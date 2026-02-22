@@ -1,0 +1,856 @@
+namespace Tnzi.Identity.Services;
+
+/// <summary>
+/// 用户管理服务实现
+/// </summary>
+public class UserService : ApplicationService, IUserService
+{
+    private static readonly TimeSpan UserCacheExpiration = TimeSpan.FromMinutes(30);
+    private const int DefaultLockoutDays = 1;
+
+    private readonly UserManager<User> _userManager;
+    private readonly RoleManager<Role> _roleManager;
+    private readonly IRepository<User, Guid> _userRepository;
+    private readonly IRepository<UserRole>? _userRoleRepository;
+    private readonly IOrganizationService? _organizationService;
+    private readonly ICurrentUser? _currentUser;
+    private readonly IPasswordPolicyService? _passwordPolicyService;
+    private readonly ICache? _cache;
+    private readonly IUserDetailService? _userDetailService;
+    private readonly IUserRoleService? _userRoleService;
+
+    public UserService(
+        UserManager<User> userManager,
+        RoleManager<Role> roleManager,
+        IRepository<User, Guid> userRepository,
+        IServiceProvider serviceProvider,
+        IOrganizationService? organizationService = null,
+        IEventBus? eventBus = null,
+        ICurrentUser? currentUser = null,
+        IPasswordPolicyService? passwordPolicyService = null,
+        ICache? cache = null,
+        IUserDetailService? userDetailService = null,
+        IUserRoleService? userRoleService = null,
+        IRepository<UserRole>? userRoleRepository = null)
+        : base(serviceProvider)
+    {
+        _userManager = Check.NotNull(userManager);
+        _roleManager = Check.NotNull(roleManager);
+        _userRepository = Check.NotNull(userRepository);
+        _organizationService = organizationService;
+        _currentUser = currentUser;
+        _passwordPolicyService = passwordPolicyService;
+        _cache = cache;
+        _userDetailService = userDetailService;
+        _userRoleService = userRoleService;
+        _userRoleRepository = userRoleRepository;
+    }
+
+    public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
+    {
+        var user = input.MapTo<User>();
+
+        var result = await _userManager.CreateAsync(user, input.Password);
+        if (!result.Succeeded)
+        {
+            return Fail<UserDto>(
+                $"Failed to create user: {result.FormatErrors()}",
+                400,
+                ErrorCodes.IDENTITY_USER_CREATE_FAILED);
+        }
+
+        // 分配角色
+        if (input.RoleIds != null && input.RoleIds.Any())
+        {
+            var assignResult = await AssignRolesAsync(user.Id, input.RoleIds);
+            if (!assignResult.Succeeded)
+            {
+                return Fail<UserDto>(assignResult.Message ?? "Failed to assign roles", assignResult.Code ?? 400, assignResult.ErrorCode);
+            }
+        }
+
+        // 发布用户注册事件（通过UserManager创建的用户也触发注册事件）
+        await PublishUserRegisteredEventAsync(user);
+
+        var userDto = await MapUserToDtoAsync(user);
+        LogInformation("User created: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+        return Ok(userDto, "User created successfully");
+    }
+
+    public async Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 只更新非空字段，避免空字符串覆盖现有值
+        // 只更新 User 表的核心字段（Email, PhoneNumber, OrganizationId）
+        // Nickname、Avatar 等个人资料字段在 UserDetail 中更新
+        if (!string.IsNullOrWhiteSpace(input.Email))
+        {
+            user.Email = input.Email;
+        }
+        if (!string.IsNullOrWhiteSpace(input.PhoneNumber))
+        {
+            user.PhoneNumber = input.PhoneNumber;
+        }
+        if (input.OrganizationId.HasValue)
+        {
+            user.OrganizationId = input.OrganizationId;
+        }
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            return Fail<UserDto>(
+                $"Failed to update user: {result.FormatErrors()}",
+                400,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
+
+        // 发布用户更新事件
+        if (EventBus != null)
+        {
+            var updatedFields = new List<string>();
+            if (input.Email != null) updatedFields.Add(nameof(User.Email));
+            if (input.PhoneNumber != null) updatedFields.Add(nameof(User.PhoneNumber));
+            if (input.Nickname != null) updatedFields.Add(nameof(UserDetail.Nickname));  // 在 UserDetail 中
+            if (input.AvatarUrl != null || input.AvatarId.HasValue) updatedFields.Add(Metadata.IdentityConstants.UserDetailField.Avatar);  // 在 UserDetail 中
+            if (input.OrganizationId.HasValue) updatedFields.Add(nameof(User.OrganizationId));
+
+            await EventBus.PublishAsync(new UserUpdatedEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                UpdatedFields = updatedFields,
+                LastModificationTime = DateTime.UtcNow,
+                LastModifierId = CurrentUser?.Id
+            }, cancellationToken: default);
+        }
+
+        // 更新角色
+        if (input.RoleIds != null)
+        {
+            var currentRoles = await _userManager.GetRolesAsync(user);
+            var currentRoleIds = await GetRoleIdsByNamesAsync(currentRoles);
+
+            var rolesToRemove = currentRoleIds.Except(input.RoleIds).ToList();
+            var rolesToAdd = input.RoleIds.Except(currentRoleIds).ToList();
+
+            if (rolesToRemove.Any())
+            {
+                var removeResult = await RemoveRolesAsync(user.Id, rolesToRemove);
+                if (!removeResult.Succeeded)
+                {
+                    return Fail<UserDto>(removeResult.Message ?? "Failed to remove roles", removeResult.Code ?? 400, removeResult.ErrorCode);
+                }
+            }
+            if (rolesToAdd.Any())
+            {
+                var assignResult = await AssignRolesAsync(user.Id, rolesToAdd);
+                if (!assignResult.Succeeded)
+                {
+                    return Fail<UserDto>(assignResult.Message ?? "Failed to assign roles", assignResult.Code ?? 400, assignResult.ErrorCode);
+                }
+            }
+        }
+
+        // 同步更新用户详情
+        if (_userDetailService != null)
+        {
+            var detailDto = new CreateUserDetailDto();
+            input.MapTo(detailDto);
+            await _userDetailService.CreateOrUpdateAsync(user.Id, detailDto);
+        }
+
+        var userDto = await MapUserToDtoAsync(user);
+
+        // 更新成功，清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        LogInformation("User updated: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+        return Ok(userDto, "User updated successfully");
+    }
+
+    public async Task<Result> DeleteAsync(Guid id)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var result = await _userManager.DeleteAsync(user);
+        if (!result.Succeeded)
+        {
+            return Fail(
+                $"Failed to delete user: {result.FormatErrors()}",
+                400,
+                ErrorCodes.IDENTITY_USER_DELETE_FAILED);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            var cacheKey = CacheKeys.Identity.User(id);
+            await _cache.RemoveAsync(cacheKey);
+        }
+
+        LogInformation("User deleted: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+        return Ok("User deleted successfully");
+    }
+
+    public async Task<Result<UserDto>> GetByIdAsync(Guid id)
+    {
+        // 尝试从缓存获取
+        if (_cache != null)
+        {
+            var cacheKey = CacheKeys.Identity.User(id);
+            var cachedUser = await _cache.GetAsync<UserDto>(cacheKey);
+            if (cachedUser != null)
+            {
+                return Ok(cachedUser);
+            }
+        }
+
+        var user = await _userRepository
+            .Where(u => u.Id == id)
+            .Include(u => u.Organization)
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+        {
+            return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var userDto = await MapUserToDtoAsync(user);
+
+        // 存入缓存（30分钟过期）
+        if (_cache != null)
+        {
+            var cacheKey = CacheKeys.Identity.User(id);
+            await _cache.SetAsync(cacheKey, userDto, UserCacheExpiration);
+        }
+
+        return Ok(userDto);
+    }
+
+    public async Task<Result<IPagedList<UserListItemDto>>> GetListAsync(UserListQueryDto query)
+    {
+        var queryable = _userRepository
+            .Where(u => !u.IsDeleted)
+            .Include(u => u.Organization)
+            .AsQueryable();
+
+        // 关键词搜索
+        if (!string.IsNullOrEmpty(query.Keyword))
+        {
+            var keyword = query.Keyword!;
+            // Nickname 已移到 UserDetail，这里只搜索 User 表的字段
+            queryable = queryable.Where(u =>
+                (u.UserName != null && u.UserName.Contains(keyword)) ||
+                (u.Email != null && u.Email.Contains(keyword)) ||
+                (u.PhoneNumber != null && u.PhoneNumber.Contains(keyword)));
+        }
+
+        // 组织筛选
+        if (query.OrganizationId.HasValue)
+        {
+            queryable = queryable.Where(u => u.OrganizationId == query.OrganizationId.Value);
+        }
+
+        // 锁定状态筛选
+        if (query.IsLockedOut.HasValue)
+        {
+            if (query.IsLockedOut.Value)
+            {
+                queryable = queryable.Where(u => u.LockoutEnd != null && u.LockoutEnd > DateTimeOffset.UtcNow);
+            }
+            else
+            {
+                queryable = queryable.Where(u => u.LockoutEnd == null || u.LockoutEnd <= DateTimeOffset.UtcNow);
+            }
+        }
+
+        // 邮箱确认状态筛选
+        if (query.IsEmailConfirmed.HasValue)
+        {
+            queryable = queryable.Where(u => u.EmailConfirmed == query.IsEmailConfirmed.Value);
+        }
+
+        // 角色筛选
+        if (query.RoleId.HasValue)
+        {
+            // 使用 IRepository<UserRole> 进行过滤，避免加载所有用户到内存
+            if (_userRoleRepository != null)
+            {
+                var userIds = _userRoleRepository.Where(ur => ur.RoleId == query.RoleId.Value).Select(ur => ur.UserId);
+                queryable = queryable.Where(u => userIds.Contains(u.Id));
+            }
+        }
+
+        // 排序
+        if (!string.IsNullOrEmpty(query.SortBy))
+        {
+            if (string.Equals(query.SortBy, "username", StringComparison.OrdinalIgnoreCase))
+            {
+                queryable = query.SortDescending
+                    ? queryable.OrderByDescending(u => u.UserName)
+                    : queryable.OrderBy(u => u.UserName);
+            }
+            else if (string.Equals(query.SortBy, "email", StringComparison.OrdinalIgnoreCase))
+            {
+                queryable = query.SortDescending
+                    ? queryable.OrderByDescending(u => u.Email)
+                    : queryable.OrderBy(u => u.Email);
+            }
+            else if (string.Equals(query.SortBy, "creationtime", StringComparison.OrdinalIgnoreCase))
+            {
+                queryable = query.SortDescending
+                    ? queryable.OrderByDescending(u => u.CreationTime)
+                    : queryable.OrderBy(u => u.CreationTime);
+            }
+            else
+            {
+                queryable = queryable.OrderByDescending(u => u.CreationTime);
+            }
+        }
+        else
+        {
+            queryable = queryable.OrderByDescending(u => u.CreationTime);
+        }
+
+        // 使用 ProjectTo 完成基础映射（轻量版，不加载 UserDetail）
+        var paged = await queryable
+            .ProjectTo<User, UserListItemDto>()
+            .CreateAsync(query);
+
+        // 批量获取用户角色，消除 N+1
+        if (_userRoleService != null && paged.Items.Any())
+        {
+            var userIds = paged.Items.Select(u => u.Id).ToList();
+            var userRolesMap = await _userRoleService.GetUserRolesAsync(userIds);
+
+            foreach (var userDto in paged.Items)
+            {
+                if (userRolesMap.TryGetValue(userDto.Id, out var roles))
+                {
+                    userDto.Roles = roles.ToList();
+                }
+            }
+        }
+
+        return Ok(paged);
+    }
+
+    public async Task<Result> EnableAsync(Guid id)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        await _userManager.SetLockoutEnabledAsync(user, false);
+        await _userManager.SetLockoutEndDateAsync(user, null);
+
+        // 发布用户启用事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserEnabledEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                EnabledTime = DateTime.UtcNow,
+                EnabledBy = CurrentUser?.Id
+            }, cancellationToken: default);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        LogInformation("User enabled: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+        return Ok("User enabled successfully");
+    }
+
+    public async Task<Result> DisableAsync(Guid id, string? reason = null)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 禁用用户：锁定到未来某个时间（如100年后）
+        await _userManager.SetLockoutEnabledAsync(user, true);
+        await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+
+        // 发布用户禁用事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserDisabledEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                DisabledTime = DateTime.UtcNow,
+                DisabledBy = CurrentUser?.Id,
+                DisableReason = reason
+            }, cancellationToken: default);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        LogInformation("User disabled: {UserId}, UserName: {UserName}, Reason: {Reason}", user.Id, user.UserName ?? string.Empty, reason ?? string.Empty);
+        return Ok("User disabled successfully");
+    }
+
+    public async Task<Result> LockAsync(Guid id, DateTimeOffset? lockoutEnd = null, string? reason = null)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var lockoutEndDate = lockoutEnd ?? DateTimeOffset.UtcNow.AddDays(DefaultLockoutDays);
+
+        await _userManager.SetLockoutEnabledAsync(user, true);
+        await _userManager.SetLockoutEndDateAsync(user, lockoutEndDate);
+
+        // 发布用户锁定事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserLockedEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                LockedTime = DateTime.UtcNow,
+                LockedBy = CurrentUser?.Id,
+                LockReason = reason
+            }, cancellationToken: default);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        LogInformation("User locked: {UserId}, UserName: {UserName}, LockoutEnd: {LockoutEnd}, Reason: {Reason}",
+            user.Id, user.UserName ?? string.Empty, lockoutEndDate, reason ?? string.Empty);
+        return Ok("User locked successfully");
+    }
+
+    public async Task<Result> UnlockAsync(Guid id)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        await _userManager.SetLockoutEndDateAsync(user, null);
+
+        // 发布用户解锁事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserUnlockedEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                UnlockedTime = DateTime.UtcNow,
+                UnlockedBy = CurrentUser?.Id
+            }, cancellationToken: default);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        LogInformation("User unlocked: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+        return Ok("User unlocked successfully");
+    }
+
+    public async Task<Result<IEnumerable<UserListItemDto>>> CreateManyAsync(IEnumerable<CreateUserDto> inputs)
+    {
+        var inputList = inputs.ToList();
+        var results = new List<UserListItemDto>();
+
+        // 由于UserManager.CreateAsync需要逐个处理（密码哈希、验证等），
+        // 我们仍然需要循环调用，但可以优化后续的数据库操作
+        // 使用事务确保原子性（如果支持）
+        foreach (var input in inputList)
+        {
+            var result = await CreateAsync(input);
+            if (!result.Succeeded)
+            {
+                return Fail<IEnumerable<UserListItemDto>>(
+                    result.Message ?? "Failed to create user",
+                    result.Code ?? 400,
+                    result.ErrorCode);
+            }
+            // 显式映射为 UserListItemDto，避免序列化时泄露 UserDto 额外字段
+            results.Add(result.Data!.MapTo<UserListItemDto>());
+        }
+
+        LogInformation("Batch created {Count} users", results.Count);
+        return Ok<IEnumerable<UserListItemDto>>(results, $"Successfully created {results.Count} users");
+    }
+
+    public async Task<Result<IEnumerable<UserListItemDto>>> UpdateManyAsync(IEnumerable<(Guid Id, UpdateUserDto Dto)> inputs)
+    {
+        var inputList = inputs.ToList();
+        var results = new List<UserListItemDto>();
+
+        // 由于UserManager.UpdateAsync需要逐个处理（验证、事件触发等），
+        // 我们仍然需要循环调用，但可以优化后续的数据库操作
+        foreach (var (id, dto) in inputList)
+        {
+            var result = await UpdateAsync(id, dto);
+            if (!result.Succeeded)
+            {
+                return Fail<IEnumerable<UserListItemDto>>(
+                    result.Message ?? $"Failed to update user {id}",
+                    result.Code ?? 400,
+                    result.ErrorCode);
+            }
+            // 显式映射为 UserListItemDto，避免序列化时泄露 UserDto 额外字段
+            results.Add(result.Data!.MapTo<UserListItemDto>());
+        }
+
+        LogInformation("Batch updated {Count} users", results.Count);
+        return Ok<IEnumerable<UserListItemDto>>(results, $"Successfully updated {results.Count} users");
+    }
+
+    public async Task<Result> DeleteManyAsync(IEnumerable<Guid> ids)
+    {
+        var idList = ids.ToList();
+        if (!idList.Any())
+        {
+            return Ok("No users to delete");
+        }
+
+        // 批量查找用户（使用一次查询而不是循环）
+        var users = await _userRepository
+            .Where(u => idList.Contains(u.Id))
+            .ToListAsync();
+
+        // 批量删除（使用UserManager的DeleteAsync，因为它会触发相关事件和清理）
+        // 注意：UserManager没有批量删除方法，所以仍然需要循环
+        // 但我们已经优化了批量查询
+        foreach (var user in users)
+        {
+            var result = await _userManager.DeleteAsync(user);
+            if (!result.Succeeded)
+            {
+                return Fail(
+                    $"Failed to delete user {user.Id}: {result.FormatErrors()}",
+                    400,
+                    ErrorCodes.IDENTITY_USER_DELETE_FAILED);
+            }
+
+            // 清除缓存
+            if (_cache != null)
+            {
+                var cacheKey = CacheKeys.Identity.User(user.Id);
+                await _cache.RemoveAsync(cacheKey);
+            }
+        }
+
+        LogInformation("Batch deleted {Count} users", users.Count);
+        return Ok($"Successfully deleted {users.Count} users");
+    }
+
+    public async Task<Result> AssignRolesAsync(Guid userId, IEnumerable<Guid> roleIds)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var idList = roleIds.ToList();
+        var roles = await _roleManager.Roles.Where(r => idList.Contains(r.Id)).ToListAsync();
+        if (roles.Count != idList.Distinct().Count())
+        {
+            return Fail("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        var result = await _userManager.AddToRolesAsync(user, roles.Select(r => r.Name!));
+        if (!result.Succeeded)
+        {
+            return Fail(
+                $"Failed to assign roles: {result.FormatErrors()}",
+                400,
+                ErrorCodes.IDENTITY_ROLE_ASSIGN_FAILED);
+        }
+
+        LogInformation("Roles assigned to user: {UserId}, Roles: {RoleNames}",
+            userId, string.Join(", ", roles.Select(r => r.Name)));
+        return Ok("Roles assigned successfully");
+    }
+
+    public async Task<Result> RemoveRolesAsync(Guid userId, IEnumerable<Guid> roleIds)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var idList = roleIds.ToList();
+        var roles = await _roleManager.Roles.Where(r => idList.Contains(r.Id)).ToListAsync();
+        if (roles.Count != idList.Distinct().Count())
+        {
+            return Fail("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        var result = await _userManager.RemoveFromRolesAsync(user, roles.Select(r => r.Name!));
+        if (!result.Succeeded)
+        {
+            return Fail(
+                $"Failed to remove roles: {result.FormatErrors()}",
+                400,
+                ErrorCodes.IDENTITY_ROLE_REMOVE_FAILED);
+        }
+
+        LogInformation("Roles removed from user: {UserId}, Roles: {RoleNames}",
+            userId, string.Join(", ", roles.Select(r => r.Name)));
+        return Ok("Roles removed successfully");
+    }
+
+    public async Task<Result<UserStatisticsDto>> GetStatisticsAsync(Guid? organizationId = null, Guid? roleId = null)
+    {
+        var query = _userRepository.Where(u => !u.IsDeleted);
+
+        if (organizationId.HasValue)
+        {
+            query = query.Where(u => u.OrganizationId == organizationId.Value);
+        }
+
+        var totalUsers = await query.CountAsync();
+        var activeUsers = await query
+            .Where(u => u.LockoutEnd == null || u.LockoutEnd <= DateTimeOffset.UtcNow)
+            .CountAsync();
+        var lockedUsers = await query
+            .Where(u => u.LockoutEnd != null && u.LockoutEnd > DateTimeOffset.UtcNow)
+            .CountAsync();
+
+        // 统计组织用户数：如果指定了组织ID，则等于总用户数；否则统计所有有组织的用户数
+        int usersByOrganization;
+        if (organizationId.HasValue)
+        {
+            usersByOrganization = totalUsers; // 已过滤到指定组织，所以等于总用户数
+        }
+        else
+        {
+            // 统计所有有组织的用户数
+            usersByOrganization = await _userRepository
+                .Where(u => !u.IsDeleted && u.OrganizationId != null)
+                .CountAsync();
+        }
+
+        var usersByRole = 0;
+        if (roleId.HasValue)
+        {
+            if (_userRoleRepository != null)
+            {
+                usersByRole = await _userRoleRepository.CountAsync(ur => ur.RoleId == roleId.Value);
+            }
+        }
+
+        var recentRegistrations = await query
+            .Where(u => u.CreationTime >= DateTime.UtcNow.AddDays(-7))
+            .CountAsync();
+
+        var statistics = new UserStatisticsDto
+        {
+            TotalUsers = totalUsers,
+            ActiveUsers = activeUsers,
+            LockedUsers = lockedUsers,
+            UsersByOrganization = usersByOrganization,
+            UsersByRole = usersByRole,
+            RecentRegistrations = recentRegistrations
+        };
+
+        return Ok(statistics);
+    }
+
+    public async Task<Result> ChangeEmailAsync(Guid userId, string newEmail)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var oldEmail = user.Email;
+
+        // 使用 UserManager 设置邮箱（会处理 NormalizedEmail）
+        var setResult = await _userManager.SetEmailAsync(user, newEmail);
+        if (!setResult.Succeeded)
+        {
+            return Fail($"Failed to change email: {setResult.FormatErrors()}", 400, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
+
+        // 已通过验证码验证，直接确认邮箱
+        var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+        var confirmResult = await _userManager.ConfirmEmailAsync(user, token);
+        if (!confirmResult.Succeeded)
+        {
+            return Fail($"Failed to confirm email: {confirmResult.FormatErrors()}", 400, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(userId));
+        }
+
+        // 发布邮箱变更事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserEmailChangedEvent
+            {
+                UserId = userId,
+                UserName = user.UserName ?? string.Empty,
+                OldEmail = oldEmail,
+                NewEmail = newEmail,
+                ChangedTime = DateTime.UtcNow
+            });
+        }
+
+        return Ok();
+    }
+
+    public async Task<Result> ChangePhoneNumberAsync(Guid userId, string newPhoneNumber)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var oldPhoneNumber = user.PhoneNumber;
+
+        // 使用 UserManager 设置手机号
+        var token = await _userManager.GenerateChangePhoneNumberTokenAsync(user, newPhoneNumber);
+        var changeResult = await _userManager.ChangePhoneNumberAsync(user, newPhoneNumber, token);
+        if (!changeResult.Succeeded)
+        {
+            return Fail($"Failed to change phone number: {changeResult.FormatErrors()}", 400, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
+
+        // ChangePhoneNumberAsync 已自动设置 PhoneNumberConfirmed = true
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(userId));
+        }
+
+        // 发布手机号变更事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserPhoneChangedEvent
+            {
+                UserId = userId,
+                UserName = user.UserName ?? string.Empty,
+                OldPhoneNumber = oldPhoneNumber,
+                NewPhoneNumber = newPhoneNumber,
+                ChangedTime = DateTime.UtcNow
+            });
+        }
+
+        return Ok();
+    }
+
+    public async Task<User?> FindByPhoneNumberAsync(string phoneNumber)
+    {
+        if (string.IsNullOrEmpty(phoneNumber))
+            return null;
+
+        return await _userManager.Users
+            .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber && u.PhoneNumberConfirmed);
+    }
+
+    /// <summary>
+    /// 映射用户实体到DTO
+    /// </summary>
+    private async Task<UserDto> MapUserToDtoAsync(User user)
+    {
+        var userDto = user.MapTo<UserDto>();
+        userDto.Roles = (await _userManager.GetRolesAsync(user)).ToList();
+
+        // 加载用户详情并合并到 DTO
+        // Nickname、Avatar 等个人资料信息已从 User 移到 UserDetail
+        if (_userDetailService != null)
+        {
+            var detailResult = await _userDetailService.GetByUserIdAsync(user.Id);
+            if (detailResult.Succeeded && detailResult.Data != null)
+            {
+                var detail = detailResult.Data;
+                userDto.Nickname = detail.Nickname;
+                userDto.AvatarId = detail.AvatarId;
+                userDto.Avatar = detail.AvatarUrl;  // 外部头像 URL 作为备用
+                userDto.Gender = detail.Gender;
+                userDto.Birthday = detail.Birthday;
+                userDto.Bio = detail.Bio;
+                userDto.Address = detail.Address;
+                userDto.Website = detail.Website;
+            }
+        }
+
+        return userDto;
+    }
+
+    /// <summary>
+    /// 根据角色名称获取角色ID列表
+    /// </summary>
+    private async Task<List<Guid>> GetRoleIdsByNamesAsync(IEnumerable<string> roleNames)
+    {
+        var names = roleNames.ToList();
+        if (!names.Any()) return new List<Guid>();
+
+        return await _roleManager.Roles
+            .Where(r => names.Contains(r.Name!))
+            .Select(r => r.Id)
+            .ToListAsync();
+    }
+
+    #region Private Methods
+
+    /// <summary>
+    /// 发布用户注册事件
+    /// </summary>
+    /// <param name="user">注册的用户</param>
+    private async Task PublishUserRegisteredEventAsync(User user)
+    {
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserRegisteredEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                Email = user.Email,
+                RegistrationTime = DateTime.UtcNow
+            }, cancellationToken: default);
+        }
+    }
+
+    #endregion
+}

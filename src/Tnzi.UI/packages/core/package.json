@@ -1,0 +1,158 @@
+{
+  "name": "@tnzi/core",
+  "version": "0.1.1",
+  "description": "Vue-reactive core for Tnzi.NET frontend — types, HTTP client, state managers, headless controllers, and adapter interfaces.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./services/*": {
+      "types": "./dist/services/*/index.d.ts",
+      "import": "./dist/services/*/index.js",
+      "require": "./dist/services/*/index.cjs"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js",
+      "require": "./dist/components/index.cjs"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js",
+      "require": "./dist/types/index.cjs"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "import": "./dist/http/index.js",
+      "require": "./dist/http/index.cjs"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js",
+      "require": "./dist/adapters/index.cjs"
+    },
+    "./adapters/i18n": {
+      "types": "./dist/adapters/i18n/index.d.ts",
+      "import": "./dist/adapters/i18n/index.js",
+      "require": "./dist/adapters/i18n/index.cjs"
+    },
+    "./adapters/icons": {
+      "types": "./dist/adapters/icons/index.d.ts",
+      "import": "./dist/adapters/icons/index.js",
+      "require": "./dist/adapters/icons/index.cjs"
+    },
+    "./adapters/theme": {
+      "types": "./dist/adapters/theme/index.d.ts",
+      "import": "./dist/adapters/theme/index.js",
+      "require": "./dist/adapters/theme/index.cjs"
+    },
+    "./adapters/router": {
+      "types": "./dist/adapters/router/index.d.ts",
+      "import": "./dist/adapters/router/index.js",
+      "require": "./dist/adapters/router/index.cjs"
+    },
+    "./state": {
+      "types": "./dist/state/index.d.ts",
+      "import": "./dist/state/index.js",
+      "require": "./dist/state/index.cjs"
+    },
+    "./headless": {
+      "types": "./dist/headless/index.d.ts",
+      "import": "./dist/headless/index.js",
+      "require": "./dist/headless/index.cjs"
+    },
+    "./composables": {
+      "types": "./dist/composables/index.d.ts",
+      "import": "./dist/composables/index.js",
+      "require": "./dist/composables/index.cjs"
+    },
+    "./stores/*": {
+      "types": "./dist/stores/*/index.d.ts",
+      "import": "./dist/stores/*/index.js",
+      "require": "./dist/stores/*/index.cjs"
+    },
+    "./enums": {
+      "types": "./dist/enums/index.d.ts",
+      "import": "./dist/enums/index.js",
+      "require": "./dist/enums/index.cjs"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js",
+      "require": "./dist/utils/index.cjs"
+    },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "import": "./dist/schemas/index.js",
+      "require": "./dist/schemas/index.cjs"
+    },
+    "./constants": {
+      "types": "./dist/constants/index.d.ts",
+      "import": "./dist/constants/index.js",
+      "require": "./dist/constants/index.cjs"
+    },
+    "./errors": {
+      "types": "./dist/errors/index.d.ts",
+      "import": "./dist/errors/index.js",
+      "require": "./dist/errors/index.cjs"
+    },
+    "./playground": {
+      "types": "./dist/playground/index.d.ts",
+      "import": "./dist/playground/index.js",
+      "require": "./dist/playground/index.cjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@vue/reactivity": "^3.5.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "rimraf": "^6.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "keywords": [
+    "tnzi",
+    "core",
+    "vue-reactivity",
+    "state-management",
+    "headless",
+    "http-client"
+  ],
+  "author": "Tnzi.NET",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tnzi/tnzi.net"
+  }
+}

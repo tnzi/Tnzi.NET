@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>AI/ML integration module for Tnzi.NET framework with chat clients, RAG, MCP protocol, tool scanning, and quota management</Description>
+    <!-- 抑制 Microsoft.Extensions.AI 实验性 API 警告 -->
+    <NoWarn>$(NoWarn);MEAI001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.2.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.2.0-preview.1.26063.2" />
+    <!-- Vector Data Abstractions for ChatHistoryMemory -->
+    <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="9.7.0" />
+    <!-- Resilience -->
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.2.0" />
+    <!-- MCP (Model Context Protocol) - official C# SDK for connecting to MCP servers -->
+    <PackageReference Include="ModelContextProtocol" Version="0.4.0-preview.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
+    <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <ProjectReference Include="..\Tnzi\Tnzi.csproj" />
+  </ItemGroup>
+
+</Project>

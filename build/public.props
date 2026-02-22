@@ -1,0 +1,33 @@
+<Project>
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Authors>Tnzi</Authors>
+    <Company>Tnzi</Company>
+    <Copyright>Copyright (c) 2014-2026 Tnzi. All rights reserved.</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/tnzi/Tnzi.NET</PackageProjectUrl>
+    <PackageReleaseNotes></PackageReleaseNotes>
+    <PackageIcon>icon.png</PackageIcon>
+    <RepositoryUrl>https://github.com/tnzi/Tnzi.NET</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>Tnzi</PackageTags>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)Tnzi.snk</AssemblyOriginatorKeyFile>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <PublishRepositoryUrl>false</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>false</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- 1701, 1702: 程序集版本警告，不影响功能 -->
+    <!-- 1591: XML 文档注释警告，保留抑制 -->
+    <!-- 8002: 其他警告，保留抑制 -->
+    <NoWarn>$(NoWarn);1701;1702;1591;8002</NoWarn>
+  </PropertyGroup>
+ 
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" Visible="false" PackagePath=""/>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,30 @@
+<Project>
+  <PropertyGroup>
+    <!-- 禁用卫星程序集生成，避免在 bin 目录下生成各种语言目录 -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- 使用最新的运行时补丁版本 -->
+    <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+    <!-- 允许向前滚动到更高版本的运行时 -->
+    <RollForward>LatestMajor</RollForward>
+    <!-- 同时也加上这个，双重保险 -->
+    <ResourceLanguages>en</ResourceLanguages> 
+  </PropertyGroup>
+
+  <!-- Frontend project file visibility rules (Solution Explorer) -->
+  <ItemGroup Condition="'$(ProjectType)' == 'Frontend'">
+    <Content Include="**\*"
+             Exclude="
+               bin\**;
+               obj\**;
+               **\node_modules\**;
+               **\dist\**;
+               **\.nuxt\**;
+               **\.output\**;
+               **\.pnpm-store\**;
+               **\coverage\**;
+               **\pnpm-lock.yaml;
+               **\*.tsbuildinfo;
+**\*.csproj;
+               tools\contract-sync\reports\contract-drift.json" />
+  </ItemGroup>
+</Project>

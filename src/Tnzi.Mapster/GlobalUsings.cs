@@ -1,0 +1,12 @@
+global using Mapster;
+global using MapsterMapper;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+global using System.Linq.Expressions;
+global using System.Reflection;
+global using Tnzi;
+global using Tnzi.Mapping;
+global using Tnzi.Mapster.Adapters;
+global using Tnzi.Modules;
+global using Tnzi.Results;
+global using Tnzi.Utilities;

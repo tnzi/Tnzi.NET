@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>In-app messaging and announcement module for Tnzi.NET framework with SignalR real-time delivery and read tracking</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
+    <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" />
+  </ItemGroup>
+
+</Project>
+

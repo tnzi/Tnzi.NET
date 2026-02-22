@@ -1,0 +1,48 @@
+{
+  "name": "@tnzi/ui-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tnzi.NET Frontend Packages Monorepo - core + shadcn/vant/naive-ui UI components.",
+  "scripts": {
+    "build": "pnpm -r --filter @tnzi/core build && pnpm -r --filter @tnzi/shadcn build && pnpm -r --filter @tnzi/vant build && pnpm -r --filter @tnzi/naive-ui build",
+    "build:all": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:unit": "pnpm -r test:unit",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean",
+    "dev": "pnpm -r --parallel dev",
+    "contract:inventory": "node ./tools/contract-sync/contract-sync.mjs inventory",
+    "contract:check": "node ./tools/contract-sync/contract-sync.mjs check",
+    "contract:approve": "node ./tools/contract-sync/contract-sync.mjs approve",
+    "api:generics:check": "node ./tools/check-api-generics/check.mjs",
+    "contracts:sync:url": "dotnet run --project ../Tnzi.Cli/Tnzi.Cli.csproj -- dev contracts sync --url http://localhost:5000/swagger/v1/swagger.json --out ./packages/core/src/services --targets dto,schema,api,metadata,paths",
+    "contracts:sync": "dotnet run --project ../Tnzi.Cli/Tnzi.Cli.csproj -- dev contracts sync --input ./openapi.json --out ./packages/core/src/services --targets dto,schema,api,metadata,paths",
+    "contracts:sync:check": "dotnet run --project ../Tnzi.Cli/Tnzi.Cli.csproj -- dev contracts sync --input ./openapi.json --out ./packages/core/src/services --targets dto,schema,api,metadata,paths --check",
+    "preinstall": "npx only-allow pnpm",
+    "version:check": "changeset status",
+    "version:add": "changeset",
+    "version:apply": "changeset version",
+    "publish:dry": "pnpm build && pnpm -r publish --dry-run --no-git-checks",
+    "publish:release": "pnpm build && changeset publish",
+    "release": "node tools/release.mjs",
+    "release:status": "node tools/release.mjs --status"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "rimraf": "^6.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.0",
+    "vite-plugin-dts": "^3.9.0",
+    "vitest": "^3.0.0",
+    "vue-tsc": "^2.0.0",
+    "zod": "^3.24.0"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

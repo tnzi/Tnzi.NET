@@ -1,0 +1,10 @@
+<Project>
+  <!-- 导入根目录的 Directory.Build.props -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- 集中版本管理 -->
+  <Import Project="..\build\version.props" />
+
+  <!-- NuGet 包公共属性 -->
+  <Import Project="..\build\public.props" />
+</Project>

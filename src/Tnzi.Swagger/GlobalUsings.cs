@@ -1,0 +1,17 @@
+global using Microsoft.AspNetCore.Builder;
+global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.AspNetCore.Mvc.ApiExplorer;
+global using Microsoft.AspNetCore.Routing;
+global using Microsoft.Extensions.Configuration;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Options;
+global using Scalar.AspNetCore;
+global using Swashbuckle.AspNetCore.SwaggerGen;
+global using System.Collections.Frozen;
+global using System.ComponentModel;
+global using System.Reflection;
+global using Tnzi.AspNetCore;
+global using Tnzi.Extensions;
+global using Tnzi.Modules;
+global using Tnzi.Options;
+global using Tnzi.Swagger.Options;

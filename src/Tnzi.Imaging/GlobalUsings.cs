@@ -1,0 +1,20 @@
+
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.DependencyInjection.Extensions;
+global using SixLabors.Fonts;
+global using SixLabors.ImageSharp;
+global using SixLabors.ImageSharp.Drawing.Processing;
+global using SixLabors.ImageSharp.PixelFormats;
+global using SixLabors.ImageSharp.Processing;
+global using System;
+global using System.Collections.Generic;
+global using System.IO;
+global using System.Linq;
+global using System.Text;
+global using System.Threading.Tasks;
+global using Tnzi.Modules;
+global using Tnzi.Imaging;
+global using Tnzi.Caching;
+global using Tnzi.Services;
+global using Tnzi.Extensions;
+global using Tnzi.Utilities;

@@ -1,0 +1,92 @@
+namespace Tnzi.Notification.Dtos;
+
+/// <summary>
+/// 创建通知请求
+/// </summary>
+public class CreateNotificationRequest
+{
+    public NotificationType Type { get; set; }
+    public string Subject { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public bool IsHtml { get; set; } = true;
+
+    [Required]
+    [MinLength(1, ErrorMessage = "At least one recipient is required.")]
+    public List<RecipientInput> Recipients { get; set; } = new();
+
+    public List<FileInfoDto> Attachments { get; set; } = new();
+    public bool SendImmediately { get; set; } = false;
+    public int MaxRetryCount { get; set; } = 3;
+    public string? TemplateName { get; set; }
+    public string? LayoutName { get; set; }
+    public Dictionary<string, object>? TemplateVariables { get; set; }
+    public string? Category { get; set; }
+    public NotificationPriority Priority { get; set; } = NotificationPriority.Normal;
+    public Guid? SenderId { get; set; }
+}
+
+/// <summary>
+/// 接收者输入（创建通知时使用）
+/// </summary>
+public class RecipientInput
+{
+    public string Address { get; set; } = string.Empty;
+    public string? Name { get; set; }
+    public Guid? UserId { get; set; }
+}
+
+/// <summary>
+/// 接收者输出（查询通知时使用）
+/// </summary>
+public class RecipientOutput
+{
+    public Guid Id { get; set; }
+    public string Address { get; set; } = string.Empty;
+    public string? Name { get; set; }
+    public NotificationStatus Status { get; set; }
+    public DateTime? SentTime { get; set; }
+    public string? FailureReason { get; set; }
+    public string? ExternalMessageId { get; set; }
+    public Guid? UserId { get; set; }
+    public bool IsRead { get; set; }
+    public DateTime? ReadTime { get; set; }
+}
+
+/// <summary>
+/// 通知信息（查询结果）
+/// </summary>
+public class NotificationInfo
+{
+    public Guid Id { get; set; }
+    public NotificationType Type { get; set; }
+    public string Subject { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public bool IsHtml { get; set; }
+    public NotificationStatus Status { get; set; }
+    public DateTime? SentTime { get; set; }
+    public string? FailureReason { get; set; }
+    public int RetryCount { get; set; }
+    public int MaxRetryCount { get; set; }
+    public int TotalRecipientCount { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime CreationTime { get; set; }
+    public NotificationPriority Priority { get; set; }
+    public Guid? SenderId { get; set; }
+    public string Category { get; set; } = "General";
+    public string? TemplateName { get; set; }
+    public List<RecipientOutput> Recipients { get; set; } = new();
+    public List<FileInfoDto> Attachments { get; set; } = new();
+}
+
+/// <summary>
+/// 查询通知请求
+/// </summary>
+public class QueryNotificationRequest : PagedQueryDto
+{
+    public NotificationType? Type { get; set; }
+    public NotificationStatus? Status { get; set; }
+    public DateTime? StartTime { get; set; }
+    public DateTime? EndTime { get; set; }
+    public string? Keyword { get; set; }
+}

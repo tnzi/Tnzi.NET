@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tnzi.NET - Welcome</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Adobe Clean', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #1a1a1a;
+            background-image:
+                radial-gradient(circle at 20% 50%, rgba(0, 140, 255, 0.12) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(0, 90, 200, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(80, 180, 255, 0.08) 0%, transparent 50%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(180deg, rgba(26, 26, 26, 0) 0%, rgba(26, 26, 26, 0.8) 100%);
+            pointer-events: none;
+        }
+        .container {
+            background: rgba(30, 30, 30, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            padding: 60px 50px;
+            max-width: 900px;
+            width: 100%;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+        .logo {
+            font-size: 56px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 16px;
+            letter-spacing: -1px;
+            text-shadow:
+                0 0 20px rgba(0, 140, 255, 0.35),
+                0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+        .logo::after {
+            content: '';
+            display: block;
+            width: 80px;
+            height: 4px;
+            background: linear-gradient(90deg, #00aaff, #005eff);
+            margin: 20px auto 0;
+            border-radius: 2px;
+            box-shadow: 0 0 12px rgba(0, 140, 255, 0.45);
+        }
+        .subtitle {
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 32px;
+            font-weight: 300;
+            letter-spacing: 0.5px;
+        }
+        .description {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.8;
+            margin-bottom: 50px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .links {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-top: 40px;
+        }
+        .link-card {
+            background: rgba(40, 40, 40, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+            padding: 24px 32px;
+            border-radius: 12px;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+        }
+        .link-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 140, 255, 0.12), transparent);
+            transition: left 0.5s ease;
+        }
+        .link-card:hover {
+            transform: translateY(-2px);
+            background: rgba(50, 50, 50, 0.9);
+            border-color: rgba(0, 140, 255, 0.35);
+            box-shadow:
+                0 8px 24px rgba(0, 0, 0, 0.4),
+                0 0 22px rgba(0, 140, 255, 0.22);
+        }
+        .link-card:hover::before {
+            left: 100%;
+        }
+        .link-card:active {
+            transform: translateY(0);
+        }
+        .link-content {
+            flex: 1;
+            text-align: left;
+        }
+        .link-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #ffffff;
+            letter-spacing: 0.3px;
+        }
+        .link-description {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.5;
+        }
+        .link-icon {
+            font-size: 28px;
+            margin-left: 24px;
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+        .link-card:hover .link-icon {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+        .api-prefix {
+            background: rgba(20, 20, 20, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin-top: 32px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .api-prefix code {
+            background: rgba(0, 140, 255, 0.16);
+            border: 1px solid rgba(0, 140, 255, 0.24);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: 'Courier New', 'Monaco', monospace;
+            color: #33b1ff;
+            font-weight: 600;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            margin-left: 8px;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 40px 24px;
+            }
+            .logo {
+                font-size: 42px;
+            }
+            .subtitle {
+                font-size: 18px;
+            }
+            .link-card {
+                flex-direction: column;
+                text-align: center;
+                padding: 20px;
+            }
+            .link-content {
+                text-align: center;
+            }
+            .link-icon {
+                margin-left: 0;
+                margin-top: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">Tnzi.NET</div>
+        <div class="subtitle">Enterprise-Grade .NET Framework</div>
+        <div class="description">
+            Welcome to Tnzi.NET! A powerful and flexible framework for building modern .NET applications.
+            Get started by exploring the API documentation or accessing the API endpoints.
+        </div>
+        <div class="links">
+            <a href="swagger/" class="link-card">
+                <div class="link-content">
+                    <div class="link-title">API Documentation</div>
+                    <div class="link-description">Explore and test all available API endpoints</div>
+                </div>
+                <div class="link-icon">📚</div>
+            </a>
+            <a href="{{API_PATH_PREFIX}}" class="link-card">
+                <div class="link-content">
+                    <div class="link-title">API Endpoints</div>
+                    <div class="link-description">Access the API base path</div>
+                </div>
+                <div class="link-icon">🔗</div>
+            </a>
+        </div>
+        <div class="api-prefix">
+            API Base Path: <code>{{API_PATH_PREFIX}}</code>
+        </div>
+    </div>
+</body>
+</html>
+</CodeContent>
+<parameter name="EmptyFile">false

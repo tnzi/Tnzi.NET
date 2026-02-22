@@ -1,0 +1,106 @@
+{
+  "identity": {
+    "missingInFrontend": [],
+    "extraInFrontend": [
+      "CaptchaDto",
+      "CommonStatus",
+      "DateRangePreset",
+      "EnableStatus",
+      "Gender",
+      "LoginResultDto",
+      "OAuthProvider",
+      "OperationType",
+      "OrganizationListItemDto",
+      "RefreshTokenDto",
+      "RoleListQueryDto",
+      "SessionListQueryDto",
+      "SortDirection",
+      "TriState"
+    ]
+  },
+  "storage": {
+    "missingInFrontend": [],
+    "extraInFrontend": [
+      "CompleteChunkedUploadDto",
+      "FileChunkDto",
+      "FileRecordDto",
+      "FileUploadResultDto",
+      "FileUploadSessionDto",
+      "InitiateChunkedUploadDto",
+      "StorageStatisticsDto"
+    ]
+  },
+  "notification": {
+    "missingInFrontend": [
+      "Attachment",
+      "AttachmentConfiguration",
+      "Message",
+      "MessageConfiguration",
+      "Recipient",
+      "RecipientConfiguration",
+      "RecipientDto"
+    ],
+    "extraInFrontend": [
+      "DigestFrequency",
+      "RecipientType",
+      "UpdateNotificationDto",
+      "UserNotificationDto",
+      "UserNotificationQueryDto"
+    ]
+  },
+  "chat": {
+    "missingInFrontend": [
+      "Message",
+      "MessageConfiguration",
+      "MessageReceive",
+      "MessageReceiveConfiguration",
+      "MessageReply",
+      "MessageReplyConfiguration"
+    ],
+    "extraInFrontend": [
+      "MessageStatus",
+      "UpdateChatMessageDto"
+    ]
+  },
+  "payment": {
+    "missingInFrontend": [],
+    "extraInFrontend": [
+      "ChannelStatistics",
+      "CouponType",
+      "Currency",
+      "PaymentParamsDto"
+    ]
+  },
+  "template": {
+    "missingInFrontend": [],
+    "extraInFrontend": [
+      "LayoutEntityDto",
+      "TemplateEntityDto",
+      "TemplateVariableType"
+    ]
+  },
+  "ai": {
+    "missingInFrontend": [],
+    "extraInFrontend": [
+      "ToolGroupDto"
+    ]
+  },
+  "audit": {
+    "missingInFrontend": [
+      "AuditEntityEntryConfiguration",
+      "AuditLogConfiguration",
+      "AuditOperationConfiguration",
+      "AuditPropertyEntryConfiguration"
+    ],
+    "extraInFrontend": []
+  },
+  "system": {
+    "missingInFrontend": [
+      "UpdateSettingDto"
+    ],
+    "extraInFrontend": [
+      "AccessLogStatisticsDto",
+      "FeatureRequirementType"
+    ]
+  }
+}

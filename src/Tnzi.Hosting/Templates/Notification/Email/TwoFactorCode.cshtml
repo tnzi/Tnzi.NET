@@ -1,0 +1,169 @@
+---
+subject: Your Verification Code - @Model.AppName
+layout: DefaultEmail
+description: Two-factor authentication verification code email template
+metadata:
+  type: Email
+  version: "3.0"
+---
+<!-- Greeting -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="greeting" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 24px; font-weight: 600; color: #1a1a2e; line-height: 1.3; padding-bottom: 24px;">
+            Your Verification Code
+        </td>
+    </tr>
+</table>
+
+<!-- Body Text -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 16px; line-height: 1.7; color: #4a5568; padding-bottom: 20px;">
+            Hi @(Model.UserName ?? "there"),
+        </td>
+    </tr>
+    <tr>
+        <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 16px; line-height: 1.7; color: #4a5568; padding-bottom: 20px;">
+            You requested a verification code to sign in to your <strong style="color: #1a1a2e;">@(Model.AppName ?? "account")</strong>. Please use the code below to complete your authentication.
+        </td>
+    </tr>
+</table>
+
+<!-- Code Container -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+    <tr>
+        <td align="center" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); border-radius: 16px; padding: 40px;">
+            <!--[if mso]>
+            <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:500px;height:140px;">
+            <v:fill type="gradient" color="#0f3460" color2="#1a1a2e" angle="135"/>
+            <v:textbox inset="0,0,0,0">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+            <tr>
+            <td align="center" style="padding: 40px;">
+            <![endif]-->
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                    <td align="center" style="font-family: Arial, sans-serif; font-size: 12px; color: rgba(255,255,255,0.7); letter-spacing: 3px; text-transform: uppercase; padding-bottom: 16px;">
+                        Your Verification Code
+                    </td>
+                </tr>
+                <tr>
+                    <td align="center" style="font-family: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 48px; font-weight: 700; letter-spacing: 12px; color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+                        @Model.Code
+                    </td>
+                </tr>
+                <tr>
+                    <td align="center" style="font-family: Arial, sans-serif; font-size: 13px; color: rgba(255,255,255,0.5); padding-top: 16px;">
+                        Enter this code in the verification screen
+                    </td>
+                </tr>
+            </table>
+            <!--[if mso]>
+            </td>
+            </tr>
+            </table>
+            </v:textbox>
+            </v:rect>
+            <![endif]-->
+        </td>
+    </tr>
+</table>
+
+<!-- Warning Box -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 24px 0;">
+    <tr>
+        <td width="4" style="background-color: #f59e0b;"></td>
+        <td style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); padding: 20px 24px;">
+            <!--[if mso]>
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" bgcolor="#fef3c7">
+            <tr>
+            <td style="padding: 20px 24px;">
+            <![endif]-->
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                    <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #92400e;">
+                        <strong>Time Sensitive:</strong> This code will expire in <strong>@Model.ExpirationMinutes minutes</strong>. Please use it before it expires.
+                    </td>
+                </tr>
+            </table>
+            <!--[if mso]>
+            </td>
+            </tr>
+            </table>
+            <![endif]-->
+        </td>
+    </tr>
+</table>
+
+<!-- Divider -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+    <tr>
+        <td style="height: 1px; background: linear-gradient(90deg, transparent 0%, #e2e8f0 50%, transparent 100%); font-size: 1px; line-height: 1px;">
+            &nbsp;
+        </td>
+    </tr>
+</table>
+
+<!-- Security Notice -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f9fafb; border-radius: 12px; margin-bottom: 24px;">
+    <tr>
+        <td style="padding: 20px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                    <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 24px; padding-bottom: 12px;">
+
+                    </td>
+                </tr>
+                <tr>
+                    <td style="font-family: Arial, sans-serif; font-size: 14px; color: #4a5568; line-height: 1.6;">
+                        <strong>Security Notice:</strong> Never share this code with anyone. Our team will never ask for your verification code. If you didn't request this code, someone may be trying to access your account.
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+
+<!-- Info Box -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 24px 0;">
+    <tr>
+        <td width="4" style="background-color: #6366f1;"></td>
+        <td style="background: linear-gradient(135deg, #f8f9fa 0%, #eef1f5 100%); padding: 20px 24px;">
+            <!--[if mso]>
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" bgcolor="#f8f9fa">
+            <tr>
+            <td style="padding: 20px 24px;">
+            <![endif]-->
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                    <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #4338ca;">
+                        <strong>Didn't request this?</strong> If you didn't try to sign in, please secure your account by changing your password immediately.
+                    </td>
+                </tr>
+            </table>
+            <!--[if mso]>
+            </td>
+            </tr>
+            </table>
+            <![endif]-->
+        </td>
+    </tr>
+</table>
+
+<!-- Divider -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+    <tr>
+        <td style="height: 1px; background: linear-gradient(90deg, transparent 0%, #e2e8f0 50%, transparent 100%); font-size: 1px; line-height: 1px;">
+            &nbsp;
+        </td>
+    </tr>
+</table>
+
+<!-- Small Text -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td style="font-family: Arial, sans-serif; font-size: 12px; color: #999999; line-height: 1.6;">
+            This is an automated security email. Please do not reply to this message.
+        </td>
+    </tr>
+</table>

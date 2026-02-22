@@ -1,0 +1,337 @@
+
+namespace Tnzi.EventBus;
+
+/// <summary>
+/// 事件总线模块
+/// 配置路径：EventBus
+/// </summary>
+[DependsOn(typeof(CachingModule))]
+public class EventBusModule : TnziInfrastructureModule
+{
+    public override int LoadOrder => 10;
+
+    public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        // 配置EventBusOptions并启用启动时验证
+        context.Services.AddOptions<EventBusOptions>()
+            .Bind(context.Configuration.GetSection("EventBus"))
+            .ValidateWith<EventBusOptions, EventBusOptionsValidator>();
+        return Task.CompletedTask;
+    }
+
+    public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        var services = context.Services;
+        var configuration = context.Configuration;
+
+        // 从配置中读取 EventBusOptions（手动绑定，避免构建 ServiceProvider）
+        // 注意：PreConfigureServicesAsync 中已绑定配置用于验证，这里重新读取是为了在无法构建
+        // ServiceProvider 的情况下获取配置值。这是必要的，因为自动注册需要在 ConfigureServicesAsync
+        // 阶段完成，而此时服务容器尚未构建完成。
+        var eventBusSection = configuration.GetSection("EventBus");
+        var options = new EventBusOptions();
+        eventBusSection.Bind(options);
+
+        // 确保默认值被正确应用（Bind 不会覆盖未配置的属性）
+        // EventBusOptions 的默认值已在属性定义中设置，Bind 只会覆盖配置文件中存在的值
+
+        // 如果启用自动注册，执行自动注册逻辑
+        // 注意：此时无法获取 ILogger，使用 NullLogger（日志将在运行时通过 IEventBus 记录）
+        if (options.AutoRegisterHandlers)
+        {
+            // 使用 NullLogger，因为此时服务还未完全注册
+            // 实际的注册信息会在运行时通过 LocalEventBus 的日志记录
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<EventBusModule>.Instance;
+            AutoRegisterEventHandlers(services, options, logger);
+        }
+
+        // 注册死信队列（如果启用）
+        if (options.EnableDeadLetterQueue)
+        {
+            services.AddSingleton<IEventDeadLetterQueue, InMemoryEventDeadLetterQueue>();
+        }
+
+        // 注册事件总线
+        services.AddSingleton<IEventBus>(provider =>
+        {
+            var eventBusLogger = provider.GetRequiredService<ILogger<LocalEventBus>>();
+            var eventBusOptions = provider.GetService<IOptions<EventBusOptions>>()?.Value ?? new EventBusOptions();
+            var maxConcurrency = eventBusOptions.MaxConcurrency;
+            var deadLetterQueue = options.EnableDeadLetterQueue
+                ? provider.GetService<IEventDeadLetterQueue>()
+                : null;
+
+            return new LocalEventBus(provider, eventBusLogger, eventBusOptions, deadLetterQueue, maxConcurrency);
+        });
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 自动注册事件处理器
+    /// </summary>
+    protected internal void AutoRegisterEventHandlers(IServiceCollection services, EventBusOptions options, ILogger logger)
+    {
+        try
+        {
+            // 扫描所有事件处理器类型
+            var handlerTypes = ScanEventHandlerTypes(options, logger);
+
+            if (handlerTypes.Count == 0)
+            {
+                logger.LogDebug("No event handlers found for auto-registration");
+                return;
+            }
+
+            // 按事件类型分组并排序
+            var groupedHandlers = handlerTypes
+                .GroupBy(h => h.EventType)
+                .ToList();
+
+            int registeredCount = 0;
+            int skippedCount = 0;
+
+            foreach (var group in groupedHandlers)
+            {
+                var eventType = group.Key;
+                var handlers = group
+                    .OrderBy(h => h.HandlerType.GetCustomAttribute<EventHandlerOrderAttribute>()?.Order ?? 0)
+                    .ToList();
+
+                foreach (var handlerInfo in handlers)
+                {
+                    // 检查是否已手动注册
+                    if (IsAlreadyRegistered(services, handlerInfo.HandlerType, eventType))
+                    {
+                        logger.LogDebug("Skipping handler {HandlerType} for event {EventType} (already manually registered)",
+                            handlerInfo.HandlerType.Name, eventType.Name);
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // 验证处理器类型（检查 IgnoreEventHandler 特性）
+                    // 注意：接口检查已在 ScanEventHandlerTypes 中完成，这里只检查特性
+                    if (handlerInfo.HandlerType.HasAttribute<IgnoreEventHandlerAttribute>())
+                    {
+                        logger.LogDebug("Skipping handler {HandlerType} (marked with [IgnoreEventHandler])",
+                            handlerInfo.HandlerType.Name);
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // 检查是否为框架程序集，输出警告
+                    var handlerAssemblyName = handlerInfo.HandlerType.Assembly.GetName().Name ?? "";
+                    if (handlerAssemblyName.StartsWith("Tnzi", StringComparison.OrdinalIgnoreCase))
+                    {
+                        logger.LogWarning(
+                            "Auto-registering event handler {HandlerType} from framework assembly {AssemblyName}. " +
+                            "Framework modules should use manual registration in ConfigureServicesAsync. " +
+                            "Consider adding [IgnoreEventHandler] attribute or manually registering this handler.",
+                            handlerInfo.HandlerType.Name, handlerAssemblyName);
+                    }
+
+                    // 获取生命周期
+                    var lifetime = GetHandlerLifetime(handlerInfo.HandlerType, options);
+
+                    // 注册到 DI 容器
+                    // 使用 TryAddEnumerable 以支持同一事件类型的多个处理器实现
+                    // TryAddEnumerable 会检查是否已存在相同的 ServiceType + ImplementationType，避免重复注册
+                    var handlerServiceType = typeof(IEventHandler<>).MakeGenericType(eventType);
+                    var descriptor = new ServiceDescriptor(handlerServiceType, handlerInfo.HandlerType, lifetime);
+                    services.TryAddEnumerable(descriptor);
+
+                    registeredCount++;
+                    logger.LogDebug("Auto-registered handler {HandlerType} for event {EventType} with lifetime {Lifetime}",
+                        handlerInfo.HandlerType.Name, eventType.Name, lifetime);
+                }
+            }
+
+            logger.LogInformation("Auto-registered {Count} event handler(s), skipped {Skipped} handler(s)",
+                registeredCount, skippedCount);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error occurred while auto-registering event handlers");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 扫描程序集获取所有事件处理器类型
+    /// </summary>
+    private List<(Type HandlerType, Type EventType)> ScanEventHandlerTypes(EventBusOptions options, ILogger logger)
+    {
+        var handlerTypes = new List<(Type HandlerType, Type EventType)>();
+        var assemblies = GetTargetAssemblies(options, logger);
+
+        foreach (var assembly in assemblies)
+        {
+            try
+            {
+                var types = assembly.GetExportedTypes()
+                    .Where(t => t.IsClass && !t.IsAbstract && !t.IsGenericTypeDefinition)
+                    .ToList();
+
+                foreach (var type in types)
+                {
+                    // 查找实现的 IEventHandler<TEvent> 接口
+                    var eventHandlerInterface = type.GetInterfaces()
+                        .FirstOrDefault(i => i.IsGenericType &&
+                                           i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
+
+                    if (eventHandlerInterface != null)
+                    {
+                        var eventType = eventHandlerInterface.GetGenericArguments()[0];
+                        handlerTypes.Add((type, eventType));
+                    }
+                }
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                // 记录类型加载异常（某些类型可能无法加载）
+                var assemblyName = assembly.GetName().Name ?? assembly.FullName ?? "Unknown";
+                logger.LogWarning(ex,
+                    "Failed to load some types from assembly {AssemblyName} while scanning for event handlers. " +
+                    "Some event handlers may not be discovered.",
+                    assemblyName);
+                continue;
+            }
+            catch (Exception ex)
+            {
+                // 记录其他异常但不抛出，继续扫描其他程序集
+                var assemblyName = assembly.GetName().Name ?? assembly.FullName ?? "Unknown";
+                logger.LogWarning(ex,
+                    "Failed to scan assembly {AssemblyName} for event handlers. " +
+                    "This assembly will be skipped.",
+                    assemblyName);
+                continue;
+            }
+        }
+
+        return handlerTypes;
+    }
+
+    /// <summary>
+    /// 获取目标程序集列表
+    /// </summary>
+    private Assembly[] GetTargetAssemblies(EventBusOptions options, ILogger logger)
+    {
+        if (options.HandlerAssemblies.Count > 0)
+        {
+            // 扫描指定的程序集
+            var assemblies = new List<Assembly>();
+            var loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies().ToList();
+
+            foreach (var assemblyName in options.HandlerAssemblies)
+            {
+                var assembly = loadedAssemblies.FirstOrDefault(a =>
+                {
+                    var name = a.GetName().Name ?? "";
+                    var fullName = a.FullName ?? "";
+                    return name.Equals(assemblyName, StringComparison.OrdinalIgnoreCase) ||
+                           fullName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase) ||
+                           fullName.StartsWith(assemblyName + ",", StringComparison.OrdinalIgnoreCase);
+                });
+
+                if (assembly != null)
+                {
+                    assemblies.Add(assembly);
+                }
+                else
+                {
+                    // 输出警告：指定的程序集未找到
+                    // 注意：此时 logger 可能是 NullLogger，但至少尝试记录警告
+                    logger.LogWarning(
+                        "Assembly '{AssemblyName}' specified in EventBus.HandlerAssemblies was not found. " +
+                        "Make sure the assembly is loaded before EventBusModule.ConfigureServicesAsync is called.",
+                        assemblyName);
+                }
+            }
+
+            return assemblies.ToArray();
+        }
+        else
+        {
+            // 扫描所有已加载的非系统程序集
+            // 注意：框架程序集（Tnzi.*）也会被扫描，但会输出警告提醒使用手动注册
+            return AppDomain.CurrentDomain.GetAssemblies()
+                .Where(a =>
+                {
+                    var name = a.GetName().Name ?? "";
+                    return !a.IsDynamic &&
+                           !name.StartsWith("System", StringComparison.OrdinalIgnoreCase) &&
+                           !name.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase) &&
+                           !name.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase);
+                })
+                .ToArray();
+        }
+    }
+
+    /// <summary>
+    /// 验证类型是否为有效的事件处理器
+    /// 注意：此方法主要用于外部调用，内部已优化为直接检查特性
+    /// </summary>
+    private bool IsValidEventHandlerType(Type type)
+    {
+        // 必须是类且非抽象
+        if (!type.IsClass || type.IsAbstract)
+            return false;
+
+        // 不能是泛型类型定义
+        if (type.IsGenericTypeDefinition)
+            return false;
+
+        // 不能有 IgnoreEventHandlerAttribute 特性
+        if (type.HasAttribute<IgnoreEventHandlerAttribute>())
+            return false;
+
+        // 必须实现 IEventHandler<TEvent> 接口
+        var eventHandlerInterface = type.GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
+
+        return eventHandlerInterface != null;
+    }
+
+    /// <summary>
+    /// 获取处理器生命周期
+    /// </summary>
+    private ServiceLifetime GetHandlerLifetime(Type handlerType, EventBusOptions options)
+    {
+        // 注意：如果将来需要支持通过特性指定处理器生命周期，可以在这里检查
+        // 示例实现：
+        // var lifetimeAttribute = handlerType.GetAttribute<EventHandlerLifetimeAttribute>();
+        // if (lifetimeAttribute != null)
+        //     return lifetimeAttribute.Lifetime;
+
+        return options.DefaultHandlerLifetime;
+    }
+
+    /// <summary>
+    /// 检查处理器是否已手动注册
+    /// </summary>
+    private bool IsAlreadyRegistered(IServiceCollection services, Type handlerType, Type eventType)
+    {
+        var handlerServiceType = typeof(IEventHandler<>).MakeGenericType(eventType);
+
+        return services.Any(descriptor =>
+        {
+            if (descriptor.ServiceType != handlerServiceType)
+                return false;
+
+            // 检查 ImplementationType
+            if (descriptor.ImplementationType == handlerType)
+                return true;
+
+            // 检查 ImplementationInstance
+            if (descriptor.ImplementationInstance != null &&
+                descriptor.ImplementationInstance.GetType() == handlerType)
+                return true;
+
+            // 注意：ImplementationFactory 无法静态推断返回类型
+            // 但 TryAddEnumerable 会在运行时检查重复，所以这里不需要检查工厂方法
+            // 如果使用工厂方法注册，TryAddEnumerable 会正确处理重复问题
+
+            return false;
+        });
+    }
+}

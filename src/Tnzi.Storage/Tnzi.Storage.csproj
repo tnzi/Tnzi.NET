@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>File storage abstraction module for Tnzi.NET framework with local disk, Amazon S3, Azure Blob, and Cloudflare R2 provider support</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\Tnzi\Tnzi.csproj" />
+    <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
+  </ItemGroup>
+
+  <!--
+    注意：这些包引用用于编译存储实现类
+    生产环境用户仍然需要在自己的应用项目中安装相应的包
+    运行时通过反射动态加载，如果用户未安装包，会抛出清晰的错误提示
+  -->
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="4.0.18.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.27.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Imaging\Tnzi.Imaging.csproj" />
+  </ItemGroup>
+
+</Project>

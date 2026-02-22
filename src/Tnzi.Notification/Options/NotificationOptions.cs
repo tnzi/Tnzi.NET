@@ -1,0 +1,359 @@
+namespace Tnzi.Notification.Options;
+
+/// <summary>
+/// 通知模块配置选项
+/// 配置路径：Notification
+/// </summary>
+public class NotificationOptions
+{
+    /// <summary>
+    /// 获取或设置 邮件发送配置
+    /// </summary>
+    public MailSenderOptions? MailSender { get; set; }
+
+    /// <summary>
+    /// 获取或设置 短信发送配置
+    /// </summary>
+    public SmsSenderOptions? SmsSender { get; set; }
+
+    /// <summary>
+    /// 获取或设置 Push推送配置
+    /// </summary>
+    public PushSenderOptions? PushSender { get; set; }
+
+    /// <summary>
+    /// 获取或设置 队列配置
+    /// </summary>
+    public QueueOptions Queue { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 最大并发数（批量发送时）
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 10;
+
+    /// <summary>
+    /// 获取或设置 发送超时（秒）
+    /// </summary>
+    public int SendTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// 获取或设置 SMS 最大内容长度
+    /// </summary>
+    public int SmsMaxContentLength { get; set; } = 1600;
+
+    /// <summary>
+    /// 获取或设置 重试配置
+    /// </summary>
+    public RetryOptions Retry { get; set; } = new();
+}
+
+
+/// <summary>
+/// 队列配置选项
+/// </summary>
+public class QueueOptions
+{
+    /// <summary>
+    /// 获取或设置 是否启用队列
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 队列容量（仅用于内存队列，默认10000）
+    /// </summary>
+    public int QueueCapacity { get; set; } = 10000;
+}
+
+/// <summary>
+/// 重试配置选项
+/// </summary>
+public class RetryOptions
+{
+    /// <summary>
+    /// 获取或设置 重试延迟（秒）
+    /// </summary>
+    public int RetryDelaySeconds { get; set; } = 60;
+
+    /// <summary>
+    /// 获取或设置 是否启用指数退避
+    /// </summary>
+    public bool EnableExponentialBackoff { get; set; } = true;
+}
+
+/// <summary>
+/// 邮件发送配置选项
+/// </summary>
+public class MailSenderOptions
+{
+    /// <summary>
+    /// 获取或设置 SMTP服务器地址
+    /// </summary>
+    public string SmtpServer { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 SMTP端口
+    /// </summary>
+    public int SmtpPort { get; set; } = 587;
+
+    /// <summary>
+    /// 获取或设置 用户名
+    /// </summary>
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 密码
+    /// </summary>
+    public string Password { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 是否启用SSL
+    /// </summary>
+    public bool EnableSsl { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 发件人邮箱
+    /// </summary>
+    public string FromEmail { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 发件人名称
+    /// </summary>
+    public string FromName { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 短信发送配置选项
+/// </summary>
+public class SmsSenderOptions
+{
+    /// <summary>
+    /// 获取或设置 短信服务提供商 (twilio, plivo)
+    /// </summary>
+    public string Provider { get; set; } = "twilio";
+
+    /// <summary>
+    /// 获取或设置 Twilio Account SID (当Provider为twilio时使用)
+    /// </summary>
+    public string TwilioAccountSid { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Twilio Auth Token (当Provider为twilio时使用)
+    /// </summary>
+    public string TwilioAuthToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Twilio From Phone Number (当Provider为twilio时使用)
+    /// </summary>
+    public string TwilioFromPhoneNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Plivo Auth ID (当Provider为plivo时使用)
+    /// </summary>
+    public string PlivoAuthId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Plivo Auth Token (当Provider为plivo时使用)
+    /// </summary>
+    public string PlivoAuthToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Plivo From Phone Number (当Provider为plivo时使用)
+    /// </summary>
+    public string PlivoFromPhoneNumber { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Push推送配置选项
+/// </summary>
+public class PushSenderOptions
+{
+    /// <summary>
+    /// 获取或设置 Push服务提供商 (fcm, firebase)
+    /// </summary>
+    public string Provider { get; set; } = "fcm";
+
+    /// <summary>
+    /// 获取或设置 Firebase项目ID (当Provider为fcm/firebase时使用)
+    /// </summary>
+    public string FirebaseProjectId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Firebase服务账号JSON文件路径 (当Provider为fcm/firebase时使用)
+    /// </summary>
+    public string FirebaseServiceAccountJsonPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置 Firebase服务账号JSON内容 (当Provider为fcm/firebase时使用，优先级高于文件路径)
+    /// </summary>
+    public string? FirebaseServiceAccountJson { get; set; }
+}
+
+/// <summary>
+/// Notification配置验证器
+/// </summary>
+public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOptions>
+{
+    protected override void ValidateOptions(NotificationOptions options, List<string> errors)
+    {
+        // 验证各个配置部分
+        ValidateMailSenderOptions(options.MailSender, errors);
+        ValidateSmsSenderOptions(options.SmsSender, errors);
+        ValidatePushSenderOptions(options.PushSender, errors);
+        ValidateQueueOptions(options.Queue, errors);
+        ValidateCommonOptions(options, errors);
+    }
+
+    /// <summary>
+    /// 验证邮件发送配置
+    /// </summary>
+    private static void ValidateMailSenderOptions(MailSenderOptions? mailSender, List<string> errors)
+    {
+        if (mailSender == null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(mailSender.SmtpServer))
+            errors.Add("MailSender.SmtpServer is required.");
+
+        if (mailSender.SmtpPort <= 0 || mailSender.SmtpPort > 65535)
+            errors.Add("MailSender.SmtpPort must be between 1 and 65535.");
+
+        if (string.IsNullOrWhiteSpace(mailSender.FromEmail))
+            errors.Add("MailSender.FromEmail is required.");
+
+        if (!string.IsNullOrWhiteSpace(mailSender.FromEmail) &&
+            !Regex.IsMatch(mailSender.FromEmail,
+                @"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.IgnoreCase))
+            errors.Add("MailSender.FromEmail must be a valid email address.");
+
+        // 如果启用了 SSL，验证用户名和密码
+        if (mailSender.EnableSsl)
+        {
+            if (string.IsNullOrWhiteSpace(mailSender.Username))
+                errors.Add("MailSender.Username is required when EnableSsl is true.");
+
+            if (string.IsNullOrWhiteSpace(mailSender.Password))
+                errors.Add("MailSender.Password is required when EnableSsl is true.");
+        }
+    }
+
+    /// <summary>
+    /// 验证短信发送配置
+    /// </summary>
+    private static void ValidateSmsSenderOptions(SmsSenderOptions? smsSender, List<string> errors)
+    {
+        if (smsSender == null)
+            return;
+
+        var provider = smsSender.Provider?.ToLower() ?? string.Empty;
+
+        if (provider == "twilio")
+        {
+            if (string.IsNullOrWhiteSpace(smsSender.TwilioAccountSid))
+                errors.Add("SmsSender.TwilioAccountSid is required when Provider is 'twilio'.");
+
+            if (string.IsNullOrWhiteSpace(smsSender.TwilioAuthToken))
+                errors.Add("SmsSender.TwilioAuthToken is required when Provider is 'twilio'.");
+
+            if (string.IsNullOrWhiteSpace(smsSender.TwilioFromPhoneNumber))
+                errors.Add("SmsSender.TwilioFromPhoneNumber is required when Provider is 'twilio'.");
+        }
+        else if (provider == "plivo")
+        {
+            if (string.IsNullOrWhiteSpace(smsSender.PlivoAuthId))
+                errors.Add("SmsSender.PlivoAuthId is required when Provider is 'plivo'.");
+
+            if (string.IsNullOrWhiteSpace(smsSender.PlivoAuthToken))
+                errors.Add("SmsSender.PlivoAuthToken is required when Provider is 'plivo'.");
+
+            if (string.IsNullOrWhiteSpace(smsSender.PlivoFromPhoneNumber))
+                errors.Add("SmsSender.PlivoFromPhoneNumber is required when Provider is 'plivo'.");
+        }
+        else if (!string.IsNullOrWhiteSpace(provider))
+        {
+            errors.Add($"SmsSender.Provider '{smsSender.Provider}' is not supported. Supported providers: twilio, plivo.");
+        }
+    }
+
+    /// <summary>
+    /// 验证推送通知配置
+    /// </summary>
+    private static void ValidatePushSenderOptions(PushSenderOptions? pushSender, List<string> errors)
+    {
+        if (pushSender == null)
+            return;
+
+        var provider = pushSender.Provider?.ToLower() ?? string.Empty;
+
+        if (provider == "fcm" || provider == "firebase")
+        {
+            if (string.IsNullOrWhiteSpace(pushSender.FirebaseProjectId))
+                errors.Add("PushSender.FirebaseProjectId is required when Provider is 'fcm' or 'firebase'.");
+
+            if (string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJson) &&
+                string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJsonPath))
+            {
+                errors.Add("PushSender.FirebaseServiceAccountJson or FirebaseServiceAccountJsonPath is required when Provider is 'fcm' or 'firebase'.");
+            }
+            else if (!string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJsonPath))
+            {
+                // 注意：不验证文件路径是否存在，因为文件可能在运行时才创建
+                // 如果文件不存在，会在实际使用时失败并记录错误
+            }
+            else if (!string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJson))
+            {
+                // 验证 JSON 内容是否有效
+                try
+                {
+                    JsonDocument.Parse(pushSender.FirebaseServiceAccountJson);
+                }
+                catch (JsonException)
+                {
+                    errors.Add("PushSender.FirebaseServiceAccountJson is not valid JSON.");
+                }
+            }
+        }
+        else if (provider == "apns")
+        {
+            errors.Add("PushSender.Provider 'apns' is not yet implemented.");
+        }
+        else if (!string.IsNullOrWhiteSpace(provider))
+        {
+            errors.Add($"PushSender.Provider '{pushSender.Provider}' is not supported. Supported providers: fcm, firebase.");
+        }
+    }
+
+    /// <summary>
+    /// 验证队列配置
+    /// </summary>
+    private static void ValidateQueueOptions(QueueOptions queue, List<string> errors)
+    {
+        if (!queue.Enabled)
+            return;
+
+        if (queue.QueueCapacity <= 0)
+            errors.Add("Queue.QueueCapacity must be greater than 0.");
+    }
+
+    /// <summary>
+    /// 验证通用配置选项
+    /// </summary>
+    private static void ValidateCommonOptions(NotificationOptions options, List<string> errors)
+    {
+        // 验证并发配置
+        if (options.MaxConcurrency <= 0)
+            errors.Add("MaxConcurrency must be greater than 0.");
+
+        // 验证超时配置
+        if (options.SendTimeoutSeconds <= 0)
+            errors.Add("SendTimeoutSeconds must be greater than 0.");
+
+        // 验证 SMS 最大长度配置
+        if (options.SmsMaxContentLength <= 0)
+            errors.Add("SmsMaxContentLength must be greater than 0.");
+
+        // 验证重试配置
+        if (options.Retry.RetryDelaySeconds < 0)
+            errors.Add("Retry.RetryDelaySeconds must be greater than or equal to 0.");
+    }
+}
+

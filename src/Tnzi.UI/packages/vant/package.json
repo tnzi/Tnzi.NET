@@ -1,0 +1,78 @@
+{
+  "name": "@tnzi/vant",
+  "version": "0.1.0",
+  "description": "Tnzi UI components based on Vant 4. Ideal for mobile apps and PWA.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./stores": {
+      "types": "./dist/stores/index.d.ts",
+      "import": "./dist/stores/index.js"
+    },
+    "./primitive/*": null,
+    "./adapters/*": {
+      "types": "./dist/adapters/*.d.ts",
+      "import": "./dist/adapters/*.js"
+    },
+    "./hooks/*": null,
+    "./style.css": {
+      "import": "./dist/style.css"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck",
+    "clean": "rimraf dist",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@tnzi/core": "workspace:*",
+    "pinia": "^2.2.0",
+    "vant": "^4.9.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.0",
+    "vite-plugin-dts": "^3.9.0",
+    "vue-tsc": "^2.0.0"
+  },
+  "peerDependencies": {
+    "vue": ">=3.5.0"
+  },
+  "keywords": [
+    "tnzi",
+    "vant",
+    "vue",
+    "vite",
+    "mobile",
+    "components",
+    "ui"
+  ],
+  "author": "Tnzi.NET",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tnzi/tnzi.net"
+  }
+}

@@ -1,0 +1,100 @@
+namespace Tnzi.Identity.Services;
+
+/// <summary>
+/// 用户管理服务接口
+/// </summary>
+public interface IUserService
+{
+    /// <summary>
+    /// 创建用户
+    /// </summary>
+    Task<Result<UserDto>> CreateAsync(CreateUserDto input);
+
+    /// <summary>
+    /// 更新用户
+    /// </summary>
+    Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input);
+
+    /// <summary>
+    /// 删除用户
+    /// </summary>
+    Task<Result> DeleteAsync(Guid id);
+
+    /// <summary>
+    /// 根据ID获取用户
+    /// </summary>
+    Task<Result<UserDto>> GetByIdAsync(Guid id);
+
+    /// <summary>
+    /// 获取用户列表
+    /// </summary>
+    Task<Result<IPagedList<UserListItemDto>>> GetListAsync(UserListQueryDto query);
+
+    /// <summary>
+    /// 启用用户
+    /// </summary>
+    Task<Result> EnableAsync(Guid id);
+
+    /// <summary>
+    /// 禁用用户
+    /// </summary>
+    Task<Result> DisableAsync(Guid id, string? reason = null);
+
+    /// <summary>
+    /// 锁定用户
+    /// </summary>
+    Task<Result> LockAsync(Guid id, DateTimeOffset? lockoutEnd = null, string? reason = null);
+
+    /// <summary>
+    /// 解锁用户
+    /// </summary>
+    Task<Result> UnlockAsync(Guid id);
+
+    /// <summary>
+    /// 批量创建用户
+    /// </summary>
+    Task<Result<IEnumerable<UserListItemDto>>> CreateManyAsync(IEnumerable<CreateUserDto> inputs);
+
+    /// <summary>
+    /// 批量更新用户
+    /// </summary>
+    Task<Result<IEnumerable<UserListItemDto>>> UpdateManyAsync(IEnumerable<(Guid Id, UpdateUserDto Dto)> inputs);
+
+    /// <summary>
+    /// 批量删除用户
+    /// </summary>
+    Task<Result> DeleteManyAsync(IEnumerable<Guid> ids);
+
+    /// <summary>
+    /// 分配角色
+    /// </summary>
+    Task<Result> AssignRolesAsync(Guid userId, IEnumerable<Guid> roleIds);
+
+    /// <summary>
+    /// 移除角色
+    /// </summary>
+    Task<Result> RemoveRolesAsync(Guid userId, IEnumerable<Guid> roleIds);
+
+    /// <summary>
+    /// 获取用户统计
+    /// </summary>
+    Task<Result<UserStatisticsDto>> GetStatisticsAsync(Guid? organizationId = null, Guid? roleId = null);
+
+    /// <summary>
+    /// 修改用户邮箱（同时设置 EmailConfirmed = true 并发布变更事件）
+    /// </summary>
+    Task<Result> ChangeEmailAsync(Guid userId, string newEmail);
+
+    /// <summary>
+    /// 修改用户手机号（同时设置 PhoneNumberConfirmed = true 并发布变更事件）
+    /// </summary>
+    Task<Result> ChangePhoneNumberAsync(Guid userId, string newPhoneNumber);
+
+    /// <summary>
+    /// 根据手机号查找用户（仅返回已验证手机号的用户）
+    /// </summary>
+    /// <param name="phoneNumber">手机号</param>
+    /// <returns>用户实体或 null</returns>
+    Task<User?> FindByPhoneNumberAsync(string phoneNumber);
+}
+

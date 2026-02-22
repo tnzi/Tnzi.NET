@@ -1,0 +1,64 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/build/">
+    <File Path="build/version.props" />
+    <File Path="build/public.props" />
+  </Folder>
+  <Folder Name="/samples/" />
+  <Folder Name="/src/">
+    <Project Path="src/Tnzi.AspNetCore/Tnzi.AspNetCore.csproj" />
+    <Project Path="src/Tnzi.EFCore/Tnzi.EFCore.csproj" />
+    <Project Path="src/Tnzi.Hangfire/Tnzi.Hangfire.csproj" />
+    <Project Path="src/Tnzi.Hosting/Tnzi.Hosting.csproj" />
+    <Project Path="src/Tnzi.Imaging/Tnzi.Imaging.csproj" />
+    <Project Path="src/Tnzi.Kafka/Tnzi.Kafka.csproj" />
+    <Project Path="src/Tnzi.Localization/Tnzi.Localization.csproj" />
+    <Project Path="src/Tnzi.Logging/Tnzi.Logging.csproj" />
+    <Project Path="src/Tnzi.Mapster/Tnzi.Mapster.csproj" />
+    <Project Path="src/Tnzi.RabbitMQ/Tnzi.RabbitMQ.csproj" />
+    <Project Path="src/Tnzi.Redis/Tnzi.Redis.csproj" />
+    <Project Path="src/Tnzi.SignalR/Tnzi.SignalR.csproj" />
+    <Project Path="src/Tnzi.Swagger/Tnzi.Swagger.csproj" />
+    <Project Path="src/Tnzi.UI/Tnzi.UI.csproj" />
+    <Project Path="src/Tnzi/Tnzi.csproj" />
+  </Folder>
+  <Folder Name="/src/diagnostics/">
+    <Project Path="src/Tnzi.HealthChecks/Tnzi.HealthChecks.csproj" />
+    <Project Path="src/Tnzi.OpenTelemetry/Tnzi.OpenTelemetry.csproj" />
+    <Project Path="src/Tnzi.Performance/Tnzi.Performance.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/">
+    <Project Path="src/Tnzi.AI/Tnzi.AI.csproj" />
+    <Project Path="src/Tnzi.Audit/Tnzi.Audit.csproj" />
+    <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
+    <Project Path="src/Tnzi.Chat/Tnzi.Chat.csproj" />
+    <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
+    <Project Path="src/Tnzi.Notification/Tnzi.Notification.csproj" />
+    <Project Path="src/Tnzi.Payment/Tnzi.Payment.csproj" />
+    <Project Path="src/Tnzi.Storage/Tnzi.Storage.csproj" />
+    <Project Path="src/Tnzi.System/Tnzi.System.csproj" />
+    <Project Path="src/Tnzi.Template/Tnzi.Template.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tnzi.AI.Tests/Tnzi.AI.Tests.csproj" />
+    <Project Path="tests/Tnzi.AspNetCore.Tests/Tnzi.AspNetCore.Tests.csproj" />
+    <Project Path="tests/Tnzi.Audit.Tests/Tnzi.Audit.Tests.csproj" />
+    <Project Path="tests/Tnzi.Authorization.Tests/Tnzi.Authorization.Tests.csproj" />
+    <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
+    <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
+    <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
+    <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
+    <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
+    <Project Path="tests/Tnzi.Redis.Tests/Tnzi.Redis.Tests.csproj" />
+    <Project Path="tests/Tnzi.SignalR.Tests/Tnzi.SignalR.Tests.csproj" />
+    <Project Path="tests/Tnzi.Storage.Tests/Tnzi.Storage.Tests.csproj" />
+    <Project Path="tests/Tnzi.System.Tests/Tnzi.System.Tests.csproj" />
+    <Project Path="tests/Tnzi.Template.Tests/Tnzi.Template.Tests.csproj" />
+    <Project Path="tests/Tnzi.TestBase/Tnzi.TestBase.csproj" />
+    <Project Path="tests/Tnzi.Tests/Tnzi.Tests.csproj" />
+  </Folder>
+</Solution>

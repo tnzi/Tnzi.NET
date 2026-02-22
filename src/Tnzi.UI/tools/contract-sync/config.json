@@ -1,0 +1,239 @@
+{
+  "modules": [
+    {
+      "name": "identity",
+      "backend": ["src/Tnzi.Identity/Dtos"],
+      "frontend": ["packages/core/src/services/identity/types.ts", "packages/core/src/services/identity/metadata.ts", "packages/core/src/enums/common.ts"],
+      "aliases": {
+        "RoleListQueryDto": "RoleListQueryDto",
+        "LoginDto": "LoginDto",
+        "RegisterDto": "RegisterDto"
+      },
+      "ignoreBackend": [
+        "UserLoginDto",
+        "UserStatisticsDto",
+        "LockUserDto",
+        "ResetPasswordByAdminDto",
+        "UpdateUserBatchDto",
+        "AssignOrganizationDto",
+        "AssignRolesDto",
+        "RemoveRolesDto",
+        "LoginLogQueryDto",
+        "LoginLogDto",
+        "LoginStatisticsDto",
+        "UserLoginStatisticsDto",
+        "AbnormalLoginDto",
+        "OAuthUserInfoDto",
+        "LinkOAuthDto",
+        "MoveOrganizationDto",
+        "UpdateOrganizationBatchDto",
+        "OrganizationStatisticsDto",
+        "CaptchaDto",
+        "SendQuickRegisterCodeDto",
+        "QuickRegisterDto",
+        "QuickRegisterResultDto",
+        "SetPasswordDto",
+        "ResendEmailConfirmationDto",
+        "UserDetailDto",
+        "CreateUserDetailDto",
+        "EnableTwoFactorDto",
+        "SendTwoFactorCodeDto",
+        "TwoFactorChallengeDto",
+        "VerifyTwoFactorDto",
+        "SendCodeLoginCodeDto",
+        "CodeLoginDto",
+        "CodeLoginResultDto",
+        "SendPasswordRecoveryCodeDto",
+        "ResetPasswordByCodeDto"
+      ],
+      "ignoreFrontend": ["UserProfile", "UserListItemDto", "RoleListItemDto", "UpdateProfileDto", "OAuthLoginDto"]
+    },
+    {
+      "name": "storage",
+      "backend": ["src/Tnzi.Storage/Dtos"],
+      "frontend": ["packages/core/src/services/storage/types.ts"],
+      "aliases": {
+        "FileStorageStatisticsDto": "StorageStatisticsDto",
+        "FileTypeStatistics": "FileTypeStatisticsDto",
+        "FileQueryRequest": "FileQueryDto",
+        "FileUploadProgress": "ChunkUploadResultDto",
+        "InitiateChunkedUploadRequest": "ChunkUploadDto"
+      },
+      "ignoreBackend": [
+        "FileReferenceStatistics",
+        "FileReferenceInfo",
+        "RenameFileRequest",
+        "CopyFileRequest",
+        "CreateShareRequest",
+        "AddWatermarkRequest",
+        "CompressRequest",
+        "CompleteChunkedUploadRequest"
+      ],
+      "ignoreFrontend": [
+        "StorageProviderDto",
+        "PresignedUrlRequestDto",
+        "PresignedUrlResponseDto",
+        "FolderDto",
+        "CreateFolderDto",
+        "BulkFileOperationDto"
+      ]
+    },
+    {
+      "name": "notification",
+      "backend": ["src/Tnzi.Notification/Dtos", "src/Tnzi.Notification/Entities"],
+      "frontend": ["packages/core/src/services/notification/types.ts", "packages/core/src/services/notification/metadata.ts"],
+      "aliases": {
+        "NotificationInfo": "MessageDto",
+        "CreateNotificationRequest": "CreateNotificationDto",
+        "QueryNotificationRequest": "MessageListQueryDto",
+        "ChannelStatisticsDto": "TypeStatistics"
+      },
+      "ignoreBackend": ["SendResult", "EmailAttachment", "StatusStatisticsDto"],
+      "ignoreFrontend": ["MessageRecipientDto", "RecipientInfoDto", "FileInfoDto", "MarkAsReadDto", "NotificationPreferencesDto", "NotificationChannelPreference"]
+    },
+    {
+      "name": "chat",
+      "backend": ["src/Tnzi.Chat/Dtos", "src/Tnzi.Chat/Entities"],
+      "frontend": ["packages/core/src/services/chat/types.ts", "packages/core/src/services/chat/metadata.ts"],
+      "aliases": {
+        "MessageDto": "ChatMessageDto",
+        "CreateMessageDto": "CreateChatMessageDto",
+        "MessageReplyDto": "ChatReplyDto",
+        "CreateMessageReplyDto": "CreateChatReplyDto",
+        "MessageQueryDto": "ChatMessageQueryDto"
+      },
+      "ignoreBackend": [],
+      "ignoreFrontend": ["ChatMessageDetailDto", "AttachmentDto", "MessageReceiveDto", "InboxQueryDto", "ConversationDto", "ConversationParticipantDto", "LastMessageDto", "ChatStatisticsDto", "DailyActivityDto"]
+    },
+    {
+      "name": "payment",
+      "backend": ["src/Tnzi.Payment/Dtos", "src/Tnzi.Payment/Metadata"],
+      "frontend": ["packages/core/src/services/payment/types.ts", "packages/core/src/services/payment/metadata.ts"],
+      "aliases": {
+        "CouponValidationResultDto": "CouponValidationDto",
+        "ChannelStatisticsDto": "ChannelStatistics"
+      },
+      "ignoreBackend": [
+        "ClosePaymentDto",
+        "PaymentOrderResultDto",
+        "PaymentCallbackDto",
+        "PaymentParamsDto",
+        "PaymentProviderCreateDto",
+        "PaymentProviderRefundDto",
+        "PaymentProviderOrderResult",
+        "PaymentProviderQueryResult",
+        "PaymentProviderRefundResult",
+        "PaymentProviderRefundQueryResult",
+        "PaymentProviderCallbackResult",
+        "CreateInvoiceDto",
+        "InvoiceLineItemDto",
+        "InvoiceDto",
+        "InvoiceQueryDto",
+        "MarkInvoicePaidDto",
+        "SendInvoiceDto",
+        "CancelInvoiceDto",
+        "InvoicePdfDto",
+        "SendEmailDto",
+        "CreatePromotionDto",
+        "UpdatePromotionDto",
+        "PromotionDto",
+        "PromotionQueryDto",
+        "ValidateCouponDto",
+        "CalculateDiscountDto",
+        "DiscountCalculationResultDto",
+        "CouponUsageDto",
+        "RedeemCodeDto",
+        "CreateRedemptionCodeDto",
+        "CreateSubscriptionDto",
+        "SubscriptionDto",
+        "SubscriptionQueryDto",
+        "SubscriptionPlanDto",
+        "CancelSubscriptionDto",
+        "ChangeSubscriptionDto",
+        "UpdatePaymentMethodDto",
+        "UpdateAutoRenewDto",
+        "ApproveRefundDto",
+        "CancelRefundDto",
+        "SubscriptionStatus",
+        "BillingCycleType",
+        "RefundType",
+        "InvoiceStatus",
+        "InvoiceType",
+        "PromotionType",
+        "DiscountType",
+        "ApplyScope",
+        "ProductType",
+        "RedemptionCodeType",
+        "RedemptionCodeStatus"
+      ],
+      "ignoreFrontend": ["PaymentDetailDto", "PaymentChannelDto", "PaymentLogDto", "CouponDto", "ApplyCouponDto", "PaymentStatisticsDto", "DailyPaymentStats"]
+    },
+    {
+      "name": "template",
+      "backend": ["src/Tnzi.Template/Dtos"],
+      "frontend": ["packages/core/src/services/template/types.ts", "packages/core/src/services/template/metadata.ts"],
+      "aliases": {
+        "CreateTemplateRequest": "CreateTemplateDto",
+        "UpdateTemplateRequest": "UpdateTemplateDto",
+        "QueryTemplateRequest": "TemplateQueryDto",
+        "CreateLayoutRequest": "CreateLayoutDto",
+        "UpdateLayoutRequest": "UpdateLayoutDto",
+        "QueryLayoutRequest": "LayoutQueryDto"
+      },
+      "ignoreBackend": [],
+      "ignoreFrontend": ["TemplateVariableDto", "TemplatePreviewDto", "TemplatePreviewResultDto", "RenderTemplateDto", "RenderedTemplateDto", "TemplateCategoryDto", "ValidateTemplateDto", "TemplateValidationResultDto", "TemplateValidationError", "TemplateValidationWarning", "TemplateExportDto", "TemplateImportDto", "TemplateImportResultDto"]
+    },
+    {
+      "name": "ai",
+      "backend": ["src/Tnzi.AI/Dtos", "src/Tnzi.AI/Metadata"],
+      "frontend": ["packages/core/src/services/ai/types.ts", "packages/core/src/services/ai/metadata.ts"],
+      "aliases": {
+        "AgentListQueryDto": "AgentQueryDto",
+        "RunAgentRequestDto": "RunAgentDto",
+        "AgentThreadDto": "ThreadDto",
+        "CreateAgentThreadDto": "ThreadDto",
+        "WorkflowDefinitionDto": "ToolGroupDto"
+      },
+      "ignoreBackend": [
+        "ChatRequestDto",
+        "ChatResponseDto",
+        "UserQuotaDto",
+        "SetQuotaDto",
+        "ResetQuotaDto",
+        "WorkflowDefinitionDto",
+        "CreateWorkflowDefinitionDto",
+        "UpdateWorkflowDefinitionDto",
+        "WorkflowStepDto",
+        "RunWorkflowRequestDto",
+        "WorkflowExecutionResultDto",
+        "WorkflowExecutionMode"
+      ],
+      "ignoreFrontend": ["AgentListItemDto", "StreamingAgentResponseDto", "ToolDefinitionDto", "ToolExecutionDto", "ToolExecutionResultDto", "AiProviderDto", "AiModelDto", "AiUsageStatisticsDto", "ProviderStatistics", "ModelStatistics", "DailyAiStats", "ThreadStatus", "MessageRole", "ToolCallStatus", "ProviderFeature", "ThreadMessageDto", "ToolCallDto", "ThreadQueryDto"]
+    },
+    {
+      "name": "audit",
+      "backend": ["src/Tnzi.Audit/Dtos", "src/Tnzi.Audit/Entities"],
+      "frontend": ["packages/core/src/services/audit/types.ts", "packages/core/src/services/audit/metadata.ts"],
+      "aliases": {
+        "AuditOperationQueryDto": "AuditLogQueryDto",
+        "AuditOperationStatistics": "AuditStatisticsDto",
+        "EntityState": "EntityChangeType"
+      },
+      "ignoreBackend": ["AuditLog", "AuditPropertyEntry", "AuditOperation", "AuditEntityEntry"],
+      "ignoreFrontend": ["AuditLogDto", "AuditOperationDto", "EntityChangeDto", "PropertyChangeDto", "HourlyStatistics", "OperationStatistics", "UserStatistics", "ErrorStatistics", "AuditConfigDto", "ExportAuditLogsDto", "AuditExportResultDto"]
+    },
+    {
+      "name": "system",
+      "backend": ["src/Tnzi.System/Dtos"],
+      "frontend": ["packages/core/src/services/app/types.ts", "packages/core/src/services/app/metadata.ts"],
+      "aliases": {
+        "MenuInfo": "MenuInfoDto",
+        "AccessLogInfo": "AccessLogInfoDto",
+        "SettingInfo": "SystemSettingDto",
+        "AccessLogStatistics": "CacheStatisticsDto"
+      },
+      "ignoreBackend": ["MenuTreeNode", "MenuOrderInfo", "CreateSettingDto"],
+      "ignoreFrontend": ["MenuMetaDto", "CreateMenuDto", "UpdateMenuDto", "MenuQueryDto", "AccessLogQueryDto", "UpdateSettingDto", "BatchUpdateSettingsDto", "SettingQueryDto", "SystemInfoDto", "HealthCheckResultDto", "HealthCheckResponseDto", "FeatureFlagDto", "FeatureRequirementDto", "MaintenanceInfoDto", "UpdateMaintenanceDto", "CachePrefixStatistics", "ClearCacheDto", "HealthStatus", "MenuBadgeType", "Environment", "ProviderFeature", "DeviceType"]
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+# Build output directory
+build/output/
+build/output-cli/
+build/tmp/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet Packages
+*.nupkg
+*.snupkg
+*.nuspec
+/packages/
+
+# Build sensitive/binary files
+build/nuget.exe
+build/*.txt
+
+# Visual Studio cache/options
+.vs/
+*.vsidx
+*.vspscc
+*.vsp
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+# File Storage (用户上传的文件，不应提交到版本控制)
+AppData/
+**/AppData/uploads/
+**/AppData/file-storage/
+uploads/
+**/uploads/
+*.upload/
+
+# Node.js / pnpm
+node_modules/
+**/node_modules/
+package-lock.json
+pnpm-lock.yaml
+.pnpm-store/
+.npm/
+.pnpm-debug.log*
+npm-debug.log*
+*.log
+
+# TypeScript / Frontend build
+dist/
+.nuxt/
+.output/
+*.tsbuildinfo
+.cache/
+.turbo/
+coverage/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Publish profiles (contain deployment server info)
+*.pubxml
+*.pubxml.user
+
+# Claude Code local settings
+#.claude/settings.local.json
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+/samples/music/src/backend/Api/ffmpeg.exe
+/samples/music/src/backend/Api/ffprobe.exe
+/samples/music/src/backend/Api/ffplay.exe

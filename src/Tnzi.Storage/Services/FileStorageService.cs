@@ -1,0 +1,794 @@
+namespace Tnzi.Storage.Services;
+
+/// <summary>
+/// 文件存储服务实现（核心文件操作）
+/// </summary>
+public class FileStorageService : ApplicationService, IFileStorageService
+{
+    private readonly IRepository<FileRecord, Guid> _repository;
+    private readonly IRepository<FileReference, Guid> _referenceRepository;
+    private readonly IFileStorage _storage;
+    private readonly StorageOptions _options;
+
+    public FileStorageService(
+        IRepository<FileRecord, Guid> repository,
+        IRepository<FileReference, Guid> referenceRepository,
+        IFileStorage storage,
+        IOptions<StorageOptions> options,
+        IServiceProvider serviceProvider)
+        : base(serviceProvider)
+    {
+        _repository = Check.NotNull(repository);
+        _referenceRepository = Check.NotNull(referenceRepository);
+        _storage = Check.NotNull(storage);
+        _options = options?.Value ?? new StorageOptions();
+    }
+
+    public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false)
+    {
+        var validation = ValidateFileName<FileRecord>(originalFileName);
+        if (validation != null)
+            return validation;
+        validation = ValidateStream<FileRecord>(stream);
+        if (validation != null)
+            return validation;
+
+        // 文件验证
+        var fileValidation = ValidateFileAsync<FileRecord>(originalFileName, stream);
+        if (fileValidation != null)
+            return fileValidation;
+
+        // 计算MD5
+        var md5Hash = await Md5Helper.CalculateAsync(stream);
+        stream.Position = 0;
+
+        // 检查是否已存在相同MD5的文件
+        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream);
+        if (existingResult != null)
+        {
+            return existingResult;
+        }
+
+        var extension = Path.GetExtension(originalFileName);
+        var fileName = $"{SequentialGuid.NewGuid()}{extension}";
+        var contentType = FileTypeHelper.GetContentType(extension);
+
+        // 1. 上传文件到存储
+        var filePath = await _storage.UploadAsync(fileName, stream, contentType);
+
+        // 2. 如果是图片，生成缩略图
+        string? thumbnailPath = null;
+        if (FileTypeHelper.IsImage(extension) && _options.AutoGenerateThumbnail)
+        {
+            thumbnailPath = await GenerateThumbnailAsync(filePath, fileName);
+        }
+
+        // 3. 保存数据库记录
+        // 临时文件的 ReferenceCount 初始为 0，正式文件为 1
+        var fileRecord = new FileRecord
+        {
+            FileName = fileName,
+            OriginalName = originalFileName,
+            Extension = extension,
+            Size = stream.Length,
+            Path = filePath,
+            Md5Hash = md5Hash,
+            Provider = _storage.ProviderName,
+            ContentType = contentType,
+            ThumbnailPath = thumbnailPath,
+            IsTemporary = isTemporary,
+            ReferenceCount = isTemporary ? 0 : 1
+        };
+
+        await _repository.InsertAsync(fileRecord);
+        LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", fileName, originalFileName, stream.Length);
+        return Ok(fileRecord, "File saved successfully");
+    }
+
+    public async Task<Result<Stream>> GetAsync(Guid id)
+    {
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<Stream>(record);
+        if (check != null)
+            return check;
+
+        if (string.IsNullOrEmpty(record!.Path))
+            return Fail<Stream>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var stream = await _storage.DownloadAsync(GetSafePath(record!.Path));
+        return Ok(stream);
+    }
+
+    public async Task<Result<(Stream Stream, long Start, long End, long TotalLength)>> GetRangeAsync(
+        Guid id,
+        long? rangeStart = null,
+        long? rangeEnd = null)
+    {
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<(Stream Stream, long Start, long End, long TotalLength)>(record);
+        if (check != null)
+            return check;
+
+        if (string.IsNullOrEmpty(record!.Path))
+            return Fail<(Stream Stream, long Start, long End, long TotalLength)>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var result = await _storage.DownloadRangeAsync(GetSafePath(record!.Path), rangeStart, rangeEnd);
+        return Ok(result);
+    }
+
+    public async Task<Result<FileRecord>> GetRecordAsync(Guid id)
+    {
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<FileRecord>(record);
+        if (check != null)
+            return check;
+        return Ok(record!);
+    }
+
+    public async Task<Result<FileInfoDto>> GetFileInfoAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(id, cancellationToken);
+        var check = EnsureFileRecordExists<FileInfoDto>(record);
+        if (check != null)
+            return check;
+
+        var dto = record!.MapTo<FileInfoDto>();
+        return Ok(dto);
+    }
+
+    public async Task<Result<string>> GetUrlAsync(Guid id, int? expiresIn = null)
+    {
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<string>(record);
+        if (check != null)
+            return check;
+
+        // 返回通过控制器访问的 URL（安全访问，不直接暴露文件路径）
+        var url = $"/api/files/{id}/download";
+        return Ok<string>(url);
+    }
+
+    public async Task<Result<Stream>> GetThumbnailAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(id, cancellationToken);
+        if (record == null)
+            return Fail<Stream>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        if (string.IsNullOrEmpty(record.ThumbnailPath))
+            return Fail<Stream>("Thumbnail not available", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var stream = await _storage.DownloadAsync(record.ThumbnailPath);
+        return Ok(stream);
+    }
+
+    public async Task<Result> DeleteAsync(Guid id)
+    {
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<object>(record);
+        if (check != null)
+            return check;
+
+        // 减少引用计数
+        var newCount = DecrementReferenceCount(record!);
+        if (newCount > 0)
+        {
+            // 还有引用，只更新计数
+            await _repository.UpdateAsync(record!);
+            LogInformation("File reference count decreased: {FileName}, ReferenceCount: {ReferenceCount}", record!.FileName, newCount);
+            return Ok("File reference count decreased");
+        }
+
+        // 1. 删除所有引用记录
+        var references = await _referenceRepository
+            .ToListAsync(r => r.FileId == id);
+        foreach (var reference in references)
+        {
+            await _referenceRepository.DeleteAsync(reference);
+        }
+
+        // 2. 删除物理文件和数据库记录
+        await DeleteFileAsync(record!);
+        LogInformation("File deleted: {FileName}, OriginalName: {OriginalName}", record!.FileName, record!.OriginalName);
+        return Ok("File deleted successfully");
+    }
+
+    public async Task<Result<FileRecord>> GetOrCreateByMd5Async(string md5Hash, string fileName, Stream stream)
+    {
+        // 检查是否已存在相同MD5的文件
+        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream);
+        if (existingResult != null)
+        {
+            return existingResult;
+        }
+
+        var validation = ValidateFileName<FileRecord>(fileName);
+        if (validation != null)
+            return validation;
+        validation = ValidateStream<FileRecord>(stream);
+        if (validation != null)
+            return validation;
+
+        validation = ValidateFileAsync<FileRecord>(fileName, stream);
+        if (validation != null)
+            return validation;
+
+        // 验证 MD5
+        var calculatedMd5 = await Md5Helper.CalculateAsync(stream);
+        stream.Position = 0;
+        if (!string.IsNullOrEmpty(md5Hash) && calculatedMd5 != md5Hash)
+        {
+            return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        var extension = Path.GetExtension(fileName);
+        var newFileName = $"{SequentialGuid.NewGuid()}{extension}";
+        var contentType = FileTypeHelper.GetContentType(extension);
+
+        var filePath = await _storage.UploadAsync(newFileName, stream, contentType);
+
+        string? thumbnailPath = null;
+        if (FileTypeHelper.IsImage(extension) && _options.AutoGenerateThumbnail)
+        {
+            thumbnailPath = await GenerateThumbnailAsync(filePath, newFileName);
+        }
+
+        var fileRecord = new FileRecord
+        {
+            FileName = newFileName,
+            OriginalName = fileName,
+            Extension = extension,
+            Size = stream.Length,
+            Path = filePath,
+            Md5Hash = calculatedMd5,
+            Provider = _storage.ProviderName,
+            ContentType = contentType,
+            ThumbnailPath = thumbnailPath,
+            ReferenceCount = 1
+        };
+
+        await _repository.InsertAsync(fileRecord);
+        LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", newFileName, fileName, stream.Length);
+        return Ok(fileRecord, "File saved successfully");
+    }
+
+    public async Task<Result<IEnumerable<FileRecord>>> SaveManyAsync(IEnumerable<(string fileName, Stream stream)> files)
+    {
+        return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
+        {
+            var records = new List<FileRecord>();
+            foreach (var (fileName, stream) in files)
+            {
+                var result = await SaveAsync(fileName, stream);
+                if (!result.Succeeded)
+                {
+                    return Fail<IEnumerable<FileRecord>>(result.Message ?? "Failed to save file", result.Code ?? 500, result.ErrorCode);
+                }
+                records.Add(result.Data!);
+            }
+            LogInformation("Batch saved {Count} files", records.Count);
+            return Ok((IEnumerable<FileRecord>)records, $"Batch saved {records.Count} files");
+        });
+    }
+
+    public async Task<Result> DeleteManyAsync(IEnumerable<Guid> ids)
+    {
+        return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
+        {
+            var idList = ids.ToList();
+            var records = await _repository
+                .ToListAsync(r => idList.Contains(r.Id), cancellationToken);
+
+            foreach (var record in records)
+            {
+                await DeleteFileAsync(record);
+            }
+            LogInformation("Batch deleted {Count} files", records.Count);
+            return Ok($"Batch deleted {records.Count} files");
+        });
+    }
+
+    public async Task<Result<FileRecord>> RenameAsync(Guid id, string newFileName)
+    {
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<FileRecord>(record);
+        if (check != null)
+            return check;
+
+        record!.OriginalName = newFileName;
+        await _repository.UpdateAsync(record);
+        LogInformation("File renamed: {OldFileName} -> {NewFileName}", record.OriginalName, newFileName);
+        return Ok(record, "File renamed successfully");
+    }
+
+    public async Task<Result<FileRecord>> CopyAsync(Guid sourceFileId, string? newFileName = null, CancellationToken cancellationToken = default)
+    {
+        var sourceFile = await _repository.GetAsync(sourceFileId, cancellationToken);
+        if (sourceFile == null)
+            return Fail<FileRecord>("Source file not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        if (string.IsNullOrEmpty(sourceFile.Path))
+            return Fail<FileRecord>("Source file path is empty", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+        using var sourceStream = await _storage.DownloadAsync(GetSafePath(sourceFile.Path));
+
+        var extension = sourceFile.Extension;
+        var copyFileName = $"{SequentialGuid.NewGuid()}{extension}";
+
+        var newFilePath = await _storage.UploadAsync(copyFileName, sourceStream, sourceFile.ContentType);
+
+        string? thumbnailPath = null;
+        if (FileTypeHelper.IsImage(extension) && _options.AutoGenerateThumbnail)
+        {
+            thumbnailPath = await GenerateThumbnailAsync(newFilePath, copyFileName);
+        }
+
+        var newFileRecord = new FileRecord
+        {
+            FileName = copyFileName,
+            OriginalName = newFileName ?? sourceFile.OriginalName,
+            Extension = extension,
+            Size = sourceFile.Size,
+            Path = newFilePath,
+            Md5Hash = sourceFile.Md5Hash, // 复制文件内容相同，直接复用 MD5
+            Provider = sourceFile.Provider,
+            ContentType = sourceFile.ContentType,
+            ThumbnailPath = thumbnailPath,
+            ReferenceCount = 0
+        };
+
+        await _repository.InsertAsync(newFileRecord, cancellationToken);
+
+        LogInformation("File copied: {SourceFileId} -> {NewFileId}, FileName: {FileName}", sourceFileId, newFileRecord.Id, newFileName ?? sourceFile.OriginalName);
+        return Ok(newFileRecord, "File copied successfully");
+    }
+
+    public async Task<Result<FileStorageStatistics>> GetStatisticsAsync()
+    {
+        var totalFiles = await _repository.CountAsync();
+        var totalSize = await _repository.AsQueryable().SumAsync(r => (long?)r.Size) ?? 0;
+
+        var filesByType = await _repository.AsQueryable()
+            .GroupBy(r => r.Extension)
+            .Select(g => new { Extension = g.Key, Count = g.Count(), Size = g.Sum(r => r.Size) })
+            .ToListAsync();
+
+        var filesByTypeDict = filesByType.ToDictionary(
+            x => x.Extension ?? "unknown",
+            x => new FileTypeStatistics { Count = x.Count, Size = x.Size });
+
+        var statistics = new FileStorageStatistics
+        {
+            TotalFiles = totalFiles,
+            TotalSize = totalSize,
+            FilesByType = filesByTypeDict
+        };
+        return Ok(statistics);
+    }
+
+    public async Task<Result<FileRecord>> SaveWithReferenceAsync(string fileName, Stream stream, string entityType, Guid entityId, string fieldName, bool isTemporary = false)
+    {
+        // 保存文件
+        var saveResult = await SaveAsync(fileName, stream, isTemporary);
+        if (!saveResult.Succeeded)
+        {
+            return saveResult;
+        }
+        var fileRecord = saveResult.Data!;
+
+        // 创建引用
+        await CreateReferenceAsync(fileRecord.Id, entityType, entityId, fieldName, isTemporary);
+
+        LogInformation("File saved with reference: {FileName}, EntityType: {EntityType}, EntityId: {EntityId}, FieldName: {FieldName}", fileName, entityType, entityId, fieldName);
+        return Ok(fileRecord, "File saved with reference");
+    }
+
+    public async Task<Result<FileRecord>> SaveFromBytesAsync(string fileName, byte[] content, string? contentType = null)
+    {
+        var validation = ValidateFileName<FileRecord>(fileName);
+        if (validation != null)
+            return validation;
+        if (content == null || content.Length == 0)
+            return Fail<FileRecord>("Content cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
+
+        using var stream = new MemoryStream(content);
+        return await SaveAsync(fileName, stream);
+    }
+
+    public async Task<Result<FileRecord>> SaveFromPathAsync(string filePath, string? contentType = null)
+    {
+        if (string.IsNullOrEmpty(filePath))
+            return Fail<FileRecord>("FilePath cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
+        if (!File.Exists(filePath))
+            return Fail<FileRecord>($"File not found: {filePath}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var fileName = Path.GetFileName(filePath);
+        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+        return await SaveAsync(fileName, stream);
+    }
+
+    public async Task<Result<IPagedList<FileRecord>>> QueryFilesAsync(FileQueryRequest request, CancellationToken cancellationToken = default)
+    {
+        var query = _repository.AsQueryable();
+
+        if (!string.IsNullOrEmpty(request.Extension))
+        {
+            query = query.Where(f => f.Extension == request.Extension);
+        }
+
+        if (request.MinSize.HasValue)
+        {
+            query = query.Where(f => f.Size >= request.MinSize.Value);
+        }
+
+        if (request.MaxSize.HasValue)
+        {
+            query = query.Where(f => f.Size <= request.MaxSize.Value);
+        }
+
+        if (request.StartTime.HasValue)
+        {
+            query = query.Where(f => f.CreationTime >= request.StartTime.Value);
+        }
+
+        if (request.EndTime.HasValue)
+        {
+            query = query.Where(f => f.CreationTime <= request.EndTime.Value);
+        }
+
+        if (request.CreatorId.HasValue)
+        {
+            query = query.Where(f => f.CreatorId == request.CreatorId.Value);
+        }
+
+        if (!string.IsNullOrEmpty(request.Provider))
+        {
+            query = query.Where(f => f.Provider == request.Provider);
+        }
+
+        if (!string.IsNullOrEmpty(request.OriginalName))
+        {
+            query = query.Where(f => f.OriginalName != null && f.OriginalName.Contains(request.OriginalName));
+        }
+
+        if (!string.IsNullOrEmpty(request.SortBy))
+        {
+            query = request.SortBy.ToLowerInvariant() switch
+            {
+                "creationtime" => request.Descending
+                    ? query.OrderByDescending(f => f.CreationTime)
+                    : query.OrderBy(f => f.CreationTime),
+                "size" => request.Descending
+                    ? query.OrderByDescending(f => f.Size)
+                    : query.OrderBy(f => f.Size),
+                "originalname" => request.Descending
+                    ? query.OrderByDescending(f => f.OriginalName)
+                    : query.OrderBy(f => f.OriginalName),
+                _ => query.OrderByDescending(f => f.CreationTime)
+            };
+        }
+        else
+        {
+            query = query.OrderByDescending(f => f.CreationTime);
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .Skip((request.PageIndex - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        IPagedList<FileRecord> pagedList = new PagedList<FileRecord>(items, request.PageIndex, request.PageSize, total);
+        return Ok(pagedList);
+    }
+
+    public async Task<Result<FileRecord>> CompressAsync(IEnumerable<Guid> fileIds, string? zipFileName = null, CancellationToken cancellationToken = default)
+    {
+        var validation = ValidateFileIds<FileRecord>(fileIds);
+        if (validation != null)
+            return validation;
+        var fileIdList = fileIds!.ToList();
+
+        var tempFilePath = Path.GetTempFileName();
+        try
+        {
+            // 使用临时文件而非 MemoryStream，避免大文件占用大量内存
+            using (var zipFileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.ReadWrite, System.IO.FileShare.None))
+            {
+                using (var archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create, true))
+                {
+                    foreach (var fileId in fileIdList)
+                    {
+                        var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
+                        if (fileRecord == null)
+                            continue;
+
+                        using var fileStream = await _storage.DownloadAsync(GetSafePath(fileRecord.Path));
+                        var entry = archive.CreateEntry(fileRecord.OriginalName ?? fileRecord.FileName);
+                        using (var entryStream = entry.Open())
+                        {
+                            await fileStream.CopyToAsync(entryStream, cancellationToken);
+                        }
+                    }
+                }
+
+                zipFileStream.Position = 0;
+
+                var zipName = zipFileName ?? $"archive_{DateTime.UtcNow:yyyyMMddHHmmss}.zip";
+                var zipPath = await _storage.UploadAsync(zipName, zipFileStream, "application/zip");
+
+                zipFileStream.Position = 0;
+                var md5Hash = await Md5Helper.CalculateAsync(zipFileStream);
+
+                var zipRecord = new FileRecord
+                {
+                    FileName = zipName,
+                    OriginalName = zipName,
+                    Extension = ".zip",
+                    Size = zipFileStream.Length,
+                    Path = zipPath,
+                    Md5Hash = md5Hash,
+                    Provider = _storage.ProviderName,
+                    ContentType = "application/zip",
+                    ReferenceCount = 0
+                };
+
+                await _repository.InsertAsync(zipRecord, cancellationToken);
+                LogInformation("Files compressed: {Count} files -> {ZipFileName}", fileIdList.Count, zipName);
+                return Ok(zipRecord, $"Compressed {fileIdList.Count} files successfully");
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempFilePath))
+                File.Delete(tempFilePath);
+        }
+    }
+
+    public async Task<Result<IEnumerable<FileRecord>>> DecompressAsync(Guid fileId, CancellationToken cancellationToken = default)
+    {
+        var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
+        if (fileRecord == null)
+            return Fail<IEnumerable<FileRecord>>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        if (fileRecord.Extension != ".zip")
+            return Fail<IEnumerable<FileRecord>>("Only ZIP files can be decompressed", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+        var extractedFiles = new List<FileRecord>();
+
+        using var zipStream = await _storage.DownloadAsync(GetSafePath(fileRecord.Path));
+        using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
+        {
+            foreach (var entry in archive.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name))
+                    continue;
+
+                // 使用临时文件而非 MemoryStream，避免大条目占用大量内存
+                var tempFilePath = Path.GetTempFileName();
+                try
+                {
+                    using (var tempStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.ReadWrite, System.IO.FileShare.None))
+                    {
+                        using var entryStream = entry.Open();
+                        await entryStream.CopyToAsync(tempStream, cancellationToken);
+                        tempStream.Position = 0;
+
+                        var md5Hash = await Md5Helper.CalculateAsync(tempStream);
+                        tempStream.Position = 0;
+
+                        var contentType = FileTypeHelper.GetContentType(Path.GetExtension(entry.Name));
+                        var extractedPath = await _storage.UploadAsync(entry.Name, tempStream, contentType);
+
+                        var extractedRecord = new FileRecord
+                        {
+                            FileName = entry.Name,
+                            OriginalName = entry.Name,
+                            Extension = Path.GetExtension(entry.Name),
+                            Size = tempStream.Length,
+                            Path = extractedPath,
+                            Md5Hash = md5Hash,
+                            Provider = _storage.ProviderName,
+                            ContentType = contentType,
+                            ReferenceCount = 0
+                        };
+
+                        await _repository.InsertAsync(extractedRecord, cancellationToken);
+                        extractedFiles.Add(extractedRecord);
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(tempFilePath))
+                        File.Delete(tempFilePath);
+                }
+            }
+        }
+
+        LogInformation("File decompressed: {FileId}, Extracted {Count} files", fileId, extractedFiles.Count);
+        return Ok((IEnumerable<FileRecord>)extractedFiles, $"Decompressed {extractedFiles.Count} files");
+    }
+
+    #region Private Methods
+
+    /// <summary>
+    /// 验证文件（大小和类型）
+    /// </summary>
+    private Result<T>? ValidateFileAsync<T>(string fileName, Stream stream)
+    {
+        if (stream.Length > _options.MaxFileSize)
+        {
+            return Fail<T>($"File size ({stream.Length} bytes) exceeds maximum allowed size ({_options.MaxFileSize} bytes).", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        var extension = Path.GetExtension(fileName);
+        if (_options.AllowedExtensions.Any() &&
+            !_options.AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        {
+            return Fail<T>($"File type '{extension}' is not allowed. Allowed types: {string.Join(", ", _options.AllowedExtensions)}", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 尝试通过 MD5 获取已存在的文件
+    /// </summary>
+    private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(string md5Hash, string originalFileName, Stream stream)
+    {
+        var existing = await _repository.FindAsync(f => f.Md5Hash == md5Hash);
+        if (existing == null)
+        {
+            return null;
+        }
+
+        var fileExists = await _storage.ExistsAsync(GetSafePath(existing.Path));
+        if (fileExists)
+        {
+            existing.ReferenceCount++;
+            await _repository.UpdateAsync(existing);
+            LogInformation("File reused by MD5: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
+            return Ok(existing, "File reused by MD5");
+        }
+        else
+        {
+            LogWarning("File record exists but physical file missing, re-uploading: {FileName}", existing.FileName);
+
+            var existingContentType = FileTypeHelper.GetContentType(existing.Extension ?? Path.GetExtension(originalFileName));
+            stream.Position = 0;
+            var newFilePath = await _storage.UploadAsync(existing.FileName, stream, existingContentType);
+
+            existing.Path = newFilePath;
+            existing.ReferenceCount++;
+
+            if (FileTypeHelper.IsImage(existing.Extension ?? "") && _options.AutoGenerateThumbnail)
+            {
+                stream.Position = 0;
+                existing.ThumbnailPath = await GenerateThumbnailAsync(newFilePath, existing.FileName);
+            }
+
+            await _repository.UpdateAsync(existing);
+            LogInformation("File re-uploaded and record updated: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
+            return Ok(existing, "File re-uploaded (was missing)");
+        }
+    }
+
+    private async Task<string?> GenerateThumbnailAsync(string originalPath, string fileName)
+    {
+        try
+        {
+            using var originalStream = await _storage.DownloadAsync(originalPath);
+
+            using var image = await Image.LoadAsync<Rgba32>(originalStream);
+            var thumbnailSize = _options.ThumbnailSize;
+            var thumbnail = image.GenerateSquareThumbnail(Math.Max(thumbnailSize.Width, thumbnailSize.Height));
+
+            using var thumbnailStream = new MemoryStream();
+            var quality = _options.ImageCompressionQuality;
+            await thumbnail.SaveAsJpegAsync(thumbnailStream, new JpegEncoder { Quality = quality });
+            thumbnailStream.Position = 0;
+
+            var thumbnailFileName = $"thumb_{fileName}";
+            var thumbnailPath = await _storage.UploadAsync(thumbnailFileName, thumbnailStream, "image/jpeg");
+
+            return thumbnailPath;
+        }
+        catch (Exception ex)
+        {
+            LogError("Error generating thumbnail for {OriginalPath}: {Error}", originalPath, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 创建文件引用（内部使用，用于 SaveWithReferenceAsync）
+    /// </summary>
+    private async Task CreateReferenceAsync(Guid fileId, string entityType, Guid entityId, string fieldName, bool isTemporary, CancellationToken cancellationToken = default)
+    {
+        var reference = new FileReference
+        {
+            FileId = fileId,
+            EntityType = entityType,
+            EntityId = entityId,
+            FieldName = fieldName,
+            IsTemporary = isTemporary,
+            CreationTime = DateTime.UtcNow
+        };
+
+        await _referenceRepository.InsertAsync(reference, cancellationToken);
+
+        if (!isTemporary)
+        {
+            var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
+            if (fileRecord != null)
+            {
+                fileRecord.ReferenceCount++;
+                await _repository.UpdateAsync(fileRecord, cancellationToken);
+            }
+        }
+    }
+
+    private Result<T>? EnsureFileRecordExists<T>(FileRecord? fileRecord)
+    {
+        if (fileRecord == null)
+        {
+            return Fail<T>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+        return null;
+    }
+
+    private static string GetSafePath(string? path)
+    {
+        return path ?? string.Empty;
+    }
+
+    private Result<T>? ValidateFileName<T>(string? fileName)
+    {
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return Fail<T>("FileName cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+        return null;
+    }
+
+    private Result<T>? ValidateStream<T>(Stream? stream)
+    {
+        if (stream == null)
+        {
+            return Fail<T>("Stream cannot be null", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+        return null;
+    }
+
+    private Result<T>? ValidateFileIds<T>(IEnumerable<Guid>? fileIds)
+    {
+        if (fileIds == null || !fileIds.Any())
+        {
+            return Fail<T>("At least one file ID is required", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+        return null;
+    }
+
+    private static int DecrementReferenceCount(FileRecord fileRecord)
+    {
+        fileRecord.ReferenceCount = Math.Max(0, fileRecord.ReferenceCount - 1);
+        return fileRecord.ReferenceCount;
+    }
+
+    private async Task DeleteFileAsync(FileRecord record)
+    {
+        if (!string.IsNullOrEmpty(record.Path))
+        {
+            await _storage.DeleteAsync(record.Path);
+        }
+
+        if (!string.IsNullOrEmpty(record.ThumbnailPath))
+        {
+            await _storage.DeleteAsync(record.ThumbnailPath);
+        }
+
+        await _repository.DeleteAsync(record);
+    }
+
+    #endregion
+}

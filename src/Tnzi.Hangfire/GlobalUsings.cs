@@ -1,0 +1,17 @@
+global using Hangfire;
+global using Hangfire.Dashboard;
+global using Hangfire.InMemory;
+global using Hangfire.PostgreSql;
+global using Hangfire.Redis.StackExchange;
+global using Hangfire.SqlServer;
+global using Microsoft.AspNetCore.Builder;
+global using Microsoft.Extensions.Configuration;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Options;
+global using Tnzi.BackgroundJobs;
+global using Tnzi.Exceptions;
+global using Tnzi.Hangfire.Options;
+global using Tnzi.Modules;
+global using Tnzi.Options;
+global using Tnzi.Utilities;
