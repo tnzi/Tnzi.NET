@@ -65,6 +65,9 @@ public class StripeOptionsValidator : OptionsValidatorBase<StripeOptions>
         if (string.IsNullOrWhiteSpace(options.PublishableKey))
             errors.Add("Stripe:PublishableKey is required when Stripe is enabled.");
 
+        if (string.IsNullOrWhiteSpace(options.WebhookSecret))
+            errors.Add("Stripe:WebhookSecret is required when Stripe is enabled.");
+
         if (string.IsNullOrWhiteSpace(options.Currency))
             errors.Add("Stripe:Currency is required when Stripe is enabled.");
 
@@ -88,6 +91,9 @@ public class PayPalOptionsValidator : OptionsValidatorBase<PayPalOptions>
 
         if (string.IsNullOrWhiteSpace(options.ClientSecret))
             errors.Add("PayPal:ClientSecret is required when PayPal is enabled.");
+
+        if (string.IsNullOrWhiteSpace(options.WebhookId))
+            errors.Add("PayPal:WebhookId is required when PayPal is enabled.");
 
         if (!string.Equals(options.Mode, "sandbox", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(options.Mode, "live", StringComparison.OrdinalIgnoreCase))

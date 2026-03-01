@@ -1,6 +1,4 @@
 
-using System.Collections.Concurrent;
-
 namespace Tnzi.Mapster.Adapters;
 
 /// <summary>

@@ -34,4 +34,29 @@ public interface IAccessLogService
     /// 批量删除访问日志
     /// </summary>
     Task<Result> DeleteAccessLogsAsync(IEnumerable<Guid> ids);
+
+    /// <summary>
+    /// 获取访问日志趋势统计（按天/周/月）
+    /// </summary>
+    Task<Result<AccessLogTrendDto>> GetAccessLogTrendAsync(
+        AccessLogTrendInterval interval,
+        DateTime startDate,
+        DateTime endDate,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<AccessLogTrendDto>("Access log trend not implemented", 501));
+    }
+
+    /// <summary>
+    /// 获取 Top 端点统计（最热/最慢/最多错误）
+    /// </summary>
+    Task<Result<List<TopEndpointDto>>> GetTopEndpointsAsync(
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        int top = 10,
+        TopEndpointSortBy sortBy = TopEndpointSortBy.Hits,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<List<TopEndpointDto>>("Top endpoints not implemented", 501));
+    }
 }

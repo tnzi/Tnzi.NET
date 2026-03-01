@@ -70,4 +70,39 @@ public abstract class FunctionAuthorizationAdminControllerBase : ApiAdminControl
         var result = await ModuleManagementService.GetModuleFunctionsAsync(moduleId);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// Reverse permission query: get all roles that have a specific permission
+    /// </summary>
+    /// <param name="permissionName">Permission name (function code)</param>
+    /// <returns>List of roles with the permission</returns>
+    [HttpGet("permission/roles")]
+    public virtual async Task<ApiResult<IEnumerable<PermissionRoleDto>>> GetPermissionRoles([FromQuery] string permissionName)
+    {
+        var result = await FunctionAuthorizationService.GetPermissionRolesAsync(permissionName);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Reverse permission query: get all users that have a specific permission
+    /// </summary>
+    /// <param name="permissionName">Permission name (function code)</param>
+    /// <returns>List of users with the permission</returns>
+    [HttpGet("permission/users")]
+    public virtual async Task<ApiResult<IEnumerable<PermissionUserDto>>> GetPermissionUsers([FromQuery] string permissionName)
+    {
+        var result = await FunctionAuthorizationService.GetPermissionUsersAsync(permissionName);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Get authorization statistics overview
+    /// </summary>
+    /// <returns>Authorization statistics</returns>
+    [HttpGet("statistics")]
+    public virtual async Task<ApiResult<AuthorizationStatisticsDto>> GetStatistics()
+    {
+        var result = await FunctionAuthorizationService.GetStatisticsAsync();
+        return result.ToApiResult();
+    }
 }

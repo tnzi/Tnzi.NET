@@ -79,4 +79,33 @@ public abstract class AccessLogAdminControllerBase : ApiAdminControllerBase
         var result = await AccessLogService.DeleteAccessLogsAsync(ids);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 获取访问日志趋势统计（按天/周/月）
+    /// </summary>
+    [HttpGet("statistics/trend")]
+    public virtual async Task<ApiResult<AccessLogTrendDto>> GetAccessLogTrend(
+        [FromQuery] AccessLogTrendInterval interval = AccessLogTrendInterval.Daily,
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null)
+    {
+        var end = endDate ?? DateTime.UtcNow;
+        var start = startDate ?? end.AddDays(-30);
+        var result = await AccessLogService.GetAccessLogTrendAsync(interval, start, end);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取 Top 端点统计（最热/最慢/最多错误）
+    /// </summary>
+    [HttpGet("statistics/top-endpoints")]
+    public virtual async Task<ApiResult<List<TopEndpointDto>>> GetTopEndpoints(
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null,
+        [FromQuery] int top = 10,
+        [FromQuery] TopEndpointSortBy sortBy = TopEndpointSortBy.Hits)
+    {
+        var result = await AccessLogService.GetTopEndpointsAsync(startDate, endDate, top, sortBy);
+        return result.ToApiResult();
+    }
 }

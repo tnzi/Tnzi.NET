@@ -12,25 +12,23 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
         {
             errors.Add("DefaultProvider cannot be null or empty");
         }
-
-        if (options.Providers == null || options.Providers.Count == 0)
+        else if (options.Providers == null || options.Providers.Count == 0)
         {
             errors.Add("At least one provider must be configured");
             return; // 如果没有提供商，后续验证无意义
         }
-
-        if (!string.IsNullOrWhiteSpace(options.DefaultProvider) && !options.Providers.ContainsKey(options.DefaultProvider))
+        else if (!options.Providers.ContainsKey(options.DefaultProvider))
         {
             errors.Add($"DefaultProvider '{options.DefaultProvider}' is not found in Providers");
         }
-
-        if (!string.IsNullOrWhiteSpace(options.DefaultProvider) && options.Providers.ContainsKey(options.DefaultProvider))
+        else if (!options.Providers[options.DefaultProvider].Enabled)
         {
-            var defaultProvider = options.Providers[options.DefaultProvider];
-            if (!defaultProvider.Enabled)
-            {
-                errors.Add($"DefaultProvider '{options.DefaultProvider}' is disabled");
-            }
+            errors.Add($"DefaultProvider '{options.DefaultProvider}' is disabled");
+        }
+
+        if (options.Providers == null || options.Providers.Count == 0)
+        {
+            return; // 如果没有提供商，后续验证无意义
         }
 
         // MCP：Enabled 时必须有至少一个 Server；再校验各服务器配置（名称、连接方式与必填字段）
@@ -110,49 +108,36 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
                 errors.Add($"Provider '{providerName}' DefaultModel cannot be null or empty when enabled");
             }
 
-            // 验证 API Key（支持从环境变量读取）
+            // 验证 API Key（PostConfigure 已处理环境变量注入，此处直接检查最终值）
             var apiKey = providerOptions.ApiKey;
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                // 尝试从环境变量读取
                 var envVarName = $"AI__{providerName.ToUpperInvariant()}__APIKEY";
-                apiKey = Environment.GetEnvironmentVariable(envVarName);
-
-                if (string.IsNullOrWhiteSpace(apiKey))
-                {
-                    errors.Add(
-                        $"Provider '{providerName}' is enabled but ApiKey is missing. " +
-                        $"Please set ApiKey in configuration or environment variable '{envVarName}'");
-                    continue; // 如果没有API Key，跳过后续验证
-                }
+                errors.Add(
+                    $"Provider '{providerName}' is enabled but ApiKey is missing. " +
+                    $"Set ApiKey in configuration or environment variable '{envVarName}'");
+                continue; // 如果没有 API Key，跳过后续验证
             }
 
             // 验证 API Key 格式
             ValidateApiKeyFormat(providerName, apiKey, errors);
 
-            // 验证 BaseUrl：OpenAI 可选（未配置时使用默认 endpoint），其他提供商必填
-            var isOpenAI = string.Equals(providerName, "OpenAI", StringComparison.OrdinalIgnoreCase);
-            if (string.IsNullOrWhiteSpace(providerOptions.BaseUrl))
+            // 验证 BaseUrl：提供时校验格式；未提供时由具体 IChatClientProvider 实现决定（如内置 OpenAI provider 有默认 endpoint，自定义 provider 可能不需要）
+            if (!string.IsNullOrWhiteSpace(providerOptions.BaseUrl))
             {
-                if (!isOpenAI)
+                if (!Uri.TryCreate(providerOptions.BaseUrl, UriKind.Absolute, out var baseUri))
                 {
-                    errors.Add($"Provider '{providerName}' BaseUrl cannot be null or empty when enabled");
+                    errors.Add($"Provider '{providerName}' BaseUrl '{providerOptions.BaseUrl}' is not a valid URI");
                 }
-            }
-            else if (!Uri.TryCreate(providerOptions.BaseUrl, UriKind.Absolute, out var baseUri))
-            {
-                errors.Add($"Provider '{providerName}' BaseUrl '{providerOptions.BaseUrl}' is not a valid URI");
-            }
-            else
-            {
-                if (baseUri.Scheme != Uri.UriSchemeHttps && baseUri.Scheme != Uri.UriSchemeHttp)
+                else if (baseUri.Scheme != Uri.UriSchemeHttps && baseUri.Scheme != Uri.UriSchemeHttp)
                 {
                     errors.Add($"Provider '{providerName}' BaseUrl must use HTTP or HTTPS protocol");
                 }
             }
 
-            // 验证 TimeoutSeconds
-            if (providerOptions.TimeoutSeconds <= 0 || providerOptions.TimeoutSeconds > 600)
+            // 验证 TimeoutSeconds（可空：未设置时跳过，显式设置时校验范围）
+            if (providerOptions.TimeoutSeconds.HasValue &&
+                (providerOptions.TimeoutSeconds.Value <= 0 || providerOptions.TimeoutSeconds.Value > 600))
             {
                 errors.Add($"Provider '{providerName}' TimeoutSeconds must be between 1 and 600");
             }

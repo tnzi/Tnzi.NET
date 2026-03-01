@@ -115,6 +115,10 @@ public class UpdateAgentDto
 
     /// <summary>Whether enabled</summary>
     public bool? IsEnabled { get; set; }
+
+    /// <summary>Change note for version tracking</summary>
+    [MaxLength(500)]
+    public string? ChangeNote { get; set; }
 }
 
 /// <summary>
@@ -179,4 +183,31 @@ public class TokenUsageDto
     public int CompletionTokens { get; set; }
     /// <summary>Total tokens</summary>
     public int TotalTokens { get; set; }
+}
+
+/// <summary>
+/// Agent 版本快照 DTO
+/// </summary>
+public class AgentVersionDto
+{
+    /// <summary>Version record ID</summary>
+    public Guid Id { get; set; }
+    /// <summary>Agent ID</summary>
+    public Guid AgentId { get; set; }
+    /// <summary>Version number</summary>
+    public int Version { get; set; }
+    /// <summary>Change note</summary>
+    public string? ChangeNote { get; set; }
+    /// <summary>Config snapshot (JSON)</summary>
+    public string ConfigSnapshot { get; set; } = string.Empty;
+    /// <summary>Creation time</summary>
+    public DateTime CreationTime { get; set; }
+}
+
+/// <summary>
+/// Agent 版本列表查询 DTO
+/// </summary>
+public class AgentVersionQueryDto : PagedQueryDto
+{
+    protected override int DefaultPageSize => 20;
 }

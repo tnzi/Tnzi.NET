@@ -53,6 +53,7 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddScoped<IInvoiceService, InvoiceService>();
         context.Services.AddScoped<IPromotionService, PromotionService>();
         context.Services.AddScoped<ICouponService, CouponService>();
+        context.Services.AddScoped<IPaymentStatisticsService, PaymentStatisticsService>();
 
         // 注册支付渠道
         context.Services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
@@ -60,9 +61,13 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddScoped<IPaymentProvider, PayPalProvider>();
         context.Services.AddScoped<IPaymentProvider, NullProvider>();
 
+        // 注册后台任务（过期支付关闭 + 订阅到期续费）
+        context.Services.AddHostedService<PaymentBackgroundService>();
+
         // 注册事件处理器
         context.Services.AddEventHandler<PaymentCompletedEvent, PaymentCompletedEventHandler>();
         context.Services.AddEventHandler<PaymentFailedEvent, PaymentFailedEventHandler>();
+        context.Services.AddEventHandler<PaymentExpiredEvent, PaymentExpiredEventHandler>();
         context.Services.AddEventHandler<RefundProcessedEvent, RefundProcessedEventHandler>();
         context.Services.AddEventHandler<SubscriptionCreatedEvent, SubscriptionCreatedEventHandler>();
         context.Services.AddEventHandler<SubscriptionCancelledEvent, SubscriptionCancelledEventHandler>();
@@ -81,6 +86,11 @@ public class PaymentModule : TnziApplicationModule
             context.Services.AddHttpClient();
         }
 
+        return Task.CompletedTask;
+    }
+
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
         return Task.CompletedTask;
     }
 }

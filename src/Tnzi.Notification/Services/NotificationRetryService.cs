@@ -68,17 +68,18 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
 
         await _notificationRepository.UpdateAsync(notification, cancellationToken);
 
-        // 通过队列调度重试（避免 Task.Delay 阻塞线程）
+        // 通过队列调度重试（带退避延迟）
         var delaySeconds = CalculateRetryDelay(notification.RetryCount);
-        if (_queueService != null && delaySeconds > 0)
+        if (_queueService != null)
         {
+            var delay = TimeSpan.FromSeconds(delaySeconds);
             LogInformation("Retrying notification {NotificationId} via queue with {DelaySeconds}s delay (attempt {RetryCount}/{MaxRetryCount})",
                 messageId, delaySeconds, notification.RetryCount + 1, notification.MaxRetryCount);
-            await _queueService.EnqueueAsync((sp, ct) =>
+            await _queueService.EnqueueWithDelayAsync((sp, ct) =>
             {
                 var svc = sp.GetRequiredService<INotificationService>();
                 return svc.SendAsync(messageId, ct);
-            });
+            }, delay);
         }
         else
         {

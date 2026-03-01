@@ -53,13 +53,8 @@ public class RequestTrackingOptions
 
     /// <summary>
     /// 不需要记录的路径模式
+    /// 默认排除：/health, /metrics, /favicon.ico, /swagger, /api-docs
+    /// 设置后将覆盖默认值
     /// </summary>
-    public List<string>? ExcludePaths { get; set; } = new()
-    {
-        "/health",
-        "/metrics",
-        "/favicon.ico",
-        "/swagger",
-        "/api-docs"
-    };
+    public List<string>? ExcludePaths { get; set; }
 }

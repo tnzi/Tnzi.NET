@@ -308,11 +308,10 @@ describe('PaginationController', () => {
       expect(pagination.pageIndex).toBe(3);
     });
 
-    it('should not adjust pageIndex if totalPages is 0', () => {
+    it('should reset pageIndex to 1 when totalCount becomes 0', () => {
       pagination.pageIndex = 5;
       pagination.updateFromResponse(0);
-      // totalPages = 0, condition: totalPages > 0 is false, no adjustment
-      expect(pagination.pageIndex).toBe(5);
+      expect(pagination.pageIndex).toBe(1);
     });
   });
 

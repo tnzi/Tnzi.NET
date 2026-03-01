@@ -49,16 +49,16 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
         };
         // 使用 System.Text.Json 序列化为 JSON，然后作为 JavaScript 对象字面量嵌入
         // 通过将 JSON 字符串中的 </script> 替换为 <\/script> 来防止脚本注入
-        var jsonString = System.Text.Json.JsonSerializer.Serialize(dataObject, new System.Text.Json.JsonSerializerOptions
+        var jsonString = JsonSerializer.Serialize(dataObject, new JsonSerializerOptions
         {
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         // 转义 HTML 中的 </script> 标签，防止脚本注入
         var json = jsonString.Replace("</script>", "<\\/script>");
 
         // postMessage target origin：优先使用配置的 FrontendUrl，未配置时使用 window.location.origin
         var originJs = !string.IsNullOrEmpty(_postMessageOrigin)
-            ? $"'{System.Net.WebUtility.HtmlEncode(_postMessageOrigin)}'"
+            ? $"'{WebUtility.HtmlEncode(_postMessageOrigin)}'"
             : "window.location.origin";
 
         return $@"<!DOCTYPE html>
@@ -182,7 +182,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     public string GenerateOAuthErrorHtml(string errorMessage)
     {
         var originJs = !string.IsNullOrEmpty(_postMessageOrigin)
-            ? $"'{System.Net.WebUtility.HtmlEncode(_postMessageOrigin)}'"
+            ? $"'{WebUtility.HtmlEncode(_postMessageOrigin)}'"
             : "window.location.origin";
 
         return $@"<!DOCTYPE html>
@@ -235,7 +235,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
 <body>
     <div class=""container"">
         <div class=""error-icon"">⚠</div>
-        <div class=""error-message"">{System.Net.WebUtility.HtmlEncode(errorMessage)}</div>
+        <div class=""error-message"">{WebUtility.HtmlEncode(errorMessage)}</div>
         <button class=""close-btn"" onclick=""window.close()"">关闭窗口</button>
     </div>
     <script>
@@ -245,7 +245,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                 type: 'oauth-callback',
                 data: {{
                     success: false,
-                    errorMessage: {System.Text.Json.JsonSerializer.Serialize(errorMessage)}
+                    errorMessage: {JsonSerializer.Serialize(errorMessage)}
                 }}
             }}, {originJs});
         }}
@@ -268,7 +268,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
 <head>
     <meta charset=""utf-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1"">
-    <title>{System.Net.WebUtility.HtmlEncode(title)}</title>
+    <title>{WebUtility.HtmlEncode(title)}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -325,8 +325,8 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
 <body>
     <div class=""container"">
         <div class=""icon"">{icon}</div>
-        <div class=""title"">{System.Net.WebUtility.HtmlEncode(title)}</div>
-        <div class=""message"">{System.Net.WebUtility.HtmlEncode(message)}</div>
+        <div class=""title"">{WebUtility.HtmlEncode(title)}</div>
+        <div class=""message"">{WebUtility.HtmlEncode(message)}</div>
         <a href=""/"" class=""button"">返回首页</a>
     </div>
 </body>
@@ -338,11 +338,11 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     /// </summary>
     public string GenerateResetPasswordFormHtml(string email, string token)
     {
-        var encodedEmail = System.Net.WebUtility.HtmlEncode(email);
+        var encodedEmail = WebUtility.HtmlEncode(email);
         // Use JSON serialization to produce a JS-safe quoted string (handles quotes, backslashes,
         // newlines, and other special characters that HtmlEncode alone would not neutralize inside
         // a JavaScript string literal context).
-        var jsToken = System.Text.Json.JsonSerializer.Serialize(token);
+        var jsToken = JsonSerializer.Serialize(token);
 
         // 获取应用名称
         var appName = _configuration?["App:AppName"] ?? "Tnzi.NET";
@@ -353,7 +353,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     <meta charset=""utf-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
     <meta http-equiv=""X-UA-Compatible"" content=""IE=edge"">
-    <title>重置密码 - {System.Net.WebUtility.HtmlEncode(appName)}</title>
+    <title>重置密码 - {WebUtility.HtmlEncode(appName)}</title>
     <style>
         /* Reset */
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -614,7 +614,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             <!-- Header -->
             <div class=""header"">
                 <div class=""logo"">
-                    {System.Net.WebUtility.HtmlEncode(appName)}<span class=""logo-accent""></span>
+                    {WebUtility.HtmlEncode(appName)}<span class=""logo-accent""></span>
                 </div>
                 <div class=""tagline"">安全 · 可靠 · 专业</div>
             </div>
@@ -741,7 +741,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     <meta charset=""utf-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
     <meta http-equiv=""X-UA-Compatible"" content=""IE=edge"">
-    <title>{System.Net.WebUtility.HtmlEncode(title)} - {System.Net.WebUtility.HtmlEncode(appName)}</title>
+    <title>{WebUtility.HtmlEncode(title)} - {WebUtility.HtmlEncode(appName)}</title>
     <style>
         /* Reset */
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -924,7 +924,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             <!-- Header -->
             <div class=""header"">
                 <div class=""logo"">
-                    {System.Net.WebUtility.HtmlEncode(appName)}<span class=""logo-accent""></span>
+                    {WebUtility.HtmlEncode(appName)}<span class=""logo-accent""></span>
                 </div>
                 <div class=""tagline"">安全 · 可靠 · 专业</div>
             </div>
@@ -934,13 +934,13 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                 <div class=""icon-wrapper"">
                     {icon}
                 </div>
-                <h1 class=""title"">{System.Net.WebUtility.HtmlEncode(title)}</h1>
-                <p class=""message"">{System.Net.WebUtility.HtmlEncode(message)}</p>
+                <h1 class=""title"">{WebUtility.HtmlEncode(title)}</h1>
+                <p class=""message"">{WebUtility.HtmlEncode(message)}</p>
                 <a href=""/"" class=""button"">返回首页</a>
 
                 <div class=""divider""></div>
                 <p class=""footer-text"">
-                    {System.Net.WebUtility.HtmlEncode(appName)} · 感谢您的使用
+                    {WebUtility.HtmlEncode(appName)} · 感谢您的使用
                 </p>
             </div>
         </div>

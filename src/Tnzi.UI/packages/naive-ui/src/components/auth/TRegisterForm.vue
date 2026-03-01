@@ -156,7 +156,7 @@ interface Props {
   captchaPlaceholder?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   showUsername: true,
   showPhone: false,
   showSocialLogin: false,
@@ -260,7 +260,7 @@ async function handleSubmit() {
     password: formModel.value.password,
     userName: formModel.value.userName || undefined,
     phoneNumber: formModel.value.phoneNumber || undefined,
-    captchaId: undefined,
+    captchaId: props.captchaId,
     captchaCode: formModel.value.captchaCode || undefined
   })
 }

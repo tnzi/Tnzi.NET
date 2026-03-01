@@ -37,6 +37,21 @@ public interface ILoginSecurityService
     /// <param name="additionalInfo">附加信息</param>
     /// <returns>设备指纹</returns>
     string GenerateDeviceFingerprint(string? userAgent, string? additionalInfo = null);
+
+    /// <summary>
+    /// 获取登录安全概览（管理员仪表盘）
+    /// </summary>
+    /// <param name="hours">统计时间范围（小时，默认24小时）</param>
+    /// <returns>安全概览数据</returns>
+    Task<Result<SecurityOverviewDto>> GetSecurityOverviewAsync(int hours = 24);
+
+    /// <summary>
+    /// 获取近期有频繁登录失败的用户列表
+    /// </summary>
+    /// <param name="hours">统计时间范围（小时，默认24小时）</param>
+    /// <param name="minFailures">最小失败次数阈值（默认3次）</param>
+    /// <returns>频繁登录失败的用户列表</returns>
+    Task<Result<IEnumerable<UserFailedLoginSummaryDto>>> GetUsersWithFrequentFailuresAsync(int hours = 24, int minFailures = 3);
 }
 
 /// <summary>
@@ -150,4 +165,89 @@ public enum AbnormalLoginAction
     Block
 }
 
+/// <summary>
+/// 登录安全概览数据
+/// </summary>
+public class SecurityOverviewDto
+{
+    /// <summary>
+    /// 统计时间范围（小时）
+    /// </summary>
+    public int TimeRangeHours { get; set; }
 
+    /// <summary>
+    /// 总登录次数
+    /// </summary>
+    public int TotalLoginAttempts { get; set; }
+
+    /// <summary>
+    /// 成功登录次数
+    /// </summary>
+    public int SuccessfulLogins { get; set; }
+
+    /// <summary>
+    /// 失败登录次数
+    /// </summary>
+    public int FailedLogins { get; set; }
+
+    /// <summary>
+    /// 失败率（0-100）
+    /// </summary>
+    public double FailureRate { get; set; }
+
+    /// <summary>
+    /// 不同用户数
+    /// </summary>
+    public int DistinctUsers { get; set; }
+
+    /// <summary>
+    /// 不同IP数
+    /// </summary>
+    public int DistinctIpAddresses { get; set; }
+
+    /// <summary>
+    /// 当前锁定的用户数
+    /// </summary>
+    public int LockedOutUsers { get; set; }
+}
+
+/// <summary>
+/// 用户登录失败摘要
+/// </summary>
+public class UserFailedLoginSummaryDto
+{
+    /// <summary>
+    /// 用户ID
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 用户名
+    /// </summary>
+    public string? UserName { get; set; }
+
+    /// <summary>
+    /// 邮箱
+    /// </summary>
+    public string? Email { get; set; }
+
+    /// <summary>
+    /// 失败次数
+    /// </summary>
+    public int FailureCount { get; set; }
+
+    /// <summary>
+    /// 最后一次失败时间
+    /// </summary>
+    public DateTime? LastFailureTime { get; set; }
+
+    /// <summary>
+    /// 失败使用的IP地址列表
+    /// </summary>
+    public List<string> IpAddresses { get; set; } = new();
+
+    /// <summary>
+    /// 用户是否已锁定
+    /// </summary>
+    public bool IsLockedOut { get; set; }
+}

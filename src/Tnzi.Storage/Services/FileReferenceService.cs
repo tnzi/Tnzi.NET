@@ -367,8 +367,7 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
             EntityType = entityType,
             EntityId = entityId,
             FieldName = fieldName,
-            IsTemporary = isTemporary,
-            CreationTime = DateTime.UtcNow
+            IsTemporary = isTemporary
         };
 
         await _referenceRepository.InsertAsync(reference, cancellationToken);

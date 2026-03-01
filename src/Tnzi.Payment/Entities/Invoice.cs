@@ -113,11 +113,13 @@ public class Invoice : FullAuditedEntity<Guid>
     /// <summary>
     /// PDF文件路径
     /// </summary>
+    [FileField]
     public string? PdfFilePath { get; set; }
 
     /// <summary>
     /// PDF文件URL
     /// </summary>
+    [FileField]
     public string? PdfFileUrl { get; set; }
 
     /// <summary>
@@ -155,6 +157,6 @@ public class Invoice : FullAuditedEntity<Guid>
     /// </summary>
     public static string GenerateInvoiceNo()
     {
-        return $"INV{DateTime.UtcNow:yyyyMMdd}{Random.Shared.Next(10000, 99999)}";
+        return $"INV{IdHelper.NextId()}";
     }
 }

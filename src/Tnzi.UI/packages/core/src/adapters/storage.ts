@@ -253,7 +253,7 @@ export function createMemoryStorageAdapter(): StorageAdapter {
 
     // Type-safe operations
     get<T>(key: string): T | null {
-      return store.get(key) as T | null;
+      return (store.get(key) ?? null) as T | null;
     },
     set<T>(key: string, value: T): void {
       store.set(key, value);

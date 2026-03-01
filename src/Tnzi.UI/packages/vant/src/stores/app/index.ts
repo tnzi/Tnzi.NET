@@ -29,8 +29,10 @@ const STORAGE_KEY = 'app_state';
 
 /** Generate a unique ID for notifications and modals. */
 const generateId = (): string => {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 };
+
+let _fullscreenListenerActive = false;
 
 // ============================================
 // Default State
@@ -218,6 +220,21 @@ export const useAppStore = defineStore('app', {
       } else {
         document.exitFullscreen?.();
       }
+      // Note: ui.fullscreen is updated by the fullscreenchange event listener (see _initFullscreenListener)
+    },
+
+    /**
+     * Initialize fullscreenchange event listener to sync state with browser.
+     * Called automatically from useApp(). Idempotent — safe to call multiple times.
+     */
+    _initFullscreenListener(): void {
+      if (_fullscreenListenerActive || typeof document === 'undefined') return;
+      _fullscreenListenerActive = true;
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      const store = this;
+      document.addEventListener('fullscreenchange', () => {
+        store.ui.fullscreen = !!document.fullscreenElement;
+      });
     },
 
     // ============================================
@@ -576,6 +593,8 @@ export const useAppStore = defineStore('app', {
  */
 export function useApp() {
   const store = useAppStore();
+  // Sync fullscreen state with browser (handles ESC key, etc.)
+  store._initFullscreenListener();
 
   return {
     // State (reactive)

@@ -1,6 +1,6 @@
 # Tnzi UI Ecosystem
 
-> Enterprise-grade UI component library for Tnzi.NET frontend applications.
+> UI component library for Tnzi.NET frontend applications.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![pnpm](https://img.shields.io/badge/maintained%20with-pnpm-cc00ff.svg)](https://pnpm.io/)

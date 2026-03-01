@@ -5,10 +5,10 @@ namespace Tnzi.AI.Services;
 /// </summary>
 public class ChatService : ApplicationService, IChatService
 {
-    private readonly ChatExecutionPipeline _pipeline;
+    private readonly IChatExecutionPipeline _pipeline;
     private readonly IOptions<AIOptions> _options;
 
-    public ChatService(ChatExecutionPipeline pipeline, IOptions<AIOptions> options, IServiceProvider serviceProvider)
+    public ChatService(IChatExecutionPipeline pipeline, IOptions<AIOptions> options, IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _pipeline = Check.NotNull(pipeline);
@@ -28,11 +28,12 @@ public class ChatService : ApplicationService, IChatService
                 return Fail<ChatResponseDto>("ThreadId requires AgentId for conversation thread.", 400, ErrorCodes.ThreadRequiresAgent);
             }
 
-            // 1. 构建消息（支持多模态）
-            var message = await _pipeline.BuildChatMessageAsync(request.Message, request.Content, ct);
+            // 1. 构建消息（支持多模态：返回包含正确 AIContent 的 ChatMessage）
+            var userMessage = await _pipeline.BuildChatMessageAsync(request.Message, request.Content, ct);
+            var messageText = userMessage.Text ?? string.Empty;
 
             // 2. 原子预留配额
-            var (reservation, quotaError) = await _pipeline.ReserveQuotaAsync<ChatResponseDto>(request.UserId, message, ct);
+            var (reservation, quotaError) = await _pipeline.ReserveQuotaAsync<ChatResponseDto>(request.UserId, messageText, ct);
             if (quotaError != null) return quotaError;
 
             // 3. 解析 Agent
@@ -51,20 +52,20 @@ public class ChatService : ApplicationService, IChatService
             threadId = resolvedThreadId;
 
             // 5. 执行对话
-            var response = await _pipeline.ExecuteAsync(resolution.Agent!, message, context, threadId, ct);
+            var response = await _pipeline.ExecuteAsync(resolution.Agent!, userMessage, context, threadId, ct);
 
             // 6. 持久化消息历史
-            await _pipeline.PersistAfterRunAsync(threadId, context, message, response.Text ?? string.Empty, ct);
+            await _pipeline.PersistAfterRunAsync(threadId, context, userMessage, response.Text ?? string.Empty, ct);
 
             // 7. 记录使用日志
             var usage = response.Usage;
-            var actualTokens = (int)(usage?.TotalTokenCount ?? 0);
+            var actualTokens = usage?.TotalTokens ?? 0;
             await _pipeline.LogUsageAsync(
                 AIOperationType.Chat,
                 resolution.Provider,
                 resolution.Model ?? "default",
-                (int)(usage?.InputTokenCount ?? 0),
-                (int)(usage?.OutputTokenCount ?? 0),
+                usage?.PromptTokens ?? 0,
+                usage?.CompletionTokens ?? 0,
                 stopwatch.ElapsedMilliseconds,
                 true,
                 agentId: resolution.AgentId,
@@ -78,7 +79,7 @@ public class ChatService : ApplicationService, IChatService
             {
                 Content = response.Text ?? string.Empty,
                 Model = resolution.Model,
-                Usage = ChatExecutionPipeline.MapUsage(response.Usage),
+                Usage = response.Usage,
                 ThreadId = threadId
             });
         }
@@ -92,11 +93,6 @@ public class ChatService : ApplicationService, IChatService
                 request.ThreadId);
 
             return Fail<ChatResponseDto>(ex.Message, ex.HttpStatusCode, ex.Code);
-        }
-        catch (InvalidOperationException ex) when (ex.Message?.Contains("quota", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            Logger.LogWarning("Chat quota exceeded: UserId={UserId}, Message={Message}", request.UserId, ex.Message);
-            return Fail<ChatResponseDto>(ex.Message, 429, ErrorCodes.QuotaExceeded);
         }
         catch (Exception ex)
         {
@@ -116,7 +112,7 @@ public class ChatService : ApplicationService, IChatService
                 threadId: threadId,
                 ct: ct);
 
-            return Fail<ChatResponseDto>($"Chat failed: {ex.Message}", 500, ErrorCodes.ChatFailed);
+            return Fail<ChatResponseDto>("Chat request failed.", 500, ErrorCodes.ChatFailed);
         }
     }
 
@@ -133,11 +129,12 @@ public class ChatService : ApplicationService, IChatService
             throw new BusinessException("ThreadId requires AgentId for conversation thread.", ErrorCodes.ThreadRequiresAgent, 400);
         }
 
-        // 1. 构建消息（支持多模态）
-        var message = await _pipeline.BuildChatMessageAsync(request.Message, request.Content, ct);
+        // 1. 构建消息（支持多模态：返回包含正确 AIContent 的 ChatMessage）
+        var userMessage = await _pipeline.BuildChatMessageAsync(request.Message, request.Content, ct);
+        var messageText = userMessage.Text ?? string.Empty;
 
         // 2. 原子预留配额
-        var reservation = await _pipeline.ReserveQuotaOrThrowAsync(request.UserId, message, ct);
+        var reservation = await _pipeline.ReserveQuotaOrThrowAsync(request.UserId, messageText, ct);
 
         // 3. 解析 Agent
         var resolution = await _pipeline.ResolveAgentAsync(request.AgentId, request.Provider, request.Model, request.ToolGroups, ct);
@@ -157,7 +154,7 @@ public class ChatService : ApplicationService, IChatService
 
         // 5. 流式执行（delta 模型 — 每个事件只包含增量内容）
         AgentStreamChunk? lastChunk = null;
-        await foreach (var chunk in _pipeline.ExecuteStreamingAsync(resolution.Agent!, message, context, request.ThreadId, ct).WithCancellation(ct))
+        await foreach (var chunk in _pipeline.ExecuteStreamingAsync(resolution.Agent!, userMessage, context, request.ThreadId, ct).WithCancellation(ct))
         {
             if (chunk.Text != null)
             {
@@ -170,12 +167,21 @@ public class ChatService : ApplicationService, IChatService
             var (inp, outp) = ChatExecutionPipeline.ExtractStreamingUsage(chunk);
             if (inp > 0 || outp > 0) { inputTokens = inp; outputTokens = outp; }
 
-            // 仅在有增量文本时发送 delta 事件
+            // 发送 delta 事件或工具调用状态事件
             if (chunk.Text != null)
             {
                 yield return new StreamEvent
                 {
                     Delta = chunk.Text,
+                    Model = resolution.Model,
+                    ThreadId = request.ThreadId
+                };
+            }
+            else if (chunk.IsToolCall)
+            {
+                yield return new StreamEvent
+                {
+                    IsToolCall = true,
                     Model = resolution.Model,
                     ThreadId = request.ThreadId
                 };
@@ -204,24 +210,43 @@ public class ChatService : ApplicationService, IChatService
             }
         };
 
-        // 6. 持久化历史与线程序列化数据
-        await _pipeline.PersistAfterRunAsync(request.ThreadId, context, message, contentBuilder.ToString(), ct);
+        // 6-8: 使用 CancellationToken.None 防止客户端断连导致配额泄漏和数据丢失
+        try
+        {
+            await _pipeline.PersistAfterRunAsync(request.ThreadId, context, userMessage, contentBuilder.ToString(), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to persist chat streaming history: ThreadId={ThreadId}", request.ThreadId);
+        }
 
-        // 7. 记录日志
-        await _pipeline.LogUsageAsync(
-            AIOperationType.ChatStreaming,
-            resolution.Provider,
-            resolution.Model ?? "default",
-            inputTokens,
-            outputTokens,
-            stopwatch.ElapsedMilliseconds,
-            true,
-            agentId: resolution.AgentId,
-            threadId: request.ThreadId,
-            ct: ct);
+        try
+        {
+            await _pipeline.LogUsageAsync(
+                AIOperationType.ChatStreaming,
+                resolution.Provider,
+                resolution.Model ?? "default",
+                inputTokens,
+                outputTokens,
+                stopwatch.ElapsedMilliseconds,
+                true,
+                agentId: resolution.AgentId,
+                threadId: request.ThreadId,
+                ct: CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to log chat streaming usage: ThreadId={ThreadId}", request.ThreadId);
+        }
 
-        // 8. 结算配额
-        var totalTokens = inputTokens + outputTokens;
-        await _pipeline.SettleQuotaAsync(request.UserId, reservation, totalTokens, ct);
+        try
+        {
+            var totalTokens = inputTokens + outputTokens;
+            await _pipeline.SettleQuotaAsync(request.UserId, reservation, totalTokens, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to settle chat streaming quota: UserId={UserId}", request.UserId);
+        }
     }
 }

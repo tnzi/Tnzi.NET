@@ -121,5 +121,61 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 
         return Ok();
     }
+
+    /// <inheritdoc />
+    public async Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold)
+    {
+        var cutoffTime = DateTime.UtcNow - inactiveThreshold;
+
+        var expiredSessions = await _repository
+            .Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime)
+            .ToListAsync();
+
+        if (!expiredSessions.Any())
+        {
+            return Ok(0);
+        }
+
+        foreach (var session in expiredSessions)
+        {
+            session.IsRevoked = true;
+            session.RevokedAt = DateTime.UtcNow;
+        }
+
+        await _repository.UpdateManyAsync(expiredSessions);
+
+        LogInformation("Cleaned {Count} expired sessions (inactive since {CutoffTime})", expiredSessions.Count, cutoffTime);
+        return Ok(expiredSessions.Count);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<SessionStatisticsDto>> GetSessionStatisticsAsync()
+    {
+        var activeSessions = _repository.Where(us => !us.IsRevoked);
+
+        var activeSessionCount = await activeSessions.CountAsync();
+        var onlineUserCount = await activeSessions.Select(us => us.UserId).Distinct().CountAsync();
+
+        var topDevices = await activeSessions
+            .Where(us => us.DeviceInfo != null && us.DeviceInfo != string.Empty)
+            .GroupBy(us => us.DeviceInfo!)
+            .Select(g => new DeviceStatItem
+            {
+                DeviceInfo = g.Key,
+                Count = g.Count()
+            })
+            .OrderByDescending(d => d.Count)
+            .Take(5)
+            .ToListAsync();
+
+        var statistics = new SessionStatisticsDto
+        {
+            ActiveSessionCount = activeSessionCount,
+            OnlineUserCount = onlineUserCount,
+            TopDevices = topDevices
+        };
+
+        return Ok(statistics);
+    }
 }
 

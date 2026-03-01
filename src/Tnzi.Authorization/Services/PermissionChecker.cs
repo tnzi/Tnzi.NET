@@ -40,13 +40,13 @@ public class PermissionChecker : IPermissionChecker
         if (permissionNames == null || permissionNames.Length == 0)
             return false;
 
-        foreach (var permissionName in permissionNames)
-        {
-            if (await IsGrantedAsync(_currentUser.Id.Value, permissionName))
-                return true;
-        }
+        // 单个权限走单次检查，避免批量查询开销
+        if (permissionNames.Length == 1)
+            return await IsGrantedAsync(_currentUser.Id.Value, permissionNames[0]);
 
-        return false;
+        // 批量查询：一次获取用户所有权限，然后 HashSet 检查
+        var results = await _functionAuthorizationService.CheckPermissionsAsync(_currentUser.Id.Value, permissionNames);
+        return results.Values.Any(v => v);
     }
 
     public async Task<bool> IsGrantedAllAsync(params string[] permissionNames)
@@ -57,13 +57,13 @@ public class PermissionChecker : IPermissionChecker
         if (permissionNames == null || permissionNames.Length == 0)
             return true;
 
-        foreach (var permissionName in permissionNames)
-        {
-            if (!await IsGrantedAsync(_currentUser.Id.Value, permissionName))
-                return false;
-        }
+        // 单个权限走单次检查
+        if (permissionNames.Length == 1)
+            return await IsGrantedAsync(_currentUser.Id.Value, permissionNames[0]);
 
-        return true;
+        // 批量查询：一次获取用户所有权限，然后 HashSet 检查
+        var results = await _functionAuthorizationService.CheckPermissionsAsync(_currentUser.Id.Value, permissionNames);
+        return results.Values.All(v => v);
     }
 
     public async Task CheckAsync(string permissionName)

@@ -43,6 +43,14 @@ public interface IPasswordPolicyService
     /// <param name="userId">用户ID</param>
     /// <returns>上次修改时间，如果从未修改则返回null</returns>
     Task<DateTime?> GetLastPasswordChangeTimeAsync(Guid userId);
+
+    /// <summary>
+    /// 评估密码强度（返回评分、等级和改进建议）
+    /// 适用于前端实时反馈密码强度
+    /// </summary>
+    /// <param name="password">待评估的密码</param>
+    /// <returns>密码强度评估结果</returns>
+    PasswordStrengthResult EvaluatePasswordStrength(string password);
 }
 
 /// <summary>
@@ -82,4 +90,61 @@ public class PasswordExpirationResult
     /// </summary>
     public static PasswordExpirationResult NotRequired()
         => new() { IsExpired = false };
+}
+
+/// <summary>
+/// 密码强度评估结果
+/// </summary>
+public class PasswordStrengthResult
+{
+    /// <summary>
+    /// 密码强度评分（0-100）
+    /// </summary>
+    public int Score { get; set; }
+
+    /// <summary>
+    /// 密码强度等级
+    /// </summary>
+    public PasswordStrengthLevel Level { get; set; }
+
+    /// <summary>
+    /// 改进建议列表
+    /// </summary>
+    public List<string> Suggestions { get; set; } = new();
+
+    /// <summary>
+    /// 是否满足当前密码策略的最低要求
+    /// </summary>
+    public bool MeetsPolicy { get; set; }
+}
+
+/// <summary>
+/// 密码强度等级
+/// </summary>
+public enum PasswordStrengthLevel
+{
+    /// <summary>
+    /// 非常弱
+    /// </summary>
+    VeryWeak,
+
+    /// <summary>
+    /// 弱
+    /// </summary>
+    Weak,
+
+    /// <summary>
+    /// 一般
+    /// </summary>
+    Fair,
+
+    /// <summary>
+    /// 强
+    /// </summary>
+    Strong,
+
+    /// <summary>
+    /// 非常强
+    /// </summary>
+    VeryStrong
 }

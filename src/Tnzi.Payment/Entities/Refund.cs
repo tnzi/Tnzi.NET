@@ -80,6 +80,6 @@ public class Refund : FullAuditedEntity<Guid>
     /// </summary>
     public static string GenerateRefundNo()
     {
-        return $"REF{DateTime.UtcNow:yyyyMMddHHmmss}{Random.Shared.Next(1000, 9999)}";
+        return $"REF{IdHelper.NextId()}";
     }
 }

@@ -125,6 +125,6 @@ public class Subscription : FullAuditedEntity<Guid>
     /// </summary>
     public static string GenerateSubscriptionNo()
     {
-        return $"SUB{DateTime.UtcNow:yyyyMMddHHmmss}{Random.Shared.Next(1000, 9999)}";
+        return $"SUB{IdHelper.NextId()}";
     }
 }

@@ -44,6 +44,40 @@ public class AccessLogService : ApplicationService, IAccessLogService
         if (query.EndTime.HasValue)
             q = q.Where(log => log.CreationTime <= query.EndTime.Value);
 
+        if (!string.IsNullOrWhiteSpace(query.Path))
+        {
+            var pathLower = query.Path.ToLower();
+            q = q.Where(log => log.Path.ToLower().Contains(pathLower));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Method))
+        {
+            var methodUpper = query.Method.ToUpper();
+            q = q.Where(log => log.Method == methodUpper);
+        }
+
+        if (query.StatusCode.HasValue)
+            q = q.Where(log => log.StatusCode == query.StatusCode.Value);
+
+        if (query.MinStatusCode.HasValue)
+            q = q.Where(log => log.StatusCode >= query.MinStatusCode.Value);
+
+        if (query.MaxStatusCode.HasValue)
+            q = q.Where(log => log.StatusCode <= query.MaxStatusCode.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.IpAddress))
+        {
+            var ipLower = query.IpAddress.ToLower();
+            q = q.Where(log => log.IpAddress != null && log.IpAddress.ToLower().Contains(ipLower));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var keyword = query.Keyword.ToLower();
+            q = q.Where(log => log.Path.ToLower().Contains(keyword)
+                || (log.UserName != null && log.UserName.ToLower().Contains(keyword)));
+        }
+
         q = q.OrderByDescending(log => log.CreationTime);
 
         var paged = await q
@@ -138,5 +172,112 @@ public class AccessLogService : ApplicationService, IAccessLogService
 
         LogInformation("Batch deleted {Count} access logs", logs.Count);
         return Ok($"Deleted {logs.Count} access logs successfully");
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<AccessLogTrendDto>> GetAccessLogTrendAsync(
+        AccessLogTrendInterval interval,
+        DateTime startDate,
+        DateTime endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var logs = await _accessLogRepository.AsQueryable()
+            .AsNoTracking()
+            .Where(l => l.CreationTime >= startDate && l.CreationTime <= endDate)
+            .Select(l => new { l.CreationTime, l.StatusCode, l.ResponseTime, l.UserId })
+            .ToListAsync(cancellationToken);
+
+        var dataPoints = new List<AccessLogTrendDataPoint>();
+        var current = startDate;
+
+        while (current < endDate)
+        {
+            var (bucketEnd, label) = interval switch
+            {
+                AccessLogTrendInterval.Daily => (current.AddDays(1), current.ToString("yyyy-MM-dd")),
+                AccessLogTrendInterval.Weekly => (current.AddDays(7), $"{current:yyyy}-W{GetIsoWeekNumber(current):D2}"),
+                AccessLogTrendInterval.Monthly => (current.AddMonths(1), current.ToString("yyyy-MM")),
+                _ => (current.AddDays(1), current.ToString("yyyy-MM-dd"))
+            };
+
+            var bucketLogs = logs.Where(l => l.CreationTime >= current && l.CreationTime < bucketEnd).ToList();
+
+            dataPoints.Add(new AccessLogTrendDataPoint
+            {
+                Label = label,
+                StartTime = current,
+                TotalRequests = bucketLogs.Count,
+                SuccessRequests = bucketLogs.Count(l => l.StatusCode >= 200 && l.StatusCode < 300),
+                ErrorRequests = bucketLogs.Count(l => l.StatusCode >= 400),
+                UniqueUsers = bucketLogs.Where(l => l.UserId.HasValue).Select(l => l.UserId).Distinct().Count(),
+                AverageResponseTime = bucketLogs.Count > 0 ? bucketLogs.Average(l => (double)l.ResponseTime) : 0
+            });
+
+            current = bucketEnd;
+        }
+
+        return Ok(new AccessLogTrendDto
+        {
+            Interval = interval,
+            StartDate = startDate,
+            EndDate = endDate,
+            DataPoints = dataPoints
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<List<TopEndpointDto>>> GetTopEndpointsAsync(
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        int top = 10,
+        TopEndpointSortBy sortBy = TopEndpointSortBy.Hits,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _accessLogRepository.AsQueryable().AsNoTracking();
+
+        if (startDate.HasValue)
+            query = query.Where(l => l.CreationTime >= startDate.Value);
+        if (endDate.HasValue)
+            query = query.Where(l => l.CreationTime <= endDate.Value);
+
+        // 按 Path+Method 分组聚合，在内存中排序取 Top N
+        var grouped = await query
+            .GroupBy(l => new { l.Path, l.Method })
+            .Select(g => new TopEndpointDto
+            {
+                Path = g.Key.Path,
+                Method = g.Key.Method,
+                TotalHits = g.Count(),
+                SuccessHits = g.Count(l => l.StatusCode >= 200 && l.StatusCode < 300),
+                ErrorHits = g.Count(l => l.StatusCode >= 400),
+                AverageResponseTime = g.Average(l => (double)l.ResponseTime),
+                MaxResponseTime = g.Max(l => l.ResponseTime)
+            })
+            .ToListAsync(cancellationToken);
+
+        // 计算错误率
+        foreach (var item in grouped)
+        {
+            item.ErrorRate = item.TotalHits > 0 ? (double)item.ErrorHits / item.TotalHits : 0;
+        }
+
+        // 按指定方式排序取 Top N
+        var sorted = sortBy switch
+        {
+            TopEndpointSortBy.AverageResponseTime => grouped.OrderByDescending(e => e.AverageResponseTime),
+            TopEndpointSortBy.Errors => grouped.OrderByDescending(e => e.ErrorHits),
+            _ => grouped.OrderByDescending(e => e.TotalHits)
+        };
+
+        return Ok(sorted.Take(top).ToList());
+    }
+
+    private static int GetIsoWeekNumber(DateTime date)
+    {
+        var day = global::System.Globalization.CultureInfo.InvariantCulture.Calendar.GetDayOfWeek(date);
+        if (day >= DayOfWeek.Monday && day <= DayOfWeek.Wednesday)
+            date = date.AddDays(3);
+        return global::System.Globalization.CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(
+            date, global::System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
     }
 }

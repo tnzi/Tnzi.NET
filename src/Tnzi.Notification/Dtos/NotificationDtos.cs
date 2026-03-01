@@ -23,6 +23,12 @@ public class CreateNotificationRequest
     public string? Category { get; set; }
     public NotificationPriority Priority { get; set; } = NotificationPriority.Normal;
     public Guid? SenderId { get; set; }
+
+    /// <summary>
+    /// Scheduled send time (null = send immediately or as queued).
+    /// When set, notification will be held until this UTC time.
+    /// </summary>
+    public DateTime? ScheduledTime { get; set; }
 }
 
 /// <summary>
@@ -75,6 +81,7 @@ public class NotificationInfo
     public Guid? SenderId { get; set; }
     public string Category { get; set; } = "General";
     public string? TemplateName { get; set; }
+    public DateTime? ScheduledTime { get; set; }
     public List<RecipientOutput> Recipients { get; set; } = new();
     public List<FileInfoDto> Attachments { get; set; } = new();
 }
@@ -89,4 +96,19 @@ public class QueryNotificationRequest : PagedQueryDto
     public DateTime? StartTime { get; set; }
     public DateTime? EndTime { get; set; }
     public string? Keyword { get; set; }
+
+    /// <summary>
+    /// Filter by category (e.g., "General", "Marketing", "System")
+    /// </summary>
+    public string? Category { get; set; }
+
+    /// <summary>
+    /// Filter by priority
+    /// </summary>
+    public NotificationPriority? Priority { get; set; }
+
+    /// <summary>
+    /// Filter by sender user ID
+    /// </summary>
+    public Guid? SenderId { get; set; }
 }

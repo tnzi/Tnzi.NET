@@ -40,17 +40,15 @@ public class AuthTokenService : ApplicationService, IAuthTokenService
             return existingToken.Id;
         }
 
-        // 创建新令牌
+        // 创建新令牌（Id 和 CreationTime 由框架自动生成）
         var token = new AuthToken
         {
-            Id = Guid.NewGuid(),
             UserId = userId,
             LoginProvider = loginProvider,
             Name = name,
             Value = value,
             ExpiresAt = expiresAt,
-            IsUsed = false,
-            CreationTime = DateTime.UtcNow
+            IsUsed = false
         };
 
         try
@@ -142,20 +140,18 @@ public class AuthTokenService : ApplicationService, IAuthTokenService
     }
 
     /// <summary>
-    /// 标记令牌为已使用（带并发控制，已被使用的令牌返回 false）
+    /// 标记令牌为已使用（原子操作，防止并发重放攻击）
     /// </summary>
     public async Task<bool> MarkTokenAsUsedAsync(Guid tokenId)
     {
-        var token = await _repository.GetAsync(tokenId);
-        if (token == null || token.IsUsed)
-        {
-            return false;
-        }
+        // 使用原子更新：WHERE Id = @id AND IsUsed = false，防止 TOCTOU 竞态条件
+        var affectedRows = await _repository
+            .Where(t => t.Id == tokenId && !t.IsUsed)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(t => t.IsUsed, true)
+                .SetProperty(t => t.UsedAt, DateTime.UtcNow));
 
-        token.IsUsed = true;
-        token.UsedAt = DateTime.UtcNow;
-        await _repository.UpdateAsync(token);
-        return true;
+        return affectedRows > 0;
     }
 
     /// <summary>

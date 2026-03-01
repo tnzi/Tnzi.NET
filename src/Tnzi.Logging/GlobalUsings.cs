@@ -4,8 +4,6 @@ global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Options;
 global using Serilog;
 global using Serilog.Events;
-global using System;
-global using System.IO;
 global using Tnzi.Logging.Options;
 global using Tnzi.Modules;
 global using Tnzi.Options;

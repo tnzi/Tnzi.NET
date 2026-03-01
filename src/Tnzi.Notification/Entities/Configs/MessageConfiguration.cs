@@ -7,9 +7,6 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
 {
     public override void Configure(EntityTypeBuilder<Message> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(n => n.Id);
-
         builder.Property(n => n.Subject).IsRequired().HasMaxLength(500);
         builder.Property(n => n.Content);
         builder.Property(n => n.FailureReason).HasMaxLength(1000);

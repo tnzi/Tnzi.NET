@@ -7,21 +7,16 @@ namespace Tnzi.AspNetCore.Tests.Security;
 public class RateLimitServiceTests
 {
     private readonly Mock<ICache> _cacheMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly RateLimitService _service;
 
     public RateLimitServiceTests()
     {
         _cacheMock = new Mock<ICache>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
-        _serviceProviderMock.Setup(sp => sp.GetService(typeof(ILogger<RateLimitService>)))
-            .Returns((ILogger<RateLimitService>?)null);
-
-        _service = new RateLimitService(_cacheMock.Object, _serviceProviderMock.Object);
+        _service = new RateLimitService(_cacheMock.Object);
     }
 
     [Fact]
-    public async Task IncrementAndGetAsync_WithFixedWindow_WhenKeyNotExists_ShouldCreateKeyWithExpiration()
+    public async Task IncrementAndGetAsync_WithFixedWindow_ShouldIncrementWithExpiration()
     {
         // Arrange
         var key = "test-key";
@@ -29,8 +24,6 @@ public class RateLimitServiceTests
         var cacheKey = "RateLimit:fixed:test-key";
         var expiration = TimeSpan.FromSeconds(windowSeconds);
 
-        _cacheMock.Setup(c => c.ExistsAsync(cacheKey, default))
-            .ReturnsAsync(false);
         _cacheMock.Setup(c => c.IncrementAsync(cacheKey, 1, expiration, default))
             .ReturnsAsync(1L);
 
@@ -39,22 +32,19 @@ public class RateLimitServiceTests
 
         // Assert
         Assert.Equal(1L, result);
-        _cacheMock.Verify(c => c.ExistsAsync(cacheKey, default), Times.Once);
         _cacheMock.Verify(c => c.IncrementAsync(cacheKey, 1, expiration, default), Times.Once);
-        _cacheMock.Verify(c => c.IncrementAsync(cacheKey, 1, default), Times.Never);
     }
 
     [Fact]
-    public async Task IncrementAndGetAsync_WithFixedWindow_WhenKeyExists_ShouldIncrementWithoutExpiration()
+    public async Task IncrementAndGetAsync_WithFixedWindow_ShouldReturnIncrementedCount()
     {
         // Arrange
         var key = "test-key";
         var windowSeconds = 60;
         var cacheKey = "RateLimit:fixed:test-key";
+        var expiration = TimeSpan.FromSeconds(windowSeconds);
 
-        _cacheMock.Setup(c => c.ExistsAsync(cacheKey, default))
-            .ReturnsAsync(true);
-        _cacheMock.Setup(c => c.IncrementAsync(cacheKey, 1, default))
+        _cacheMock.Setup(c => c.IncrementAsync(cacheKey, 1, expiration, default))
             .ReturnsAsync(5L);
 
         // Act
@@ -62,9 +52,6 @@ public class RateLimitServiceTests
 
         // Assert
         Assert.Equal(5L, result);
-        _cacheMock.Verify(c => c.ExistsAsync(cacheKey, default), Times.Once);
-        _cacheMock.Verify(c => c.IncrementAsync(cacheKey, 1, default), Times.Once);
-        _cacheMock.Verify(c => c.IncrementAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<TimeSpan>(), default), Times.Never);
     }
 
     [Fact]
@@ -100,8 +87,6 @@ public class RateLimitServiceTests
         var cacheKey = "RateLimit:fixed:test-key";
         var expiration = TimeSpan.FromSeconds(windowSeconds);
 
-        _cacheMock.Setup(c => c.ExistsAsync(cacheKey, default))
-            .ReturnsAsync(false);
         _cacheMock.Setup(c => c.IncrementAsync(cacheKey, 1, expiration, default))
             .ReturnsAsync(1L);
 
@@ -110,7 +95,6 @@ public class RateLimitServiceTests
 
         // Assert
         Assert.Equal(1L, result);
-        _cacheMock.Verify(c => c.ExistsAsync(cacheKey, default), Times.Once);
         _cacheMock.Verify(c => c.IncrementAsync(cacheKey, 1, expiration, default), Times.Once);
     }
 }

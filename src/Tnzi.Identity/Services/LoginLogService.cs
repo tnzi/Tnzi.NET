@@ -105,7 +105,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
             .Where(ll => ll.CreationTime < expireDate)
             .ExecuteDeleteAsync();
 
-        LogInformation($"Deleted {count} expired login logs (older than {days} days)");
+        LogInformation("Deleted {Count} expired login logs (older than {Days} days)", count, days);
         return Ok(count);
     }
 
@@ -364,25 +364,75 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
             query = query.Where(ll => ll.CreationTime <= endDate.Value);
         }
 
-        var totalLogins = await query.CountAsync();
-        var successfulLogins = await query.Where(ll => ll.Status == LoginStatus.Success).CountAsync();
-        var failedLogins = await query.Where(ll => ll.Status == LoginStatus.Failed).CountAsync();
+        // 单次聚合查询替代 3 个独立 COUNT 查询
+        var stats = await query.GroupBy(o => 1).Select(g => new
+        {
+            TotalLogins = g.Count(),
+            SuccessfulLogins = g.Count(ll => ll.Status == LoginStatus.Success),
+            FailedLogins = g.Count(ll => ll.Status == LoginStatus.Failed)
+        }).FirstOrDefaultAsync();
+
         var lastLogin = await query
             .Where(ll => ll.Status == LoginStatus.Success)
             .OrderByDescending(ll => ll.CreationTime)
+            .Select(ll => new { ll.CreationTime, ll.IpAddress })
             .FirstOrDefaultAsync();
 
         var statistics = new UserLoginStatisticsDto
         {
             UserId = userId,
-            TotalLogins = totalLogins,
-            SuccessfulLogins = successfulLogins,
-            FailedLogins = failedLogins,
+            TotalLogins = stats?.TotalLogins ?? 0,
+            SuccessfulLogins = stats?.SuccessfulLogins ?? 0,
+            FailedLogins = stats?.FailedLogins ?? 0,
             LastLoginTime = lastLogin?.CreationTime,
             LastLoginIp = lastLogin?.IpAddress
         };
 
         return Ok(statistics);
+    }
+
+    /// <summary>
+    /// Get daily login trend data for dashboards and charts
+    /// </summary>
+    public async Task<Result<IEnumerable<LoginTrendItem>>> GetLoginTrendAsync(DateTime startDate, DateTime endDate, Guid? userId = null)
+    {
+        if (startDate > endDate)
+            return Fail<IEnumerable<LoginTrendItem>>("Start date must be before or equal to end date", 400, ErrorCodes.VALIDATION_ERROR);
+
+        // Limit to 365 days max to prevent excessive queries
+        if ((endDate - startDate).TotalDays > 365)
+            return Fail<IEnumerable<LoginTrendItem>>("Date range cannot exceed 365 days", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var query = _repository.AsQueryable()
+            .Where(ll => ll.CreationTime >= startDate && ll.CreationTime <= endDate);
+
+        if (userId.HasValue)
+        {
+            query = query.Where(ll => ll.UserId == userId.Value);
+        }
+
+        var dailyData = await query
+            .GroupBy(ll => ll.CreationTime.Date)
+            .Select(g => new LoginTrendItem
+            {
+                Date = g.Key,
+                TotalLogins = g.Count(),
+                SuccessfulLogins = g.Count(ll => ll.Status == LoginStatus.Success),
+                FailedLogins = g.Count(ll => ll.Status == LoginStatus.Failed),
+                UniqueUsers = g.Where(ll => ll.UserId != null).Select(ll => ll.UserId).Distinct().Count()
+            })
+            .OrderBy(t => t.Date)
+            .ToListAsync();
+
+        // Fill in missing dates with zero values
+        var result = new List<LoginTrendItem>();
+        for (var date = startDate.Date; date <= endDate.Date; date = date.AddDays(1))
+        {
+            var existing = dailyData.FirstOrDefault(d => d.Date == date);
+            result.Add(existing ?? new LoginTrendItem { Date = date });
+        }
+
+        return Ok<IEnumerable<LoginTrendItem>>(result);
     }
 
     /// <summary>

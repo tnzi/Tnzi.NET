@@ -5,6 +5,8 @@ global using Microsoft.AspNetCore.Routing;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Options;
+global using Microsoft.OpenApi;
+global using Microsoft.AspNetCore.Mvc.Controllers;
 global using Scalar.AspNetCore;
 global using Swashbuckle.AspNetCore.SwaggerGen;
 global using System.Collections.Frozen;

@@ -48,7 +48,7 @@ export const useUserStore = defineStore('user', {
 
   getters: {
     /** Whether user data has been loaded */
-    isLoaded: (state): boolean => state.currentUser !== null || state.isLoading === false,
+    isLoaded: (state): boolean => state.currentUser !== null,
 
     /** Whether a user is authenticated */
     isAuthenticated: (state): boolean => state.currentUser !== null,

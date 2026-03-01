@@ -312,8 +312,8 @@ public class TnziApplication : ITnziApplication
             {
                 try
                 {
-                    // 同步释放：使用 AsyncHelper.RunSync 避免死锁
-                    AsyncHelper.RunSync(ShutdownAsync);
+                    // 同步释放：使用 Task.Run 避免同步上下文死锁
+                    Task.Run(ShutdownAsync).GetAwaiter().GetResult();
                 }
                 catch (Exception)
                 {

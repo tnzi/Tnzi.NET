@@ -12,7 +12,9 @@ public class RefundConfiguration : EntityTypeConfigurationBase<Refund, Guid>
         builder.Property(r => r.ApproveRemark).HasMaxLength(500);
         builder.Property(r => r.BusinessOrderNo).HasMaxLength(128);
 
-        builder.HasIndex(r => r.RefundNo).IsUnique();
+        builder.HasIndex(r => r.RefundNo).IsUnique()
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        builder.HasIndex(r => r.PaymentId);
         builder.HasIndex(r => r.Status);
         builder.HasIndex(r => r.CreationTime);
     }

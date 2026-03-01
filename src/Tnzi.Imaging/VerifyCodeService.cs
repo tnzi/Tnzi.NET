@@ -34,17 +34,13 @@ public class VerifyCodeService : IVerifyCodeService
     {
         Check.NotNullOrEmpty(id);
 
-        // 生成验证码文本
-        var code = GenerateCode(codeLength, codeType);
+        // 映射验证码类型
+        var validateCodeType = MapCodeType(codeType);
+
+        // 生成验证码文本（委托给 ValidateCoder 统一管理字符池）
+        var code = _validateCoder.GetCode(codeLength, validateCodeType);
 
         // 生成验证码图片
-        var validateCodeType = codeType switch
-        {
-            VerifyCodeType.Number => ValidateCodeType.Number,
-            VerifyCodeType.Letter => ValidateCodeType.NumberAndLetter, // ValidateCoder没有纯字母类型，使用混合类型
-            VerifyCodeType.Mixed => ValidateCodeType.NumberAndLetter,
-            _ => ValidateCodeType.Number
-        };
         var imageBytes = _validateCoder.CreateImageBytes(code, validateCodeType);
 
         // 存储验证码到缓存（用于后续验证）
@@ -82,17 +78,12 @@ public class VerifyCodeService : IVerifyCodeService
         if (string.IsNullOrEmpty(storedCode))
             return false; // 验证码不存在或已过期
 
-        // 先比较验证码，成功后再删除（避免先删后比导致验证失败也消耗验证码）
+        // 立即删除验证码（一次性使用，无论验证成功与否都消耗）
+        // 防止 TOCTOU：并发请求不能对同一验证码重复验证成功
+        await _cache.RemoveAsync(cacheKey, cancellationToken);
+
         var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var isValid = string.Equals(storedCode, code, comparison);
-
-        if (isValid)
-        {
-            // 验证成功后删除（一次性使用）
-            await _cache.RemoveAsync(cacheKey, cancellationToken);
-        }
-
-        return isValid;
+        return string.Equals(storedCode, code, comparison);
     }
 
     /// <summary>
@@ -111,35 +102,23 @@ public class VerifyCodeService : IVerifyCodeService
     }
 
     /// <summary>
-    /// 生成验证码文本
+    /// 映射验证码类型
     /// </summary>
-    private string GenerateCode(int length, VerifyCodeType codeType)
+    private static ValidateCodeType MapCodeType(VerifyCodeType codeType)
     {
-        const string numbers = "0123456789";
-        const string letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // 排除易混淆的字母
-        const string mixed = numbers + letters;
-
-        var chars = codeType switch
+        return codeType switch
         {
-            VerifyCodeType.Number => numbers,
-            VerifyCodeType.Letter => letters,
-            VerifyCodeType.Mixed => mixed,
-            _ => numbers
+            VerifyCodeType.Number => ValidateCodeType.Number,
+            VerifyCodeType.Letter => ValidateCodeType.NumberAndLetter,
+            VerifyCodeType.Mixed => ValidateCodeType.NumberAndLetter,
+            _ => ValidateCodeType.Number
         };
-
-        var code = new char[length];
-        for (int i = 0; i < length; i++)
-        {
-            code[i] = chars[Random.Shared.Next(chars.Length)];
-        }
-
-        return new string(code);
     }
 
     /// <summary>
     /// 获取缓存键
     /// </summary>
-    private string GetCacheKey(string id)
+    private static string GetCacheKey(string id)
     {
         return $"{CacheKeyPrefix}{id}";
     }

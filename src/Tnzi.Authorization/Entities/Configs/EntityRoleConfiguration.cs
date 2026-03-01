@@ -7,8 +7,6 @@ public class EntityRoleConfiguration : EntityTypeConfigurationBase<EntityRole, G
 {
     public override void Configure(EntityTypeBuilder<EntityRole> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(e => e.Id);
         builder.Property(e => e.Filter).HasMaxLength(2000);
 
         // 创建索引

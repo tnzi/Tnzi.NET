@@ -31,4 +31,12 @@ public interface INotificationService
     /// 取消通知
     /// </summary>
     Task<Result> CancelAsync(Guid messageId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量取消通知 (pending/scheduled 状态)
+    /// </summary>
+    Task<Result<int>> BatchCancelAsync(List<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<int>("Batch cancel not implemented", 501));
+    }
 }

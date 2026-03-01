@@ -53,7 +53,9 @@ export function createNaiveDialogAdapter(dialogApi?: NaiveDialogApi): DialogAdap
           resolve(window.confirm(message));
           return;
         }
-        api.warning({
+        const method = options?.type ?? 'warning';
+        const showFn = api[method] ?? api.warning;
+        showFn({
           title: options?.title ?? 'Confirm',
           content: message,
           positiveText: options?.confirmText ?? 'OK',
@@ -72,7 +74,9 @@ export function createNaiveDialogAdapter(dialogApi?: NaiveDialogApi): DialogAdap
         return;
       }
       return new Promise<void>((resolve) => {
-        api.info({
+        const method = options?.type ?? 'info';
+        const showFn = api[method] ?? api.info;
+        showFn({
           title: options?.title ?? 'Alert',
           content: message,
           positiveText: options?.confirmText ?? 'OK',

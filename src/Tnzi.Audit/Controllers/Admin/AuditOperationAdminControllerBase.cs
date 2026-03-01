@@ -107,4 +107,80 @@ public abstract class AuditOperationAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 获取审计操作趋势统计
+    /// </summary>
+    [HttpGet("trend")]
+    public virtual async Task<ApiResult<List<AuditTrendPointDto>>> GetTrend(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] AuditTrendGroupBy groupBy = AuditTrendGroupBy.Daily)
+    {
+        var result = await AuditOperationService.GetAuditTrendAsync(startDate, endDate, groupBy);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取 Top N 功能统计
+    /// </summary>
+    [HttpGet("top-functions")]
+    public virtual async Task<ApiResult<List<TopFunctionDto>>> GetTopFunctions(
+        [FromQuery] int topN = 10,
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null)
+    {
+        var result = await AuditOperationService.GetTopFunctionsAsync(topN, startDate, endDate);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取 Top N 活跃用户统计
+    /// </summary>
+    [HttpGet("top-users")]
+    public virtual async Task<ApiResult<List<TopUserDto>>> GetTopUsers(
+        [FromQuery] int topN = 10,
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null)
+    {
+        var result = await AuditOperationService.GetTopUsersAsync(topN, startDate, endDate);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Export audit operations as CSV
+    /// </summary>
+    /// <param name="query">Query filter criteria</param>
+    /// <returns>CSV file download</returns>
+    [HttpPost("export/csv")]
+    public virtual async Task<IActionResult> ExportCsv([FromBody] AuditOperationQueryDto query)
+    {
+        var result = await AuditOperationService.ExportToCsvAsync(query);
+        if (!result.Succeeded)
+        {
+            return new BadRequestObjectResult(result.Message);
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(result.Data!);
+        var fileName = $"audit_export_{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
+        return File(bytes, "text/csv", fileName);
+    }
+
+    /// <summary>
+    /// Export audit operations as JSON
+    /// </summary>
+    /// <param name="query">Query filter criteria</param>
+    /// <returns>JSON file download</returns>
+    [HttpPost("export/json")]
+    public virtual async Task<IActionResult> ExportJson([FromBody] AuditOperationQueryDto query)
+    {
+        var result = await AuditOperationService.ExportToJsonAsync(query);
+        if (!result.Succeeded)
+        {
+            return new BadRequestObjectResult(result.Message);
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(result.Data!);
+        var fileName = $"audit_export_{DateTime.UtcNow:yyyyMMddHHmmss}.json";
+        return File(bytes, "application/json", fileName);
+    }
 }

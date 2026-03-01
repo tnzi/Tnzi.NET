@@ -10,8 +10,9 @@ public static class InvoiceQueryExtensions
     /// </summary>
     public static IQueryable<Invoice> Filter(this IQueryable<Invoice> queryable, InvoiceQueryDto query)
     {
+        // 系统生成的流水号使用精确匹配（支持索引）
         if (!string.IsNullOrEmpty(query.InvoiceNo))
-            queryable = queryable.Where(i => i.InvoiceNo.ToLower().Contains(query.InvoiceNo.ToLower()));
+            queryable = queryable.Where(i => i.InvoiceNo == query.InvoiceNo);
 
         if (query.Type.HasValue)
             queryable = queryable.Where(i => i.Type == query.Type.Value);
@@ -20,7 +21,7 @@ public static class InvoiceQueryExtensions
             queryable = queryable.Where(i => i.Status == query.Status.Value);
 
         if (!string.IsNullOrEmpty(query.CustomerEmail))
-            queryable = queryable.Where(i => i.CustomerEmail.ToLower().Contains(query.CustomerEmail.ToLower()));
+            queryable = queryable.Where(i => i.CustomerEmail == query.CustomerEmail);
 
         if (query.StartTime.HasValue)
             queryable = queryable.Where(i => i.InvoiceDate >= query.StartTime.Value);

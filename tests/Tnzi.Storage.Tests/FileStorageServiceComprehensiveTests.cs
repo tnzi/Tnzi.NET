@@ -439,6 +439,8 @@ public class FileStorageServiceComprehensiveTests
         // Mock ToListAsync directly since Where is an extension method on IQueryable
         _mockFileRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(fileRecords);
+        _mockReferenceRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileReference, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FileReference>());
         _mockStorage.Setup(s => s.DeleteAsync(It.IsAny<string>())).ReturnsAsync(true);
         _mockFileRepository.Setup(r => r.DeleteAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);

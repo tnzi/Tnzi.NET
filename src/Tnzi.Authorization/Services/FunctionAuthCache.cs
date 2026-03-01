@@ -20,7 +20,7 @@ public class FunctionAuthCache
     /// <param name="cache">缓存服务</param>
     public FunctionAuthCache(ICache cache)
     {
-        _cache = cache;
+        _cache = Check.NotNull(cache);
     }
 
     /// <summary>
@@ -65,10 +65,8 @@ public class FunctionAuthCache
     /// <returns>任务</returns>
     public async Task RemoveUserPermissionNamesAsync(IEnumerable<Guid> userIds)
     {
-        foreach (var userId in userIds)
-        {
-            await RemoveUserPermissionNamesAsync(userId);
-        }
+        var tasks = userIds.Select(id => RemoveUserPermissionNamesAsync(id));
+        await Task.WhenAll(tasks);
     }
 
     /// <summary>

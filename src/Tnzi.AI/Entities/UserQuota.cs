@@ -39,4 +39,9 @@ public class UserQuota : FullAuditedEntity<Guid>
     /// 是否启用配额限制
     /// </summary>
     public bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 乐观并发令牌（用于防止并发更新竞态）
+    /// </summary>
+    public uint Version { get; set; }
 }

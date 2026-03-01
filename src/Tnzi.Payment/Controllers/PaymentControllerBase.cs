@@ -33,7 +33,8 @@ public abstract class PaymentControllerBase : ApiControllerBase
     [HttpGet("{tradeNo}")]
     public virtual async Task<ApiResult<PaymentDto>> Get(string tradeNo)
     {
-        var result = await _paymentService.GetPaymentAsync(tradeNo);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _paymentService.GetPaymentAsync(tradeNo, userId);
         return result.ToApiResult();
     }
 
@@ -43,7 +44,8 @@ public abstract class PaymentControllerBase : ApiControllerBase
     [HttpGet]
     public virtual async Task<ApiResult<IPagedList<PaymentDto>>> GetList([FromQuery] PaymentQueryDto query)
     {
-        var result = await _paymentService.GetPaymentListAsync(query);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _paymentService.GetPaymentListAsync(query, userId);
         return result.ToApiResult();
     }
 
@@ -53,7 +55,8 @@ public abstract class PaymentControllerBase : ApiControllerBase
     [HttpPost("{tradeNo}/close")]
     public virtual async Task<ApiResult> Close(string tradeNo, [FromBody] ClosePaymentDto request)
     {
-        var result = await _paymentService.ClosePaymentAsync(tradeNo, request.Reason);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _paymentService.ClosePaymentAsync(tradeNo, request.Reason, userId);
         return result.ToApiResult();
     }
 
@@ -63,7 +66,8 @@ public abstract class PaymentControllerBase : ApiControllerBase
     [HttpGet("{tradeNo}/params")]
     public virtual async Task<ApiResult<PaymentParamsDto>> GetPaymentParams(string tradeNo)
     {
-        var result = await _paymentService.GetPaymentParamsAsync(tradeNo);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _paymentService.GetPaymentParamsAsync(tradeNo, userId);
         return result.ToApiResult();
     }
 
@@ -73,7 +77,8 @@ public abstract class PaymentControllerBase : ApiControllerBase
     [HttpPost("{tradeNo}/sync")]
     public virtual async Task<ApiResult> Sync(string tradeNo)
     {
-        var result = await _paymentService.SyncOrderAsync(tradeNo);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _paymentService.SyncOrderAsync(tradeNo, userId);
         return result.ToApiResult();
     }
 }

@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 嵌入服务实现 - 使用 OpenAI SDK 的 EmbeddingClient 生成文本向量
+/// 嵌入服务实现 - 使用 MEAI IEmbeddingGenerator 生成文本向量
 /// </summary>
 public class EmbeddingService : ApplicationService, IEmbeddingService
 {
@@ -17,17 +17,18 @@ public class EmbeddingService : ApplicationService, IEmbeddingService
     /// <inheritdoc />
     public async Task<Result<float[]>> GenerateEmbeddingAsync(string text, EmbeddingOptions? options = null, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return Fail<float[]>("Text cannot be null or empty", 400, ErrorCodes.EmbeddingFailed);
-        }
+        Check.NotNullOrWhiteSpace(text);
 
         try
         {
-            var client = _clientFactory.GetEmbeddingClient(options?.Provider, options?.Model);
-            var response = await client.GenerateEmbeddingAsync(text, cancellationToken: ct);
+            var generator = _clientFactory.GetEmbeddingGenerator(options?.Provider, options?.Model);
+            if (generator == null)
+            {
+                return Fail<float[]>("Embedding generator not available for the specified provider", 400, ErrorCodes.EmbeddingProviderNotFound);
+            }
 
-            return Ok(response.Value.ToFloats().ToArray());
+            var embeddings = await generator.GenerateAsync([text], cancellationToken: ct);
+            return Ok(embeddings[0].Vector.ToArray());
         }
         catch (InvalidOperationException ex)
         {
@@ -37,27 +38,29 @@ public class EmbeddingService : ApplicationService, IEmbeddingService
         catch (Exception ex)
         {
             Logger.LogError(ex, "Embedding generation failed for single text");
-            return Fail<float[]>($"Embedding generation failed: {ex.Message}", 500, ErrorCodes.EmbeddingFailed);
+            return Fail<float[]>("Embedding generation failed.", 500, ErrorCodes.EmbeddingFailed);
         }
     }
 
     /// <inheritdoc />
     public async Task<Result<List<float[]>>> GenerateEmbeddingsAsync(List<string> texts, EmbeddingOptions? options = null, CancellationToken ct = default)
     {
-        if (texts == null || texts.Count == 0)
-        {
-            return Fail<List<float[]>>("Texts cannot be null or empty", 400, ErrorCodes.EmbeddingFailed);
-        }
+        Check.NotNullOrEmpty(texts);
 
         try
         {
-            var client = _clientFactory.GetEmbeddingClient(options?.Provider, options?.Model);
-            var response = await client.GenerateEmbeddingsAsync(texts, cancellationToken: ct);
-
-            var result = new List<float[]>(response.Value.Count);
-            foreach (var embedding in response.Value)
+            var generator = _clientFactory.GetEmbeddingGenerator(options?.Provider, options?.Model);
+            if (generator == null)
             {
-                result.Add(embedding.ToFloats().ToArray());
+                return Fail<List<float[]>>("Embedding generator not available for the specified provider", 400, ErrorCodes.EmbeddingProviderNotFound);
+            }
+
+            var embeddings = await generator.GenerateAsync(texts, cancellationToken: ct);
+
+            var result = new List<float[]>(embeddings.Count);
+            foreach (var embedding in embeddings)
+            {
+                result.Add(embedding.Vector.ToArray());
             }
 
             return Ok(result);
@@ -70,7 +73,7 @@ public class EmbeddingService : ApplicationService, IEmbeddingService
         catch (Exception ex)
         {
             Logger.LogError(ex, "Embedding generation failed for {Count} texts", texts.Count);
-            return Fail<List<float[]>>($"Embedding generation failed: {ex.Message}", 500, ErrorCodes.EmbeddingFailed);
+            return Fail<List<float[]>>("Embedding generation failed.", 500, ErrorCodes.EmbeddingFailed);
         }
     }
 }

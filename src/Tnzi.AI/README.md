@@ -97,9 +97,12 @@ Tnzi.AI
 ├── Controllers/             # 控制器基类
 │   ├── ChatControllerBase.cs       # 聊天 API
 │   └── Admin/                      # 管理端 API
-│       ├── AgentAdminControllerBase.cs   # Agent 管理
+│       ├── AgentAdminControllerBase.cs   # Agent 管理 (CRUD + Clone)
 │       ├── WorkflowAdminControllerBase.cs # 工作流管理
-│       └── QuotaAdminControllerBase.cs    # 配额管理
+│       ├── QuotaAdminControllerBase.cs    # 配额管理
+│       ├── ThreadAdminControllerBase.cs   # Thread 管理 (列表/详情/改标题)
+│       ├── UsageAnalyticsAdminControllerBase.cs # 使用量分析
+│       └── ProviderAdminControllerBase.cs # Provider 信息查询
 ├── Tools/                   # 工具系统
 │   ├── ToolAdapter.cs     # 工具适配器
 │   └── Examples/                # 内置工具示例
@@ -221,8 +224,8 @@ var agent = await _agentService.CreateAsync(new CreateAgentDto
 模块内置了三组常用工具：
 
 - **datetime** - 日期时间工具（获取时间、日期计算、格式化等）
-- **math** - 数学计算工具（四则运算、统计分析、单位转换等）
 - **text** - 文本处理工具（统计、转换、提取、编码等）
+- **websearch** - Web 搜索工具（通过 IWebSearchProvider 联网搜索）
 
 ## 配置选项
 
@@ -255,12 +258,17 @@ var agent = await _agentService.CreateAsync(new CreateAgentDto
 
 ## 数据库表
 
-### Agent 和工作流
+所有表使用 `AI_` 前缀（TableNamePrefix = "AI"）。
+
 | 表名 | 说明 |
 |------|------|
-| `Agent` | Agent 定义 |
-| `AgentThread` | Agent 会话线程 |
-| `WorkflowDefinition` | 工作流定义 |
+| `AI_Agent` | Agent 定义（模型、系统提示、工具配置） |
+| `AI_AgentThread` | Agent 会话线程 |
+| `AI_AgentThreadMessage` | 会话消息 |
+| `AI_WorkflowDefinition` | DAG 工作流定义 |
+| `AI_UserQuota` | 用户用量配额 |
+| `AI_UsageLog` | 用量日志 |
+| `AI_MemoryEntry` | Agent 记忆条目 |
 
 ## 依赖项
 
@@ -286,8 +294,8 @@ var agent = await _agentService.CreateAsync(new CreateAgentDto
 查看 `Tools/Examples/` 目录下的内置工具示例：
 
 - `DateTimeTools.cs` - 日期时间工具
-- `MathTools.cs` - 数学计算工具
 - `TextTools.cs` - 文本处理工具
+- `WebSearchTools.cs` - Web 搜索工具
 
 ## License
 

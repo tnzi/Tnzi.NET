@@ -12,6 +12,10 @@ public class TemplateStoreServiceTests
 
     public TemplateStoreServiceTests()
     {
+        // 初始化 Mapster（MapTo 扩展方法需要）
+        var config = new TypeAdapterConfig();
+        MapperExtensions.SetMapper(new Mapper(config));
+
         _repositoryMock = new Mock<IRepository<Entities.Template, Guid>>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -171,7 +175,7 @@ public class TemplateStoreServiceTests
             ContentTemplate = "Content"
         };
 
-        _repositoryMock.Setup(r => r.ExistsAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.Template, bool>>>(), It.IsAny<CancellationToken>()))
+        _repositoryMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.Template, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         _repositoryMock.Setup(r => r.InsertAsync(It.IsAny<Entities.Template>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -198,7 +202,7 @@ public class TemplateStoreServiceTests
             ContentTemplate = "Content"
         };
 
-        _repositoryMock.Setup(r => r.ExistsAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.Template, bool>>>(), It.IsAny<CancellationToken>()))
+        _repositoryMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.Template, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
@@ -236,7 +240,7 @@ public class TemplateStoreServiceTests
 
         _repositoryMock.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(existing);
-        _repositoryMock.Setup(r => r.ExistsAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.Template, bool>>>(), It.IsAny<CancellationToken>()))
+        _repositoryMock.Setup(r => r.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.Template, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         _repositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Entities.Template>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -402,6 +406,255 @@ public class TemplateStoreServiceTests
         // Assert
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+    }
+
+    #endregion
+
+    #region ExportTemplatesAsync Tests
+
+    /// <summary>
+    /// 设置仓储的 AsQueryable mock（用于 ExportTemplatesAsync 等使用 _repository.AsQueryable() 的方法）
+    /// </summary>
+    private void SetupAsQueryable(List<Entities.Template> templates)
+    {
+        var mockQueryable = templates.BuildMock();
+        _repositoryMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(mockQueryable);
+        // Also set the IQueryable interface for compatibility
+        _repositoryMock.As<IQueryable<Entities.Template>>()
+            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
+        _repositoryMock.As<IQueryable<Entities.Template>>()
+            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
+        _repositoryMock.As<IQueryable<Entities.Template>>()
+            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
+        _repositoryMock.As<IQueryable<Entities.Template>>()
+            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
+    }
+
+    [Fact]
+    public async Task ExportTemplatesAsync_WithNoFilter_ExportsAllTemplates()
+    {
+        // Arrange
+        var templates = new List<Entities.Template>
+        {
+            new() { Id = Guid.NewGuid(), TemplateName = "WelcomeEmail", Module = "Notification", Category = "Email", SubjectTemplate = "Welcome!", ContentTemplate = "<p>Welcome</p>", IsActive = true, IsDeleted = false },
+            new() { Id = Guid.NewGuid(), TemplateName = "OrderConfirm", Module = "Payment", Category = "Email", SubjectTemplate = "Order", ContentTemplate = "<p>Order</p>", IsActive = true, IsDeleted = false }
+        };
+
+        SetupAsQueryable(templates);
+
+        // Act
+        var result = await _service.ExportTemplatesAsync();
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Assert.Contains("WelcomeEmail", result.Data);
+        Assert.Contains("OrderConfirm", result.Data);
+    }
+
+    [Fact]
+    public async Task ExportTemplatesAsync_WithModuleFilter_ExportsFilteredTemplates()
+    {
+        // Arrange
+        var templates = new List<Entities.Template>
+        {
+            new() { Id = Guid.NewGuid(), TemplateName = "WelcomeEmail", Module = "Notification", Category = "Email", SubjectTemplate = "Welcome!", ContentTemplate = "<p>Welcome</p>", IsActive = true, IsDeleted = false },
+            new() { Id = Guid.NewGuid(), TemplateName = "InvoiceTemplate", Module = "Payment", Category = "PDF", SubjectTemplate = "Invoice", ContentTemplate = "<p>Invoice</p>", IsActive = true, IsDeleted = false }
+        };
+
+        SetupAsQueryable(templates);
+
+        // Act
+        var result = await _service.ExportTemplatesAsync(module: "Notification");
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Assert.Contains("WelcomeEmail", result.Data);
+        Assert.DoesNotContain("InvoiceTemplate", result.Data);
+    }
+
+    [Fact]
+    public async Task ExportTemplatesAsync_ExcludesDeletedTemplates()
+    {
+        // Arrange
+        var templates = new List<Entities.Template>
+        {
+            new() { Id = Guid.NewGuid(), TemplateName = "ActiveTemplate", Module = "Notification", IsActive = true, IsDeleted = false },
+            new() { Id = Guid.NewGuid(), TemplateName = "DeletedTemplate", Module = "Notification", IsActive = true, IsDeleted = true }
+        };
+
+        SetupAsQueryable(templates);
+
+        // Act
+        var result = await _service.ExportTemplatesAsync();
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.Contains("ActiveTemplate", result.Data!);
+        Assert.DoesNotContain("DeletedTemplate", result.Data!);
+    }
+
+    #endregion
+
+    #region ImportTemplatesAsync Tests
+
+    [Fact]
+    public async Task ImportTemplatesAsync_WithValidJson_CreatesNewTemplates()
+    {
+        // Arrange
+        var json = """
+        [
+            {
+                "templateName": "NewTemplate",
+                "module": "Notification",
+                "category": "Email",
+                "subjectTemplate": "Subject",
+                "contentTemplate": "<p>Content</p>",
+                "isActive": true
+            }
+        ]
+        """;
+
+        // No existing templates
+        SetupQueryable(new List<Entities.Template>());
+        _repositoryMock.Setup(r => r.FirstOrDefaultAsync(
+            It.IsAny<Expression<Func<Entities.Template, bool>>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entities.Template?)null);
+
+        // Act
+        var result = await _service.ImportTemplatesAsync(json);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Assert.Equal(1, result.Data.CreatedCount);
+        Assert.Equal(0, result.Data.UpdatedCount);
+        Assert.Equal(0, result.Data.SkippedCount);
+    }
+
+    [Fact]
+    public async Task ImportTemplatesAsync_WithInvalidJson_ReturnsFail()
+    {
+        // Act
+        var result = await _service.ImportTemplatesAsync("invalid json {{{");
+
+        // Assert
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+    }
+
+    [Fact]
+    public async Task ImportTemplatesAsync_WithEmptyArray_ReturnsFail()
+    {
+        // Act
+        var result = await _service.ImportTemplatesAsync("[]");
+
+        // Assert
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+    }
+
+    [Fact]
+    public async Task ImportTemplatesAsync_WithMissingTemplateName_SkipsEntry()
+    {
+        // Arrange
+        var json = """
+        [
+            {
+                "templateName": "",
+                "module": "Notification"
+            }
+        ]
+        """;
+
+        SetupQueryable(new List<Entities.Template>());
+
+        // Act
+        var result = await _service.ImportTemplatesAsync(json);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, result.Data!.CreatedCount);
+        Assert.Equal(1, result.Data.SkippedCount);
+        Assert.Single(result.Data.Errors);
+    }
+
+    [Fact]
+    public async Task ImportTemplatesAsync_ExistingTemplate_OverwriteFalse_SkipsEntry()
+    {
+        // Arrange
+        var json = """
+        [
+            {
+                "templateName": "ExistingTemplate",
+                "module": "Notification",
+                "contentTemplate": "new content"
+            }
+        ]
+        """;
+
+        var existingTemplate = new Entities.Template
+        {
+            Id = Guid.NewGuid(),
+            TemplateName = "ExistingTemplate",
+            Module = "Notification",
+            ContentTemplate = "old content"
+        };
+
+        SetupQueryable(new List<Entities.Template> { existingTemplate });
+        _repositoryMock.Setup(r => r.FirstOrDefaultAsync(
+            It.IsAny<Expression<Func<Entities.Template, bool>>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingTemplate);
+
+        // Act
+        var result = await _service.ImportTemplatesAsync(json, overwriteExisting: false);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, result.Data!.CreatedCount);
+        Assert.Equal(0, result.Data.UpdatedCount);
+        Assert.Equal(1, result.Data.SkippedCount);
+    }
+
+    [Fact]
+    public async Task ImportTemplatesAsync_ExistingTemplate_OverwriteTrue_UpdatesEntry()
+    {
+        // Arrange
+        var json = """
+        [
+            {
+                "templateName": "ExistingTemplate",
+                "module": "Notification",
+                "contentTemplate": "updated content"
+            }
+        ]
+        """;
+
+        var existingTemplate = new Entities.Template
+        {
+            Id = Guid.NewGuid(),
+            TemplateName = "ExistingTemplate",
+            Module = "Notification",
+            ContentTemplate = "old content"
+        };
+
+        SetupQueryable(new List<Entities.Template> { existingTemplate });
+        _repositoryMock.Setup(r => r.FirstOrDefaultAsync(
+            It.IsAny<Expression<Func<Entities.Template, bool>>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingTemplate);
+
+        // Act
+        var result = await _service.ImportTemplatesAsync(json, overwriteExisting: true);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, result.Data!.CreatedCount);
+        Assert.Equal(1, result.Data.UpdatedCount);
+        Assert.Equal(0, result.Data.SkippedCount);
     }
 
     #endregion

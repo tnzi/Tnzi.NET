@@ -42,7 +42,7 @@ public class PaymentCompletedEventHandler : IEventHandler<PaymentCompletedEvent>
                         invoiceResult.Data.Id, eventData.TradeNo);
 
                     // 自动发送发票
-                    await _invoiceService.SendAsync(invoiceResult.Data.Id, null, cancellationToken);
+                    await _invoiceService.SendAsync(invoiceResult.Data.Id, null, null, cancellationToken);
                 }
             }
         }
@@ -119,6 +119,36 @@ public class RefundProcessedEventHandler : IEventHandler<RefundProcessedEvent>
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to handle refund processed event. RefundNo: {RefundNo}", eventData.RefundNo);
+        }
+    }
+}
+
+/// <summary>
+/// 支付过期事件处理器
+/// 记录支付过期日志
+/// </summary>
+public class PaymentExpiredEventHandler : IEventHandler<PaymentExpiredEvent>
+{
+    private readonly ILogger<PaymentExpiredEventHandler> _logger;
+
+    public PaymentExpiredEventHandler(ILogger<PaymentExpiredEventHandler> logger)
+    {
+        _logger = Check.NotNull(logger);
+    }
+
+    public async Task HandleAsync(PaymentExpiredEvent eventData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "Payment expired. TradeNo: {TradeNo}, BusinessOrderNo: {BusinessOrderNo}, ExpiredTime: {ExpiredTime}",
+                eventData.TradeNo, eventData.BusinessOrderNo, eventData.ExpiredTime);
+
+            await Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to handle payment expired event. TradeNo: {TradeNo}", eventData.TradeNo);
         }
     }
 }

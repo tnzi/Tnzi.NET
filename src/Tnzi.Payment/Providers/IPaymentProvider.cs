@@ -48,7 +48,7 @@ public interface IPaymentProvider
     /// <summary>
     /// 验证签名
     /// </summary>
-    bool VerifySignature(IDictionary<string, string> parameters);
+    Task<bool> VerifySignatureAsync(IDictionary<string, string> parameters);
 
     /// <summary>
     /// 同步订单状态

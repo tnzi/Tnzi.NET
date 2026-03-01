@@ -13,16 +13,19 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
     private const int FrequentIpTopCount = 10;
 
     private readonly IRepository<LoginLog, Guid>? _loginLogRepository;
+    private readonly UserManager<User>? _userManager;
     private readonly AccountSecurityOptions _securityOptions;
 
     public LoginSecurityService(
         IServiceProvider serviceProvider,
         IOptions<IdentityOptions>? identityOptions = null,
-        IRepository<LoginLog, Guid>? loginLogRepository = null)
+        IRepository<LoginLog, Guid>? loginLogRepository = null,
+        UserManager<User>? userManager = null)
         : base(serviceProvider)
     {
         _securityOptions = identityOptions?.Value.AccountSecurity ?? new AccountSecurityOptions();
         _loginLogRepository = loginLogRepository;
+        _userManager = userManager;
     }
 
     /// <inheritdoc />
@@ -194,6 +197,127 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         using var sha256 = SHA256.Create();
         var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
         return Convert.ToBase64String(bytes)[..16]; // 取前16个字符作为指纹
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<SecurityOverviewDto>> GetSecurityOverviewAsync(int hours = 24)
+    {
+        if (_loginLogRepository == null)
+        {
+            return Fail<SecurityOverviewDto>("Login log repository is not available");
+        }
+
+        var since = DateTime.UtcNow.AddHours(-hours);
+
+        var logs = await _loginLogRepository
+            .Where(l => l.CreationTime >= since)
+            .GroupBy(l => l.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        var totalAttempts = logs.Sum(g => g.Count);
+        var successCount = logs.Where(g => g.Status == LoginStatus.Success).Sum(g => g.Count);
+        var failedCount = totalAttempts - successCount;
+
+        // 统计不同用户和IP
+        var distinctUsers = await _loginLogRepository
+            .Where(l => l.CreationTime >= since && l.UserId != null)
+            .Select(l => l.UserId)
+            .Distinct()
+            .CountAsync();
+
+        var distinctIps = await _loginLogRepository
+            .Where(l => l.CreationTime >= since && !string.IsNullOrEmpty(l.IpAddress))
+            .Select(l => l.IpAddress)
+            .Distinct()
+            .CountAsync();
+
+        // 锁定用户数
+        var lockedOutUsers = 0;
+        if (_userManager != null)
+        {
+            lockedOutUsers = await _userManager.Users
+                .Where(u => u.LockoutEnd != null && u.LockoutEnd > DateTimeOffset.UtcNow)
+                .CountAsync();
+        }
+
+        return Ok(new SecurityOverviewDto
+        {
+            TimeRangeHours = hours,
+            TotalLoginAttempts = totalAttempts,
+            SuccessfulLogins = successCount,
+            FailedLogins = failedCount,
+            FailureRate = totalAttempts > 0 ? Math.Round((double)failedCount / totalAttempts * 100, 1) : 0,
+            DistinctUsers = distinctUsers,
+            DistinctIpAddresses = distinctIps,
+            LockedOutUsers = lockedOutUsers
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IEnumerable<UserFailedLoginSummaryDto>>> GetUsersWithFrequentFailuresAsync(int hours = 24, int minFailures = 3)
+    {
+        if (_loginLogRepository == null)
+        {
+            return Fail<IEnumerable<UserFailedLoginSummaryDto>>("Login log repository is not available");
+        }
+
+        var since = DateTime.UtcNow.AddHours(-hours);
+
+        // 查询有频繁失败的用户
+        var failedGroups = await _loginLogRepository
+            .Where(l => l.CreationTime >= since && l.Status == LoginStatus.Failed && l.UserId != null)
+            .GroupBy(l => l.UserId)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                FailureCount = g.Count(),
+                LastFailureTime = g.Max(l => l.CreationTime)
+            })
+            .Where(g => g.FailureCount >= minFailures)
+            .OrderByDescending(g => g.FailureCount)
+            .ToListAsync();
+
+        if (!failedGroups.Any())
+        {
+            return Ok(Enumerable.Empty<UserFailedLoginSummaryDto>());
+        }
+
+        var userIds = failedGroups.Select(g => g.UserId!.Value).ToList();
+
+        // 获取用户信息
+        var users = _userManager != null
+            ? await _userManager.Users.Where(u => userIds.Contains(u.Id)).ToListAsync()
+            : new List<User>();
+
+        // 获取失败的IP地址
+        var failedIps = await _loginLogRepository
+            .Where(l => l.CreationTime >= since && l.Status == LoginStatus.Failed &&
+                        l.UserId != null && userIds.Contains(l.UserId.Value) &&
+                        !string.IsNullOrEmpty(l.IpAddress))
+            .Select(l => new { l.UserId, l.IpAddress })
+            .ToListAsync();
+
+        var ipsByUser = failedIps
+            .GroupBy(x => x.UserId)
+            .ToDictionary(g => g.Key!.Value, g => g.Select(x => x.IpAddress!).Distinct().ToList());
+
+        var results = failedGroups.Select(g =>
+        {
+            var user = users.FirstOrDefault(u => u.Id == g.UserId);
+            return new UserFailedLoginSummaryDto
+            {
+                UserId = g.UserId!.Value,
+                UserName = user?.UserName,
+                Email = user?.Email,
+                FailureCount = g.FailureCount,
+                LastFailureTime = g.LastFailureTime,
+                IpAddresses = ipsByUser.GetValueOrDefault(g.UserId!.Value, new List<string>()),
+                IsLockedOut = user?.LockoutEnd != null && user.LockoutEnd > DateTimeOffset.UtcNow
+            };
+        });
+
+        return Ok(results);
     }
 }
 

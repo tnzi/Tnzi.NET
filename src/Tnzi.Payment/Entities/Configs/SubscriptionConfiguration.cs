@@ -9,8 +9,10 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         builder.Property(s => s.ChannelCode).HasMaxLength(32).IsRequired();
         builder.Property(s => s.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
 
-        builder.HasIndex(s => s.SubscriptionNo).IsUnique();
+        builder.HasIndex(s => s.SubscriptionNo).IsUnique()
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         builder.HasIndex(s => s.UserId);
+        builder.HasIndex(s => s.PlanId);
         builder.HasIndex(s => s.Status);
         builder.HasIndex(s => s.EndTime);
     }

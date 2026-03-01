@@ -18,6 +18,14 @@ public class RequestTrackingMiddleware
     /// </summary>
     private static readonly ConcurrentDictionary<string, Regex> _regexCache = new();
 
+    /// <summary>
+    /// 默认排除路径（当用户未配置 ExcludePaths 时使用）
+    /// </summary>
+    private static readonly List<string> DefaultExcludePaths =
+    [
+        "/health", "/metrics", "/favicon.ico", "/swagger", "/api-docs"
+    ];
+
     public RequestTrackingMiddleware(
         RequestDelegate next,
         ILogger<RequestTrackingMiddleware> logger,
@@ -118,17 +126,13 @@ public class RequestTrackingMiddleware
                     UserId = userId
                 };
 
-                // 读取响应体
+                // 读取响应体（使用 leaveOpen 保留 buffer 供后续复制）
                 if (trackingOptions.LogResponseBody && responseBuffer != null)
                 {
                     responseBuffer.Position = 0;
-                    using var reader = new StreamReader(responseBuffer);
+                    using var reader = new StreamReader(responseBuffer, leaveOpen: true);
                     var responseBodyText = await reader.ReadToEndAsync();
                     logEntry.ResponseBody = Truncate(responseBodyText, trackingOptions.MaxResponseBodyLength);
-
-                    // 复制响应体到原始流
-                    responseBuffer.Position = 0;
-                    await responseBuffer.CopyToAsync(originalResponseBody!);
                 }
 
                 _logger.Log(logLevel, "{@RequestLog}", logEntry);
@@ -136,9 +140,14 @@ public class RequestTrackingMiddleware
         }
         finally
         {
-            // 恢复响应体流
+            // 始终将响应缓冲区复制回原始流（无论是否记录日志）
             if (originalResponseBody != null)
             {
+                if (responseBuffer is { Length: > 0 })
+                {
+                    responseBuffer.Position = 0;
+                    await responseBuffer.CopyToAsync(originalResponseBody);
+                }
                 context.Response.Body = originalResponseBody;
             }
             responseBuffer?.Dispose();
@@ -155,9 +164,10 @@ public class RequestTrackingMiddleware
 
         var path = context.Request.Path.Value ?? "";
 
-        // 检查排除路径
-        if (options.ExcludePaths?.Any(pattern =>
-                MatchesPattern(path, pattern)) == true)
+        // 检查排除路径（使用用户配置或默认值）
+        var excludePaths = options.ExcludePaths ?? DefaultExcludePaths;
+        if (excludePaths.Any(pattern =>
+                MatchesPattern(path, pattern)))
             return false;
 
         // 检查包含路径

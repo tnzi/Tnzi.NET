@@ -41,4 +41,17 @@ public interface ISessionService
     /// </summary>
     /// <param name="sessionId">会话ID</param>
     Task<Result> UpdateActivityTimeAsync(Guid sessionId);
+
+    /// <summary>
+    /// 清理超过指定时间未活跃的会话
+    /// </summary>
+    /// <param name="inactiveThreshold">不活跃时间阈值</param>
+    /// <returns>清理的会话数量</returns>
+    Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold);
+
+    /// <summary>
+    /// 获取会话统计信息（活跃会话数、在线用户数、设备分布 Top 5）
+    /// </summary>
+    /// <returns>会话统计信息</returns>
+    Task<Result<SessionStatisticsDto>> GetSessionStatisticsAsync();
 }

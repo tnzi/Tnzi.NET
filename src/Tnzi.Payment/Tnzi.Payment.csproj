@@ -18,4 +18,8 @@
     <PackageReference Include="PayPalCheckoutSdk" Version="1.0.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Templates\**\*.cshtml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

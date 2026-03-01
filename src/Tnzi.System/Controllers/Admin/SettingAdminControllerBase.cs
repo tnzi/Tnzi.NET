@@ -77,4 +77,24 @@ public abstract class SettingAdminControllerBase : ApiAdminControllerBase
         var result = await SettingService.DeleteSettingsAsync(ids);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// Get system information (version, loaded modules, uptime, environment)
+    /// </summary>
+    [HttpGet("system-info")]
+    public virtual async Task<ApiResult<SystemInfoDto>> GetSystemInfo()
+    {
+        var result = await SettingService.GetSystemInfoAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取配置分组列表（分组名称 + 每组配置数量）
+    /// </summary>
+    [HttpGet("groups")]
+    public virtual async Task<ApiResult<List<SettingGroupDto>>> GetSettingGroups()
+    {
+        var result = await SettingService.GetSettingGroupsAsync();
+        return result.ToApiResult();
+    }
 }

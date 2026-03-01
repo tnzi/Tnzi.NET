@@ -1,6 +1,6 @@
 {
   "name": "@tnzi/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Vue-reactive core for Tnzi.NET frontend — types, HTTP client, state managers, headless controllers, and adapter interfaces.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -56,6 +56,11 @@
       "types": "./dist/adapters/router/index.d.ts",
       "import": "./dist/adapters/router/index.js",
       "require": "./dist/adapters/router/index.cjs"
+    },
+    "./adapters/storage": {
+      "types": "./dist/adapters/storage/index.d.ts",
+      "import": "./dist/adapters/storage/index.js",
+      "require": "./dist/adapters/storage/index.cjs"
     },
     "./state": {
       "types": "./dist/state/index.d.ts",

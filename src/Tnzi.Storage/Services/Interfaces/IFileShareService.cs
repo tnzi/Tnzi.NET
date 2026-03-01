@@ -29,4 +29,20 @@ public interface IFileShareService
     /// 增加分享访问计数
     /// </summary>
     Task<Result> IncrementShareAccessCountAsync(string shareToken, CancellationToken cancellationToken = default);
+
+    // Admin management methods
+    /// <summary>
+    /// Get all shares for a specific file
+    /// </summary>
+    Task<Result<IEnumerable<FileShareSummaryDto>>> GetSharesByFileAsync(Guid fileId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Query active shares with paging and filtering
+    /// </summary>
+    Task<Result<IPagedList<FileShareSummaryDto>>> GetActiveSharesAsync(ActiveSharesQueryRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Batch revoke multiple shares
+    /// </summary>
+    Task<Result<int>> BatchRevokeSharesAsync(IEnumerable<Guid> shareIds, CancellationToken cancellationToken = default);
 }

@@ -8,7 +8,8 @@ public class InvoiceService : ApplicationService, IInvoiceService
     private readonly IRepository<Invoice, Guid> _invoiceRepository;
     private readonly IRepository<InvoiceLineItem, Guid> _lineItemRepository;
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
-    private readonly ITemplateEngine? _templateEngine;
+    private readonly IHtmlToPdfConverter? _pdfConverter;
+    private readonly ITemplateRenderService? _templateRenderService;
     private readonly INotificationService? _notificationService;
     private readonly IOptions<InvoiceOptions> _invoiceOptions;
 
@@ -18,7 +19,8 @@ public class InvoiceService : ApplicationService, IInvoiceService
         IRepository<PaymentEntity, Guid> paymentRepository,
         IOptions<InvoiceOptions> invoiceOptions,
         IServiceProvider serviceProvider,
-        ITemplateEngine? templateEngine = null,
+        IHtmlToPdfConverter? pdfConverter = null,
+        ITemplateRenderService? templateRenderService = null,
         INotificationService? notificationService = null)
         : base(serviceProvider)
     {
@@ -26,7 +28,8 @@ public class InvoiceService : ApplicationService, IInvoiceService
         _lineItemRepository = Check.NotNull(lineItemRepository);
         _paymentRepository = Check.NotNull(paymentRepository);
         _invoiceOptions = Check.NotNull(invoiceOptions);
-        _templateEngine = templateEngine;
+        _pdfConverter = pdfConverter;
+        _templateRenderService = templateRenderService;
         _notificationService = notificationService;
     }
 
@@ -161,12 +164,13 @@ public class InvoiceService : ApplicationService, IInvoiceService
         }, cancellationToken);
     }
 
-    public async Task<Result> SendAsync(Guid invoiceId, string? recipientEmail, CancellationToken cancellationToken = default)
+    public async Task<Result> SendAsync(Guid invoiceId, string? recipientEmail, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         if (_notificationService == null)
             return Fail("Notification module is not loaded. Cannot send invoice.", 500);
 
-        var invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
+        var invoice = await _invoiceRepository.FirstOrDefaultAsync(
+            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.CreatorId == ownerUserId.Value), cancellationToken);
         if (invoice == null)
             return Fail(ErrorCodes.InvoiceNotFound, 404);
 
@@ -219,9 +223,6 @@ public class InvoiceService : ApplicationService, IInvoiceService
 
     public async Task<Result<string>> GeneratePdfAsync(Guid invoiceId, CancellationToken cancellationToken = default)
     {
-        if (_templateEngine == null)
-            return Fail<string>("Template module is not loaded. Cannot generate PDF.", 500);
-
         var invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
         if (invoice == null)
             return Fail<string>(ErrorCodes.InvoiceNotFound, 404);
@@ -241,23 +242,107 @@ public class InvoiceService : ApplicationService, IInvoiceService
             TaxId = _invoiceOptions.Value.TaxId ?? string.Empty
         };
 
-        await _templateEngine.RenderAsync(invoice.TemplateName ?? "Standard", model);
+        // 使用模板系统渲染发票 HTML
+        var htmlContent = await RenderInvoiceHtmlAsync(invoice, model, cancellationToken);
 
-        // TODO: Convert HTML to PDF using a library like QuestPDF or Puppeteer
-        var pdfPath = $"/invoices/{invoice.InvoiceNo}.pdf";
-        invoice.PdfFilePath = pdfPath;
-        invoice.PdfFileUrl = $"/api/files{invoice.PdfFilePath}";
+        // 通过 Template 模块的 IHtmlToPdfConverter 生成输出字节
+        byte[] outputBytes;
+        var fileExtension = ".html";
+        var contentType = "text/html";
+        if (_pdfConverter != null)
+        {
+            outputBytes = await _pdfConverter.ConvertAsync(htmlContent, null, cancellationToken);
+            fileExtension = _pdfConverter.FileExtension;
+            contentType = _pdfConverter.ContentType;
+        }
+        else
+        {
+            outputBytes = Encoding.UTF8.GetBytes(htmlContent);
+        }
+
+        // 持久化生成的文件
+        var fileName = $"{invoice.InvoiceNo}{fileExtension}";
+        var invoiceDir = Path.Combine(AppContext.BaseDirectory, "invoices");
+        Directory.CreateDirectory(invoiceDir);
+        var localFilePath = Path.Combine(invoiceDir, fileName);
+        await File.WriteAllBytesAsync(localFilePath, outputBytes, cancellationToken);
+
+        invoice.PdfFilePath = localFilePath;
+        invoice.PdfFileUrl = $"/api/invoices/{invoice.Id}/pdf";
 
         await _invoiceRepository.UpdateAsync(invoice, cancellationToken);
 
-        Logger.LogInformation("Invoice PDF generated. InvoiceNo: {InvoiceNo}", invoice.InvoiceNo);
+        Logger.LogInformation("Invoice generated. InvoiceNo: {InvoiceNo}, Format: {Format}",
+            invoice.InvoiceNo, contentType);
 
         return Ok<string>(invoice.PdfFileUrl ?? string.Empty);
     }
 
-    public async Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 使用模板系统渲染发票 HTML
+    /// 优先使用数据库/文件系统中的自定义模板，fallback 到内置 HTML
+    /// </summary>
+    private async Task<string> RenderInvoiceHtmlAsync(Invoice invoice, InvoicePdfDto model, CancellationToken cancellationToken)
     {
-        var invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
+        // 优先使用框架模板系统（支持用户在数据库或文件系统中覆盖模板）
+        if (_templateRenderService != null)
+        {
+            var templateName = invoice.TemplateName ?? _invoiceOptions.Value.DefaultTemplate ?? "InvoiceDefault";
+            var renderResult = await _templateRenderService.RenderByNameAsync(
+                templateName, "Payment", model, "Invoice", null, cancellationToken);
+
+            if (renderResult.Succeeded)
+                return renderResult.Data!.Content;
+
+            Logger.LogWarning("Invoice template rendering failed for '{TemplateName}', using fallback. Error: {Error}",
+                templateName, renderResult.Message);
+        }
+
+        // Fallback: 内置简单 HTML（模板模块未加载或模板渲染失败时）
+        return RenderFallbackHtml(model);
+    }
+
+    /// <summary>
+    /// 内置 Fallback HTML 渲染（无模板模块依赖）
+    /// </summary>
+    private static string RenderFallbackHtml(InvoicePdfDto model)
+    {
+        var inv = model.Invoice;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<!DOCTYPE html><html><head><meta charset='UTF-8'/>");
+        sb.AppendLine("<style>body{font-family:sans-serif;margin:40px}table{width:100%;border-collapse:collapse}th,td{padding:8px;text-align:left;border-bottom:1px solid #ddd}th{background:#f5f5f5}.right{text-align:right}.total{font-weight:bold;font-size:1.2em}</style>");
+        sb.AppendLine("</head><body>");
+        sb.AppendLine($"<h1>{model.CompanyName}</h1>");
+        if (!string.IsNullOrEmpty(model.CompanyAddress))
+            sb.AppendLine($"<p>{model.CompanyAddress}</p>");
+        sb.AppendLine($"<h2>Invoice #{inv.InvoiceNo}</h2>");
+        sb.AppendLine($"<p>Date: {inv.InvoiceDate:yyyy-MM-dd} | Status: {inv.Status} | Currency: {inv.Currency}</p>");
+        sb.AppendLine($"<p><strong>Bill To:</strong> {inv.CustomerName}");
+        if (!string.IsNullOrEmpty(inv.CustomerEmail))
+            sb.Append($" ({inv.CustomerEmail})");
+        sb.AppendLine("</p>");
+        sb.AppendLine("<table><thead><tr><th>Description</th><th class='right'>Qty</th><th class='right'>Unit Price</th><th class='right'>Amount</th></tr></thead><tbody>");
+        foreach (var item in model.LineItems)
+        {
+            sb.AppendLine($"<tr><td>{item.Description}</td><td class='right'>{item.Quantity:N2}</td><td class='right'>{item.UnitPrice:N2}</td><td class='right'>{item.Amount:N2}</td></tr>");
+        }
+        sb.AppendLine("</tbody></table>");
+        sb.AppendLine($"<p class='right'>Subtotal: {inv.Amount:N2}</p>");
+        if (inv.DiscountAmount > 0)
+            sb.AppendLine($"<p class='right'>Discount: -{inv.DiscountAmount:N2}</p>");
+        if (inv.TaxAmount > 0)
+            sb.AppendLine($"<p class='right'>Tax: {inv.TaxAmount:N2}</p>");
+        sb.AppendLine($"<p class='right total'>Total Due: {inv.Currency} {inv.DueAmount:N2}</p>");
+        if (!string.IsNullOrEmpty(inv.Notes))
+            sb.AppendLine($"<p><em>Notes: {inv.Notes}</em></p>");
+        sb.AppendLine("</body></html>");
+        return sb.ToString();
+    }
+
+    public async Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
+    {
+        var invoice = await _invoiceRepository.FirstOrDefaultAsync(
+            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.CreatorId == ownerUserId.Value), cancellationToken);
         if (invoice == null)
             return Fail<string>(ErrorCodes.InvoiceNotFound, 404);
 
@@ -322,19 +407,24 @@ public class InvoiceService : ApplicationService, IInvoiceService
         return Ok();
     }
 
-    public async Task<Result<InvoiceDto>> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<Result<InvoiceDto>> GetAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
+        var invoice = await _invoiceRepository.FirstOrDefaultAsync(
+            i => i.Id == id && (!ownerUserId.HasValue || i.CreatorId == ownerUserId.Value), cancellationToken);
         if (invoice == null)
             return Fail<InvoiceDto>(ErrorCodes.InvoiceNotFound, 404);
 
         return Ok(invoice.MapTo<InvoiceDto>());
     }
 
-    public async Task<Result<IPagedList<InvoiceDto>>> GetListAsync(InvoiceQueryDto query, CancellationToken cancellationToken = default)
+    public async Task<Result<IPagedList<InvoiceDto>>> GetListAsync(InvoiceQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var pagedList = await _invoiceRepository.AsNoTracking()
-            .Filter(query)
+        var queryable = _invoiceRepository.AsNoTracking().Filter(query);
+
+        if (ownerUserId.HasValue)
+            queryable = queryable.Where(i => i.CreatorId == ownerUserId.Value);
+
+        var pagedList = await queryable
             .OrderByDescending(i => i.InvoiceDate)
             .ProjectTo<Invoice, InvoiceDto>()
             .CreateAsync(query.PageIndex, query.PageSize, cancellationToken);

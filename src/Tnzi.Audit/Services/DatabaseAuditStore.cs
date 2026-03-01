@@ -59,11 +59,8 @@ public class DatabaseAuditStore : IAuditStore
         var expireDate = DateTime.UtcNow.AddDays(-days);
 
         var count = await _operationRepository.CountAsync(o => o.CreationTime < expireDate);
-        if (count > 0)
-        {
-            // 级联删除会自动清理关联的 EntityEntry 和 PropertyEntry
-            await _operationRepository.DeleteAsync(o => o.CreationTime < expireDate);
-        }
+        // 级联删除会自动清理关联的 EntityEntry 和 PropertyEntry
+        await _operationRepository.DeleteAsync(o => o.CreationTime < expireDate);
 
         return count;
     }

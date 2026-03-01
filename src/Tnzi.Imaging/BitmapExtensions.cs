@@ -14,14 +14,44 @@ public static class BitmapExtensions
     /// <summary>
     /// 获取可用的字体族，优先使用指定字体，不可用时回退到系统任意可用字体
     /// </summary>
+    private static readonly string[] FontFallbacks =
+        ["Arial", "Liberation Sans", "DejaVu Sans", "Noto Sans", "Verdana"];
+
     private static FontFamily GetFontFamily(string preferred = "Arial")
     {
-        if (SystemFonts.TryGet(preferred, out var family))
+        // 优先使用指定字体
+        if (SystemFonts.TryGet(preferred, out var family) && IsFontUsable(family))
             return family;
-        var families = SystemFonts.Families;
-        if (!families.Any())
-            throw new InvalidOperationException("No fonts available on the system.");
-        return families.First();
+        // 回退列表
+        foreach (var name in FontFallbacks)
+        {
+            if (name != preferred && SystemFonts.TryGet(name, out family) && IsFontUsable(family))
+                return family;
+        }
+        // 最终回退：遍历所有系统字体，跳过 CFF 字体
+        foreach (var f in SystemFonts.Families)
+        {
+            if (IsFontUsable(f))
+                return f;
+        }
+        throw new InvalidOperationException("No usable TrueType fonts available on the system.");
+    }
+
+    /// <summary>
+    /// 检测字体是否可用（部分字体缺少 TrueType 所需的 loca 表）
+    /// </summary>
+    private static bool IsFontUsable(FontFamily family)
+    {
+        try
+        {
+            var font = family.CreateFont(12, FontStyle.Regular);
+            TextMeasurer.MeasureSize("A", new TextOptions(font));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -32,6 +62,57 @@ public static class BitmapExtensions
         if (width > MaxDimension || height > MaxDimension)
             throw new ArgumentException($"Image dimensions cannot exceed {MaxDimension}x{MaxDimension}.");
     }
+
+    #region Load - 图片加载
+
+    /// <summary>
+    /// 从字节数组加载图片
+    /// </summary>
+    /// <param name="bytes">图片字节数组</param>
+    /// <returns>图片对象（调用方负责 Dispose）</returns>
+    public static Image<Rgba32> LoadFromBytes(byte[] bytes)
+    {
+        Check.NotNullOrEmpty(bytes);
+        return Image.Load<Rgba32>(bytes);
+    }
+
+    /// <summary>
+    /// 从流加载图片
+    /// </summary>
+    /// <param name="stream">图片流</param>
+    /// <returns>图片对象（调用方负责 Dispose）</returns>
+    public static Image<Rgba32> LoadFromStream(Stream stream)
+    {
+        Check.NotNull(stream);
+        return Image.Load<Rgba32>(stream);
+    }
+
+    /// <summary>
+    /// 从字节数组异步加载图片
+    /// </summary>
+    /// <param name="bytes">图片字节数组</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>图片对象（调用方负责 Dispose）</returns>
+    public static async Task<Image<Rgba32>> LoadFromBytesAsync(byte[] bytes, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(bytes);
+        using var ms = new MemoryStream(bytes);
+        return await Image.LoadAsync<Rgba32>(ms, cancellationToken);
+    }
+
+    /// <summary>
+    /// 从流异步加载图片
+    /// </summary>
+    /// <param name="stream">图片流</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>图片对象（调用方负责 Dispose）</returns>
+    public static async Task<Image<Rgba32>> LoadFromStreamAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(stream);
+        return await Image.LoadAsync<Rgba32>(stream, cancellationToken);
+    }
+
+    #endregion
 
     #region Resize - 图片缩放
 
@@ -324,6 +405,160 @@ public static class BitmapExtensions
         int minSize = Math.Min(image.Width, image.Height);
         using var cropped = CropFromCenter(image, minSize, minSize);
         return Resize(cropped, size, size);
+    }
+
+    #endregion
+
+    #region Format Detection - 格式检测
+
+    /// <summary>
+    /// Detect image format from raw bytes by inspecting magic bytes (file signature).
+    /// Returns null if the format is not recognized.
+    /// </summary>
+    /// <param name="bytes">Image file bytes (at least first 12 bytes needed)</param>
+    /// <returns>Detected image format info, or null if not recognized</returns>
+    public static ImageFormatInfo? DetectFormat(byte[] bytes)
+    {
+        Check.NotNullOrEmpty(bytes);
+
+        if (bytes.Length < 4)
+            return null;
+
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+            return new ImageFormatInfo("PNG", "image/png", ".png");
+
+        // JPEG: FF D8 FF
+        if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+            return new ImageFormatInfo("JPEG", "image/jpeg", ".jpg");
+
+        // GIF: 47 49 46 38
+        if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38)
+            return new ImageFormatInfo("GIF", "image/gif", ".gif");
+
+        // BMP: 42 4D
+        if (bytes[0] == 0x42 && bytes[1] == 0x4D)
+            return new ImageFormatInfo("BMP", "image/bmp", ".bmp");
+
+        // WebP: RIFF....WEBP
+        if (bytes.Length >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+            && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50)
+            return new ImageFormatInfo("WebP", "image/webp", ".webp");
+
+        // TIFF: 49 49 2A 00 (little-endian) or 4D 4D 00 2A (big-endian)
+        if ((bytes[0] == 0x49 && bytes[1] == 0x49 && bytes[2] == 0x2A && bytes[3] == 0x00)
+            || (bytes[0] == 0x4D && bytes[1] == 0x4D && bytes[2] == 0x00 && bytes[3] == 0x2A))
+            return new ImageFormatInfo("TIFF", "image/tiff", ".tiff");
+
+        // ICO: 00 00 01 00
+        if (bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0x01 && bytes[3] == 0x00)
+            return new ImageFormatInfo("ICO", "image/x-icon", ".ico");
+
+        return null;
+    }
+
+    /// <summary>
+    /// Detect image format from a stream by reading the first bytes.
+    /// Stream position is restored after detection.
+    /// </summary>
+    /// <param name="stream">Image stream (must be seekable)</param>
+    /// <returns>Detected image format info, or null if not recognized</returns>
+    public static ImageFormatInfo? DetectFormat(Stream stream)
+    {
+        Check.NotNull(stream);
+
+        if (!stream.CanSeek)
+            throw new ArgumentException("Stream must be seekable for format detection.", nameof(stream));
+
+        var originalPosition = stream.Position;
+        var header = new byte[12];
+        var bytesRead = stream.Read(header, 0, 12);
+        stream.Position = originalPosition;
+
+        if (bytesRead < 4)
+            return null;
+
+        return DetectFormat(header);
+    }
+
+    #endregion
+
+    #region Image Hash - 图片指纹
+
+    /// <summary>
+    /// Compute a perceptual hash (pHash) of an image for deduplication and similarity detection.
+    /// <para>
+    /// Algorithm: resize to 8x8 grayscale, compute mean, generate 64-bit hash based on pixel > mean.
+    /// Two images are considered similar if their hash Hamming distance is below a threshold (e.g., 5).
+    /// </para>
+    /// </summary>
+    /// <param name="image">Source image</param>
+    /// <returns>64-bit perceptual hash as hex string (16 characters)</returns>
+    public static string ComputePerceptualHash(this Image<Rgba32> image)
+    {
+        Check.NotNull(image);
+
+        // 1. Resize to 8x8
+        using var small = image.Clone();
+        small.Mutate(ctx => ctx.Resize(new ResizeOptions
+        {
+            Size = new Size(8, 8),
+            Mode = ResizeMode.Stretch
+        }));
+
+        // 2. Convert to grayscale values
+        var pixels = new double[64];
+        for (var y = 0; y < 8; y++)
+        {
+            for (var x = 0; x < 8; x++)
+            {
+                var pixel = small[x, y];
+                // ITU-R BT.709 luminance formula
+                pixels[y * 8 + x] = 0.2126 * pixel.R + 0.7152 * pixel.G + 0.0722 * pixel.B;
+            }
+        }
+
+        // 3. Compute mean
+        var mean = pixels.Average();
+
+        // 4. Generate hash: each bit = pixel > mean
+        ulong hash = 0;
+        for (var i = 0; i < 64; i++)
+        {
+            if (pixels[i] > mean)
+                hash |= 1UL << i;
+        }
+
+        return hash.ToString("x16");
+    }
+
+    /// <summary>
+    /// Compute the Hamming distance between two perceptual hashes.
+    /// Lower values indicate more similar images.
+    /// </summary>
+    /// <param name="hash1">First hash (16-char hex string)</param>
+    /// <param name="hash2">Second hash (16-char hex string)</param>
+    /// <returns>Hamming distance (0 = identical, 64 = completely different)</returns>
+    public static int HammingDistance(string hash1, string hash2)
+    {
+        Check.NotNullOrWhiteSpace(hash1);
+        Check.NotNullOrWhiteSpace(hash2);
+
+        if (hash1.Length != 16 || hash2.Length != 16)
+            throw new ArgumentException("Hashes must be 16-character hex strings.");
+
+        var val1 = Convert.ToUInt64(hash1, 16);
+        var val2 = Convert.ToUInt64(hash2, 16);
+
+        var xor = val1 ^ val2;
+        var distance = 0;
+        while (xor != 0)
+        {
+            distance++;
+            xor &= xor - 1; // Clear least significant set bit
+        }
+
+        return distance;
     }
 
     #endregion

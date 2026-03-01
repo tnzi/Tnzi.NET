@@ -11,8 +11,9 @@ public class DefaultAdminStorageController : StorageAdminControllerBase
 {
     public DefaultAdminStorageController(
         IFileStorageService fileStorageService,
-        IFileReferenceService fileReferenceService)
-        : base(fileStorageService, fileReferenceService)
+        IFileReferenceService fileReferenceService,
+        IFileShareService fileShareService)
+        : base(fileStorageService, fileReferenceService, fileShareService)
     {
     }
 }

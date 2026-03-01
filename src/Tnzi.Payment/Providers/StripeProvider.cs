@@ -75,6 +75,7 @@ public class StripeProvider : IPaymentProvider
             return Result.Success(new PaymentProviderOrderResult
             {
                 TradeNo = input.TradeNo,
+                ExternalTradeNo = paymentIntent.Id,
                 PayParams = paymentIntent.ClientSecret,
                 ExpireTime = input.ExpireTime,
             });
@@ -129,7 +130,7 @@ public class StripeProvider : IPaymentProvider
 
             var refundOptions = new RefundCreateOptions
             {
-                PaymentIntent = input.TradeNo,
+                PaymentIntent = input.ExternalTradeNo ?? input.TradeNo,
                 Amount = (long)(input.RefundAmount * 100),
                 Reason = RefundReasons.RequestedByCustomer
             };
@@ -182,18 +183,92 @@ public class StripeProvider : IPaymentProvider
 
     public Task<Result<PaymentProviderCallbackResult>> HandleCallbackAsync(IDictionary<string, string> parameters)
     {
-        // Stripe webhooks are handled separately with raw body
-        return Task.FromResult(Result.Success(new PaymentProviderCallbackResult()));
+        if (!parameters.TryGetValue("__raw_body", out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
+            return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.PaymentInvalidSignature, 400));
+
+        try
+        {
+            var stripeEvent = EventUtility.ParseEvent(rawBody);
+            if (stripeEvent.Data.Object is not PaymentIntent paymentIntent)
+            {
+                return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(
+                    "Stripe callback payload does not contain payment intent.", 400));
+            }
+
+            if (!paymentIntent.Metadata.TryGetValue("TradeNo", out var tradeNo) || string.IsNullOrWhiteSpace(tradeNo))
+            {
+                return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(
+                    "Stripe callback missing TradeNo metadata.", 400));
+            }
+
+            return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+            {
+                TradeNo = tradeNo,
+                ExternalTradeNo = paymentIntent.Id,
+                Status = MapStripeStatus(paymentIntent.Status),
+                PaidAmount = paymentIntent.AmountReceived > 0 ? paymentIntent.AmountReceived / 100m : paymentIntent.Amount / 100m,
+                FailReason = paymentIntent.LastPaymentError?.Message
+            }));
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogWarning(ex, "Stripe callback parse failed.");
+            return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.PaymentInvalidSignature, 400));
+        }
     }
 
-    public bool VerifySignature(IDictionary<string, string> parameters)
+    public Task<bool> VerifySignatureAsync(IDictionary<string, string> parameters)
     {
-        // Stripe signature verification is done with raw request body
-        return true;
+        if (string.IsNullOrWhiteSpace(_options.Value.WebhookSecret))
+            return Task.FromResult(false);
+
+        if (!parameters.TryGetValue("__raw_body", out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
+            return Task.FromResult(false);
+
+        if (!parameters.TryGetValue("__stripe_signature", out var signature) || string.IsNullOrWhiteSpace(signature))
+            return Task.FromResult(false);
+
+        try
+        {
+            _ = EventUtility.ConstructEvent(rawBody, signature, _options.Value.WebhookSecret);
+            return Task.FromResult(true);
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogWarning(ex, "Stripe webhook signature verification failed.");
+            return Task.FromResult(false);
+        }
     }
 
     public async Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
     {
+        // PaymentService 传入 ExternalTradeNo（Stripe PaymentIntent ID，形如 pi_xxx）
+        // 直接通过 ID 获取比 metadata 搜索更快更可靠
+        if (tradeNo.StartsWith("pi_", StringComparison.Ordinal))
+        {
+            try
+            {
+                var client = GetClient();
+                var service = new PaymentIntentService(client);
+                var intent = await service.GetAsync(tradeNo);
+
+                return Result.Success(new PaymentProviderQueryResult
+                {
+                    TradeNo = intent.Metadata.TryGetValue("TradeNo", out var internalNo) ? internalNo : tradeNo,
+                    ExternalTradeNo = intent.Id,
+                    Status = MapStripeStatus(intent.Status),
+                    Amount = intent.Amount / 100m,
+                    PaidTime = intent.Status == "succeeded" ? DateTime.UtcNow : null
+                });
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Stripe sync by PaymentIntent ID failed. Id: {Id}", tradeNo);
+                return Result.Failure<PaymentProviderQueryResult>(ErrorCodes.StripePaymentQueryFailed, 400);
+            }
+        }
+
+        // Fallback: 按内部 TradeNo 通过 metadata 搜索
         return await QueryPaymentAsync(tradeNo);
     }
 
@@ -206,11 +281,45 @@ public class StripeProvider : IPaymentProvider
         }));
     }
 
-    public Task<Result> UpdatePaymentMethodAsync(string subscriptionNo, string paymentMethodId)
+    public async Task<Result> UpdatePaymentMethodAsync(string subscriptionNo, string paymentMethodId)
     {
-        // TODO: Implement Stripe customer update
-        return Task.FromResult(Result.Success());
+        try
+        {
+            var client = GetClient();
+            var service = new Stripe.SubscriptionService(client);
+
+            // 通过 metadata 搜索订阅
+            var searchResult = await service.SearchAsync(new SubscriptionSearchOptions
+            {
+                Query = $"metadata['SubscriptionNo']:'{subscriptionNo}'"
+            });
+
+            var subscription = searchResult.Data.FirstOrDefault();
+            if (subscription == null)
+            {
+                _logger.LogWarning("Stripe subscription not found. SubscriptionNo: {SubscriptionNo}", subscriptionNo);
+                return Result.Failure(ErrorCodes.SubscriptionNotFound, 404);
+            }
+
+            await service.UpdateAsync(subscription.Id, new SubscriptionUpdateOptions
+            {
+                DefaultPaymentMethod = paymentMethodId
+            });
+
+            _logger.LogInformation("Stripe subscription payment method updated. SubscriptionNo: {SubscriptionNo}", subscriptionNo);
+            return Result.Success();
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogError(ex, "Stripe payment method update failed. SubscriptionNo: {SubscriptionNo}", subscriptionNo);
+            return Result.Failure($"Stripe payment method update failed: {ex.Message}", 400);
+        }
     }
+
+    /// <summary>
+    /// 获取 Stripe 客户端（供模块内部使用）
+    /// </summary>
+    internal StripeClient GetStripeClient() => GetClient();
 
     private static PaymentStatus MapStripeStatus(string? status)
     {

@@ -12,6 +12,7 @@ public class CouponUsageConfiguration : EntityTypeConfigurationBase<CouponUsage,
     {
         builder.HasIndex(c => c.UserId);
         builder.HasIndex(c => c.CouponId);
+        builder.HasIndex(c => new { c.CouponId, c.UserId });
         builder.HasIndex(c => c.CreationTime);
     }
 }

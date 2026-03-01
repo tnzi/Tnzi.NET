@@ -19,6 +19,7 @@ public class MessageDto
     public bool IsRead { get; set; }
     public DateTime? ReadTime { get; set; }
     public int ReplyCount { get; set; }
+    public bool IsImportant { get; set; }
     public List<MessageReplyDto> Replies { get; set; } = new();
 }
 
@@ -36,6 +37,7 @@ public class MessageListItemDto
     public DateTime CreationTime { get; set; }
     public bool IsRead { get; set; }
     public int ReplyCount { get; set; }
+    public bool IsImportant { get; set; }
 }
 
 /// <summary>
@@ -64,6 +66,7 @@ public class CreateMessageDto
     public List<Guid>? RecipientIds { get; set; }
 
     public bool CanReply { get; set; } = true;
+    public bool IsImportant { get; set; }
     public DateTime? BeginDate { get; set; }
     public DateTime? EndDate { get; set; }
 }
@@ -80,6 +83,7 @@ public class UpdateMessageDto
     public string? Content { get; set; }
 
     public bool? CanReply { get; set; }
+    public bool? IsImportant { get; set; }
     public DateTime? BeginDate { get; set; }
     public DateTime? EndDate { get; set; }
 }
@@ -123,9 +127,56 @@ public class MessageQueryDto : PagedQueryDto
 {
     public MessageType? MessageType { get; set; }
     public bool? IsRead { get; set; }
+    public bool? IsImportant { get; set; }
     public string? Keyword { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
+}
+
+/// <summary>
+/// 消息统计 DTO
+/// </summary>
+public class ChatStatisticsDto
+{
+    /// <summary>
+    /// 总消息数
+    /// </summary>
+    public int TotalMessages { get; set; }
+
+    /// <summary>
+    /// 已发送消息数
+    /// </summary>
+    public int SentMessages { get; set; }
+
+    /// <summary>
+    /// 草稿消息数
+    /// </summary>
+    public int DraftMessages { get; set; }
+
+    /// <summary>
+    /// 公共消息数
+    /// </summary>
+    public int PublicMessages { get; set; }
+
+    /// <summary>
+    /// 私人消息数
+    /// </summary>
+    public int PrivateMessages { get; set; }
+
+    /// <summary>
+    /// 总回复数
+    /// </summary>
+    public int TotalReplies { get; set; }
+
+    /// <summary>
+    /// 活跃发送者数量（去重）
+    /// </summary>
+    public int ActiveSenders { get; set; }
+
+    /// <summary>
+    /// 重要消息数
+    /// </summary>
+    public int ImportantMessages { get; set; }
 }
 
 /// <summary>

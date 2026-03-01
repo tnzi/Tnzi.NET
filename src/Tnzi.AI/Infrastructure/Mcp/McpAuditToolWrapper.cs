@@ -9,9 +9,9 @@ internal sealed class McpAuditToolWrapper : DelegatingAIFunction
     private readonly ILogger<McpAuditToolWrapper>? _logger;
 
     public McpAuditToolWrapper(AIFunction innerFunction, string serverName, ILogger<McpAuditToolWrapper>? logger = null)
-        : base(innerFunction)
+        : base(Check.NotNull(innerFunction))
     {
-        _serverName = serverName ?? string.Empty;
+        _serverName = Check.NotNullOrEmpty(serverName);
         _logger = logger;
     }
 

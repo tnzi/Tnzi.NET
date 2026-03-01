@@ -85,9 +85,9 @@ public class NullProvider : IPaymentProvider
         }));
     }
 
-    public bool VerifySignature(IDictionary<string, string> parameters)
+    public Task<bool> VerifySignatureAsync(IDictionary<string, string> parameters)
     {
-        return true; // Always valid in test mode
+        return Task.FromResult(true); // Always valid in test mode
     }
 
     public Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)

@@ -7,8 +7,6 @@ public class WorkflowDefinitionConfiguration : EntityTypeConfigurationBase<Workf
 {
     public override void Configure(EntityTypeBuilder<WorkflowDefinition> builder)
     {
-        builder.HasKey(e => e.Id);
-
         builder.Property(e => e.Name)
             .IsRequired()
             .HasMaxLength(200);
@@ -22,7 +20,8 @@ public class WorkflowDefinitionConfiguration : EntityTypeConfigurationBase<Workf
             .HasMaxLength(50)
             .HasDefaultValue(WorkflowExecutionMode.Sequential);
 
-        builder.HasIndex(e => e.Name);
+        builder.HasIndex(e => e.Name)
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         builder.HasIndex(e => e.IsEnabled);
     }
 }

@@ -7,8 +7,6 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
 {
     public override void Configure(EntityTypeBuilder<Message> builder)
     {
-        builder.HasKey(m => m.Id);
-
         builder.Property(m => m.Title).IsRequired().HasMaxLength(200);
         builder.Property(m => m.Content).IsRequired().HasMaxLength(4000);
 

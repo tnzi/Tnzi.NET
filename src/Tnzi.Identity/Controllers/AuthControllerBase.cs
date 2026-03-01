@@ -14,9 +14,10 @@ public abstract class AuthControllerBase : ApiControllerBase
     protected readonly IPasswordService PasswordService;
     protected readonly IOAuthService? OAuthService;
     protected readonly ICaptchaService? CaptchaService;
-    protected readonly IOptions<Options.IdentityOptions>? IdentityOptions;
+    protected readonly IOptions<IdentityOptions>? IdentityOptions;
     protected readonly IConfiguration? Configuration;
     protected readonly IIdentityPageService? IdentityPageService;
+    protected readonly IPasswordPolicyService? PasswordPolicyService;
 
     /// <summary>
     /// 初始化认证控制器基类
@@ -30,6 +31,7 @@ public abstract class AuthControllerBase : ApiControllerBase
     /// <param name="identityOptions">Identity配置选项（可选）</param>
     /// <param name="configuration">配置（可选）</param>
     /// <param name="identityPageService">页面生成服务（可选）</param>
+    /// <param name="passwordPolicyService">密码策略服务（可选）</param>
     protected AuthControllerBase(
         ITwoFactorService twoFactorService,
         IAuthService authService,
@@ -37,9 +39,10 @@ public abstract class AuthControllerBase : ApiControllerBase
         IPasswordService passwordService,
         IOAuthService? oAuthService = null,
         ICaptchaService? captchaService = null,
-        IOptions<Options.IdentityOptions>? identityOptions = null,
+        IOptions<IdentityOptions>? identityOptions = null,
         IConfiguration? configuration = null,
-        IIdentityPageService? identityPageService = null)
+        IIdentityPageService? identityPageService = null,
+        IPasswordPolicyService? passwordPolicyService = null)
     {
         TwoFactorService = Check.NotNull(twoFactorService);
         AuthService = Check.NotNull(authService);
@@ -50,6 +53,7 @@ public abstract class AuthControllerBase : ApiControllerBase
         IdentityOptions = identityOptions;
         Configuration = configuration;
         IdentityPageService = identityPageService;
+        PasswordPolicyService = passwordPolicyService;
     }
 
     /// <summary>
@@ -309,11 +313,11 @@ public abstract class AuthControllerBase : ApiControllerBase
 
             // 添加IP地址和UserAgent到Claims
             var claims = authenticateResult.Principal.Claims.ToList();
-            claims.Add(new System.Security.Claims.Claim("ip_address", HttpContext.Connection.RemoteIpAddress?.ToString() ?? ""));
-            claims.Add(new System.Security.Claims.Claim("user_agent", HttpContext.Request.Headers["User-Agent"].ToString()));
+            claims.Add(new Claim("ip_address", HttpContext.Connection.RemoteIpAddress?.ToString() ?? ""));
+            claims.Add(new Claim("user_agent", HttpContext.Request.Headers["User-Agent"].ToString()));
 
-            var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(
-                new System.Security.Claims.ClaimsIdentity(claims, authenticateResult.Principal.Identity?.AuthenticationType));
+            var claimsPrincipal = new ClaimsPrincipal(
+                new ClaimsIdentity(claims, authenticateResult.Principal.Identity?.AuthenticationType));
 
             // 处理OAuth回调
             var result = await OAuthService.HandleOAuthCallbackAsync(provider.ToLowerInvariant(), claimsPrincipal);
@@ -584,6 +588,25 @@ public abstract class AuthControllerBase : ApiControllerBase
             // 返回失败HTML页面
             return Content(GenerateEmailConfirmationResultHtml(false, result.Message ?? "邮箱确认失败"), "text/html; charset=utf-8");
         }
+    }
+
+    /// <summary>
+    /// 评估密码强度（匿名接口，供前端注册/修改密码时实时反馈）
+    /// </summary>
+    /// <param name="password">待评估的密码</param>
+    /// <returns>密码强度评估结果（评分、等级、建议）</returns>
+    [HttpPost("password-strength")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual ApiResult<PasswordStrengthResult> EvaluatePasswordStrength([FromBody] string password)
+    {
+        if (PasswordPolicyService == null)
+        {
+            return ApiResult<PasswordStrengthResult>.Error("Password policy service is not available");
+        }
+
+        var result = PasswordPolicyService.EvaluatePasswordStrength(password);
+        return ApiResult<PasswordStrengthResult>.Ok(result);
     }
 
     /// <summary>

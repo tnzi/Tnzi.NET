@@ -13,7 +13,7 @@ public class AesHelper
     /// <summary>
     /// 初始化一个<see cref="AesHelper"/>类型的新实例
     /// </summary>
-    public AesHelper(bool needIV = false)
+    public AesHelper(bool needIV = true)
         : this(GenerateRandomKey(), needIV)
     {
     }
@@ -22,8 +22,8 @@ public class AesHelper
     /// 初始化一个<see cref="AesHelper"/>类型的新实例
     /// </summary>
     /// <param name="key">加密密钥（32字节，256位）</param>
-    /// <param name="needIV">是否需要初始化向量</param>
-    public AesHelper(string key, bool needIV = false)
+    /// <param name="needIV">是否需要随机初始化向量（默认 true，推荐开启以确保语义安全性）</param>
+    public AesHelper(string key, bool needIV = true)
     {
         Check.NotNullOrEmpty(key);
 
@@ -77,7 +77,7 @@ public class AesHelper
     /// <summary>
     /// 加密字节数组
     /// </summary>
-    public static byte[] Encrypt(byte[] decodeBytes, string key, bool needIV = false)
+    public static byte[] Encrypt(byte[] decodeBytes, string key, bool needIV = true)
     {
         Check.NotNullOrEmpty(decodeBytes);
         Check.NotNullOrEmpty(key);
@@ -117,7 +117,7 @@ public class AesHelper
     /// <summary>
     /// 解密字节数组
     /// </summary>
-    public static byte[] Decrypt(byte[] encodeBytes, string key, bool needIV = false)
+    public static byte[] Decrypt(byte[] encodeBytes, string key, bool needIV = true)
     {
         Check.NotNullOrEmpty(encodeBytes);
         Check.NotNullOrEmpty(key);
@@ -133,7 +133,7 @@ public class AesHelper
         if (needIV)
         {
             byte[] iv = new byte[IVSize];
-            ms.Read(iv, 0, IVSize);
+            ms.ReadExactly(iv, 0, IVSize);
             aes.IV = iv;
         }
         else
@@ -152,7 +152,7 @@ public class AesHelper
     /// <summary>
     /// 加密字符串, 输出为Base64编码的字符串
     /// </summary>
-    public static string Encrypt(string source, string key, bool needIV = false)
+    public static string Encrypt(string source, string key, bool needIV = true)
     {
         if (string.IsNullOrEmpty(source))
             return string.Empty;
@@ -165,7 +165,7 @@ public class AesHelper
     /// <summary>
     /// 解密字符串, 输入为Base64编码的字符串
     /// </summary>
-    public static string Decrypt(string source, string key, bool needIV = false)
+    public static string Decrypt(string source, string key, bool needIV = true)
     {
         if (string.IsNullOrEmpty(source))
             return string.Empty;

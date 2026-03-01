@@ -39,6 +39,18 @@ public class AspNetCoreModule : TnziFrameworkModule
             .Bind(context.Configuration.GetSection("AspNetCore"))
             .ValidateWith<AspNetCoreOptions, AspNetCoreOptionsValidator>();
 
+        // 注册租户解析器配置选项
+        context.Services.AddOptions<TenantResolverOptions>()
+            .Bind(context.Configuration.GetSection("AspNetCore:TenantResolver"));
+
+        // 注册异常处理选项（中间件通过 IOptionsMonitor<ExceptionHandlingOptions> 独立注入）
+        context.Services.AddOptions<ExceptionHandlingOptions>()
+            .Bind(context.Configuration.GetSection("AspNetCore:ExceptionHandling"));
+
+        // 注册请求追踪选项（中间件通过 IOptionsMonitor<RequestTrackingOptions> 独立注入）
+        context.Services.AddOptions<RequestTrackingOptions>()
+            .Bind(context.Configuration.GetSection("AspNetCore:RequestTracking"));
+
         return Task.CompletedTask;
     }
 
@@ -86,8 +98,11 @@ public class AspNetCoreModule : TnziFrameworkModule
         context.Services.AddScoped<IScopedContext, ScopedContext.HttpContextScopedContext>();
 
         // 注册HTTP加密服务
+        // IHostHttpCrypto 和 HostHttpCryptoMiddleware 使用 Scoped 生命周期，
+        // 确保每个请求一个实例，避免并发竞态条件（HostHttpCryptoMiddleware 实现 IMiddleware）
         context.Services.TryAddTransient<IClientHttpCrypto, ClientHttpCrypto>();
-        context.Services.TryAddTransient<IHostHttpCrypto, HostHttpCrypto>();
+        context.Services.TryAddScoped<IHostHttpCrypto, HostHttpCrypto>();
+        context.Services.TryAddScoped<HostHttpCryptoMiddleware>();
 
         // 读取并配置 AspNetCore 选项
         var aspNetCoreOptions = context.Configuration
@@ -156,6 +171,9 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册 UnitOfWorkActionFilter（用于可选标记模式）
         context.Services.AddScoped<UnitOfWorkActionFilter>();
 
+        // 注册 AjaxOnlyFilter（供 [ServiceFilter(typeof(AjaxOnlyFilter))] 使用）
+        context.Services.AddScoped<AjaxOnlyFilter>();
+
         // 注册请求验证服务（如果启用）
         if (aspNetCoreOptions.RequestValidation?.Enabled == true)
         {
@@ -175,6 +193,12 @@ public class AspNetCoreModule : TnziFrameworkModule
             {
                 var historySize = exceptionHandling!.ExceptionHistorySize;
                 return new ExceptionStatistics(historySize);
+            });
+            // 注册异常统计查询服务（供 Admin API 使用）
+            context.Services.AddSingleton<IExceptionStatisticsService>(sp =>
+            {
+                var stats = sp.GetRequiredService<IExceptionStatistics>();
+                return new ExceptionStatisticsService(stats);
             });
         }
 
@@ -317,6 +341,15 @@ public class AspNetCoreModule : TnziFrameworkModule
 
             // 11. 认证和授权中间件（必须在路由之前调用）
             app.UseAuthentication();
+
+            // 11.5. 租户解析中间件（在认证之后，以便 Claims 来源可用）
+            var tenantResolverOptions = context.ServiceProvider
+                .GetRequiredService<IOptions<TenantResolverOptions>>().Value;
+            if (tenantResolverOptions.Enabled)
+            {
+                app.UseMiddleware<TenantResolverMiddleware>();
+            }
+
             app.UseAuthorization();
 
             // 12. SPA 404 处理中间件（最内层，可选）

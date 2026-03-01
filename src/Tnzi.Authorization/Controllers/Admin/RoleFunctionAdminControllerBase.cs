@@ -130,4 +130,44 @@ public abstract class RoleFunctionAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// Compare permissions between two roles
+    /// </summary>
+    [HttpGet("compare")]
+    public virtual async Task<ApiResult<PermissionComparisonDto>> CompareRolePermissions([FromQuery] Guid roleId1, [FromQuery] Guid roleId2)
+    {
+        var result = await RoleFunctionService.CompareRolePermissionsAsync(roleId1, roleId2);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Clone permissions from source role to target role
+    /// </summary>
+    [HttpPost("role/{roleId:guid}/clone")]
+    public virtual async Task<ApiResult<int>> CloneRolePermissions(Guid roleId, [FromBody] CloneRolePermissionsRequest request)
+    {
+        var result = await RoleFunctionService.CloneRoleFunctionsAsync(request.SourceRoleId, roleId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Export role's permissions as JSON
+    /// </summary>
+    [HttpGet("role/{roleId:guid}/export")]
+    public virtual async Task<ApiResult<RolePermissionExportDto>> ExportRolePermissions(Guid roleId)
+    {
+        var result = await RoleFunctionService.ExportRolePermissionsAsync(roleId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Import permissions to a role from exported data
+    /// </summary>
+    [HttpPost("role/{roleId:guid}/import")]
+    public virtual async Task<ApiResult<PermissionImportResultDto>> ImportRolePermissions(Guid roleId, [FromBody] RolePermissionExportDto importData)
+    {
+        var result = await RoleFunctionService.ImportRolePermissionsAsync(roleId, importData);
+        return result.ToApiResult();
+    }
+
 }

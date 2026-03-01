@@ -70,6 +70,39 @@ public static class StreamingResponseWriter
     }
 
     /// <summary>
+    /// 写入错误事件到 HttpResponse
+    /// </summary>
+    public static async Task WriteErrorAsync(HttpResponse response, string errorMessage, string? errorCode, StreamingFormat format, CancellationToken ct = default)
+    {
+        var errorEvent = new StreamEvent
+        {
+            IsError = true,
+            IsDone = true,
+            ErrorMessage = errorMessage,
+            ErrorCode = errorCode
+        };
+        await WriteEventAsync(response, errorEvent, format, ct);
+    }
+
+    /// <summary>
+    /// 写入心跳信号（防止反向代理/CDN 超时断连）
+    /// </summary>
+    public static async Task WriteHeartbeatAsync(HttpResponse response, StreamingFormat format, CancellationToken ct = default)
+    {
+        switch (format)
+        {
+            case StreamingFormat.SSE:
+                await response.WriteAsync(": heartbeat\n\n", ct);
+                break;
+            case StreamingFormat.NDJSON:
+                await response.WriteAsync("\n", ct);
+                break;
+        }
+
+        await response.Body.FlushAsync(ct);
+    }
+
+    /// <summary>
     /// 写入 SSE 的 [DONE] 终止信号
     /// </summary>
     public static async Task WriteDoneAsync(HttpResponse response, StreamingFormat format, CancellationToken ct = default)
@@ -80,5 +113,36 @@ public static class StreamingResponseWriter
             await response.Body.FlushAsync(ct);
         }
         // NDJSON 不需要特殊终止符
+    }
+
+    /// <summary>
+    /// 写入流式事件序列，并在相邻事件间隔超过阈值时自动插入心跳信号，防止反向代理超时断连。
+    /// </summary>
+    /// <remarks>
+    /// 心跳在相邻事件之间检测注入。若 LLM 完全无响应（不产生任何事件），
+    /// 应在 Agent 层设置超时（AgentExecutorOptions.ToolTimeoutSeconds）控制。
+    /// </remarks>
+    public static async Task WriteStreamWithHeartbeatAsync(
+        HttpResponse response,
+        IAsyncEnumerable<StreamEvent> events,
+        StreamingFormat format,
+        TimeSpan? heartbeatInterval = null,
+        CancellationToken ct = default)
+    {
+        var interval = heartbeatInterval ?? TimeSpan.FromSeconds(15);
+        var lastWrite = DateTime.UtcNow;
+
+        await foreach (var evt in events.WithCancellation(ct))
+        {
+            var now = DateTime.UtcNow;
+            if (now - lastWrite >= interval)
+            {
+                await WriteHeartbeatAsync(response, format, ct);
+                lastWrite = now;
+            }
+
+            await WriteEventAsync(response, evt, format, ct);
+            lastWrite = DateTime.UtcNow;
+        }
     }
 }

@@ -32,7 +32,7 @@ public class MessageReplyService : ApplicationService, IMessageReplyService
         Check.NotNull(input);
 
         var message = await _messageRepository.GetAsync(input.MessageId);
-        if (message == null || message.IsDeleted)
+        if (message == null)
             return Fail<MessageReplyDto>("Message not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         if (!message.CanReply)
@@ -42,7 +42,7 @@ public class MessageReplyService : ApplicationService, IMessageReplyService
         if (input.ParentReplyId.HasValue)
         {
             var parentReply = await _replyRepository.GetAsync(input.ParentReplyId.Value);
-            if (parentReply == null || parentReply.IsDeleted || parentReply.BelongMessageId != input.MessageId)
+            if (parentReply == null || parentReply.BelongMessageId != input.MessageId)
                 return Fail<MessageReplyDto>("Parent reply not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
@@ -88,7 +88,7 @@ public class MessageReplyService : ApplicationService, IMessageReplyService
     public async Task<Result<IEnumerable<MessageReplyDto>>> GetByMessageIdAsync(Guid messageId, Guid userId)
     {
         var replies = await _replyRepository
-            .Where(r => r.BelongMessageId == messageId && !r.IsDeleted)
+            .Where(r => r.BelongMessageId == messageId)
             .OrderBy(r => r.CreationTime)
             .ToListAsync();
 
@@ -122,7 +122,7 @@ public class MessageReplyService : ApplicationService, IMessageReplyService
     public async Task<Result> DeleteAsync(Guid replyId, Guid userId)
     {
         var reply = await _replyRepository.GetAsync(replyId);
-        if (reply == null || reply.IsDeleted)
+        if (reply == null)
             return Fail("Reply not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         if (reply.UserId != userId)

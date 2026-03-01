@@ -1,0 +1,403 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { HttpClient, createHttpClient } from '../../http/http';
+
+// Mock fetch globally
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
+function jsonResponse(data: Record<string, unknown>, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    json: () => Promise.resolve(data),
+    blob: () => Promise.resolve(new Blob()),
+    headers: new Headers(),
+  } as unknown as Response;
+}
+
+function apiSuccessResponse<T>(data: T) {
+  return jsonResponse({ succeeded: true, data, code: 200 });
+}
+
+function apiErrorResponse(message: string, code = 500) {
+  return jsonResponse({ succeeded: false, message, code }, code);
+}
+
+describe('HttpClient', () => {
+  let client: HttpClient;
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    client = new HttpClient({ baseUrl: 'http://localhost:5000/api' });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // ------------------------------------------
+  // Constructor
+  // ------------------------------------------
+
+  describe('constructor', () => {
+    it('should create client with config', () => {
+      expect(client).toBeDefined();
+    });
+
+    it('should use createHttpClient factory', () => {
+      const c = createHttpClient({ baseUrl: '/api' });
+      expect(c).toBeInstanceOf(HttpClient);
+    });
+  });
+
+  // ------------------------------------------
+  // Token management
+  // ------------------------------------------
+
+  describe('token management', () => {
+    it('should set and get access token', () => {
+      client.setAccessToken('my-token');
+      expect(client.getAccessToken()).toBe('my-token');
+    });
+
+    it('should include Authorization header when token is set', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ id: 1 }));
+      client.setAccessToken('bearer-token');
+      await client.get('/test');
+
+      const [, fetchOptions] = mockFetch.mock.calls[0];
+      expect(fetchOptions.headers['Authorization']).toBe('Bearer bearer-token');
+    });
+
+    it('should not include Authorization header when token is null', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ id: 1 }));
+      await client.get('/test');
+
+      const [, fetchOptions] = mockFetch.mock.calls[0];
+      expect(fetchOptions.headers['Authorization']).toBeUndefined();
+    });
+
+    it('should clear token', () => {
+      client.setAccessToken('token');
+      client.setAccessToken(null);
+      expect(client.getAccessToken()).toBeNull();
+    });
+  });
+
+  // ------------------------------------------
+  // HTTP methods
+  // ------------------------------------------
+
+  describe('HTTP methods', () => {
+    beforeEach(() => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ id: 1, name: 'test' }));
+    });
+
+    it('GET should call fetch with GET method', async () => {
+      await client.get('/users/1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:5000/api/users/1',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('POST should call fetch with body', async () => {
+      await client.post('/users', { name: 'test' });
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.method).toBe('POST');
+      expect(opts.body).toBe(JSON.stringify({ name: 'test' }));
+    });
+
+    it('PUT should call fetch with body', async () => {
+      await client.put('/users/1', { name: 'updated' });
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.method).toBe('PUT');
+    });
+
+    it('PATCH should call fetch with body', async () => {
+      await client.patch('/users/1', { name: 'patched' });
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.method).toBe('PATCH');
+    });
+
+    it('DELETE should call fetch with DELETE method', async () => {
+      await client.delete('/users/1');
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.method).toBe('DELETE');
+    });
+  });
+
+  // ------------------------------------------
+  // URL building
+  // ------------------------------------------
+
+  describe('URL building', () => {
+    beforeEach(() => {
+      mockFetch.mockResolvedValue(apiSuccessResponse(null));
+    });
+
+    it('should prepend baseUrl for relative paths', async () => {
+      await client.get('/users');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:5000/api/users',
+        expect.anything(),
+      );
+    });
+
+    it('should use absolute URL directly', async () => {
+      await client.get('http://other-host/data');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://other-host/data',
+        expect.anything(),
+      );
+    });
+
+    it('should append query params', async () => {
+      await client.get('/users', { params: { page: 1, size: 20 } });
+      const url = mockFetch.mock.calls[0][0];
+      expect(url).toContain('page=1');
+      expect(url).toContain('size=20');
+    });
+
+    it('should handle array params', async () => {
+      await client.get('/users', { params: { ids: [1, 2, 3] } });
+      const url: string = mockFetch.mock.calls[0][0];
+      expect(url).toContain('ids=1');
+      expect(url).toContain('ids=2');
+      expect(url).toContain('ids=3');
+    });
+
+    it('should skip null/undefined params', async () => {
+      await client.get('/users', { params: { name: null, age: undefined, status: 'active' } });
+      const url: string = mockFetch.mock.calls[0][0];
+      expect(url).not.toContain('name');
+      expect(url).not.toContain('age');
+      expect(url).toContain('status=active');
+    });
+  });
+
+  // ------------------------------------------
+  // Response normalization
+  // ------------------------------------------
+
+  describe('response normalization', () => {
+    it('should return normalized ApiResult on success', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ id: 1 }));
+      const result = await client.get<{ id: number }>('/test');
+      expect(result.succeeded).toBe(true);
+      expect(result.data).toEqual({ id: 1 });
+    });
+
+    it('should return normalized ApiResult on API error', async () => {
+      mockFetch.mockResolvedValue(apiErrorResponse('Not found', 404));
+      const result = await client.get('/test');
+      expect(result.succeeded).toBe(false);
+      expect(result.message).toBe('Not found');
+    });
+
+    it('should return failed result on network error', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'));
+      const result = await client.get('/test');
+      expect(result.succeeded).toBe(false);
+    });
+  });
+
+  // ------------------------------------------
+  // 401 handling
+  // ------------------------------------------
+
+  describe('401 handling', () => {
+    it('should call onUnauthorized on first 401', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', onUnauthorized });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.get('/protected');
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it('should deduplicate 401 callbacks', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', onUnauthorized });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.get('/a');
+      await c.get('/b');
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reset deduplication guard after setAccessToken', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', onUnauthorized });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.get('/a');
+      c.setAccessToken('new-token');
+      await c.get('/b');
+      expect(onUnauthorized).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ------------------------------------------
+  // Request interceptor
+  // ------------------------------------------
+
+  describe('request interceptor', () => {
+    it('should apply request interceptor', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse(null));
+      const c = new HttpClient({
+        baseUrl: '/api',
+        requestInterceptor: (config) => ({
+          ...config,
+          headers: { ...config.headers, 'X-Custom': 'value' },
+        }),
+      });
+      await c.get('/test');
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.headers['X-Custom']).toBe('value');
+    });
+  });
+
+  // ------------------------------------------
+  // Response interceptor
+  // ------------------------------------------
+
+  describe('response interceptor', () => {
+    it('should apply response interceptor', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ original: true }));
+      const c = new HttpClient({
+        baseUrl: '/api',
+        responseInterceptor: (response) => ({
+          ...response,
+          data: { ...response.data, intercepted: true },
+        }),
+      });
+      const result = await c.get<{ original: boolean; intercepted: boolean }>('/test');
+      expect(result.data?.intercepted).toBe(true);
+    });
+  });
+
+  // ------------------------------------------
+  // Error interceptor
+  // ------------------------------------------
+
+  describe('error interceptor', () => {
+    it('should call error interceptor on network error', async () => {
+      const errorInterceptor = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', errorInterceptor });
+      mockFetch.mockRejectedValue(new Error('Network failure'));
+      await c.get('/test');
+      expect(errorInterceptor).toHaveBeenCalledWith(expect.any(Error));
+    });
+  });
+
+  // ------------------------------------------
+  // Retry
+  // ------------------------------------------
+
+  describe('retry', () => {
+    it('should retry on retryable status codes', async () => {
+      const c = new HttpClient({
+        baseUrl: '/api',
+        retry: { maxRetries: 2, baseDelay: 1 },
+      });
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 503 }, 503))
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 503 }, 503))
+        .mockResolvedValueOnce(apiSuccessResponse({ id: 1 }));
+
+      const result = await c.get<{ id: number }>('/test');
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(result.succeeded).toBe(true);
+    });
+
+    it('should not retry on non-retryable status codes', async () => {
+      const c = new HttpClient({
+        baseUrl: '/api',
+        retry: { maxRetries: 2, baseDelay: 1 },
+      });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 404 }, 404));
+
+      await c.get('/test');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should stop retrying after maxRetries', async () => {
+      const c = new HttpClient({
+        baseUrl: '/api',
+        retry: { maxRetries: 1, baseDelay: 1 },
+      });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 500 }, 500));
+
+      await c.get('/test');
+      expect(mockFetch).toHaveBeenCalledTimes(2); // 1 original + 1 retry
+    });
+  });
+
+  // ------------------------------------------
+  // Download
+  // ------------------------------------------
+
+  describe('download', () => {
+    it('should return blob on success', async () => {
+      const blob = new Blob(['test'], { type: 'text/plain' });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        blob: () => Promise.resolve(blob),
+      });
+
+      const result = await client.download('/file');
+      expect(result.succeeded).toBe(true);
+      expect(result.data).toBeInstanceOf(Blob);
+    });
+
+    it('should return failed result on error', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      });
+
+      const result = await client.download('/missing');
+      expect(result.succeeded).toBe(false);
+    });
+  });
+
+  // ------------------------------------------
+  // resolveUrl
+  // ------------------------------------------
+
+  describe('resolveUrl', () => {
+    it('should resolve relative URL', () => {
+      expect(client.resolveUrl('/users')).toBe('http://localhost:5000/api/users');
+    });
+
+    it('should resolve with params', () => {
+      const url = client.resolveUrl('/users', { page: 1 });
+      expect(url).toContain('page=1');
+    });
+  });
+
+  // ------------------------------------------
+  // Response middleware
+  // ------------------------------------------
+
+  describe('response middleware', () => {
+    it('should apply middleware pipeline', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ count: 1 }));
+
+      const middleware = vi.fn((result, _ctx) => ({
+        ...result,
+        data: { ...result.data, processed: true },
+      }));
+
+      const c = new HttpClient({
+        baseUrl: '/api',
+        responseMiddlewares: [middleware],
+      });
+
+      const result = await c.get<{ count: number; processed: boolean }>('/test');
+      expect(middleware).toHaveBeenCalled();
+      expect(result.data?.processed).toBe(true);
+    });
+  });
+});

@@ -8,7 +8,6 @@ public class FileReferenceConfiguration : EntityTypeConfigurationBase<FileRefere
     public override void Configure(EntityTypeBuilder<FileReference> builder)
     {
         builder.ToTable("Reference");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.FileId).IsRequired();
         builder.Property(e => e.EntityType).IsRequired().HasMaxLength(128);

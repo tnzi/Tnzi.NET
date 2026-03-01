@@ -9,16 +9,19 @@ public abstract class StorageAdminControllerBase : ApiAdminControllerBase
 {
     protected readonly IFileStorageService FileStorageService;
     protected readonly IFileReferenceService FileReferenceService;
+    protected readonly IFileShareService FileShareService;
 
     /// <summary>
     /// 初始化文件存储管理控制器基类
     /// </summary>
     protected StorageAdminControllerBase(
         IFileStorageService fileStorageService,
-        IFileReferenceService fileReferenceService)
+        IFileReferenceService fileReferenceService,
+        IFileShareService fileShareService)
     {
         FileStorageService = Check.NotNull(fileStorageService);
         FileReferenceService = Check.NotNull(fileReferenceService);
+        FileShareService = Check.NotNull(fileShareService);
     }
 
     /// <summary>
@@ -161,6 +164,112 @@ public abstract class StorageAdminControllerBase : ApiAdminControllerBase
         [FromBody] Dictionary<string, IEnumerable<Guid>> request)
     {
         var result = await FileReferenceService.BatchUpdateReferencesAsync(entityType, entityId, request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Get storage usage for a specific user
+    /// </summary>
+    [HttpGet("usage/user/{userId:guid}")]
+    public virtual async Task<ApiResult<UserStorageUsage>> GetUserStorageUsage(Guid userId)
+    {
+        var result = await FileStorageService.GetUserStorageUsageAsync(userId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Get top users by storage usage
+    /// </summary>
+    [HttpGet("usage/top-users")]
+    public virtual async Task<ApiResult<IEnumerable<UserStorageUsage>>> GetTopUsersByStorage([FromQuery] int top = 20)
+    {
+        var result = await FileStorageService.GetTopUsersByStorageAsync(top);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Generate a presigned URL for a file (temporary public access)
+    /// </summary>
+    [HttpGet("{id:guid}/presigned-url")]
+    public virtual async Task<ApiResult<string>> GetPresignedUrl(Guid id, [FromQuery] int expiresInSeconds = 3600, [FromQuery] string httpMethod = "GET")
+    {
+        var result = await FileStorageService.GetPresignedUrlAsync(id, expiresInSeconds, httpMethod);
+        return result.ToApiResult();
+    }
+
+    // File integrity verification
+
+    /// <summary>
+    /// Verify integrity of a single file (checks physical existence + MD5 match)
+    /// </summary>
+    [HttpGet("{id:guid}/verify-integrity")]
+    public virtual async Task<ApiResult<FileIntegrityResult>> VerifyFileIntegrity(Guid id)
+    {
+        var result = await FileStorageService.VerifyFileIntegrityAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Batch verify integrity of files (returns only problematic files in details)
+    /// </summary>
+    [HttpPost("verify-integrity")]
+    public virtual async Task<ApiResult<BatchIntegrityResult>> BatchVerifyIntegrity([FromQuery] int maxFiles = 100)
+    {
+        var result = await FileStorageService.BatchVerifyIntegrityAsync(maxFiles);
+        return result.ToApiResult();
+    }
+
+    // Share management
+
+    /// <summary>
+    /// Get all shares for a specific file
+    /// </summary>
+    [HttpGet("{id:guid}/shares")]
+    public virtual async Task<ApiResult<IEnumerable<FileShareSummaryDto>>> GetSharesByFile(Guid id)
+    {
+        var result = await FileShareService.GetSharesByFileAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Query active shares with paging and filtering
+    /// </summary>
+    [HttpPost("shares/query")]
+    public virtual async Task<ApiResult<IPagedList<FileShareSummaryDto>>> QueryActiveShares([FromBody] ActiveSharesQueryRequest request)
+    {
+        var result = await FileShareService.GetActiveSharesAsync(request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Batch revoke multiple shares
+    /// </summary>
+    [HttpPost("shares/batch-revoke")]
+    public virtual async Task<ApiResult<int>> BatchRevokeShares([FromBody] IEnumerable<Guid> shareIds)
+    {
+        var result = await FileShareService.BatchRevokeSharesAsync(shareIds);
+        return result.ToApiResult();
+    }
+
+    // File tags
+
+    /// <summary>
+    /// Set tags for a file
+    /// </summary>
+    [HttpPut("{id:guid}/tags")]
+    public virtual async Task<ApiResult<FileRecord>> SetFileTags(Guid id, [FromBody] SetFileTagsRequest request)
+    {
+        var result = await FileStorageService.SetFileTagsAsync(id, request.Tags);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Get files by tag
+    /// </summary>
+    [HttpGet("by-tag/{tag}")]
+    public virtual async Task<ApiResult<IPagedList<FileRecord>>> GetFilesByTag(string tag, [FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20)
+    {
+        var result = await FileStorageService.GetFilesByTagAsync(tag, pageIndex, pageSize);
         return result.ToApiResult();
     }
 }

@@ -27,7 +27,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     {
         // 验证 Agent 存在
         var agent = await _agentRepository.GetAsync(input.AgentId);
-        if (agent == null || agent.IsDeleted)
+        if (agent == null)
         {
             return Fail<AgentThreadDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
         }
@@ -49,10 +49,100 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     public async Task<Result<AgentThreadDto>> GetByIdAsync(Guid id)
     {
         var entity = await _repository.GetAsync(id);
-        if (entity == null || entity.IsDeleted)
+        if (entity == null)
         {
             return Fail<AgentThreadDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
         }
+
+        var dto = entity.MapTo<AgentThreadDto>();
+        dto.MessageCount = await _messageRepository.Where(m => m.ThreadId == id).CountAsync();
+        return Ok(dto);
+    }
+
+    public async Task<Result<AgentThreadDetailDto>> GetDetailAsync(Guid id, int messageLimit = 50)
+    {
+        var entity = await _repository.AsQueryable()
+            .Include(t => t.Agent)
+            .FirstOrDefaultAsync(t => t.Id == id);
+
+        if (entity == null)
+        {
+            return Fail<AgentThreadDetailDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        var totalMessageCount = await _messageRepository
+            .Where(m => m.ThreadId == id)
+            .CountAsync();
+
+        // 获取最近 N 条消息（取降序 top N，再内存中反转为正序）
+        var recentMessages = await _messageRepository
+            .Where(m => m.ThreadId == id)
+            .OrderByDescending(m => m.Order)
+            .Take(messageLimit)
+            .ToListAsync();
+        recentMessages.Reverse();
+
+        var dto = new AgentThreadDetailDto
+        {
+            Id = entity.Id,
+            AgentId = entity.AgentId,
+            AgentName = entity.Agent?.Name,
+            Title = entity.Title,
+            Metadata = entity.Metadata,
+            MessageCount = totalMessageCount,
+            LastActivityTime = entity.LastActivityTime,
+            CreationTime = entity.CreationTime,
+            Messages = recentMessages.MapToList<ThreadMessageDto>()
+        };
+
+        return Ok(dto);
+    }
+
+    public async Task<Result<IPagedList<AgentThreadDto>>> GetListAsync(ThreadListQueryDto query)
+    {
+        var q = _repository.AsQueryable();
+
+        if (query.AgentId.HasValue)
+        {
+            q = q.Where(t => t.AgentId == query.AgentId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var keyword = query.Keyword.ToLower();
+            q = q.Where(t => t.Title != null && t.Title.ToLower().Contains(keyword));
+        }
+
+        if (query.StartTime.HasValue)
+        {
+            q = q.Where(t => t.LastActivityTime >= query.StartTime.Value);
+        }
+
+        if (query.EndTime.HasValue)
+        {
+            q = q.Where(t => t.LastActivityTime <= query.EndTime.Value);
+        }
+
+        var pagedList = await q
+            .OrderByDescending(t => t.LastActivityTime)
+            .ProjectTo<AgentThread, AgentThreadDto>()
+            .CreateAsync(query);
+
+        return Ok(pagedList);
+    }
+
+    public async Task<Result<AgentThreadDto>> UpdateTitleAsync(Guid id, string title)
+    {
+        var entity = await _repository.GetAsync(id);
+        if (entity == null)
+        {
+            return Fail<AgentThreadDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        entity.Title = title;
+        await _repository.UpdateAsync(entity);
+
+        Logger.LogInformation("Agent thread title updated: {ThreadId}, Title: {Title}", id, title);
 
         return Ok(entity.MapTo<AgentThreadDto>());
     }
@@ -60,7 +150,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     public async Task<Result> DeleteAsync(Guid id)
     {
         var entity = await _repository.GetAsync(id);
-        if (entity == null || entity.IsDeleted)
+        if (entity == null)
         {
             return Fail("Thread not found", 404, ErrorCodes.ThreadNotFound);
         }
@@ -75,7 +165,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     {
         // 验证 Agent 存在
         var agentDef = await _agentRepository.GetAsync(agentId, ct);
-        if (agentDef == null || agentDef.IsDeleted)
+        if (agentDef == null)
         {
             throw new BusinessException("Agent not found", ErrorCodes.AgentNotFound, 404);
         }
@@ -84,7 +174,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         if (threadId.HasValue)
         {
             var threadEntity = await _repository.GetAsync(threadId.Value, ct);
-            if (threadEntity == null || threadEntity.IsDeleted || threadEntity.AgentId != agentId)
+            if (threadEntity == null || threadEntity.AgentId != agentId)
             {
                 Logger.LogWarning("Thread not found or agent mismatch: ThreadId={ThreadId}, AgentId={AgentId}", threadId.Value, agentId);
                 throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
@@ -133,7 +223,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     public async Task SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, CancellationToken ct = default)
     {
         var thread = await _repository.GetAsync(threadId, ct);
-        if (thread == null || thread.IsDeleted)
+        if (thread == null)
         {
             Logger.LogWarning("Thread not found when saving message: {ThreadId}", threadId);
             return;
@@ -202,7 +292,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         try
         {
             var threadEntity = await _repository.GetAsync(threadId, ct);
-            if (threadEntity == null || threadEntity.IsDeleted)
+            if (threadEntity == null)
             {
                 Logger.LogWarning("Thread not found when saving serialized data: {ThreadId}", threadId);
                 return;
@@ -221,6 +311,88 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             Logger.LogWarning(ex, "Failed to save conversation context data: {ThreadId}", threadId);
             // 不抛出异常，允许继续执行
         }
+    }
+
+    public async Task<Result<ThreadExportDto>> ExportAsJsonAsync(Guid id)
+    {
+        var entity = await _repository.AsQueryable()
+            .Include(t => t.Agent)
+            .FirstOrDefaultAsync(t => t.Id == id);
+
+        if (entity == null)
+        {
+            return Fail<ThreadExportDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        var allMessages = await _messageRepository
+            .Where(m => m.ThreadId == id)
+            .OrderBy(m => m.Order)
+            .ToListAsync();
+
+        var dto = new ThreadExportDto
+        {
+            Id = entity.Id,
+            AgentId = entity.AgentId,
+            AgentName = entity.Agent?.Name,
+            Title = entity.Title,
+            Metadata = entity.Metadata,
+            MessageCount = allMessages.Count,
+            LastActivityTime = entity.LastActivityTime,
+            CreationTime = entity.CreationTime,
+            ExportedAt = DateTime.UtcNow,
+            Messages = allMessages.MapToList<ThreadMessageDto>()
+        };
+
+        return Ok(dto);
+    }
+
+    public async Task<Result<string>> ExportAsMarkdownAsync(Guid id)
+    {
+        var entity = await _repository.AsQueryable()
+            .Include(t => t.Agent)
+            .FirstOrDefaultAsync(t => t.Id == id);
+
+        if (entity == null)
+        {
+            return Fail<string>("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        var allMessages = await _messageRepository
+            .Where(m => m.ThreadId == id)
+            .OrderBy(m => m.Order)
+            .ToListAsync();
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"# {entity.Title ?? "Untitled Thread"}");
+        sb.AppendLine();
+        sb.AppendLine($"- **Agent**: {entity.Agent?.Name ?? entity.AgentId.ToString()}");
+        sb.AppendLine($"- **Thread ID**: {entity.Id}");
+        sb.AppendLine($"- **Created**: {entity.CreationTime:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine($"- **Last Activity**: {entity.LastActivityTime:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine($"- **Messages**: {allMessages.Count}");
+        sb.AppendLine($"- **Exported**: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+
+        foreach (var msg in allMessages)
+        {
+            var roleLabel = msg.Role switch
+            {
+                MessageRole.System => "System",
+                MessageRole.User => "User",
+                MessageRole.Assistant => "Assistant",
+                MessageRole.Tool => "Tool",
+                _ => msg.Role
+            };
+
+            sb.AppendLine($"### {roleLabel} (#{msg.Order})");
+            sb.AppendLine();
+            sb.AppendLine(msg.Content);
+            sb.AppendLine();
+        }
+
+        return Ok<string>(sb.ToString());
     }
 
     /// <summary>

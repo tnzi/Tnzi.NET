@@ -10,10 +10,10 @@ public class OrganizationService : ApplicationService, IOrganizationService
     private static readonly TimeSpan OrganizationCacheExpiration = TimeSpan.FromMinutes(30);
 
     private readonly IRepository<Organization, Guid> _organizationRepository;
-    private readonly Microsoft.EntityFrameworkCore.DbContext? _dbContext;
+    private readonly DbContext? _dbContext;
     private readonly IEventBus? _eventBus;
     private readonly ICurrentUser? _currentUser;
-    private readonly Tnzi.Caching.ICache? _cache;
+    private readonly ICache? _cache;
     private readonly UserManager<User>? _userManager;
 
     /// <summary>
@@ -22,10 +22,10 @@ public class OrganizationService : ApplicationService, IOrganizationService
     public OrganizationService(
         IRepository<Organization, Guid> organizationRepository,
         IServiceProvider serviceProvider,
-        Microsoft.EntityFrameworkCore.DbContext? dbContext = null,
+        DbContext? dbContext = null,
         IEventBus? eventBus = null,
         ICurrentUser? currentUser = null,
-        Tnzi.Caching.ICache? cache = null,
+        ICache? cache = null,
         UserManager<User>? userManager = null)
         : base(serviceProvider)
     {
@@ -162,7 +162,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         var dto = organization.MapTo<OrganizationDto>();
-        LogInformation($"Organization created: {organization.Name} (ID: {organization.Id})");
+        LogInformation("Organization created: {Name} (ID: {Id})", organization.Name, organization.Id);
         return Ok(dto);
     }
 
@@ -239,7 +239,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         var dto = organization.MapTo<OrganizationDto>();
-        LogInformation($"Organization updated: {organization.Name} (ID: {organization.Id})");
+        LogInformation("Organization updated: {Name} (ID: {Id})", organization.Name, organization.Id);
         return Ok(dto);
     }
 
@@ -278,7 +278,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }, cancellationToken: default);
         }
 
-        LogInformation($"Organization deleted: {organization.Name} (ID: {organization.Id})");
+        LogInformation("Organization deleted: {Name} (ID: {Id})", organization.Name, organization.Id);
         return Ok();
     }
 
@@ -326,7 +326,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         // 清除缓存
         await ClearOrganizationCacheAsync(id);
 
-        LogInformation($"Organization moved: {organization.Name} (ID: {organization.Id}) to parent {newParentId}");
+        LogInformation("Organization moved: {Name} (ID: {Id}) to parent {NewParentId}", organization.Name, organization.Id, newParentId);
         return Ok();
     }
 
@@ -552,7 +552,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         var dtos = organizations.MapToList<OrganizationDto>();
-        LogInformation($"Created {organizations.Count} organizations");
+        LogInformation("Created {Count} organizations", organizations.Count);
         return Ok<IEnumerable<OrganizationDto>>(dtos);
     }
 
@@ -658,7 +658,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         var dtos = organizations.MapToList<OrganizationDto>();
-        LogInformation($"Updated {organizations.Count} organizations");
+        LogInformation("Updated {Count} organizations", organizations.Count);
         return Ok<IEnumerable<OrganizationDto>>(dtos);
     }
 
@@ -705,7 +705,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }
         }
 
-        LogInformation($"Deleted {organizations.Count} organizations");
+        LogInformation("Deleted {Count} organizations", organizations.Count);
         return Ok();
     }
 
@@ -827,7 +827,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
         }
 
-        LogInformation($"User {user.UserName ?? string.Empty} assigned to organization {organization!.Name ?? string.Empty} (ID: {organizationId})");
+        LogInformation("User {UserName} assigned to organization {OrgName} (ID: {OrgId})", user.UserName ?? string.Empty, organization!.Name ?? string.Empty, organizationId);
         return Ok();
     }
 
@@ -876,8 +876,137 @@ public class OrganizationService : ApplicationService, IOrganizationService
             await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
         }
 
-        LogInformation($"User {user.UserName} removed from organization (ID: {oldOrganizationId})");
+        LogInformation("User {UserName} removed from organization (ID: {OrgId})", user.UserName ?? string.Empty, oldOrganizationId);
         return Ok();
+    }
+
+    /// <summary>
+    /// 根据名称或代码模糊搜索组织
+    /// </summary>
+    public async Task<Result<IEnumerable<OrganizationDto>>> SearchAsync(string keyword, int maxResults = 20)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return Ok<IEnumerable<OrganizationDto>>(Enumerable.Empty<OrganizationDto>());
+        }
+
+        var lowerKeyword = keyword.ToLower();
+
+        var results = await _organizationRepository
+            .Where(o => !o.IsDeleted &&
+                (o.Name.ToLower().Contains(lowerKeyword) ||
+                 (o.Code != null && o.Code.ToLower().Contains(lowerKeyword))))
+            .OrderBy(o => o.SortOrder)
+            .ThenBy(o => o.Name)
+            .Take(maxResults)
+            .ProjectTo<Organization, OrganizationDto>()
+            .ToListAsync();
+
+        return Ok<IEnumerable<OrganizationDto>>(results);
+    }
+
+    /// <summary>
+    /// 更新组织排序
+    /// </summary>
+    public async Task<Result> UpdateSortOrderAsync(Guid id, int newSortOrder)
+    {
+        var organization = await _organizationRepository.GetAsync(id);
+        if (organization == null)
+        {
+            return Fail("Organization not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        organization.SortOrder = newSortOrder;
+        await _organizationRepository.UpdateAsync(organization);
+
+        // 清除缓存（排序变更影响树形结构）
+        await ClearOrganizationCacheAsync(id);
+
+        LogInformation("Organization sort order updated: {Name} (ID: {Id}) to {SortOrder}", organization.Name, organization.Id, newSortOrder);
+        return Ok();
+    }
+
+    /// <summary>
+    /// 批量更新组织排序
+    /// </summary>
+    public async Task<Result> BatchUpdateSortOrderAsync(IEnumerable<(Guid Id, int SortOrder)> updates)
+    {
+        var updateList = updates.ToList();
+        if (!updateList.Any())
+        {
+            return Ok();
+        }
+
+        var ids = updateList.Select(u => u.Id).ToList();
+        var organizations = await _organizationRepository
+            .Where(o => ids.Contains(o.Id))
+            .ToListAsync();
+
+        if (organizations.Count != updateList.Count)
+        {
+            var foundIds = organizations.Select(o => o.Id).ToHashSet();
+            var missingIds = ids.Where(id => !foundIds.Contains(id)).ToList();
+            return Fail($"Organizations not found: {string.Join(", ", missingIds)}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        var orgDict = organizations.ToDictionary(o => o.Id);
+        foreach (var (id, sortOrder) in updateList)
+        {
+            orgDict[id].SortOrder = sortOrder;
+        }
+
+        await _organizationRepository.UpdateManyAsync(organizations);
+
+        // 清除缓存（排序变更影响树形结构）
+        await ClearOrganizationCacheAsync();
+
+        LogInformation("Batch updated sort order for {Count} organizations", updateList.Count);
+        return Ok();
+    }
+
+    /// <summary>
+    /// 获取组织下的用户分页列表
+    /// </summary>
+    public async Task<Result<IPagedList<UserListItemDto>>> GetUsersAsync(Guid organizationId, PagedQueryDto query, bool includeChildren = false)
+    {
+        var organization = await _organizationRepository.GetAsync(organizationId);
+        if (organization == null)
+        {
+            return Fail<IPagedList<UserListItemDto>>("Organization not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        if (_dbContext == null)
+        {
+            return Fail<IPagedList<UserListItemDto>>("Database context is not available", 503);
+        }
+
+        IQueryable<User> usersQuery;
+
+        if (includeChildren)
+        {
+            // 获取当前组织及所有子组织的 ID
+            var path = organization.Path ?? $"/{organizationId}/";
+            var orgIds = await _organizationRepository
+                .Where(o => o.Path != null && o.Path.StartsWith(path) && !o.IsDeleted)
+                .Select(o => o.Id)
+                .ToListAsync();
+
+            usersQuery = _dbContext.Set<User>()
+                .Where(u => u.OrganizationId.HasValue && orgIds.Contains(u.OrganizationId.Value) && !u.IsDeleted);
+        }
+        else
+        {
+            usersQuery = _dbContext.Set<User>()
+                .Where(u => u.OrganizationId == organizationId && !u.IsDeleted);
+        }
+
+        usersQuery = usersQuery.OrderByDescending(u => u.CreationTime);
+
+        var paged = await usersQuery
+            .ProjectTo<User, UserListItemDto>()
+            .CreateAsync(query);
+
+        return Ok(paged);
     }
 
 }

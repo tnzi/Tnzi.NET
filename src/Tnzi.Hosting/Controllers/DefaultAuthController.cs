@@ -21,9 +21,11 @@ public class DefaultAuthController : AuthControllerBase
         ICaptchaService? captchaService = null,
         IOptions<IdentityOptions>? identityOptions = null,
         IConfiguration? configuration = null,
-        IIdentityPageService? identityPageService = null)
+        IIdentityPageService? identityPageService = null,
+        IPasswordPolicyService? passwordPolicyService = null)
         : base(twoFactorService, authService, registrationService, passwordService,
-               oAuthService, captchaService, identityOptions, configuration, identityPageService)
+               oAuthService, captchaService, identityOptions, configuration, identityPageService,
+               passwordPolicyService)
     {
     }
 }

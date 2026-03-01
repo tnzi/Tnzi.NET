@@ -161,12 +161,6 @@ public class ApiControllerRouteProvider : IApplicationModelProvider
             return word;
         }
 
-        // 已经是复数形式,直接返回
-        if (word.EndsWith("s", StringComparison.OrdinalIgnoreCase))
-        {
-            return word;
-        }
-
         // 以 y 结尾(且前面不是元音字母): category -> categories
         if (word.Length > 1 &&
             word.EndsWith("y", StringComparison.OrdinalIgnoreCase) &&
@@ -175,7 +169,19 @@ public class ApiControllerRouteProvider : IApplicationModelProvider
             return word[..(word.Length - 1)] + "ies";
         }
 
-        // 以 s, x, z, ch, sh 结尾: box -> boxes, church -> churches
+        // 以 fe 结尾: knife -> knives（必须在 f 之前检查）
+        if (word.EndsWith("fe", StringComparison.OrdinalIgnoreCase))
+        {
+            return word[..(word.Length - 2)] + "ves";
+        }
+
+        // 以 f 结尾: leaf -> leaves
+        if (word.EndsWith("f", StringComparison.OrdinalIgnoreCase))
+        {
+            return word[..(word.Length - 1)] + "ves";
+        }
+
+        // 以 s, x, z, ch, sh 结尾: bus -> buses, box -> boxes, church -> churches
         if (word.EndsWith("s", StringComparison.OrdinalIgnoreCase) ||
             word.EndsWith("x", StringComparison.OrdinalIgnoreCase) ||
             word.EndsWith("z", StringComparison.OrdinalIgnoreCase) ||
@@ -183,16 +189,6 @@ public class ApiControllerRouteProvider : IApplicationModelProvider
             word.EndsWith("sh", StringComparison.OrdinalIgnoreCase))
         {
             return word + "es";
-        }
-
-        // 以 f 或 fe 结尾: leaf -> leaves, knife -> knives
-        if (word.EndsWith("f", StringComparison.OrdinalIgnoreCase))
-        {
-            return word[..(word.Length - 1)] + "ves";
-        }
-        if (word.EndsWith("fe", StringComparison.OrdinalIgnoreCase))
-        {
-            return word[..(word.Length - 2)] + "ves";
         }
 
         // 默认: 直接加 s

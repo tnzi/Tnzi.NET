@@ -10,16 +10,16 @@ public class DapperService : IDapperService
 {
     private readonly DbContext _dbContext;
     private readonly IDatabaseProvider _databaseProvider;
-    private readonly ILogger<DapperService> _logger;
+    private readonly ILogger<DapperService>? _logger;
 
     public DapperService(
         DbContext dbContext,
         IDatabaseProvider databaseProvider,
-        ILogger<DapperService> logger)
+        ILogger<DapperService>? logger = null)
     {
         _dbContext = Check.NotNull(dbContext);
         _databaseProvider = Check.NotNull(databaseProvider);
-        _logger = Check.NotNull(logger);
+        _logger = logger;
     }
 
     /// <summary>
@@ -132,7 +132,6 @@ public class DapperService : IDapperService
         var connection = await GetConnectionAsync();
         var transaction = GetTransaction();
 
-        #pragma warning disable CS0618 // 内部调用已标记为 Obsolete 的方法是预期行为
         return await DapperBulkOperations.BulkUpdateAsync(
             connection,
             _databaseProvider,
@@ -142,7 +141,6 @@ public class DapperService : IDapperService
             keyColumn,
             transaction,
             cancellationToken: cancellationToken);
-        #pragma warning restore CS0618
     }
 
     public async Task<int> BulkDeleteAsync<T>(
@@ -154,7 +152,6 @@ public class DapperService : IDapperService
         var connection = await GetConnectionAsync();
         var transaction = GetTransaction();
 
-        #pragma warning disable CS0618 // 内部调用已标记为 Obsolete 的方法是预期行为
         return await DapperBulkOperations.BulkDeleteAsync(
             connection,
             _databaseProvider,
@@ -165,7 +162,6 @@ public class DapperService : IDapperService
             keyColumn,
             transaction,
             cancellationToken: cancellationToken);
-        #pragma warning restore CS0618
     }
 
     public async Task<IEnumerable<T>> ExecuteStoredProcedureAsync<T>(

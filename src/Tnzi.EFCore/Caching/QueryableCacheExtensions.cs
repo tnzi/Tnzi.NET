@@ -179,7 +179,6 @@ public static class QueryableCacheExtensions
     /// 警告：基于 Expression.ToString() 的自动键生成不稳定，不同 EF Core 版本或查询构建方式可能产生不同的字符串。
     /// 建议始终提供显式的 cacheKey 参数。
     /// </summary>
-    [Obsolete("基于 Expression.ToString() 的自动键生成不可靠，请始终提供显式的 cacheKey 参数")]
     private static string GenerateCacheKey<T>(IQueryable<T> source, ICacheKeyGenerator? keyGenerator, params object[] additionalParams)
     {
         if (keyGenerator != null)

@@ -65,11 +65,9 @@ describe('createMemoryStorageAdapter', () => {
   // ------------------------------------------
 
   describe('type-safe operations', () => {
-    it('should return undefined for missing keys via get (Map behavior)', () => {
-      // Memory adapter uses Map.get() which returns undefined for missing keys.
-      // The interface declares T | null but at runtime it's undefined.
+    it('should return null for missing keys via get', () => {
       const result = adapter.get('missing');
-      expect(result).toBeUndefined();
+      expect(result).toBeNull();
     });
 
     it('should store and retrieve typed values', () => {
@@ -93,11 +91,11 @@ describe('createMemoryStorageAdapter', () => {
       expect(adapter.get<boolean>('flag')).toBe(true);
     });
 
-    it('should return undefined after typed remove (Map behavior)', () => {
+    it('should return null after typed remove', () => {
       adapter.set('key', 'value');
       adapter.remove('key');
       const result = adapter.get('key');
-      expect(result).toBeUndefined();
+      expect(result).toBeNull();
     });
   });
 

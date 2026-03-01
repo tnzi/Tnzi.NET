@@ -3,6 +3,10 @@ namespace Tnzi.AI.Tools;
 /// <summary>
 /// 工具适配器 - 将 ToolDefinition 转换为 M.E.AI 的 AITool
 /// </summary>
+/// <remarks>
+/// 工具提供者（ToolDefinition.ProviderType）必须注册为 Singleton，
+/// 因为 ToolAdapter 从根 ServiceProvider 解析实例（非 Scoped）。
+/// </remarks>
 internal static class ToolAdapter
 {
     /// <summary>

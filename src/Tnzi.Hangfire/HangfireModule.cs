@@ -109,6 +109,12 @@ public class HangfireModule : TnziInfrastructureModule
                 config.UsePostgreSqlStorage(configure => configure.UseNpgsqlConnection(options.ConnectionString));
                 break;
 
+#pragma warning disable CS0618 // MySQL is [Obsolete] but we need to handle it explicitly
+            case StorageType.MySQL:
+#pragma warning restore CS0618
+                throw new InfrastructureException("Hangfire",
+                    "MySQL storage for Hangfire is not yet implemented. Use Redis, SqlServer, or PostgreSQL instead.");
+
             default:
                 throw new InfrastructureException("Hangfire",
                     $"Storage type '{options.StorageType}' is not supported.");

@@ -37,6 +37,11 @@ public class AgentExecutorOptions
     public int MaxToolIterations { get; set; } = 10;
 
     /// <summary>
+    /// 单个工具调用超时时间（秒）
+    /// </summary>
+    public int ToolTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>
     /// 历史消息压缩器（可选）
     /// </summary>
     public IHistoryReducer? HistoryReducer { get; set; }
@@ -45,4 +50,9 @@ public class AgentExecutorOptions
     /// 上下文注入提供者（可选）
     /// </summary>
     public IContextProvider? ContextProvider { get; set; }
+
+    /// <summary>
+    /// 工具执行中间件列表（按注册顺序执行，洋葱模型）
+    /// </summary>
+    public IReadOnlyList<IToolExecutionMiddleware>? Middlewares { get; set; }
 }

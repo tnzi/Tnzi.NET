@@ -14,6 +14,9 @@ public class CoreServicesModule : TnziCoreModule
         // 注册性能监控服务
         context.Services.TryAddSingleton<IPerformanceMonitorService, PerformanceMonitorService>();
 
+        // 注册 TimeProvider（用于审计时间戳，支持可测试性）
+        context.Services.TryAddSingleton(TimeProvider.System);
+
         return Task.CompletedTask;
     }
 }

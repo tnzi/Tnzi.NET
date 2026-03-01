@@ -96,5 +96,41 @@ public interface IUserService
     /// <param name="phoneNumber">手机号</param>
     /// <returns>用户实体或 null</returns>
     Task<User?> FindByPhoneNumberAsync(string phoneNumber);
+
+    /// <summary>
+    /// 用户自助停用账户（自行禁用，可由管理员恢复）
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="reason">停用原因</param>
+    Task<Result> DeactivateAccountAsync(Guid userId, string? reason = null);
+
+    /// <summary>
+    /// 用户自助删除账户（软删除，GDPR 合规）
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    Task<Result> DeleteAccountAsync(Guid userId);
+
+    /// <summary>
+    /// 导出用户个人数据（GDPR 合规）
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    Task<Result<PersonalDataExportDto>> ExportPersonalDataAsync(Guid userId);
+
+    /// <summary>
+    /// Export users as CSV string (admin operation)
+    /// </summary>
+    /// <param name="query">Optional query filter (null = export all users)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>CSV formatted string</returns>
+    Task<Result<string>> ExportUsersCsvAsync(UserListQueryDto? query = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Import users from CSV data (admin operation).
+    /// Creates new users; skips existing ones (by email).
+    /// </summary>
+    /// <param name="csvContent">CSV content with headers: UserName,Email,PhoneNumber,Password</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Import result with success/failure counts and error details</returns>
+    Task<Result<UserImportResult>> ImportUsersCsvAsync(string csvContent, CancellationToken cancellationToken = default);
 }
 

@@ -33,5 +33,10 @@ public enum NotificationStatus
     /// <summary>
     /// 已取消
     /// </summary>
-    Cancelled = 5
+    Cancelled = 5,
+
+    /// <summary>
+    /// Scheduled for future delivery
+    /// </summary>
+    Scheduled = 6
 }

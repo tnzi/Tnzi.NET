@@ -32,6 +32,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Chat\Tnzi.Chat.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Mapster\Tnzi.Mapster.csproj" />
   </ItemGroup>
 
 </Project>

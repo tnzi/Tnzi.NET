@@ -52,3 +52,40 @@ public class UserSessionDto
     /// </summary>
     public DateTime? RevokedAt { get; set; }
 }
+
+/// <summary>
+/// 会话统计DTO
+/// </summary>
+public class SessionStatisticsDto
+{
+    /// <summary>
+    /// 活跃会话数（未撤销的会话）
+    /// </summary>
+    public int ActiveSessionCount { get; set; }
+
+    /// <summary>
+    /// 在线用户数（有活跃会话的不同用户数）
+    /// </summary>
+    public int OnlineUserCount { get; set; }
+
+    /// <summary>
+    /// 设备分布 Top 5
+    /// </summary>
+    public IEnumerable<DeviceStatItem> TopDevices { get; set; } = new List<DeviceStatItem>();
+}
+
+/// <summary>
+/// 设备统计项
+/// </summary>
+public class DeviceStatItem
+{
+    /// <summary>
+    /// 设备信息
+    /// </summary>
+    public string DeviceInfo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 该设备的会话数量
+    /// </summary>
+    public int Count { get; set; }
+}

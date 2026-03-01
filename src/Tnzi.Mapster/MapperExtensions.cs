@@ -92,8 +92,8 @@ public static class MapperExtensions
     /// 1. 修改映射配置，避免使用条件表达式，直接映射导航属性（如 src.Artist.Name）
     /// 2. 先加载数据（Include），然后使用 MapToList 进行内存映射
     /// </remarks>
-    public static System.Linq.IQueryable<TDestination> ProjectTo<TSource, TDestination>(
-        this System.Linq.IQueryable<TSource> source,
+    public static IQueryable<TDestination> ProjectTo<TSource, TDestination>(
+        this IQueryable<TSource> source,
         TypeAdapterConfig? config = null)
     {
         config ??= TypeAdapterConfig.GlobalSettings;

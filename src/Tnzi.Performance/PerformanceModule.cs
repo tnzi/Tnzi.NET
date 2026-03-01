@@ -29,9 +29,13 @@ public class PerformanceModule : TnziInfrastructureModule
         var config = context.Configuration.GetSection("Performance").Get<PerformanceOptions>()
             ?? new PerformanceOptions();
 
-        // 如果未启用，不注册服务
         if (!config.Enabled)
         {
+            // 注册空操作收集器，避免下游注入 IPerformanceCollector 时 DI 失败
+            context.Services.AddSingleton<IPerformanceCollector>(provider =>
+            {
+                return new PerformanceCollector(0);
+            });
             return Task.CompletedTask;
         }
 

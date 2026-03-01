@@ -28,12 +28,13 @@ public static class TnziDbContextHelper
         Func<CancellationToken, Task<int>> baseSaveAsync,
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeProvider? timeProvider = null)
     {
         var logger = DbContextServiceResolver.GetLogger(dbContext);
 
         // 1. 应用审计
-        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant);
+        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider);
 
         // 2. 文件引用追踪 - 收集变更信息
         var fileTracker = new FileTracking.FileReferenceChangeTracker();
@@ -45,7 +46,14 @@ public static class TnziDbContextHelper
         // 3. 保存主实体
         var result = await baseSaveAsync(cancellationToken);
 
-        // 4. 文件引用处理（事务后异步处理，避免并发 DbContext 问题）
+        // 4. 收集并发布领域事件（保存成功后收集，避免保存失败时事件丢失）
+        var domainEvents = HarvestDomainEvents(dbContext);
+        if (domainEvents.Count > 0)
+        {
+            await DispatchDomainEventsAsync(dbContext, domainEvents, cancellationToken);
+        }
+
+        // 6. 文件引用处理（事务后异步处理，避免并发 DbContext 问题）
         if (fileTracker.HasChanges)
         {
             foreach (var change in fileTracker.GetChanges())
@@ -93,8 +101,54 @@ public static class TnziDbContextHelper
     /// <summary>
     /// 应用审计属性
     /// </summary>
-    public static void ApplyAuditProperties(DbContext dbContext, ICurrentUser currentUser, ICurrentTenant? currentTenant)
+    public static void ApplyAuditProperties(DbContext dbContext, ICurrentUser currentUser, ICurrentTenant? currentTenant, TimeProvider? timeProvider = null)
     {
-        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant);
+        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider);
+    }
+
+    /// <summary>
+    /// 从跟踪的实体中收集领域事件并清除
+    /// </summary>
+    private static List<IEvent> HarvestDomainEvents(DbContext dbContext)
+    {
+        var events = new List<IEvent>();
+        foreach (var entry in dbContext.ChangeTracker.Entries<IHasDomainEvents>())
+        {
+            var domainEvents = entry.Entity.DomainEvents;
+            if (domainEvents.Count > 0)
+            {
+                events.AddRange(domainEvents);
+                entry.Entity.ClearDomainEvents();
+            }
+        }
+        return events;
+    }
+
+    /// <summary>
+    /// 发布领域事件（事务感知：事务中延迟到提交后发布）
+    /// </summary>
+    private static async Task DispatchDomainEventsAsync(DbContext dbContext, List<IEvent> events, CancellationToken cancellationToken)
+    {
+        var serviceProvider = DbContextServiceResolver.GetServiceProvider(dbContext);
+        if (serviceProvider == null) return;
+
+        var eventBus = serviceProvider.GetService<IEventBus>();
+        if (eventBus == null) return;
+
+        var postCommitQueue = serviceProvider.GetService<IPostCommitActionQueue>();
+        var uowManager = serviceProvider.GetService<IUnitOfWorkManager>();
+
+        foreach (var @event in events)
+        {
+            if (uowManager?.IsEnabledTransaction == true && postCommitQueue != null)
+            {
+                var capturedEvent = @event;
+                postCommitQueue.Enqueue(async ct => await eventBus.PublishAsync(capturedEvent, ct));
+            }
+            else
+            {
+                await eventBus.PublishAsync(@event, cancellationToken);
+            }
+        }
     }
 }

@@ -105,6 +105,56 @@ public abstract class TemplateAdminControllerBase : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 克隆模板
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    public virtual async Task<ApiResult<TemplateDto>> Clone(Guid id, [FromQuery] string newName)
+    {
+        var result = await TemplateStoreService.CloneTemplateAsync(id, newName);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Export templates as JSON
+    /// </summary>
+    [HttpGet("export")]
+    public virtual async Task<ApiResult<string>> Export([FromQuery] string? module = null, [FromQuery] string? category = null)
+    {
+        var result = await TemplateStoreService.ExportTemplatesAsync(module, category);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Import templates from JSON
+    /// </summary>
+    [HttpPost("import")]
+    public virtual async Task<ApiResult<TemplateImportResultDto>> Import([FromBody] TemplateImportRequest request)
+    {
+        var result = await TemplateStoreService.ImportTemplatesAsync(request.Json, request.OverwriteExisting);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Discover template variables (@Model.XXX references)
+    /// </summary>
+    [HttpGet("{id:guid}/variables")]
+    public virtual async Task<ApiResult<TemplateVariablesDto>> GetVariables(Guid id)
+    {
+        var result = await TemplateStoreService.GetTemplateVariablesAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Batch activate or deactivate templates
+    /// </summary>
+    [HttpPost("batch-activate")]
+    public virtual async Task<ApiResult<int>> BatchActivate([FromBody] BatchActivateRequest request)
+    {
+        var result = await TemplateStoreService.BatchActivateAsync(request.Ids, request.IsActive);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 预览模板渲染结果
     /// </summary>
     [HttpPost("preview")]

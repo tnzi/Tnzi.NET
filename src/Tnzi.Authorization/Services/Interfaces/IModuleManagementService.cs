@@ -99,4 +99,16 @@ public interface IModuleManagementService
     /// </summary>
     /// <param name="id">功能ID</param>
     Task<Result> DisableModuleFunctionAsync(Guid id);
+
+    /// <summary>
+    /// 启用模块（同时启用所有子模块及其功能）
+    /// </summary>
+    /// <param name="id">模块ID</param>
+    Task<Result> EnableModuleAsync(Guid id);
+
+    /// <summary>
+    /// 禁用模块（同时禁用所有子模块及其功能）
+    /// </summary>
+    /// <param name="id">模块ID</param>
+    Task<Result> DisableModuleAsync(Guid id);
 }

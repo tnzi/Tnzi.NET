@@ -1,5 +1,4 @@
 
-
 namespace Tnzi.RabbitMQ;
 
 /// <summary>
@@ -38,7 +37,7 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
 
         // 检查 EventBus.Type 是否为 RabbitMQ
         var eventBusOptions = configuration.GetSection("EventBus").Get<EventBusOptions>() ?? new EventBusOptions();
-        
+
         if (!string.Equals(eventBusOptions.Type, "RabbitMQ", StringComparison.OrdinalIgnoreCase))
         {
             // 如果类型不是 RabbitMQ，不注册 RabbitMQ 相关服务
@@ -48,14 +47,14 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
         // 获取连接字符串（优先级：EventBusOptions.RabbitMqConnectionString > ConnectionStrings:RabbitMQ）
         var connectionString = eventBusOptions.RabbitMqConnectionString
             ?? configuration.GetConnectionString("RabbitMQ")
-            ?? throw new InvalidOperationException(
+            ?? throw new RabbitMQConnectionException(
                 "RabbitMQ connection string is required when EventBus.Type is RabbitMQ. " +
                 "Configure EventBus.RabbitMqConnectionString or ConnectionStrings:RabbitMQ in your configuration file.");
 
         // 验证连接字符串格式
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            throw new InvalidOperationException("RabbitMQ connection string cannot be empty.");
+            throw new RabbitMQConnectionException("RabbitMQ connection string cannot be empty.");
         }
 
         try
@@ -65,16 +64,16 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
         }
         catch (UriFormatException ex)
         {
-            throw new InvalidOperationException(
+            throw new RabbitMQConnectionException(
                 "Invalid RabbitMQ connection string format. " +
-                "Connection string must be a valid URI (e.g., amqp://user:pass@localhost:5672/).", ex);
+                "Connection string must be a valid URI (e.g., amqp://user:pass@localhost:5672/).",
+                innerException: ex);
         }
 
         // 获取交换机名称（优先级：EventBusOptions.RabbitMqExchangeName > 默认值）
         var exchangeName = eventBusOptions.RabbitMqExchangeName ?? "Tnzi.Events";
 
         // 注册 RabbitMQ 连接工厂
-        // 注意：connectionString 通过闭包捕获，确保在工厂函数执行时使用正确的值
         services.AddSingleton<IConnectionFactory>(provider =>
         {
             var rabbitMQOptions = provider.GetService<IOptions<RabbitMQOptions>>()?.Value ?? new RabbitMQOptions();
@@ -96,24 +95,25 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
         {
             var factory = provider.GetRequiredService<IConnectionFactory>();
             var logger = provider.GetService<ILogger<RabbitMQEventBusModule>>();
-            
+
             try
             {
-                // 使用 AsyncHelper.RunSync 安全地执行异步操作
-                var connection = AsyncHelper.RunSync(async () => await factory.CreateConnectionAsync().ConfigureAwait(false));
+                var connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
                 logger?.LogInformation("Successfully connected to RabbitMQ at {Endpoint}", SanitizeAmqpUri(factory.Uri));
                 return connection;
             }
             catch (Exception ex)
             {
                 logger?.LogError(ex, "Failed to connect to RabbitMQ at {Endpoint}", SanitizeAmqpUri(factory.Uri));
-                throw;
+                throw new RabbitMQConnectionException(
+                    $"Failed to connect to RabbitMQ at {SanitizeAmqpUri(factory.Uri)}",
+                    SanitizeAmqpUri(factory.Uri),
+                    ex);
             }
         });
 
-        // 注册 RabbitMQ 事件总线（替换本地事件总线）
-        services.RemoveAll<IEventBus>();
-        services.AddSingleton<IEventBus>(provider =>
+        // 注册 RabbitMQEventBus 实例（具名 Singleton）
+        services.AddSingleton<RabbitMQEventBus>(provider =>
         {
             var connection = provider.GetRequiredService<IConnection>();
             var logger = provider.GetRequiredService<ILogger<RabbitMQEventBus>>();
@@ -122,21 +122,40 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
             return new RabbitMQEventBus(connection, logger, provider, rabbitOptions, exchangeName);
         });
 
+        // 注册 IEventBus 和 IIntegrationEventBus 接口，指向同一实例（与 Kafka 模块一致）
+        services.RemoveAll<IEventBus>();
+        services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
+        services.AddSingleton<IIntegrationEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
+
         return Task.CompletedTask;
     }
 
     /// <summary>
     /// 应用关闭时清理资源
     /// </summary>
-    public override Task OnApplicationShutdownAsync(ApplicationShutdownContext context)
+    public override async Task OnApplicationShutdownAsync(ApplicationShutdownContext context)
     {
+        // 优先使用 IAsyncDisposable 优雅关闭 EventBus（等待消费者完成）
+        var eventBus = context.ServiceProvider.GetService<RabbitMQEventBus>();
+        if (eventBus != null)
+        {
+            try
+            {
+                await eventBus.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                var logger = context.ServiceProvider.GetService<ILogger<RabbitMQEventBusModule>>();
+                logger?.LogError(ex, "Error occurred while disposing RabbitMQ event bus");
+            }
+        }
+
+        // 关闭连接
         try
         {
             var connection = context.ServiceProvider.GetService<IConnection>();
             if (connection != null)
             {
-                // RabbitMQ.Client 7.0+ IConnection 实现了 IDisposable 和 IAsyncDisposable
-                // 直接调用 Dispose 即可安全关闭连接
                 connection.Dispose();
             }
         }
@@ -145,8 +164,6 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
             var logger = context.ServiceProvider.GetService<ILogger<RabbitMQEventBusModule>>();
             logger?.LogError(ex, "Error occurred while closing RabbitMQ connection");
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>

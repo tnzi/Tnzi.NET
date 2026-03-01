@@ -1,6 +1,4 @@
 
-using Tnzi.Localization.Json;
-
 using LocalizationOptions = Tnzi.Localization.Options.LocalizationOptions;
 
 namespace Tnzi.Localization;
@@ -15,7 +13,7 @@ public class LocalizationModule : TnziFrameworkModule
     /// <summary>
     /// 在 AspNetCoreModule 之后加载
     /// </summary>
-    public override int LoadOrder => 201;
+    public override int LoadOrder => 10;
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {

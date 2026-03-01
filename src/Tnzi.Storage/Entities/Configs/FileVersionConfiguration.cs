@@ -8,7 +8,6 @@ public class FileVersionConfiguration : EntityTypeConfigurationBase<FileVersion,
     public override void Configure(EntityTypeBuilder<FileVersion> builder)
     {
         builder.ToTable("Version");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.FileId).IsRequired();
         builder.Property(e => e.Version).IsRequired();

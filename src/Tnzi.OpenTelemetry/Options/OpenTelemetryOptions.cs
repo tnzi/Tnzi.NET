@@ -83,4 +83,26 @@ public class OpenTelemetryOptions
     /// 默认值：false
     /// </summary>
     public bool ExportToConsole { get; set; } = false;
+
+    /// <summary>
+    /// Whether to auto-subscribe to framework ActivitySource/Meter instances (Tnzi.*)
+    /// This enables tracing and metrics from AI, RAG, Performance, and other framework modules
+    /// Default: true
+    /// </summary>
+    /// <remarks>
+    /// Known framework sources: Tnzi.AI, Tnzi.AI.Rag, Tnzi.Framework
+    /// </remarks>
+    public bool InstrumentFramework { get; set; } = true;
+
+    /// <summary>
+    /// Additional ActivitySource names to subscribe for tracing
+    /// Use this to include custom application-level ActivitySources
+    /// </summary>
+    public List<string> AdditionalActivitySources { get; set; } = new();
+
+    /// <summary>
+    /// Additional Meter names to subscribe for metrics
+    /// Use this to include custom application-level Meters
+    /// </summary>
+    public List<string> AdditionalMeters { get; set; } = new();
 }

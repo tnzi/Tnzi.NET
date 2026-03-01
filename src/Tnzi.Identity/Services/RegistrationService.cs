@@ -471,7 +471,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
         var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
 
         // 将令牌编码为 URL 安全的 Base64
-        var encodedToken = WebEncoders.Base64UrlEncode(System.Text.Encoding.UTF8.GetBytes(token));
+        var encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
 
         return Result<string>.Success(encodedToken);
     }
@@ -494,7 +494,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
         string decodedToken;
         try
         {
-            decodedToken = System.Text.Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(token));
+            decodedToken = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(token));
         }
         catch
         {

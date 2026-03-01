@@ -53,6 +53,26 @@ internal static class EntityRegistrationHelper
 
         // 3. 应用批量配置（如 TableNamePrefix）
         ApplyBatchConfigurations(dbContext, modelBuilder);
+
+        // 4. 自动配置 IConcurrencyStamp 并发控制
+        ApplyConcurrencyStampConfiguration(modelBuilder);
+    }
+
+    /// <summary>
+    /// 为实现 IConcurrencyStamp 的实体自动配置乐观并发控制
+    /// </summary>
+    private static void ApplyConcurrencyStampConfiguration(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (typeof(IConcurrencyStamp).IsAssignableFrom(entityType.ClrType))
+            {
+                modelBuilder.Entity(entityType.ClrType)
+                    .Property(nameof(IConcurrencyStamp.ConcurrencyStamp))
+                    .IsConcurrencyToken()
+                    .HasMaxLength(32); // Guid.NewGuid().ToString("N") = 32 chars
+            }
+        }
     }
 
     #endregion

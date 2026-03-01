@@ -7,8 +7,6 @@ public class MessageRecipientConfiguration : EntityTypeConfigurationBase<Message
 {
     public override void Configure(EntityTypeBuilder<MessageRecipient> builder)
     {
-        builder.HasKey(mr => mr.Id);
-
         builder.HasIndex(mr => new { mr.MessageId, mr.UserId }).IsUnique();
         builder.HasIndex(mr => mr.UserId);
 

@@ -121,4 +121,20 @@ public abstract class LoginLogAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// Get daily login trend data for the specified date range
+    /// </summary>
+    /// <param name="startDate">Start date (inclusive)</param>
+    /// <param name="endDate">End date (inclusive)</param>
+    /// <param name="userId">Optional: filter by specific user</param>
+    /// <returns>Daily login trend data points</returns>
+    [HttpGet("trend")]
+    public virtual async Task<ApiResult<IEnumerable<LoginTrendItem>>> GetLoginTrend(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] Guid? userId = null)
+    {
+        var result = await LoginLogService.GetLoginTrendAsync(startDate, endDate, userId);
+        return result.ToApiResult();
+    }
 }

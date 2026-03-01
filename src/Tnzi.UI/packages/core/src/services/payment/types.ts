@@ -86,6 +86,18 @@ export interface CreatePaymentDto {
 }
 
 /**
+ * Payment order creation result
+ */
+export interface PaymentOrderResultDto {
+  tradeNo: string;
+  payParams?: string | null;
+  payUrl?: string | null;
+  expireTime?: Date | string | null;
+  amount: number;
+  currency: string;
+}
+
+/**
  * Payment list query
  */
 export interface PaymentQueryDto extends SortedPagedQueryDto {

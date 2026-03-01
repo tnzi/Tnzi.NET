@@ -19,8 +19,15 @@ export default defineConfig({
         "adapters/index": "src/adapters/index.ts",
         "adapters/i18n/index": "src/adapters/i18n/index.ts",
         "adapters/icons/index": "src/adapters/icons/index.ts",
+        "adapters/storage/index": "src/adapters/storage.ts",
         "adapters/theme/index": "src/adapters/theme/index.ts",
         "adapters/router/index": "src/adapters/router/index.ts",
+
+        // Store 类型定义
+        "stores/index": "src/stores/index.ts",
+        "stores/auth/index": "src/stores/auth/index.ts",
+        "stores/user/index": "src/stores/user/index.ts",
+        "stores/app/index": "src/stores/app/index.ts",
 
         // 状态管理逻辑层 ( 新增)
         "state/index": "src/state/index.ts",

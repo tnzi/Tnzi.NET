@@ -117,13 +117,13 @@ const handleRefreshCaptcha = () => props.onRefreshCaptcha?.();
       </div>
 
       <div v-if="props.showCaptcha" class="space-y-2">
-        <Label>{{ props.captchaLabel || '验证码' }}</Label>
+        <Label>{{ props.captchaLabel || t('auth.verificationCode') }}</Label>
         <div class="flex gap-2">
           <Input
             v-model="captchaCode"
             type="text"
             class="min-w-0 flex-1"
-            :placeholder="props.captchaPlaceholder || '请输入验证码'"
+            :placeholder="props.captchaPlaceholder || t('auth.enterVerificationCode')"
             :disabled="isDisabled"
           />
           <img

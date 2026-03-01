@@ -87,6 +87,91 @@ public class AuditOperationStatistics
 }
 
 /// <summary>
+/// 审计趋势分组类型
+/// </summary>
+public enum AuditTrendGroupBy
+{
+    /// <summary>按天分组</summary>
+    Daily,
+    /// <summary>按周分组</summary>
+    Weekly,
+    /// <summary>按月分组</summary>
+    Monthly
+}
+
+/// <summary>
+/// 审计趋势数据点
+/// </summary>
+public class AuditTrendPointDto
+{
+    /// <summary>时间段标识（如 "2026-02-28", "2026-W09", "2026-02"）</summary>
+    public string Period { get; set; } = string.Empty;
+
+    /// <summary>总操作数</summary>
+    public int TotalCount { get; set; }
+
+    /// <summary>成功操作数</summary>
+    public int SuccessCount { get; set; }
+
+    /// <summary>失败操作数</summary>
+    public int FailedCount { get; set; }
+
+    /// <summary>警告操作数</summary>
+    public int WarningCount { get; set; }
+
+    /// <summary>平均耗时（毫秒）</summary>
+    public double AverageElapsed { get; set; }
+}
+
+/// <summary>
+/// Top 功能统计 DTO
+/// </summary>
+public class TopFunctionDto
+{
+    /// <summary>功能名称</summary>
+    public string FunctionName { get; set; } = string.Empty;
+
+    /// <summary>调用次数</summary>
+    public int HitCount { get; set; }
+
+    /// <summary>平均耗时（毫秒）</summary>
+    public double AverageElapsed { get; set; }
+
+    /// <summary>最大耗时（毫秒）</summary>
+    public long MaxElapsed { get; set; }
+
+    /// <summary>错误次数</summary>
+    public int ErrorCount { get; set; }
+
+    /// <summary>错误率（0-1）</summary>
+    public double ErrorRate { get; set; }
+}
+
+/// <summary>
+/// Top 用户统计 DTO
+/// </summary>
+public class TopUserDto
+{
+    /// <summary>用户ID</summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>用户名</summary>
+    public string? UserName { get; set; }
+
+    /// <summary>操作次数</summary>
+    public int OperationCount { get; set; }
+
+    /// <summary>成功次数</summary>
+    public int SuccessCount { get; set; }
+
+    /// <summary>失败次数</summary>
+    public int FailedCount { get; set; }
+
+    /// <summary>成功率（0-1）</summary>
+    public double SuccessRate { get; set; }
+}
+
+/// <summary>
 /// 审计操作 DTO
 /// </summary>
 public class AuditOperationDto

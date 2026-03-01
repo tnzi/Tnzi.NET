@@ -33,7 +33,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpGet("{id:guid}")]
     public virtual async Task<ApiResult<SubscriptionDto>> Get(Guid id)
     {
-        var result = await _subscriptionService.GetSubscriptionAsync(id);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.GetSubscriptionAsync(id, userId);
         return result.ToApiResult();
     }
 
@@ -54,7 +55,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpGet]
     public virtual async Task<ApiResult<IPagedList<SubscriptionDto>>> GetList([FromQuery] SubscriptionQueryDto query)
     {
-        var result = await _subscriptionService.GetSubscriptionListAsync(query);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.GetSubscriptionListAsync(query, userId);
         return result.ToApiResult();
     }
 
@@ -64,7 +66,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpPost("{id:guid}/cancel")]
     public virtual async Task<ApiResult> Cancel(Guid id, [FromBody] CancelSubscriptionDto request)
     {
-        var result = await _subscriptionService.CancelSubscriptionAsync(id, request);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.CancelSubscriptionAsync(id, request, userId);
         return result.ToApiResult();
     }
 
@@ -74,7 +77,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpPost("{id:guid}/resume")]
     public virtual async Task<ApiResult> Resume(Guid id)
     {
-        var result = await _subscriptionService.ResumeSubscriptionAsync(id);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.ResumeSubscriptionAsync(id, userId);
         return result.ToApiResult();
     }
 
@@ -84,7 +88,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpPost("{id:guid}/change-plan")]
     public virtual async Task<ApiResult<SubscriptionDto>> ChangePlan(Guid id, [FromBody] ChangeSubscriptionDto request)
     {
-        var result = await _subscriptionService.ChangePlanAsync(id, request);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.ChangePlanAsync(id, request, userId);
         return result.ToApiResult();
     }
 
@@ -94,7 +99,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpPost("{id:guid}/payment-method")]
     public virtual async Task<ApiResult> UpdatePaymentMethod(Guid id, [FromBody] UpdatePaymentMethodDto request)
     {
-        var result = await _subscriptionService.UpdatePaymentMethodAsync(id, request.PaymentMethodId);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.UpdatePaymentMethodAsync(id, request.PaymentMethodId, userId);
         return result.ToApiResult();
     }
 
@@ -104,7 +110,8 @@ public abstract class SubscriptionControllerBase : ApiControllerBase
     [HttpPost("{id:guid}/auto-renew")]
     public virtual async Task<ApiResult> UpdateAutoRenew(Guid id, [FromBody] UpdateAutoRenewDto request)
     {
-        var result = await _subscriptionService.UpdateAutoRenewAsync(id, request.AutoRenew);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.UpdateAutoRenewAsync(id, request.AutoRenew, userId);
         return result.ToApiResult();
     }
 

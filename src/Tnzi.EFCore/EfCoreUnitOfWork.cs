@@ -11,7 +11,7 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
     private readonly ILogger<EFCoreUnitOfWork<TDbContext>>? _logger;
     private readonly IPerformanceMonitorService? _monitor;
     private IDbContextTransaction? _transaction;
-    private readonly Stack<string> _transactionStack = new();
+    private int _transactionDepth;
     private readonly SemaphoreSlim _transactionSemaphore = new(1, 1);
     private bool _hasCommitted;
 
@@ -26,14 +26,14 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
     }
 
     /// <summary>
-    /// 获取是否已启用事务（存在活跃事务或事务栈非空）
+    /// 获取是否已启用事务（存在活跃事务或事务深度 > 0）
     /// </summary>
-    public bool IsEnabledTransaction => _transaction != null || _transactionStack.Count > 0;
+    public bool IsEnabledTransaction => _transaction != null || Volatile.Read(ref _transactionDepth) > 0;
 
     /// <summary>
     /// 获取事务嵌套深度
     /// </summary>
-    public int TransactionDepth => _transactionStack.Count;
+    public int TransactionDepth => Volatile.Read(ref _transactionDepth);
 
     /// <summary>
     /// 启用事务（标记需要事务，但不立即开始，支持嵌套）
@@ -41,7 +41,7 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
     /// </summary>
     public void EnableTransaction()
     {
-        _transactionStack.Push("tx");
+        Interlocked.Increment(ref _transactionDepth);
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -73,12 +73,12 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
         await _transactionSemaphore.WaitAsync(cancellationToken);
         try
         {
-            // 如果已启用事务，说明是嵌套调用，只增加栈深度（在 EnableTransaction 中已处理）
+            // 如果已启用事务，说明是嵌套调用，只增加深度（在 EnableTransaction 中已处理）
             // 这里只处理真正开始数据库事务的情况
             if (_transaction != null)
             {
-                // 如果事务栈深度 > 1，说明是嵌套调用，不需要重新开始事务
-                if (_transactionStack.Count > 1)
+                // 如果事务深度 > 1，说明是嵌套调用，不需要重新开始事务
+                if (Volatile.Read(ref _transactionDepth) > 1)
                 {
                     return;
                 }
@@ -103,27 +103,21 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
             return;
         }
 
-        if (_transactionStack.Count == 0)
+        var currentDepth = Volatile.Read(ref _transactionDepth);
+        if (currentDepth == 0)
         {
             throw new InvalidOperationException("Transaction is not enabled. Call EnableTransaction() before committing.");
         }
 
-        string token;
-
-        // 如果事务栈深度 > 1，说明是嵌套调用，只弹出栈，不真正提交
-        if (_transactionStack.Count > 1)
+        // 如果事务深度 > 1，说明是嵌套调用，只减少深度，不真正提交
+        if (currentDepth > 1)
         {
-            token = _transactionStack.Pop();
+            Interlocked.Decrement(ref _transactionDepth);
             return;
         }
 
-        if (!IsEnabledTransaction)
-        {
-            throw new InvalidOperationException("Transaction is not enabled. Call EnableTransaction() before committing.");
-        }
-
-        // 弹出 token（统一在这里弹出，确保所有返回点都能正确清理栈）
-        token = _transactionStack.Pop();
+        // 减少深度到 0（最外层提交）
+        Interlocked.Decrement(ref _transactionDepth);
 
         try
         {
@@ -165,11 +159,8 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
             return;
         }
 
-        // 清空事务栈（回滚所有嵌套事务）
-        while (_transactionStack.Count > 0)
-        {
-            _transactionStack.Pop();
-        }
+        // 重置事务深度（回滚所有嵌套事务）
+        Interlocked.Exchange(ref _transactionDepth, 0);
 
         if (_transaction == null)
         {
@@ -212,7 +203,7 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
         {
             _transaction?.Dispose();
             _transaction = null;
-            _transactionStack.Clear();
+            Interlocked.Exchange(ref _transactionDepth, 0);
             _transactionSemaphore.Dispose();
         }
 
@@ -235,7 +226,7 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
             await _transaction.DisposeAsync();
             _transaction = null;
         }
-        _transactionStack.Clear();
+        Interlocked.Exchange(ref _transactionDepth, 0);
         _transactionSemaphore.Dispose();
         _disposed = true;
     }

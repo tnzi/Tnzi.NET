@@ -72,7 +72,8 @@ public class CreateOrganizationDto
     /// <summary>
     /// 获取或设置 组织名称
     /// </summary>
-    public string Name { get; set; } = string.Empty;
+    [Required]
+    public string Name { get; set; } = null!;
 
     /// <summary>
     /// 获取或设置 组织代码
@@ -103,7 +104,8 @@ public class UpdateOrganizationDto
     /// <summary>
     /// 获取或设置 组织名称
     /// </summary>
-    public string Name { get; set; } = string.Empty;
+    [Required]
+    public string Name { get; set; } = null!;
 
     /// <summary>
     /// 获取或设置 组织代码
@@ -141,6 +143,33 @@ public class UpdateOrganizationBatchDto
 {
     public Guid Id { get; set; }
     public UpdateOrganizationDto Dto { get; set; } = null!;
+}
+
+/// <summary>
+/// 更新排序值DTO
+/// </summary>
+public class UpdateSortOrderDto
+{
+    /// <summary>
+    /// 新的排序值
+    /// </summary>
+    public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// 批量排序更新项DTO
+/// </summary>
+public class BatchSortOrderItemDto
+{
+    /// <summary>
+    /// 组织ID
+    /// </summary>
+    public Guid Id { get; set; }
+
+    /// <summary>
+    /// 新的排序值
+    /// </summary>
+    public int SortOrder { get; set; }
 }
 
 /// <summary>

@@ -8,6 +8,7 @@ namespace Tnzi.SignalR;
 /// 配置路径：SignalR
 /// </summary>
 [DependsOn(typeof(AspNetCoreModule))]
+[DependsOn(typeof(CachingModule))]
 public class SignalRModule : TnziFrameworkModule
 {
     /// <summary>

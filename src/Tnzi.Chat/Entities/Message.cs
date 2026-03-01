@@ -62,6 +62,11 @@ public class Message : FullAuditedEntity<Guid>
     public DateTime? EndDate { get; set; }
 
     /// <summary>
+    /// Whether this message is marked as important/priority
+    /// </summary>
+    public bool IsImportant { get; set; }
+
+    /// <summary>
     /// 获取或设置 接收记录集合
     /// </summary>
     public virtual ICollection<MessageReceive> Receives { get; set; } = new List<MessageReceive>();

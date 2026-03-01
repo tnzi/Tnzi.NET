@@ -7,9 +7,6 @@ public class ModuleUserConfiguration : EntityTypeConfigurationBase<ModuleUser, G
 {
     public override void Configure(EntityTypeBuilder<ModuleUser> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(e => e.Id);
-
         // 配置与FunctionModule的关系
         builder.HasOne(e => e.FunctionModule)
             .WithMany()

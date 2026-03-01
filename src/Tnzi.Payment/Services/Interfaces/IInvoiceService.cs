@@ -18,7 +18,7 @@ public interface IInvoiceService
     /// <summary>
     /// 发送发票
     /// </summary>
-    Task<Result> SendAsync(Guid invoiceId, string? recipientEmail = null, CancellationToken cancellationToken = default);
+    Task<Result> SendAsync(Guid invoiceId, string? recipientEmail = null, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 生成PDF
@@ -28,7 +28,7 @@ public interface IInvoiceService
     /// <summary>
     /// 获取PDF URL
     /// </summary>
-    Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, CancellationToken cancellationToken = default);
+    Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 标记为已支付
@@ -43,12 +43,12 @@ public interface IInvoiceService
     /// <summary>
     /// 获取发票信息
     /// </summary>
-    Task<Result<InvoiceDto>> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Result<InvoiceDto>> GetAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取发票列表
     /// </summary>
-    Task<Result<IPagedList<InvoiceDto>>> GetListAsync(InvoiceQueryDto query, CancellationToken cancellationToken = default);
+    Task<Result<IPagedList<InvoiceDto>>> GetListAsync(InvoiceQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取用户发票列表

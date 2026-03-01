@@ -21,8 +21,10 @@ import { createStore } from '../factory';
 // ============================================
 
 const generateId = (): string => {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 };
+
+let _fullscreenListenerActive = false;
 
 // ============================================
 // Default State
@@ -150,6 +152,20 @@ export const useAppStore = createStore<AppState>({
       } else {
         document.exitFullscreen?.();
       }
+      // Note: ui.fullscreen is updated by the fullscreenchange event listener (see _initFullscreenListener)
+    },
+
+    /**
+     * Initialize fullscreenchange event listener to sync state with browser.
+     * Called automatically from useApp(). Idempotent — safe to call multiple times.
+     */
+    _initFullscreenListener(): void {
+      if (_fullscreenListenerActive || typeof document === 'undefined') return;
+      _fullscreenListenerActive = true;
+      const store = this;
+      document.addEventListener('fullscreenchange', () => {
+        store.$state.ui.fullscreen = !!document.fullscreenElement;
+      });
     },
 
     // Loading actions
@@ -364,6 +380,8 @@ export const useAppStore = createStore<AppState>({
  */
 export function useApp() {
   const store = useAppStore();
+  // Sync fullscreen state with browser (handles ESC key, etc.)
+  (store as unknown as { _initFullscreenListener: () => void })._initFullscreenListener();
 
   return {
     // State (typed via FlatStoreInstance<AppState>)

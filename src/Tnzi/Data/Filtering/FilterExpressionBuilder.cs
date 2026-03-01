@@ -55,6 +55,100 @@ public static class FilterExpressionBuilder
         return Expression.Lambda<Func<T, bool>>(body, param);
     }
 
+    // Cache for FilterProperty metadata per DTO type
+    private static readonly ConcurrentDictionary<Type, FilterPropertyMetadata[]> _dtoMetadataCache = new();
+
+    /// <summary>
+    /// Build a filter expression from a DTO instance decorated with [FilterProperty] attributes.
+    /// Null or default-valued properties are automatically skipped.
+    /// </summary>
+    public static Expression<Func<TEntity, bool>> BuildFromDto<TEntity, TDto>(TDto dto, LogicalOperator logic = LogicalOperator.And)
+        where TDto : class
+    {
+        Check.NotNull(dto);
+
+        var metadata = GetFilterPropertyMetadata(typeof(TDto));
+        if (metadata.Length == 0)
+        {
+            var param = Expression.Parameter(typeof(TEntity), "e");
+            return Expression.Lambda<Func<TEntity, bool>>(Expression.Constant(true), param);
+        }
+
+        var group = new FilterGroup { Logic = logic };
+
+        foreach (var meta in metadata)
+        {
+            var value = meta.PropertyInfo.GetValue(dto);
+            if (value == null) continue;
+            if (IsDefaultValue(value, meta.PropertyInfo.PropertyType)) continue;
+            if (value is string str && string.IsNullOrWhiteSpace(str)) continue;
+
+            var entityField = meta.EntityProperty ?? meta.PropertyInfo.Name;
+            group.AddRule(entityField, meta.Operator, value);
+        }
+
+        return Build<TEntity>(group);
+    }
+
+    /// <summary>
+    /// Build a FilterGroup from a DTO instance decorated with [FilterProperty] attributes.
+    /// Useful when you need to further customize the filter before building the expression.
+    /// </summary>
+    public static FilterGroup BuildGroupFromDto<TDto>(TDto dto, LogicalOperator logic = LogicalOperator.And)
+        where TDto : class
+    {
+        Check.NotNull(dto);
+
+        var metadata = GetFilterPropertyMetadata(typeof(TDto));
+        var group = new FilterGroup { Logic = logic };
+
+        foreach (var meta in metadata)
+        {
+            var value = meta.PropertyInfo.GetValue(dto);
+            if (value == null) continue;
+            if (IsDefaultValue(value, meta.PropertyInfo.PropertyType)) continue;
+            if (value is string str && string.IsNullOrWhiteSpace(str)) continue;
+
+            var entityField = meta.EntityProperty ?? meta.PropertyInfo.Name;
+            group.AddRule(entityField, meta.Operator, value);
+        }
+
+        return group;
+    }
+
+    private static FilterPropertyMetadata[] GetFilterPropertyMetadata(Type dtoType)
+    {
+        return _dtoMetadataCache.GetOrAdd(dtoType, type =>
+        {
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var result = new List<FilterPropertyMetadata>();
+
+            foreach (var prop in properties)
+            {
+                var attr = prop.GetCustomAttribute<FilterPropertyAttribute>();
+                if (attr == null) continue;
+
+                result.Add(new FilterPropertyMetadata(prop, attr.EntityProperty, attr.Operator, attr.Logic));
+            }
+
+            return result.ToArray();
+        });
+    }
+
+    private static bool IsDefaultValue(object value, Type propertyType)
+    {
+        var underlyingType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (!underlyingType.IsValueType) return false;
+        var defaultValue = Activator.CreateInstance(underlyingType);
+        return value.Equals(defaultValue);
+    }
+
+    private sealed record FilterPropertyMetadata(
+        PropertyInfo PropertyInfo,
+        string? EntityProperty,
+        FilterOperator Operator,
+        LogicalOperator Logic);
+
     /// <summary>
     /// 验证 FilterGroup 是否能正常转换为表达式
     /// </summary>

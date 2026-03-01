@@ -71,19 +71,29 @@ public abstract class LayoutAdminControllerBase : ApiAdminControllerBase
     /// 根据名称、模块和分类获取布局
     /// </summary>
     [HttpGet("name/{layoutName}")]
-    public virtual async Task<ApiResult<Layout>> GetLayout(string layoutName, [FromQuery] string module, [FromQuery] string? category = null)
+    public virtual async Task<ApiResult<LayoutDto>> GetLayout(string layoutName, [FromQuery] string module, [FromQuery] string? category = null)
     {
         var result = await LayoutStoreService.GetLayoutAsync(layoutName, module, category);
-        return result.ToApiResult();
+        return result.Map(e => e.MapTo<LayoutDto>()).ToApiResult();
     }
 
     /// <summary>
     /// 获取默认布局
     /// </summary>
     [HttpGet("default")]
-    public virtual async Task<ApiResult<Layout>> GetDefaultLayout([FromQuery] string module, [FromQuery] string category)
+    public virtual async Task<ApiResult<LayoutDto>> GetDefaultLayout([FromQuery] string module, [FromQuery] string category)
     {
         var result = await LayoutStoreService.GetDefaultLayoutAsync(module, category);
+        return result.Map(e => e.MapTo<LayoutDto>()).ToApiResult();
+    }
+
+    /// <summary>
+    /// 克隆布局
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    public virtual async Task<ApiResult<LayoutDto>> Clone(Guid id, [FromQuery] string newName)
+    {
+        var result = await LayoutStoreService.CloneLayoutAsync(id, newName);
         return result.ToApiResult();
     }
 
@@ -94,6 +104,36 @@ public abstract class LayoutAdminControllerBase : ApiAdminControllerBase
     public virtual async Task<ApiResult<IPagedList<LayoutInfoDto>>> GetAllLayouts([FromQuery] QueryLayoutRequest request)
     {
         var result = await LayoutStoreService.QueryLayoutsAsync(request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Export layouts as JSON
+    /// </summary>
+    [HttpGet("export")]
+    public virtual async Task<ApiResult<string>> Export([FromQuery] string? module = null, [FromQuery] string? category = null)
+    {
+        var result = await LayoutStoreService.ExportLayoutsAsync(module, category);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Import layouts from JSON
+    /// </summary>
+    [HttpPost("import")]
+    public virtual async Task<ApiResult<LayoutImportResultDto>> Import([FromBody] LayoutImportRequest request)
+    {
+        var result = await LayoutStoreService.ImportLayoutsAsync(request.Json, request.OverwriteExisting);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Batch activate or deactivate layouts
+    /// </summary>
+    [HttpPost("batch-activate")]
+    public virtual async Task<ApiResult<int>> BatchActivate([FromBody] BatchActivateRequest request)
+    {
+        var result = await LayoutStoreService.BatchActivateAsync(request.Ids, request.IsActive);
         return result.ToApiResult();
     }
 }

@@ -114,8 +114,9 @@ export class PaginationController {
   /** Update totalCount from API response */
   updateFromResponse(totalCount: number): void {
     this.totalCount = totalCount;
-    // Adjust to last page if current page is out of range
-    if (this.totalPages > 0 && this.pageIndex > this.totalPages) {
+    if (this.totalPages === 0) {
+      this.pageIndex = 1;
+    } else if (this.pageIndex > this.totalPages) {
       this.pageIndex = this.totalPages;
     }
   }

@@ -13,8 +13,10 @@ public abstract class ApplicationService : IApplicationService
     private readonly Lazy<IPermissionChecker?> _permissionChecker;
     private readonly Lazy<IUnitOfWorkManager?> _unitOfWorkManager;
     private readonly Lazy<IEventBus?> _eventBus;
+    private readonly Lazy<IEventStore?> _eventStore;
     private readonly Lazy<IScopedContext?> _scopedContext;
     private readonly Lazy<IPostCommitActionQueue?> _postCommitActionQueue;
+    private readonly Lazy<TimeProvider> _timeProvider;
     private readonly Lazy<ILogger> _logger;
 
     /// <summary>
@@ -36,8 +38,10 @@ public abstract class ApplicationService : IApplicationService
         _permissionChecker = new Lazy<IPermissionChecker?>(() => ServiceProvider?.GetService<IPermissionChecker>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _unitOfWorkManager = new Lazy<IUnitOfWorkManager?>(() => ServiceProvider?.GetService<IUnitOfWorkManager>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _eventBus = new Lazy<IEventBus?>(() => ServiceProvider?.GetService<IEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _eventStore = new Lazy<IEventStore?>(() => ServiceProvider?.GetService<IEventStore>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _scopedContext = new Lazy<IScopedContext?>(() => ServiceProvider?.GetService<IScopedContext>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _postCommitActionQueue = new Lazy<IPostCommitActionQueue?>(() => ServiceProvider?.GetService<IPostCommitActionQueue>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _timeProvider = new Lazy<TimeProvider>(() => serviceProvider.GetRequiredService<TimeProvider>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _logger = new Lazy<ILogger>(() =>
         {
             if (ServiceProvider == null)
@@ -104,12 +108,26 @@ public abstract class ApplicationService : IApplicationService
     }
 
     /// <summary>
-    /// 发布事件（事务感知）
-    /// 在事务中时延迟到提交后发布，不在事务中时立即发布
-    /// 推荐在 ExecuteInUnitOfWorkAsync 内部使用此方法替代直接调用 EventBus.PublishAsync
+    /// 事件存储（延迟加载，线程安全）
+    /// 当 Outbox 模式启用时可用，用于将集成事件持久化到 Outbox 表
+    /// </summary>
+    protected IEventStore? EventStore => _eventStore.Value;
+
+    /// <summary>
+    /// 发布事件（事务感知，支持 Outbox 模式）
+    /// 对于 IIntegrationEvent：优先通过 IEventStore 写入 Outbox，由后台服务可靠投递
+    /// 对于其他事件：在事务中时延迟到提交后发布，不在事务中时立即发布
     /// </summary>
     protected async Task PublishEventAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default) where TEvent : class, IEvent
     {
+        // 对 IIntegrationEvent 优先写入 Outbox，确保事务一致性
+        if (@event is IIntegrationEvent && EventStore != null)
+        {
+            var eventType = @event.GetType().AssemblyQualifiedName ?? @event.GetType().FullName ?? @event.GetType().Name;
+            await EventStore.SaveEventAsync(@event, eventType, cancellationToken);
+            return;
+        }
+
         var eventBus = EventBus;
         if (eventBus == null) return;
 
@@ -140,6 +158,12 @@ public abstract class ApplicationService : IApplicationService
     /// 事务提交后操作队列（延迟加载，线程安全）
     /// </summary>
     protected IPostCommitActionQueue? PostCommitActionQueue => _postCommitActionQueue.Value;
+
+    /// <summary>
+    /// 时间提供者（延迟加载，线程安全）
+    /// 用于获取可测试的时间戳，替代 DateTime.UtcNow
+    /// </summary>
+    protected TimeProvider TimeProvider => _timeProvider.Value;
 
     /// <summary>
     /// 日志记录器（延迟加载，线程安全）

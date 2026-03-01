@@ -62,4 +62,14 @@ public interface ILoginLogService
     /// <param name="days">保留天数</param>
     /// <returns>删除的记录数</returns>
     Task<Result<int>> DeleteExpiredLogsAsync(int days = 90);
+
+    /// <summary>
+    /// Get daily login trend data for the specified date range.
+    /// Provides day-by-day breakdown of login activity for charts and dashboards.
+    /// </summary>
+    /// <param name="startDate">Start date (inclusive)</param>
+    /// <param name="endDate">End date (inclusive)</param>
+    /// <param name="userId">Optional: filter by specific user</param>
+    /// <returns>List of daily login trend data points</returns>
+    Task<Result<IEnumerable<LoginTrendItem>>> GetLoginTrendAsync(DateTime startDate, DateTime endDate, Guid? userId = null);
 }

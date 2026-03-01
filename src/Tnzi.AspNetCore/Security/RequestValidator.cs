@@ -19,9 +19,9 @@ public class RequestValidator : IRequestValidator
         ICache cache,
         ILogger<RequestValidator> logger)
     {
-        _options = aspNetCoreOptions.Value.RequestValidation ?? new RequestValidationOptions();
-        _cache = cache;
-        _logger = logger;
+        _options = Check.NotNull(aspNetCoreOptions).Value.RequestValidation ?? new RequestValidationOptions();
+        _cache = Check.NotNull(cache);
+        _logger = Check.NotNull(logger);
     }
 
     /// <summary>
@@ -153,28 +153,35 @@ public class RequestValidator : IRequestValidator
 
         // 读取请求体（如果存在且需要）
         // 注意：只读取小于 1MB 的请求体，避免性能问题
+        // 对于 chunked 传输（ContentLength 为 null），也需要读取 body 以确保签名完整性
         string body = string.Empty;
-        var contentLength = context.Request.ContentLength ?? 0;
+        var contentLength = context.Request.ContentLength;
         const long maxBodySize = 1024 * 1024; // 1MB
-        
-        if (contentLength > 0 && contentLength <= maxBodySize)
-        {
-            // 启用缓冲以便可以多次读取
-            context.Request.EnableBuffering();
-            
-            if (context.Request.Body.CanSeek)
-            {
-                var originalPosition = context.Request.Body.Position;
-                context.Request.Body.Position = 0;
-                using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-                body = await reader.ReadToEndAsync();
-                context.Request.Body.Position = originalPosition;
-            }
-        }
-        else if (contentLength > maxBodySize)
+
+        if (contentLength > maxBodySize)
         {
             _logger.LogWarning("Request body too large for signature validation: {Size} bytes", contentLength);
             return "Request body too large for signature validation";
+        }
+
+        // ContentLength > 0 或 ContentLength 为 null（chunked 传输）时读取 body
+        if (contentLength is null or > 0)
+        {
+            // 启用缓冲以便可以多次读取
+            context.Request.EnableBuffering();
+
+            var originalPosition = context.Request.Body.Position;
+            context.Request.Body.Position = 0;
+            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+            body = await reader.ReadToEndAsync();
+            context.Request.Body.Position = originalPosition;
+
+            // 对 chunked 请求进行大小检查（读取后才知道实际大小）
+            if (Encoding.UTF8.GetByteCount(body) > maxBodySize)
+            {
+                _logger.LogWarning("Request body too large for signature validation (chunked): {Size} bytes", body.Length);
+                return "Request body too large for signature validation";
+            }
         }
 
         // 构建签名字符串：timestamp + nonce + method + path + queryString + body
@@ -230,18 +237,12 @@ public class RequestValidator : IRequestValidator
 
     /// <summary>
     /// 时间安全的字符串比较（防止时序攻击）
+    /// 使用 CryptographicOperations.FixedTimeEquals 确保常数时间比较
     /// </summary>
     private static bool TimeSafeCompare(string a, string b)
     {
-        if (a.Length != b.Length)
-            return false;
-
-        var result = 0;
-        for (var i = 0; i < a.Length; i++)
-        {
-            result |= a[i] ^ b[i];
-        }
-
-        return result == 0;
+        var aBytes = Encoding.UTF8.GetBytes(a);
+        var bBytes = Encoding.UTF8.GetBytes(b);
+        return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
     }
 }

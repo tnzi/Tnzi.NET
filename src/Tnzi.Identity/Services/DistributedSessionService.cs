@@ -270,6 +270,77 @@ public class DistributedSessionService : ApplicationService, ISessionService
         return Ok();
     }
 
+    /// <inheritdoc />
+    public async Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold)
+    {
+        // Redis 会话使用 TTL 自动过期，无法高效遍历所有会话
+        // 如果启用了数据库审计日志，清理数据库中的过期记录
+        if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
+        {
+            var cutoffTime = DateTime.UtcNow - inactiveThreshold;
+
+            var expiredSessions = await _repository
+                .Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime)
+                .ToListAsync();
+
+            if (!expiredSessions.Any())
+            {
+                return Ok(0);
+            }
+
+            foreach (var session in expiredSessions)
+            {
+                session.IsRevoked = true;
+                session.RevokedAt = DateTime.UtcNow;
+            }
+
+            await _repository.UpdateManyAsync(expiredSessions);
+
+            LogInformation("Cleaned {Count} expired sessions from database (inactive since {CutoffTime})", expiredSessions.Count, cutoffTime);
+            return Ok(expiredSessions.Count);
+        }
+
+        // Redis 模式下没有数据库审计日志，会话由 Redis TTL 自动清理
+        LogInformation("Redis sessions are automatically cleaned by TTL expiration. No manual cleanup needed.");
+        return Ok(0);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<SessionStatisticsDto>> GetSessionStatisticsAsync()
+    {
+        // Redis 无法高效遍历所有会话，降级到数据库查询
+        if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
+        {
+            var activeSessions = _repository.Where(us => !us.IsRevoked);
+
+            var activeSessionCount = await activeSessions.CountAsync();
+            var onlineUserCount = await activeSessions.Select(us => us.UserId).Distinct().CountAsync();
+
+            var topDevices = await activeSessions
+                .Where(us => us.DeviceInfo != null && us.DeviceInfo != string.Empty)
+                .GroupBy(us => us.DeviceInfo!)
+                .Select(g => new DeviceStatItem
+                {
+                    DeviceInfo = g.Key,
+                    Count = g.Count()
+                })
+                .OrderByDescending(d => d.Count)
+                .Take(5)
+                .ToListAsync();
+
+            return Ok(new SessionStatisticsDto
+            {
+                ActiveSessionCount = activeSessionCount,
+                OnlineUserCount = onlineUserCount,
+                TopDevices = topDevices
+            });
+        }
+
+        // 没有数据库审计日志时，无法提供统计
+        LogWarning("Session statistics are not available in Redis mode without KeepDatabaseAuditLog enabled.");
+        return Ok(new SessionStatisticsDto());
+    }
+
     #region Redis 操作辅助方法
 
     private string GetSessionKey(Guid sessionId) => $"{_sessionOptions.RedisKeyPrefix}:{sessionId}";

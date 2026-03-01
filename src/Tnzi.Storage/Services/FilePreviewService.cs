@@ -32,13 +32,12 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
 
         var extension = fileRecord.Extension;
 
-        // 支持的预览类型
+        // 支持的预览类型（Office 文档暂不支持服务端预览）
         return FileTypeHelper.IsImage(extension) ||
                FileTypeHelper.IsPdf(extension) ||
                FileTypeHelper.IsVideo(extension) ||
                FileTypeHelper.IsAudio(extension) ||
-               FileTypeHelper.IsText(extension) ||
-               FileTypeHelper.IsOffice(extension);
+               FileTypeHelper.IsText(extension);
     }
 
     /// <summary>

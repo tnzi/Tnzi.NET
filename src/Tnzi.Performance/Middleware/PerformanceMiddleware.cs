@@ -205,4 +205,8 @@ internal sealed class CountingStream : Stream
         await InnerStream.WriteAsync(buffer, cancellationToken);
         BytesWritten += buffer.Length;
     }
+
+    // 不 dispose InnerStream (原始 Response.Body)，防止后续中间件无法写入
+    protected override void Dispose(bool disposing) { }
+    public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

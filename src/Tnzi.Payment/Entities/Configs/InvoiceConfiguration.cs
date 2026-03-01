@@ -23,7 +23,8 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
             .HasForeignKey(l => l.InvoiceId)
             .HasPrincipalKey(i => i.Id);
 
-        builder.HasIndex(i => i.InvoiceNo).IsUnique();
+        builder.HasIndex(i => i.InvoiceNo).IsUnique()
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         builder.HasIndex(i => i.Status);
         builder.HasIndex(i => i.InvoiceDate);
         builder.HasIndex(i => i.CustomerEmail);

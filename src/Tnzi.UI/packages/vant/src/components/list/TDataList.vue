@@ -41,6 +41,8 @@ const onRefresh = async () => {
     ...updatePageQuery(props.query ?? {}, 1, normalizedPageSize),
     cursor: undefined,
   });
+  // 延迟关闭 refreshing，让 pull-to-refresh 动画有时间完成
+  await new Promise<void>(resolve => setTimeout(resolve, 300));
   refreshing.value = false;
 };
 
@@ -55,7 +57,7 @@ const onLoad = () => emit('loadMore');
       :disabled="loading"
       @refresh="onRefresh"
     >
-      <van-list :loading="loading" :finished="finished" finished-text="No more" @load="onLoad">
+      <van-list :loading="loading" :finished="finished" :finished-text="t('table.noMore')" @load="onLoad">
         <template v-if="isEmpty">
           <div class="empty">{{ emptyText }}</div>
         </template>
@@ -74,7 +76,7 @@ const onLoad = () => emit('loadMore');
       </van-list>
     </van-pull-refresh>
 
-    <van-list v-else :loading="loading" :finished="finished" finished-text="No more" @load="onLoad">
+    <van-list v-else :loading="loading" :finished="finished" :finished-text="t('table.noMore')" @load="onLoad">
       <template v-if="isEmpty">
         <div class="empty">{{ emptyText }}</div>
       </template>

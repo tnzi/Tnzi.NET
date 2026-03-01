@@ -262,7 +262,8 @@ public class SettingServiceTests
             _serviceProviderMock.Object,
             _settingRepositoryMock.Object,
             _applicationOptionsMock.Object,
-            _cacheMock.Object);
+            _cacheMock.Object,
+            Enumerable.Empty<ISettingProvider>());
     }
 
     [Fact]

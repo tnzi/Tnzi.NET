@@ -64,4 +64,36 @@ public interface ISettingService
     /// 批量删除配置
     /// </summary>
     Task<Result> DeleteSettingsAsync(IEnumerable<Guid> ids);
+
+    /// <summary>
+    /// 获取配置值（分层解析：User → Tenant → Global）
+    /// 使用注册的 ISettingProvider 链按优先级解析
+    /// </summary>
+    Task<Result<string?>> GetSettingValueAsync(string key, string? defaultValue = null);
+
+    /// <summary>
+    /// 获取指定作用域的配置值
+    /// </summary>
+    Task<Result<string?>> GetSettingAsync(string key, SettingScope scope, string? scopeId = null);
+
+    /// <summary>
+    /// 设置指定作用域的配置值
+    /// </summary>
+    Task<Result> SetSettingAsync(string key, string value, SettingScope scope, string? scopeId = null);
+
+    /// <summary>
+    /// Get system information (version, loaded modules, uptime, environment)
+    /// </summary>
+    Task<Result<SystemInfoDto>> GetSystemInfoAsync()
+    {
+        return Task.FromResult(Result.Failure<SystemInfoDto>("Not implemented", 501));
+    }
+
+    /// <summary>
+    /// 获取配置分组列表（分组名称 + 每组配置数量）
+    /// </summary>
+    Task<Result<List<SettingGroupDto>>> GetSettingGroupsAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<List<SettingGroupDto>>("Setting groups not implemented", 501));
+    }
 }

@@ -62,7 +62,7 @@ public class SwaggerModule : TnziFrameworkModule
         context.Services.AddSwaggerGen(c =>
         {
             // 添加默认文档（用于没有指定 GroupName 的 API）
-            c.SwaggerDoc(defaultDoc.Name, new Microsoft.OpenApi.OpenApiInfo
+            c.SwaggerDoc(defaultDoc.Name, new OpenApiInfo
             {
                 Title = defaultDoc.Title,
                 Version = defaultDoc.Version,
@@ -75,7 +75,7 @@ public class SwaggerModule : TnziFrameworkModule
                 if (!string.IsNullOrEmpty(groupName) && groupName != defaultDoc.Name)
                 {
                     var title = groupName.ToPascalCase() + " API";
-                    c.SwaggerDoc(groupName, new Microsoft.OpenApi.OpenApiInfo
+                    c.SwaggerDoc(groupName, new OpenApiInfo
                     {
                         Title = title,
                         Version = defaultDoc.Version,
@@ -107,7 +107,7 @@ public class SwaggerModule : TnziFrameworkModule
 
                 // 获取控制器上的 ApiExplorerSettings
                 string? controllerGroupName = null;
-                var controllerDescriptor = apiDesc.ActionDescriptor as Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor;
+                var controllerDescriptor = apiDesc.ActionDescriptor as ControllerActionDescriptor;
                 if (controllerDescriptor?.ControllerTypeInfo != null)
                 {
                     var controllerAttr = controllerDescriptor.ControllerTypeInfo
@@ -135,22 +135,22 @@ public class SwaggerModule : TnziFrameworkModule
                 var description = jwtAuth.Description
                     ?? "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"";
 
-                c.AddSecurityDefinition(jwtAuth.SchemeName, new Microsoft.OpenApi.OpenApiSecurityScheme
+                c.AddSecurityDefinition(jwtAuth.SchemeName, new OpenApiSecurityScheme
                 {
                     Description = description,
                     Name = "Authorization",
-                    In = Microsoft.OpenApi.ParameterLocation.Header,
-                    Type = Microsoft.OpenApi.SecuritySchemeType.ApiKey,
+                    In = ParameterLocation.Header,
+                    Type = SecuritySchemeType.ApiKey,
                     Scheme = jwtAuth.SchemeName
                 });
 
                 // 为所有文档添加安全要求
                 c.AddSecurityRequirement(doc =>
                 {
-                    return new Microsoft.OpenApi.OpenApiSecurityRequirement
+                    return new OpenApiSecurityRequirement
                     {
                         {
-                            new Microsoft.OpenApi.OpenApiSecuritySchemeReference(jwtAuth.SchemeName),
+                            new OpenApiSecuritySchemeReference(jwtAuth.SchemeName),
                             new List<string>()
                         }
                     };

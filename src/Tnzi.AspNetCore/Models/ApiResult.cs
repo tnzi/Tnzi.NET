@@ -88,7 +88,7 @@ public class ApiResult<T> : Result<T>, IApiResult
     {
         if (result.Succeeded)
         {
-            return Ok(result.Data!, result.Message ?? "Success");
+            return new ApiResult<T>(true, result.Data, result.Message ?? "Success", 200);
         }
         else
         {

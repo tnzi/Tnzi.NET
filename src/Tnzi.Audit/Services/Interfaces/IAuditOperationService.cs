@@ -63,4 +63,65 @@ public interface IAuditOperationService
     /// <param name="days">保留天数</param>
     /// <returns>删除的记录数</returns>
     Task<Result<int>> DeleteExpiredOperationsAsync(int days = 90);
+
+    /// <summary>
+    /// Export audit operations as CSV string
+    /// </summary>
+    /// <param name="query">Query filter criteria</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>CSV formatted string</returns>
+    Task<Result<string>> ExportToCsvAsync(AuditOperationQueryDto query, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Export audit operations as JSON string
+    /// </summary>
+    /// <param name="query">Query filter criteria</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>JSON formatted string</returns>
+    Task<Result<string>> ExportToJsonAsync(AuditOperationQueryDto query, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 获取审计操作趋势统计（按时间分组）
+    /// </summary>
+    /// <param name="startDate">开始日期</param>
+    /// <param name="endDate">结束日期</param>
+    /// <param name="groupBy">分组方式</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>趋势数据点列表</returns>
+    Task<Result<List<AuditTrendPointDto>>> GetAuditTrendAsync(
+        DateTime startDate,
+        DateTime endDate,
+        AuditTrendGroupBy groupBy = AuditTrendGroupBy.Daily,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(Result.Failure<List<AuditTrendPointDto>>("GetAuditTrendAsync not implemented", 501));
+
+    /// <summary>
+    /// 获取 Top N 调用量最高的功能统计
+    /// </summary>
+    /// <param name="topN">返回数量</param>
+    /// <param name="startDate">开始日期（可选）</param>
+    /// <param name="endDate">结束日期（可选）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>Top 功能统计列表</returns>
+    Task<Result<List<TopFunctionDto>>> GetTopFunctionsAsync(
+        int topN = 10,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(Result.Failure<List<TopFunctionDto>>("GetTopFunctionsAsync not implemented", 501));
+
+    /// <summary>
+    /// 获取 Top N 活跃用户统计
+    /// </summary>
+    /// <param name="topN">返回数量</param>
+    /// <param name="startDate">开始日期（可选）</param>
+    /// <param name="endDate">结束日期（可选）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>Top 用户统计列表</returns>
+    Task<Result<List<TopUserDto>>> GetTopUsersAsync(
+        int topN = 10,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(Result.Failure<List<TopUserDto>>("GetTopUsersAsync not implemented", 501));
 }

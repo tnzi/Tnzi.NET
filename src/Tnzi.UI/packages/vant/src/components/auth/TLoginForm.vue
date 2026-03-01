@@ -70,8 +70,8 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
       <van-field
         v-if="props.showCaptcha"
         v-model="captchaCode"
-        :label="props.captchaLabel || '验证码'"
-        :placeholder="props.captchaPlaceholder || '请输入验证码'"
+        :label="props.captchaLabel || t('auth.verificationCode')"
+        :placeholder="props.captchaPlaceholder || t('auth.enterVerificationCode')"
         :disabled="isDisabled"
       >
         <template #button>

@@ -19,7 +19,7 @@ public class AuthTokenConfiguration : EntityTypeConfigurationBase<AuthToken, Gui
         builder.HasOne(ut => ut.User)
             .WithMany()
             .HasForeignKey(ut => ut.UserId)
-            .IsRequired(false)
+            .IsRequired()
             .OnDelete(DeleteBehavior.Cascade);
 
         // 索引配置：同一用户的同一 Provider 和 Name 组合只能有一个有效 Token

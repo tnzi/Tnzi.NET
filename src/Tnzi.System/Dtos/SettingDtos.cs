@@ -13,6 +13,8 @@ public class SettingDto
     public bool IsSystem { get; set; }
     public int SortOrder { get; set; }
     public SettingValueType ValueType { get; set; }
+    public SettingScope Scope { get; set; }
+    public string? ScopeId { get; set; }
     public DateTime CreationTime { get; set; }
 }
 
@@ -33,6 +35,8 @@ public class CreateSettingDto
     public string? Group { get; set; }
     public int SortOrder { get; set; }
     public SettingValueType ValueType { get; set; }
+    public SettingScope Scope { get; set; } = SettingScope.Global;
+    public string? ScopeId { get; set; }
 }
 
 /// <summary>
@@ -48,4 +52,92 @@ public class UpdateSettingDto
     public string? Group { get; set; }
     public int SortOrder { get; set; }
     public SettingValueType ValueType { get; set; }
+}
+
+/// <summary>
+/// 配置分组信息 DTO
+/// </summary>
+public class SettingGroupDto
+{
+    /// <summary>
+    /// 分组名称
+    /// </summary>
+    public string GroupName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 该分组下的配置数量
+    /// </summary>
+    public int SettingCount { get; set; }
+}
+
+/// <summary>
+/// System information DTO
+/// </summary>
+public class SystemInfoDto
+{
+    /// <summary>
+    /// Application name
+    /// </summary>
+    public string AppName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Framework version
+    /// </summary>
+    public string FrameworkVersion { get; set; } = string.Empty;
+
+    /// <summary>
+    /// .NET runtime version
+    /// </summary>
+    public string RuntimeVersion { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Operating system
+    /// </summary>
+    public string OperatingSystem { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Application start time (UTC)
+    /// </summary>
+    public DateTime StartTime { get; set; }
+
+    /// <summary>
+    /// Application uptime
+    /// </summary>
+    public string Uptime { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Environment name (Development, Staging, Production)
+    /// </summary>
+    public string Environment { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Loaded module names (in load order)
+    /// </summary>
+    public List<SystemModuleInfoDto> LoadedModules { get; set; } = new();
+}
+
+/// <summary>
+/// Module info within system info
+/// </summary>
+public class SystemModuleInfoDto
+{
+    /// <summary>
+    /// Module type name (short)
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Module assembly name
+    /// </summary>
+    public string Assembly { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the module is enabled
+    /// </summary>
+    public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// Module load order
+    /// </summary>
+    public int LoadOrder { get; set; }
 }

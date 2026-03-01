@@ -35,6 +35,23 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
         await _queue.Writer.WriteAsync(workItem);
     }
 
+    public async Task EnqueueWithDelayAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
+    {
+        Check.NotNull(workItem);
+        if (delay <= TimeSpan.Zero)
+        {
+            await EnqueueAsync(workItem);
+            return;
+        }
+
+        // 包装为延迟执行的工作项
+        await _queue.Writer.WriteAsync(async (sp, ct) =>
+        {
+            await Task.Delay(delay, ct);
+            await workItem(sp, ct);
+        });
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Notification Background Queue Service is starting.");

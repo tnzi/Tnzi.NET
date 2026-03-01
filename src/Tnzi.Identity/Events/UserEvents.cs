@@ -140,6 +140,7 @@ public class TwoFactorCodeSentEvent : EventBase
     public string UserName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty; // "Email" 或 "Sms"
     public string Address { get; set; } = string.Empty; // 邮箱地址或手机号
+    [System.Text.Json.Serialization.JsonIgnore] // 防止验证码明文泄露到日志/消息队列
     public string Code { get; set; } = string.Empty; // 验证码
     public DateTime ExpiresAt { get; set; }
     public int ExpirationMinutes { get; set; }
@@ -207,6 +208,7 @@ public class QuickRegisterCodeSentEvent : EventBase
     /// <summary>
     /// 验证码
     /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public string Code { get; set; } = string.Empty;
 
     /// <summary>
@@ -298,5 +300,36 @@ public class AbnormalLoginDetectedEvent : EventBase
     /// 建议操作
     /// </summary>
     public string RecommendedAction { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 用户账户自助停用事件
+/// </summary>
+public class UserAccountDeactivatedEvent : EventBase
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public DateTime DeactivatedTime { get; set; }
+    public string? Reason { get; set; }
+}
+
+/// <summary>
+/// 用户账户自助删除事件（GDPR 合规）
+/// </summary>
+public class UserAccountDeletedEvent : EventBase
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public DateTime DeletedTime { get; set; }
+}
+
+/// <summary>
+/// 用户个人数据导出事件（GDPR 审计）
+/// </summary>
+public class PersonalDataExportedEvent : EventBase
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public DateTime ExportedTime { get; set; }
 }
 

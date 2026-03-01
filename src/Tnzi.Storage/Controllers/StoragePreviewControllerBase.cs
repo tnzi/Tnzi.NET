@@ -6,6 +6,7 @@ namespace Tnzi.Storage.Controllers;
 /// </summary>
 [Route("files/preview")]  // 路由说明: 基类为 files 可重写
 [ApiAuthorize]
+[ApiExplorerSettings(GroupName = "user")]
 public abstract class StoragePreviewControllerBase : ApiControllerBase
 {
     protected readonly IFilePreviewService FilePreviewService;

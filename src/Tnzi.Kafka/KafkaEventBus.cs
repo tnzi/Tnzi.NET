@@ -125,7 +125,9 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
 
             // 启动后台任务消费消息，并跟踪任务以支持优雅关闭
             var cts = new CancellationTokenSource();
-            var consumerTask = Task.Run(async () =>
+            // 使用 LongRunning 创建专用线程，避免阻塞线程池
+            // Confluent.Kafka 的 Consume() 是阻塞 API，会永久占用线程
+            var consumerTask = Task.Factory.StartNew(async () =>
             {
                 var currentConsumer = consumer;
                 var reconnectAttempts = 0;
@@ -149,7 +151,7 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
                                 }
 
                                 var json = result.Message.Value;
-                                var @event = JsonSerializer.Deserialize<TEvent>(json);
+                                var @event = JsonSerializer.Deserialize<TEvent>(json, TnziJsonDefaults.Options);
 
                                 if (@event == null)
                                 {
@@ -266,7 +268,7 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
                         }
                     }
                 }
-            }, cts.Token);
+            }, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
             // 跟踪消费者任务以支持优雅关闭
             _consumerTasks.Add(consumerTask);

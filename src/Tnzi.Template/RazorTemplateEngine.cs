@@ -10,6 +10,7 @@ public class RazorTemplateEngine : ITemplateEngine
     private readonly IMemoryCache _cache;
     private readonly RazorEngine _razorEngine;
     private readonly string _normalizedRootPath;
+    private readonly ConcurrentDictionary<string, byte> _trackedCacheKeys = new();
 
     // 缓存键前缀，用于区分不同类型的缓存
     private const string CacheKeyPrefix = "Tnzi.Template:";
@@ -220,37 +221,18 @@ public class RazorTemplateEngine : ITemplateEngine
 
     /// <summary>
     /// 清除模板缓存
-    /// 注意：IMemoryCache 接口本身不提供清除所有缓存的方法
-    /// 此方法尝试使用 MemoryCache.Compact 方法（如果可用）
-    /// 对于其他 IMemoryCache 实现，可能无法完全清除缓存
+    /// 仅移除本引擎管理的缓存条目，不影响 IMemoryCache 中其他模块的缓存
     /// </summary>
     public void ClearCache()
     {
-        // 尝试使用 MemoryCache.Compact 方法清除缓存
-        // 使用反射以支持所有 MemoryCache 实现（包括包装类）
-        var cacheType = _cache.GetType();
-        var compactMethod = cacheType.GetMethod("Compact", new[] { typeof(double) });
+        var keys = _trackedCacheKeys.Keys.ToList();
+        foreach (var key in keys)
+        {
+            _cache.Remove(key);
+        }
 
-        if (compactMethod != null)
-        {
-            try
-            {
-                compactMethod.Invoke(_cache, new object[] { 1.0 });  // 释放 100% 的缓存
-                _logger.LogInformation("Template cache cleared using Compact method.");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to clear template cache using Compact method.");
-            }
-        }
-        else
-        {
-            // 如果 Compact 方法不可用，记录警告
-            _logger.LogWarning(
-                "Cannot clear template cache: IMemoryCache implementation '{CacheType}' does not support Compact method. " +
-                "Cache entries will expire based on their expiration settings.",
-                cacheType.FullName);
-        }
+        _trackedCacheKeys.Clear();
+        _logger.LogInformation("Template cache cleared. Removed {Count} entries.", keys.Count);
     }
 
     /// <summary>
@@ -320,6 +302,12 @@ public class RazorTemplateEngine : ITemplateEngine
             // 设置缓存过期策略
             entry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
             entry.Size = 1;  // 用于限制缓存大小
+
+            // 注册淘汰回调，自动清理跟踪集合
+            entry.RegisterPostEvictionCallback((key, _, _, _) => _trackedCacheKeys.TryRemove(key.ToString()!, out _));
+
+            // 跟踪缓存键
+            _trackedCacheKeys.TryAdd(cacheKey, 0);
 
             return await CompileTemplateAsync(templateContent, cancellationToken);
         });
@@ -444,6 +432,10 @@ public class RazorTemplateEngine : ITemplateEngine
             // 设置缓存选项
             cacheEntry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
             cacheEntry.Size = 1;
+
+            // 注册淘汰回调并跟踪缓存键
+            cacheEntry.RegisterPostEvictionCallback((key, _, _, _) => _trackedCacheKeys.TryRemove(key.ToString()!, out _));
+            _trackedCacheKeys.TryAdd(cacheKey, 0);
 
             return fileEntry;
         });

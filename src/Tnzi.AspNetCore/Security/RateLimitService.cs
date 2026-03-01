@@ -14,12 +14,10 @@ public class RateLimitService : IRateLimitService
     /// <summary>
     /// 初始化一个<see cref="RateLimitService"/>类型的新实例
     /// </summary>
-    public RateLimitService(
-        ICache cache,
-        IServiceProvider serviceProvider)
+    public RateLimitService(ICache cache, ILogger<RateLimitService>? logger = null)
     {
         _cache = Check.NotNull(cache);
-        _logger = Check.NotNull(serviceProvider).GetService<ILogger<RateLimitService>>();
+        _logger = logger;
     }
 
     /// <summary>

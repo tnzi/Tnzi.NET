@@ -118,9 +118,10 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok(subscription.MapTo<SubscriptionDto>());
     }
 
-    public async Task<Result> CancelSubscriptionAsync(Guid subscriptionId, CancelSubscriptionDto request, CancellationToken cancellationToken = default)
+    public async Task<Result> CancelSubscriptionAsync(Guid subscriptionId, CancelSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(
+            s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value), cancellationToken);
         if (subscription == null)
             return Fail(ErrorCodes.SubscriptionNotFound, 404);
 
@@ -164,9 +165,10 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok();
     }
 
-    public async Task<Result> ResumeSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
+    public async Task<Result> ResumeSubscriptionAsync(Guid subscriptionId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(
+            s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value), cancellationToken);
         if (subscription == null)
             return Fail(ErrorCodes.SubscriptionNotFound, 404);
 
@@ -185,9 +187,10 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok();
     }
 
-    public async Task<Result<SubscriptionDto>> ChangePlanAsync(Guid subscriptionId, ChangeSubscriptionDto request, CancellationToken cancellationToken = default)
+    public async Task<Result<SubscriptionDto>> ChangePlanAsync(Guid subscriptionId, ChangeSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(
+            s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value), cancellationToken);
         if (subscription == null)
             return Fail<SubscriptionDto>(ErrorCodes.SubscriptionNotFound, 404);
 
@@ -223,9 +226,10 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok(subscription.MapTo<SubscriptionDto>());
     }
 
-    public async Task<Result> UpdatePaymentMethodAsync(Guid subscriptionId, string paymentMethodId, CancellationToken cancellationToken = default)
+    public async Task<Result> UpdatePaymentMethodAsync(Guid subscriptionId, string paymentMethodId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(
+            s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value), cancellationToken);
         if (subscription == null)
             return Fail(ErrorCodes.SubscriptionNotFound, 404);
 
@@ -242,9 +246,10 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok();
     }
 
-    public async Task<Result> UpdateAutoRenewAsync(Guid subscriptionId, bool autoRenew, CancellationToken cancellationToken = default)
+    public async Task<Result> UpdateAutoRenewAsync(Guid subscriptionId, bool autoRenew, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(
+            s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value), cancellationToken);
         if (subscription == null)
             return Fail(ErrorCodes.SubscriptionNotFound, 404);
 
@@ -266,9 +271,10 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok();
     }
 
-    public async Task<Result<SubscriptionDto>> GetSubscriptionAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<Result<SubscriptionDto>> GetSubscriptionAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(
+            s => s.Id == id && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value), cancellationToken);
         if (subscription == null)
             return Fail<SubscriptionDto>(ErrorCodes.SubscriptionNotFound, 404);
 
@@ -286,10 +292,14 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok(pagedList);
     }
 
-    public async Task<Result<IPagedList<SubscriptionDto>>> GetSubscriptionListAsync(SubscriptionQueryDto query, CancellationToken cancellationToken = default)
+    public async Task<Result<IPagedList<SubscriptionDto>>> GetSubscriptionListAsync(SubscriptionQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var pagedList = await _subscriptionRepository.AsNoTracking()
-            .Filter(query)
+        var queryable = _subscriptionRepository.AsNoTracking().Filter(query);
+
+        if (ownerUserId.HasValue)
+            queryable = queryable.Where(s => s.UserId == ownerUserId.Value);
+
+        var pagedList = await queryable
             .OrderByDescending(s => s.CreationTime)
             .ProjectTo<Subscription, SubscriptionDto>()
             .CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
@@ -364,6 +374,83 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         Logger.LogInformation("Subscription plan deactivated. PlanId: {PlanId}", planId);
 
         return Ok();
+    }
+
+    public async Task<Result<int>> RenewExpiredSubscriptionsAsync(CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+
+        // 查找到期需要续费的订阅
+        var dueSubscriptions = await _subscriptionRepository
+            .Where(s => s.AutoRenew
+                && s.Status == SubscriptionStatus.Active
+                && s.NextBillingTime != null
+                && s.NextBillingTime <= now)
+            .Include(s => s.Plan)
+            .ToListAsync(cancellationToken);
+
+        if (dueSubscriptions.Count == 0)
+            return Ok(0);
+
+        var renewedCount = 0;
+
+        foreach (var subscription in dueSubscriptions)
+        {
+            try
+            {
+                if (subscription.Plan == null)
+                    continue;
+
+                // 创建续费支付
+                var paymentResult = await _paymentService.CreatePaymentAsync(new CreatePaymentDto
+                {
+                    BusinessOrderNo = subscription.SubscriptionNo,
+                    BusinessType = BusinessType.Subscription,
+                    Amount = subscription.Plan.Price,
+                    Currency = subscription.Currency,
+                    ChannelCode = subscription.ChannelCode,
+                    Description = $"Subscription renewal: {subscription.Plan.PlanName}"
+                }, cancellationToken);
+
+                if (!paymentResult.Succeeded)
+                {
+                    Logger.LogWarning("Subscription renewal payment failed. SubscriptionNo: {SubscriptionNo}",
+                        subscription.SubscriptionNo);
+                    continue;
+                }
+
+                // 更新下次计费时间
+                var nextBillingTime = CalculateNextBillingTime(now, subscription.CycleType, subscription.CycleValue);
+                subscription.NextBillingTime = nextBillingTime;
+                await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+
+                if (EventBus != null)
+                {
+                    await EventBus.PublishAsync(new SubscriptionRenewedEvent
+                    {
+                        SubscriptionId = subscription.Id,
+                        SubscriptionNo = subscription.SubscriptionNo,
+                        UserId = subscription.UserId,
+                        PlanId = subscription.PlanId,
+                        NewEndTime = nextBillingTime,
+                        Amount = subscription.Plan.Price,
+                        Currency = subscription.Currency,
+                        PaymentTradeNo = paymentResult.Data?.TradeNo,
+                        AutoRenew = true
+                    });
+                }
+
+                renewedCount++;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Subscription renewal failed. SubscriptionNo: {SubscriptionNo}",
+                    subscription.SubscriptionNo);
+            }
+        }
+
+        Logger.LogInformation("Renewed {Count} subscriptions out of {Total} due", renewedCount, dueSubscriptions.Count);
+        return Ok(renewedCount);
     }
 
     /// <summary>

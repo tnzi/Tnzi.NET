@@ -112,7 +112,7 @@ public class IdentityModule : TnziApplicationModule
         // 先配置 JwtBearerOptions，使用 IConfigureOptions 模式在运行时从配置获取值
         // 注意：必须指定认证方案名称，与 AddJwtBearer() 使用的默认方案名一致
         context.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-            .PostConfigure<IOptions<IdentityOptions>, Microsoft.AspNetCore.Hosting.IWebHostEnvironment>((jwtBearerOptions, identityOptions, environment) =>
+            .PostConfigure<IOptions<IdentityOptions>, IWebHostEnvironment>((jwtBearerOptions, identityOptions, environment) =>
             {
                 var jwtConfig = identityOptions.Value.Jwt;
                 var jwtSecret = jwtConfig.SecretKey;
@@ -169,7 +169,7 @@ public class IdentityModule : TnziApplicationModule
             // 检查是否已注册 IDistributedCache（Redis/StackExchange 模块会注册）
             // 注意：不检查实现类型，只检查是否注册了 IDistributedCache
             var hasDistributedCache = services.Any(s =>
-                s.ServiceType == typeof(Microsoft.Extensions.Caching.Distributed.IDistributedCache));
+                s.ServiceType == typeof(IDistributedCache));
 
             if (hasDistributedCache)
             {
@@ -230,10 +230,10 @@ public class IdentityModule : TnziApplicationModule
                     {
                         // 找到继承自 IdentityDbContext 的 DbContext，自动配置 Identity
                         // 检查是否已注册 Identity
-                        var identityBuilderType = typeof(Microsoft.AspNetCore.Identity.IdentityBuilder);
+                        var identityBuilderType = typeof(IdentityBuilder);
                         var isAlreadyRegistered = services.Any(s =>
                             s.ServiceType == identityBuilderType ||
-                            (s.ServiceType.IsGenericType && s.ServiceType.GetGenericTypeDefinition() == typeof(Microsoft.AspNetCore.Identity.UserManager<>)));
+                            (s.ServiceType.IsGenericType && s.ServiceType.GetGenericTypeDefinition() == typeof(UserManager<>)));
 
                         if (!isAlreadyRegistered)
                         {
@@ -255,7 +255,7 @@ public class IdentityModule : TnziApplicationModule
 public static class IdentityExtensions
 {
     public static IdentityBuilder AddTnziIdentity<TDbContext>(this IServiceCollection services, IConfiguration configuration)
-        where TDbContext : Microsoft.EntityFrameworkCore.DbContext
+        where TDbContext : DbContext
     {
         // 从配置中读取 Identity 选项
         var identitySection = configuration.GetSection("Identity");

@@ -8,6 +8,7 @@ public class MessageService : ApplicationService, IMessageService
     private readonly IRepository<Message, Guid> _messageRepository;
     private readonly IRepository<MessageReceive, Guid> _receiveRepository;
     private readonly IRepository<MessageRecipient, Guid> _recipientRepository;
+    private readonly IRepository<MessageReply, Guid> _replyRepository;
     private readonly IRepository<MessageRole, Guid> _roleRepository;
     private readonly IRepository<User, Guid> _userRepository;
     private readonly IUserRoleService? _userRoleService;
@@ -16,6 +17,7 @@ public class MessageService : ApplicationService, IMessageService
         IRepository<Message, Guid> messageRepository,
         IRepository<MessageReceive, Guid> receiveRepository,
         IRepository<MessageRecipient, Guid> recipientRepository,
+        IRepository<MessageReply, Guid> replyRepository,
         IRepository<MessageRole, Guid> roleRepository,
         IRepository<User, Guid> userRepository,
         IServiceProvider serviceProvider,
@@ -25,6 +27,7 @@ public class MessageService : ApplicationService, IMessageService
         _messageRepository = Check.NotNull(messageRepository);
         _receiveRepository = Check.NotNull(receiveRepository);
         _recipientRepository = Check.NotNull(recipientRepository);
+        _replyRepository = Check.NotNull(replyRepository);
         _roleRepository = Check.NotNull(roleRepository);
         _userRepository = Check.NotNull(userRepository);
         _userRoleService = userRoleService;
@@ -44,70 +47,74 @@ public class MessageService : ApplicationService, IMessageService
         if (input.MessageType == MessageType.Public && (input.RoleIds == null || input.RoleIds.Count == 0))
             return Fail<MessageDto>("Public message requires at least one role", 400, ErrorCodes.VALIDATION_ERROR);
 
-        var message = input.MapTo<Message>();
-        message.SenderId = senderId;
-        message.IsSent = false;
-
-        await _messageRepository.InsertAsync(message);
-
-        // 创建收件人/角色关系记录
         var recipientUserIds = new List<Guid>();
 
-        if (input.MessageType == MessageType.Private && input.RecipientIds != null)
+        var message = await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            var recipients = input.RecipientIds.Select(uid => new MessageRecipient
-            {
-                MessageId = message.Id,
-                UserId = uid
-            }).ToList();
-            await _recipientRepository.InsertManyAsync(recipients);
+            var msg = input.MapTo<Message>();
+            msg.SenderId = senderId;
+            msg.IsSent = false;
 
-            var receives = input.RecipientIds.Select(uid => new MessageReceive
-            {
-                MessageId = message.Id,
-                UserId = uid
-            }).ToList();
-            await _receiveRepository.InsertManyAsync(receives);
+            await _messageRepository.InsertAsync(msg);
 
-            recipientUserIds.AddRange(input.RecipientIds);
-        }
-        else if (input.MessageType == MessageType.Public && input.RoleIds != null)
-        {
-            var roles = input.RoleIds.Select(rid => new MessageRole
+            // 创建收件人/角色关系记录
+            if (input.MessageType == MessageType.Private && input.RecipientIds != null)
             {
-                MessageId = message.Id,
-                RoleId = rid
-            }).ToList();
-            await _roleRepository.InsertManyAsync(roles);
-
-            // 解析角色对应的用户
-            if (_userRoleService != null)
-            {
-                var userIdSet = new HashSet<Guid>();
-                foreach (var roleId in input.RoleIds)
+                var recipients = input.RecipientIds.Select(uid => new MessageRecipient
                 {
-                    var userIds = await _userRoleService.GetRoleUserIdsAsync(roleId);
-                    foreach (var uid in userIds)
-                        userIdSet.Add(uid);
-                }
+                    MessageId = msg.Id,
+                    UserId = uid
+                }).ToList();
+                await _recipientRepository.InsertManyAsync(recipients);
 
-                if (userIdSet.Count > 0)
+                var receives = input.RecipientIds.Select(uid => new MessageReceive
                 {
-                    var receives = userIdSet.Select(uid => new MessageReceive
+                    MessageId = msg.Id,
+                    UserId = uid
+                }).ToList();
+                await _receiveRepository.InsertManyAsync(receives);
+
+                recipientUserIds.AddRange(input.RecipientIds);
+            }
+            else if (input.MessageType == MessageType.Public && input.RoleIds != null)
+            {
+                var roles = input.RoleIds.Select(rid => new MessageRole
+                {
+                    MessageId = msg.Id,
+                    RoleId = rid
+                }).ToList();
+                await _roleRepository.InsertManyAsync(roles);
+
+                // 解析角色对应的用户
+                if (_userRoleService != null)
+                {
+                    var userIdSet = new HashSet<Guid>();
+                    foreach (var roleId in input.RoleIds)
                     {
-                        MessageId = message.Id,
-                        UserId = uid
-                    }).ToList();
-                    await _receiveRepository.InsertManyAsync(receives);
-                    recipientUserIds.AddRange(userIdSet);
+                        var userIds = await _userRoleService.GetRoleUserIdsAsync(roleId);
+                        foreach (var uid in userIds)
+                            userIdSet.Add(uid);
+                    }
+
+                    if (userIdSet.Count > 0)
+                    {
+                        var receives = userIdSet.Select(uid => new MessageReceive
+                        {
+                            MessageId = msg.Id,
+                            UserId = uid
+                        }).ToList();
+                        await _receiveRepository.InsertManyAsync(receives);
+                        recipientUserIds.AddRange(userIdSet);
+                    }
                 }
             }
-        }
 
-        message.IsSent = true;
-        await _messageRepository.UpdateAsync(message);
+            msg.IsSent = true;
+            await _messageRepository.UpdateAsync(msg);
+            return msg;
+        });
 
-        // 发布消息发送事件
+        // 发布消息发送事件（事务外）
         if (EventBus != null)
         {
             await EventBus.PublishAsync(new MessageSentEvent
@@ -132,7 +139,7 @@ public class MessageService : ApplicationService, IMessageService
     public async Task<Result<IPagedList<MessageListItemDto>>> GetUserInboxAsync(Guid userId, MessageQueryDto query)
     {
         var queryable = _messageRepository.AsQueryable()
-            .Where(m => !m.IsDeleted && m.IsSent);
+            .Where(m => m.IsSent);
 
         if (query.MessageType.HasValue)
             queryable = queryable.Where(m => m.MessageType == query.MessageType.Value);
@@ -141,6 +148,15 @@ public class MessageService : ApplicationService, IMessageService
             queryable = queryable.Where(m => m.CreationTime >= query.StartDate.Value);
         if (query.EndDate.HasValue)
             queryable = queryable.Where(m => m.CreationTime <= query.EndDate.Value);
+
+        // BeginDate/EndDate 有效期过滤
+        var now = DateTime.UtcNow;
+        queryable = queryable.Where(m =>
+            (!m.BeginDate.HasValue || m.BeginDate.Value <= now) &&
+            (!m.EndDate.HasValue || m.EndDate.Value >= now));
+
+        if (query.IsImportant.HasValue)
+            queryable = queryable.Where(m => m.IsImportant == query.IsImportant.Value);
 
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
@@ -184,7 +200,7 @@ public class MessageService : ApplicationService, IMessageService
     public async Task<Result<MessageDto>> GetByIdAsync(Guid messageId, Guid userId)
     {
         var message = await _messageRepository.GetAsync(messageId);
-        if (message == null || message.IsDeleted)
+        if (message == null)
             return Fail<MessageDto>("Message not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         // 权限检查
@@ -213,7 +229,7 @@ public class MessageService : ApplicationService, IMessageService
         Check.NotNull(input);
 
         var message = await _messageRepository.GetAsync(messageId);
-        if (message == null || message.IsDeleted)
+        if (message == null)
             return Fail<MessageDto>("Message not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         if (message.SenderId != userId)
@@ -222,6 +238,7 @@ public class MessageService : ApplicationService, IMessageService
         if (input.Title != null) message.Title = input.Title;
         if (input.Content != null) message.Content = input.Content;
         if (input.CanReply.HasValue) message.CanReply = input.CanReply.Value;
+        if (input.IsImportant.HasValue) message.IsImportant = input.IsImportant.Value;
         if (input.BeginDate.HasValue) message.BeginDate = input.BeginDate.Value;
         if (input.EndDate.HasValue) message.EndDate = input.EndDate.Value;
 
@@ -254,6 +271,11 @@ public class MessageService : ApplicationService, IMessageService
     /// </summary>
     public async Task<Result> MarkAsReadAsync(Guid messageId, Guid userId)
     {
+        // 验证消息存在
+        var message = await _messageRepository.GetAsync(messageId);
+        if (message == null)
+            return Fail("Message not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
         var receive = await _receiveRepository
             .FirstOrDefaultAsync(mr => mr.MessageId == messageId && mr.UserId == userId);
 
@@ -278,8 +300,7 @@ public class MessageService : ApplicationService, IMessageService
         }
 
         // 发布已读事件
-        var message = await _messageRepository.GetAsync(messageId);
-        if (EventBus != null && message != null)
+        if (EventBus != null)
         {
             await EventBus.PublishAsync(new MessageReadEvent
             {
@@ -328,8 +349,7 @@ public class MessageService : ApplicationService, IMessageService
     /// </summary>
     public async Task<Result<IPagedList<MessageListItemDto>>> GetAdminListAsync(AdminMessageQueryDto query)
     {
-        var queryable = _messageRepository.AsQueryable()
-            .Where(m => !m.IsDeleted);
+        var queryable = _messageRepository.AsQueryable();
 
         if (query.MessageType.HasValue)
             queryable = queryable.Where(m => m.MessageType == query.MessageType.Value);
@@ -373,6 +393,103 @@ public class MessageService : ApplicationService, IMessageService
         return Ok("Message deleted successfully");
     }
 
+    /// <summary>
+    /// 管理端：批量删除消息
+    /// </summary>
+    public async Task<Result<int>> AdminBatchDeleteAsync(List<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var messages = await _messageRepository
+            .Where(m => ids.Contains(m.Id))
+            .ToListAsync(cancellationToken);
+
+        if (messages.Count == 0)
+            return Ok(0, "No messages found");
+
+        await _messageRepository.DeleteManyAsync(messages, cancellationToken);
+        LogInformation("Admin batch deleted {Count} messages", messages.Count);
+        return Ok(messages.Count, $"{messages.Count} messages deleted");
+    }
+
+    /// <summary>
+    /// 管理端：获取消息统计
+    /// </summary>
+    public async Task<Result<ChatStatisticsDto>> GetStatisticsAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default)
+    {
+        var queryable = _messageRepository.AsQueryable();
+
+        if (startDate.HasValue)
+            queryable = queryable.Where(m => m.CreationTime >= startDate.Value);
+        if (endDate.HasValue)
+            queryable = queryable.Where(m => m.CreationTime <= endDate.Value);
+
+        var messages = await queryable.ToListAsync(cancellationToken);
+
+        var dto = new ChatStatisticsDto
+        {
+            TotalMessages = messages.Count,
+            SentMessages = messages.Count(m => m.IsSent),
+            DraftMessages = messages.Count(m => !m.IsSent),
+            PublicMessages = messages.Count(m => m.MessageType == MessageType.Public),
+            PrivateMessages = messages.Count(m => m.MessageType == MessageType.Private),
+            ActiveSenders = messages.Select(m => m.SenderId).Distinct().Count(),
+            ImportantMessages = messages.Count(m => m.IsImportant)
+        };
+
+        // 回复数量需要单独查询
+        var replyQueryable = _replyRepository.AsQueryable();
+        if (startDate.HasValue)
+            replyQueryable = replyQueryable.Where(r => r.CreationTime >= startDate.Value);
+        if (endDate.HasValue)
+            replyQueryable = replyQueryable.Where(r => r.CreationTime <= endDate.Value);
+
+        dto.TotalReplies = await replyQueryable.CountAsync(cancellationToken);
+
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// 用户：批量删除消息（从收件箱移除）
+    /// </summary>
+    public async Task<Result<int>> BatchDeleteReceivesAsync(Guid userId, List<Guid> messageIds, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(messageIds);
+
+        var receives = await _receiveRepository
+            .Where(r => r.UserId == userId && messageIds.Contains(r.MessageId))
+            .ToListAsync(cancellationToken);
+
+        if (receives.Count == 0)
+            return Ok(0, "No messages found in inbox");
+
+        await _receiveRepository.DeleteManyAsync(receives, cancellationToken);
+        LogInformation("User {UserId} batch deleted {Count} inbox messages", userId, receives.Count);
+        return Ok(receives.Count, $"{receives.Count} messages removed from inbox");
+    }
+
+    /// <summary>
+    /// 用户：批量标记已读
+    /// </summary>
+    public async Task<Result<int>> BatchMarkAsReadAsync(Guid userId, List<Guid> messageIds, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(messageIds);
+
+        var unreadReceives = await _receiveRepository
+            .Where(r => r.UserId == userId && messageIds.Contains(r.MessageId) && r.ReadTime == null)
+            .ToListAsync(cancellationToken);
+
+        if (unreadReceives.Count == 0)
+            return Ok(0, "No unread messages found");
+
+        var now = DateTime.UtcNow;
+        foreach (var receive in unreadReceives)
+            receive.ReadTime = now;
+
+        await _receiveRepository.UpdateManyAsync(unreadReceives, cancellationToken);
+        return Ok(unreadReceives.Count, $"{unreadReceives.Count} messages marked as read");
+    }
+
     // === 私有辅助方法 ===
 
     /// <summary>
@@ -385,7 +502,7 @@ public class MessageService : ApplicationService, IMessageService
 
         // 检查接收记录
         var hasReceive = await _receiveRepository
-            .ExistsAsync(mr => mr.MessageId == message.Id && mr.UserId == userId);
+            .AnyAsync(mr => mr.MessageId == message.Id && mr.UserId == userId);
         if (hasReceive)
             return true;
 
@@ -419,10 +536,8 @@ public class MessageService : ApplicationService, IMessageService
         dto.IsRead = receive?.ReadTime != null;
         dto.ReadTime = receive?.ReadTime;
 
-        dto.ReplyCount = await _messageRepository.AsQueryable()
-            .Where(m => m.Id == message.Id)
-            .SelectMany(m => m.Replies)
-            .Where(r => !r.IsDeleted)
+        dto.ReplyCount = await _replyRepository
+            .Where(r => r.BelongMessageId == message.Id)
             .CountAsync();
 
         return dto;
@@ -450,6 +565,20 @@ public class MessageService : ApplicationService, IMessageService
         {
             if (receiveDict.TryGetValue(item.Id, out var receive))
                 item.IsRead = receive.ReadTime != null;
+        }
+
+        // 批量加载回复数量
+        var replyCounts = await _replyRepository.AsQueryable()
+            .Where(r => messageIds.Contains(r.BelongMessageId))
+            .GroupBy(r => r.BelongMessageId)
+            .Select(g => new { MessageId = g.Key, Count = g.Count() })
+            .ToListAsync();
+        var replyCountDict = replyCounts.ToDictionary(x => x.MessageId, x => x.Count);
+
+        foreach (var item in itemList)
+        {
+            if (replyCountDict.TryGetValue(item.Id, out var count))
+                item.ReplyCount = count;
         }
     }
 

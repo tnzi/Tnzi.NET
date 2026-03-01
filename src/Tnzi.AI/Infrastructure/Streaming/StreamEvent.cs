@@ -22,4 +22,16 @@ public class StreamEvent
 
     /// <summary>是否为终止事件</summary>
     public bool IsDone { get; set; }
+
+    /// <summary>是否为错误事件</summary>
+    public bool IsError { get; set; }
+
+    /// <summary>错误消息（仅在 IsError 为 true 时包含）</summary>
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>错误码（仅在 IsError 为 true 时包含）</summary>
+    public string? ErrorCode { get; set; }
+
+    /// <summary>是否为工具调用中间状态（用于心跳）</summary>
+    public bool IsToolCall { get; set; }
 }

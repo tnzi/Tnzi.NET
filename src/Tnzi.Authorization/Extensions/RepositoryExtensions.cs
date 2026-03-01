@@ -37,27 +37,5 @@ public static class RepositoryExtensions
         return query;
     }
 
-    /// <summary>
-    /// 应用数据权限过滤的查询（同步版本）
-    /// 警告：此方法会阻塞当前线程，应优先使用异步版本 WithDataAuthAsync
-    /// </summary>
-    /// <typeparam name="TEntity">实体类型</typeparam>
-    /// <typeparam name="TKey">主键类型</typeparam>
-    /// <param name="repository">仓储</param>
-    /// <param name="dataAuthService">数据授权服务</param>
-    /// <param name="currentUser">当前用户</param>
-    /// <param name="operation">操作类型</param>
-    /// <returns>应用了数据权限过滤的查询</returns>
-    public static IQueryable<TEntity> WithDataAuth<TEntity, TKey>(
-        this IRepository<TEntity, TKey> repository,
-        IDataAuthService dataAuthService,
-        ICurrentUser currentUser,
-        DataAuthOperation operation = DataAuthOperation.Query)
-        where TEntity : class, Tnzi.Domain.Entities.IEntity<TKey>
-        where TKey : notnull
-    {
-        // 使用 AsyncHelper.RunSync 避免在同步上下文中阻塞异步操作
-        return AsyncHelper.RunSync(() => WithDataAuthAsync(repository, dataAuthService, currentUser, operation));
-    }
 }
 

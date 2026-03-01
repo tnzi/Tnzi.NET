@@ -30,5 +30,6 @@ global using Tnzi.Modules;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Security.Claims;
+global using Tnzi.SignalR;
 global using Tnzi.SignalR.Services;
 global using Tnzi.Utilities;

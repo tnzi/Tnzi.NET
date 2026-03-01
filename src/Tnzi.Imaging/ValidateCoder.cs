@@ -3,6 +3,7 @@ namespace Tnzi.Imaging;
 
 /// <summary>
 /// 验证码生成类（使用SixLabors.ImageSharp实现，支持跨平台）
+/// 所有属性使用 init setter，确保单例注册后线程安全（不可变）
 /// </summary>
 public class ValidateCoder
 {
@@ -11,8 +12,18 @@ public class ValidateCoder
     /// </summary>
     public ValidateCoder()
     {
-        FontNames = new List<string> { "Arial", "Times New Roman", "Courier New", "Verdana", "Georgia" };
-        FontNamesForHanzi = new List<string> { "SimSun", "SimHei", "KaiTi", "FangSong", "Microsoft YaHei" };
+        FontNames = [
+            // Windows
+            "Arial", "Times New Roman", "Courier New", "Verdana", "Georgia",
+            // Linux (liberation / dejavu / noto)
+            "Liberation Sans", "Liberation Serif", "DejaVu Sans", "Noto Sans"
+        ];
+        FontNamesForHanzi = [
+            // Windows
+            "SimSun", "SimHei", "KaiTi", "FangSong", "Microsoft YaHei",
+            // Linux
+            "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Droid Sans Fallback"
+        ];
         FontSize = 20;
         FontWidth = FontSize;
         BgColor = Color.FromRgb(240, 240, 240);
@@ -25,62 +36,62 @@ public class ValidateCoder
     /// <summary>
     /// 获取或设置 字体名称集合
     /// </summary>
-    public List<string> FontNames { get; set; }
+    public IReadOnlyList<string> FontNames { get; init; }
 
     /// <summary>
     /// 获取或设置 汉字字体名称集合
     /// </summary>
-    public List<string> FontNamesForHanzi { get; set; }
+    public IReadOnlyList<string> FontNamesForHanzi { get; init; }
 
     /// <summary>
     /// 获取或设置 字体大小
     /// </summary>
-    public int FontSize { get; set; }
+    public int FontSize { get; init; }
 
     /// <summary>
     /// 获取或设置 字体宽度
     /// </summary>
-    public int FontWidth { get; set; }
+    public int FontWidth { get; init; }
 
     /// <summary>
     /// 获取或设置 图片高度
     /// </summary>
-    public int Height { get; set; }
+    public int Height { get; init; }
 
     /// <summary>
     /// 获取或设置 背景颜色
     /// </summary>
-    public Color BgColor { get; set; }
+    public Color BgColor { get; init; }
 
     /// <summary>
     /// 获取或设置 是否有边框
     /// </summary>
-    public bool HasBorder { get; set; }
+    public bool HasBorder { get; init; }
 
     /// <summary>
     /// 获取或设置 是否随机位置
     /// </summary>
-    public bool RandomPosition { get; set; }
+    public bool RandomPosition { get; init; }
 
     /// <summary>
     /// 获取或设置 是否随机字体颜色
     /// </summary>
-    public bool RandomColor { get; set; }
+    public bool RandomColor { get; init; }
 
     /// <summary>
     /// 获取或设置 是否随机倾斜字体
     /// </summary>
-    public bool RandomItalic { get; set; }
+    public bool RandomItalic { get; init; }
 
     /// <summary>
     /// 获取或设置 随机干扰点百分比（百分数形式）
     /// </summary>
-    public double RandomPointPercent { get; set; }
+    public double RandomPointPercent { get; init; }
 
     /// <summary>
     /// 获取或设置 随机干扰线数量
     /// </summary>
-    public int RandomLineCount { get; set; }
+    public int RandomLineCount { get; init; }
 
     #endregion
 
@@ -256,12 +267,12 @@ public class ValidateCoder
 
     private static string GetRandomNums(int length)
     {
-        var nums = new int[length];
+        var result = new char[length];
         for (int i = 0; i < length; i++)
         {
-            nums[i] = Random.Shared.Next(0, 10);
+            result[i] = (char)('0' + Random.Shared.Next(0, 10));
         }
-        return nums.ExpandAndToString("");
+        return new string(result);
     }
 
     // 缓存可用字符数组，避免每次调用都 Split
@@ -298,17 +309,37 @@ public class ValidateCoder
     /// <summary>
     /// 从字体名称列表中获取第一个可用的字体族，回退到系统任意可用字体
     /// </summary>
-    private static FontFamily GetAvailableFontFamily(List<string> fontNames)
+    private static FontFamily GetAvailableFontFamily(IReadOnlyList<string> fontNames)
     {
         foreach (var name in fontNames)
         {
-            if (SystemFonts.TryGet(name, out var family))
+            if (SystemFonts.TryGet(name, out var family) && IsFontUsable(family))
                 return family;
         }
-        var families = SystemFonts.Families;
-        if (!families.Any())
-            throw new InvalidOperationException("No fonts available on the system.");
-        return families.First();
+        // 回退：遍历所有系统字体，跳过无法使用的（如 CFF 字体缺少 loca 表）
+        foreach (var family in SystemFonts.Families)
+        {
+            if (IsFontUsable(family))
+                return family;
+        }
+        throw new InvalidOperationException("No usable TrueType fonts available on the system.");
+    }
+
+    /// <summary>
+    /// 检测字体是否可用（部分字体缺少 TrueType 所需的 loca 表，会在渲染时抛异常）
+    /// </summary>
+    private static bool IsFontUsable(FontFamily family)
+    {
+        try
+        {
+            var font = family.CreateFont(12, FontStyle.Regular);
+            TextMeasurer.MeasureSize("A", new TextOptions(font));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     #endregion

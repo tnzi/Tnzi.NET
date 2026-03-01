@@ -147,7 +147,7 @@ public static class HttpContextExtensions
     {
         Check.NotNull(request);
 
-        var userAgent = request.GetUserAgent()?.ToLower();
+        var userAgent = request.GetUserAgent();
 
         if (string.IsNullOrEmpty(userAgent))
         {
@@ -155,31 +155,31 @@ public static class HttpContextExtensions
         }
 
         // 移动设备检测
-        if (userAgent.Contains("android") ||
-            userAgent.Contains("iphone") ||
-            userAgent.Contains("ipad") ||
-            userAgent.Contains("ipod") ||
-            userAgent.Contains("mobile"))
+        if (userAgent.Contains("android", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("iphone", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("ipad", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("ipod", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("mobile", StringComparison.OrdinalIgnoreCase))
         {
             return RequestClientType.Mobile;
         }
 
         // 桌面操作系统检测
-        if (userAgent.Contains("windows nt") ||
-            userAgent.Contains("macintosh") ||
-            userAgent.Contains("x11") ||
-            userAgent.Contains("linux"))
+        if (userAgent.Contains("windows nt", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("macintosh", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("x11", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("linux", StringComparison.OrdinalIgnoreCase))
         {
             return RequestClientType.Desktop;
         }
 
         // 浏览器检测
-        if (userAgent.Contains("chrome") ||
-            userAgent.Contains("firefox") ||
-            userAgent.Contains("safari") ||
-            userAgent.Contains("opera") ||
-            userAgent.Contains("edge") ||
-            userAgent.Contains("msie"))
+        if (userAgent.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("firefox", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("safari", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("opera", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("edge", StringComparison.OrdinalIgnoreCase) ||
+            userAgent.Contains("msie", StringComparison.OrdinalIgnoreCase))
         {
             return RequestClientType.Browser;
         }

@@ -58,7 +58,6 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
             Md5Hash = md5Hash,
             IsCompleted = false,
             IsCancelled = false,
-            CreationTime = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddHours(24)
         };
 
@@ -119,8 +118,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
             ChunkIndex = chunkIndex,
             ChunkSize = memoryStream.Length,
             ChunkPath = chunkPath,
-            Md5Hash = chunkMd5,
-            CreationTime = DateTime.UtcNow
+            Md5Hash = chunkMd5
         };
 
         await _chunkRepository.InsertAsync(chunk, cancellationToken);
@@ -160,65 +158,80 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         if (chunks.Count != session.TotalChunks)
             return Fail<FileRecord>($"Not all chunks have been uploaded. Expected {session.TotalChunks}, got {chunks.Count}", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
-        // 合并所有分块
-        using var mergedStream = new MemoryStream();
-        foreach (var chunk in chunks)
+        // 使用临时文件合并分块，避免大文件占用大量内存
+        var tempFilePath = Path.GetTempFileName();
+        try
         {
-            if (string.IsNullOrEmpty(chunk.ChunkPath))
-                throw new StorageException($"Chunk {chunk.ChunkIndex} path is empty.", null, ErrorCodes.FILE_OPERATION_ERROR);
-
-            using var chunkStream = await _storage.DownloadAsync(chunk.ChunkPath);
-            await chunkStream.CopyToAsync(mergedStream, cancellationToken);
-        }
-        mergedStream.Position = 0;
-
-        // 验证文件大小
-        if (mergedStream.Length != session.TotalSize)
-            return Fail<FileRecord>($"File size mismatch. Expected {session.TotalSize}, got {mergedStream.Length}", 400, ErrorCodes.FILE_OPERATION_ERROR);
-
-        // 计算合并后的 MD5
-        var md5Hash = await Md5Helper.CalculateAsync(mergedStream);
-        mergedStream.Position = 0;
-
-        if (!string.IsNullOrEmpty(session.Md5Hash) && md5Hash != session.Md5Hash)
-            return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.FILE_OPERATION_ERROR);
-
-        // 保存合并后的文件
-        var filePath = await _storage.UploadAsync(session.FileName, mergedStream, FileTypeHelper.GetContentType(Path.GetExtension(session.FileName)));
-
-        // 创建文件记录
-        var fileRecord = new FileRecord
-        {
-            FileName = session.FileName,
-            OriginalName = session.FileName,
-            Extension = Path.GetExtension(session.FileName),
-            Size = mergedStream.Length,
-            Path = filePath,
-            Md5Hash = md5Hash,
-            Provider = _storage.ProviderName,
-            ContentType = FileTypeHelper.GetContentType(Path.GetExtension(session.FileName)),
-            ReferenceCount = 0
-        };
-
-        await _fileRepository.InsertAsync(fileRecord, cancellationToken);
-
-        // 标记会话为已完成
-        session.IsCompleted = true;
-        session.CompletedTime = DateTime.UtcNow;
-        await _uploadSessionRepository.UpdateAsync(session, cancellationToken);
-
-        // 清理分块文件
-        foreach (var chunk in chunks)
-        {
-            if (!string.IsNullOrEmpty(chunk.ChunkPath))
+            long mergedSize;
+            using (var mergedStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.ReadWrite, System.IO.FileShare.None))
             {
-                await _storage.DeleteAsync(chunk.ChunkPath);
-            }
-            await _chunkRepository.DeleteAsync(chunk, cancellationToken);
-        }
+                foreach (var chunk in chunks)
+                {
+                    if (string.IsNullOrEmpty(chunk.ChunkPath))
+                        throw new StorageException($"Chunk {chunk.ChunkIndex} path is empty.", null, ErrorCodes.FILE_OPERATION_ERROR);
 
-        LogInformation("Chunked upload completed: SessionId: {SessionId}, FileName: {FileName}, Size: {Size}", uploadSessionId, session.FileName, mergedStream.Length);
-        return Ok(fileRecord, "Chunked upload completed successfully");
+                    using var chunkStream = await _storage.DownloadAsync(chunk.ChunkPath);
+                    await chunkStream.CopyToAsync(mergedStream, cancellationToken);
+                }
+
+                mergedSize = mergedStream.Length;
+
+                // 验证文件大小
+                if (mergedSize != session.TotalSize)
+                    return Fail<FileRecord>($"File size mismatch. Expected {session.TotalSize}, got {mergedSize}", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+                // 计算合并后的 MD5
+                mergedStream.Position = 0;
+                var md5Hash = await Md5Helper.CalculateAsync(mergedStream);
+
+                if (!string.IsNullOrEmpty(session.Md5Hash) && md5Hash != session.Md5Hash)
+                    return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+                // 保存合并后的文件
+                mergedStream.Position = 0;
+                var contentType = FileTypeHelper.GetContentType(Path.GetExtension(session.FileName));
+                var filePath = await _storage.UploadAsync(session.FileName, mergedStream, contentType);
+
+                // 创建文件记录
+                var fileRecord = new FileRecord
+                {
+                    FileName = session.FileName,
+                    OriginalName = session.FileName,
+                    Extension = Path.GetExtension(session.FileName),
+                    Size = mergedSize,
+                    Path = filePath,
+                    Md5Hash = md5Hash,
+                    Provider = _storage.ProviderName,
+                    ContentType = contentType,
+                    ReferenceCount = 0
+                };
+
+                await _fileRepository.InsertAsync(fileRecord, cancellationToken);
+
+                // 标记会话为已完成
+                session.IsCompleted = true;
+                session.CompletedTime = DateTime.UtcNow;
+                await _uploadSessionRepository.UpdateAsync(session, cancellationToken);
+
+                // 清理分块文件
+                foreach (var chunk in chunks)
+                {
+                    if (!string.IsNullOrEmpty(chunk.ChunkPath))
+                    {
+                        await _storage.DeleteAsync(chunk.ChunkPath);
+                    }
+                    await _chunkRepository.DeleteAsync(chunk, cancellationToken);
+                }
+
+                LogInformation("Chunked upload completed: SessionId: {SessionId}, FileName: {FileName}, Size: {Size}", uploadSessionId, session.FileName, mergedSize);
+                return Ok(fileRecord, "Chunked upload completed successfully");
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempFilePath))
+                File.Delete(tempFilePath);
+        }
     }
 
     public async Task<Result> CancelChunkedUploadAsync(Guid uploadSessionId, CancellationToken cancellationToken = default)

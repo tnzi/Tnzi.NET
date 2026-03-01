@@ -19,9 +19,9 @@ public class RequestValidationMiddleware
         IRequestValidator validator,
         ILogger<RequestValidationMiddleware> logger)
     {
-        _next = next;
-        _validator = validator;
-        _logger = logger;
+        _next = Check.NotNull(next);
+        _validator = Check.NotNull(validator);
+        _logger = Check.NotNull(logger);
     }
 
     /// <summary>
@@ -41,10 +41,9 @@ public class RequestValidationMiddleware
                 
                 context.Response.StatusCode = 400;
                 context.Response.ContentType = "application/json";
-                
-                // 使用更安全的 JSON 序列化
-                var errorResponse = System.Text.Json.JsonSerializer.Serialize(new { error = error });
-                await context.Response.WriteAsync(errorResponse);
+
+                var errorResult = ApiResult.Error(error, 400);
+                await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
                 return;
             }
 
@@ -60,8 +59,8 @@ public class RequestValidationMiddleware
             // 这里选择拒绝请求，因为验证失败意味着请求可能不安全
             context.Response.StatusCode = 500;
             context.Response.ContentType = "application/json";
-            var errorResponse = System.Text.Json.JsonSerializer.Serialize(new { error = "Request validation error" });
-            await context.Response.WriteAsync(errorResponse);
+            var errorResult = ApiResult.Error("Request validation error", 500);
+            await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
         }
     }
 }

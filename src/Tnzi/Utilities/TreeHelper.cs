@@ -216,4 +216,156 @@ public static class TreeHelper
             }
         }
     }
+
+    /// <summary>
+    /// 在平面数据中查找指定节点
+    /// </summary>
+    /// <typeparam name="T">节点类型</typeparam>
+    /// <typeparam name="TKey">ID 类型</typeparam>
+    /// <param name="flatData">平面数据列表</param>
+    /// <param name="getId">获取节点 ID 的委托</param>
+    /// <param name="targetId">要查找的节点 ID</param>
+    /// <returns>找到的节点，不存在返回 default</returns>
+    public static T? FindNode<T, TKey>(IEnumerable<T> flatData, Func<T, TKey> getId, TKey targetId)
+        where TKey : notnull
+    {
+        Check.NotNull(flatData);
+        Check.NotNull(getId);
+
+        return flatData.FirstOrDefault(item => EqualityComparer<TKey>.Default.Equals(getId(item), targetId));
+    }
+
+    /// <summary>
+    /// 获取指定节点的所有祖先节点（从直接父节点到根节点）
+    /// </summary>
+    /// <typeparam name="T">节点类型</typeparam>
+    /// <typeparam name="TKey">ID 类型</typeparam>
+    /// <param name="flatData">平面数据列表</param>
+    /// <param name="getId">获取节点 ID 的委托</param>
+    /// <param name="getParentId">获取父节点 ID 的委托</param>
+    /// <param name="targetId">起始节点 ID</param>
+    /// <returns>祖先节点列表（从直接父节点到根节点排列）</returns>
+    public static IList<T> FindAncestors<T, TKey>(
+        IEnumerable<T> flatData,
+        Func<T, TKey> getId,
+        Func<T, TKey?> getParentId,
+        TKey targetId)
+        where TKey : notnull
+    {
+        Check.NotNull(flatData);
+        Check.NotNull(getId);
+        Check.NotNull(getParentId);
+
+        var dataList = flatData as IList<T> ?? flatData.ToList();
+        var nodeDict = dataList.ToDictionary(x => getId(x), x => x);
+        var ancestors = new List<T>();
+        var visited = new HashSet<TKey>();
+
+        var current = nodeDict.GetValueOrDefault(targetId);
+        if (current == null) return ancestors;
+
+        var parentId = getParentId(current);
+        while (parentId != null && nodeDict.TryGetValue(parentId, out var parent))
+        {
+            if (!visited.Add(getId(parent)))
+                break; // 防止循环引用
+
+            ancestors.Add(parent);
+            parentId = getParentId(parent);
+        }
+
+        return ancestors;
+    }
+
+    /// <summary>
+    /// 获取指定节点的所有后代节点（深度优先）
+    /// </summary>
+    /// <typeparam name="T">节点类型</typeparam>
+    /// <typeparam name="TKey">ID 类型</typeparam>
+    /// <param name="flatData">平面数据列表</param>
+    /// <param name="getId">获取节点 ID 的委托</param>
+    /// <param name="getParentId">获取父节点 ID 的委托</param>
+    /// <param name="targetId">起始节点 ID</param>
+    /// <returns>所有后代节点列表</returns>
+    public static IList<T> FindDescendants<T, TKey>(
+        IEnumerable<T> flatData,
+        Func<T, TKey> getId,
+        Func<T, TKey?> getParentId,
+        TKey targetId)
+        where TKey : notnull
+    {
+        Check.NotNull(flatData);
+        Check.NotNull(getId);
+        Check.NotNull(getParentId);
+
+        var dataList = flatData as IList<T> ?? flatData.ToList();
+        var childrenMap = new Dictionary<TKey, List<T>>();
+
+        foreach (var item in dataList)
+        {
+            var pid = getParentId(item);
+            if (pid != null)
+            {
+                if (!childrenMap.TryGetValue(pid, out var children))
+                {
+                    children = [];
+                    childrenMap[pid] = children;
+                }
+                children.Add(item);
+            }
+        }
+
+        var descendants = new List<T>();
+        var stack = new Stack<TKey>();
+        stack.Push(targetId);
+
+        while (stack.Count > 0)
+        {
+            var currentId = stack.Pop();
+            if (!childrenMap.TryGetValue(currentId, out var childList))
+                continue;
+
+            foreach (var child in childList)
+            {
+                descendants.Add(child);
+                stack.Push(getId(child));
+            }
+        }
+
+        return descendants;
+    }
+
+    /// <summary>
+    /// 获取从根节点到指定节点的完整路径
+    /// </summary>
+    /// <typeparam name="T">节点类型</typeparam>
+    /// <typeparam name="TKey">ID 类型</typeparam>
+    /// <param name="flatData">平面数据列表</param>
+    /// <param name="getId">获取节点 ID 的委托</param>
+    /// <param name="getParentId">获取父节点 ID 的委托</param>
+    /// <param name="targetId">目标节点 ID</param>
+    /// <returns>从根节点到目标节点的路径列表</returns>
+    public static IList<T> FindPath<T, TKey>(
+        IEnumerable<T> flatData,
+        Func<T, TKey> getId,
+        Func<T, TKey?> getParentId,
+        TKey targetId)
+        where TKey : notnull
+    {
+        var ancestors = FindAncestors(flatData, getId, getParentId, targetId);
+        var target = FindNode(flatData, getId, targetId);
+
+        // 反转祖先列表（从根到叶），再加上目标节点本身
+        var path = new List<T>(ancestors.Count + 1);
+        for (int i = ancestors.Count - 1; i >= 0; i--)
+        {
+            path.Add(ancestors[i]);
+        }
+        if (target != null)
+        {
+            path.Add(target);
+        }
+
+        return path;
+    }
 }

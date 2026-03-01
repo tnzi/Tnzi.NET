@@ -4,6 +4,7 @@ namespace Tnzi.Storage;
 /// 存储模块
 /// 配置路径：Storage
 /// </summary>
+[DependsOn(typeof(EFCore.EFCoreModule))]
 public class StorageModule : TnziApplicationModule
 {
     /// <summary>
@@ -33,21 +34,17 @@ public class StorageModule : TnziApplicationModule
 
         // 注册存储服务（默认使用 LocalStorage）
         // 用户可以通过配置选择不同的存储提供者（Local, S3, R2, Azure 等）
-        // 存储实现已内置，依赖随 Tnzi.Storage 传递，应用通常无需单独安装 NuGet 包；若需固定版本可显式引用
+        // 自定义提供者: 在模块的 PreConfigureServicesAsync 中调用 StorageProviderFactory.Register()
         services.AddSingleton<IFileStorage>(provider =>
         {
-            var options = provider.GetService<IOptions<StorageOptions>>()?.Value;
-            var providerName = options?.Provider ?? "Local";
-            var configuration = provider.GetService<IConfiguration>();
+            var options = provider.GetService<IOptions<StorageOptions>>()?.Value
+                ?? throw new InvalidOperationException("StorageOptions is not configured.");
+            var configuration = provider.GetRequiredService<IConfiguration>();
             var environment = provider.GetService<IWebHostEnvironment>();
             var loggerFactory = provider.GetService<ILoggerFactory>();
 
-            return StorageProviderFactory.Create(
-                providerName,
-                options ?? throw new InvalidOperationException("StorageOptions is not configured."),
-                configuration!,
-                environment,
-                loggerFactory);
+            var ctx = new StorageProviderContext(options, configuration, environment, loggerFactory);
+            return StorageProviderFactory.Create(ctx);
         });
 
         // 注册文件存储服务

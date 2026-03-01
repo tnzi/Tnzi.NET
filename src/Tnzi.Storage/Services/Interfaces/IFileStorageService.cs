@@ -62,4 +62,56 @@ public interface IFileStorageService
     // 压缩
     Task<Result<FileRecord>> CompressAsync(IEnumerable<Guid> fileIds, string? zipFileName = null, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<FileRecord>>> DecompressAsync(Guid fileId, CancellationToken cancellationToken = default);
+
+    // Presigned URL
+    /// <summary>
+    /// Generate a presigned URL for temporary public access to a file (download or upload).
+    /// Cloud providers (S3, R2, Azure) support this natively; LocalStorage returns a controller-based URL.
+    /// </summary>
+    /// <param name="id">File ID</param>
+    /// <param name="expiresInSeconds">URL expiration in seconds (default 3600 = 1 hour)</param>
+    /// <param name="httpMethod">HTTP method: GET for download, PUT for direct upload (default GET)</param>
+    /// <returns>Presigned URL string</returns>
+    Task<Result<string>> GetPresignedUrlAsync(Guid id, int expiresInSeconds = 3600, string httpMethod = "GET");
+
+    // User/Tenant storage usage
+    /// <summary>
+    /// Get storage usage statistics for a specific user (total files and total size).
+    /// </summary>
+    /// <param name="userId">User ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>User storage usage statistics</returns>
+    Task<Result<UserStorageUsage>> GetUserStorageUsageAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get storage usage ranked by top users (ordered by total size descending).
+    /// </summary>
+    /// <param name="top">Number of top users to return (default 20)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of user storage usages</returns>
+    Task<Result<IEnumerable<UserStorageUsage>>> GetTopUsersByStorageAsync(int top = 20, CancellationToken cancellationToken = default);
+
+    // File integrity verification
+    /// <summary>
+    /// Verify integrity of a single file: checks physical existence and MD5 hash match.
+    /// </summary>
+    Task<Result<FileIntegrityResult>> VerifyFileIntegrityAsync(Guid fileId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Batch verify integrity of all files (or a subset). Returns only problematic files in details.
+    /// </summary>
+    /// <param name="maxFiles">Maximum number of files to check (default 100, 0 = all)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task<Result<BatchIntegrityResult>> BatchVerifyIntegrityAsync(int maxFiles = 100, CancellationToken cancellationToken = default);
+
+    // File tags
+    /// <summary>
+    /// Set tags for a file (replaces existing tags).
+    /// </summary>
+    Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get files by tag (supports paging).
+    /// </summary>
+    Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default);
 }

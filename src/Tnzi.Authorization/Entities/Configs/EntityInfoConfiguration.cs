@@ -7,8 +7,6 @@ public class EntityInfoConfiguration : EntityTypeConfigurationBase<EntityInfo, G
 {
     public override void Configure(EntityTypeBuilder<EntityInfo> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(e => e.Id);
         builder.Property(e => e.Name).IsRequired().HasMaxLength(200);
         builder.Property(e => e.TypeName).IsRequired().HasMaxLength(500);
         builder.Property(e => e.DisplayName).HasMaxLength(200);

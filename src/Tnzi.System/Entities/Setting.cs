@@ -66,4 +66,14 @@ public class Setting : FullAuditedEntity<Guid>
     /// 获取或设置 值类型
     /// </summary>
     public SettingValueType ValueType { get; set; }
+
+    /// <summary>
+    /// 获取或设置 配置作用域
+    /// </summary>
+    public SettingScope Scope { get; set; } = SettingScope.Global;
+
+    /// <summary>
+    /// 获取或设置 作用域标识（租户ID/用户ID）
+    /// </summary>
+    public string? ScopeId { get; set; }
 }

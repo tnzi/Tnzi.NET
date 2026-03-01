@@ -1,86 +1,105 @@
 namespace Tnzi.Storage.Providers;
 
 /// <summary>
-/// 存储提供者工厂
+/// Storage provider creation context
+/// </summary>
+public class StorageProviderContext
+{
+    public StorageOptions Options { get; }
+    public IConfiguration Configuration { get; }
+    public IWebHostEnvironment? Environment { get; }
+    public ILoggerFactory? LoggerFactory { get; }
+
+    public StorageProviderContext(StorageOptions options, IConfiguration configuration, IWebHostEnvironment? environment = null, ILoggerFactory? loggerFactory = null)
+    {
+        Options = Check.NotNull(options);
+        Configuration = Check.NotNull(configuration);
+        Environment = environment;
+        LoggerFactory = loggerFactory;
+    }
+}
+
+/// <summary>
+/// 存储提供者工厂 — 可扩展的提供者注册表
+/// <para>
+/// 内置提供者: Local, S3, R2, Azure
+/// 自定义提供者: 在模块的 PreConfigureServicesAsync 中调用 <see cref="Register"/> 注册
+/// </para>
 /// </summary>
 public static class StorageProviderFactory
 {
+    private static readonly Dictionary<string, Func<StorageProviderContext, IFileStorage>> _providers = new(StringComparer.OrdinalIgnoreCase);
+
+    static StorageProviderFactory()
+    {
+        // 注册内置提供者
+        Register("local", ctx => new LocalStorage(ctx.Configuration, ctx.Environment));
+        Register("s3", ctx =>
+        {
+            if (ctx.Options.S3 == null)
+                throw new InvalidOperationException("S3 options are required when Provider is S3.");
+            return new S3Storage(ctx.Options.S3, ctx.Configuration);
+        });
+        Register("r2", ctx =>
+        {
+            if (ctx.Options.R2 == null)
+                throw new InvalidOperationException("R2 options are required when Provider is R2.");
+            return new R2Storage(ctx.Options.R2, ctx.Configuration);
+        });
+        Register("azure", ctx =>
+        {
+            if (ctx.Options.Azure == null)
+                throw new InvalidOperationException("Azure options are required when Provider is Azure.");
+            ILogger<AzureBlobStorage>? logger = ctx.LoggerFactory?.CreateLogger<AzureBlobStorage>();
+            return new AzureBlobStorage(ctx.Options.Azure, ctx.Configuration, logger);
+        });
+    }
+
+    /// <summary>
+    /// Register a custom storage provider.
+    /// Call in your module's PreConfigureServicesAsync to add custom providers.
+    /// </summary>
+    /// <param name="providerName">Provider name (case-insensitive)</param>
+    /// <param name="factory">Factory function to create the provider</param>
+    public static void Register(string providerName, Func<StorageProviderContext, IFileStorage> factory)
+    {
+        Check.NotNullOrWhiteSpace(providerName);
+        Check.NotNull(factory);
+        _providers[providerName] = factory;
+    }
+
+    /// <summary>
+    /// Check if a provider is registered
+    /// </summary>
+    public static bool IsRegistered(string providerName)
+    {
+        return _providers.ContainsKey(providerName);
+    }
+
+    /// <summary>
+    /// Get all registered provider names
+    /// </summary>
+    public static IReadOnlyCollection<string> GetRegisteredProviders()
+    {
+        return _providers.Keys.ToList().AsReadOnly();
+    }
+
     /// <summary>
     /// 创建存储提供者实例
     /// </summary>
-    /// <param name="providerName">提供者名称（Local, S3, R2, Azure）</param>
-    /// <param name="options">文件存储配置选项</param>
-    /// <param name="configuration">配置</param>
-    /// <param name="environment">Web宿主环境（Local存储需要）</param>
-    /// <param name="loggerFactory">日志工厂（Azure存储需要）</param>
-    /// <returns>存储提供者实例</returns>
-    public static IFileStorage Create(
-        string providerName,
-        StorageOptions options,
-        IConfiguration configuration,
-        IWebHostEnvironment? environment = null,
-        ILoggerFactory? loggerFactory = null)
+    public static IFileStorage Create(StorageProviderContext context)
     {
-        if (string.IsNullOrEmpty(providerName))
-            providerName = "Local";
+        Check.NotNull(context);
+        var providerName = context.Options.Provider ?? "Local";
 
-        return providerName.ToLowerInvariant() switch
+        if (_providers.TryGetValue(providerName, out var factory))
         {
-            "local" => CreateLocalStorage(configuration, environment),
-            "s3" => CreateS3Storage(options, configuration),
-            "r2" => CreateR2Storage(options, configuration),
-            "azure" => CreateAzureStorage(options, configuration, loggerFactory),
-            _ => CreateLocalStorage(configuration, environment)
-        };
-    }
-
-    /// <summary>
-    /// 创建本地存储实例
-    /// </summary>
-    private static IFileStorage CreateLocalStorage(IConfiguration configuration, IWebHostEnvironment? environment)
-    {
-        return new LocalStorage(configuration, environment);
-    }
-
-    /// <summary>
-    /// 创建 S3 存储实例
-    /// </summary>
-    private static IFileStorage CreateS3Storage(StorageOptions options, IConfiguration configuration)
-    {
-        if (options.S3 == null)
-            throw new InvalidOperationException("S3 options are required when Provider is S3.");
-
-        return new S3Storage(options.S3, configuration);
-    }
-
-    /// <summary>
-    /// 创建 R2 存储实例（R2 兼容 S3 API）。
-    /// </summary>
-    private static IFileStorage CreateR2Storage(StorageOptions options, IConfiguration configuration)
-    {
-        if (options.R2 == null)
-            throw new InvalidOperationException("R2 options are required when Provider is R2.");
-
-        return new R2Storage(options.R2, configuration);
-    }
-
-    /// <summary>
-    /// 创建 Azure 存储实例
-    /// </summary>
-    private static IFileStorage CreateAzureStorage(
-        StorageOptions options,
-        IConfiguration configuration,
-        ILoggerFactory? loggerFactory)
-    {
-        if (options.Azure == null)
-            throw new InvalidOperationException("Azure options are required when Provider is Azure.");
-
-        ILogger<AzureBlobStorage>? logger = null;
-        if (loggerFactory != null)
-        {
-            logger = loggerFactory.CreateLogger<AzureBlobStorage>();
+            return factory(context);
         }
 
-        return new AzureBlobStorage(options.Azure, configuration, logger);
+        throw new InvalidOperationException(
+            $"Unknown storage provider '{providerName}'. Registered providers: {string.Join(", ", _providers.Keys)}. " +
+            $"Register custom providers via StorageProviderFactory.Register() in your module's PreConfigureServicesAsync.");
     }
+
 }

@@ -5,7 +5,8 @@ namespace Tnzi.Data.Snows;
 /// </summary>
 public class IdHelper
 {
-    private static IIdGenerator? _IdGenInstance = null;
+    private static volatile IIdGenerator? _IdGenInstance;
+    private static readonly object _initLock = new();
 
     public static IIdGenerator IdGenInstance => _IdGenInstance ?? throw new InvalidOperationException("IdGenerator has not been initialized. Call SetIdGenerator first.");
 
@@ -20,7 +21,10 @@ public class IdHelper
     /// <param name="options"></param>
     public static void SetIdGenerator(IdGeneratorOptions options)
     {
-        _IdGenInstance = new DefaultIdGenerator(options);
+        lock (_initLock)
+        {
+            _IdGenInstance = new DefaultIdGenerator(options);
+        }
     }
 
     /// <summary>
@@ -33,9 +37,11 @@ public class IdHelper
     {
         if (_IdGenInstance == null)
         {
-            _IdGenInstance = new DefaultIdGenerator(
-                new IdGeneratorOptions() { WorkerId = 1 }
-                );
+            lock (_initLock)
+            {
+                _IdGenInstance ??= new DefaultIdGenerator(
+                    new IdGeneratorOptions() { WorkerId = 1 });
+            }
         }
 
         return _IdGenInstance.NewLong();

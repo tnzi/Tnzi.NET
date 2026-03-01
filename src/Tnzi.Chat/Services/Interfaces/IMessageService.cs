@@ -54,4 +54,36 @@ public interface IMessageService
     /// 管理端：删除消息
     /// </summary>
     Task<Result> AdminDeleteAsync(Guid messageId);
+
+    /// <summary>
+    /// 管理端：批量删除消息
+    /// </summary>
+    Task<Result<int>> AdminBatchDeleteAsync(List<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<int>("Admin batch delete not implemented", 501));
+    }
+
+    /// <summary>
+    /// 管理端：获取消息统计
+    /// </summary>
+    Task<Result<ChatStatisticsDto>> GetStatisticsAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<ChatStatisticsDto>("Statistics not implemented", 501));
+    }
+
+    /// <summary>
+    /// 用户：批量删除消息（从收件箱移除）
+    /// </summary>
+    Task<Result<int>> BatchDeleteReceivesAsync(Guid userId, List<Guid> messageIds, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<int>("Batch delete receives not implemented", 501));
+    }
+
+    /// <summary>
+    /// 用户：批量标记已读
+    /// </summary>
+    Task<Result<int>> BatchMarkAsReadAsync(Guid userId, List<Guid> messageIds, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<int>("Batch mark as read not implemented", 501));
+    }
 }

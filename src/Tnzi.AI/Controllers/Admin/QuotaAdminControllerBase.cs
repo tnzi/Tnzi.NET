@@ -4,6 +4,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// 配额管理控制器基类
 /// </summary>
 [Route("admin/quotas")]
+[ApiExplorerSettings(GroupName = "ai-admin")]
 public abstract class QuotaAdminControllerBase : ApiAdminControllerBase
 {
     protected readonly IQuotaService QuotaService;
@@ -20,7 +21,7 @@ public abstract class QuotaAdminControllerBase : ApiAdminControllerBase
     /// <param name="ct">取消令牌</param>
     /// <returns>配额信息</returns>
     [HttpGet("{userId:guid}")]
-    public virtual async Task<ApiResult<UserQuotaDto>> GetQuotaAsync(Guid userId, CancellationToken ct = default)
+    public virtual async Task<ApiResult<UserQuotaDto>> GetQuota(Guid userId, CancellationToken ct = default)
     {
         var result = await QuotaService.GetQuotaAsync(userId, ct);
         return result.ToApiResult();
@@ -33,7 +34,7 @@ public abstract class QuotaAdminControllerBase : ApiAdminControllerBase
     /// <param name="ct">取消令牌</param>
     /// <returns>配额信息</returns>
     [HttpPost]
-    public virtual async Task<ApiResult<UserQuotaDto>> SetQuotaAsync([FromBody] SetQuotaDto request, CancellationToken ct = default)
+    public virtual async Task<ApiResult<UserQuotaDto>> SetQuota([FromBody] SetQuotaDto request, CancellationToken ct = default)
     {
         var result = await QuotaService.SetQuotaAsync(
             request.UserId,
@@ -51,7 +52,7 @@ public abstract class QuotaAdminControllerBase : ApiAdminControllerBase
     /// <param name="ct">取消令牌</param>
     /// <returns>操作结果</returns>
     [HttpPost("reset")]
-    public virtual async Task<ApiResult> ResetQuotaAsync([FromBody] ResetQuotaDto request, CancellationToken ct = default)
+    public virtual async Task<ApiResult> ResetQuota([FromBody] ResetQuotaDto request, CancellationToken ct = default)
     {
         var result = await QuotaService.ResetQuotaAsync(
             request.UserId,

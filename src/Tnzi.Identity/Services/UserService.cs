@@ -247,15 +247,15 @@ public class UserService : ApplicationService, IUserService
             .Include(u => u.Organization)
             .AsQueryable();
 
-        // 关键词搜索
+        // 关键词搜索（大小写不敏感）
         if (!string.IsNullOrEmpty(query.Keyword))
         {
-            var keyword = query.Keyword!;
+            var keyword = query.Keyword!.ToLower();
             // Nickname 已移到 UserDetail，这里只搜索 User 表的字段
             queryable = queryable.Where(u =>
-                (u.UserName != null && u.UserName.Contains(keyword)) ||
-                (u.Email != null && u.Email.Contains(keyword)) ||
-                (u.PhoneNumber != null && u.PhoneNumber.Contains(keyword)));
+                (u.UserName != null && u.UserName.ToLower().Contains(keyword)) ||
+                (u.Email != null && u.Email.ToLower().Contains(keyword)) ||
+                (u.PhoneNumber != null && u.PhoneNumber.ToLower().Contains(keyword)));
         }
 
         // 组织筛选
@@ -850,6 +850,359 @@ public class UserService : ApplicationService, IUserService
                 RegistrationTime = DateTime.UtcNow
             }, cancellationToken: default);
         }
+    }
+
+    #endregion
+
+    #region 用户自助账户管理
+
+    public async Task<Result> DeactivateAccountAsync(Guid userId, string? reason = null)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 使用 lockout 机制禁用用户
+        await _userManager.SetLockoutEnabledAsync(user, true);
+        await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+
+        // 发布账户停用事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserAccountDeactivatedEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                DeactivatedTime = DateTime.UtcNow,
+                Reason = reason
+            }, cancellationToken: default);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        LogInformation("User account deactivated: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+        return Ok("Account deactivated successfully");
+    }
+
+    public async Task<Result> DeleteAccountAsync(Guid userId)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var userName = user.UserName ?? string.Empty;
+
+        // 软删除
+        user.IsDeleted = true;
+        user.LastModificationTime = DateTime.UtcNow;
+
+        // 锁定账户
+        await _userManager.SetLockoutEnabledAsync(user, true);
+        await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            return Fail(result.FormatErrors(), 400, ErrorCodes.IDENTITY_USER_DELETE_FAILED);
+        }
+
+        // 发布账户删除事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new UserAccountDeletedEvent
+            {
+                UserId = userId,
+                UserName = userName,
+                DeletedTime = DateTime.UtcNow
+            }, cancellationToken: default);
+        }
+
+        // 清除缓存
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(userId));
+        }
+
+        LogInformation("User account self-deleted: {UserId}, UserName: {UserName}", userId, userName);
+        return Ok("Account deleted successfully");
+    }
+
+    public async Task<Result<PersonalDataExportDto>> ExportPersonalDataAsync(Guid userId)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail<PersonalDataExportDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var export = new PersonalDataExportDto
+        {
+            UserId = user.Id,
+            UserName = user.UserName ?? string.Empty,
+            Email = user.Email,
+            PhoneNumber = user.PhoneNumber,
+            CreationTime = user.CreationTime,
+            LastModificationTime = user.LastModificationTime,
+            TwoFactorEnabled = user.TwoFactorEnabled,
+            EmailConfirmed = user.EmailConfirmed,
+            PhoneNumberConfirmed = user.PhoneNumberConfirmed,
+            ExportedAt = DateTime.UtcNow
+        };
+
+        // 获取角色
+        var roles = await _userManager.GetRolesAsync(user);
+        export.Roles = roles.ToList();
+
+        // 获取组织名称
+        if (user.OrganizationId.HasValue && _organizationService != null)
+        {
+            var orgResult = await _organizationService.GetByIdAsync(user.OrganizationId.Value);
+            if (orgResult.Succeeded && orgResult.Data != null)
+            {
+                export.OrganizationName = orgResult.Data.Name;
+            }
+        }
+
+        // 获取外部登录提供者
+        var logins = await _userManager.GetLoginsAsync(user);
+        export.LinkedProviders = logins.Select(l => l.LoginProvider).ToList();
+
+        // 发布数据导出事件（审计目的）
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new PersonalDataExportedEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                ExportedTime = DateTime.UtcNow
+            }, cancellationToken: default);
+        }
+
+        LogInformation("Personal data exported for user: {UserId}", userId);
+        return Ok(export);
+    }
+
+    /// <summary>
+    /// Export users as CSV string
+    /// </summary>
+    public async Task<Result<string>> ExportUsersCsvAsync(UserListQueryDto? query = null, CancellationToken cancellationToken = default)
+    {
+        var queryable = _userRepository.Where(u => !u.IsDeleted);
+
+        if (query != null)
+        {
+            if (!string.IsNullOrEmpty(query.Keyword))
+            {
+                var keyword = query.Keyword.ToLower();
+                queryable = queryable.Where(u =>
+                    (u.UserName != null && u.UserName.ToLower().Contains(keyword)) ||
+                    (u.Email != null && u.Email.ToLower().Contains(keyword)) ||
+                    (u.PhoneNumber != null && u.PhoneNumber.ToLower().Contains(keyword)));
+            }
+
+            if (query.OrganizationId.HasValue)
+            {
+                queryable = queryable.Where(u => u.OrganizationId == query.OrganizationId.Value);
+            }
+        }
+
+        var users = await queryable
+            .OrderBy(u => u.CreationTime)
+            .Take(50000) // Export safety limit
+            .ToListAsync(cancellationToken);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Id,UserName,Email,PhoneNumber,IsActive,EmailConfirmed,PhoneNumberConfirmed,CreationTime,LastModificationTime");
+
+        foreach (var user in users)
+        {
+            var isActive = user.LockoutEnd == null || user.LockoutEnd <= DateTimeOffset.UtcNow;
+            sb.AppendLine(string.Join(",",
+                EscapeCsv(user.Id.ToString()),
+                EscapeCsv(user.UserName),
+                EscapeCsv(user.Email),
+                EscapeCsv(user.PhoneNumber),
+                isActive.ToString(),
+                user.EmailConfirmed.ToString(),
+                user.PhoneNumberConfirmed.ToString(),
+                user.CreationTime.ToString("o"),
+                user.LastModificationTime?.ToString("o") ?? ""
+            ));
+        }
+
+        LogInformation("Exported {Count} users to CSV", users.Count);
+        return Ok<string>(sb.ToString());
+    }
+
+    /// <summary>
+    /// Import users from CSV data
+    /// </summary>
+    public async Task<Result<UserImportResult>> ImportUsersCsvAsync(string csvContent, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(csvContent))
+            return Fail<UserImportResult>("CSV content cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var lines = csvContent.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim('\r'))
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .ToList();
+
+        if (lines.Count < 2)
+            return Fail<UserImportResult>("CSV must contain a header row and at least one data row", 400, ErrorCodes.VALIDATION_ERROR);
+
+        // Parse header (case-insensitive)
+        var header = lines[0].Split(',').Select(h => h.Trim().ToLowerInvariant()).ToArray();
+        var userNameIdx = Array.IndexOf(header, "username");
+        var emailIdx = Array.IndexOf(header, "email");
+        var phoneIdx = Array.IndexOf(header, "phonenumber");
+        var passwordIdx = Array.IndexOf(header, "password");
+
+        if (userNameIdx < 0 || emailIdx < 0 || passwordIdx < 0)
+            return Fail<UserImportResult>("CSV header must contain at least: UserName, Email, Password", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var result = new UserImportResult { TotalRows = lines.Count - 1 };
+
+        for (var i = 1; i < lines.Count; i++)
+        {
+            var fields = ParseCsvLine(lines[i]);
+            var rowNumber = i + 1;
+
+            try
+            {
+                if (fields.Length <= Math.Max(Math.Max(userNameIdx, emailIdx), passwordIdx))
+                {
+                    result.Errors[rowNumber] = "Insufficient columns";
+                    result.FailedCount++;
+                    continue;
+                }
+
+                var userName = fields[userNameIdx].Trim();
+                var email = fields[emailIdx].Trim();
+                var password = fields[passwordIdx].Trim();
+
+                if (string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
+                {
+                    result.Errors[rowNumber] = "UserName, Email, and Password are required";
+                    result.FailedCount++;
+                    continue;
+                }
+
+                // Check if user already exists
+                var existingUser = await _userManager.FindByEmailAsync(email);
+                if (existingUser != null)
+                {
+                    result.SkippedCount++;
+                    continue;
+                }
+
+                var user = new User
+                {
+                    UserName = userName,
+                    Email = email,
+                    PhoneNumber = phoneIdx >= 0 && fields.Length > phoneIdx ? fields[phoneIdx].Trim() : null,
+                    EmailConfirmed = true, // Auto-confirm for imported users
+                    CreationTime = DateTime.UtcNow
+                };
+
+                var createResult = await _userManager.CreateAsync(user, password);
+                if (createResult.Succeeded)
+                {
+                    result.SuccessCount++;
+                }
+                else
+                {
+                    result.Errors[rowNumber] = createResult.FormatErrors();
+                    result.FailedCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Errors[rowNumber] = ex.Message;
+                result.FailedCount++;
+            }
+        }
+
+        LogInformation("User import completed: {Success} success, {Failed} failed, {Skipped} skipped out of {Total} rows",
+            result.SuccessCount, result.FailedCount, result.SkippedCount, result.TotalRows);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Escape a value for CSV output
+    /// </summary>
+    private static string EscapeCsv(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+        {
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Parse a CSV line respecting quoted fields
+    /// </summary>
+    private static string[] ParseCsvLine(string line)
+    {
+        var fields = new List<string>();
+        var current = new StringBuilder();
+        var inQuotes = false;
+
+        for (var i = 0; i < line.Length; i++)
+        {
+            var ch = line[i];
+
+            if (inQuotes)
+            {
+                if (ch == '"')
+                {
+                    if (i + 1 < line.Length && line[i + 1] == '"')
+                    {
+                        current.Append('"');
+                        i++; // Skip escaped quote
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else
+                {
+                    current.Append(ch);
+                }
+            }
+            else
+            {
+                if (ch == '"')
+                {
+                    inQuotes = true;
+                }
+                else if (ch == ',')
+                {
+                    fields.Add(current.ToString());
+                    current.Clear();
+                }
+                else
+                {
+                    current.Append(ch);
+                }
+            }
+        }
+
+        fields.Add(current.ToString());
+        return fields.ToArray();
     }
 
     #endregion

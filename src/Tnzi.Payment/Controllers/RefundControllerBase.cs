@@ -23,7 +23,8 @@ public abstract class RefundControllerBase : ApiControllerBase
     [HttpPost]
     public virtual async Task<ApiResult<RefundDto>> Create([FromBody] CreateRefundDto request)
     {
-        var result = await _refundService.CreateRefundAsync(request);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _refundService.CreateRefundAsync(request, userId);
         return result.ToApiResult();
     }
 
@@ -33,7 +34,8 @@ public abstract class RefundControllerBase : ApiControllerBase
     [HttpGet("{id:guid}")]
     public virtual async Task<ApiResult<RefundDto>> Get(Guid id)
     {
-        var result = await _refundService.GetRefundAsync(id);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _refundService.GetRefundAsync(id, userId);
         return result.ToApiResult();
     }
 
@@ -43,7 +45,8 @@ public abstract class RefundControllerBase : ApiControllerBase
     [HttpGet]
     public virtual async Task<ApiResult<IPagedList<RefundDto>>> GetList([FromQuery] RefundQueryDto query)
     {
-        var result = await _refundService.GetRefundListAsync(query);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _refundService.GetRefundListAsync(query, userId);
         return result.ToApiResult();
     }
 
@@ -53,7 +56,8 @@ public abstract class RefundControllerBase : ApiControllerBase
     [HttpGet("trade/{tradeNo}")]
     public virtual async Task<ApiResult<List<RefundDto>>> GetByTradeNo(string tradeNo)
     {
-        var result = await _refundService.GetRefundsByTradeNoAsync(tradeNo);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _refundService.GetRefundsByTradeNoAsync(tradeNo, userId);
         return result.ToApiResult();
     }
 }

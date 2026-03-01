@@ -99,5 +99,34 @@ public interface IOrganizationService
     /// </summary>
     /// <param name="userId">用户ID</param>
     Task<Result> RemoveUserFromOrganizationAsync(Guid userId);
+
+    /// <summary>
+    /// 获取组织下的用户分页列表
+    /// </summary>
+    /// <param name="organizationId">组织ID</param>
+    /// <param name="query">分页查询参数</param>
+    /// <param name="includeChildren">是否包含子组织的用户</param>
+    Task<Result<IPagedList<UserListItemDto>>> GetUsersAsync(Guid organizationId, PagedQueryDto query, bool includeChildren = false);
+
+    /// <summary>
+    /// 根据名称或代码模糊搜索组织
+    /// </summary>
+    /// <param name="keyword">搜索关键词</param>
+    /// <param name="maxResults">最大返回数量（默认20）</param>
+    /// <returns>匹配的组织列表</returns>
+    Task<Result<IEnumerable<OrganizationDto>>> SearchAsync(string keyword, int maxResults = 20);
+
+    /// <summary>
+    /// 更新组织排序
+    /// </summary>
+    /// <param name="id">组织ID</param>
+    /// <param name="newSortOrder">新的排序值</param>
+    Task<Result> UpdateSortOrderAsync(Guid id, int newSortOrder);
+
+    /// <summary>
+    /// 批量更新组织排序（适用于前端拖拽排序场景）
+    /// </summary>
+    /// <param name="updates">排序更新列表（组织ID和新排序值）</param>
+    Task<Result> BatchUpdateSortOrderAsync(IEnumerable<(Guid Id, int SortOrder)> updates);
 }
 

@@ -2,7 +2,8 @@
 namespace Tnzi.Performance.Services;
 
 /// <summary>
-/// 性能收集器实现
+/// In-memory performance collector implementation.
+/// Uses a ConcurrentQueue with bounded capacity for thread-safe metric collection.
 /// </summary>
 public class PerformanceCollector : IPerformanceCollector
 {
@@ -10,9 +11,9 @@ public class PerformanceCollector : IPerformanceCollector
     private readonly int _maxHistorySize;
 
     /// <summary>
-    /// 初始化性能收集器
+    /// Initialize the performance collector
     /// </summary>
-    /// <param name="maxHistorySize">最大历史记录数量</param>
+    /// <param name="maxHistorySize">Maximum number of records to retain</param>
     public PerformanceCollector(int maxHistorySize = 1000)
     {
         _maxHistorySize = Check.GreaterThan(maxHistorySize, 0);
@@ -24,7 +25,7 @@ public class PerformanceCollector : IPerformanceCollector
         Check.NotNull(metrics);
         _recentRecords.Enqueue(metrics);
 
-        // 限制历史记录大小（批量清理避免高并发下的性能问题）
+        // Batch eviction to avoid contention under high concurrency
         var excessCount = _recentRecords.Count - _maxHistorySize;
         for (var i = 0; i < excessCount; i++)
         {
@@ -97,5 +98,39 @@ public class PerformanceCollector : IPerformanceCollector
     public void Clear()
     {
         while (_recentRecords.TryDequeue(out _)) { }
+    }
+
+    /// <summary>
+    /// Calculate percentile statistics directly from the internal queue (avoids extra copy)
+    /// </summary>
+    public PercentileResult GetPercentiles(TimeSpan? timeWindow = null)
+    {
+        return PercentileCalculator.Calculate(_recentRecords, timeWindow);
+    }
+
+    /// <summary>
+    /// Calculate per-endpoint statistics directly from the internal queue
+    /// </summary>
+    public List<EndpointStats> GetEndpointStats(TimeSpan? timeWindow = null, int topN = 0)
+    {
+        return EndpointStatsCalculator.Calculate(_recentRecords, timeWindow, topN);
+    }
+
+    /// <summary>
+    /// Get detailed slow request records
+    /// </summary>
+    public List<SlowRequestRecord> GetSlowRequestDetails(int count, double? thresholdMs = null)
+    {
+        var threshold = thresholdMs ?? 0;
+        return GetSlowRequests(threshold, count)
+            .Select(m => new SlowRequestRecord(
+                m.Path,
+                m.Method,
+                m.StatusCode,
+                m.DurationMs,
+                m.UserId,
+                m.RequestId,
+                m.Timestamp))
+            .ToList();
     }
 }

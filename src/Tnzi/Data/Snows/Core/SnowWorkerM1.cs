@@ -41,7 +41,7 @@ internal class SnowWorkerM1 : ISnowWorker
     protected readonly int TopOverCostCount = 0;
 
     protected readonly byte _TimestampShift = 0;
-    protected static object _SyncLock = new object();
+    protected readonly object _SyncLock = new object();
 
     protected ushort _CurrentSeqNumber;
     protected long _LastTimeTick = -1L;

@@ -115,7 +115,7 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     protected void RequireRole(params string[] roles)
     {
         RequireAuthentication();
-        
+
         if (roles == null || roles.Length == 0)
             return;
 
@@ -145,7 +145,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
             {
                 try
                 {
-                    await _connectionManager.AddConnectionAsync(CurrentUserId.Value, Context.ConnectionId);
+                    // Build connection metadata from HttpContext
+                    var metadata = BuildConnectionMetadata();
+                    await _connectionManager.AddConnectionAsync(CurrentUserId.Value, Context.ConnectionId, metadata);
+
+                    // Publish connection event (auxiliary, errors ignored)
+                    await PublishConnectionEventAsync();
                 }
                 catch (Exception ex)
                 {
@@ -177,6 +182,9 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
                 try
                 {
                     await _connectionManager.RemoveConnectionAsync(CurrentUserId.Value, Context.ConnectionId);
+
+                    // Publish disconnection event (auxiliary, errors ignored)
+                    await PublishDisconnectionEventAsync(exception);
                 }
                 catch (Exception ex)
                 {
@@ -189,6 +197,78 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
         }
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>
+    /// Build connection metadata from the current HttpContext
+    /// </summary>
+    private ConnectionMetadata BuildConnectionMetadata()
+    {
+        var httpContext = Context.GetHttpContext();
+        return new ConnectionMetadata
+        {
+            ConnectionId = Context.ConnectionId,
+            UserId = CurrentUserId,
+            UserName = CurrentUserName,
+            ConnectedAt = DateTime.UtcNow,
+            IpAddress = httpContext?.Connection?.RemoteIpAddress?.ToString(),
+            UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString(),
+            HubName = GetType().Name,
+        };
+    }
+
+    /// <summary>
+    /// Publish user connected event via EventBus (auxiliary operation)
+    /// </summary>
+    private async Task PublishConnectionEventAsync()
+    {
+        var eventBus = GetEventBus();
+        if (eventBus == null || !CurrentUserId.HasValue) return;
+
+        try
+        {
+            var connectionCount = await _connectionManager!.GetConnectionCountAsync(CurrentUserId.Value);
+            await eventBus.PublishAsync(new Events.UserConnectedEvent
+            {
+                UserId = CurrentUserId.Value,
+                ConnectionId = Context.ConnectionId,
+                HubName = GetType().Name,
+                UserName = CurrentUserName,
+                IpAddress = Context.GetHttpContext()?.Connection?.RemoteIpAddress?.ToString(),
+                TotalConnections = connectionCount,
+            });
+        }
+        catch (Exception ex)
+        {
+            GetLogger()?.LogDebug(ex, "Failed to publish UserConnectedEvent");
+        }
+    }
+
+    /// <summary>
+    /// Publish user disconnected event via EventBus (auxiliary operation)
+    /// </summary>
+    private async Task PublishDisconnectionEventAsync(Exception? disconnectException)
+    {
+        var eventBus = GetEventBus();
+        if (eventBus == null || !CurrentUserId.HasValue) return;
+
+        try
+        {
+            var remainingCount = await _connectionManager!.GetConnectionCountAsync(CurrentUserId.Value);
+            await eventBus.PublishAsync(new Events.UserDisconnectedEvent
+            {
+                UserId = CurrentUserId.Value,
+                ConnectionId = Context.ConnectionId,
+                HubName = GetType().Name,
+                Reason = disconnectException?.Message,
+                RemainingConnections = remainingCount,
+                WentOffline = remainingCount == 0,
+            });
+        }
+        catch (Exception ex)
+        {
+            GetLogger()?.LogDebug(ex, "Failed to publish UserDisconnectedEvent");
+        }
     }
 
     /// <summary>
@@ -208,7 +288,22 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     }
 
     /// <summary>
-    /// 将用户添加到指定组
+    /// 获取事件总线（从 Hub 上下文的请求服务中延迟解析）
+    /// </summary>
+    private IEventBus? GetEventBus()
+    {
+        try
+        {
+            return Context.GetHttpContext()?.RequestServices?.GetService<IEventBus>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 将用户添加到指定组 (SignalR group + ConnectionManager tracking)
     /// </summary>
     /// <param name="groupId">组ID</param>
     /// <returns>任务</returns>
@@ -216,10 +311,24 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     {
         Check.NotNullOrWhiteSpace(groupId);
         await Groups.AddToGroupAsync(Context.ConnectionId, groupId);
+
+        // Track in connection manager as well
+        if (_connectionManager != null)
+        {
+            try
+            {
+                await _connectionManager.AddToGroupAsync(Context.ConnectionId, groupId);
+            }
+            catch (Exception ex)
+            {
+                GetLogger()?.LogDebug(ex, "Failed to track group membership for {ConnectionId} in group {GroupId}",
+                    Context.ConnectionId, groupId);
+            }
+        }
     }
 
     /// <summary>
-    /// 将用户从指定组移除
+    /// 将用户从指定组移除 (SignalR group + ConnectionManager tracking)
     /// </summary>
     /// <param name="groupId">组ID</param>
     /// <returns>任务</returns>
@@ -227,6 +336,52 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     {
         Check.NotNullOrWhiteSpace(groupId);
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupId);
+
+        // Track in connection manager as well
+        if (_connectionManager != null)
+        {
+            try
+            {
+                await _connectionManager.RemoveFromGroupAsync(Context.ConnectionId, groupId);
+            }
+            catch (Exception ex)
+            {
+                GetLogger()?.LogDebug(ex, "Failed to remove group membership for {ConnectionId} from group {GroupId}",
+                    Context.ConnectionId, groupId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get the typed client proxy for a specific user (by user ID).
+    /// Uses the convention-based user group "User_{userId}" to target all of a user's connections.
+    /// </summary>
+    /// <param name="userId">Target user ID</param>
+    /// <returns>Typed client proxy for the user</returns>
+    protected TClient UserClient(Guid userId)
+    {
+        var groupName = $"User_{userId}";
+        return Clients.Group(groupName);
+    }
+
+    /// <summary>
+    /// Get the typed client proxy for all clients except the caller
+    /// </summary>
+    /// <returns>Typed client proxy excluding the caller</returns>
+    protected TClient OthersClient()
+    {
+        return Clients.AllExcept(Context.ConnectionId);
+    }
+
+    /// <summary>
+    /// Get the typed client proxy for all clients in a group except the caller
+    /// </summary>
+    /// <param name="groupName">Group name</param>
+    /// <returns>Typed client proxy for the group excluding the caller</returns>
+    protected TClient GroupExceptCallerClient(string groupName)
+    {
+        Check.NotNullOrWhiteSpace(groupName);
+        return Clients.GroupExcept(groupName, Context.ConnectionId);
     }
 }
 

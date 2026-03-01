@@ -22,7 +22,7 @@ public class HttpContextCurrentUser : ICurrentUser
 
     public bool IsInRole(string roleName)
     {
-        return FindClaimValues(ClaimTypes.Role).Contains(roleName);
+        return FindClaimValues(ClaimTypes.Role).Contains(roleName, StringComparer.OrdinalIgnoreCase);
     }
 
     private string? FindClaimValue(string claimType)

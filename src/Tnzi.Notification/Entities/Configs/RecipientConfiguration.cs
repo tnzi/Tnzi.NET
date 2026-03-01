@@ -7,8 +7,6 @@ public class RecipientConfiguration : EntityTypeConfigurationBase<Recipient, Gui
 {
     public override void Configure(EntityTypeBuilder<Recipient> builder)
     {
-        builder.HasKey(r => r.Id);
-
         builder.Property(r => r.Address).IsRequired().HasMaxLength(500);
         builder.Property(r => r.Name).HasMaxLength(200);
         builder.Property(r => r.ExternalMessageId).HasMaxLength(200);
@@ -18,7 +16,6 @@ public class RecipientConfiguration : EntityTypeConfigurationBase<Recipient, Gui
         builder.HasOne(r => r.Message)
             .WithMany(n => n.Recipients)
             .HasForeignKey(r => r.MessageId)
-            .IsRequired(false)
             .OnDelete(DeleteBehavior.Cascade);
 
         // 创建索引

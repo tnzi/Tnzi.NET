@@ -32,7 +32,15 @@ public class HangfireOptionsValidator : OptionsValidatorBase<HangfireOptions>
                 errors.Add("Hangfire.Dashboard.Path must start with '/'.");
             }
 
-            if (options.Dashboard.EnableAuthorization && 
+            if (options.Dashboard.Enabled && !options.Dashboard.EnableAuthorization)
+            {
+                // Dashboard 开启但未启用授权时，任何人都可访问 /hangfire 查看和操作后台任务
+                // 这是一个安全风险，在生产环境中强烈建议启用授权
+                errors.Add("Hangfire.Dashboard.EnableAuthorization should be true when Dashboard is enabled. "
+                    + "Set EnableAuthorization=true and configure AllowedRoles to restrict Dashboard access.");
+            }
+
+            if (options.Dashboard.EnableAuthorization &&
                 (options.Dashboard.AllowedRoles == null || options.Dashboard.AllowedRoles.Count == 0))
             {
                 errors.Add("Hangfire.Dashboard.AllowedRoles cannot be empty when EnableAuthorization is true.");

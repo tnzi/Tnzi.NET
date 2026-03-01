@@ -21,6 +21,7 @@
 import { computed, h } from 'vue'
 import { NDataTable, NButton, NSpace } from 'naive-ui'
 import type { DataTableColumn, DataTableSortState, PaginationProps } from 'naive-ui'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 
 interface ITableColumn<T = unknown> {
   key: string
@@ -96,6 +97,8 @@ const emit = defineEmits<{
   action: [actionKey: string, row: Record<string, unknown>, index: number]
 }>()
 
+const { t } = useI18n()
+
 const resolvedRowKey = computed(() => {
   if (typeof props.rowKey === 'function') {
     return props.rowKey
@@ -147,7 +150,7 @@ const naiveColumns = computed<DataTableColumn[]>(() => {
   if (props.actions?.buttons?.length) {
     result.push({
       key: '__actions',
-      title: 'Actions',
+      title: t('table.actions'),
       fixed: 'right',
       width: Math.max(props.actions.buttons.length * 80, 120),
       render(row: object, index: number) {
@@ -192,7 +195,7 @@ const naivePagination = computed<PaginationProps | false>(() => {
 
   if (config.showTotal !== false) {
     paginationProps.prefix = ({ itemCount }: { itemCount: number | undefined }) =>
-      `Total ${itemCount ?? 0} items`
+      t('table.totalItems', { count: String(itemCount ?? 0) })
   }
 
   return paginationProps

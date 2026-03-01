@@ -13,6 +13,7 @@
     <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
     <ProjectReference Include="..\Tnzi.Audit\Tnzi.Audit.csproj" />
     <ProjectReference Include="..\Tnzi.Authorization\Tnzi.Authorization.csproj" />
+    <ProjectReference Include="..\Tnzi.Feature\Tnzi.Feature.csproj" />
     <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" />
     <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" />

@@ -78,6 +78,32 @@ public class PaymentFailedEvent : EventBase
 }
 
 /// <summary>
+/// 支付过期事件
+/// </summary>
+public class PaymentExpiredEvent : EventBase
+{
+    /// <summary>
+    /// 支付ID
+    /// </summary>
+    public Guid PaymentId { get; set; }
+
+    /// <summary>
+    /// 交易流水号
+    /// </summary>
+    public string TradeNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 业务订单号
+    /// </summary>
+    public string BusinessOrderNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 过期时间
+    /// </summary>
+    public DateTime ExpiredTime { get; set; }
+}
+
+/// <summary>
 /// 退款处理完成事件
 /// </summary>
 public class RefundProcessedEvent : EventBase

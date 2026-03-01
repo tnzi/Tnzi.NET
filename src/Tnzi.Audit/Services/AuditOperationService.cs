@@ -8,16 +8,19 @@ namespace Tnzi.Audit.Services;
 public class AuditOperationService : ApplicationService, IAuditOperationService
 {
     private readonly IRepository<AuditOperation, Guid> _operationRepository;
+    private readonly IAuditStore _auditStore;
 
     /// <summary>
     /// 初始化一个<see cref="AuditOperationService"/>类型的新实例
     /// </summary>
     public AuditOperationService(
         IRepository<AuditOperation, Guid> operationRepository,
+        IAuditStore auditStore,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _operationRepository = Check.NotNull(operationRepository);
+        _auditStore = Check.NotNull(auditStore);
     }
 
     /// <summary>
@@ -79,7 +82,8 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         if (!string.IsNullOrEmpty(query.FunctionName))
         {
-            queryable = queryable.Where(o => o.FunctionName.Contains(query.FunctionName));
+            var functionNameLower = query.FunctionName.ToLower();
+            queryable = queryable.Where(o => o.FunctionName.ToLower().Contains(functionNameLower));
         }
 
         if (!string.IsNullOrEmpty(query.PermissionName))
@@ -174,16 +178,260 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     public async Task<Result<int>> DeleteExpiredOperationsAsync(int days = 90)
     {
-        var expireDate = DateTime.UtcNow.AddDays(-days);
+        if (days <= 0)
+            return Fail<int>("Days must be greater than 0", 400, AuditErrorCodes.AuditDeleteExpiredFailed);
 
-        var count = await _operationRepository.CountAsync(o => o.CreationTime < expireDate);
-        if (count > 0)
-        {
-            await _operationRepository.DeleteAsync(o => o.CreationTime < expireDate);
-        }
-
+        var count = await _auditStore.DeleteExpiredAsync(days);
         LogInformation("Deleted {Count} expired audit operations (older than {Days} days)", count, days);
         return Ok(count, $"Deleted {count} expired audit operations");
+    }
+
+    /// <summary>
+    /// Export audit operations as CSV string
+    /// </summary>
+    public async Task<Result<string>> ExportToCsvAsync(AuditOperationQueryDto query, CancellationToken cancellationToken = default)
+    {
+        var operations = await GetFilteredOperationsAsync(query, cancellationToken);
+
+        var sb = new System.Text.StringBuilder();
+        // CSV header
+        sb.AppendLine("Id,FunctionName,UserName,Ip,HttpMethod,Url,HttpStatusCode,Elapsed,ResultType,Message,StartTime,EndTime,CreationTime");
+
+        foreach (var op in operations)
+        {
+            sb.AppendLine(string.Join(",",
+                EscapeCsv(op.Id.ToString()),
+                EscapeCsv(op.FunctionName),
+                EscapeCsv(op.UserName),
+                EscapeCsv(op.Ip),
+                EscapeCsv(op.HttpMethod),
+                EscapeCsv(op.Url),
+                op.HttpStatusCode?.ToString() ?? "",
+                op.Elapsed.ToString(),
+                op.ResultType.ToString(),
+                EscapeCsv(op.Message),
+                op.StartTime.ToString("o"),
+                op.EndTime?.ToString("o") ?? "",
+                op.CreationTime.ToString("o")
+            ));
+        }
+
+        LogInformation("Exported {Count} audit operations to CSV", operations.Count);
+        return Ok<string>(sb.ToString());
+    }
+
+    /// <summary>
+    /// Export audit operations as JSON string
+    /// </summary>
+    public async Task<Result<string>> ExportToJsonAsync(AuditOperationQueryDto query, CancellationToken cancellationToken = default)
+    {
+        var operations = await GetFilteredOperationsAsync(query, cancellationToken);
+        var dtos = operations.MapToList<AuditOperationDto>();
+
+        var jsonOptions = new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(dtos, jsonOptions);
+        LogInformation("Exported {Count} audit operations to JSON", operations.Count);
+        return Ok<string>(json);
+    }
+
+    /// <summary>
+    /// Get filtered operations for export (reuses query logic, max 10000 rows for export)
+    /// </summary>
+    private async Task<List<AuditOperation>> GetFilteredOperationsAsync(AuditOperationQueryDto query, CancellationToken cancellationToken)
+    {
+        var queryable = _operationRepository.AsQueryable();
+
+        if (!string.IsNullOrEmpty(query.FunctionName))
+        {
+            var functionNameLower = query.FunctionName.ToLower();
+            queryable = queryable.Where(o => o.FunctionName.ToLower().Contains(functionNameLower));
+        }
+
+        if (!string.IsNullOrEmpty(query.PermissionName))
+        {
+            queryable = queryable.Where(o => o.PermissionName == query.PermissionName);
+        }
+
+        if (query.UserId.HasValue)
+        {
+            queryable = queryable.Where(o => o.UserId == query.UserId.Value);
+        }
+
+        if (query.ResultType.HasValue)
+        {
+            queryable = queryable.Where(o => o.ResultType == query.ResultType.Value);
+        }
+
+        if (query.StartDate.HasValue)
+        {
+            queryable = queryable.Where(o => o.CreationTime >= query.StartDate.Value);
+        }
+
+        if (query.EndDate.HasValue)
+        {
+            queryable = queryable.Where(o => o.CreationTime <= query.EndDate.Value);
+        }
+
+        if (!string.IsNullOrEmpty(query.Ip))
+        {
+            queryable = queryable.Where(o => o.Ip == query.Ip);
+        }
+
+        return await queryable
+            .OrderByDescending(o => o.CreationTime)
+            .Take(10000) // Export safety limit
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Escape a value for CSV output
+    /// </summary>
+    private static string EscapeCsv(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+
+        // If value contains comma, quote, or newline, wrap in quotes and escape inner quotes
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+        {
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// 获取审计操作趋势统计
+    /// </summary>
+    public async Task<Result<List<AuditTrendPointDto>>> GetAuditTrendAsync(
+        DateTime startDate,
+        DateTime endDate,
+        AuditTrendGroupBy groupBy = AuditTrendGroupBy.Daily,
+        CancellationToken cancellationToken = default)
+    {
+        if (endDate <= startDate)
+            return Fail<List<AuditTrendPointDto>>("End date must be after start date", 400);
+
+        var operations = await _operationRepository
+            .Where(o => o.CreationTime >= startDate && o.CreationTime <= endDate)
+            .ToListAsync(cancellationToken);
+
+        var grouped = groupBy switch
+        {
+            AuditTrendGroupBy.Daily => operations.GroupBy(o => o.CreationTime.ToString("yyyy-MM-dd")),
+            AuditTrendGroupBy.Weekly => operations.GroupBy(o =>
+            {
+                var cal = System.Globalization.CultureInfo.InvariantCulture.Calendar;
+                var week = cal.GetWeekOfYear(o.CreationTime, System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+                return $"{o.CreationTime.Year}-W{week:D2}";
+            }),
+            AuditTrendGroupBy.Monthly => operations.GroupBy(o => o.CreationTime.ToString("yyyy-MM")),
+            _ => operations.GroupBy(o => o.CreationTime.ToString("yyyy-MM-dd"))
+        };
+
+        var trend = grouped
+            .OrderBy(g => g.Key)
+            .Select(g => new AuditTrendPointDto
+            {
+                Period = g.Key,
+                TotalCount = g.Count(),
+                SuccessCount = g.Count(o => o.ResultType == AuditResultType.Success),
+                FailedCount = g.Count(o => o.ResultType == AuditResultType.Failed),
+                WarningCount = g.Count(o => o.ResultType == AuditResultType.Warning),
+                AverageElapsed = g.Average(o => (double)o.Elapsed)
+            })
+            .ToList();
+
+        return Ok(trend);
+    }
+
+    /// <summary>
+    /// 获取 Top N 功能统计
+    /// </summary>
+    public async Task<Result<List<TopFunctionDto>>> GetTopFunctionsAsync(
+        int topN = 10,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (topN <= 0)
+            return Fail<List<TopFunctionDto>>("TopN must be greater than 0", 400);
+
+        var queryable = _operationRepository.AsQueryable();
+
+        if (startDate.HasValue)
+            queryable = queryable.Where(o => o.CreationTime >= startDate.Value);
+        if (endDate.HasValue)
+            queryable = queryable.Where(o => o.CreationTime <= endDate.Value);
+
+        var operations = await queryable.ToListAsync(cancellationToken);
+
+        var topFunctions = operations
+            .GroupBy(o => o.FunctionName)
+            .Select(g => new TopFunctionDto
+            {
+                FunctionName = g.Key,
+                HitCount = g.Count(),
+                AverageElapsed = g.Average(o => (double)o.Elapsed),
+                MaxElapsed = g.Max(o => o.Elapsed),
+                ErrorCount = g.Count(o => o.ResultType == AuditResultType.Failed),
+                ErrorRate = g.Count() > 0
+                    ? (double)g.Count(o => o.ResultType == AuditResultType.Failed) / g.Count()
+                    : 0
+            })
+            .OrderByDescending(f => f.HitCount)
+            .Take(topN)
+            .ToList();
+
+        return Ok(topFunctions);
+    }
+
+    /// <summary>
+    /// 获取 Top N 活跃用户统计
+    /// </summary>
+    public async Task<Result<List<TopUserDto>>> GetTopUsersAsync(
+        int topN = 10,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (topN <= 0)
+            return Fail<List<TopUserDto>>("TopN must be greater than 0", 400);
+
+        var queryable = _operationRepository.AsQueryable();
+
+        if (startDate.HasValue)
+            queryable = queryable.Where(o => o.CreationTime >= startDate.Value);
+        if (endDate.HasValue)
+            queryable = queryable.Where(o => o.CreationTime <= endDate.Value);
+
+        var operations = await queryable
+            .Where(o => o.UserId != null)
+            .ToListAsync(cancellationToken);
+
+        var topUsers = operations
+            .GroupBy(o => new { o.UserId, o.UserName })
+            .Select(g => new TopUserDto
+            {
+                UserId = g.Key.UserId!.Value,
+                UserName = g.Key.UserName,
+                OperationCount = g.Count(),
+                SuccessCount = g.Count(o => o.ResultType == AuditResultType.Success),
+                FailedCount = g.Count(o => o.ResultType == AuditResultType.Failed),
+                SuccessRate = g.Count() > 0
+                    ? (double)g.Count(o => o.ResultType == AuditResultType.Success) / g.Count()
+                    : 0
+            })
+            .OrderByDescending(u => u.OperationCount)
+            .Take(topN)
+            .ToList();
+
+        return Ok(topUsers);
     }
 
     /// <summary>
@@ -191,11 +439,6 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     private async Task<AuditOperationStatistics> CalculateStatisticsAsync(IQueryable<AuditOperation> query)
     {
-        if (!await query.AnyAsync())
-        {
-            return new AuditOperationStatistics();
-        }
-
         var stats = await query.GroupBy(o => 1).Select(g => new
         {
             TotalCount = g.Count(),
@@ -208,9 +451,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         }).FirstOrDefaultAsync();
 
         if (stats == null)
-        {
             return new AuditOperationStatistics();
-        }
 
         return new AuditOperationStatistics
         {

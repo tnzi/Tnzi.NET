@@ -13,32 +13,32 @@ public interface ISubscriptionService
     /// <summary>
     /// 取消订阅
     /// </summary>
-    Task<Result> CancelSubscriptionAsync(Guid subscriptionId, CancelSubscriptionDto request, CancellationToken cancellationToken = default);
+    Task<Result> CancelSubscriptionAsync(Guid subscriptionId, CancelSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 恢复订阅
     /// </summary>
-    Task<Result> ResumeSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default);
+    Task<Result> ResumeSubscriptionAsync(Guid subscriptionId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 变更订阅计划
     /// </summary>
-    Task<Result<SubscriptionDto>> ChangePlanAsync(Guid subscriptionId, ChangeSubscriptionDto request, CancellationToken cancellationToken = default);
+    Task<Result<SubscriptionDto>> ChangePlanAsync(Guid subscriptionId, ChangeSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 更新支付方式
     /// </summary>
-    Task<Result> UpdatePaymentMethodAsync(Guid subscriptionId, string paymentMethodId, CancellationToken cancellationToken = default);
+    Task<Result> UpdatePaymentMethodAsync(Guid subscriptionId, string paymentMethodId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 启用/禁用自动续费
     /// </summary>
-    Task<Result> UpdateAutoRenewAsync(Guid subscriptionId, bool autoRenew, CancellationToken cancellationToken = default);
+    Task<Result> UpdateAutoRenewAsync(Guid subscriptionId, bool autoRenew, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取订阅信息
     /// </summary>
-    Task<Result<SubscriptionDto>> GetSubscriptionAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Result<SubscriptionDto>> GetSubscriptionAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取用户订阅列表
@@ -48,7 +48,7 @@ public interface ISubscriptionService
     /// <summary>
     /// 获取订阅列表
     /// </summary>
-    Task<Result<IPagedList<SubscriptionDto>>> GetSubscriptionListAsync(SubscriptionQueryDto query, CancellationToken cancellationToken = default);
+    Task<Result<IPagedList<SubscriptionDto>>> GetSubscriptionListAsync(SubscriptionQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取订阅计划列表
@@ -69,4 +69,9 @@ public interface ISubscriptionService
     /// 删除订阅计划
     /// </summary>
     Task<Result> DeletePlanAsync(Guid planId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 续费过期订阅
+    /// </summary>
+    Task<Result<int>> RenewExpiredSubscriptionsAsync(CancellationToken cancellationToken = default);
 }

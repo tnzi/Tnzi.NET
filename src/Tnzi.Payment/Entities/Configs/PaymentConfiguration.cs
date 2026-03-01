@@ -23,7 +23,8 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
             .HasForeignKey<Invoice>(i => i.PaymentId)
             .HasPrincipalKey<Payment>(p => p.Id);
 
-        builder.HasIndex(p => p.TradeNo).IsUnique();
+        builder.HasIndex(p => p.TradeNo).IsUnique()
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         builder.HasIndex(p => p.BusinessOrderNo);
         builder.HasIndex(p => p.Status);
         builder.HasIndex(p => p.ChannelCode);

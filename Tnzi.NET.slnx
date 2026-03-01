@@ -8,7 +8,6 @@
     <File Path="build/version.props" />
     <File Path="build/public.props" />
   </Folder>
-  <Folder Name="/samples/" />
   <Folder Name="/src/">
     <Project Path="src/Tnzi.AspNetCore/Tnzi.AspNetCore.csproj" />
     <Project Path="src/Tnzi.EFCore/Tnzi.EFCore.csproj" />
@@ -32,16 +31,21 @@
     <Project Path="src/Tnzi.Performance/Tnzi.Performance.csproj" />
   </Folder>
   <Folder Name="/src/modules/">
-    <Project Path="src/Tnzi.AI/Tnzi.AI.csproj" />
     <Project Path="src/Tnzi.Audit/Tnzi.Audit.csproj" />
     <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
     <Project Path="src/Tnzi.Chat/Tnzi.Chat.csproj" />
+    <Project Path="src/Tnzi.Feature/Tnzi.Feature.csproj" />
     <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
     <Project Path="src/Tnzi.Notification/Tnzi.Notification.csproj" />
     <Project Path="src/Tnzi.Payment/Tnzi.Payment.csproj" />
     <Project Path="src/Tnzi.Storage/Tnzi.Storage.csproj" />
     <Project Path="src/Tnzi.System/Tnzi.System.csproj" />
     <Project Path="src/Tnzi.Template/Tnzi.Template.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/Tnzi.AI/">
+    <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
+    <Project Path="src/Tnzi.AI.Coder/Tnzi.AI.Coder.csproj" />
+    <Project Path="src/Tnzi.AI/Tnzi.AI.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tnzi.AI.Tests/Tnzi.AI.Tests.csproj" />
@@ -50,15 +54,22 @@
     <Project Path="tests/Tnzi.Authorization.Tests/Tnzi.Authorization.Tests.csproj" />
     <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
     <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
+    <Project Path="tests/Tnzi.Feature.Tests/Tnzi.Feature.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
+    <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
+    <Project Path="tests/Tnzi.OpenTelemetry.Tests/Tnzi.OpenTelemetry.Tests.csproj" />
+    <Project Path="tests/Tnzi.Payment.Tests/Tnzi.Payment.Tests.csproj" />
+    <Project Path="tests/Tnzi.RabbitMQ.Tests/Tnzi.RabbitMQ.Tests.csproj" />
     <Project Path="tests/Tnzi.Redis.Tests/Tnzi.Redis.Tests.csproj" />
     <Project Path="tests/Tnzi.SignalR.Tests/Tnzi.SignalR.Tests.csproj" />
     <Project Path="tests/Tnzi.Storage.Tests/Tnzi.Storage.Tests.csproj" />
     <Project Path="tests/Tnzi.System.Tests/Tnzi.System.Tests.csproj" />
     <Project Path="tests/Tnzi.Template.Tests/Tnzi.Template.Tests.csproj" />
+    <Project Path="tests/Tnzi.Performance.Tests/Tnzi.Performance.Tests.csproj" />
     <Project Path="tests/Tnzi.TestBase/Tnzi.TestBase.csproj" />
+    <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
     <Project Path="tests/Tnzi.Tests/Tnzi.Tests.csproj" />
   </Folder>
 </Solution>

@@ -86,8 +86,7 @@ public static class DapperBulkOperations
     /// 批量更新（使用数据库特定的批量更新语法）
     /// </summary>
     /// <param name="batchSize">每批处理的实体数量，默认 1000</param>
-    [Obsolete("Use IRepository.ExecuteUpdateAsync instead. This method will be removed in a future version.")]
-    public static async Task<int> BulkUpdateAsync<T>(
+    internal static async Task<int> BulkUpdateAsync<T>(
         IDbConnection connection,
         IDatabaseProvider provider,
         DbContext dbContext,
@@ -284,8 +283,7 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
     /// 批量删除
     /// </summary>
     /// <param name="batchSize">每批处理的键数量，默认 1000</param>
-    [Obsolete("Use IRepository.ExecuteDeleteAsync instead. This method will be removed in a future version.")]
-    public static async Task<int> BulkDeleteAsync(
+    internal static async Task<int> BulkDeleteAsync(
         IDbConnection connection,
         IDatabaseProvider provider,
         DbContext dbContext,

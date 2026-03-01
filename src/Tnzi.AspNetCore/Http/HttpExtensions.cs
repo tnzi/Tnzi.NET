@@ -110,8 +110,7 @@ public static class HttpExtensions
     /// <returns>是否成功</returns>
     public static bool IsSuccessStatusCode(this HttpResponse response)
     {
-        if (response == null)
-            return false;
+        Check.NotNull(response);
 
         return response.StatusCode >= 200 && response.StatusCode <= 299;
     }

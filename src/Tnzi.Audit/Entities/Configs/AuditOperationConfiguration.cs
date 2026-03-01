@@ -8,7 +8,6 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
     public override void Configure(EntityTypeBuilder<AuditOperation> builder)
     {
         builder.ToTable("Operation");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.FunctionName).IsRequired().HasMaxLength(200);
         builder.Property(e => e.PermissionName).HasMaxLength(200);
@@ -35,6 +34,7 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
         builder.HasIndex(e => e.UserId);
         builder.HasIndex(e => e.TenantId);
         builder.HasIndex(e => e.StartTime);
+        builder.HasIndex(e => e.FunctionName);
         builder.HasIndex(e => e.PermissionName);
         builder.HasIndex(e => new { e.UserId, e.StartTime });
     }

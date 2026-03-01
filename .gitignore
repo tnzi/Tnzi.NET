@@ -84,8 +84,6 @@ coverage/
 *.pubxml
 *.pubxml.user
 
-# Claude Code local settings
-#.claude/settings.local.json
 
 # VS Code
 .vscode/
@@ -96,6 +94,13 @@ Thumbs.db
 *.swp
 *.swo
 
-/samples/music/src/backend/Api/ffmpeg.exe
-/samples/music/src/backend/Api/ffprobe.exe
-/samples/music/src/backend/Api/ffplay.exe
+# >>> Cloud Sync (managed by cloud-sync)
+.cloud-sync
+CLAUDE.md
+.claude/
+.cursor
+.windsurf
+.aider
+.codeium
+.continue
+# <<< Cloud Sync (managed by cloud-sync)

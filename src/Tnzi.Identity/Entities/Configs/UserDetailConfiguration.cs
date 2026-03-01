@@ -23,7 +23,7 @@ public class UserDetailConfiguration : EntityTypeConfigurationBase<UserDetail, G
         builder.HasOne(ud => ud.User)
             .WithOne()
             .HasForeignKey<UserDetail>(ud => ud.UserId)
-            .IsRequired(false)
+            .IsRequired()
             .OnDelete(DeleteBehavior.Cascade);
 
         // 索引配置

@@ -130,7 +130,7 @@ public class RsaHelper
 
         using var rsa = RSA.Create();
         rsa.FromXmlString2(publicKey);
-        return rsa.Encrypt(source, RSAEncryptionPadding.Pkcs1);
+        return rsa.Encrypt(source, RSAEncryptionPadding.OaepSHA256);
     }
 
     /// <summary>
@@ -143,7 +143,7 @@ public class RsaHelper
 
         using var rsa = RSA.Create();
         rsa.FromXmlString2(privateKey);
-        return rsa.Decrypt(source, RSAEncryptionPadding.Pkcs1);
+        return rsa.Decrypt(source, RSAEncryptionPadding.OaepSHA256);
     }
 
     /// <summary>
@@ -159,7 +159,7 @@ public class RsaHelper
 
         using var rsa = RSA.Create();
         rsa.FromXmlString2(privateKey);
-        return rsa.SignData(source, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
+        return rsa.SignData(source, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
     }
 
     /// <summary>
@@ -177,7 +177,7 @@ public class RsaHelper
 
         using var rsa = RSA.Create();
         rsa.FromXmlString2(publicKey);
-        return rsa.VerifyData(source, signData, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
+        return rsa.VerifyData(source, signData, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
     }
 
     /// <summary>
@@ -259,6 +259,7 @@ internal static class RSAKeyExtensions
         RSAParameters parameters = new RSAParameters();
 
         XmlDocument xmlDoc = new XmlDocument();
+        xmlDoc.XmlResolver = null;
         xmlDoc.LoadXml(xmlString);
 
         if (xmlDoc.DocumentElement?.Name.Equals("RSAKeyValue") == true)

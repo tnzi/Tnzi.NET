@@ -14,7 +14,7 @@ public class AgentStreamChunk
     /// <summary>
     /// Token 使用信息（通常只在最后一个 chunk 中出现）
     /// </summary>
-    public UsageDetails? Usage { get; set; }
+    public TokenUsageDto? Usage { get; set; }
 
     /// <summary>
     /// 结束原因（通常只在最后一个 chunk 中出现）
@@ -25,4 +25,9 @@ public class AgentStreamChunk
     /// 是否为工具调用中间状态（此时 Text 可能为 null）
     /// </summary>
     public bool IsToolCall { get; set; }
+
+    /// <summary>
+    /// 错误信息（工具调用超时、Guardrail 拒绝等）
+    /// </summary>
+    public string? Error { get; set; }
 }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text;
 
 namespace Tnzi.Payment.Providers;
@@ -54,6 +55,8 @@ public class PayPalProvider : IPaymentProvider
                     new
                     {
                         reference_id = input.TradeNo,
+                        custom_id = input.TradeNo,
+                        invoice_id = input.TradeNo,
                         description = input.Description,
                         amount = new
                         {
@@ -86,6 +89,7 @@ public class PayPalProvider : IPaymentProvider
             return Result.Success(new PaymentProviderOrderResult
             {
                 TradeNo = input.TradeNo,
+                ExternalTradeNo = content.Id,
                 PayParams = content.Id,
                 PayUrl = approvalUrl,
                 ExpireTime = input.ExpireTime,
@@ -102,6 +106,9 @@ public class PayPalProvider : IPaymentProvider
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(tradeNo))
+                return Result.Failure<PaymentProviderQueryResult>("PayPal order id is required.");
+
             var client = CreateHttpClient();
             var accessToken = await GetAccessTokenAsync(client);
             if (accessToken == null)
@@ -122,7 +129,9 @@ public class PayPalProvider : IPaymentProvider
                 TradeNo = tradeNo,
                 ExternalTradeNo = content.Id,
                 Status = content.Status == "COMPLETED" ? PaymentStatus.Succeeded : PaymentStatus.Processing,
-                Amount = decimal.Parse(content.PurchaseUnits?.FirstOrDefault()?.Amount?.Value ?? "0"),
+                Amount = decimal.Parse(
+                    content.PurchaseUnits?.FirstOrDefault()?.Amount?.Value ?? "0",
+                    System.Globalization.CultureInfo.InvariantCulture),
                 PaidTime = content.Status == "COMPLETED" ? DateTime.UtcNow : null
             });
         }
@@ -154,7 +163,8 @@ public class PayPalProvider : IPaymentProvider
                 note_to_payer = input.Reason
             };
 
-            var response = await client.PostAsJsonAsync($"/v2/payments/captures/{input.TradeNo}/refunds", refundRequest);
+            var captureId = input.ExternalTradeNo ?? input.TradeNo;
+            var response = await client.PostAsJsonAsync($"/v2/payments/captures/{captureId}/refunds", refundRequest);
             var content = await response.Content.ReadFromJsonAsync<PayPalRefundResponse>();
 
             _logger.LogInformation("PayPal refund created. RefundNo: {RefundNo}, Amount: {Amount}",
@@ -188,14 +198,101 @@ public class PayPalProvider : IPaymentProvider
 
     public Task<Result<PaymentProviderCallbackResult>> HandleCallbackAsync(IDictionary<string, string> parameters)
     {
-        // PayPal webhooks 通过单独的 webhook 端点处理
-        return Task.FromResult(Result.Success(new PaymentProviderCallbackResult()));
+        if (!parameters.TryGetValue("__raw_body", out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
+            return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.PaymentInvalidSignature, 400));
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawBody);
+            var root = document.RootElement;
+            var eventType = root.TryGetProperty("event_type", out var eventTypeElement)
+                ? eventTypeElement.GetString()
+                : null;
+
+            var resource = root.TryGetProperty("resource", out var resourceElement)
+                ? resourceElement
+                : default;
+
+            var tradeNo =
+                TryGetNestedString(resource, "purchase_units", 0, "reference_id")
+                ?? TryGetNestedString(resource, "custom_id")
+                ?? TryGetNestedString(resource, "invoice_id")
+                ?? string.Empty;
+
+            var externalTradeNo =
+                TryGetNestedString(resource, "id")
+                ?? TryGetNestedString(resource, "supplementary_data", "related_ids", "order_id");
+
+            var amountText =
+                TryGetNestedString(resource, "amount", "value")
+                ?? TryGetNestedString(resource, "seller_receivable_breakdown", "gross_amount", "value");
+
+            decimal.TryParse(amountText, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var paidAmount);
+
+            return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+            {
+                TradeNo = tradeNo,
+                ExternalTradeNo = externalTradeNo,
+                Status = MapPayPalEventStatus(eventType),
+                PaidAmount = paidAmount,
+                FailReason = eventType
+            }));
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse PayPal callback payload.");
+            return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.PaymentInvalidSignature, 400));
+        }
     }
 
-    public bool VerifySignature(IDictionary<string, string> parameters)
+    public async Task<bool> VerifySignatureAsync(IDictionary<string, string> parameters)
     {
-        // PayPal webhook 验证需要 API 调用
-        return true;
+        if (string.IsNullOrWhiteSpace(_options.Value.WebhookId))
+            return false;
+
+        if (!parameters.TryGetValue("__raw_body", out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
+            return false;
+
+        if (!parameters.TryGetValue("__paypal_transmission_id", out var transmissionId)
+            || !parameters.TryGetValue("__paypal_transmission_time", out var transmissionTime)
+            || !parameters.TryGetValue("__paypal_transmission_sig", out var transmissionSig)
+            || !parameters.TryGetValue("__paypal_cert_url", out var certUrl)
+            || !parameters.TryGetValue("__paypal_auth_algo", out var authAlgo))
+        {
+            return false;
+        }
+
+        try
+        {
+            var client = CreateHttpClient();
+            var accessToken = await GetAccessTokenAsync(client);
+            if (string.IsNullOrWhiteSpace(accessToken))
+                return false;
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var verifyRequest = new
+            {
+                transmission_id = transmissionId,
+                transmission_time = transmissionTime,
+                cert_url = certUrl,
+                auth_algo = authAlgo,
+                transmission_sig = transmissionSig,
+                webhook_id = _options.Value.WebhookId,
+                webhook_event = JsonSerializer.Deserialize<JsonElement>(rawBody)
+            };
+
+            var response = await client.PostAsJsonAsync("/v1/notifications/verify-webhook-signature", verifyRequest);
+            var content = await response.Content.ReadFromJsonAsync<PayPalWebhookVerifyResponse>();
+
+            return response.IsSuccessStatusCode
+                && string.Equals(content?.VerificationStatus, "SUCCESS", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PayPal webhook signature verification failed.");
+            return false;
+        }
     }
 
     public async Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
@@ -208,13 +305,15 @@ public class PayPalProvider : IPaymentProvider
         return Task.FromResult(Result.Success(new PaymentParamsDto
         {
             TradeNo = tradeNo,
-            OrderId = null
+            OrderId = tradeNo
         }));
     }
 
     public Task<Result> UpdatePaymentMethodAsync(string subscriptionNo, string paymentMethodId)
     {
-        return Task.FromResult(Result.Success());
+        // PayPal 不支持通过 API 直接更新订阅支付方式，需用户在 PayPal 端操作
+        _logger.LogWarning("PayPal does not support updating subscription payment method via API. SubscriptionNo: {SubscriptionNo}", subscriptionNo);
+        return Task.FromResult(Result.Failure("PayPal does not support updating subscription payment method via API. The subscriber must update their payment method directly on PayPal.", 501));
     }
 
     private HttpClient CreateHttpClient()
@@ -269,6 +368,55 @@ public class PayPalProvider : IPaymentProvider
             _accessToken = null;
             return null;
         }
+    }
+
+    private static PaymentStatus MapPayPalEventStatus(string? eventType)
+    {
+        return eventType switch
+        {
+            "PAYMENT.CAPTURE.COMPLETED" or "CHECKOUT.ORDER.COMPLETED" => PaymentStatus.Succeeded,
+            "PAYMENT.CAPTURE.DENIED" or "PAYMENT.CAPTURE.REFUNDED" or "CHECKOUT.ORDER.VOIDED" => PaymentStatus.Failed,
+            _ => PaymentStatus.Processing
+        };
+    }
+
+    private static string? TryGetNestedString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+            return null;
+
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+    }
+
+    private static string? TryGetNestedString(JsonElement element, string propertyName, int index, string nestedProperty)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var array) || array.ValueKind != JsonValueKind.Array)
+            return null;
+
+        if (array.GetArrayLength() <= index)
+            return null;
+
+        var item = array[index];
+        if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty(nestedProperty, out var value))
+            return null;
+
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+    }
+
+    private static string? TryGetNestedString(JsonElement element, string property1, string property2)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property1, out var nested))
+            return null;
+
+        return TryGetNestedString(nested, property2);
+    }
+
+    private static string? TryGetNestedString(JsonElement element, string property1, string property2, string property3)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property1, out var nested))
+            return null;
+
+        return TryGetNestedString(nested, property2, property3);
     }
 }
 
@@ -336,4 +484,10 @@ public class PayPalRefundResponse
 
     [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
+}
+
+public class PayPalWebhookVerifyResponse
+{
+    [JsonPropertyName("verification_status")]
+    public string? VerificationStatus { get; set; }
 }

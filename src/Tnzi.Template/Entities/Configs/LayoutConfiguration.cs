@@ -7,9 +7,6 @@ public class LayoutConfiguration : EntityTypeConfigurationBase<Layout, Guid>
 {
     public override void Configure(EntityTypeBuilder<Layout> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(l => l.Id);
-
         // 属性配置
         builder.Property(l => l.LayoutName).IsRequired().HasMaxLength(200);
         builder.Property(l => l.Module).IsRequired().HasMaxLength(100);

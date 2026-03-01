@@ -308,13 +308,13 @@ public class SkillLoader
     }
 
     /// <summary>
-    /// 生成技能 ID
+    /// 生成技能 ID（使用 SHA256 确定性哈希，跨进程/运行时稳定）
     /// </summary>
     private static string GenerateSkillId(string filePath)
     {
-        // 使用文件路径的哈希值作为 ID
         var normalized = filePath.Replace('\\', '/').ToLowerInvariant();
-        return $"skill_{Math.Abs(normalized.GetHashCode()):x8}";
+        var hashBytes = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return $"skill_{Convert.ToHexString(hashBytes)[..16].ToLowerInvariant()}";
     }
 
     /// <summary>

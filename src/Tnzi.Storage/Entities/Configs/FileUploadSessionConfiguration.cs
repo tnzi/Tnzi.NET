@@ -8,7 +8,6 @@ public class FileUploadSessionConfiguration : EntityTypeConfigurationBase<FileUp
     public override void Configure(EntityTypeBuilder<FileUploadSession> builder)
     {
         builder.ToTable("UploadSession");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.FileName).IsRequired().HasMaxLength(256);
         builder.Property(e => e.TotalSize).IsRequired();

@@ -90,6 +90,12 @@ public class FileQueryRequest : PagedQueryDto
     public string? OriginalName { get; set; }
 
     /// <summary>
+    /// Filter by tag (exact match)
+    /// </summary>
+    [MaxLength(128)]
+    public string? Tag { get; set; }
+
+    /// <summary>
     /// 排序字段，如 CreationTime, Size, OriginalName
     /// </summary>
     [MaxLength(64)]
@@ -309,6 +315,40 @@ public class CompressRequest
 }
 
 /// <summary>
+/// User storage usage statistics
+/// </summary>
+public class UserStorageUsage
+{
+    /// <summary>
+    /// User ID (null for anonymous uploads)
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// Total number of files uploaded by the user
+    /// </summary>
+    public int FileCount { get; set; }
+
+    /// <summary>
+    /// Total storage size in bytes
+    /// </summary>
+    public long TotalSize { get; set; }
+
+    /// <summary>
+    /// Formatted total size (e.g., "12.5 MB")
+    /// </summary>
+    public string FormattedSize => FormatFileSize(TotalSize);
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+}
+
+/// <summary>
 /// 初始化分块上传请求
 /// </summary>
 public class InitiateChunkedUploadRequest
@@ -346,4 +386,220 @@ public class CompleteChunkedUploadRequest
     /// 是否临时文件
     /// </summary>
     public bool IsTemporary { get; set; } = false;
+}
+
+/// <summary>
+/// File integrity verification result
+/// </summary>
+public class FileIntegrityResult
+{
+    /// <summary>
+    /// File ID
+    /// </summary>
+    public Guid FileId { get; set; }
+
+    /// <summary>
+    /// Original file name
+    /// </summary>
+    public string OriginalName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the physical file exists on storage
+    /// </summary>
+    public bool PhysicalFileExists { get; set; }
+
+    /// <summary>
+    /// Whether the MD5 hash matches (null if file doesn't exist or MD5 not stored)
+    /// </summary>
+    public bool? Md5Matches { get; set; }
+
+    /// <summary>
+    /// Expected MD5 hash (from database)
+    /// </summary>
+    public string? ExpectedMd5 { get; set; }
+
+    /// <summary>
+    /// Actual MD5 hash (from physical file, null if file doesn't exist)
+    /// </summary>
+    public string? ActualMd5 { get; set; }
+
+    /// <summary>
+    /// Overall integrity status
+    /// </summary>
+    public FileIntegrityStatus Status { get; set; }
+
+    /// <summary>
+    /// Error message (if any)
+    /// </summary>
+    public string? Error { get; set; }
+}
+
+/// <summary>
+/// File integrity status
+/// </summary>
+public enum FileIntegrityStatus
+{
+    /// <summary>
+    /// File is healthy — exists and MD5 matches
+    /// </summary>
+    Healthy,
+
+    /// <summary>
+    /// Physical file is missing from storage
+    /// </summary>
+    Missing,
+
+    /// <summary>
+    /// File exists but MD5 hash does not match (corrupted)
+    /// </summary>
+    Corrupted,
+
+    /// <summary>
+    /// Unable to verify (error during check)
+    /// </summary>
+    Error
+}
+
+/// <summary>
+/// Batch integrity verification result
+/// </summary>
+public class BatchIntegrityResult
+{
+    /// <summary>
+    /// Total files checked
+    /// </summary>
+    public int TotalChecked { get; set; }
+
+    /// <summary>
+    /// Number of healthy files
+    /// </summary>
+    public int Healthy { get; set; }
+
+    /// <summary>
+    /// Number of missing files
+    /// </summary>
+    public int Missing { get; set; }
+
+    /// <summary>
+    /// Number of corrupted files
+    /// </summary>
+    public int Corrupted { get; set; }
+
+    /// <summary>
+    /// Number of files with errors during verification
+    /// </summary>
+    public int Errors { get; set; }
+
+    /// <summary>
+    /// Details of problematic files (missing/corrupted/error only)
+    /// </summary>
+    public List<FileIntegrityResult> Problems { get; set; } = new();
+}
+
+/// <summary>
+/// File share summary DTO (for admin listing)
+/// </summary>
+public class FileShareSummaryDto
+{
+    /// <summary>
+    /// Share ID
+    /// </summary>
+    public Guid Id { get; set; }
+
+    /// <summary>
+    /// File ID
+    /// </summary>
+    public Guid FileId { get; set; }
+
+    /// <summary>
+    /// Original file name
+    /// </summary>
+    public string OriginalName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Share token
+    /// </summary>
+    public string ShareToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Expiration time
+    /// </summary>
+    public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// Access count
+    /// </summary>
+    public int AccessCount { get; set; }
+
+    /// <summary>
+    /// Max access count
+    /// </summary>
+    public int? MaxAccessCount { get; set; }
+
+    /// <summary>
+    /// Whether password is required
+    /// </summary>
+    public bool RequirePassword { get; set; }
+
+    /// <summary>
+    /// Whether the share is enabled
+    /// </summary>
+    public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// Whether the share is expired
+    /// </summary>
+    public bool IsExpired => ExpiresAt.HasValue && ExpiresAt.Value < DateTime.UtcNow;
+
+    /// <summary>
+    /// Whether the share has reached max access count
+    /// </summary>
+    public bool IsExhausted => MaxAccessCount.HasValue && AccessCount >= MaxAccessCount.Value;
+
+    /// <summary>
+    /// Creation time
+    /// </summary>
+    public DateTime CreationTime { get; set; }
+
+    /// <summary>
+    /// Creator ID
+    /// </summary>
+    public Guid? CreatorId { get; set; }
+}
+
+/// <summary>
+/// Active shares query request
+/// </summary>
+public class ActiveSharesQueryRequest : PagedQueryDto
+{
+    /// <summary>
+    /// Filter by file ID
+    /// </summary>
+    public Guid? FileId { get; set; }
+
+    /// <summary>
+    /// Filter by creator ID
+    /// </summary>
+    public Guid? CreatorId { get; set; }
+
+    /// <summary>
+    /// Include expired shares (default false)
+    /// </summary>
+    public bool IncludeExpired { get; set; } = false;
+
+    /// <summary>
+    /// Include disabled shares (default false)
+    /// </summary>
+    public bool IncludeDisabled { get; set; } = false;
+}
+
+/// <summary>
+/// Set file tags request
+/// </summary>
+public class SetFileTagsRequest
+{
+    /// <summary>
+    /// Tags to set (replaces existing tags)
+    /// </summary>
+    public List<string> Tags { get; set; } = null!;
 }

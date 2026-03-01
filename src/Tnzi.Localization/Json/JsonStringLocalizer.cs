@@ -1,13 +1,10 @@
-using System.Collections.Concurrent;
-using System.Globalization;
-using System.Text.Json;
-
 namespace Tnzi.Localization.Json;
 
 /// <summary>
-/// 基于 JSON 文件的字符串本地化器
-/// 从 JSON 文件加载翻译资源，支持扁平键值对格式
-/// 查找路径优先级：{resourcesPath}/{baseName}.{culture}.json -> {resourcesPath}/{culture}.json
+/// JSON-based string localizer
+/// Loads translation resources from JSON files, supports both flat and nested JSON formats
+/// Nested keys are flattened using dot notation (e.g., {"Auth": {"Login": "Login"}} -> key "Auth.Login")
+/// Lookup priority: {resourcesPath}/{baseName}.{culture}.json -> {resourcesPath}/{culture}.json
 /// </summary>
 public class JsonStringLocalizer : IStringLocalizer
 {
@@ -143,20 +140,83 @@ public class JsonStringLocalizer : IStringLocalizer
     }
 
     /// <summary>
-    /// 读取并解析 JSON 文件为键值对字典
+    /// Read and parse a JSON file into a flat key-value dictionary.
+    /// Supports both flat and nested JSON structures.
+    /// Nested objects are flattened using dot notation (e.g., {"Auth": {"Login": "Sign In"}} -> "Auth.Login" = "Sign In").
     /// </summary>
     private Dictionary<string, string> ReadJsonFile(string filePath)
     {
         try
         {
             var json = File.ReadAllText(filePath);
-            var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-            return result ?? new Dictionary<string, string>();
+            using var document = JsonDocument.Parse(json);
+            var result = new Dictionary<string, string>();
+            FlattenJsonElement(document.RootElement, string.Empty, result);
+            return result;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load JSON resource file: {FilePath}", filePath);
             return new Dictionary<string, string>();
+        }
+    }
+
+    /// <summary>
+    /// Recursively flatten a JsonElement into dot-separated key-value pairs.
+    /// Object properties are joined with "." separator.
+    /// Array elements, null values, and non-string/non-object values are converted to their JSON string representation.
+    /// </summary>
+    public static void FlattenJsonElement(JsonElement element, string prefix, Dictionary<string, string> result)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    var key = string.IsNullOrEmpty(prefix) ? property.Name : $"{prefix}.{property.Name}";
+                    FlattenJsonElement(property.Value, key, result);
+                }
+                break;
+
+            case JsonValueKind.String:
+                if (!string.IsNullOrEmpty(prefix))
+                {
+                    result[prefix] = element.GetString() ?? string.Empty;
+                }
+                break;
+
+            case JsonValueKind.Number:
+                if (!string.IsNullOrEmpty(prefix))
+                {
+                    result[prefix] = element.GetRawText();
+                }
+                break;
+
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                if (!string.IsNullOrEmpty(prefix))
+                {
+                    result[prefix] = element.GetBoolean().ToString().ToLowerInvariant();
+                }
+                break;
+
+            case JsonValueKind.Array:
+                if (!string.IsNullOrEmpty(prefix))
+                {
+                    // Flatten array elements with numeric index
+                    var index = 0;
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        FlattenJsonElement(item, $"{prefix}.{index}", result);
+                        index++;
+                    }
+                }
+                break;
+
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+                // Skip null/undefined values
+                break;
         }
     }
 }

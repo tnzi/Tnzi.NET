@@ -9,7 +9,6 @@ public class AuditPropertyEntryConfiguration : EntityTypeConfigurationBase<Audit
     {
         // 表名由 TableNamePrefix 属性自动处理，此处显式指定以保持与原有表名一致
         builder.ToTable("PropertyEntry");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.PropertyName).IsRequired().HasMaxLength(200);
         builder.Property(e => e.PropertyDisplayName).HasMaxLength(200);

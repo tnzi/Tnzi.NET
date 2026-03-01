@@ -111,9 +111,6 @@ public class RepositoryRegistrar : IRepositoryRegistrar
 
         try
         {
-            // 1. 注册 IRepository<TEntity>
-            var repoInterfaceType = typeof(IRepository<>).MakeGenericType(entityType);
-
             // 查找主键类型
             var keyType = TypeHelper.GetPrimaryKeyType(entityType);
 
@@ -121,6 +118,8 @@ public class RepositoryRegistrar : IRepositoryRegistrar
                 ? typeof(EFCoreRepository<,,>).MakeGenericType(dbContextType, entityType, keyType)
                 : typeof(EFCoreRepository<,>).MakeGenericType(dbContextType, entityType);
 
+            // 1. 注册 IRepository<TEntity>
+            var repoInterfaceType = typeof(IRepository<>).MakeGenericType(entityType);
             if (!services.Any(s => s.ServiceType == repoInterfaceType))
             {
                 services.AddScoped(repoInterfaceType, repoImplType);
@@ -128,7 +127,14 @@ public class RepositoryRegistrar : IRepositoryRegistrar
                     repoInterfaceType.Name, repoImplType.Name);
             }
 
-            // 2. 注册 IRepository<TEntity, TKey>
+            // 2. 注册 IReadOnlyRepository<TEntity>（使用同一实现，CQRS 查询端可注入此接口）
+            var readOnlyInterfaceType = typeof(IReadOnlyRepository<>).MakeGenericType(entityType);
+            if (!services.Any(s => s.ServiceType == readOnlyInterfaceType))
+            {
+                services.AddScoped(readOnlyInterfaceType, repoImplType);
+            }
+
+            // 3. 注册 IRepository<TEntity, TKey> 和 IReadOnlyRepository<TEntity, TKey>
             if (keyType != null)
             {
                 var repoKeyInterfaceType = typeof(IRepository<,>).MakeGenericType(entityType, keyType);
@@ -139,6 +145,12 @@ public class RepositoryRegistrar : IRepositoryRegistrar
                     services.AddScoped(repoKeyInterfaceType, repoKeyImplType);
                     logger?.LogDebug("Registered Repository: {Interface} -> {Implementation}",
                         repoKeyInterfaceType.Name, repoKeyImplType.Name);
+                }
+
+                var readOnlyKeyInterfaceType = typeof(IReadOnlyRepository<,>).MakeGenericType(entityType, keyType);
+                if (!services.Any(s => s.ServiceType == readOnlyKeyInterfaceType))
+                {
+                    services.AddScoped(readOnlyKeyInterfaceType, repoKeyImplType);
                 }
             }
         }

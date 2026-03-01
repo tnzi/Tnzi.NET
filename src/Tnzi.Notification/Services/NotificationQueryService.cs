@@ -31,8 +31,20 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         if (request.EndTime.HasValue)
             query = query.Where(n => n.CreationTime <= request.EndTime.Value);
 
+        if (!string.IsNullOrWhiteSpace(request.Category))
+            query = query.Where(n => n.Category == request.Category);
+
+        if (request.Priority.HasValue)
+            query = query.Where(n => n.Priority == request.Priority.Value);
+
+        if (request.SenderId.HasValue)
+            query = query.Where(n => n.SenderId == request.SenderId.Value);
+
         if (!string.IsNullOrWhiteSpace(request.Keyword))
-            query = query.Where(n => n.Subject.Contains(request.Keyword) || n.Content.Contains(request.Keyword));
+        {
+            var keyword = request.Keyword.ToLower();
+            query = query.Where(n => n.Subject.ToLower().Contains(keyword) || n.Content.ToLower().Contains(keyword));
+        }
 
         query = query.OrderByDescending(n => n.CreationTime);
 
@@ -184,5 +196,123 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         var notificationInfos = notifications.MapToList<NotificationInfo>();
 
         return Ok((IEnumerable<NotificationInfo>)notificationInfos);
+    }
+
+    public async Task<Result<IPagedList<NotificationInfo>>> GetScheduledAsync(QueryNotificationRequest request, CancellationToken cancellationToken = default)
+    {
+        var query = _notificationRepository.AsQueryable().AsNoTracking()
+            .Where(n => n.Status == NotificationStatus.Scheduled);
+
+        if (request.Type.HasValue)
+            query = query.Where(n => n.Type == request.Type.Value);
+
+        if (!string.IsNullOrWhiteSpace(request.Category))
+            query = query.Where(n => n.Category == request.Category);
+
+        if (request.Priority.HasValue)
+            query = query.Where(n => n.Priority == request.Priority.Value);
+
+        if (request.StartTime.HasValue)
+            query = query.Where(n => n.ScheduledTime >= request.StartTime.Value);
+
+        if (request.EndTime.HasValue)
+            query = query.Where(n => n.ScheduledTime <= request.EndTime.Value);
+
+        if (!string.IsNullOrWhiteSpace(request.Keyword))
+        {
+            var keyword = request.Keyword.ToLower();
+            query = query.Where(n => n.Subject.ToLower().Contains(keyword));
+        }
+
+        query = query.OrderBy(n => n.ScheduledTime);
+
+        var paged = await query
+            .ProjectTo<Message, NotificationInfo>()
+            .CreateAsync(request, cancellationToken);
+
+        return Ok(paged);
+    }
+
+    public async Task<Result<int>> BatchDeleteAsync(List<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var notifications = await _notificationRepository
+            .AsQueryable()
+            .Where(n => ids.Contains(n.Id))
+            .ToListAsync(cancellationToken);
+
+        if (notifications.Count == 0)
+            return Ok(0, "No notifications found to delete");
+
+        await _notificationRepository.DeleteManyAsync(notifications, cancellationToken);
+        return Ok(notifications.Count, $"{notifications.Count} notifications deleted");
+    }
+
+    public async Task<Result<NotificationTrendDto>> GetStatisticsTrendAsync(TrendInterval interval, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
+    {
+        if (endDate <= startDate)
+            return Fail<NotificationTrendDto>("End date must be after start date", 400);
+
+        var notifications = await _notificationRepository.AsQueryable().AsNoTracking()
+            .Where(n => n.CreationTime >= startDate && n.CreationTime <= endDate)
+            .Select(n => new { n.CreationTime, n.Status })
+            .ToListAsync(cancellationToken);
+
+        var dataPoints = new List<TrendDataPoint>();
+        var current = startDate;
+
+        while (current < endDate)
+        {
+            DateTime periodEnd;
+            string label;
+
+            switch (interval)
+            {
+                case TrendInterval.Daily:
+                    periodEnd = current.AddDays(1);
+                    label = current.ToString("yyyy-MM-dd");
+                    break;
+                case TrendInterval.Weekly:
+                    periodEnd = current.AddDays(7);
+                    var weekOfYear = System.Globalization.CultureInfo.InvariantCulture.Calendar
+                        .GetWeekOfYear(current, System.Globalization.CalendarWeekRule.FirstDay, DayOfWeek.Monday);
+                    label = $"{current:yyyy}-W{weekOfYear:D2}";
+                    break;
+                case TrendInterval.Monthly:
+                    periodEnd = current.AddMonths(1);
+                    label = current.ToString("yyyy-MM");
+                    break;
+                default:
+                    periodEnd = current.AddDays(1);
+                    label = current.ToString("yyyy-MM-dd");
+                    break;
+            }
+
+            var periodNotifications = notifications
+                .Where(n => n.CreationTime >= current && n.CreationTime < periodEnd)
+                .ToList();
+
+            dataPoints.Add(new TrendDataPoint
+            {
+                Label = label,
+                StartTime = current,
+                TotalCount = periodNotifications.Count,
+                SentCount = periodNotifications.Count(n => n.Status == NotificationStatus.Sent || n.Status == NotificationStatus.PartiallySent),
+                FailedCount = periodNotifications.Count(n => n.Status == NotificationStatus.Failed)
+            });
+
+            current = periodEnd;
+        }
+
+        var trend = new NotificationTrendDto
+        {
+            Interval = interval,
+            StartDate = startDate,
+            EndDate = endDate,
+            DataPoints = dataPoints
+        };
+
+        return Ok(trend);
     }
 }

@@ -36,6 +36,11 @@ public class SystemModule : TnziApplicationModule
         // 注册配置服务
         services.AddScoped<ISettingService, SettingService>();
 
+        // 注册配置提供者（分层解析链：User → Tenant → Global）
+        services.AddScoped<ISettingProvider, GlobalSettingProvider>();
+        services.AddScoped<ISettingProvider, TenantSettingProvider>();
+        services.AddScoped<ISettingProvider, UserSettingProvider>();
+
         // 注册访问日志服务
         services.AddScoped<IAccessLogService, AccessLogService>();
 

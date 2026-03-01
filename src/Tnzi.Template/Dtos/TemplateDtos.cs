@@ -169,7 +169,7 @@ public class QueryTemplateRequest : PagedQueryDto
 }
 
 /// <summary>
-/// 模板信息DTO（分页列表项）
+/// 模板信息DTO（分页列表项，不含大文本字段以优化传输性能）
 /// </summary>
 public class TemplateInfoDto
 {
@@ -177,12 +177,9 @@ public class TemplateInfoDto
     public string TemplateName { get; set; } = string.Empty;
     public string Module { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
-    public string SubjectTemplate { get; set; } = string.Empty;
-    public string ContentTemplate { get; set; } = string.Empty;
     public string? DefaultLayoutName { get; set; }
     public bool IsActive { get; set; }
     public string? Description { get; set; }
-    public string? Metadata { get; set; }
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
 }
@@ -219,4 +216,111 @@ public class PreviewTemplateRequest
     /// 模板模型数据
     /// </summary>
     public Dictionary<string, object>? Model { get; set; }
+}
+
+/// <summary>
+/// Template import request
+/// </summary>
+public class TemplateImportRequest
+{
+    /// <summary>
+    /// JSON string containing templates to import
+    /// </summary>
+    [Required]
+    public string Json { get; set; } = null!;
+
+    /// <summary>
+    /// Whether to overwrite existing templates with same name+module+category
+    /// </summary>
+    public bool OverwriteExisting { get; set; } = false;
+}
+
+/// <summary>
+/// Template export entry (JSON-serializable format for import/export)
+/// </summary>
+public class TemplateExportEntry
+{
+    public string TemplateName { get; set; } = string.Empty;
+    public string Module { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string SubjectTemplate { get; set; } = string.Empty;
+    public string ContentTemplate { get; set; } = string.Empty;
+    public string? DefaultLayoutName { get; set; }
+    public bool IsActive { get; set; }
+    public string? Description { get; set; }
+    public string? Metadata { get; set; }
+}
+
+/// <summary>
+/// Template import result
+/// </summary>
+public class TemplateImportResultDto
+{
+    /// <summary>
+    /// Number of templates created
+    /// </summary>
+    public int CreatedCount { get; set; }
+
+    /// <summary>
+    /// Number of templates updated (overwritten)
+    /// </summary>
+    public int UpdatedCount { get; set; }
+
+    /// <summary>
+    /// Number of templates skipped (already exist)
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>
+    /// Errors encountered during import
+    /// </summary>
+    public List<string> Errors { get; set; } = new();
+}
+
+/// <summary>
+/// Template variable discovery result
+/// </summary>
+public class TemplateVariablesDto
+{
+    /// <summary>
+    /// Template ID
+    /// </summary>
+    public Guid TemplateId { get; set; }
+
+    /// <summary>
+    /// Template name
+    /// </summary>
+    public string TemplateName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Variables found in the subject template
+    /// </summary>
+    public List<string> SubjectVariables { get; set; } = new();
+
+    /// <summary>
+    /// Variables found in the content template
+    /// </summary>
+    public List<string> ContentVariables { get; set; } = new();
+
+    /// <summary>
+    /// All unique variables (union of subject and content)
+    /// </summary>
+    public List<string> AllVariables { get; set; } = new();
+}
+
+/// <summary>
+/// Batch activate/deactivate request
+/// </summary>
+public class BatchActivateRequest
+{
+    /// <summary>
+    /// IDs to activate or deactivate
+    /// </summary>
+    [Required]
+    public List<Guid> Ids { get; set; } = null!;
+
+    /// <summary>
+    /// Whether to activate (true) or deactivate (false)
+    /// </summary>
+    public bool IsActive { get; set; }
 }

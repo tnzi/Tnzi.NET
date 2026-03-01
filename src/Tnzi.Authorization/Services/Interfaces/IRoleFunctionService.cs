@@ -68,4 +68,38 @@ public interface IRoleFunctionService
     /// </summary>
     /// <param name="roleId">角色ID</param>
     Task<Result> ClearRoleFunctionsAsync(Guid roleId);
+
+    /// <summary>
+    /// Compare permissions between two roles
+    /// Returns functions unique to each role and shared functions
+    /// </summary>
+    /// <param name="roleId1">First role ID</param>
+    /// <param name="roleId2">Second role ID</param>
+    /// <returns>Permission comparison result</returns>
+    Task<Result<PermissionComparisonDto>> CompareRolePermissionsAsync(Guid roleId1, Guid roleId2);
+
+    /// <summary>
+    /// Clone all function assignments from source role to target role
+    /// Existing assignments on the target role are preserved (additive clone)
+    /// </summary>
+    /// <param name="sourceRoleId">Source role ID</param>
+    /// <param name="targetRoleId">Target role ID</param>
+    /// <returns>Number of new assignments created</returns>
+    Task<Result<int>> CloneRoleFunctionsAsync(Guid sourceRoleId, Guid targetRoleId);
+
+    /// <summary>
+    /// Export role's function assignments as JSON (using function codes for portability)
+    /// </summary>
+    /// <param name="roleId">Role ID</param>
+    /// <returns>JSON string of exported permission data</returns>
+    Task<Result<RolePermissionExportDto>> ExportRolePermissionsAsync(Guid roleId);
+
+    /// <summary>
+    /// Import function assignments to a role from exported JSON data
+    /// Uses function codes to resolve function IDs (environment-independent)
+    /// </summary>
+    /// <param name="roleId">Target role ID</param>
+    /// <param name="importData">Exported permission data</param>
+    /// <returns>Import result with counts</returns>
+    Task<Result<PermissionImportResultDto>> ImportRolePermissionsAsync(Guid roleId, RolePermissionExportDto importData);
 }

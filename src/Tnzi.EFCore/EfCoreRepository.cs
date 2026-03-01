@@ -265,16 +265,8 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     {
         var query = GetQueryableAsNoTracking();
         if (predicate != null)
-        {
             query = query.Where(predicate);
-        }
         return await query.AnyAsync(cancellationToken);
-    }
-
-    public virtual async Task<bool> ExistsAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
-    {
-        Check.NotNull(predicate);
-        return await AnyAsync(predicate, cancellationToken);
     }
 
     public virtual async Task<TEntity> GetRequiredAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
@@ -379,6 +371,14 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         Check.NotNull(query);
         // 分页查询通常是只读的，使用AsNoTracking提升性能
         var source = GetQueryableAsNoTracking();
+
+        // Auto-apply dynamic filter from PagedQuery.Filter
+        if (query.Filter is { HasFilters: true })
+        {
+            var filterExpression = FilterExpressionBuilder.Build<TEntity>(query.Filter);
+            source = source.Where(filterExpression);
+        }
+
         source = ApplyOrderBy(source, query.OrderBy);
         return await source.CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
     }
@@ -389,6 +389,14 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         Check.NotNull(query);
         // 分页查询通常是只读的，使用AsNoTracking提升性能
         var source = GetQueryableAsNoTracking().Where(predicate);
+
+        // Auto-apply dynamic filter from PagedQuery.Filter
+        if (query.Filter is { HasFilters: true })
+        {
+            var filterExpression = FilterExpressionBuilder.Build<TEntity>(query.Filter);
+            source = source.Where(filterExpression);
+        }
+
         source = ApplyOrderBy(source, query.OrderBy);
         return await source.CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
     }
@@ -404,6 +412,110 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         }
         source = ApplyOrderBy(source, query.OrderBy);
         return await source.Select(selector).CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
+    }
+
+    // Dynamic filter methods (FilterGroup integration)
+
+    /// <summary>
+    /// Get a filtered paged list using dynamic FilterGroup.
+    /// </summary>
+    public virtual async Task<IPagedList<TEntity>> GetFilteredPagedListAsync(
+        FilterGroup filter, PagedQuery query,
+        Expression<Func<TEntity, bool>>? additionalPredicate = null,
+        CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(filter);
+        Check.NotNull(query);
+
+        var source = GetQueryableAsNoTracking();
+
+        if (filter.HasFilters)
+        {
+            var filterExpression = FilterExpressionBuilder.Build<TEntity>(filter);
+            source = source.Where(filterExpression);
+        }
+
+        if (additionalPredicate != null)
+            source = source.Where(additionalPredicate);
+
+        source = ApplyOrderBy(source, query.OrderBy);
+        return await source.CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
+    }
+
+    /// <summary>
+    /// Get a filtered list using dynamic FilterGroup (non-paged).
+    /// </summary>
+    public virtual async Task<List<TEntity>> GetFilteredListAsync(
+        FilterGroup filter, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(filter);
+
+        var source = GetQueryableAsNoTracking();
+
+        if (filter.HasFilters)
+        {
+            var filterExpression = FilterExpressionBuilder.Build<TEntity>(filter);
+            source = source.Where(filterExpression);
+        }
+
+        return await source.ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Count entities matching a dynamic FilterGroup.
+    /// </summary>
+    public virtual async Task<int> CountAsync(
+        FilterGroup filter, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(filter);
+
+        var source = GetQueryableAsNoTracking();
+
+        if (filter.HasFilters)
+        {
+            var filterExpression = FilterExpressionBuilder.Build<TEntity>(filter);
+            source = source.Where(filterExpression);
+        }
+
+        return await source.CountAsync(cancellationToken);
+    }
+
+    // 聚合方法实现
+
+    public virtual async Task<decimal> SumAsync(Expression<Func<TEntity, decimal>> selector, Expression<Func<TEntity, bool>>? predicate = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(selector);
+        var query = GetQueryableAsNoTracking();
+        if (predicate != null)
+            query = query.Where(predicate);
+        return await query.SumAsync(selector, cancellationToken);
+    }
+
+    public virtual async Task<TResult> MinAsync<TResult>(Expression<Func<TEntity, TResult>> selector, Expression<Func<TEntity, bool>>? predicate = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(selector);
+        var query = GetQueryableAsNoTracking();
+        if (predicate != null)
+            query = query.Where(predicate);
+        return await query.MinAsync(selector, cancellationToken);
+    }
+
+    public virtual async Task<TResult> MaxAsync<TResult>(Expression<Func<TEntity, TResult>> selector, Expression<Func<TEntity, bool>>? predicate = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(selector);
+        var query = GetQueryableAsNoTracking();
+        if (predicate != null)
+            query = query.Where(predicate);
+        return await query.MaxAsync(selector, cancellationToken);
+    }
+
+    public virtual async Task<decimal> AverageAsync(Expression<Func<TEntity, decimal>> selector, Expression<Func<TEntity, bool>>? predicate = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(selector);
+        var query = GetQueryableAsNoTracking();
+        if (predicate != null)
+            query = query.Where(predicate);
+        return await query.AverageAsync(selector, cancellationToken);
     }
 
     public virtual async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
@@ -578,54 +690,56 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         }
     }
 
+    /// <summary>
+    /// 执行软删除：通过 ExecuteUpdateAsync 在数据库层批量设置审计字段
+    /// 根据实体实现的接口组合动态构建 SetProperty 调用链
+    /// </summary>
+    protected virtual async Task ExecuteSoftDeleteAsync(IQueryable<TEntity> query, CancellationToken cancellationToken)
+    {
+        var currentUser = _serviceProvider?.GetService<ICurrentUser>();
+        var userId = currentUser?.Id;
+        var tp = _serviceProvider?.GetService<TimeProvider>() ?? TimeProvider.System;
+        var now = tp.GetUtcNow().UtcDateTime;
+
+        var hasDeleter = typeof(IHasDeleter).IsAssignableFrom(typeof(TEntity));
+        var hasModTime = typeof(IHasModificationTime).IsAssignableFrom(typeof(TEntity));
+        var hasModifier = typeof(IHasModifier).IsAssignableFrom(typeof(TEntity));
+        var hasConcurrency = typeof(IConcurrencyStamp).IsAssignableFrom(typeof(TEntity));
+
+        // 构建统一的 SetProperty 调用链，消除组合爆炸
+        await query.ExecuteUpdateAsync(s =>
+        {
+            s.SetProperty(e => ((ISoftDelete)e).IsDeleted, true);
+
+            if (hasDeleter)
+            {
+                s.SetProperty(e => ((IHasDeleter)e).DeleterId, userId);
+                s.SetProperty(e => ((IHasDeleter)e).DeletionTime, now);
+            }
+            if (hasModTime)
+            {
+                s.SetProperty(e => ((IHasModificationTime)e).LastModificationTime, (DateTime?)now);
+            }
+            if (hasModifier)
+            {
+                s.SetProperty(e => ((IHasModifier)e).LastModifierId, userId);
+            }
+            if (hasConcurrency)
+            {
+                s.SetProperty(e => ((IConcurrencyStamp)e).ConcurrencyStamp, Guid.NewGuid().ToString("N"));
+            }
+        }, cancellationToken);
+    }
+
     public virtual async Task DeleteAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
     {
         Check.NotNull(predicate);
-        
+
         // 软删除优化：使用 ExecuteUpdateAsync 直接在数据库层批量更新
         // 注意：软删除不涉及物理文件删除，因此可以安全使用优化路径
         if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
         {
-            var currentUser = _serviceProvider?.GetService<ICurrentUser>();
-            var userId = currentUser?.Id;
-            var now = DateTime.UtcNow;
-
-            var hasDeleter = typeof(IHasDeleter).IsAssignableFrom(typeof(TEntity));
-            var hasModTime = typeof(IHasModificationTime).IsAssignableFrom(typeof(TEntity));
-            var hasModifier = typeof(IHasModifier).IsAssignableFrom(typeof(TEntity));
-
-            if (hasDeleter && hasModTime && hasModifier)
-            {
-                await DbSet.Where(predicate).ExecuteUpdateAsync(s => s
-                    .SetProperty(e => ((ISoftDelete)e).IsDeleted, true)
-                    .SetProperty(e => ((IHasDeleter)e).DeleterId, userId)
-                    .SetProperty(e => ((IHasDeleter)e).DeletionTime, now)
-                    .SetProperty(e => ((IHasModificationTime)e).LastModificationTime, (DateTime?)now)
-                    .SetProperty(e => ((IHasModifier)e).LastModifierId, userId)
-                , cancellationToken);
-            }
-            else if (hasDeleter)
-            {
-                await DbSet.Where(predicate).ExecuteUpdateAsync(s => s
-                    .SetProperty(e => ((ISoftDelete)e).IsDeleted, true)
-                    .SetProperty(e => ((IHasDeleter)e).DeleterId, userId)
-                    .SetProperty(e => ((IHasDeleter)e).DeletionTime, now)
-                , cancellationToken);
-            }
-            else if (hasModTime && hasModifier)
-            {
-                await DbSet.Where(predicate).ExecuteUpdateAsync(s => s
-                    .SetProperty(e => ((ISoftDelete)e).IsDeleted, true)
-                    .SetProperty(e => ((IHasModificationTime)e).LastModificationTime, (DateTime?)now)
-                    .SetProperty(e => ((IHasModifier)e).LastModifierId, userId)
-                , cancellationToken);
-            }
-            else
-            {
-                await DbSet.Where(predicate).ExecuteUpdateAsync(s => s
-                    .SetProperty(e => ((ISoftDelete)e).IsDeleted, true)
-                , cancellationToken);
-            }
+            await ExecuteSoftDeleteAsync(DbSet.Where(predicate), cancellationToken);
         }
         else
         {

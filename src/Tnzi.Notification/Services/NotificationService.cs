@@ -5,7 +5,7 @@ namespace Tnzi.Notification.Services;
 /// <summary>
 /// 通知服务实现（创建+发送编排）
 /// </summary>
-public class NotificationService : ApplicationService, INotificationService, IDisposable, IAsyncDisposable
+public class NotificationService : ApplicationService, INotificationService
 {
     private readonly IRepository<Message, Guid> _notificationRepository;
     private readonly IEmailSender _emailSender;
@@ -14,12 +14,11 @@ public class NotificationService : ApplicationService, INotificationService, IDi
     private readonly INotificationQueueService? _queueService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly NotificationOptions _options;
-    private readonly ITemplateStoreService? _templateStoreService;
-    private readonly ILayoutStoreService? _layoutStoreService;
-    private readonly ITemplateEngine? _templateEngine;
-    private readonly SemaphoreSlim _semaphore;
+    private readonly ITemplateRenderService? _templateRenderService;
 
-    private new const string ModuleName = "Notification";
+    // 静态信号量，确保跨请求的并发控制真正生效
+    private static SemaphoreSlim? _sendSemaphore;
+    private static readonly object _semaphoreLock = new();
 
     public NotificationService(
         IRepository<Message, Guid> notificationRepository,
@@ -30,9 +29,7 @@ public class NotificationService : ApplicationService, INotificationService, IDi
         IOptions<NotificationOptions> options,
         IServiceProvider serviceProvider,
         INotificationQueueService? queueService = null,
-        ITemplateStoreService? templateStoreService = null,
-        ILayoutStoreService? layoutStoreService = null,
-        ITemplateEngine? templateEngine = null)
+        ITemplateRenderService? templateRenderService = null)
         : base(serviceProvider)
     {
         _notificationRepository = Check.NotNull(notificationRepository);
@@ -42,10 +39,9 @@ public class NotificationService : ApplicationService, INotificationService, IDi
         _unitOfWork = Check.NotNull(unitOfWork);
         _options = Check.NotNull(options).Value;
         _queueService = queueService;
-        _templateStoreService = templateStoreService;
-        _layoutStoreService = layoutStoreService;
-        _templateEngine = templateEngine;
-        _semaphore = new SemaphoreSlim(_options.MaxConcurrency, _options.MaxConcurrency);
+        _templateRenderService = templateRenderService;
+
+        EnsureSemaphoreInitialized(_options.MaxConcurrency);
     }
 
     public async Task<Result<NotificationInfo>> CreateAndSendAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
@@ -59,6 +55,26 @@ public class NotificationService : ApplicationService, INotificationService, IDi
 
         var notificationInfo = createResult.Data;
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Handle scheduled notifications: defer sending until ScheduledTime
+        if (request.ScheduledTime.HasValue && request.ScheduledTime.Value > DateTime.UtcNow)
+        {
+            var delay = request.ScheduledTime.Value - DateTime.UtcNow;
+            if (_queueService != null)
+            {
+                await _queueService.EnqueueWithDelayAsync(
+                    (sp, ct) =>
+                    {
+                        var svc = sp.GetRequiredService<INotificationService>();
+                        return svc.SendAsync(notificationInfo.Id, ct);
+                    },
+                    delay);
+            }
+
+            LogInformation("Notification scheduled: {NotificationId}, Type: {Type}, ScheduledTime: {ScheduledTime}",
+                notificationInfo.Id, notificationInfo.Type, request.ScheduledTime.Value);
+            return Ok(notificationInfo, $"Notification scheduled for {request.ScheduledTime.Value:u}");
+        }
 
         if (request.SendImmediately)
         {
@@ -84,10 +100,6 @@ public class NotificationService : ApplicationService, INotificationService, IDi
 
         var messageRequestMap = new List<(Message Message, CreateNotificationRequest Request)>();
         var errors = new List<string>();
-        var timestamp = DateTime.UtcNow;
-
-        var templateCache = new Dictionary<string, Tnzi.Template.Entities.Template>();
-        var layoutCache = new Dictionary<string, Tnzi.Template.Entities.Layout?>();
 
         for (int i = 0; i < requestList.Count; i++)
         {
@@ -101,26 +113,19 @@ public class NotificationService : ApplicationService, INotificationService, IDi
                     continue;
                 }
 
-                var renderResult = await RenderTemplateContentAsync(request, templateCache, layoutCache, cancellationToken);
-                if (!renderResult.Succeeded)
-                {
-                    errors.Add($"Request at index {i}: {renderResult.Message}");
-                    Logger.LogWarning("Failed to render template for request at index {Index}: {Error}", i, renderResult.Message);
-                    continue;
-                }
+                var (subject, content, category) = await RenderContentAsync(request, cancellationToken);
 
                 var notification = new Message
                 {
                     Type = request.Type,
-                    Subject = renderResult.Subject,
-                    Content = renderResult.Content,
+                    Subject = subject,
+                    Content = content,
                     IsHtml = request.IsHtml,
                     Priority = request.Priority,
                     Status = NotificationStatus.Pending,
                     SenderId = request.SenderId,
-                    Category = renderResult.Category,
+                    Category = category,
                     TemplateName = request.TemplateName,
-                    CreationTime = timestamp,
                     RetryCount = 0,
                     MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
                     TotalRecipientCount = request.Recipients.Count,
@@ -198,22 +203,20 @@ public class NotificationService : ApplicationService, INotificationService, IDi
         if (validationError != null)
             return Fail<NotificationInfo>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
 
-        var renderResult = await RenderTemplateContentAsync(request, null, null, cancellationToken);
-        if (!renderResult.Succeeded)
-            return Fail<NotificationInfo>(renderResult.Message, 400, ErrorCodes.NOTIFICATION_ERROR);
+        var (subject, content, category) = await RenderContentAsync(request, cancellationToken);
 
         var notification = new Message
         {
             Type = request.Type,
-            Subject = renderResult.Subject,
-            Content = renderResult.Content,
+            Subject = subject,
+            Content = content,
             IsHtml = request.IsHtml,
             Priority = request.Priority,
-            Status = NotificationStatus.Pending,
+            Status = request.ScheduledTime.HasValue ? NotificationStatus.Scheduled : NotificationStatus.Pending,
             SenderId = request.SenderId,
-            Category = renderResult.Category,
+            Category = category,
             TemplateName = request.TemplateName,
-            CreationTime = DateTime.UtcNow,
+            ScheduledTime = request.ScheduledTime,
             RetryCount = 0,
             MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
             TotalRecipientCount = request.Recipients.Count,
@@ -277,6 +280,10 @@ public class NotificationService : ApplicationService, INotificationService, IDi
         if (notification.Status == NotificationStatus.Cancelled)
             return Fail($"Notification {messageId} has been cancelled", 400, ErrorCodes.NOTIFICATION_ERROR);
 
+        // If scheduled and not yet time, skip
+        if (notification.Status == NotificationStatus.Scheduled && notification.ScheduledTime.HasValue && notification.ScheduledTime.Value > DateTime.UtcNow)
+            return Fail($"Notification {messageId} is scheduled for {notification.ScheduledTime.Value:u}", 400, ErrorCodes.NOTIFICATION_ERROR);
+
         notification.Status = NotificationStatus.Sending;
         notification.RetryCount++;
 
@@ -298,7 +305,7 @@ public class NotificationService : ApplicationService, INotificationService, IDi
 
         foreach (var recipient in pendingRecipients)
         {
-            await _semaphore.WaitAsync(cancellationToken);
+            await _sendSemaphore!.WaitAsync(cancellationToken);
             try
             {
                 var sendResult = await SendToRecipientAsync(notification, recipient, cancellationToken);
@@ -327,7 +334,7 @@ public class NotificationService : ApplicationService, INotificationService, IDi
             }
             finally
             {
-                _semaphore.Release();
+                _sendSemaphore!.Release();
             }
         }
 
@@ -410,7 +417,40 @@ public class NotificationService : ApplicationService, INotificationService, IDi
         return Ok("Notification cancelled successfully");
     }
 
+    public async Task<Result<int>> BatchCancelAsync(List<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var notifications = await _notificationRepository
+            .AsQueryable()
+            .Where(n => ids.Contains(n.Id) && (n.Status == NotificationStatus.Pending || n.Status == NotificationStatus.Scheduled))
+            .ToListAsync(cancellationToken);
+
+        if (notifications.Count == 0)
+            return Ok(0, "No cancellable notifications found");
+
+        foreach (var notification in notifications)
+        {
+            notification.Status = NotificationStatus.Cancelled;
+        }
+
+        await _notificationRepository.UpdateManyAsync(notifications, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogInformation("Batch cancelled {Count} notifications", notifications.Count);
+        return Ok(notifications.Count, $"{notifications.Count} notifications cancelled");
+    }
+
     #region Private Methods
+
+    private static void EnsureSemaphoreInitialized(int maxConcurrency)
+    {
+        if (_sendSemaphore != null) return;
+        lock (_semaphoreLock)
+        {
+            _sendSemaphore ??= new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        }
+    }
 
     private static string? ValidateRecipients(List<RecipientInput> recipients)
     {
@@ -426,93 +466,40 @@ public class NotificationService : ApplicationService, INotificationService, IDi
         return null;
     }
 
-    private async Task<TemplateRenderResult> RenderTemplateContentAsync(
-        CreateNotificationRequest request,
-        Dictionary<string, Tnzi.Template.Entities.Template>? templateCache,
-        Dictionary<string, Tnzi.Template.Entities.Layout?>? layoutCache,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// 渲染通知内容（使用 ITemplateRenderService 或直接使用请求内容）
+    /// </summary>
+    private async Task<(string Subject, string Content, string Category)> RenderContentAsync(CreateNotificationRequest request, CancellationToken cancellationToken)
     {
-        // 如果没有模板名称，直接使用请求中的内容
+        // 没有模板名称，直接使用请求中的内容
         if (string.IsNullOrWhiteSpace(request.TemplateName))
+            return (request.Subject, request.Content, request.Category ?? "General");
+
+        // 没有模板渲染服务，使用原始内容
+        if (_templateRenderService == null)
         {
-            return TemplateRenderResult.Ok(
-                request.Subject,
-                request.Content,
-                request.Category ?? "General");
+            Logger.LogWarning("ITemplateRenderService not available, using raw content for template '{TemplateName}'", request.TemplateName);
+            return (request.Subject, request.Content, request.Category ?? "General");
         }
 
-        // 没有模板服务时使用原始内容
-        if (_templateStoreService == null || _templateEngine == null)
+        // 使用 ITemplateRenderService 一站式渲染
+        var renderResult = await _templateRenderService.RenderByNameAsync(
+            request.TemplateName,
+            "Notification",
+            request.TemplateVariables,
+            request.Category,
+            request.LayoutName,
+            cancellationToken);
+
+        if (!renderResult.Succeeded)
         {
-            Logger.LogWarning("Template services not available, using raw content for template '{TemplateName}'", request.TemplateName);
-            return TemplateRenderResult.Ok(
-                request.Subject,
-                request.Content,
-                request.Category ?? "General");
+            Logger.LogWarning("Template rendering failed for '{TemplateName}': {Error}. Using raw content.", request.TemplateName, renderResult.Message);
+            return (request.Subject, request.Content, request.Category ?? "General");
         }
 
-        try
-        {
-            // 查找模板（支持缓存）
-            Tnzi.Template.Entities.Template? template;
-            if (templateCache != null && templateCache.TryGetValue(request.TemplateName, out var cachedTemplate))
-            {
-                template = cachedTemplate;
-            }
-            else
-            {
-                var templateResult = await _templateStoreService.GetTemplateAsync(request.TemplateName, ModuleName, null, cancellationToken);
-                template = templateResult.Succeeded ? templateResult.Data : null;
-                if (template != null)
-                    templateCache?.TryAdd(request.TemplateName, template);
-            }
-
-            if (template == null)
-                return TemplateRenderResult.Fail($"Template '{request.TemplateName}' not found");
-
-            // 渲染模板内容
-            var variables = request.TemplateVariables ?? new Dictionary<string, object>();
-            var content = await _templateEngine.RenderAsync(template.ContentTemplate, variables);
-            var subject = !string.IsNullOrWhiteSpace(template.SubjectTemplate)
-                ? await _templateEngine.RenderAsync(template.SubjectTemplate, variables)
-                : request.Subject;
-
-            // 如果指定了布局，渲染布局
-            var layoutName = request.LayoutName ?? template.DefaultLayoutName;
-            if (!string.IsNullOrWhiteSpace(layoutName) && _layoutStoreService != null)
-            {
-                Tnzi.Template.Entities.Layout? layout;
-                if (layoutCache != null && layoutCache.TryGetValue(layoutName, out var cachedLayout))
-                {
-                    layout = cachedLayout;
-                }
-                else
-                {
-                    var layoutResult = await _layoutStoreService.GetLayoutAsync(layoutName, ModuleName, null, cancellationToken);
-                    layout = layoutResult.Succeeded ? layoutResult.Data : null;
-                    layoutCache?.TryAdd(layoutName, layout);
-                }
-
-                if (layout?.LayoutContent != null)
-                {
-                    var layoutVariables = new Dictionary<string, object>(variables)
-                    {
-                        ["Body"] = content
-                    };
-                    content = await _templateEngine.RenderAsync(layout.LayoutContent, layoutVariables);
-                }
-            }
-
-            return TemplateRenderResult.Ok(
-                subject,
-                content,
-                template.Category ?? request.Category ?? "General");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to render template '{TemplateName}'", request.TemplateName);
-            return TemplateRenderResult.Fail($"Failed to render template: {ex.Message}");
-        }
+        var rendered = renderResult.Data!;
+        var subject = !string.IsNullOrWhiteSpace(rendered.Subject) ? rendered.Subject : request.Subject;
+        return (subject, rendered.Content, request.Category ?? "General");
     }
 
     private async Task QueueNotificationAsync(Guid messageId, CancellationToken cancellationToken)
@@ -570,38 +557,4 @@ public class NotificationService : ApplicationService, INotificationService, IDi
     }
 
     #endregion
-
-    #region IDisposable
-
-    public void Dispose()
-    {
-        _semaphore.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        Dispose();
-        return ValueTask.CompletedTask;
-    }
-
-    #endregion
-
-    /// <summary>
-    /// 模板渲染结果
-    /// </summary>
-    private class TemplateRenderResult
-    {
-        public bool Succeeded { get; init; }
-        public string Message { get; init; } = string.Empty;
-        public string Subject { get; init; } = string.Empty;
-        public string Content { get; init; } = string.Empty;
-        public string Category { get; init; } = "General";
-
-        public static TemplateRenderResult Ok(string subject, string content, string category)
-            => new() { Succeeded = true, Subject = subject, Content = content, Category = category };
-
-        public static TemplateRenderResult Fail(string message)
-            => new() { Succeeded = false, Message = message };
-    }
 }

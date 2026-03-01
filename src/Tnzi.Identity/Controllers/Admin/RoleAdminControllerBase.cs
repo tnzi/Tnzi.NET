@@ -29,6 +29,30 @@ public abstract class RoleAdminControllerBase : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 获取角色分页列表
+    /// </summary>
+    /// <param name="query">查询参数</param>
+    /// <returns>角色分页列表</returns>
+    [HttpGet("paged")]
+    public virtual async Task<ApiResult<IPagedList<RoleDto>>> GetPagedList([FromQuery] RoleListQueryDto query)
+    {
+        var result = await RoleService.GetPagedListAsync(query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 根据ID获取角色详情（包含用户计数）
+    /// </summary>
+    /// <param name="id">角色ID</param>
+    /// <returns>角色详情</returns>
+    [HttpGet("{id}/detail")]
+    public virtual async Task<ApiResult<RoleDetailDto>> GetDetail(Guid id)
+    {
+        var result = await RoleService.GetDetailAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 根据ID获取角色
     /// </summary>
     /// <param name="id">角色ID</param>
@@ -90,6 +114,18 @@ public abstract class RoleAdminControllerBase : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 批量删除角色
+    /// </summary>
+    /// <param name="ids">角色ID列表</param>
+    /// <returns>操作结果</returns>
+    [HttpDelete("batch")]
+    public virtual async Task<ApiResult> DeleteMany([FromBody] IEnumerable<Guid> ids)
+    {
+        var result = await RoleService.DeleteManyAsync(ids);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 检查角色是否存在
     /// </summary>
     /// <param name="name">角色名称</param>
@@ -101,4 +137,52 @@ public abstract class RoleAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 获取角色下的用户分页列表
+    /// </summary>
+    /// <param name="id">角色ID</param>
+    /// <param name="query">分页参数</param>
+    /// <returns>用户分页列表</returns>
+    [HttpGet("{id}/users")]
+    public virtual async Task<ApiResult<IPagedList<UserListItemDto>>> GetUsersInRole(Guid id, [FromQuery] PagedQueryDto query)
+    {
+        var result = await RoleService.GetUsersInRoleAsync(id, query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取角色下的用户数量
+    /// </summary>
+    /// <param name="id">角色ID</param>
+    /// <returns>用户数量</returns>
+    [HttpGet("{id}/user-count")]
+    public virtual async Task<ApiResult<int>> GetUserCount(Guid id)
+    {
+        var result = await RoleService.GetUserCountAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取所有默认角色
+    /// </summary>
+    /// <returns>默认角色列表</returns>
+    [HttpGet("defaults")]
+    public virtual async Task<ApiResult<IEnumerable<RoleDto>>> GetDefaultRoles()
+    {
+        var result = await RoleService.GetDefaultRolesAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 设置角色为默认角色
+    /// </summary>
+    /// <param name="id">角色ID</param>
+    /// <param name="isDefault">是否设为默认</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("{id}/default")]
+    public virtual async Task<ApiResult> SetDefault(Guid id, [FromQuery] bool isDefault)
+    {
+        var result = await RoleService.SetDefaultAsync(id, isDefault);
+        return result.ToApiResult();
+    }
 }

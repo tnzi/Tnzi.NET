@@ -7,9 +7,6 @@ public class RoleFunctionConfiguration : EntityTypeConfigurationBase<RoleFunctio
 {
     public override void Configure(EntityTypeBuilder<RoleFunction> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(e => e.Id);
-
         // 配置与ModuleFunction的关系
         builder.HasOne(e => e.Function)
             .WithMany()

@@ -12,6 +12,7 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
     protected ICurrentUser CurrentUser { get; }
     protected ICurrentTenant? CurrentTenant { get; }
     protected IDataFilterManager? DataFilterManager { get; }
+    protected TimeProvider? TimeProvider { get; }
 
     /// <summary>
     /// 初始化 IdentityDbContext 实例
@@ -20,16 +21,19 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
     /// <param name="currentUser">当前用户服务</param>
     /// <param name="currentTenant">当前租户服务（可选）</param>
     /// <param name="dataFilterManager">数据过滤器管理器（可选）</param>
+    /// <param name="timeProvider">时间提供者（可选）</param>
     public IdentityDbContext(
         DbContextOptions<TDbContext> options,
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant = null,
-        IDataFilterManager? dataFilterManager = null)
+        IDataFilterManager? dataFilterManager = null,
+        TimeProvider? timeProvider = null)
         : base(options)
     {
-        CurrentUser = currentUser;
+        CurrentUser = Check.NotNull(currentUser);
         CurrentTenant = currentTenant;
         DataFilterManager = dataFilterManager;
+        TimeProvider = timeProvider;
     }
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -180,12 +184,13 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        // 使用辅助类处理通用的保存逻辑（审计、文件追踪、事务等）
+        // 使用辅助类处理通用的保存逻辑（审计、文件追踪、领域事件、事务等）
         return await TnziDbContextHelper.SaveChangesAsync(
             this,
             base.SaveChangesAsync,
             CurrentUser,
             CurrentTenant,
-            cancellationToken);
+            cancellationToken,
+            TimeProvider);
     }
 }

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import type { INavBarEmits, INavBarProps } from '@tnzi/core/components';
+import { useI18n } from '@tnzi/core/adapters/i18n';
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<INavBarProps>(), {
   title: '',
@@ -27,8 +30,8 @@ const onClickRight = () => {
     :title="props.title"
     :fixed="props.fixed"
     :safe-area-inset-top="props.safeAreaInsetTop"
-    :left-text="props.showBack ? 'Back' : ''"
-    :right-text="props.showClose ? 'Close' : ''"
+    :left-text="props.showBack ? t('common.back') : ''"
+    :right-text="props.showClose ? t('common.close') : ''"
     :class="props.class"
     :style="props.style"
     @click-left="onClickLeft"

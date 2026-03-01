@@ -29,4 +29,24 @@ public interface IFunctionAuthorizationService : Tnzi.Security.Authorization.IFu
     /// <param name="userId">用户ID</param>
     /// <returns>权限名称集合</returns>
     Task<Result<IEnumerable<string>>> GetUserPermissionNamesWithResultAsync(Guid userId);
+
+    /// <summary>
+    /// Reverse permission query: get all roles that have a specific permission
+    /// </summary>
+    /// <param name="permissionName">Permission name (function code)</param>
+    /// <returns>List of roles with the permission</returns>
+    Task<Result<IEnumerable<PermissionRoleDto>>> GetPermissionRolesAsync(string permissionName);
+
+    /// <summary>
+    /// Reverse permission query: get all user IDs that have a specific permission (via roles)
+    /// </summary>
+    /// <param name="permissionName">Permission name (function code)</param>
+    /// <returns>List of users with the permission</returns>
+    Task<Result<IEnumerable<PermissionUserDto>>> GetPermissionUsersAsync(string permissionName);
+
+    /// <summary>
+    /// Get authorization statistics overview
+    /// </summary>
+    /// <returns>Authorization statistics</returns>
+    Task<Result<AuthorizationStatisticsDto>> GetStatisticsAsync();
 }

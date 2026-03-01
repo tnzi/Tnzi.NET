@@ -8,7 +8,8 @@ public class RefreshTokenDto
     /// <summary>
     /// 刷新令牌
     /// </summary>
-    public string RefreshToken { get; set; } = string.Empty;
+    [Required]
+    public string RefreshToken { get; set; } = null!;
 }
 
 public class LoginDto
@@ -17,13 +18,13 @@ public class LoginDto
     /// 用户名/邮箱/手机号（根据配置支持不同登录方式）
     /// </summary>
     [Required]
-    public string UserName { get; set; } = string.Empty;
+    public string UserName { get; set; } = null!;
 
     /// <summary>
     /// 密码
     /// </summary>
     [Required]
-    public string Password { get; set; } = string.Empty;
+    public string Password { get; set; } = null!;
 
     /// <summary>
     /// 验证码ID（当启用登录验证码时必填）
@@ -47,13 +48,13 @@ public class RegisterDto
     /// 密码
     /// </summary>
     [Required]
-    public string Password { get; set; } = string.Empty;
+    public string Password { get; set; } = null!;
 
     /// <summary>
     /// 邮箱（必填，用于注册和作为默认用户名）
     /// </summary>
     [Required]
-    public string Email { get; set; } = string.Empty;
+    public string Email { get; set; } = null!;
 
     /// <summary>
     /// 验证码ID（当启用注册验证码时必填）
@@ -83,7 +84,7 @@ public class ForgotPasswordDto
 {
     [Required]
     [EmailAddress]
-    public string Email { get; set; } = string.Empty;
+    public string Email { get; set; } = null!;
 }
 
 /// <summary>
@@ -93,13 +94,13 @@ public class ResetPasswordDto
 {
     [Required]
     [EmailAddress]
-    public string Email { get; set; } = string.Empty;
+    public string Email { get; set; } = null!;
 
     [Required]
-    public string Token { get; set; } = string.Empty;
+    public string Token { get; set; } = null!;
 
     [Required]
-    public string NewPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = null!;
 }
 
 /// <summary>
@@ -158,7 +159,7 @@ public class QuickRegisterDto
     /// 验证码
     /// </summary>
     [Required]
-    public string Code { get; set; } = string.Empty;
+    public string Code { get; set; } = null!;
 
     /// <summary>
     /// 用户名（可选，不提供则使用邮箱/手机号）
@@ -217,13 +218,13 @@ public class SetPasswordDto
     /// 设置密码令牌
     /// </summary>
     [Required]
-    public string Token { get; set; } = string.Empty;
+    public string Token { get; set; } = null!;
 
     /// <summary>
     /// 新密码
     /// </summary>
     [Required]
-    public string Password { get; set; } = string.Empty;
+    public string Password { get; set; } = null!;
 }
 
 /// <summary>

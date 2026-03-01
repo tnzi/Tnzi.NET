@@ -38,7 +38,7 @@ public class FunctionAuthorizationHandler : AuthorizationHandler<FunctionAuthori
 
         // 检查是否有 AllowAnonymous 特性
         var hasAllowAnonymous = endpoint?.Metadata
-            .OfType<Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute>()
+            .OfType<AllowAnonymousAttribute>()
             .Any() ?? false;
         if (hasAllowAnonymous)
         {

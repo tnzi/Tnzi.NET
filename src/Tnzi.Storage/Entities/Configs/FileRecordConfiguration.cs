@@ -9,7 +9,6 @@ public class FileRecordConfiguration : EntityTypeConfigurationBase<FileRecord, G
     {
         // 表名显式指定为 "Record" 以保持与现有数据库架构兼容；否则由 TableNamePrefix 生成 Storage_FileRecord
         builder.ToTable("Record");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.FileName).IsRequired().HasMaxLength(256);
         builder.Property(e => e.OriginalName).HasMaxLength(256);
@@ -21,6 +20,7 @@ public class FileRecordConfiguration : EntityTypeConfigurationBase<FileRecord, G
         builder.Property(e => e.ThumbnailPath).HasMaxLength(256);
         builder.Property(e => e.ReferenceCount).HasDefaultValue(1);
         builder.Property(e => e.IsTemporary).HasDefaultFalse();
+        builder.Property(e => e.Tags).HasMaxLength(1024);
 
         // 创建索引
         builder.HasIndex(e => e.Md5Hash);

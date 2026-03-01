@@ -8,7 +8,6 @@ public class FileShareConfiguration : EntityTypeConfigurationBase<FileShare, Gui
     public override void Configure(EntityTypeBuilder<FileShare> builder)
     {
         builder.ToTable("Share");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.FileId).IsRequired();
         builder.Property(e => e.ShareToken).IsRequired().HasMaxLength(64);

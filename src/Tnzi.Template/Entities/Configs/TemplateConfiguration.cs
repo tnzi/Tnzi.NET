@@ -7,9 +7,6 @@ public class TemplateConfiguration : EntityTypeConfigurationBase<Template, Guid>
 {
     public override void Configure(EntityTypeBuilder<Template> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(t => t.Id);
-
         // 属性配置
         builder.Property(t => t.TemplateName).IsRequired().HasMaxLength(200);
         builder.Property(t => t.Module).IsRequired().HasMaxLength(100);

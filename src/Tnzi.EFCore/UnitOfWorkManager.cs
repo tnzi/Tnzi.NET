@@ -9,8 +9,8 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<UnitOfWorkManager>? _logger;
-    private readonly Dictionary<Type, IUnitOfWork> _unitOfWorks = new();
-    private readonly Stack<string> _transactionStack = new();
+    private readonly ConcurrentDictionary<Type, IUnitOfWork> _unitOfWorks = new();
+    private int _transactionDepth;
     private volatile List<Type>? _cachedDbContextTypes;
 
     public UnitOfWorkManager(IServiceProvider serviceProvider, ILogger<UnitOfWorkManager>? logger = null)
@@ -65,10 +65,9 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             foreach (var dbContextType in dbContextTypes)
             {
                 var unitOfWork = GetUnitOfWork(dbContextType);
-                if (unitOfWork != null && !_unitOfWorks.ContainsKey(dbContextType))
+                if (unitOfWork != null)
                 {
-                    unitOfWork.EnableTransaction();
-                    _unitOfWorks[dbContextType] = unitOfWork;
+                    _unitOfWorks.TryAdd(dbContextType, unitOfWork);
                 }
             }
             return Task.CompletedTask;
@@ -86,10 +85,10 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             return;
         }
 
-        // 如果事务栈深度 > 1，说明是嵌套调用，只弹出栈，不真正提交
-        if (_transactionStack.Count > 1)
+        // 如果事务深度 > 1，说明是嵌套调用，只减少深度，不真正提交
+        if (_transactionDepth > 1)
         {
-            var token = _transactionStack.Pop();
+            Interlocked.Decrement(ref _transactionDepth);
 
             // 为所有 UnitOfWork 也执行嵌套提交
             foreach (var unitOfWork in _unitOfWorks.Values)
@@ -120,6 +119,9 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
                 }
             }
         }
+
+        // 最终提交阶段：减少事务深度到 0
+        Interlocked.Decrement(ref _transactionDepth);
 
         // 使用 fail-fast 策略提交所有已创建的 UnitOfWork
         // 如果任何一个提交失败，立即停止并回滚所有尚未提交的 UnitOfWork
@@ -165,11 +167,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
                         kvp.Key.Name);
                 }
 
-                // 弹出事务栈
-                if (_transactionStack.Count > 0)
-                {
-                    _transactionStack.Pop();
-                }
+                // 事务深度已在上方减少，无需再次操作
 
                 // 直接抛出原始异常，保留完整的异常栈信息
                 throw;
@@ -191,11 +189,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             }
         }
 
-        // 弹出事务栈的最后一级
-        if (_transactionStack.Count > 0)
-        {
-            _transactionStack.Pop();
-        }
+        // 事务深度已在提交前减少
     }
 
     public async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
@@ -205,11 +199,8 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             return;
         }
 
-        // 清空事务栈（回滚所有嵌套事务）
-        while (_transactionStack.Count > 0)
-        {
-            _transactionStack.Pop();
-        }
+        // 重置事务深度（回滚所有嵌套事务）
+        Interlocked.Exchange(ref _transactionDepth, 0);
 
         // 清空 post-commit 队列（事务回滚，丢弃所有待执行操作）
         var postCommitQueue = _serviceProvider.GetService<IPostCommitActionQueue>();
@@ -295,7 +286,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
 
         if (unitOfWork != null)
         {
-            _unitOfWorks[dbContextType] = unitOfWork;
+            _unitOfWorks.TryAdd(dbContextType, unitOfWork);
 
             // 如果已启用事务，为新创建的 UnitOfWork 也启用事务
             if (IsEnabledTransaction)
@@ -371,7 +362,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
 
     public void EnableTransaction()
     {
-        _transactionStack.Push("tx");
+        Interlocked.Increment(ref _transactionDepth);
 
         // 为所有已获取的 UnitOfWork 启用事务
         foreach (var unitOfWork in _unitOfWorks.Values)
@@ -380,9 +371,9 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
         }
     }
 
-    public bool IsEnabledTransaction => _transactionStack.Count > 0;
+    public bool IsEnabledTransaction => Volatile.Read(ref _transactionDepth) > 0;
 
-    public int TransactionDepth => _transactionStack.Count;
+    public int TransactionDepth => Volatile.Read(ref _transactionDepth);
 
     #region IDisposable / IAsyncDisposable
 
@@ -416,7 +407,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
                 }
             }
             _unitOfWorks.Clear();
-            _transactionStack.Clear();
+            Interlocked.Exchange(ref _transactionDepth, 0);
         }
 
         _disposed = true;
@@ -431,6 +422,8 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
 
     protected virtual async ValueTask DisposeAsyncCore()
     {
+        if (_disposed) return;
+
         // 异步清理所有管理的 UnitOfWork
         foreach (var unitOfWork in _unitOfWorks.Values)
         {
@@ -458,7 +451,8 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             }
         }
         _unitOfWorks.Clear();
-        _transactionStack.Clear();
+        Interlocked.Exchange(ref _transactionDepth, 0);
+        _disposed = true;
     }
 
     #endregion

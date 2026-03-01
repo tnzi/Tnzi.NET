@@ -20,14 +20,14 @@ public enum RateLimitAlgorithm
     /// <summary>
     /// 令牌桶算法（Token Bucket）
     /// 以固定速率生成令牌，请求消耗令牌，允许突发流量
-    /// 注意：此算法需要更复杂的状态管理，当前版本暂未实现
+    /// <para><b>尚未实现</b> - 配置时会在启动验证阶段报错，请使用 FixedWindow 或 SlidingWindow</para>
     /// </summary>
     TokenBucket = 2,
 
     /// <summary>
     /// 漏桶算法（Leaky Bucket）
     /// 以固定速率处理请求，超出容量的请求被丢弃
-    /// 注意：此算法需要更复杂的状态管理，当前版本暂未实现
+    /// <para><b>尚未实现</b> - 配置时会在启动验证阶段报错，请使用 FixedWindow 或 SlidingWindow</para>
     /// </summary>
     LeakyBucket = 3
 }

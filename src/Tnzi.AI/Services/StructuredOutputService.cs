@@ -41,7 +41,7 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
         StructuredOutputOptions? options = null,
         CancellationToken ct = default) where T : class
     {
-        Check.NotNullOrEmpty(prompt);
+        Check.NotNullOrWhiteSpace(prompt);
 
         var messages = new List<ChatMessage>
         {
@@ -83,9 +83,11 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
 
                 if (retryCount <= options.MaxRetries)
                 {
+                    var delayMs = (int)Math.Pow(2, retryCount - 1) * 100; // 100ms, 200ms, 400ms...
                     Logger.LogDebug(
-                        "Structured output parsing failed, retrying ({RetryCount}/{MaxRetries}): {Error}",
-                        retryCount, options.MaxRetries, result.Message);
+                        "Structured output parsing failed, retrying ({RetryCount}/{MaxRetries}) after {DelayMs}ms: {Error}",
+                        retryCount, options.MaxRetries, delayMs, result.Message);
+                    await Task.Delay(delayMs, ct);
                 }
             }
             catch (Exception ex)
@@ -95,9 +97,11 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
 
                 if (retryCount <= options.MaxRetries)
                 {
+                    var delayMs = (int)Math.Pow(2, retryCount - 1) * 100;
                     Logger.LogDebug(ex,
-                        "Structured output request failed, retrying ({RetryCount}/{MaxRetries})",
-                        retryCount, options.MaxRetries);
+                        "Structured output request failed, retrying ({RetryCount}/{MaxRetries}) after {DelayMs}ms",
+                        retryCount, options.MaxRetries, delayMs);
+                    await Task.Delay(delayMs, ct);
                 }
             }
         }
@@ -106,7 +110,7 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
             "Failed to get structured output after {RetryCount} attempts: {Error}",
             retryCount, lastError);
 
-        return Fail<T>(lastError ?? "Failed to get structured output", 500);
+        return Fail<T>(lastError ?? "Failed to get structured output", 500, ErrorCodes.StructuredOutputFailed);
     }
 
     /// <summary>
@@ -168,7 +172,8 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
                 temperature,
                 maxTokens,
                 options: null,
-                ct);
+                userPermissions: null,
+                ct: ct);
 
             // 通过 AgentExecutor 执行，获取文本响应后手动反序列化
             var response = await agent.ExecuteAsync(messageList, ct);
@@ -183,16 +188,16 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
                 return Ok(data);
             }
 
-            return Fail<T>("Deserialization returned null", 500);
+            return Fail<T>("Deserialization returned null", 500, ErrorCodes.StructuredOutputFailed);
         }
         catch (JsonException ex)
         {
-            return Fail<T>($"JSON parsing error: {ex.Message}", 500);
+            return Fail<T>($"JSON parsing error: {ex.Message}", 500, ErrorCodes.StructuredOutputFailed);
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Structured output via agent failed");
-            return Fail<T>(ex.Message, 500);
+            return Fail<T>(ex.Message, 500, ErrorCodes.StructuredOutputFailed);
         }
     }
 
@@ -205,8 +210,7 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
         StructuredOutputOptions options,
         CancellationToken ct) where T : class
     {
-        var openAiChatClient = _chatClientFactory.GetChatClient(providerName, options.ModelId);
-        var chatClient = openAiChatClient.AsIChatClient();
+        var chatClient = _chatClientFactory.GetChatClient(providerName, options.ModelId);
 
         var chatOptions = new ChatOptions();
 
@@ -247,12 +251,12 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
                 return Ok(data);
             }
 
-            return Fail<T>("Deserialization returned null", 500);
+            return Fail<T>("Deserialization returned null", 500, ErrorCodes.StructuredOutputFailed);
         }
         catch (JsonException ex)
         {
             Logger.LogDebug("JSON parsing failed, raw response: {RawResponse}", rawResponse);
-            return Fail<T>($"JSON parsing error: {ex.Message}", 500);
+            return Fail<T>($"JSON parsing error: {ex.Message}", 500, ErrorCodes.StructuredOutputFailed);
         }
     }
 
@@ -275,72 +279,16 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
     }
 
     /// <summary>
-    /// 生成简单的 JSON Schema（基于类型的公共属性）
+    /// 生成 JSON Schema（使用 .NET 内置 JsonSchemaExporter，支持嵌套类型、可空、枚举等）
     /// </summary>
     private static JsonElement GenerateSimpleJsonSchema<T>()
     {
-        var type = typeof(T);
-        var properties = new Dictionary<string, object>();
-        var required = new List<string>();
-
-        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        var exporterOptions = new JsonSerializerOptions
         {
-            if (!prop.CanRead || !prop.CanWrite) continue;
-
-            var propSchema = GetPropertySchema(prop.PropertyType);
-            properties[prop.Name] = propSchema;
-
-            // 非可空类型标记为必需
-            if (!IsNullable(prop.PropertyType))
-            {
-                required.Add(prop.Name);
-            }
-        }
-
-        var schema = new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["properties"] = properties
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
-
-        if (required.Count > 0)
-        {
-            schema["required"] = required;
-        }
-
-        var jsonString = JsonSerializer.Serialize(schema);
-        return JsonSerializer.Deserialize<JsonElement>(jsonString);
-    }
-
-    /// <summary>
-    /// 获取属性的 JSON Schema 类型
-    /// </summary>
-    private static Dictionary<string, object> GetPropertySchema(Type type)
-    {
-        // 处理可空类型
-        var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-
-        var jsonType = underlyingType switch
-        {
-            Type t when t == typeof(string) => "string",
-            Type t when t == typeof(int) || t == typeof(long) || t == typeof(short) || t == typeof(byte) => "integer",
-            Type t when t == typeof(decimal) || t == typeof(double) || t == typeof(float) => "number",
-            Type t when t == typeof(bool) => "boolean",
-            Type t when t == typeof(DateTime) || t == typeof(DateTimeOffset) => "string",
-            Type t when t == typeof(Guid) => "string",
-            Type t when t.IsArray || typeof(System.Collections.IEnumerable).IsAssignableFrom(t) && t != typeof(string) => "array",
-            _ => "object"
-        };
-
-        return new Dictionary<string, object> { ["type"] = jsonType };
-    }
-
-    /// <summary>
-    /// 检查类型是否可空
-    /// </summary>
-    private static bool IsNullable(Type type)
-    {
-        return !type.IsValueType || Nullable.GetUnderlyingType(type) != null;
+        var schemaNode = exporterOptions.GetJsonSchemaAsNode(typeof(T));
+        return JsonSerializer.Deserialize<JsonElement>(schemaNode.ToJsonString());
     }
 
     /// <summary>

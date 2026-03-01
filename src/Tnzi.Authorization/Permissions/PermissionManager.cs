@@ -114,8 +114,14 @@ public class PermissionManager : IPermissionManager
                 return;
             }
 
-            var modules = await moduleRepository.Where(m => m.IsEnabled).ToListAsync();
-            var functions = await functionRepository.Where(f => f.IsEnabled).ToListAsync();
+            var modules = await moduleRepository.AsQueryable()
+                .Include(m => m.Parent)
+                .Where(m => m.IsEnabled)
+                .ToListAsync();
+            var functions = await functionRepository.AsQueryable()
+                .Include(f => f.FunctionModule)
+                .Where(f => f.IsEnabled)
+                .ToListAsync();
 
             // 加载权限组（模块）
             foreach (var module in modules)
@@ -271,7 +277,7 @@ public class PermissionManager : IPermissionManager
     }
 
     /// <summary>
-    /// 不可变的权限数据快照
+    /// 不可变的权限数据快照（使用 FrozenDictionary 保证真正不可变）
     /// </summary>
     private sealed class PermissionSnapshot
     {
@@ -279,15 +285,15 @@ public class PermissionManager : IPermissionManager
             new Dictionary<string, PermissionDefinition>(),
             new Dictionary<string, PermissionGroupDefinition>());
 
-        public Dictionary<string, PermissionDefinition> Permissions { get; }
-        public Dictionary<string, PermissionGroupDefinition> Groups { get; }
+        public FrozenDictionary<string, PermissionDefinition> Permissions { get; }
+        public FrozenDictionary<string, PermissionGroupDefinition> Groups { get; }
 
         public PermissionSnapshot(
             Dictionary<string, PermissionDefinition> permissions,
             Dictionary<string, PermissionGroupDefinition> groups)
         {
-            Permissions = permissions;
-            Groups = groups;
+            Permissions = permissions.ToFrozenDictionary();
+            Groups = groups.ToFrozenDictionary();
         }
     }
 }

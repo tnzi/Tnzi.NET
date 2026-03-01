@@ -103,14 +103,9 @@ public class RateLimitingMiddleware
                 context.Response.StatusCode = 429; // Too Many Requests
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Retry-After"] = rule.WindowSeconds.ToString();
-                
-                // 使用更安全的 JSON 序列化
-                var errorResponse = System.Text.Json.JsonSerializer.Serialize(new 
-                { 
-                    error = "Rate limit exceeded. Please try again later.",
-                    retryAfter = rule.WindowSeconds
-                });
-                await context.Response.WriteAsync(errorResponse);
+
+                var errorResult = ApiResult.Error("Rate limit exceeded. Please try again later.", 429);
+                await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
                 return;
             }
         }
@@ -131,11 +126,8 @@ public class RateLimitingMiddleware
                 // 拒绝请求（fail-safe）
                 context.Response.StatusCode = 503; // Service Unavailable
                 context.Response.ContentType = "application/json";
-                var errorResponse = System.Text.Json.JsonSerializer.Serialize(new 
-                { 
-                    error = "Rate limiting service is temporarily unavailable. Please try again later."
-                });
-                await context.Response.WriteAsync(errorResponse);
+                var errorResult = ApiResult.Error("Rate limiting service is temporarily unavailable. Please try again later.", 503);
+                await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
             }
             return;
         }

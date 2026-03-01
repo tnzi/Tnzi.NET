@@ -46,7 +46,7 @@ export const useUserStore = createStore<UserState>({
   state: defaultState,
 
   getters: {
-    isLoaded: (state: UserState): boolean => state.currentUser !== null || state.isLoading === false,
+    isLoaded: (state: UserState): boolean => state.currentUser !== null,
 
     isAuthenticated: (state: UserState): boolean => state.currentUser !== null,
 

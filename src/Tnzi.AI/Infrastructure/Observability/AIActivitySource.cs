@@ -37,6 +37,7 @@ public static class AIActivitySource
     private static readonly Counter<long> _chatTokenCounter;
     private static readonly Histogram<double> _chatLatencyHistogram;
     private static readonly Counter<long> _toolCallCounter;
+    private static readonly Histogram<double> _toolCallDurationHistogram;
     private static readonly Counter<long> _errorCounter;
 
     static AIActivitySource()
@@ -64,6 +65,12 @@ public static class AIActivitySource
             "gen_ai.client.tool.call.count",
             unit: "{call}",
             description: "Number of tool calls made by AI");
+
+        // 工具调用耗时直方图
+        _toolCallDurationHistogram = Meter.CreateHistogram<double>(
+            "gen_ai.client.tool.call.duration",
+            unit: "s",
+            description: "Duration of individual tool calls");
 
         // 错误计数器
         _errorCounter = Meter.CreateCounter<long>(
@@ -123,6 +130,26 @@ public static class AIActivitySource
     public static void RecordToolCall(string toolName, string? toolGroup = null)
     {
         _toolCallCounter.Add(1,
+            new KeyValuePair<string, object?>(SemanticTags.ToolName, toolName),
+            new KeyValuePair<string, object?>(SemanticTags.ToolGroup, toolGroup));
+    }
+
+    /// <summary>
+    /// 记录工具调用（增强版：含耗时、参数摘要、结果摘要）
+    /// </summary>
+    public static void RecordToolCallDetailed(
+        string toolName,
+        double durationSeconds,
+        string? toolGroup = null,
+        string? argumentSummary = null,
+        string? resultSummary = null,
+        bool isSuccess = true)
+    {
+        _toolCallCounter.Add(1,
+            new KeyValuePair<string, object?>(SemanticTags.ToolName, toolName),
+            new KeyValuePair<string, object?>(SemanticTags.ToolGroup, toolGroup));
+
+        _toolCallDurationHistogram.Record(durationSeconds,
             new KeyValuePair<string, object?>(SemanticTags.ToolName, toolName),
             new KeyValuePair<string, object?>(SemanticTags.ToolGroup, toolGroup));
     }
@@ -196,7 +223,10 @@ public static class AIActivitySource
     /// <summary>
     /// 开始工具调用 Activity
     /// </summary>
-    public static Activity? StartToolActivity(string toolName, string? toolGroup = null)
+    public static Activity? StartToolActivity(
+        string toolName,
+        string? toolGroup = null,
+        string? argumentSummary = null)
     {
         var activity = Source.StartActivity(
             $"tool.{toolName}",
@@ -209,6 +239,11 @@ public static class AIActivitySource
             if (!string.IsNullOrEmpty(toolGroup))
             {
                 activity.SetTag(SemanticTags.ToolGroup, toolGroup);
+            }
+
+            if (!string.IsNullOrEmpty(argumentSummary))
+            {
+                activity.SetTag(SemanticTags.ToolArguments, argumentSummary);
             }
         }
 
@@ -242,6 +277,27 @@ public static class AIActivitySource
         }
 
         activity.SetStatus(ActivityStatusCode.Ok);
+    }
+
+    /// <summary>
+    /// 完成工具调用 Activity 并记录结果
+    /// </summary>
+    public static void CompleteToolActivity(
+        Activity? activity,
+        double durationSeconds,
+        string? resultSummary = null,
+        bool isSuccess = true)
+    {
+        if (activity == null) return;
+
+        activity.SetTag(SemanticTags.ToolDuration, durationSeconds);
+
+        if (!string.IsNullOrEmpty(resultSummary))
+        {
+            activity.SetTag(SemanticTags.ToolResult, resultSummary);
+        }
+
+        activity.SetStatus(isSuccess ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
     }
 
     /// <summary>
@@ -293,6 +349,11 @@ public static class SemanticTags
     // 工具相关
     public const string ToolName = "gen_ai.tool.name";
     public const string ToolGroup = "gen_ai.tool.group";
+
+    // 工具详细追踪
+    public const string ToolArguments = "gen_ai.tool.arguments";
+    public const string ToolResult = "gen_ai.tool.result";
+    public const string ToolDuration = "gen_ai.tool.duration";
 
     // 错误相关
     public const string ErrorType = "error.type";

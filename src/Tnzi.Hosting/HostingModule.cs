@@ -3,20 +3,25 @@ namespace Tnzi.Hosting;
 
 /// <summary>
 /// Hosting 模块（标准版）
-/// 包含：认证、授权、云存储、通知、系统管理
+/// 包含：认证、授权、云存储、通知、系统管理、AI、审计
 /// 提供开箱即用的 Controller 实现和预制模板
 /// </summary>
 [DependsOn(
     typeof(AspNetCoreModule),
     typeof(IdentityModule),
     typeof(AuthorizationModule),
+    typeof(FeatureModule),
     typeof(StorageModule),
     typeof(TemplateModule),
     typeof(NotificationModule),
+    typeof(AIModule),
+    typeof(AuditModule),
     typeof(SystemModule),
     typeof(SwaggerModule),
     typeof(LocalizationModule)
 )]
+[OptionalDependsOn(typeof(HangfireModule))]
+[OptionalDependsOn(typeof(SignalRModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：
@@ -38,5 +43,3 @@ public abstract class HostingModule : TnziApplicationModule
         return base.ConfigureServicesAsync(context);
     }
 }
-
-//

@@ -131,7 +131,7 @@ interface Props {
   captchaPlaceholder?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   showRememberMe: true,
   showForgotPassword: true,
   showSocialLogin: false,
@@ -200,7 +200,7 @@ async function handleSubmit() {
     userName: formModel.value.userName,
     password: formModel.value.password,
     rememberMe: formModel.value.rememberMe,
-    captchaId: undefined,
+    captchaId: props.captchaId,
     captchaCode: formModel.value.captchaCode || undefined
   })
 }

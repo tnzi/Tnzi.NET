@@ -11,11 +11,11 @@ namespace Tnzi.AI.Services;
 /// </remarks>
 public class NoOpTextSearchService : ITextSearchService
 {
-    private readonly ILogger<NoOpTextSearchService> _logger;
+    private readonly ILogger<NoOpTextSearchService>? _logger;
 
-    public NoOpTextSearchService(ILogger<NoOpTextSearchService> logger)
+    public NoOpTextSearchService(ILogger<NoOpTextSearchService>? logger = null)
     {
-        _logger = Check.NotNull(logger);
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -24,7 +24,7 @@ public class NoOpTextSearchService : ITextSearchService
         int maxResults = 5,
         CancellationToken ct = default)
     {
-        _logger.LogDebug(
+        _logger?.LogDebug(
             "NoOpTextSearchService.SearchAsync called with query length {Length}. " +
             "Register a custom ITextSearchService implementation to enable RAG.",
             query?.Length ?? 0);

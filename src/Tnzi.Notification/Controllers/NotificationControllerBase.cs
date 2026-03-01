@@ -70,4 +70,37 @@ public abstract class NotificationControllerBase : ApiControllerBase
         var result = await UserNotificationService.GetUnreadCountAsync(userId);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 删除通知
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    public virtual async Task<ApiResult> Delete(Guid id)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await UserNotificationService.DeleteAsync(userId, id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量标记已读
+    /// </summary>
+    [HttpPost("batch-read")]
+    public virtual async Task<ApiResult> BatchMarkAsRead([FromBody] List<Guid> ids)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await UserNotificationService.BatchMarkAsReadAsync(userId, ids);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量删除通知
+    /// </summary>
+    [HttpPost("batch-delete")]
+    public virtual async Task<ApiResult> BatchDelete([FromBody] List<Guid> ids)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await UserNotificationService.BatchDeleteAsync(userId, ids);
+        return result.ToApiResult();
+    }
 }

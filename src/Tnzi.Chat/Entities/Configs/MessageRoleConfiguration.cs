@@ -7,8 +7,6 @@ public class MessageRoleConfiguration : EntityTypeConfigurationBase<MessageRole,
 {
     public override void Configure(EntityTypeBuilder<MessageRole> builder)
     {
-        builder.HasKey(mr => mr.Id);
-
         builder.HasIndex(mr => new { mr.MessageId, mr.RoleId }).IsUnique();
         builder.HasIndex(mr => mr.RoleId);
 

@@ -95,3 +95,83 @@ public class StatusStatisticsDto
     public double Percentage { get; set; }
 }
 
+/// <summary>
+/// 统计趋势时间间隔
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TrendInterval
+{
+    /// <summary>
+    /// 按天
+    /// </summary>
+    Daily = 0,
+
+    /// <summary>
+    /// 按周
+    /// </summary>
+    Weekly = 1,
+
+    /// <summary>
+    /// 按月
+    /// </summary>
+    Monthly = 2
+}
+
+/// <summary>
+/// 趋势数据点
+/// </summary>
+public class TrendDataPoint
+{
+    /// <summary>
+    /// 时间标签 (e.g., "2026-02-28", "2026-W09", "2026-02")
+    /// </summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 时间段起始时间
+    /// </summary>
+    public DateTime StartTime { get; set; }
+
+    /// <summary>
+    /// 总数量
+    /// </summary>
+    public int TotalCount { get; set; }
+
+    /// <summary>
+    /// 发送成功数量
+    /// </summary>
+    public int SentCount { get; set; }
+
+    /// <summary>
+    /// 发送失败数量
+    /// </summary>
+    public int FailedCount { get; set; }
+}
+
+/// <summary>
+/// 通知统计趋势
+/// </summary>
+public class NotificationTrendDto
+{
+    /// <summary>
+    /// 时间间隔
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public TrendInterval Interval { get; set; }
+
+    /// <summary>
+    /// 起始时间
+    /// </summary>
+    public DateTime StartDate { get; set; }
+
+    /// <summary>
+    /// 结束时间
+    /// </summary>
+    public DateTime EndDate { get; set; }
+
+    /// <summary>
+    /// 数据点列表
+    /// </summary>
+    public List<TrendDataPoint> DataPoints { get; set; } = new();
+}
+

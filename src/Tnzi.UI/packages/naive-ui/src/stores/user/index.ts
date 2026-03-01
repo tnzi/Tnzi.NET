@@ -43,7 +43,7 @@ export const useUserStore = defineStore('user', {
   state: defaultState,
 
   getters: {
-    isLoaded: (state): boolean => state.currentUser !== null || state.isLoading === false,
+    isLoaded: (state): boolean => state.currentUser !== null,
 
     isAuthenticated: (state): boolean => state.currentUser !== null,
 
@@ -73,8 +73,6 @@ export const useUserStore = defineStore('user', {
     // ---- Profile actions ----
 
     async fetchCurrentUser(): Promise<void> {
-      if (!this.isAuthenticated) return;
-
       this.isLoading = true;
       this.error = null;
 

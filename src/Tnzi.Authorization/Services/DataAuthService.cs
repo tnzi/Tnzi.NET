@@ -164,41 +164,6 @@ public class DataAuthService : ApplicationService, IDataAuthService
         }
     }
 
-    /// <summary>
-    /// 清除用户的数据过滤缓存 (同步兼容模式)
-    /// </summary>
-    public void ClearUserDataFilterCache(Guid userId)
-    {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await ClearUserDataFilterCacheAsync(userId);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Failed to clear user data filter cache for user {UserId}", userId);
-            }
-        });
-    }
-
-    /// <summary>
-    /// 清除所有数据过滤缓存 (同步兼容模式)
-    /// </summary>
-    public void ClearAllDataFilterCache()
-    {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await ClearAllDataFilterCacheAsync();
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Failed to clear all data filter cache");
-            }
-        });
-    }
 
     /// <summary>
     /// 检查用户是否有指定实体的数据权限
@@ -399,7 +364,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         // 如果启用状态改变，清除缓存
         if (oldEnabled != request.IsDataAuthEnabled)
         {
-            ClearAllDataFilterCache();
+            await ClearAllDataFilterCacheAsync();
         }
 
         LogInformation("EntityInfo updated: {TypeName}, Name: {Name}", entityInfo.TypeName, entityInfo.Name);
@@ -431,7 +396,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         await _entityInfoRepository.DeleteAsync(entityInfo);
 
         // 清除缓存
-        ClearAllDataFilterCache();
+        await ClearAllDataFilterCacheAsync();
         LogInformation("EntityInfo deleted: {TypeName}, Name: {Name}", entityInfo.TypeName, entityInfo.Name);
         return Ok("EntityInfo deleted successfully");
     }
@@ -522,7 +487,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         await _entityRoleRepository.UpdateAsync(entityRole);
 
         // 清除缓存
-        ClearAllDataFilterCache();
+        await ClearAllDataFilterCacheAsync();
 
         LogInformation("EntityRole updated: Id: {Id}", id);
         return Ok(entityRole, "EntityRole updated successfully");
@@ -543,7 +508,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         await _entityRoleRepository.DeleteAsync(entityRole);
 
         // 清除缓存
-        ClearAllDataFilterCache();
+        await ClearAllDataFilterCacheAsync();
         return Ok();
     }
 
@@ -579,7 +544,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         await _entityRoleRepository.InsertAsync(entityRole);
 
         // 清除缓存
-        ClearAllDataFilterCache();
+        await ClearAllDataFilterCacheAsync();
 
         LogInformation("EntityRole created: EntityInfoId: {EntityInfoId}, RoleId: {RoleId}", request.EntityInfoId, request.RoleId);
         return Ok(entityRole, "EntityRole created successfully");
@@ -626,7 +591,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         {
             await _entityRoleRepository.InsertManyAsync(rolesToCreate);
             // 清除缓存
-            ClearAllDataFilterCache();
+            await ClearAllDataFilterCacheAsync();
         }
 
         LogInformation("Batch created {Count} EntityRoles for EntityInfoId: {EntityInfoId}", rolesToCreate.Count, request.EntityInfoId);

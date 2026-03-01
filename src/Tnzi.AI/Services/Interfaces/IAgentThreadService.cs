@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// Agent 线程管理服务接口（公共 CRUD）
+/// Agent 线程管理服务接口（公共 CRUD + 查询）
 /// </summary>
 public interface IAgentThreadService
 {
@@ -17,9 +17,34 @@ public interface IAgentThreadService
     Task<Result<AgentThreadDto>> GetByIdAsync(Guid id);
 
     /// <summary>
+    /// 获取线程详情（含最近消息）
+    /// </summary>
+    Task<Result<AgentThreadDetailDto>> GetDetailAsync(Guid id, int messageLimit = 50);
+
+    /// <summary>
+    /// 获取线程列表（分页 + 筛选）
+    /// </summary>
+    Task<Result<IPagedList<AgentThreadDto>>> GetListAsync(ThreadListQueryDto query);
+
+    /// <summary>
+    /// 更新线程标题
+    /// </summary>
+    Task<Result<AgentThreadDto>> UpdateTitleAsync(Guid id, string title);
+
+    /// <summary>
     /// 删除线程
     /// </summary>
     Task<Result> DeleteAsync(Guid id);
+
+    /// <summary>
+    /// 导出线程为 JSON 格式
+    /// </summary>
+    Task<Result<ThreadExportDto>> ExportAsJsonAsync(Guid id);
+
+    /// <summary>
+    /// 导出线程为 Markdown 格式
+    /// </summary>
+    Task<Result<string>> ExportAsMarkdownAsync(Guid id);
 }
 
 /// <summary>

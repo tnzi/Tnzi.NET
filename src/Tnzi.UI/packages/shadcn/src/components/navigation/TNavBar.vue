@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { INavBarEmits, INavBarProps } from '@tnzi/core/components';
+import { useI18n } from '@tnzi/core/adapters/i18n';
 import { Button } from '../primitive/ui';
+
+const { t } = useI18n();
 
 const props = withDefaults(defineProps<INavBarProps>(), {
   title: '',
@@ -21,7 +24,7 @@ const emit = defineEmits<INavBarEmits>();
   >
     <div class="flex items-center gap-2">
       <Button v-if="props.showBack" size="sm" variant="ghost" @click="emit('back')">
-        Back
+        {{ t('common.back') }}
       </Button>
       <div v-if="$slots.left">
         <button type="button" class="rounded px-2 py-1 text-sm hover:bg-accent" @click="emit('leftClick')">
@@ -41,7 +44,7 @@ const emit = defineEmits<INavBarEmits>();
         </button>
       </div>
       <Button v-if="props.showClose" size="sm" variant="ghost" @click="emit('close')">
-        Close
+        {{ t('common.close') }}
       </Button>
     </div>
   </header>

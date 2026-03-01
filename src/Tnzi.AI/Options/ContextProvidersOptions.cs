@@ -31,6 +31,32 @@ public class ContextProvidersOptions
     /// Skills 技能配置
     /// </summary>
     public SkillsOptions Skills { get; set; } = new();
+
+    /// <summary>
+    /// 记忆存储配置
+    /// </summary>
+    public MemoryOptions Memory { get; set; } = new();
+
+    /// <summary>
+    /// 实体记忆配置（跨会话命名实体追踪）
+    /// </summary>
+    public EntityMemoryOptions EntityMemory { get; set; } = new();
+}
+
+/// <summary>
+/// 记忆存储配置选项
+/// </summary>
+public class MemoryOptions
+{
+    /// <summary>
+    /// 是否启用记忆上下文提供器
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 默认记忆 scope
+    /// </summary>
+    public string DefaultScope { get; set; } = "default";
 }
 
 /// <summary>

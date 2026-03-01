@@ -139,7 +139,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
 
         // 检查模板名称是否已存在（在同一个模块和分类下）
         var exists = await _repository
-            .ExistsAsync(t => t.TemplateName == request.TemplateName
+            .AnyAsync(t => t.TemplateName == request.TemplateName
                 && t.Module == request.Module
                 && t.Category == request.Category
                 && !t.IsDeleted, cancellationToken);
@@ -174,7 +174,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             || existing.Category != request.Category)
         {
             var nameExists = await _repository
-                .ExistsAsync(t => t.TemplateName == request.TemplateName
+                .AnyAsync(t => t.TemplateName == request.TemplateName
                     && t.Module == request.Module
                     && t.Category == request.Category
                     && t.Id != id
@@ -280,5 +280,242 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             .CreateAsync(request, cancellationToken);
 
         return Ok(pagedList);
+    }
+
+    public async Task<Result<string>> ExportTemplatesAsync(string? module = null, string? category = null, CancellationToken cancellationToken = default)
+    {
+        var query = _repository.AsQueryable().AsNoTracking().Where(t => !t.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(module))
+            query = query.Where(t => t.Module == module);
+
+        if (!string.IsNullOrWhiteSpace(category))
+            query = query.Where(t => t.Category == category);
+
+        var templates = await query
+            .OrderBy(t => t.Module)
+            .ThenBy(t => t.Category)
+            .ThenBy(t => t.TemplateName)
+            .ToListAsync(cancellationToken);
+
+        var entries = templates.Select(t => new TemplateExportEntry
+        {
+            TemplateName = t.TemplateName,
+            Module = t.Module,
+            Category = t.Category,
+            SubjectTemplate = t.SubjectTemplate,
+            ContentTemplate = t.ContentTemplate,
+            DefaultLayoutName = t.DefaultLayoutName,
+            IsActive = t.IsActive,
+            Description = t.Description,
+            Metadata = t.Metadata
+        }).ToList();
+
+        var json = System.Text.Json.JsonSerializer.Serialize(entries, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+        });
+
+        LogInformation("Exported {Count} templates (module: {Module}, category: {Category})", entries.Count, module ?? "all", category ?? "all");
+        return Ok(json, $"Exported {entries.Count} templates");
+    }
+
+    public async Task<Result<TemplateImportResultDto>> ImportTemplatesAsync(string json, bool overwriteExisting = false, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(json);
+
+        List<TemplateExportEntry>? entries;
+        try
+        {
+            entries = System.Text.Json.JsonSerializer.Deserialize<List<TemplateExportEntry>>(json, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return Fail<TemplateImportResultDto>($"Invalid JSON format: {ex.Message}", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (entries == null || entries.Count == 0)
+            return Fail<TemplateImportResultDto>("No templates found in import data", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var result = new TemplateImportResultDto();
+        var toInsert = new List<TemplateEntity>();
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.TemplateName) || string.IsNullOrWhiteSpace(entry.Module))
+            {
+                result.Errors.Add($"Skipped entry with empty TemplateName or Module");
+                result.SkippedCount++;
+                continue;
+            }
+
+            var existing = await _repository.FirstOrDefaultAsync(
+                t => t.TemplateName == entry.TemplateName
+                    && t.Module == entry.Module
+                    && t.Category == entry.Category
+                    && !t.IsDeleted,
+                cancellationToken);
+
+            if (existing != null)
+            {
+                if (overwriteExisting)
+                {
+                    existing.SubjectTemplate = entry.SubjectTemplate;
+                    existing.ContentTemplate = entry.ContentTemplate;
+                    existing.DefaultLayoutName = entry.DefaultLayoutName;
+                    existing.IsActive = entry.IsActive;
+                    existing.Description = entry.Description;
+                    existing.Metadata = entry.Metadata;
+                    await _repository.UpdateAsync(existing, cancellationToken);
+                    result.UpdatedCount++;
+                }
+                else
+                {
+                    result.SkippedCount++;
+                }
+                continue;
+            }
+
+            toInsert.Add(new TemplateEntity
+            {
+                TemplateName = entry.TemplateName,
+                Module = entry.Module,
+                Category = entry.Category,
+                SubjectTemplate = entry.SubjectTemplate,
+                ContentTemplate = entry.ContentTemplate,
+                DefaultLayoutName = entry.DefaultLayoutName,
+                IsActive = entry.IsActive,
+                Description = entry.Description,
+                Metadata = entry.Metadata
+            });
+        }
+
+        if (toInsert.Count > 0)
+        {
+            await _repository.InsertManyAsync(toInsert, cancellationToken);
+            result.CreatedCount = toInsert.Count;
+        }
+
+        LogInformation("Imported templates: {Created} created, {Updated} updated, {Skipped} skipped, {Errors} errors",
+            result.CreatedCount, result.UpdatedCount, result.SkippedCount, result.Errors.Count);
+
+        return Ok(result, $"Imported {result.CreatedCount} templates, updated {result.UpdatedCount}, skipped {result.SkippedCount}");
+    }
+
+    public async Task<Result<TemplateDto>> CloneTemplateAsync(Guid sourceId, string newTemplateName, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(newTemplateName);
+
+        var source = await _repository.GetAsync(sourceId, cancellationToken);
+        if (source == null)
+        {
+            return Fail<TemplateDto>("Source template not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        // 检查新名称是否已存在
+        var exists = await _repository
+            .AnyAsync(t => t.TemplateName == newTemplateName
+                && t.Module == source.Module
+                && t.Category == source.Category
+                && !t.IsDeleted, cancellationToken);
+
+        if (exists)
+        {
+            return Fail<TemplateDto>(
+                $"Template with name '{newTemplateName}' already exists in module '{source.Module}' and category '{source.Category}'",
+                409,
+                ErrorCodes.DATA_CONFLICT);
+        }
+
+        var clone = new TemplateEntity
+        {
+            TemplateName = newTemplateName,
+            Module = source.Module,
+            Category = source.Category,
+            SubjectTemplate = source.SubjectTemplate,
+            ContentTemplate = source.ContentTemplate,
+            DefaultLayoutName = source.DefaultLayoutName,
+            IsActive = source.IsActive,
+            Description = $"Cloned from '{source.TemplateName}'",
+            Metadata = source.Metadata
+        };
+
+        await _repository.InsertAsync(clone, cancellationToken);
+        LogInformation("Template cloned: {SourceName} -> {CloneName}, Module: {Module}", source.TemplateName, newTemplateName, source.Module);
+        return Ok(clone.MapTo<TemplateDto>(), "Template cloned successfully");
+    }
+
+    public async Task<Result<TemplateVariablesDto>> GetTemplateVariablesAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var template = await _repository.GetAsync(id, cancellationToken);
+        if (template == null)
+            return Fail<TemplateVariablesDto>("Template not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var subjectVars = ExtractTemplateVariables(template.SubjectTemplate);
+        var contentVars = ExtractTemplateVariables(template.ContentTemplate);
+        var allVars = subjectVars.Union(contentVars).OrderBy(v => v).ToList();
+
+        return Ok(new TemplateVariablesDto
+        {
+            TemplateId = template.Id,
+            TemplateName = template.TemplateName,
+            SubjectVariables = subjectVars,
+            ContentVariables = contentVars,
+            AllVariables = allVars
+        });
+    }
+
+    public async Task<Result<int>> BatchActivateAsync(List<Guid> ids, bool isActive, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var templates = await _repository.Where(t => ids.Contains(t.Id) && !t.IsDeleted).ToListAsync(cancellationToken);
+        if (templates.Count == 0)
+            return Fail<int>("No templates found for the specified IDs", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var changed = 0;
+        foreach (var template in templates)
+        {
+            if (template.IsActive != isActive)
+            {
+                template.IsActive = isActive;
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+            await _repository.UpdateManyAsync(templates, cancellationToken);
+
+        LogInformation("Batch {Action} {Count} templates", isActive ? "activated" : "deactivated", changed);
+        return Ok(changed, $"Successfully {(isActive ? "activated" : "deactivated")} {changed} templates");
+    }
+
+    /// <summary>
+    /// Extract @Model.XXX variable references from a Razor template string
+    /// </summary>
+    private static List<string> ExtractTemplateVariables(string? templateContent)
+    {
+        if (string.IsNullOrWhiteSpace(templateContent))
+            return new List<string>();
+
+        var variables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Match @Model.PropertyName patterns (including nested like @Model.User.Name)
+        var regex = new System.Text.RegularExpressions.Regex(
+            @"@Model\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)",
+            System.Text.RegularExpressions.RegexOptions.None,
+            TimeSpan.FromSeconds(5));
+
+        foreach (System.Text.RegularExpressions.Match match in regex.Matches(templateContent))
+        {
+            variables.Add(match.Groups[1].Value);
+        }
+
+        return variables.OrderBy(v => v).ToList();
     }
 }

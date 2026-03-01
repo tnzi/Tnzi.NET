@@ -8,14 +8,22 @@
  * 2. Global handle: uses window.$message (set by a setup component under NMessageProvider)
  */
 
-import type { MessageAdapter } from '@tnzi/core/adapters';
+import type { MessageAdapter, MessageOptions } from '@tnzi/core/adapters';
 
 interface NaiveMessageApi {
-  success: (content: string) => void;
-  error: (content: string) => void;
-  warning: (content: string) => void;
-  info: (content: string) => void;
-  loading: (content: string) => { destroy: () => void };
+  success: (content: string, options?: Record<string, unknown>) => void;
+  error: (content: string, options?: Record<string, unknown>) => void;
+  warning: (content: string, options?: Record<string, unknown>) => void;
+  info: (content: string, options?: Record<string, unknown>) => void;
+  loading: (content: string, options?: Record<string, unknown>) => { destroy: () => void };
+}
+
+function toNaiveOptions(options?: MessageOptions): Record<string, unknown> | undefined {
+  if (!options) return undefined;
+  return {
+    duration: options.duration,
+    closable: options.closable,
+  };
 }
 
 /**
@@ -45,20 +53,20 @@ function resolveApi(messageApi?: NaiveMessageApi): NaiveMessageApi | undefined {
  */
 export function createNaiveMessageAdapter(messageApi?: NaiveMessageApi): MessageAdapter {
   return {
-    success(content: string) {
-      resolveApi(messageApi)?.success(content);
+    success(content: string, options?: MessageOptions) {
+      resolveApi(messageApi)?.success(content, toNaiveOptions(options));
     },
-    error(content: string) {
-      resolveApi(messageApi)?.error(content);
+    error(content: string, options?: MessageOptions) {
+      resolveApi(messageApi)?.error(content, toNaiveOptions(options));
     },
-    warning(content: string) {
-      resolveApi(messageApi)?.warning(content);
+    warning(content: string, options?: MessageOptions) {
+      resolveApi(messageApi)?.warning(content, toNaiveOptions(options));
     },
-    info(content: string) {
-      resolveApi(messageApi)?.info(content);
+    info(content: string, options?: MessageOptions) {
+      resolveApi(messageApi)?.info(content, toNaiveOptions(options));
     },
-    loading(content: string) {
-      const instance = resolveApi(messageApi)?.loading(content);
+    loading(content: string, options?: MessageOptions) {
+      const instance = resolveApi(messageApi)?.loading(content, toNaiveOptions(options));
       return () => instance?.destroy();
     },
   };

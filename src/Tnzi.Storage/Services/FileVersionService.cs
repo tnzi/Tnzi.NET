@@ -81,8 +81,7 @@ public class FileVersionService : ApplicationService, IFileVersionService
             Size = stream.Length,
             Md5Hash = md5Hash,
             Description = description,
-            IsCurrent = true,
-            CreationTime = DateTime.UtcNow
+            IsCurrent = true
         };
 
         await _versionRepository.InsertAsync(newVersionRecord, cancellationToken);

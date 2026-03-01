@@ -144,4 +144,57 @@ public class UserNotificationService : ApplicationService, IUserNotificationServ
 
         return Ok(dto);
     }
+
+    public async Task<Result> DeleteAsync(Guid userId, Guid recipientId, CancellationToken cancellationToken = default)
+    {
+        var recipient = await _recipientRepository
+            .AsQueryable()
+            .Where(r => r.Id == recipientId && r.UserId == userId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (recipient == null)
+            return Fail("Notification not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        await _recipientRepository.DeleteAsync(recipient, cancellationToken);
+        return Ok("Notification deleted");
+    }
+
+    public async Task<Result> BatchMarkAsReadAsync(Guid userId, List<Guid> recipientIds, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(recipientIds);
+
+        var recipients = await _recipientRepository
+            .AsQueryable()
+            .Where(r => recipientIds.Contains(r.Id) && r.UserId == userId && !r.IsRead)
+            .ToListAsync(cancellationToken);
+
+        if (recipients.Count == 0)
+            return Ok("No unread notifications to mark");
+
+        var now = DateTime.UtcNow;
+        foreach (var recipient in recipients)
+        {
+            recipient.IsRead = true;
+            recipient.ReadTime = now;
+        }
+
+        await _recipientRepository.UpdateManyAsync(recipients, cancellationToken);
+        return Ok($"{recipients.Count} notifications marked as read");
+    }
+
+    public async Task<Result> BatchDeleteAsync(Guid userId, List<Guid> recipientIds, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(recipientIds);
+
+        var recipients = await _recipientRepository
+            .AsQueryable()
+            .Where(r => recipientIds.Contains(r.Id) && r.UserId == userId)
+            .ToListAsync(cancellationToken);
+
+        if (recipients.Count == 0)
+            return Ok("No notifications to delete");
+
+        await _recipientRepository.DeleteManyAsync(recipients, cancellationToken);
+        return Ok($"{recipients.Count} notifications deleted");
+    }
 }

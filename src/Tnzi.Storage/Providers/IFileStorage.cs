@@ -66,4 +66,16 @@ public interface IFileStorage
         string filePath,
         long? rangeStart = null,
         long? rangeEnd = null);
+
+    /// <summary>
+    /// Generate a presigned URL for direct upload or temporary public access.
+    /// Default implementation returns null (not supported).
+    /// Cloud providers (S3, R2, Azure) should override with real presigned URL generation.
+    /// </summary>
+    /// <param name="filePath">File path or key</param>
+    /// <param name="expiresInSeconds">URL expiration in seconds (default 3600 = 1 hour)</param>
+    /// <param name="httpMethod">HTTP method: GET for download, PUT for upload (default GET)</param>
+    /// <returns>Presigned URL, or null if not supported by the provider</returns>
+    Task<string?> GetPresignedUrlAsync(string filePath, int expiresInSeconds = 3600, string httpMethod = "GET")
+        => Task.FromResult<string?>(null);
 }

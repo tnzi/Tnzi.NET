@@ -14,7 +14,7 @@ public class AgentResponse
     /// <summary>
     /// Token 使用信息
     /// </summary>
-    public UsageDetails? Usage { get; set; }
+    public TokenUsageDto? Usage { get; set; }
 
     /// <summary>
     /// 结束原因

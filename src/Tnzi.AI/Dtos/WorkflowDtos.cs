@@ -76,14 +76,42 @@ public class UpdateWorkflowDefinitionDto
 /// </summary>
 public class WorkflowStepDto
 {
+    /// <summary>Step unique ID (required for DAG mode dependency references)</summary>
+    public string? StepId { get; set; }
+
     /// <summary>Agent ID for this step</summary>
     public Guid? AgentId { get; set; }
 
-    /// <summary>Step order</summary>
+    /// <summary>Step order (used in Sequential/Parallel mode)</summary>
     public int Order { get; set; }
 
-    /// <summary>Optional condition</summary>
+    /// <summary>Predecessor step IDs (DAG mode: all dependencies must complete before this step runs)</summary>
+    public List<string>? DependsOn { get; set; }
+
+    /// <summary>Condition expression (empty = unconditional; supports {{stepId}} template variables)</summary>
     public string? Condition { get; set; }
+
+    /// <summary>Custom provider (overrides Agent default)</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>Custom model (overrides Agent default)</summary>
+    public string? Model { get; set; }
+
+    /// <summary>Custom instructions (overrides Agent default; supports {{stepId}} template variables)</summary>
+    public string? Instructions { get; set; }
+}
+
+/// <summary>
+/// 工作流步骤执行结果 DTO（DAG 模式下逐步返回）
+/// </summary>
+public class WorkflowStepResultDto
+{
+    /// <summary>Step ID</summary>
+    public string StepId { get; set; } = string.Empty;
+    /// <summary>Step output</summary>
+    public string Output { get; set; } = string.Empty;
+    /// <summary>Whether this step was skipped (condition not met)</summary>
+    public bool Skipped { get; set; }
 }
 
 /// <summary>
@@ -105,8 +133,10 @@ public class RunWorkflowRequestDto
 /// </summary>
 public class WorkflowExecutionResultDto
 {
-    /// <summary>Workflow output</summary>
+    /// <summary>Workflow output (final output text)</summary>
     public string Output { get; set; } = string.Empty;
     /// <summary>Execution status</summary>
     public string Status { get; set; } = string.Empty;
+    /// <summary>Per-step results (DAG mode only; null for Sequential/Parallel)</summary>
+    public List<WorkflowStepResultDto>? StepResults { get; set; }
 }

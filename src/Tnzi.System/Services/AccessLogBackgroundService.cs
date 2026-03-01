@@ -69,7 +69,6 @@ public class AccessLogBackgroundService : BackgroundService
         foreach (var log in logs)
         {
             var entity = log.MapTo<AccessLog>();
-            entity.CreationTime = DateTime.UtcNow;
 
             // 在后台进行 IP 定位和 UA 解析，不阻塞主流程
             try

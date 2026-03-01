@@ -8,19 +8,19 @@ public class FileReferenceProcessor : IFileReferenceProcessor
 {
     private readonly IRepository<FileReference, Guid> _referenceRepository;
     private readonly IRepository<FileRecord, Guid> _fileRepository;
-    private readonly IEventBus _eventBus;
+    private readonly IEventBus? _eventBus;
     private readonly ILogger<FileReferenceProcessor> _logger;
 
     public FileReferenceProcessor(
         IRepository<FileReference, Guid> referenceRepository,
         IRepository<FileRecord, Guid> fileRepository,
-        IEventBus eventBus,
-        ILogger<FileReferenceProcessor> logger)
+        ILogger<FileReferenceProcessor> logger,
+        IEventBus? eventBus = null)
     {
         _referenceRepository = Check.NotNull(referenceRepository);
         _fileRepository = Check.NotNull(fileRepository);
-        _eventBus = Check.NotNull(eventBus);
         _logger = Check.NotNull(logger);
+        _eventBus = eventBus;
     }
 
     /// <summary>
@@ -61,8 +61,7 @@ public class FileReferenceProcessor : IFileReferenceProcessor
                         EntityType = change.EntityType,
                         EntityId = entityIdGuid,
                         FieldName = change.FieldName,
-                        IsTemporary = false,
-                        CreationTime = DateTime.UtcNow
+                        IsTemporary = false
                     };
 
                     _logger.LogInformation("Inserting FileReference: FileId={FileId}, EntityType={EntityType}, EntityId={EntityId}",
@@ -144,6 +143,9 @@ public class FileReferenceProcessor : IFileReferenceProcessor
     /// </summary>
     public async Task PublishDeleteEventsAsync(IReadOnlyList<FileReferenceChange> changes, CancellationToken cancellationToken = default)
     {
+        if (_eventBus == null)
+            return;
+
         var deleteChanges = changes.Where(c => c.ChangeType == FileReferenceChangeType.Delete).ToList();
         if (!deleteChanges.Any())
             return;

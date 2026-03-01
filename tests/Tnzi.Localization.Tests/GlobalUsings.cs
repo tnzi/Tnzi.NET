@@ -1,0 +1,13 @@
+global using Microsoft.Extensions.Hosting;
+global using Microsoft.Extensions.Localization;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Logging.Abstractions;
+global using Moq;
+global using System.Collections.Concurrent;
+global using System.Globalization;
+global using System.Text.Json;
+global using Tnzi.Localization.Dtos;
+global using Tnzi.Localization.Json;
+global using Tnzi.Localization.Services;
+global using Tnzi.TestBase;
+global using Xunit;

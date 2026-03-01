@@ -24,6 +24,28 @@ public class OpenTelemetryModule : TnziInfrastructureModule
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Well-known framework ActivitySource names (Tnzi.AI, Tnzi.AI.Rag, Tnzi.Framework)
+    /// These are auto-subscribed when InstrumentFramework is true
+    /// </summary>
+    private static readonly string[] FrameworkActivitySourceNames =
+    [
+        "Tnzi.AI",
+        "Tnzi.AI.Rag",
+        "Tnzi.Framework"
+    ];
+
+    /// <summary>
+    /// Well-known framework Meter names (matching ActivitySource names)
+    /// These are auto-subscribed when InstrumentFramework is true
+    /// </summary>
+    private static readonly string[] FrameworkMeterNames =
+    [
+        "Tnzi.AI",
+        "Tnzi.AI.Rag",
+        "Tnzi.Framework"
+    ];
+
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var config = context.Configuration.GetSection("OpenTelemetry").Get<OpenTelemetryOptions>()
@@ -45,6 +67,10 @@ public class OpenTelemetryModule : TnziInfrastructureModule
                 serviceVersion: serviceVersion,
                 serviceInstanceId: config.ServiceInstanceId));
 
+        // Collect framework and additional source names
+        var activitySourceNames = CollectActivitySourceNames(config);
+        var meterNames = CollectMeterNames(config);
+
         // 配置 Tracing
         if (config.EnableTracing)
         {
@@ -54,6 +80,12 @@ public class OpenTelemetryModule : TnziInfrastructureModule
                 if (config.SamplingRatio < 1.0)
                 {
                     tracing.SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(config.SamplingRatio)));
+                }
+
+                // Subscribe to framework and custom ActivitySources
+                if (activitySourceNames.Length > 0)
+                {
+                    tracing.AddSource(activitySourceNames);
                 }
 
                 // ASP.NET Core 追踪
@@ -93,6 +125,12 @@ public class OpenTelemetryModule : TnziInfrastructureModule
         {
             otelBuilder.WithMetrics(metrics =>
             {
+                // Subscribe to framework and custom Meters
+                if (meterNames.Length > 0)
+                {
+                    metrics.AddMeter(meterNames);
+                }
+
                 // ASP.NET Core 指标
                 if (config.InstrumentAspNetCore)
                 {
@@ -126,6 +164,50 @@ public class OpenTelemetryModule : TnziInfrastructureModule
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Collect ActivitySource names from framework well-known sources and additional configuration
+    /// </summary>
+    public static string[] CollectActivitySourceNames(OpenTelemetryOptions config)
+    {
+        var sources = new List<string>();
+
+        // Add framework sources (Tnzi.AI, Tnzi.AI.Rag, Tnzi.Framework)
+        if (config.InstrumentFramework)
+        {
+            sources.AddRange(FrameworkActivitySourceNames);
+        }
+
+        // Add user-configured additional sources
+        if (config.AdditionalActivitySources.Count > 0)
+        {
+            sources.AddRange(config.AdditionalActivitySources.Where(s => !string.IsNullOrWhiteSpace(s)));
+        }
+
+        return sources.Distinct().ToArray();
+    }
+
+    /// <summary>
+    /// Collect Meter names from framework well-known meters and additional configuration
+    /// </summary>
+    public static string[] CollectMeterNames(OpenTelemetryOptions config)
+    {
+        var meters = new List<string>();
+
+        // Add framework meters (Tnzi.AI, Tnzi.AI.Rag, Tnzi.Framework)
+        if (config.InstrumentFramework)
+        {
+            meters.AddRange(FrameworkMeterNames);
+        }
+
+        // Add user-configured additional meters
+        if (config.AdditionalMeters.Count > 0)
+        {
+            meters.AddRange(config.AdditionalMeters.Where(m => !string.IsNullOrWhiteSpace(m)));
+        }
+
+        return meters.Distinct().ToArray();
     }
 
     /// <summary>

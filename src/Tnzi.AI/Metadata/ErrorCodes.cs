@@ -71,6 +71,11 @@ public static class ErrorCodes
     public const string QuotaResetFailed = "AI_QUOTA_RESET_FAILED";
 
     /// <summary>
+    /// Quota concurrency conflict after max retries.
+    /// </summary>
+    public const string QuotaConcurrencyConflict = "AI_QUOTA_CONCURRENCY_CONFLICT";
+
+    /// <summary>
     /// Agent run failed.
     /// </summary>
     public const string AgentRunFailed = "AI_AGENT_RUN_FAILED";
@@ -114,4 +119,34 @@ public static class ErrorCodes
     /// Embedding generation failed.
     /// </summary>
     public const string EmbeddingFailed = "AI_EMBEDDING_FAILED";
+
+    /// <summary>
+    /// Structured output generation failed after max retries.
+    /// </summary>
+    public const string StructuredOutputFailed = "AI_STRUCTURED_OUTPUT_FAILED";
+
+    /// <summary>
+    /// MCP server connection failed.
+    /// </summary>
+    public const string McpConnectionFailed = "AI_MCP_CONNECTION_FAILED";
+
+    /// <summary>
+    /// Failed to load tools from MCP server.
+    /// </summary>
+    public const string McpToolLoadFailed = "AI_MCP_TOOL_LOAD_FAILED";
+
+    /// <summary>
+    /// Workflow parallel execution had one or more agent failures (partial success).
+    /// </summary>
+    public const string WorkflowPartialFailure = "AI_WORKFLOW_PARTIAL_FAILURE";
+
+    /// <summary>
+    /// Guardrail tripwire triggered — immediate abort of all parallel guardrails.
+    /// </summary>
+    public const string GuardrailTripwire = "AI_GUARDRAIL_TRIPWIRE";
+
+    /// <summary>
+    /// Agent version not found.
+    /// </summary>
+    public const string AgentVersionNotFound = "AI_AGENT_VERSION_NOT_FOUND";
 }

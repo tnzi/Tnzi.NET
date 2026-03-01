@@ -26,6 +26,7 @@ global using Tnzi.Audit.Dtos;
 global using Tnzi.Audit.Entities;
 global using Tnzi.Audit.Middleware;
 global using Tnzi.Audit.Options;
+global using Tnzi.Audit.Metadata;
 global using Tnzi.Audit.Services;
 global using Tnzi.Options;
 global using Tnzi.Data;

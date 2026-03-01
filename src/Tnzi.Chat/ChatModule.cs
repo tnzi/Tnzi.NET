@@ -5,6 +5,7 @@ namespace Tnzi.Chat;
 /// 支持私人消息、公共消息（角色推送）、消息回复、已读追踪
 /// </summary>
 [DependsOn(typeof(EFCoreModule), typeof(IdentityModule))]
+[OptionalDependsOn(typeof(SignalRModule))]
 public class ChatModule : TnziApplicationModule
 {
     /// <summary>

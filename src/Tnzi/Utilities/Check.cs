@@ -165,4 +165,68 @@ public static class Check
         if (!condition)
             throw new ArgumentException(message);
     }
+
+    /// <summary>
+    /// 检查字符串长度不超过最大值
+    /// </summary>
+    public static string MaxLength(string value, int maxLength, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+    {
+        NotNull(value, paramName);
+        if (value.Length > maxLength)
+            throw new ArgumentException($"{paramName ?? FallbackParamName} must not exceed {maxLength} characters! Current length: {value.Length}.", paramName ?? FallbackParamName);
+        return value;
+    }
+
+    /// <summary>
+    /// 检查字符串长度不小于最小值
+    /// </summary>
+    public static string MinLength(string value, int minLength, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+    {
+        NotNull(value, paramName);
+        if (value.Length < minLength)
+            throw new ArgumentException($"{paramName ?? FallbackParamName} must be at least {minLength} characters! Current length: {value.Length}.", paramName ?? FallbackParamName);
+        return value;
+    }
+
+    /// <summary>
+    /// 检查字符串长度在指定范围内
+    /// </summary>
+    public static string Length(string value, int minLength, int maxLength, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+    {
+        NotNull(value, paramName);
+        if (value.Length < minLength || value.Length > maxLength)
+            throw new ArgumentException($"{paramName ?? FallbackParamName} must be between {minLength} and {maxLength} characters! Current length: {value.Length}.", paramName ?? FallbackParamName);
+        return value;
+    }
+
+    /// <summary>
+    /// 检查字符串是否匹配正则表达式
+    /// </summary>
+    public static string Matches(string value, [System.Diagnostics.CodeAnalysis.StringSyntax("Regex")] string pattern, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+    {
+        NotNull(value, paramName);
+        if (!Regex.IsMatch(value, pattern))
+            throw new ArgumentException($"{paramName ?? FallbackParamName} does not match the required pattern.", paramName ?? FallbackParamName);
+        return value;
+    }
+
+    /// <summary>
+    /// 检查数值是否为正数（大于 0）
+    /// </summary>
+    public static T Positive<T>(T value, [CallerArgumentExpression(nameof(value))] string? paramName = null) where T : IComparable<T>
+    {
+        if (value.CompareTo(default!) <= 0)
+            throw new ArgumentOutOfRangeException(paramName ?? FallbackParamName, value, $"{paramName ?? FallbackParamName} must be positive!");
+        return value;
+    }
+
+    /// <summary>
+    /// 检查 Guid 是否不为空
+    /// </summary>
+    public static Guid NotEmpty(Guid value, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+    {
+        if (value == Guid.Empty)
+            throw new ArgumentException($"{paramName ?? FallbackParamName} can not be empty Guid!", paramName ?? FallbackParamName);
+        return value;
+    }
 }

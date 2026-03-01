@@ -67,6 +67,29 @@ public abstract class SessionAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 清理超过指定时间未活跃的会话
+    /// </summary>
+    /// <param name="inactiveMinutes">不活跃时间阈值（分钟，默认30分钟）</param>
+    /// <returns>清理的会话数量</returns>
+    [HttpPost("clean-expired")]
+    public virtual async Task<ApiResult<int>> CleanExpired([FromQuery] int inactiveMinutes = 30)
+    {
+        var result = await SessionService.CleanExpiredSessionsAsync(TimeSpan.FromMinutes(inactiveMinutes));
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取会话统计信息
+    /// </summary>
+    /// <returns>会话统计信息（活跃会话数、在线用户数、设备分布）</returns>
+    [HttpGet("statistics")]
+    public virtual async Task<ApiResult<SessionStatisticsDto>> GetStatistics()
+    {
+        var result = await SessionService.GetSessionStatisticsAsync();
+        return result.ToApiResult();
+    }
+
     // 注意：会话管理不是CRUD操作，不提供钩子方法
     // 如需扩展，请使用重写方法
 }

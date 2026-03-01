@@ -77,7 +77,7 @@ public class LocalizationController : ApiControllerBase
         }
         finally
         {
-            System.Globalization.CultureInfo.CurrentUICulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalCulture;
         }
     }
 }

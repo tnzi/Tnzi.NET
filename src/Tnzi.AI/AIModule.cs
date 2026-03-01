@@ -6,6 +6,7 @@ namespace Tnzi.AI;
 /// AI 模块 - 基于 Microsoft.Extensions.AI 的自定义 Agent 引擎
 /// </summary>
 [DependsOn(typeof(EFCoreModule))]
+[DependsOn(typeof(Tnzi.AspNetCore.AspNetCoreModule))]
 public class AIModule : TnziApplicationModule
 {
     /// <summary>
@@ -24,6 +25,9 @@ public class AIModule : TnziApplicationModule
         context.Services.AddOptions<AIOptions>()
             .Bind(context.Configuration.GetSection("AI"))
             .ValidateWith<AIOptions, AIOptionsValidator>();
+
+        context.Services.AddOptions<FileConversationStoreOptions>()
+            .Bind(context.Configuration.GetSection("AI:Coder"));
 
         // 从环境变量补充 API Key（移自 Validator 的副作用）
         context.Services.PostConfigure<AIOptions>(options =>
@@ -69,21 +73,43 @@ public class AIModule : TnziApplicationModule
             });
 
         // 注册基础设施
+        services.AddSingleton<IChatClientProvider, OpenAIChatClientProvider>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
+        services.AddSingleton<IToolResolver, ToolResolver>();
+        services.AddSingleton<AgentExecutorOptionsBuilder>();
         services.AddSingleton<IAgentFactory, AgentFactory>();
-        services.AddSingleton<WorkflowBuilderFactory>();
-        services.AddSingleton<ToolScanner>();
+        services.AddSingleton<IWorkflowBuilderFactory, WorkflowBuilderFactory>();
+
+        // 工具基础设施（TryAdd: 允许 Agent 模块提前注册）
+        services.TryAddSingleton<IToolScanner, ToolScanner>();
+        services.TryAddSingleton<IToolRegistry, ToolRegistry>();
 
         // MCP：连接工厂与工具提供者（启用 AI:Mcp:Enabled 时生效）。IMcpToolProvider 为 Singleton 以匹配 IAgentFactory 生命周期，避免 captive dependency。
         services.AddSingleton<IMcpClientFactory, McpClientFactory>();
         services.AddSingleton<IMcpToolProvider, McpToolProvider>();
 
+        // Token 估算器（TryAdd：允许用户注册 tiktoken 等精确实现）
+        services.TryAddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
+
         // 注册执行管道
-        services.AddScoped<ChatExecutionPipeline>();
+        services.AddScoped<IChatExecutionPipeline, ChatExecutionPipeline>();
+
+        // 注册对话存储和记忆存储（使用 TryAdd，允许 Agent 模块替换）
+        services.TryAddScoped<IConversationStore, DatabaseConversationStore>();
+        services.TryAddScoped<IMemoryStore, DatabaseMemoryStore>();
+
+        // 注册实体记忆存储和 LLM 实体抽取器
+        services.TryAddScoped<IEntityMemoryStore, DatabaseEntityMemoryStore>();
+        services.AddScoped<LlmEntityExtractor>();
+
+        // 注册项目上下文提供器（从 DI 获取 IProjectContextLoader）
+        services.AddScoped<ProjectContextProvider>();
 
         // 注册核心服务
         services.AddScoped<IUsageLogService, UsageLogService>();
+        services.AddScoped<IUsageAnalyticsService, UsageAnalyticsService>();
         services.AddScoped<IQuotaService, QuotaService>();
+        services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
         services.AddScoped<IAgentService, AgentService>();
         services.AddScoped<AgentThreadService>();
         services.AddScoped<IAgentThreadService>(sp => sp.GetRequiredService<AgentThreadService>());
@@ -103,85 +129,117 @@ public class AIModule : TnziApplicationModule
 
         // 注册工具审批处理器（使用 TryAdd 允许用户覆盖）
         // 用户可以注册自己的 IToolApprovalHandler 实现来实现自定义审批逻辑
-        services.TryAddScoped<IToolApprovalHandler, AutoApprovalHandler>();
+        services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
 
         // 注册内置工具（默认提供，运行时根据配置决定是否使用）
         services.TryAddScoped<DateTimeTools>();
-        services.TryAddScoped<MathTools>();
         services.TryAddScoped<TextTools>();
+        services.TryAddScoped<WebSearchTools>();
 
-        // 扫描并注册所有工具
-        ScanAndRegisterTools(services);
+        // 注册工作流检查点存储（TryAdd：允许用户注册自定义实现）
+        services.TryAddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();
+
+        // 注册 OpenAPI 工具生成器（运行时通过 OpenApiToolsOptions.Enabled 控制是否生效）
+        services.AddSingleton<OpenApiToolGenerator>();
+
+        // 注册 Guardrails（运行时通过 GuardrailsOptions.Enabled 控制是否生效）
+        services.AddScoped<GuardrailRunner>();
+        services.AddScoped<IInputGuardrail, MaxLengthGuardrail>();
+        services.AddScoped<IInputGuardrail, PromptInjectionGuardrail>();
+        services.AddScoped<IInputGuardrail, PiiDetectionGuardrail>();
+        services.AddScoped<IOutputGuardrail, ContentFilterGuardrail>();
+
+        // LLM-as-Judge guardrail（同时作为输入和输出 guardrail）
+        services.AddScoped<LlmJudgeGuardrail>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
+        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
+
+        // 注册 A2A 客户端（TryAdd：允许用户注册自定义实现）
+        services.TryAddScoped<IA2AClient, HttpA2AClient>();
+
+        // 注册 Agent 评估器（TryAdd：允许用户注册自定义实现）
+        services.TryAddScoped<IAgentEvaluator, DefaultAgentEvaluator>();
+
+        return Task.CompletedTask;
+    }
+
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        // 扫描并注册工具（在应用初始化阶段执行一次）
+        var serviceProvider = context.ServiceProvider;
+        var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
+        var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();
+        var logger = serviceProvider.GetRequiredService<ILogger<AIModule>>();
+
+        // 扫描自身程序集
+        var assembly = Assembly.GetExecutingAssembly();
+        RegisterTools(toolRegistry, toolScanner, assembly, logger);
+
+        // 扫描应用程序集（排除框架程序集和系统程序集）
+        var appAssemblies = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic
+                && a.FullName != null
+                && !a.FullName.StartsWith("System.", StringComparison.Ordinal)
+                && !a.FullName.StartsWith("Microsoft.", StringComparison.Ordinal)
+                && !IsFrameworkCoreAssembly(a)
+                && a != assembly);
+
+        foreach (var appAssembly in appAssemblies)
+        {
+            RegisterTools(toolRegistry, toolScanner, appAssembly, logger);
+        }
+
+        // 根据 BuiltInToolsOptions 按 ProviderType 精确移除已禁用的内置工具
+        // 使用 UnregisterByProviderType 而非 UnregisterGroup，避免误删用户注册的同名工具组
+        var builtInOptions = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value.BuiltInTools;
+        if (!builtInOptions.Enabled)
+        {
+            toolRegistry.UnregisterByProviderType(typeof(DateTimeTools));
+            toolRegistry.UnregisterByProviderType(typeof(TextTools));
+            toolRegistry.UnregisterByProviderType(typeof(WebSearchTools));
+        }
+        else
+        {
+            if (!builtInOptions.EnableDateTime) toolRegistry.UnregisterByProviderType(typeof(DateTimeTools));
+            if (!builtInOptions.EnableText) toolRegistry.UnregisterByProviderType(typeof(TextTools));
+            if (!builtInOptions.EnableWebSearch) toolRegistry.UnregisterByProviderType(typeof(WebSearchTools));
+        }
 
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// 工具扫描缓存 - 避免重复扫描相同程序集
+    /// 扫描程序集并注册工具到 ToolRegistry
     /// </summary>
-    private static readonly ConcurrentDictionary<string, IEnumerable<Tools.Models.ToolDefinition>> _toolScanCache = new();
-
-    /// <summary>
-    /// 扫描并注册所有工具
-    /// </summary>
-    private static void ScanAndRegisterTools(IServiceCollection services)
+    private static void RegisterTools(IToolRegistry registry, IToolScanner scanner, Assembly assembly, ILogger logger)
     {
-        // 延迟注册，在服务提供者构建后执行
-        services.AddSingleton<ToolRegistry>(serviceProvider =>
+        try
         {
-            var logger = serviceProvider.GetRequiredService<ILogger<ToolRegistry>>();
-            var registry = new ToolRegistry(logger);
-            var scanner = serviceProvider.GetRequiredService<ToolScanner>();
-
-            // 扫描当前程序集
-            var assembly = Assembly.GetExecutingAssembly();
-            var tools = GetOrScanAssembly(scanner, assembly);
-
-            // 注册到注册表
+            var tools = scanner.ScanAssembly(assembly);
             foreach (var tool in tools)
             {
                 registry.Register(tool);
             }
-
-            // 扫描应用程序集（用户定义的工具）
-            var appAssemblies = AppDomain.CurrentDomain.GetAssemblies()
-                .Where(a => !a.IsDynamic
-                    && a.FullName != null
-                    && !a.FullName.StartsWith("System.", StringComparison.Ordinal)
-                    && !a.FullName.StartsWith("Microsoft.", StringComparison.Ordinal)
-                    && !a.FullName.StartsWith("Tnzi.", StringComparison.Ordinal)
-                    && a != assembly);
-
-            foreach (var appAssembly in appAssemblies)
-            {
-                try
-                {
-                    var appTools = GetOrScanAssembly(scanner, appAssembly);
-                    foreach (var tool in appTools)
-                    {
-                        registry.Register(tool);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // 记录扫描失败的程序集，但继续扫描其他程序集
-                    var moduleLogger = serviceProvider.GetService<ILogger<AIModule>>();
-                    moduleLogger?.LogWarning(ex,
-                        "Failed to scan assembly '{AssemblyName}' for AI tools. Skipping this assembly.",
-                        appAssembly.FullName);
-                }
-            }
-
-            return registry;
-        });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to scan assembly '{AssemblyName}' for AI tools. Skipping this assembly.",
+                assembly.FullName);
+        }
     }
 
     /// <summary>
-    /// 获取或扫描程序集的工具定义（使用缓存）
+    /// 判断是否为框架核心程序集
     /// </summary>
-    private static IEnumerable<Tools.Models.ToolDefinition> GetOrScanAssembly(ToolScanner scanner, Assembly assembly)
+    /// <remarks>
+    /// 所有 Tnzi.* 程序集（包括 Tnzi.AI.Coder）由各自模块负责工具注册。
+    /// AIModule 只扫描自身程序集和用户应用程序集。
+    /// </remarks>
+    private static bool IsFrameworkCoreAssembly(Assembly a)
     {
-        var assemblyName = assembly.GetName().FullName;
-        return _toolScanCache.GetOrAdd(assemblyName, _ => scanner.ScanAssembly(assembly));
+        var name = a.GetName().Name;
+        if (name == null) return false;
+        return name.StartsWith("Tnzi.", StringComparison.Ordinal);
     }
 }

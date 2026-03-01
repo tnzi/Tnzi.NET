@@ -74,10 +74,20 @@ public abstract class PaymentCallbackControllerBase : ApiControllerBase
             parameters["__stripe_signature"] = stripeSignature.ToString();
         }
 
-        if (request.Headers.TryGetValue("PayPal-Transmission-Sig", out var paypalSignature))
-        {
-            parameters["__paypal_signature"] = paypalSignature.ToString();
-        }
+        if (request.Headers.TryGetValue("PayPal-Transmission-Id", out var paypalTransmissionId))
+            parameters["__paypal_transmission_id"] = paypalTransmissionId.ToString();
+
+        if (request.Headers.TryGetValue("PayPal-Transmission-Time", out var paypalTransmissionTime))
+            parameters["__paypal_transmission_time"] = paypalTransmissionTime.ToString();
+
+        if (request.Headers.TryGetValue("PayPal-Transmission-Sig", out var paypalTransmissionSig))
+            parameters["__paypal_transmission_sig"] = paypalTransmissionSig.ToString();
+
+        if (request.Headers.TryGetValue("PayPal-Cert-Url", out var paypalCertUrl))
+            parameters["__paypal_cert_url"] = paypalCertUrl.ToString();
+
+        if (request.Headers.TryGetValue("PayPal-Auth-Algo", out var paypalAuthAlgo))
+            parameters["__paypal_auth_algo"] = paypalAuthAlgo.ToString();
 
         // 如果是 form data，解析表单参数
         if (request.HasFormContentType)

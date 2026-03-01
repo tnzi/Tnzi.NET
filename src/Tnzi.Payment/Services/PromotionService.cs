@@ -8,17 +8,20 @@ public class PromotionService : ApplicationService, IPromotionService
     private readonly IRepository<Promotion, Guid> _promotionRepository;
     private readonly IRepository<CouponUsage, Guid> _couponUsageRepository;
     private readonly IOptions<PromotionOptions> _promotionOptions;
+    private readonly IPaymentProviderFactory? _providerFactory;
 
     public PromotionService(
         IRepository<Promotion, Guid> promotionRepository,
         IRepository<CouponUsage, Guid> couponUsageRepository,
         IOptions<PromotionOptions> promotionOptions,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IPaymentProviderFactory? providerFactory = null)
         : base(serviceProvider)
     {
         _promotionRepository = Check.NotNull(promotionRepository);
         _couponUsageRepository = Check.NotNull(couponUsageRepository);
         _promotionOptions = Check.NotNull(promotionOptions);
+        _providerFactory = providerFactory;
     }
 
     public async Task<Result<PromotionDto>> CreateAsync(CreatePromotionDto request, CancellationToken cancellationToken = default)
@@ -223,11 +226,61 @@ public class PromotionService : ApplicationService, IPromotionService
         });
     }
 
-    public Task<Result> SyncToStripeAsync(Guid promotionId, CancellationToken cancellationToken = default)
+    public async Task<Result> SyncToStripeAsync(Guid promotionId, CancellationToken cancellationToken = default)
     {
-        // TODO: Implement Stripe Coupon sync
-        Logger.LogInformation("Stripe coupon sync requested. PromotionId: {PromotionId}", promotionId);
-        return Task.FromResult(Ok());
+        if (!_promotionOptions.Value.EnableStripeCouponSync)
+            return Fail("Stripe coupon sync is disabled.", 400);
+
+        var provider = _providerFactory?.GetProvider("Stripe");
+        if (provider is not StripeProvider stripeProvider)
+            return Fail("Stripe provider is not available.", 400);
+
+        var promotion = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == promotionId, cancellationToken);
+        if (promotion == null)
+            return Fail(ErrorCodes.PromotionNotFound, 404);
+
+        try
+        {
+            var stripeClient = stripeProvider.GetStripeClient();
+            var couponService = new Stripe.CouponService(stripeClient);
+
+            var couponOptions = new Stripe.CouponCreateOptions
+            {
+                Id = promotion.PromotionCode,
+                Name = promotion.Name,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "PromotionId", promotionId.ToString() },
+                    { "PromotionCode", promotion.PromotionCode }
+                }
+            };
+
+            if (promotion.DiscountType == DiscountType.Percentage)
+            {
+                couponOptions.PercentOff = promotion.DiscountValue;
+            }
+            else
+            {
+                couponOptions.AmountOff = (long)(promotion.DiscountValue * 100);
+                couponOptions.Currency = "usd";
+            }
+
+            if (promotion.EndTime.HasValue)
+                couponOptions.RedeemBy = promotion.EndTime.Value;
+
+            if (promotion.TotalUsageLimit.HasValue)
+                couponOptions.MaxRedemptions = promotion.TotalUsageLimit.Value;
+
+            await couponService.CreateAsync(couponOptions, cancellationToken: cancellationToken);
+
+            Logger.LogInformation("Promotion synced to Stripe. PromotionCode: {Code}", promotion.PromotionCode);
+            return Ok();
+        }
+        catch (Stripe.StripeException ex)
+        {
+            Logger.LogError(ex, "Failed to sync promotion to Stripe. PromotionId: {Id}", promotionId);
+            return Fail($"Stripe sync failed: {ex.Message}", 400);
+        }
     }
 
     /// <summary>

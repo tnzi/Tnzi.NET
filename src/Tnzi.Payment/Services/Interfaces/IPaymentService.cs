@@ -13,17 +13,17 @@ public interface IPaymentService
     /// <summary>
     /// 获取支付信息
     /// </summary>
-    Task<Result<PaymentDto>> GetPaymentAsync(string tradeNo, CancellationToken cancellationToken = default);
+    Task<Result<PaymentDto>> GetPaymentAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取支付列表
     /// </summary>
-    Task<Result<IPagedList<PaymentDto>>> GetPaymentListAsync(PaymentQueryDto query, CancellationToken cancellationToken = default);
+    Task<Result<IPagedList<PaymentDto>>> GetPaymentListAsync(PaymentQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 关闭支付订单
     /// </summary>
-    Task<Result> ClosePaymentAsync(string tradeNo, string? reason = null, CancellationToken cancellationToken = default);
+    Task<Result> ClosePaymentAsync(string tradeNo, string? reason = null, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 处理支付回调
@@ -34,10 +34,15 @@ public interface IPaymentService
     /// <summary>
     /// 获取支付参数字段
     /// </summary>
-    Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo, CancellationToken cancellationToken = default);
+    Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 同步订单状态
     /// </summary>
-    Task<Result> SyncOrderAsync(string tradeNo, CancellationToken cancellationToken = default);
+    Task<Result> SyncOrderAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 自动关闭过期支付（后台任务调用）
+    /// </summary>
+    Task<Result<int>> CloseExpiredPaymentsAsync(CancellationToken cancellationToken = default);
 }

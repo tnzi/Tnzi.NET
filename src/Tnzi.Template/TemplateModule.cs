@@ -45,6 +45,12 @@ public class TemplateModule : TnziApplicationModule
         context.Services.AddScoped<ITemplateStoreService, TemplateStoreService>();
         context.Services.AddScoped<ILayoutStoreService, LayoutStoreService>();
 
+        // 注册模板渲染服务（高级 API，统一编排引擎+存储+布局）
+        context.Services.AddScoped<ITemplateRenderService, TemplateRenderService>();
+
+        // 注册 HTML→PDF 转换器（默认 HTML 直出，应用层可替换为 PuppeteerSharp/Gotenberg 等实现）
+        context.Services.TryAddScoped<IHtmlToPdfConverter, HtmlPassThroughConverter>();
+
         return Task.CompletedTask;
     }
 

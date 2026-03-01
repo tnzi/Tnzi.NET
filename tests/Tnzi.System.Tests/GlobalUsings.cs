@@ -4,6 +4,7 @@ global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
+global using MockQueryable;
 global using MockQueryable.Moq;
 global using Moq;
 global using Shouldly;

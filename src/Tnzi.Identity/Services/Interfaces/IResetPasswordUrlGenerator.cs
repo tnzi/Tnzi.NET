@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services.Interfaces;
+namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 密码重置URL生成器接口

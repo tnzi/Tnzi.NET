@@ -74,7 +74,7 @@ public class UserDetailService : ApplicationService, IUserDetailService
             await _repository.UpdateAsync(existingDetail);
 
             var resultDto = existingDetail.MapTo<UserDetailDto>();
-            LogInformation($"User detail updated for user: {userId}");
+            LogInformation("User detail updated for user: {UserId}", userId);
             return Ok(resultDto);
         }
         else
@@ -85,7 +85,7 @@ public class UserDetailService : ApplicationService, IUserDetailService
 
             await _repository.InsertAsync(userDetail);
             var resultDto = userDetail.MapTo<UserDetailDto>();
-            LogInformation($"User detail created for user: {userId}");
+            LogInformation("User detail created for user: {UserId}", userId);
             return Ok(resultDto);
         }
     }
@@ -102,7 +102,7 @@ public class UserDetailService : ApplicationService, IUserDetailService
         }
 
         await _repository.DeleteAsync(userDetail);
-        LogInformation($"User detail deleted for user: {userId}");
+        LogInformation("User detail deleted for user: {UserId}", userId);
         return Ok();
     }
 

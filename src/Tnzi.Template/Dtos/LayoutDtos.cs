@@ -73,11 +73,26 @@ public class QueryLayoutRequest : PagedQueryDto
 }
 
 /// <summary>
-/// 布局信息DTO（分页列表项）
+/// 布局信息DTO（分页列表项，不含大文本字段以优化传输性能）
 /// </summary>
 public class LayoutInfoDto
 {
     public Guid Id { get; set; }
+    public string LayoutName { get; set; } = string.Empty;
+    public string Module { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public bool IsDefault { get; set; }
+    public string? Description { get; set; }
+    public DateTime CreationTime { get; set; }
+    public DateTime? LastModificationTime { get; set; }
+}
+
+/// <summary>
+/// Layout export entry (JSON-serializable format for import/export)
+/// </summary>
+public class LayoutExportEntry
+{
     public string LayoutName { get; set; } = string.Empty;
     public string Module { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
@@ -86,6 +101,47 @@ public class LayoutInfoDto
     public bool IsDefault { get; set; }
     public string? Description { get; set; }
     public string? Metadata { get; set; }
-    public DateTime CreationTime { get; set; }
-    public DateTime? LastModificationTime { get; set; }
+}
+
+/// <summary>
+/// Layout import request
+/// </summary>
+public class LayoutImportRequest
+{
+    /// <summary>
+    /// JSON string containing layouts to import
+    /// </summary>
+    [Required]
+    public string Json { get; set; } = null!;
+
+    /// <summary>
+    /// Whether to overwrite existing layouts with same name+module+category
+    /// </summary>
+    public bool OverwriteExisting { get; set; } = false;
+}
+
+/// <summary>
+/// Layout import result
+/// </summary>
+public class LayoutImportResultDto
+{
+    /// <summary>
+    /// Number of layouts created
+    /// </summary>
+    public int CreatedCount { get; set; }
+
+    /// <summary>
+    /// Number of layouts updated (overwritten)
+    /// </summary>
+    public int UpdatedCount { get; set; }
+
+    /// <summary>
+    /// Number of layouts skipped (already exist)
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>
+    /// Errors encountered during import
+    /// </summary>
+    public List<string> Errors { get; set; } = new();
 }

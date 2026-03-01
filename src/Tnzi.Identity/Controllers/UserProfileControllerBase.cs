@@ -398,6 +398,55 @@ public abstract class UserProfileControllerBase : ApiControllerBase
 
     #endregion
 
+    #region 账户管理
+
+    /// <summary>
+    /// 停用当前用户的账户
+    /// </summary>
+    [HttpPost("deactivate")]
+    public virtual async Task<ApiResult> DeactivateAccount([FromBody] DeactivateAccountDto? input = null)
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        var result = await UserService.DeactivateAccountAsync(CurrentUser.Id.Value, input?.Reason);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 删除当前用户的账户（软删除，GDPR 合规）
+    /// </summary>
+    [HttpDelete("account")]
+    public virtual async Task<ApiResult> DeleteAccount()
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        var result = await UserService.DeleteAccountAsync(CurrentUser.Id.Value);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 导出当前用户的个人数据（GDPR 合规）
+    /// </summary>
+    [HttpGet("personal-data")]
+    public virtual async Task<ApiResult<PersonalDataExportDto>> ExportPersonalData()
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized<PersonalDataExportDto>("User not authenticated");
+        }
+
+        var result = await UserService.ExportPersonalDataAsync(CurrentUser.Id.Value);
+        return result.ToApiResult();
+    }
+
+    #endregion
+
     #region 修改邮箱/手机号
 
     /// <summary>

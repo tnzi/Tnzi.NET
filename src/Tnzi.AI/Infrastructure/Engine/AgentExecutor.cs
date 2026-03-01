@@ -1,6 +1,4 @@
 
-using Tnzi.AI.Infrastructure.Observability;
-
 namespace Tnzi.AI.Infrastructure.Engine;
 
 /// <summary>
@@ -29,20 +27,46 @@ public class AgentExecutor
     public string Name => _options.Name;
 
     /// <summary>
+    /// 创建一个包含额外工具的新 AgentExecutor（不修改原实例）
+    /// </summary>
+    public AgentExecutor WithAdditionalTools(IEnumerable<AITool> additionalTools)
+    {
+        var mergedTools = new List<AITool>();
+        if (_options.Tools != null) mergedTools.AddRange(_options.Tools);
+        mergedTools.AddRange(additionalTools);
+
+        var newOptions = new AgentExecutorOptions
+        {
+            Name = _options.Name,
+            Instructions = _options.Instructions,
+            Tools = mergedTools,
+            Temperature = _options.Temperature,
+            MaxOutputTokens = _options.MaxOutputTokens,
+            MaxToolIterations = _options.MaxToolIterations,
+            ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
+            HistoryReducer = _options.HistoryReducer,
+            ContextProvider = _options.ContextProvider,
+            Middlewares = _options.Middlewares
+        };
+
+        return new AgentExecutor(_chatClient, newOptions);
+    }
+
+    /// <summary>
     /// 非流式执行
     /// </summary>
     public async Task<AgentResponse> ExecuteAsync(List<ChatMessage> messages, CancellationToken ct = default)
     {
         Check.NotNull(messages);
 
-        // 1. 上下文注入
-        var contextInjection = await InjectContextAsync(messages, ct);
-
-        // 2. 历史压缩
+        // 1. 历史压缩（先压缩，避免后续注入的 RAG 上下文被裁剪）
         messages = await ReduceHistoryAsync(messages, ct);
 
-        // 3. 构建 ChatOptions
-        var chatOptions = BuildChatOptions(contextInjection);
+        // 2. 上下文注入
+        var contextInjection = await InjectContextAsync(messages, ct);
+
+        // 3. 构建 ChatOptions（输出合并后的完整工具列表）
+        var chatOptions = BuildChatOptions(contextInjection, out var allTools);
 
         // 4. 工具调用循环
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
@@ -62,14 +86,14 @@ public class AgentExecutor
                 return new AgentResponse
                 {
                     Text = response.Text,
-                    Usage = response.Usage,
+                    Usage = ConvertUsage(response.Usage),
                     FinishReason = response.FinishReason?.ToString(),
                     Messages = messages
                 };
             }
 
             // 执行工具并添加结果到消息
-            var toolResults = await ExecuteToolCallsAsync(toolCalls, ct);
+            var toolResults = await ExecuteToolCallsAsync(toolCalls, allTools, ct);
             messages.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
         }
 
@@ -94,14 +118,14 @@ public class AgentExecutor
     {
         Check.NotNull(messages);
 
-        // 1. 上下文注入
-        var contextInjection = await InjectContextAsync(messages, ct);
-
-        // 2. 历史压缩
+        // 1. 历史压缩（先压缩，避免后续注入的 RAG 上下文被裁剪）
         messages = await ReduceHistoryAsync(messages, ct);
 
-        // 3. 构建 ChatOptions
-        var chatOptions = BuildChatOptions(contextInjection);
+        // 2. 上下文注入
+        var contextInjection = await InjectContextAsync(messages, ct);
+
+        // 3. 构建 ChatOptions（输出合并后的完整工具列表）
+        var chatOptions = BuildChatOptions(contextInjection, out var allTools);
 
         // 4. 工具调用循环（流式版本）
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
@@ -142,7 +166,9 @@ public class AgentExecutor
 
                 finishReason = update.FinishReason ?? finishReason;
 
-                // 仅当无工具调用时才 yield 文本 chunk
+                // 设计意图：检测到工具调用后停止 yield 文本 chunk。
+                // 工具调用检测前的文本属于 LLM 的"思考"输出，可以安全地流式返回；
+                // 工具调用检测后的中间文本属于函数调用上下文（参数序列化等），不应暴露给客户端。
                 if (update.Text != null && toolCallContents.Count == 0)
                 {
                     yield return new AgentStreamChunk { Text = update.Text };
@@ -161,7 +187,7 @@ public class AgentExecutor
 
                 yield return new AgentStreamChunk
                 {
-                    Usage = usage,
+                    Usage = ConvertUsage(usage),
                     FinishReason = finishReason?.ToString()
                 };
                 yield break;
@@ -171,14 +197,10 @@ public class AgentExecutor
             yield return new AgentStreamChunk { IsToolCall = true };
 
             // 执行工具
-            var toolResults = await ExecuteToolCallsAsync(toolCallContents, ct);
+            var toolResults = await ExecuteToolCallsAsync(toolCallContents, allTools, ct);
             messages.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
 
-            // 记录工具调用指标
-            foreach (var tc in toolCallContents)
-            {
-                AIActivitySource.RecordToolCall(tc.Name);
-            }
+            // 注意: RecordToolCall 已在 ExecuteToolCallsAsync 内部调用，此处不重复记录
         }
 
         // 达到最大迭代次数
@@ -227,9 +249,9 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 构建 ChatOptions
+    /// 构建 ChatOptions，同时输出合并后的完整工具列表
     /// </summary>
-    private ChatOptions BuildChatOptions(ContextInjection? contextInjection)
+    private ChatOptions BuildChatOptions(ContextInjection? contextInjection, out IList<AITool> allTools)
     {
         var chatOptions = new ChatOptions();
 
@@ -249,20 +271,21 @@ public class AgentExecutor
         }
 
         // 合并工具：Options 中的工具 + ContextProvider 注入的工具
-        var allTools = new List<AITool>();
+        var mergedTools = new List<AITool>();
         if (_options.Tools != null)
         {
-            allTools.AddRange(_options.Tools);
+            mergedTools.AddRange(_options.Tools);
         }
         if (contextInjection?.Tools != null)
         {
-            allTools.AddRange(contextInjection.Tools);
+            mergedTools.AddRange(contextInjection.Tools);
         }
-        if (allTools.Count > 0)
+        if (mergedTools.Count > 0)
         {
-            chatOptions.Tools = allTools;
+            chatOptions.Tools = mergedTools;
         }
 
+        allTools = mergedTools;
         return chatOptions;
     }
 
@@ -286,60 +309,119 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 执行工具调用
+    /// 并行执行工具调用（支持中间件管道和增强追踪）
     /// </summary>
-    private async Task<List<FunctionResultContent>> ExecuteToolCallsAsync(List<FunctionCallContent> toolCalls, CancellationToken ct)
+    private async Task<List<FunctionResultContent>> ExecuteToolCallsAsync(List<FunctionCallContent> toolCalls, IList<AITool> allTools, CancellationToken ct)
     {
-        var results = new List<FunctionResultContent>();
-
-        foreach (var toolCall in toolCalls)
+        var tasks = toolCalls.Select(async toolCall =>
         {
-            // 记录工具调用指标
-            AIActivitySource.RecordToolCall(toolCall.Name);
-
-            // 查找工具
-            var tool = FindTool(toolCall.Name);
+            // 从合并后的完整工具列表中查找（包含 ContextProvider 注入的工具）
+            var tool = FindTool(toolCall.Name, allTools);
             if (tool == null)
             {
-                results.Add(new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found"));
-                continue;
+                return new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found");
             }
+
+            // 构建参数摘要（用于追踪，截取前 200 字符避免大参数污染 trace）
+            var argSummary = toolCall.Arguments is { Count: > 0 }
+                ? string.Join(", ", toolCall.Arguments.Select(kv => $"{kv.Key}={Truncate(kv.Value?.ToString(), 50)}"))
+                : null;
+            if (argSummary?.Length > 200) argSummary = argSummary[..200] + "...";
 
             try
             {
-                using var activity = AIActivitySource.StartToolActivity(toolCall.Name);
+                using var activity = AIActivitySource.StartToolActivity(toolCall.Name, argumentSummary: argSummary);
+                var sw = Stopwatch.StartNew();
 
-                // 执行工具（AIFunction 支持直接调用）
-                if (tool is AIFunction aiFunction)
+                // 构建核心执行委托
+                Func<Task<object?>> coreExecution = async () =>
                 {
+                    if (tool is not AIFunction aiFunction)
+                    {
+                        throw new InvalidOperationException($"Tool '{toolCall.Name}' is not invocable");
+                    }
+
                     var args = toolCall.Arguments is null ? null : new AIFunctionArguments(toolCall.Arguments);
-                    var result = await aiFunction.InvokeAsync(args, ct);
-                    results.Add(new FunctionResultContent(toolCall.CallId, result));
+                    return await aiFunction.InvokeAsync(args, ct).AsTask()
+                        .WaitAsync(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds), ct);
+                };
 
-                    AIActivitySource.CompleteActivity(activity);
-                }
-                else
-                {
-                    results.Add(new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' is not invocable"));
-                }
+                // 通过中间件管道执行
+                var result = await ExecuteWithMiddlewareAsync(toolCall, coreExecution, ct);
+
+                sw.Stop();
+                var resultSummary = Truncate(result?.ToString(), 200);
+                AIActivitySource.RecordToolCallDetailed(toolCall.Name, sw.Elapsed.TotalSeconds, resultSummary: resultSummary);
+                AIActivitySource.CompleteToolActivity(activity, sw.Elapsed.TotalSeconds, resultSummary);
+
+                return new FunctionResultContent(toolCall.CallId, result);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // 传播取消信号，不吞掉
+            }
+            catch (TimeoutException)
+            {
+                return new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' timed out after {_options.ToolTimeoutSeconds} seconds");
             }
             catch (Exception ex)
             {
-                results.Add(new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}"));
+                AIActivitySource.RecordToolCallDetailed(toolCall.Name, 0, isSuccess: false);
+                return new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}");
             }
-        }
+        });
 
-        return results;
+        var results = await Task.WhenAll(tasks);
+        return [.. results];
     }
 
     /// <summary>
-    /// 查找工具
+    /// 通过中间件管道执行工具调用
     /// </summary>
-    private AITool? FindTool(string name)
+    private async Task<object?> ExecuteWithMiddlewareAsync(FunctionCallContent toolCall, Func<Task<object?>> coreExecution, CancellationToken ct)
     {
-        if (_options.Tools == null) return null;
+        var middlewares = _options.Middlewares;
+        if (middlewares == null || middlewares.Count == 0)
+        {
+            return await coreExecution();
+        }
 
-        foreach (var tool in _options.Tools)
+        // 构建中间件上下文
+        var context = new ToolExecutionContext
+        {
+            ToolName = toolCall.Name,
+            CallId = toolCall.CallId,
+            Arguments = toolCall.Arguments,
+            CancellationToken = ct
+        };
+
+        // 构建洋葱模型调用链（从最后一个中间件向第一个包装）
+        var pipeline = coreExecution;
+        for (var i = middlewares.Count - 1; i >= 0; i--)
+        {
+            var middleware = middlewares[i];
+            var next = pipeline;
+            pipeline = () => middleware.InvokeAsync(context, next);
+        }
+
+        return await pipeline();
+    }
+
+    /// <summary>
+    /// 截取字符串（用于追踪摘要）
+    /// </summary>
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (value == null || value.Length <= maxLength) return value;
+        return value[..maxLength] + "...";
+    }
+
+    /// <summary>
+    /// 从合并后的完整工具列表中查找工具
+    /// </summary>
+    private static AITool? FindTool(string name, IList<AITool> allTools)
+    {
+        foreach (var tool in allTools)
         {
             if (string.Equals(tool.Name, name, StringComparison.OrdinalIgnoreCase))
             {
@@ -348,6 +430,20 @@ public class AgentExecutor
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 将 MEAI UsageDetails 转换为 TokenUsageDto（引擎层出口转换）
+    /// </summary>
+    private static TokenUsageDto? ConvertUsage(UsageDetails? usage)
+    {
+        if (usage == null) return null;
+        return new TokenUsageDto
+        {
+            PromptTokens = (int)(usage.InputTokenCount ?? 0),
+            CompletionTokens = (int)(usage.OutputTokenCount ?? 0),
+            TotalTokens = (int)(usage.TotalTokenCount ?? 0)
+        };
     }
 
     /// <summary>

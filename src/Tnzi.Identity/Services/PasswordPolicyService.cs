@@ -193,4 +193,81 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
         return latestHistory?.CreationTime;
     }
 
+    public PasswordStrengthResult EvaluatePasswordStrength(string password)
+    {
+        var result = new PasswordStrengthResult();
+
+        if (string.IsNullOrEmpty(password))
+        {
+            result.Score = 0;
+            result.Level = PasswordStrengthLevel.VeryWeak;
+            result.MeetsPolicy = false;
+            result.Suggestions.Add("Password cannot be empty");
+            return result;
+        }
+
+        var score = 0;
+        var options = _passwordPolicyOptions;
+
+        // 长度评分（最高30分）
+        var lengthScore = Math.Min(password.Length * 3, 30);
+        score += lengthScore;
+
+        // 字符类型评分（每类最高10分）
+        var hasUppercase = password.Any(char.IsUpper);
+        var hasLowercase = password.Any(char.IsLower);
+        var hasDigit = password.Any(char.IsDigit);
+        var hasSpecialChar = password.Any(ch => !char.IsLetterOrDigit(ch));
+
+        if (hasUppercase) score += 10;
+        if (hasLowercase) score += 10;
+        if (hasDigit) score += 10;
+        if (hasSpecialChar) score += 10;
+
+        // 复杂度奖励（最高20分）
+        var charTypeCount = (hasUppercase ? 1 : 0) + (hasLowercase ? 1 : 0) + (hasDigit ? 1 : 0) + (hasSpecialChar ? 1 : 0);
+        if (charTypeCount >= 3) score += 10;
+        if (charTypeCount >= 4) score += 5;
+        if (password.Length >= 12) score += 5;
+
+        // 扣分项：重复字符
+        var distinctRatio = (double)password.Distinct().Count() / password.Length;
+        if (distinctRatio < 0.5) score -= 10;
+
+        result.Score = Math.Clamp(score, 0, 100);
+
+        // 映射等级
+        result.Level = result.Score switch
+        {
+            < 20 => PasswordStrengthLevel.VeryWeak,
+            < 40 => PasswordStrengthLevel.Weak,
+            < 60 => PasswordStrengthLevel.Fair,
+            < 80 => PasswordStrengthLevel.Strong,
+            _ => PasswordStrengthLevel.VeryStrong
+        };
+
+        // 生成改进建议
+        if (password.Length < options.MinLength)
+            result.Suggestions.Add($"Use at least {options.MinLength} characters");
+        else if (password.Length < 12)
+            result.Suggestions.Add("Consider using 12 or more characters for better security");
+
+        if (!hasUppercase)
+            result.Suggestions.Add("Add uppercase letters (A-Z)");
+        if (!hasLowercase)
+            result.Suggestions.Add("Add lowercase letters (a-z)");
+        if (!hasDigit)
+            result.Suggestions.Add("Add numbers (0-9)");
+        if (!hasSpecialChar)
+            result.Suggestions.Add("Add special characters (!@#$%^&*)");
+
+        if (distinctRatio < 0.5)
+            result.Suggestions.Add("Avoid repeating characters");
+
+        // 策略合规检查（复用现有验证逻辑）
+        result.MeetsPolicy = ValidatePasswordStrength(password) == null;
+
+        return result;
+    }
+
 }

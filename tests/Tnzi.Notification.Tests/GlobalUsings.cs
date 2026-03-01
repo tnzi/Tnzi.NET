@@ -28,6 +28,7 @@ global using Tnzi.Notification.Services;
 global using Tnzi.Results;
 global using Tnzi.Template;
 global using Tnzi.Template.Entities;
+global using Tnzi.Template.Models;
 global using Tnzi.Template.Services;
 global using Tnzi.TestBase;
 global using Xunit;

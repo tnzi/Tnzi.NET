@@ -8,6 +8,9 @@ namespace Tnzi.Domain.Specifications;
 public abstract class Specification<TEntity> : ISpecification<TEntity>
 {
     private Func<TEntity, bool>? _compiled;
+    private readonly List<OrderByExpression<TEntity>> _orderByExpressions = [];
+    private readonly List<Expression<Func<TEntity, object>>> _includeExpressions = [];
+    private (int Skip, int Take)? _paging;
 
     /// <summary>
     /// 将规范转换为表达式
@@ -22,6 +25,63 @@ public abstract class Specification<TEntity> : ISpecification<TEntity>
         _compiled ??= ToExpression().Compile();
         return _compiled(entity);
     }
+
+    /// <summary>
+    /// 获取排序表达式列表
+    /// </summary>
+    public IReadOnlyList<OrderByExpression<TEntity>> OrderByExpressions => _orderByExpressions;
+
+    /// <summary>
+    /// 获取 Include 表达式列表
+    /// </summary>
+    public IReadOnlyList<Expression<Func<TEntity, object>>> IncludeExpressions => _includeExpressions;
+
+    /// <summary>
+    /// 获取分页参数（null 表示不分页）
+    /// </summary>
+    public (int Skip, int Take)? Paging => _paging;
+
+    #region Fluent Builder Methods
+
+    /// <summary>
+    /// 添加升序排序
+    /// </summary>
+    protected Specification<TEntity> OrderBy(Expression<Func<TEntity, object>> keySelector)
+    {
+        _orderByExpressions.Add(new OrderByExpression<TEntity>(keySelector));
+        return this;
+    }
+
+    /// <summary>
+    /// 添加降序排序
+    /// </summary>
+    protected Specification<TEntity> OrderByDescending(Expression<Func<TEntity, object>> keySelector)
+    {
+        _orderByExpressions.Add(new OrderByExpression<TEntity>(keySelector, Descending: true));
+        return this;
+    }
+
+    /// <summary>
+    /// 添加 Include 导航属性
+    /// </summary>
+    protected Specification<TEntity> Include(Expression<Func<TEntity, object>> includeExpression)
+    {
+        _includeExpressions.Add(includeExpression);
+        return this;
+    }
+
+    /// <summary>
+    /// 设置分页参数
+    /// </summary>
+    protected Specification<TEntity> WithPaging(int skip, int take)
+    {
+        _paging = (skip, take);
+        return this;
+    }
+
+    #endregion
+
+    #region Combination Operators
 
     /// <summary>
     /// AND操作：组合两个规范
@@ -70,6 +130,8 @@ public abstract class Specification<TEntity> : ISpecification<TEntity>
     {
         return new NotSpecification<TEntity>(this);
     }
+
+    #endregion
 }
 
 /// <summary>

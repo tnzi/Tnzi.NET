@@ -92,13 +92,13 @@ public class LinkOAuthDto
     /// 提供者名称
     /// </summary>
     [Required]
-    public string Provider { get; set; } = string.Empty;
+    public string Provider { get; set; } = null!;
 
     /// <summary>
     /// 提供者用户ID
     /// </summary>
     [Required]
-    public string ProviderKey { get; set; } = string.Empty;
+    public string ProviderKey { get; set; } = null!;
 
     /// <summary>
     /// 显示名称

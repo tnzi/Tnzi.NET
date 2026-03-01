@@ -33,4 +33,24 @@ public abstract class ChatAdminControllerBase : ApiAdminControllerBase
         var result = await MessageService.AdminDeleteAsync(id);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 批量删除消息
+    /// </summary>
+    [HttpPost("batch-delete")]
+    public virtual async Task<ApiResult<int>> BatchDelete([FromBody] List<Guid> ids)
+    {
+        var result = await MessageService.AdminBatchDeleteAsync(ids);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取消息统计
+    /// </summary>
+    [HttpGet("statistics")]
+    public virtual async Task<ApiResult<ChatStatisticsDto>> GetStatistics([FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
+    {
+        var result = await MessageService.GetStatisticsAsync(startDate, endDate);
+        return result.ToApiResult();
+    }
 }

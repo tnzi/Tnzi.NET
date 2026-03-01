@@ -10,8 +10,10 @@ internal static class AuditPropertyHelper
     /// <summary>
     /// 应用审计属性
     /// </summary>
-    public static void ApplyAuditProperties(DbContext dbContext, ICurrentUser currentUser, ICurrentTenant? currentTenant)
+    public static void ApplyAuditProperties(DbContext dbContext, ICurrentUser currentUser, ICurrentTenant? currentTenant, TimeProvider? timeProvider = null)
     {
+        var utcNow = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
+
         foreach (var entry in dbContext.ChangeTracker.Entries())
         {
             switch (entry.State)
@@ -20,7 +22,7 @@ internal static class AuditPropertyHelper
                     IdGenerationHelper.ApplyAutoId(dbContext, entry);
                     if (entry.Entity is IHasCreationTime hasCreationTime && hasCreationTime.CreationTime == default)
                     {
-                        hasCreationTime.CreationTime = DateTime.UtcNow;
+                        hasCreationTime.CreationTime = utcNow;
                     }
                     if (entry.Entity is IHasCreator hasCreator && hasCreator.CreatorId == null)
                     {
@@ -30,16 +32,24 @@ internal static class AuditPropertyHelper
                     {
                         multiTenant.TenantId = currentTenant?.Id ?? currentUser?.TenantId;
                     }
+                    if (entry.Entity is IConcurrencyStamp addedConcurrency)
+                    {
+                        addedConcurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+                    }
                     break;
 
                 case EntityState.Modified:
                     if (entry.Entity is IHasModificationTime hasModTime)
                     {
-                        hasModTime.LastModificationTime = DateTime.UtcNow;
+                        hasModTime.LastModificationTime = utcNow;
                     }
                     if (entry.Entity is IHasModifier hasModifier)
                     {
                         hasModifier.LastModifierId = currentUser?.Id;
+                    }
+                    if (entry.Entity is IConcurrencyStamp modifiedConcurrency)
+                    {
+                        modifiedConcurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
                     }
                     break;
 
@@ -51,16 +61,20 @@ internal static class AuditPropertyHelper
                         if (entry.Entity is IHasDeleter hasDeleter)
                         {
                             hasDeleter.DeleterId = currentUser?.Id;
-                            hasDeleter.DeletionTime = DateTime.UtcNow;
+                            hasDeleter.DeletionTime = utcNow;
                         }
                         // 软删除也要更新修改时间和修改人
                         if (entry.Entity is IHasModificationTime hasModTimeOnDelete)
                         {
-                            hasModTimeOnDelete.LastModificationTime = DateTime.UtcNow;
+                            hasModTimeOnDelete.LastModificationTime = utcNow;
                         }
                         if (entry.Entity is IHasModifier hasModifierOnDelete)
                         {
                             hasModifierOnDelete.LastModifierId = currentUser?.Id;
+                        }
+                        if (entry.Entity is IConcurrencyStamp deletedConcurrency)
+                        {
+                            deletedConcurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
                         }
                     }
                     break;

@@ -23,17 +23,20 @@ public abstract class TnziDbContext<TDbContext> : DbContext
     protected ICurrentUser CurrentUser { get; }
     protected ICurrentTenant? CurrentTenant { get; }
     protected IDataFilterManager? DataFilterManager { get; }
+    protected TimeProvider? TimeProvider { get; }
 
     public TnziDbContext(
         DbContextOptions<TDbContext> options,
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant = null,
-        IDataFilterManager? dataFilterManager = null)
+        IDataFilterManager? dataFilterManager = null,
+        TimeProvider? timeProvider = null)
         : base(options)
     {
         CurrentUser = Check.NotNull(currentUser);
         CurrentTenant = currentTenant;
         DataFilterManager = dataFilterManager;
+        TimeProvider = timeProvider;
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -113,12 +116,13 @@ public abstract class TnziDbContext<TDbContext> : DbContext
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        // 使用辅助类处理通用的保存逻辑（审计、文件追踪、事务等）
+        // 使用辅助类处理通用的保存逻辑（审计、文件追踪、领域事件、事务等）
         return await TnziDbContextHelper.SaveChangesAsync(
             this,
             base.SaveChangesAsync,
             CurrentUser,
             CurrentTenant,
-            cancellationToken);
+            cancellationToken,
+            TimeProvider);
     }
 }

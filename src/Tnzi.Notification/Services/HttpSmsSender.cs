@@ -87,7 +87,7 @@ public class HttpSmsSender : ISmsSender
         // 构建Basic Auth Header（使用HttpRequestMessage避免修改HttpClient的DefaultRequestHeaders）
         var authBytes = Encoding.UTF8.GetBytes($"{accountSid}:{authToken}");
         var authHeader = Convert.ToBase64String(authBytes);
-        var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
         {
             Content = formContent
         };
@@ -107,14 +107,9 @@ public class HttpSmsSender : ISmsSender
                 _logger.LogInformation("SMS sent via Twilio HTTP to {PhoneNumber}, Status: {StatusCode}, SID: {MessageSid}",
                     phoneNumber, response.StatusCode, messageSid);
 
-                if (!string.IsNullOrWhiteSpace(messageSid))
-                {
-                    return SendResult.CreateSuccess(messageSid);
-                }
-                else
-                {
-                    return SendResult.CreateFailure("Twilio API returned empty message SID");
-                }
+                return !string.IsNullOrWhiteSpace(messageSid)
+                    ? SendResult.CreateSuccess(messageSid)
+                    : SendResult.CreateFailure("Twilio API returned empty message SID");
             }
             else
             {
@@ -125,7 +120,6 @@ public class HttpSmsSender : ISmsSender
         }
         catch (Exception ex)
         {
-            // 未知异常使用Error级别
             _logger.LogError(ex, "Failed to send SMS via Twilio HTTP to {PhoneNumber}", phoneNumber);
             return SendResult.CreateFailure(ex.Message);
         }
@@ -172,7 +166,7 @@ public class HttpSmsSender : ISmsSender
         // 构建Basic Auth Header（使用HttpRequestMessage避免修改HttpClient的DefaultRequestHeaders）
         var authBytes = Encoding.UTF8.GetBytes($"{authId}:{authToken}");
         var authHeader = Convert.ToBase64String(authBytes);
-        var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
         {
             Content = content
         };

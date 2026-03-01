@@ -46,15 +46,8 @@ public class DapperDatabaseProviderFactory
         // 使用统一的检测器
         if (DatabaseProviderDetector.TryDetectFromConnectionString(connectionString, out var provider, out _))
         {
-            try
-            {
-                return Create(provider);
-            }
-            catch (NotSupportedException) when (provider == DatabaseProvider.Sqlite)
-            {
-                // SQLite 在 Dapper 中不支持，使用默认值
-                return new SqlServerProvider();
-            }
+            // 如果检测到 SQLite，直接抛出（Dapper 不支持 SQLite）
+            return Create(provider);
         }
 
         // 如果检测失败，默认使用 SQL Server

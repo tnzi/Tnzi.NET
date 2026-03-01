@@ -259,6 +259,34 @@ public class S3Storage : IFileStorage, IDisposable
         return (response.ResponseStream, start, actualEnd, totalLength);
     }
 
+    /// <summary>
+    /// Generate a presigned URL for direct upload or temporary public download access.
+    /// </summary>
+    /// <param name="filePath">S3 object key</param>
+    /// <param name="expiresInSeconds">URL expiration in seconds</param>
+    /// <param name="httpMethod">HTTP method: GET for download, PUT for upload</param>
+    /// <returns>Presigned URL</returns>
+    public Task<string?> GetPresignedUrlAsync(string filePath, int expiresInSeconds = 3600, string httpMethod = "GET")
+    {
+        if (string.IsNullOrEmpty(filePath))
+            return Task.FromResult<string?>(null);
+
+        var verb = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase)
+            ? HttpVerb.PUT
+            : HttpVerb.GET;
+
+        var request = new GetPreSignedUrlRequest
+        {
+            BucketName = _options.BucketName,
+            Key = filePath,
+            Verb = verb,
+            Expires = DateTime.UtcNow.AddSeconds(expiresInSeconds)
+        };
+
+        var url = _s3Client.GetPreSignedURL(request);
+        return Task.FromResult<string?>(url);
+    }
+
     public void Dispose()
     {
         _s3Client?.Dispose();

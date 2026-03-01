@@ -157,6 +157,125 @@ public class UserLoginStatisticsDto
 }
 
 /// <summary>
+/// Daily login trend data point
+/// </summary>
+public class LoginTrendItem
+{
+    /// <summary>
+    /// Date (UTC, date only)
+    /// </summary>
+    public DateTime Date { get; set; }
+
+    /// <summary>
+    /// Total login attempts on this day
+    /// </summary>
+    public int TotalLogins { get; set; }
+
+    /// <summary>
+    /// Successful logins on this day
+    /// </summary>
+    public int SuccessfulLogins { get; set; }
+
+    /// <summary>
+    /// Failed logins on this day
+    /// </summary>
+    public int FailedLogins { get; set; }
+
+    /// <summary>
+    /// Number of unique users who attempted login on this day
+    /// </summary>
+    public int UniqueUsers { get; set; }
+}
+
+/// <summary>
+/// User export DTO (CSV export format)
+/// </summary>
+public class UserExportDto
+{
+    public Guid Id { get; set; }
+    public string? UserName { get; set; }
+    public string? Email { get; set; }
+    public string? PhoneNumber { get; set; }
+    public string? NickName { get; set; }
+    public bool IsActive { get; set; }
+    public bool EmailConfirmed { get; set; }
+    public bool PhoneNumberConfirmed { get; set; }
+    public DateTime CreationTime { get; set; }
+    public DateTime? LastModificationTime { get; set; }
+}
+
+/// <summary>
+/// User import DTO (CSV import format)
+/// </summary>
+public class UserImportDto
+{
+    /// <summary>
+    /// User name (required)
+    /// </summary>
+    [Required]
+    [MaxLength(256)]
+    public string UserName { get; set; } = null!;
+
+    /// <summary>
+    /// Email (required)
+    /// </summary>
+    [Required]
+    [EmailAddress]
+    [MaxLength(256)]
+    public string Email { get; set; } = null!;
+
+    /// <summary>
+    /// Phone number (optional)
+    /// </summary>
+    [MaxLength(32)]
+    public string? PhoneNumber { get; set; }
+
+    /// <summary>
+    /// Password (required for new users)
+    /// </summary>
+    [Required]
+    [MaxLength(128)]
+    public string Password { get; set; } = null!;
+
+    /// <summary>
+    /// Nick name (optional)
+    /// </summary>
+    [MaxLength(128)]
+    public string? NickName { get; set; }
+}
+
+/// <summary>
+/// User import result
+/// </summary>
+public class UserImportResult
+{
+    /// <summary>
+    /// Total rows processed
+    /// </summary>
+    public int TotalRows { get; set; }
+
+    /// <summary>
+    /// Successfully imported count
+    /// </summary>
+    public int SuccessCount { get; set; }
+
+    /// <summary>
+    /// Failed count
+    /// </summary>
+    public int FailedCount { get; set; }
+
+    /// <summary>
+    /// Skipped (already exists) count
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>
+    /// Error details per row (row number -> error message)
+    /// </summary>
+    public Dictionary<int, string> Errors { get; set; } = new();
+}
+
+/// <summary>
 /// 异常登录检测结果DTO
 /// </summary>
 public class AbnormalLoginDto
@@ -174,5 +293,5 @@ public class AbnormalLoginDto
     /// <summary>
     /// 最近登录记录
     /// </summary>
-    public List<LoginLog> RecentLogins { get; set; } = new();
+    public List<LoginLogDto> RecentLogins { get; set; } = new();
 }

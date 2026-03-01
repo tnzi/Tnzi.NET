@@ -188,11 +188,12 @@ public class LoggingModule : TnziInfrastructureModule
                 app.UseSerilogRequestLogging(opts =>
                 {
                     opts.MessageTemplate = options.RequestLogging.MessageTemplate;
-                    var slowThreshold = options.RequestLogging.SlowRequestThresholdSeconds;
+                    // elapsed 参数单位为毫秒，SlowRequestThresholdSeconds 单位为秒，需转换
+                    var slowThresholdMs = options.RequestLogging.SlowRequestThresholdSeconds * 1000;
                     opts.GetLevel = (httpContext, elapsed, ex) =>
                         ex != null
                             ? LogEventLevel.Error
-                            : elapsed > slowThreshold
+                            : elapsed > slowThresholdMs
                                 ? LogEventLevel.Warning
                                 : options.RequestLogging.Level;
                 });

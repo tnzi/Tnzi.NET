@@ -7,8 +7,6 @@ public class MessageReplyConfiguration : EntityTypeConfigurationBase<MessageRepl
 {
     public override void Configure(EntityTypeBuilder<MessageReply> builder)
     {
-        builder.HasKey(mr => mr.Id);
-
         builder.Property(mr => mr.Content).IsRequired().HasMaxLength(4000);
 
         builder.HasIndex(mr => mr.BelongMessageId);

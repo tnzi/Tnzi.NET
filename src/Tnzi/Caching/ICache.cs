@@ -149,8 +149,9 @@ public interface ICache
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取缓存值，如果不存在则使用工厂方法创建并缓存
-    /// 默认实现使用 GetAsync + SetAsync，具体实现可重写以提供原子操作
+    /// 获取缓存值，如果不存在则使用工厂方法创建并缓存。
+    /// 默认实现使用 per-key 锁防止缓存击穿（并发请求只执行一次 factory）。
+    /// 具体实现可重写以提供更高效的原子操作。
     /// </summary>
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
@@ -164,12 +165,29 @@ public interface ICache
         if (value is not null)
             return value;
 
-        value = await factory();
-        if (value is not null)
-            await SetAsync(key, value, expiration, cancellationToken);
+        // Per-key 锁防止缓存击穿
+        await using (await CacheStampedeGuard.Instance.LockAsync(key, cancellationToken))
+        {
+            // Double-check: 另一个线程可能已经填充了缓存
+            value = await GetAsync<T>(key, cancellationToken);
+            if (value is not null)
+                return value;
+
+            value = await factory();
+            if (value is not null)
+                await SetAsync(key, value, expiration, cancellationToken);
+        }
 
         return value;
     }
+}
+
+/// <summary>
+/// 缓存击穿防护的共享锁实例
+/// </summary>
+internal static class CacheStampedeGuard
+{
+    internal static readonly KeyedAsyncLock Instance = new();
 }
 
 

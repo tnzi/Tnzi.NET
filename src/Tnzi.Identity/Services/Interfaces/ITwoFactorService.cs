@@ -49,7 +49,7 @@ public interface ITwoFactorService
     /// <param name="userId">用户ID</param>
     /// <param name="input">2FA配置</param>
     /// <returns>操作结果</returns>
-    Task<Result<string>> EnableTwoFactorAsync(Guid userId, Tnzi.Identity.Dtos.EnableTwoFactorDto input);
+    Task<Result<string>> EnableTwoFactorAsync(Guid userId, EnableTwoFactorDto input);
 
     /// <summary>
     /// 获取 TOTP 设置信息（生成密钥和二维码 URI）

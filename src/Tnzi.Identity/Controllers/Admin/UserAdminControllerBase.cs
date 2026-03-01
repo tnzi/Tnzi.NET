@@ -269,4 +269,38 @@ public abstract class UserAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// Export users as CSV file
+    /// </summary>
+    [HttpPost("export/csv")]
+    public virtual async Task<IActionResult> ExportCsv([FromBody] UserListQueryDto? query = null)
+    {
+        var result = await UserService.ExportUsersCsvAsync(query);
+        if (!result.Succeeded)
+        {
+            return new BadRequestObjectResult(result.Message);
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(result.Data!);
+        var fileName = $"users_export_{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
+        return File(bytes, "text/csv", fileName);
+    }
+
+    /// <summary>
+    /// Import users from CSV file
+    /// </summary>
+    [HttpPost("import/csv")]
+    public virtual async Task<ApiResult<UserImportResult>> ImportCsv(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest<UserImportResult>("CSV file is required");
+        }
+
+        using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8);
+        var csvContent = await reader.ReadToEndAsync();
+
+        var result = await UserService.ImportUsersCsvAsync(csvContent);
+        return result.ToApiResult();
+    }
 }

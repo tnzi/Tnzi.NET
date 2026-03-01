@@ -6,6 +6,7 @@ namespace Tnzi.Storage.Controllers;
 /// </summary>
 [Route("files")]
 [ApiAuthorize]
+[ApiExplorerSettings(GroupName = "user")]
 public abstract class StorageControllerBase : ApiControllerBase
 {
     protected readonly IFileStorageService FileStorageService;
@@ -206,6 +207,16 @@ public abstract class StorageControllerBase : ApiControllerBase
     public virtual async Task<ApiResult<string>> GetUrl(Guid id, [FromQuery] int? expiresIn = null)
     {
         var result = await FileStorageService.GetUrlAsync(id, expiresIn);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Generate a presigned URL for temporary public access
+    /// </summary>
+    [HttpGet("{id:guid}/presigned-url")]
+    public virtual async Task<ApiResult<string>> GetPresignedUrl(Guid id, [FromQuery] int expiresInSeconds = 3600)
+    {
+        var result = await FileStorageService.GetPresignedUrlAsync(id, expiresInSeconds, "GET");
         return result.ToApiResult();
     }
 

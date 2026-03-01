@@ -363,7 +363,8 @@ public class ExceptionHandlingMiddlewareTests
         var responseBody = await reader.ReadToEndAsync();
         // 当ShowDetailsInDevelopment为false时，应该使用通用错误消息
         var jsonDoc = JsonDocument.Parse(responseBody);
-        Assert.True(jsonDoc.RootElement.TryGetProperty("Message", out var messageElement));
+        // TnziJsonDefaults.Options 使用 camelCase 命名策略
+        Assert.True(jsonDoc.RootElement.TryGetProperty("message", out var messageElement));
         var message = messageElement.GetString();
         Assert.NotNull(message);
         // 应该不包含详细的异常信息
@@ -399,7 +400,8 @@ public class ExceptionHandlingMiddlewareTests
         using var reader = new StreamReader(context.Response.Body);
         var responseBody = await reader.ReadToEndAsync();
         var jsonDoc = JsonDocument.Parse(responseBody);
-        Assert.False(jsonDoc.RootElement.TryGetProperty("RequestId", out _));
+        // TnziJsonDefaults.Options 使用 camelCase + WhenWritingNull，null 属性不会出现
+        Assert.False(jsonDoc.RootElement.TryGetProperty("requestId", out _));
     }
 
     [Fact]
@@ -439,7 +441,8 @@ public class ExceptionHandlingMiddlewareTests
         using var reader = new StreamReader(context.Response.Body);
         var responseBody = await reader.ReadToEndAsync();
         var jsonDoc = JsonDocument.Parse(responseBody);
-        Assert.True(jsonDoc.RootElement.TryGetProperty("RequestId", out var requestIdElement));
+        // TnziJsonDefaults.Options 使用 camelCase 命名策略
+        Assert.True(jsonDoc.RootElement.TryGetProperty("requestId", out var requestIdElement));
         Assert.Equal(context.TraceIdentifier, requestIdElement.GetString());
     }
 
@@ -481,7 +484,8 @@ public class ExceptionHandlingMiddlewareTests
         using var reader = new StreamReader(context.Response.Body);
         var responseBody = await reader.ReadToEndAsync();
         var jsonDoc = JsonDocument.Parse(responseBody);
-        Assert.True(jsonDoc.RootElement.TryGetProperty("ContextData", out var contextDataElement));
+        // TnziJsonDefaults.Options 使用 camelCase 命名策略
+        Assert.True(jsonDoc.RootElement.TryGetProperty("contextData", out var contextDataElement));
         Assert.True(contextDataElement.TryGetProperty("UserId", out var userIdElement));
         Assert.Equal("123", userIdElement.GetString());
     }
@@ -521,7 +525,7 @@ public class ExceptionHandlingMiddlewareTests
         using var reader = new StreamReader(context.Response.Body);
         var responseBody = await reader.ReadToEndAsync();
         var jsonDoc = JsonDocument.Parse(responseBody);
-        Assert.False(jsonDoc.RootElement.TryGetProperty("ContextData", out _));
+        Assert.False(jsonDoc.RootElement.TryGetProperty("contextData", out _));
     }
 
     [Fact]
@@ -555,7 +559,8 @@ public class ExceptionHandlingMiddlewareTests
         using var reader = new StreamReader(context.Response.Body);
         var responseBody = await reader.ReadToEndAsync();
         var jsonDoc = JsonDocument.Parse(responseBody);
-        Assert.True(jsonDoc.RootElement.TryGetProperty("IsRetryable", out var isRetryableElement));
+        // TnziJsonDefaults.Options 使用 camelCase 命名策略
+        Assert.True(jsonDoc.RootElement.TryGetProperty("isRetryable", out var isRetryableElement));
         Assert.True(isRetryableElement.GetBoolean());
     }
 

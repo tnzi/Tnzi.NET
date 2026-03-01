@@ -8,7 +8,12 @@ namespace Tnzi.AspNetCore.Mvc.Conventions;
 /// </summary>
 public class ConditionalControllerProvider : IApplicationModelProvider
 {
-    private readonly IServiceCollection _services;
+    /// <summary>
+    /// 已注册的服务类型集合（在构造时快照，避免长期持有整个 IServiceCollection）
+    /// </summary>
+    private readonly HashSet<Type> _registeredServiceTypes;
+    private readonly HashSet<Type> _registeredGenericDefinitions;
+    private readonly List<(Type ServiceType, Type? ImplementationType, object? ImplementationInstance)> _serviceEntries;
 
     /// <summary>
     /// 执行顺序，在ApiControllerRouteProvider之后执行
@@ -22,7 +27,14 @@ public class ConditionalControllerProvider : IApplicationModelProvider
     /// <param name="services">服务集合，用于检查依赖是否已注册</param>
     public ConditionalControllerProvider(IServiceCollection services)
     {
-        _services = Check.NotNull(services);
+        Check.NotNull(services);
+
+        // 快照服务类型，避免长期持有整个 IServiceCollection
+        _registeredServiceTypes = new HashSet<Type>(services.Select(s => s.ServiceType));
+        _registeredGenericDefinitions = new HashSet<Type>(
+            services.Where(s => s.ServiceType.IsGenericType)
+                    .Select(s => s.ServiceType.GetGenericTypeDefinition()));
+        _serviceEntries = services.Select(s => (s.ServiceType, s.ImplementationType, s.ImplementationInstance)).ToList();
     }
 
     /// <summary>
@@ -116,8 +128,8 @@ public class ConditionalControllerProvider : IApplicationModelProvider
     /// <returns>如果服务已注册则返回true，否则返回false</returns>
     private bool IsServiceRegistered(Type serviceType)
     {
-        // 检查直接注册的服务（完全匹配）
-        if (_services.Any(s => s.ServiceType == serviceType))
+        // 检查直接注册的服务（完全匹配，O(1) HashSet 查找）
+        if (_registeredServiceTypes.Contains(serviceType))
         {
             return true;
         }
@@ -126,37 +138,31 @@ public class ConditionalControllerProvider : IApplicationModelProvider
         if (serviceType.IsGenericType)
         {
             var genericTypeDefinition = serviceType.GetGenericTypeDefinition();
-            if (_services.Any(s =>
-                s.ServiceType.IsGenericType &&
-                s.ServiceType.GetGenericTypeDefinition() == genericTypeDefinition))
+            if (_registeredGenericDefinitions.Contains(genericTypeDefinition))
             {
                 return true;
             }
         }
 
-        // 检查接口的实现
-        // 在 ASP.NET Core DI 中，如果 ServiceType 是接口，ImplementationType 应该实现该接口
-        // 如果 ServiceType 是类，它可能直接实现了该接口
-        foreach (var service in _services)
+        // 检查接口的实现（使用快照数据）
+        foreach (var (svcType, implType, implInstance) in _serviceEntries)
         {
             // 检查 ServiceType 是否实现了目标接口（当 ServiceType 是类时）
-            if (service.ServiceType != serviceType &&
-                !service.ServiceType.IsInterface &&
-                serviceType.IsAssignableFrom(service.ServiceType))
+            if (svcType != serviceType &&
+                !svcType.IsInterface &&
+                serviceType.IsAssignableFrom(svcType))
             {
                 return true;
             }
 
             // 检查 ImplementationType 是否实现了目标接口
-            if (service.ImplementationType != null &&
-                serviceType.IsAssignableFrom(service.ImplementationType))
+            if (implType != null && serviceType.IsAssignableFrom(implType))
             {
                 return true;
             }
 
             // 检查 ImplementationInstance 是否实现了目标接口
-            if (service.ImplementationInstance != null &&
-                serviceType.IsInstanceOfType(service.ImplementationInstance))
+            if (implInstance != null && serviceType.IsInstanceOfType(implInstance))
             {
                 return true;
             }

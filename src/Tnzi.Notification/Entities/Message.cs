@@ -94,4 +94,10 @@ public class Message : FullAuditedEntity<Guid>
     /// 模板名称（如果使用模板创建）
     /// </summary>
     public string? TemplateName { get; set; }
+
+    /// <summary>
+    /// Scheduled send time (null = send immediately or as queued)
+    /// When set, notification will not be sent until this time
+    /// </summary>
+    public DateTime? ScheduledTime { get; set; }
 }

@@ -50,11 +50,11 @@ public class RoutePrefixConvention : IApplicationModelConvention
                     var existingRoute = selector.AttributeRouteModel.Template ?? string.Empty;
                     
                     // 如果现有路由已经以配置的前缀开头，则不再添加（避免重复）
-                    // _routePrefix 在构造函数中已去除尾部 /，无需再次 TrimEnd
                     var normalizedRoute = existingRoute.TrimStart('/');
+                    var normalizedPrefix = _routePrefix.TrimStart('/');
 
-                    if (normalizedRoute.StartsWith(_routePrefix + "/", StringComparison.OrdinalIgnoreCase) ||
-                        normalizedRoute.Equals(_routePrefix, StringComparison.OrdinalIgnoreCase))
+                    if (normalizedRoute.StartsWith(normalizedPrefix + "/", StringComparison.OrdinalIgnoreCase) ||
+                        normalizedRoute.Equals(normalizedPrefix, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

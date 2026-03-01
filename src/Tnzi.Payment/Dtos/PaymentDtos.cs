@@ -306,6 +306,7 @@ public class PaymentProviderCreateDto
 public class PaymentProviderRefundDto
 {
     public string TradeNo { get; set; } = string.Empty;
+    public string? ExternalTradeNo { get; set; }
     public string RefundNo { get; set; } = string.Empty;
     public decimal RefundAmount { get; set; }
     public string Reason { get; set; } = string.Empty;
@@ -317,6 +318,7 @@ public class PaymentProviderRefundDto
 public class PaymentProviderOrderResult
 {
     public string TradeNo { get; set; } = string.Empty;
+    public string? ExternalTradeNo { get; set; }
     public string? PayParams { get; set; }
     public string? PayUrl { get; set; }
     public DateTime? ExpireTime { get; set; }

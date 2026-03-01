@@ -52,6 +52,5 @@ global using Tnzi.Security.Authorization;
 global using Tnzi.Security.Claims;
 global using Tnzi.Services;
 global using Tnzi.Template;
-global using Tnzi.Template.Entities;
 global using Tnzi.Template.Services;
 global using Tnzi.Utilities;

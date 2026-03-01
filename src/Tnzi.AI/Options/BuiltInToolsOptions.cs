@@ -21,12 +21,12 @@ public class BuiltInToolsOptions
     public bool EnableDateTime { get; set; } = true;
 
     /// <summary>
-    /// 启用数学计算工具
-    /// </summary>
-    public bool EnableMath { get; set; } = true;
-
-    /// <summary>
     /// 启用文本处理工具
     /// </summary>
     public bool EnableText { get; set; } = true;
+
+    /// <summary>
+    /// 启用 Web 搜索工具（需要注册 IWebSearchProvider）
+    /// </summary>
+    public bool EnableWebSearch { get; set; } = true;
 }

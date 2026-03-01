@@ -40,6 +40,12 @@ public class PagedQuery
     /// </summary>
     public string? OrderBy { get; set; }
 
+    /// <summary>
+    /// Dynamic filter group for building query predicates.
+    /// When set, the repository will apply FilterExpressionBuilder to build WHERE clauses.
+    /// </summary>
+    public FilterGroup? Filter { get; set; }
+
     public int Skip => (PageIndex - 1) * PageSize;
     public int Take => PageSize;
 }

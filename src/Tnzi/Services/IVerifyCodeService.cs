@@ -63,6 +63,16 @@ public class VerifyCodeResult
     /// 获取或设置 唯一标识（用于后续验证）
     /// </summary>
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取验证码图片的 Base64 编码字符串
+    /// </summary>
+    public string Base64Image => ImageBytes.Length > 0 ? Convert.ToBase64String(ImageBytes) : string.Empty;
+
+    /// <summary>
+    /// 获取验证码图片的 Data URI（可直接用于 HTML img src）
+    /// </summary>
+    public string DataUri => ImageBytes.Length > 0 ? $"data:image/png;base64,{Base64Image}" : string.Empty;
 }
 
 /// <summary>

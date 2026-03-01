@@ -2,6 +2,8 @@ global using Mapster;
 global using MapsterMapper;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.DependencyInjection;
+global using MockQueryable;
+global using MockQueryable.Moq;
 global using Moq;
 global using Shouldly;
 global using System;

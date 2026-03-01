@@ -7,8 +7,6 @@ public class FunctionModuleConfiguration : EntityTypeConfigurationBase<FunctionM
 {
     public override void Configure(EntityTypeBuilder<FunctionModule> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(e => e.Id);
         builder.Property(e => e.Name).IsRequired().HasMaxLength(200);
         builder.Property(e => e.Code).IsRequired().HasMaxLength(200);
         builder.Property(e => e.Description).HasMaxLength(500);

@@ -5,9 +5,14 @@ namespace Tnzi.System.Services;
 /// </summary>
 public class SettingService : ApplicationService, ISettingService
 {
+    private static readonly DateTime _startTime = DateTime.UtcNow;
+
     private readonly IRepository<Setting, Guid> _settingRepository;
     private readonly ApplicationOptions _applicationOptions;
     private readonly ICache _cache;
+    private readonly IEnumerable<ISettingProvider> _settingProviders;
+    private readonly ITnziApplication? _tnziApplication;
+    private readonly IHostEnvironment? _hostEnvironment;
 
     // 标准配置键常量
     private const string KeyAppName = "App.AppName";
@@ -16,18 +21,24 @@ public class SettingService : ApplicationService, ISettingService
     /// <summary>
     /// 缓存条目，用于区分"不存在"和"值为null"
     /// </summary>
-    internal record SettingCacheEntry(string? Value, bool Exists);
+    private record SettingCacheEntry(string? Value, bool Exists);
 
     public SettingService(
         IServiceProvider serviceProvider,
         IRepository<Setting, Guid> settingRepository,
         IOptions<ApplicationOptions> applicationOptions,
-        ICache cache)
+        ICache cache,
+        IEnumerable<ISettingProvider> settingProviders,
+        ITnziApplication? tnziApplication = null,
+        IHostEnvironment? hostEnvironment = null)
         : base(serviceProvider)
     {
         _settingRepository = Check.NotNull(settingRepository);
         _applicationOptions = Check.NotNull(applicationOptions).Value;
         _cache = Check.NotNull(cache);
+        _settingProviders = Check.NotNull(settingProviders);
+        _tnziApplication = tnziApplication;
+        _hostEnvironment = hostEnvironment;
     }
 
     /// <inheritdoc />
@@ -71,7 +82,7 @@ public class SettingService : ApplicationService, ISettingService
             var setting = await _settingRepository
                 .AsQueryable()
                 .AsNoTracking()
-                .Where(s => !s.IsDeleted)
+                .Where(s => s.Scope == SettingScope.Global)
                 .FirstOrDefaultAsync(s => s.Key == key);
 
             var exists = setting != null;
@@ -118,7 +129,7 @@ public class SettingService : ApplicationService, ISettingService
         {
             var setting = await _settingRepository
                 .AsQueryable()
-                .Where(s => !s.IsDeleted)
+                .Where(s => s.Scope == SettingScope.Global)
                 .FirstOrDefaultAsync(s => s.Key == key, cancellationToken);
 
             if (setting != null)
@@ -144,10 +155,10 @@ public class SettingService : ApplicationService, ISettingService
                 };
                 await _settingRepository.InsertAsync(setting, cancellationToken);
             }
-
-            // 清理缓存
-            await _cache.RemoveAsync($"Setting:{key}");
         });
+
+        // 缓存清理在事务提交后执行，避免事务回滚时缓存已被清理
+        await _cache.RemoveAsync($"Setting:{key}");
 
         LogInformation("Setting updated: {Key}", key);
         return Ok("Setting updated successfully");
@@ -156,12 +167,12 @@ public class SettingService : ApplicationService, ISettingService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<SettingDto>>> GetSettingsAsync(string? group = null)
     {
-        var query = _settingRepository.AsQueryable().AsNoTracking()
-            .Where(s => !s.IsDeleted);
+        var query = _settingRepository.AsQueryable().AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(group))
         {
-            query = query.Where(s => s.Group == group);
+            var groupLower = group.ToLower();
+            query = query.Where(s => s.Group != null && s.Group.ToLower() == groupLower);
         }
 
         var settings = await query
@@ -189,11 +200,10 @@ public class SettingService : ApplicationService, ISettingService
     {
         Check.NotNull(input);
 
-        // 检查键是否已存在
+        // 检查键是否已存在（按 Key + Scope + ScopeId 唯一约束）
         var exists = await _settingRepository
             .AsQueryable()
-            .Where(s => !s.IsDeleted)
-            .AnyAsync(s => s.Key == input.Key);
+            .AnyAsync(s => s.Key == input.Key && s.Scope == input.Scope && s.ScopeId == input.ScopeId);
 
         if (exists)
             return Fail<SettingDto>($"Setting with key '{input.Key}' already exists", 409, ErrorCodes.VALIDATION_ERROR);
@@ -263,18 +273,153 @@ public class SettingService : ApplicationService, ISettingService
             return Fail($"Cannot delete system settings: {string.Join(", ", systemSettings.Select(s => s.Key))}", 403, ErrorCodes.SYSTEM_ERROR);
 
         var count = settings.Count;
+        var settingKeys = settings.Select(s => s.Key).ToList();
 
         await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
             await _settingRepository.DeleteManyAsync(settings);
-
-            foreach (var s in settings)
-            {
-                await _cache.RemoveAsync($"Setting:{s.Key}");
-            }
         });
+
+        // 缓存清理在事务提交后执行，避免事务回滚时缓存已被清理
+        foreach (var key in settingKeys)
+        {
+            await _cache.RemoveAsync($"Setting:{key}");
+        }
 
         LogInformation("Batch deleted {Count} settings", count);
         return Ok($"Deleted {count} settings successfully");
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<string?>> GetSettingValueAsync(string key, string? defaultValue = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return Ok<string?>(defaultValue);
+
+        try
+        {
+            // 按 Priority 降序遍历 provider 链，返回第一个非 null 值
+            foreach (var provider in _settingProviders.OrderByDescending(p => p.Priority))
+            {
+                var value = await provider.GetOrNullAsync(key);
+                if (value != null)
+                    return Ok<string?>(value);
+            }
+
+            return Ok<string?>(defaultValue);
+        }
+        catch (Exception)
+        {
+            LogWarning("Failed to get setting {Key} from provider chain, returning default value", key);
+            return Ok<string?>(defaultValue);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<string?>> GetSettingAsync(string key, SettingScope scope, string? scopeId = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return Ok<string?>(null);
+
+        var setting = await _settingRepository.AsQueryable()
+            .AsNoTracking()
+            .Where(s => s.Key == key && s.Scope == scope && s.ScopeId == scopeId)
+            .FirstOrDefaultAsync();
+
+        return Ok<string?>(setting?.Value);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> SetSettingAsync(string key, string value, SettingScope scope, string? scopeId = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return Fail("Key cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
+
+        await ExecuteInUnitOfWorkAsync(async cancellationToken =>
+        {
+            var setting = await _settingRepository.AsQueryable()
+                .Where(s => s.Key == key && s.Scope == scope && s.ScopeId == scopeId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (setting != null)
+            {
+                setting.Value = value;
+                await _settingRepository.UpdateAsync(setting, cancellationToken);
+            }
+            else
+            {
+                setting = new Setting
+                {
+                    Key = key,
+                    Value = value,
+                    Scope = scope,
+                    ScopeId = scopeId,
+                    Group = "General"
+                };
+                await _settingRepository.InsertAsync(setting, cancellationToken);
+            }
+        });
+
+        // 缓存清理在事务提交后执行
+        await _cache.RemoveAsync($"Setting:{key}");
+
+        return Ok("Setting updated successfully");
+    }
+
+    /// <inheritdoc />
+    public Task<Result<SystemInfoDto>> GetSystemInfoAsync()
+    {
+        var uptime = DateTime.UtcNow - _startTime;
+        var frameworkAssembly = typeof(ITnziApplication).Assembly;
+
+        var info = new SystemInfoDto
+        {
+            AppName = _applicationOptions.AppName,
+            FrameworkVersion = frameworkAssembly.GetName().Version?.ToString() ?? "0.0.0",
+            RuntimeVersion = RuntimeInformation.FrameworkDescription,
+            OperatingSystem = RuntimeInformation.OSDescription,
+            StartTime = _startTime,
+            Uptime = FormatUptime(uptime),
+            Environment = _hostEnvironment?.EnvironmentName ?? "Unknown"
+        };
+
+        if (_tnziApplication != null)
+        {
+            info.LoadedModules = _tnziApplication.Modules.Select(m => new SystemModuleInfoDto
+            {
+                Name = m.Type.Name,
+                Assembly = m.Assembly.GetName().Name ?? string.Empty,
+                IsEnabled = m.IsEnabled,
+                LoadOrder = m.Instance.LoadOrder
+            }).ToList();
+        }
+
+        return Task.FromResult(Ok(info));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<List<SettingGroupDto>>> GetSettingGroupsAsync(CancellationToken cancellationToken = default)
+    {
+        var groups = await _settingRepository.AsQueryable()
+            .AsNoTracking()
+            .GroupBy(s => s.Group ?? "General")
+            .Select(g => new SettingGroupDto
+            {
+                GroupName = g.Key,
+                SettingCount = g.Count()
+            })
+            .OrderBy(g => g.GroupName)
+            .ToListAsync(cancellationToken);
+
+        return Ok(groups);
+    }
+
+    private static string FormatUptime(TimeSpan uptime)
+    {
+        if (uptime.TotalDays >= 1)
+            return $"{(int)uptime.TotalDays}d {uptime.Hours}h {uptime.Minutes}m";
+        if (uptime.TotalHours >= 1)
+            return $"{uptime.Hours}h {uptime.Minutes}m {uptime.Seconds}s";
+        return $"{uptime.Minutes}m {uptime.Seconds}s";
     }
 }

@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// 提供工作流 CRUD、运行等 API 端点，所有方法支持重写
 /// </summary>
 [Route("admin/workflows")]
+[ApiExplorerSettings(GroupName = "ai-admin")]
 public abstract class WorkflowAdminControllerBase : ApiAdminControllerBase
 {
     protected readonly IWorkflowService WorkflowService;
@@ -73,7 +74,9 @@ public abstract class WorkflowAdminControllerBase : ApiAdminControllerBase
     [HttpPost("{id:guid}/run")]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> Run(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
-        var result = await WorkflowService.RunAsync(id, request.Input, request.UserId, cancellationToken);
+        // 管理员可代理但默认用自身 ID
+        var userId = CurrentUser?.Id ?? request.UserId;
+        var result = await WorkflowService.RunAsync(id, request.Input, userId, cancellationToken);
         return result.ToApiResult();
     }
 
@@ -84,21 +87,62 @@ public abstract class WorkflowAdminControllerBase : ApiAdminControllerBase
     [HttpPost("{id:guid}/run/stream")]
     public virtual async Task RunStreaming(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
+        // 管理员可代理但默认用自身 ID
+        var userId = CurrentUser?.Id ?? request.UserId;
         var format = StreamingResponseWriter.NegotiateFormat(Request);
-        StreamingResponseWriter.ConfigureResponse(Response, format);
 
-        await foreach (var result in WorkflowService.RunStreamingAsync(id, request.Input, request.UserId, cancellationToken))
+        var stream = WorkflowService.RunStreamingAsync(id, request.Input, userId, cancellationToken);
+        var enumerator = stream.GetAsyncEnumerator(cancellationToken);
+
+        try
         {
-            var evt = new StreamEvent
+            if (!await enumerator.MoveNextAsync())
             {
-                Delta = result.Output,
-                FinishReason = result.Status == "Completed" ? "stop" : null,
-                IsDone = result.Status == "Completed"
-            };
-            await StreamingResponseWriter.WriteEventAsync(Response, evt, format, cancellationToken);
+                StreamingResponseWriter.ConfigureResponse(Response, format);
+                await StreamingResponseWriter.WriteDoneAsync(Response, format, cancellationToken);
+                return;
+            }
+        }
+        catch (BusinessException)
+        {
+            throw;
         }
 
-        await StreamingResponseWriter.WriteDoneAsync(Response, format, cancellationToken);
+        StreamingResponseWriter.ConfigureResponse(Response, format);
+
+        var firstResult = enumerator.Current;
+        var isCompleted = firstResult.Status == "Completed" || firstResult.Status.StartsWith("PartialFailure", StringComparison.Ordinal);
+        await StreamingResponseWriter.WriteEventAsync(Response, new StreamEvent
+        {
+            Delta = firstResult.Output,
+            FinishReason = isCompleted ? "stop" : null,
+            IsDone = isCompleted
+        }, format, cancellationToken);
+
+        try
+        {
+            while (await enumerator.MoveNextAsync())
+            {
+                var result = enumerator.Current;
+                isCompleted = result.Status == "Completed" || result.Status.StartsWith("PartialFailure", StringComparison.Ordinal);
+                await StreamingResponseWriter.WriteEventAsync(Response, new StreamEvent
+                {
+                    Delta = result.Output,
+                    FinishReason = isCompleted ? "stop" : null,
+                    IsDone = isCompleted
+                }, format, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            await StreamingResponseWriter.WriteErrorAsync(Response, ex.Message, ErrorCodes.StreamingFailed, format, CancellationToken.None);
+        }
+        finally
+        {
+            await enumerator.DisposeAsync();
+        }
+
+        await StreamingResponseWriter.WriteDoneAsync(Response, format, CancellationToken.None);
     }
 
 }

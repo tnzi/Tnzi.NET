@@ -131,6 +131,14 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception, ExceptionHandlingResult? customResult = null)
     {
+        // If the response has already started (e.g., streaming), we can't modify headers or status code
+        if (context.Response.HasStarted)
+        {
+            _logger.LogWarning("Response has already started, unable to write error response for {ExceptionType}: {Message}",
+                exception.GetType().Name, exception.Message);
+            return;
+        }
+
         context.Response.ContentType = "application/json";
 
         ExceptionHandlingResult result;
@@ -161,12 +169,6 @@ public class ExceptionHandlingMiddleware
 
         // 设置HTTP状态码
         context.Response.StatusCode = result.StatusCode ?? 500;
-
-        // 处理限流异常的Retry-After头（在BusinessExceptionHandler中已处理，但这里确保设置）
-        if (exception is RateLimitException rateLimitException && rateLimitException.RetryAfter.HasValue)
-        {
-            context.Response.Headers["Retry-After"] = rateLimitException.RetryAfter.Value.ToString();
-        }
 
         // 构建响应
         await WriteResponseAsync(context, result);

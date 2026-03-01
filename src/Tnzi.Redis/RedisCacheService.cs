@@ -737,7 +737,14 @@ public class RedisCacheService : ICache, IPatternCache
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetManyAsync<T>(IEnumerable<KeyValuePair<string, T>> items, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
-        if (items == null || !items.Any())
+        if (items == null)
+        {
+            return;
+        }
+
+        // 提前物化，避免多次枚举 IEnumerable（调用方可能传入延迟查询）
+        var itemsList = items as IReadOnlyList<KeyValuePair<string, T>> ?? items.ToList();
+        if (itemsList.Count == 0)
         {
             return;
         }
@@ -748,7 +755,7 @@ public class RedisCacheService : ICache, IPatternCache
             var batch = database.CreateBatch();
             var tasks = new List<Task>();
 
-            foreach (var item in items)
+            foreach (var item in itemsList)
             {
                 if (string.IsNullOrEmpty(item.Key))
                 {
@@ -775,7 +782,7 @@ public class RedisCacheService : ICache, IPatternCache
             // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
             if (_cacheSyncService != null)
             {
-                foreach (var item in items)
+                foreach (var item in itemsList)
                 {
                     if (!string.IsNullOrEmpty(item.Key))
                     {
@@ -807,7 +814,14 @@ public class RedisCacheService : ICache, IPatternCache
     /// <param name="cancellationToken">取消令牌</param>
     public async Task RemoveManyAsync(IEnumerable<string> keys, CancellationToken cancellationToken = default)
     {
-        if (keys == null || !keys.Any())
+        if (keys == null)
+        {
+            return;
+        }
+
+        // 提前物化，避免多次枚举 IEnumerable
+        var keyList = keys as IReadOnlyList<string> ?? keys.ToList();
+        if (keyList.Count == 0)
         {
             return;
         }
@@ -815,18 +829,18 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var database = _connectionMultiplexer.GetDatabase();
-            var keysList = keys.Where(k => !string.IsNullOrEmpty(k)).Select(GetCacheKey).Select(k => (RedisKey)k).ToArray();
+            var redisKeys = keyList.Where(k => !string.IsNullOrEmpty(k)).Select(GetCacheKey).Select(k => (RedisKey)k).ToArray();
 
-            if (keysList.Length > 0)
+            if (redisKeys.Length > 0)
             {
-                await database.KeyDeleteAsync(keysList);
+                await database.KeyDeleteAsync(redisKeys);
             }
 
             // 发布缓存删除通知（如果启用了缓存同步）
             // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
             if (_cacheSyncService != null)
             {
-                foreach (var key in keys)
+                foreach (var key in keyList)
                 {
                     if (!string.IsNullOrEmpty(key))
                     {

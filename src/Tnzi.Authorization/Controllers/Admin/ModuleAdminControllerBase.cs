@@ -113,4 +113,28 @@ public abstract class ModuleAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 启用模块（级联启用所有子模块及其功能）
+    /// </summary>
+    /// <param name="id">模块ID</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("{id:guid}/enable")]
+    public virtual async Task<ApiResult> Enable(Guid id)
+    {
+        var result = await ModuleManagementService.EnableModuleAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 禁用模块（级联禁用所有子模块及其功能）
+    /// </summary>
+    /// <param name="id">模块ID</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("{id:guid}/disable")]
+    public virtual async Task<ApiResult> Disable(Guid id)
+    {
+        var result = await ModuleManagementService.DisableModuleAsync(id);
+        return result.ToApiResult();
+    }
+
 }

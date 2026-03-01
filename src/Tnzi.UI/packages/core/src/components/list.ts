@@ -27,7 +27,7 @@ export interface IInfiniteListProps<T = unknown> {
   /** Item key field */
   itemKey?: string | ((item: T, index: number) => string);
   /** Item render function */
-  render?: (item: T, index: number) => any;
+  render?: (item: T, index: number) => unknown;
   /** Custom style class */
   class?: string | string[];
   /** Custom inline style */

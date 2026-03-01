@@ -10,14 +10,15 @@ public static class PaymentQueryExtensions
     /// </summary>
     public static IQueryable<PaymentEntity> Filter(this IQueryable<PaymentEntity> queryable, PaymentQueryDto query)
     {
+        // 系统生成的流水号使用精确匹配（支持索引），用户输入字段使用模糊匹配
         if (!string.IsNullOrEmpty(query.TradeNo))
-            queryable = queryable.Where(p => p.TradeNo.ToLower().Contains(query.TradeNo.ToLower()));
+            queryable = queryable.Where(p => p.TradeNo == query.TradeNo);
 
         if (!string.IsNullOrEmpty(query.ExternalTradeNo))
-            queryable = queryable.Where(p => p.ExternalTradeNo != null && p.ExternalTradeNo.ToLower().Contains(query.ExternalTradeNo.ToLower()));
+            queryable = queryable.Where(p => p.ExternalTradeNo == query.ExternalTradeNo);
 
         if (!string.IsNullOrEmpty(query.BusinessOrderNo))
-            queryable = queryable.Where(p => p.BusinessOrderNo.ToLower().Contains(query.BusinessOrderNo.ToLower()));
+            queryable = queryable.Where(p => p.BusinessOrderNo == query.BusinessOrderNo);
 
         if (query.BusinessType.HasValue)
             queryable = queryable.Where(p => p.BusinessType == query.BusinessType.Value);

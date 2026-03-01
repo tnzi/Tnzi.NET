@@ -8,7 +8,6 @@ public class FileChunkConfiguration : EntityTypeConfigurationBase<FileChunk, Gui
     public override void Configure(EntityTypeBuilder<FileChunk> builder)
     {
         builder.ToTable("Chunk");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.UploadSessionId).IsRequired();
         builder.Property(e => e.ChunkIndex).IsRequired();

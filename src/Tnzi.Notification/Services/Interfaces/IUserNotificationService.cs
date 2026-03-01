@@ -10,4 +10,19 @@ public interface IUserNotificationService
     Task<Result> MarkAsReadAsync(Guid userId, Guid recipientId, CancellationToken cancellationToken = default);
     Task<Result> MarkAllAsReadAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<Result<UnreadCountDto>> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 删除用户收件箱中的一条通知
+    /// </summary>
+    Task<Result> DeleteAsync(Guid userId, Guid recipientId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量标记已读
+    /// </summary>
+    Task<Result> BatchMarkAsReadAsync(Guid userId, List<Guid> recipientIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量删除通知
+    /// </summary>
+    Task<Result> BatchDeleteAsync(Guid userId, List<Guid> recipientIds, CancellationToken cancellationToken = default);
 }

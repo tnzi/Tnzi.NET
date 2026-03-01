@@ -1,4 +1,5 @@
 global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Options;
 global using Moq;
 global using Shouldly;
 global using System;
@@ -8,7 +9,12 @@ global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.Caching;
 global using Tnzi.Data;
+global using Tnzi.EventBus;
 global using Tnzi.Extensions;
 global using Tnzi.SignalR;
+global using Tnzi.SignalR.Dtos;
+global using Tnzi.SignalR.Events;
+global using Tnzi.SignalR.Filters;
+global using Tnzi.SignalR.Options;
 global using Tnzi.SignalR.Services;
 global using Xunit;

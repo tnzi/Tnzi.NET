@@ -161,4 +161,49 @@ public abstract class NotificationAdminControllerBase : ApiAdminControllerBase
         var result = await QueryService.GetFailedNotificationsAsync(startDate, endDate, top);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 批量取消通知
+    /// </summary>
+    [HttpPost("batch-cancel")]
+    public virtual async Task<ApiResult<int>> BatchCancel([FromBody] List<Guid> ids)
+    {
+        var result = await NotificationService.BatchCancelAsync(ids);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量删除通知
+    /// </summary>
+    [HttpDelete("batch")]
+    public virtual async Task<ApiResult<int>> BatchDelete([FromBody] List<Guid> ids)
+    {
+        var result = await QueryService.BatchDeleteAsync(ids);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 查询计划中的通知
+    /// </summary>
+    [HttpPost("scheduled")]
+    public virtual async Task<ApiResult<IPagedList<NotificationInfo>>> GetScheduled([FromBody] QueryNotificationRequest request)
+    {
+        var result = await QueryService.GetScheduledAsync(request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取通知统计趋势
+    /// </summary>
+    [HttpGet("statistics/trend")]
+    public virtual async Task<ApiResult<NotificationTrendDto>> GetStatisticsTrend(
+        [FromQuery] TrendInterval interval = TrendInterval.Daily,
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null)
+    {
+        var start = startDate ?? DateTime.UtcNow.AddDays(-30);
+        var end = endDate ?? DateTime.UtcNow;
+        var result = await QueryService.GetStatisticsTrendAsync(interval, start, end);
+        return result.ToApiResult();
+    }
 }

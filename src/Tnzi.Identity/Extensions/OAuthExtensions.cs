@@ -144,6 +144,7 @@ public static class OAuthExtensions
 
     /// <summary>
     /// 尝试动态添加 GitHub OAuth 支持
+    /// 通过反射调用 AspNet.Security.OAuth.GitHub 包的 AddGitHub 扩展方法
     /// </summary>
     private static void TryAddGitHub(AuthenticationBuilder builder, string clientId, string clientSecret, string callbackPath)
     {
@@ -152,48 +153,89 @@ public static class OAuthExtensions
             var assembly = AppDomain.CurrentDomain.GetAssemblies()
                 .FirstOrDefault(a => a.GetName().Name == "AspNet.Security.OAuth.GitHub");
 
-            if (assembly != null)
+            if (assembly == null)
             {
-                var extensionType = assembly.GetType("AspNet.Security.OAuth.GitHub.GitHubAuthenticationExtensions");
-                if (extensionType != null)
-                {
-                    var addGitHubMethod = extensionType.GetMethods()
-                        .FirstOrDefault(m => m.Name == "AddGitHub" &&
-                            m.GetParameters().Length == 2 &&
-                            m.GetParameters()[0].ParameterType == typeof(AuthenticationBuilder));
+                return;
+            }
 
-                    if (addGitHubMethod != null)
-                    {
-                        var optionsType = assembly.GetType("AspNet.Security.OAuth.GitHub.GitHubAuthenticationOptions");
-                        if (optionsType != null)
-                        {
-                            var options = Activator.CreateInstance(optionsType);
-                            optionsType.GetProperty("ClientId")?.SetValue(options, clientId);
-                            optionsType.GetProperty("ClientSecret")?.SetValue(options, clientSecret);
-                            optionsType.GetProperty("SignInScheme")?.SetValue(options, "Identity.External");
+            var optionsType = assembly.GetType("AspNet.Security.OAuth.GitHub.GitHubAuthenticationOptions");
+            var extensionType = assembly.GetType("AspNet.Security.OAuth.GitHub.GitHubAuthenticationExtensions");
+            if (optionsType == null || extensionType == null)
+            {
+                return;
+            }
 
-                            var callbackPathProp = optionsType.GetProperty("CallbackPath");
-                            if (callbackPathProp != null)
-                            {
-                                var pathValue = Activator.CreateInstance(callbackPathProp.PropertyType, callbackPath);
-                                if (pathValue != null)
-                                {
-                                    callbackPathProp.SetValue(options, pathValue);
-                                }
-                            }
+            // AddGitHub 的签名是 (AuthenticationBuilder, Action<GitHubAuthenticationOptions>)
+            var actionType = typeof(Action<>).MakeGenericType(optionsType);
+            var addGitHubMethod = extensionType.GetMethods()
+                .FirstOrDefault(m => m.Name == "AddGitHub"
+                    && m.GetParameters().Length == 2
+                    && m.GetParameters()[0].ParameterType == typeof(AuthenticationBuilder)
+                    && m.GetParameters()[1].ParameterType == actionType);
 
-                            if (options != null)
-                            {
-                                addGitHubMethod.Invoke(null, new object[] { builder, options });
-                            }
-                        }
-                    }
-                }
+            if (addGitHubMethod == null)
+            {
+                return;
+            }
+
+            // 构建 Action<GitHubAuthenticationOptions> 委托
+            var configureMethod = typeof(OAuthExtensions).GetMethod(
+                nameof(ConfigureGitHubOptions),
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            if (configureMethod == null)
+            {
+                return;
+            }
+
+            // 使用闭包创建配置委托
+            var configureDelegate = Delegate.CreateDelegate(actionType,
+                null,
+                configureMethod.MakeGenericMethod(optionsType));
+
+            // 通过静态字段传递配置参数（反射场景的线程安全由启动阶段单线程保证）
+            _pendingGitHubClientId = clientId;
+            _pendingGitHubClientSecret = clientSecret;
+            _pendingGitHubCallbackPath = callbackPath;
+
+            addGitHubMethod.Invoke(null, [builder, configureDelegate]);
+        }
+        catch (Exception ex)
+        {
+            // GitHub OAuth 包未安装或调用失败，记录调试日志
+            System.Diagnostics.Debug.WriteLine($"Failed to add GitHub OAuth: {ex.Message}");
+        }
+    }
+
+    // 启动阶段临时配置参数（单线程安全）
+    private static string? _pendingGitHubClientId;
+    private static string? _pendingGitHubClientSecret;
+    private static string? _pendingGitHubCallbackPath;
+
+    /// <summary>
+    /// 通过反射调用的 GitHub OAuth 配置方法
+    /// </summary>
+    private static void ConfigureGitHubOptions<T>(T options) where T : class
+    {
+        var optionsType = typeof(T);
+        optionsType.GetProperty("ClientId")?.SetValue(options, _pendingGitHubClientId);
+        optionsType.GetProperty("ClientSecret")?.SetValue(options, _pendingGitHubClientSecret);
+        optionsType.GetProperty("SignInScheme")?.SetValue(options, "Identity.External");
+        optionsType.GetProperty("SaveTokens")?.SetValue(options, true);
+
+        var callbackPathProp = optionsType.GetProperty("CallbackPath");
+        if (callbackPathProp != null && _pendingGitHubCallbackPath != null)
+        {
+            var pathValue = Activator.CreateInstance(callbackPathProp.PropertyType, _pendingGitHubCallbackPath);
+            if (pathValue != null)
+            {
+                callbackPathProp.SetValue(options, pathValue);
             }
         }
-        catch
-        {
-            // GitHub OAuth 包未安装或调用失败，忽略
-        }
+
+        // 清理临时参数
+        _pendingGitHubClientId = null;
+        _pendingGitHubClientSecret = null;
+        _pendingGitHubCallbackPath = null;
     }
 }

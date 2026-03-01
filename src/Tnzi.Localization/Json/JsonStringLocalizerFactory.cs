@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace Tnzi.Localization.Json;
 
 /// <summary>

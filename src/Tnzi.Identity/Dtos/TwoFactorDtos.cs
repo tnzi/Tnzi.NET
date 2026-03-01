@@ -21,7 +21,7 @@ public class SendTwoFactorCodeDto
     /// 临时Token（从登录接口获取）
     /// </summary>
     [Required]
-    public string TempToken { get; set; } = string.Empty;
+    public string TempToken { get; set; } = null!;
 
     /// <summary>
     /// 验证方式（SMS/Email）
@@ -70,13 +70,13 @@ public class VerifyTwoFactorDto
     /// 临时Token
     /// </summary>
     [Required]
-    public string TempToken { get; set; } = string.Empty;
+    public string TempToken { get; set; } = null!;
 
     /// <summary>
     /// 验证码
     /// </summary>
     [Required]
-    public string Code { get; set; } = string.Empty;
+    public string Code { get; set; } = null!;
 
     /// <summary>
     /// 验证方式
@@ -160,7 +160,7 @@ public class CodeLoginDto
     /// 验证码
     /// </summary>
     [Required]
-    public string Code { get; set; } = string.Empty;
+    public string Code { get; set; } = null!;
 
     /// <summary>
     /// 验证方式（Email/Sms）
@@ -269,13 +269,13 @@ public class ResetPasswordByCodeDto
     /// 验证码
     /// </summary>
     [Required]
-    public string Code { get; set; } = string.Empty;
+    public string Code { get; set; } = null!;
 
     /// <summary>
     /// 新密码
     /// </summary>
     [Required]
-    public string NewPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = null!;
 
     /// <summary>
     /// 验证方式（Email/Sms）

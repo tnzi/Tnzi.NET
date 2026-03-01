@@ -81,9 +81,9 @@ public class RateLimitHubFilter : IHubFilter
             throw new HubException("Message rate limit exceeded. You have been temporarily banned.");
         }
 
-        var result = await next(invocationContext);
+        // 先记录消息再执行，防止恶意用户通过发送导致异常的请求绕过限流
         await _rateLimitService.RecordMessageAsync(userId.Value);
-        return result;
+        return await next(invocationContext);
     }
 
     /// <summary>

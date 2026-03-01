@@ -39,6 +39,13 @@ public class AuditMiddleware
             return;
         }
 
+        // Check [AuditDisabled] attribute on controller or action
+        if (IsAuditDisabled(context))
+        {
+            await _next(context);
+            return;
+        }
+
         var startTime = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         Exception? exception = null;
@@ -65,6 +72,19 @@ public class AuditMiddleware
                 _logger.LogError(ex, "Failed to enqueue audit operation");
             }
         }
+    }
+
+    /// <summary>
+    /// Check if the current endpoint has [AuditDisabled] attribute
+    /// </summary>
+    private static bool IsAuditDisabled(HttpContext context)
+    {
+        var endpoint = context.GetEndpoint();
+        if (endpoint == null)
+            return false;
+
+        // Check action-level attribute first, then controller-level
+        return endpoint.Metadata.GetMetadata<Tnzi.Audit.Metadata.AuditDisabledAttribute>() != null;
     }
 
     private bool IsExcludedPath(PathString path)
@@ -139,7 +159,7 @@ public class AuditMiddleware
             FunctionName = functionName,
             UserId = currentUser.Id,
             UserName = currentUser.UserName,
-            NickName = currentUser.UserName,
+            NickName = null, // ICurrentUser 不包含 NickName，避免错误赋值 UserName
             Ip = context.Connection.RemoteIpAddress?.ToString(),
             OperatingSystem = operatingSystem,
             Browser = browser,

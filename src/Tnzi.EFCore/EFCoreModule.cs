@@ -24,6 +24,11 @@ public class EFCoreModule : TnziInfrastructureModule
             .Bind(configuration.GetSection("EFCore"))
             .ValidateWith<Options.EFCoreOptions, Options.EFCoreOptionsValidator>();
 
+        // 注册 Outbox 配置选项并启用启动时验证
+        context.Services.AddOptions<OutboxOptions>()
+            .Bind(configuration.GetSection("EFCore:Outbox"))
+            .ValidateWith<OutboxOptions, OutboxOptionsValidator>();
+
         return Task.CompletedTask;
     }
 
@@ -70,11 +75,24 @@ public class EFCoreModule : TnziInfrastructureModule
         services.AddSingleton<Services.IDataSeederManager, Services.DataSeederManager>();
         services.AddSingleton<Services.IRepositoryRegistrar, Services.RepositoryRegistrar>();
 
+        // 注册数据库迁移器（TryAdd 确保不覆盖用户自定义实现）
+        services.TryAddScoped<IDbMigrator, Services.EfCoreDbMigrator>();
+
         // 注册慢查询日志拦截器（Scoped 以支持 Logger 注入）
         services.AddScoped<Interceptors.SlowQueryLoggingInterceptor>();
 
         // 注册 Dapper 相关服务
         services.AddScoped<Dapper.DapperExecutorFactory>();
+
+        // 注册 Outbox 事件存储（TryAdd 确保不会覆盖用户自定义实现）
+        services.TryAddScoped<IEventStore, EfCoreEventStore>();
+
+        // 条件性注册 Outbox 中继后台服务
+        var outboxOptions = configuration.GetSection("EFCore:Outbox").Get<OutboxOptions>() ?? new OutboxOptions();
+        if (outboxOptions.Enabled)
+        {
+            services.AddHostedService<OutboxRelayBackgroundService>();
+        }
 
         // 获取配置选项
         var options = configuration.GetSection("Database").Get<DatabaseOptions>() ?? new DatabaseOptions();

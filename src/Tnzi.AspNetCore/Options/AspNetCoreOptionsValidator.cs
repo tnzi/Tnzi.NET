@@ -78,9 +78,27 @@ public class AspNetCoreOptionsValidator : OptionsValidatorBase<AspNetCoreOptions
                         errors.Add($"RateLimit.ByPath[\"{pathRule.Key}\"].Limit must be greater than 0.");
                     if (pathRule.Value.WindowSeconds <= 0)
                         errors.Add($"RateLimit.ByPath[\"{pathRule.Key}\"].WindowSeconds must be greater than 0.");
+                    ValidateRateLimitAlgorithm(pathRule.Value.Algorithm, $"RateLimit.ByPath[\"{pathRule.Key}\"]", errors);
                 }
             }
+
+            // 验证各维度的限流算法
+            if (options.RateLimit.ByIp != null)
+                ValidateRateLimitAlgorithm(options.RateLimit.ByIp.Algorithm, "RateLimit.ByIp", errors);
+            if (options.RateLimit.ByUser != null)
+                ValidateRateLimitAlgorithm(options.RateLimit.ByUser.Algorithm, "RateLimit.ByUser", errors);
         }
 
+    }
+
+    /// <summary>
+    /// 验证限流算法是否已实现
+    /// </summary>
+    private static void ValidateRateLimitAlgorithm(RateLimitAlgorithm algorithm, string path, List<string> errors)
+    {
+        if (algorithm is RateLimitAlgorithm.TokenBucket or RateLimitAlgorithm.LeakyBucket)
+        {
+            errors.Add($"{path}.Algorithm '{algorithm}' is not yet implemented. Use FixedWindow or SlidingWindow instead.");
+        }
     }
 }

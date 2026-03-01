@@ -14,8 +14,8 @@ public class SecurityHeadersMiddleware
         RequestDelegate next,
         IOptionsMonitor<AspNetCoreOptions> options)
     {
-        _next = next;
-        _options = options;
+        _next = Check.NotNull(next);
+        _options = Check.NotNull(options);
     }
 
     public async Task InvokeAsync(HttpContext context)

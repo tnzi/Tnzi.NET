@@ -23,7 +23,8 @@ public abstract class InvoiceControllerBase : ApiControllerBase
     [HttpGet]
     public virtual async Task<ApiResult<IPagedList<InvoiceDto>>> GetList([FromQuery] InvoiceQueryDto query)
     {
-        var result = await _invoiceService.GetListAsync(query);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _invoiceService.GetListAsync(query, userId);
         return result.ToApiResult();
     }
 
@@ -33,7 +34,8 @@ public abstract class InvoiceControllerBase : ApiControllerBase
     [HttpGet("{id:guid}")]
     public virtual async Task<ApiResult<InvoiceDto>> Get(Guid id)
     {
-        var result = await _invoiceService.GetAsync(id);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _invoiceService.GetAsync(id, userId);
         return result.ToApiResult();
     }
 
@@ -54,7 +56,8 @@ public abstract class InvoiceControllerBase : ApiControllerBase
     [HttpGet("{id:guid}/pdf")]
     public virtual async Task<ApiResult<string>> DownloadPdf(Guid id)
     {
-        var result = await _invoiceService.GetPdfUrlAsync(id);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _invoiceService.GetPdfUrlAsync(id, userId);
         return result.ToApiResult();
     }
 
@@ -64,7 +67,8 @@ public abstract class InvoiceControllerBase : ApiControllerBase
     [HttpPost("{id:guid}/send")]
     public virtual async Task<ApiResult> Send(Guid id, [FromBody] SendInvoiceDto? request)
     {
-        var result = await _invoiceService.SendAsync(id, request?.RecipientEmail);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _invoiceService.SendAsync(id, request?.RecipientEmail, userId);
         return result.ToApiResult();
     }
 }

@@ -10,9 +10,6 @@ public class UserQuotaConfiguration : EntityTypeConfigurationBase<UserQuota, Gui
 {
     public override void Configure(EntityTypeBuilder<UserQuota> builder)
     {
-        // 表名由 TableNamePrefix 属性自动处理
-        builder.HasKey(e => e.Id);
-
         builder.Property(e => e.UserId)
             .IsRequired();
 
@@ -39,9 +36,12 @@ public class UserQuotaConfiguration : EntityTypeConfigurationBase<UserQuota, Gui
             .IsRequired()
             .HasDefaultValue(true);
 
+        // 乐观并发令牌
+        builder.Property(e => e.Version)
+            .IsConcurrencyToken();
+
         // 为 UserId 创建索引（查询优化）
         builder.HasIndex(e => e.UserId)
-            .IsUnique()
-            .HasDatabaseName("IX_UserQuota_UserId");
+            .IsUnique();
     }
 }

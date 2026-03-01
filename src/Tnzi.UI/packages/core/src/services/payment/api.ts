@@ -6,6 +6,7 @@ import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
 import type {
   PaymentDto,
+  PaymentOrderResultDto,
   CreatePaymentDto,
   PaymentQueryDto,
   RefundDto,
@@ -39,7 +40,7 @@ export function usePaymentApi(client: HttpClient) {
 
     /** Create payment order */
     create: (data: CreatePaymentDto) =>
-      client.post<PaymentDto>(BASE, data),
+      client.post<PaymentOrderResultDto>(BASE, data),
 
     /** Close payment order */
     close: (tradeNo: string, reason: string) =>

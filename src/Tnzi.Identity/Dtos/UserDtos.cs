@@ -43,10 +43,10 @@ public class UserDto : UserListItemDto
 public class CreateUserDto
 {
     [Required]
-    public string UserName { get; set; } = string.Empty;
-    
+    public string UserName { get; set; } = null!;
+
     [Required]
-    public string Password { get; set; } = string.Empty;
+    public string Password { get; set; } = null!;
     
     [EmailAddress]
     public string? Email { get; set; }
@@ -169,7 +169,7 @@ public class AssignOrganizationDto
 /// </summary>
 public class AssignRolesDto
 {
-    public IEnumerable<Guid> RoleIds { get; set; } = new List<Guid>();
+    public IEnumerable<Guid> RoleIds { get; set; } = null!;
 }
 
 /// <summary>
@@ -177,7 +177,7 @@ public class AssignRolesDto
 /// </summary>
 public class RemoveRolesDto
 {
-    public IEnumerable<Guid> RoleIds { get; set; } = new List<Guid>();
+    public IEnumerable<Guid> RoleIds { get; set; } = null!;
 }
 
 /// <summary>
@@ -248,5 +248,88 @@ public class LoginHistoryQueryDto
     /// 是否成功
     /// </summary>
     public bool? IsSuccess { get; set; }
+}
+
+/// <summary>
+/// 账户停用请求DTO
+/// </summary>
+public class DeactivateAccountDto
+{
+    /// <summary>
+    /// 停用原因
+    /// </summary>
+    [StringLength(500)]
+    public string? Reason { get; set; }
+}
+
+/// <summary>
+/// 用户个人数据导出DTO（GDPR 合规）
+/// </summary>
+public class PersonalDataExportDto
+{
+    /// <summary>
+    /// 用户ID
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 用户名
+    /// </summary>
+    public string UserName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 邮箱
+    /// </summary>
+    public string? Email { get; set; }
+
+    /// <summary>
+    /// 手机号
+    /// </summary>
+    public string? PhoneNumber { get; set; }
+
+    /// <summary>
+    /// 组织名称
+    /// </summary>
+    public string? OrganizationName { get; set; }
+
+    /// <summary>
+    /// 角色列表
+    /// </summary>
+    public List<string> Roles { get; set; } = new();
+
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public DateTime CreationTime { get; set; }
+
+    /// <summary>
+    /// 最后修改时间
+    /// </summary>
+    public DateTime? LastModificationTime { get; set; }
+
+    /// <summary>
+    /// 是否启用双因素认证
+    /// </summary>
+    public bool TwoFactorEnabled { get; set; }
+
+    /// <summary>
+    /// 邮箱是否已确认
+    /// </summary>
+    public bool EmailConfirmed { get; set; }
+
+    /// <summary>
+    /// 手机号是否已确认
+    /// </summary>
+    public bool PhoneNumberConfirmed { get; set; }
+
+    /// <summary>
+    /// 关联的外部登录提供者
+    /// </summary>
+    public List<string> LinkedProviders { get; set; } = new();
+
+    /// <summary>
+    /// 导出时间
+    /// </summary>
+    public DateTime ExportedAt { get; set; }
 }
 

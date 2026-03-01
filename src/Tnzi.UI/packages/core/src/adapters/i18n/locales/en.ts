@@ -67,6 +67,9 @@ export default {
   // Table
   table: {
     total: 'Total {count}',
+    totalItems: 'Total {count} items',
+    actions: 'Actions',
+    noMore: 'No more',
     page: 'Page',
     size: 'per page',
     jumpTo: 'Go to',

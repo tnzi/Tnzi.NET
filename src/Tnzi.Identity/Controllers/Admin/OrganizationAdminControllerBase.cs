@@ -163,4 +163,57 @@ public abstract class OrganizationAdminControllerBase : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 根据名称或代码模糊搜索组织
+    /// </summary>
+    /// <param name="keyword">搜索关键词</param>
+    /// <param name="maxResults">最大返回数量（默认20）</param>
+    /// <returns>匹配的组织列表</returns>
+    [HttpGet("search")]
+    public virtual async Task<ApiResult<IEnumerable<OrganizationDto>>> Search([FromQuery] string keyword, [FromQuery] int maxResults = 20)
+    {
+        var result = await OrganizationService.SearchAsync(keyword, maxResults);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 更新组织排序
+    /// </summary>
+    /// <param name="id">组织ID</param>
+    /// <param name="input">排序值</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("{id}/sort-order")]
+    public virtual async Task<ApiResult> UpdateSortOrder(Guid id, [FromBody] UpdateSortOrderDto input)
+    {
+        var result = await OrganizationService.UpdateSortOrderAsync(id, input.SortOrder);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量更新组织排序（适用于前端拖拽排序场景）
+    /// </summary>
+    /// <param name="inputs">排序更新列表</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("batch/sort-order")]
+    public virtual async Task<ApiResult> BatchUpdateSortOrder([FromBody] IEnumerable<BatchSortOrderItemDto> inputs)
+    {
+        var updates = inputs.Select(x => (x.Id, x.SortOrder));
+        var result = await OrganizationService.BatchUpdateSortOrderAsync(updates);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取组织下的用户分页列表
+    /// </summary>
+    /// <param name="id">组织ID</param>
+    /// <param name="query">分页参数</param>
+    /// <param name="includeChildren">是否包含子组织的用户</param>
+    /// <returns>用户分页列表</returns>
+    [HttpGet("{id}/users")]
+    public virtual async Task<ApiResult<IPagedList<UserListItemDto>>> GetUsers(Guid id, [FromQuery] PagedQueryDto query, [FromQuery] bool includeChildren = false)
+    {
+        var result = await OrganizationService.GetUsersAsync(id, query, includeChildren);
+        return result.ToApiResult();
+    }
+
 }

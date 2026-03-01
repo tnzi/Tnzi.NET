@@ -19,7 +19,7 @@ public class UserSessionConfiguration : EntityTypeConfigurationBase<UserSession,
         builder.HasOne(us => us.User)
             .WithMany()
             .HasForeignKey(us => us.UserId)
-            .IsRequired(false)  // 设置为可选，避免全局查询过滤器警告（当用户被软删除时）
+            .IsRequired()
             .OnDelete(DeleteBehavior.Cascade);
 
         // 索引配置

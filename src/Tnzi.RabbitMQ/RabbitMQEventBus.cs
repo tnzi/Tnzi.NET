@@ -4,22 +4,31 @@ namespace Tnzi.RabbitMQ;
 
 /// <summary>
 /// RabbitMQ事件总线实现
-/// 同时实现IEventBus和IIntegrationEventBus接口
+/// 使用独立的发布 Channel 和 per-consumer Channel 架构（RabbitMQ 最佳实践）
+/// RabbitMQ.Client 7.x 的 IChannel 是线程安全的，发布操作无需外部锁
 /// </summary>
-public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
+public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
 {
     private readonly IConnection _connection;
     private readonly ILogger<RabbitMQEventBus> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly RabbitMQOptions _options;
     private readonly string _exchangeName;
-    private readonly ConcurrentDictionary<Type, string> _queueNames = new();
 
-    // 延迟初始化的 channel，替代构造函数中的 AsyncHelper.RunSync
-    private IChannel? _channel;
-    private readonly SemaphoreSlim _channelLock = new(1, 1);
-    private bool _channelInitialized;
-    private bool _disposed;
+    // 发布 Channel（延迟初始化，自动恢复）
+    // volatile 确保多线程下 IsOpen 检查的可见性
+    private volatile IChannel? _publishChannel;
+    private readonly SemaphoreSlim _publishChannelLock = new(1, 1);
+
+    // Channel pool for high-throughput publish scenarios
+    private readonly ConcurrentBag<IChannel>? _channelPool;
+    private readonly SemaphoreSlim? _channelPoolSemaphore;
+    private int _channelPoolCount;
+
+    // 每个事件类型的独立消费者 Channel（消除 publish/consume 锁竞争）
+    private readonly ConcurrentDictionary<Type, ConsumerSubscription> _subscriptions = new();
+
+    private volatile bool _disposed;
 
     /// <inheritdoc />
     public bool IsLocal => false;
@@ -39,59 +48,137 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         _serviceProvider = Check.NotNull(serviceProvider);
         _options = Check.NotNull(options);
         _exchangeName = exchangeName ?? "Tnzi.Events";
+
+        // Initialize channel pool if enabled
+        if (_options.ChannelPool is { Enabled: true })
+        {
+            _channelPool = new ConcurrentBag<IChannel>();
+            _channelPoolSemaphore = new SemaphoreSlim(_options.ChannelPool.MaxSize, _options.ChannelPool.MaxSize);
+            _logger.LogInformation("Channel pool enabled with max size {MaxSize}", _options.ChannelPool.MaxSize);
+        }
     }
 
     /// <summary>
-    /// 延迟初始化 channel 和 exchange，避免在构造函数中使用 AsyncHelper.RunSync
+    /// 获取或创建发布 Channel（带自动恢复）
+    /// SemaphoreSlim 仅保护 Channel 初始化/恢复路径，不保护每次发布操作
     /// </summary>
-    private async Task<IChannel> GetOrCreateChannelAsync()
+    private async Task<IChannel> GetPublishChannelAsync(CancellationToken cancellationToken = default)
     {
-        if (_channelInitialized && _channel != null)
-            return _channel;
+        // 快速路径：Channel 已初始化且健康
+        var channel = _publishChannel;
+        if (channel is { IsOpen: true })
+            return channel;
 
-        await _channelLock.WaitAsync();
+        await _publishChannelLock.WaitAsync(cancellationToken);
         try
         {
-            if (_channelInitialized && _channel != null)
-                return _channel;
+            // 双重检查
+            channel = _publishChannel;
+            if (channel is { IsOpen: true })
+                return channel;
 
-            _channel = await _connection.CreateChannelAsync();
-            await _channel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false);
+            // 清理旧 Channel
+            if (channel != null)
+            {
+                try { await channel.DisposeAsync(); }
+                catch { /* ignore cleanup errors */ }
+            }
 
-            // 声明死信交换机
-            await _channel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false);
+            // 创建新 Channel 并声明交换机（幂等操作）
+            var newChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+            await newChannel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
+            await newChannel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
 
-            _channelInitialized = true;
-            return _channel;
+            _publishChannel = newChannel;
+            _logger.LogDebug("Publish channel created/recovered");
+            return newChannel;
         }
         finally
         {
-            _channelLock.Release();
+            _publishChannelLock.Release();
         }
     }
 
     /// <summary>
-    /// 发布事件（使用 SemaphoreSlim 保护 channel 的线程安全）
+    /// Acquire a channel from the pool, creating a new one if the pool has capacity.
+    /// </summary>
+    private async Task<IChannel> AcquirePooledChannelAsync(CancellationToken cancellationToken = default)
+    {
+        await _channelPoolSemaphore!.WaitAsync(cancellationToken);
+
+        // Try to get an existing healthy channel from the pool
+        while (_channelPool!.TryTake(out var channel))
+        {
+            if (channel.IsOpen)
+                return channel;
+
+            // Channel is dead, dispose and decrement count
+            try { await channel.DisposeAsync(); }
+            catch { /* ignore cleanup errors */ }
+            Interlocked.Decrement(ref _channelPoolCount);
+        }
+
+        // No available channel, create a new one
+        var newChannel = await CreateAndInitializeChannelAsync(cancellationToken);
+        Interlocked.Increment(ref _channelPoolCount);
+        return newChannel;
+    }
+
+    /// <summary>
+    /// Return a channel to the pool for reuse.
+    /// </summary>
+    private void ReturnPooledChannel(IChannel channel)
+    {
+        if (channel.IsOpen && !_disposed)
+        {
+            _channelPool!.Add(channel);
+        }
+        else
+        {
+            try { channel.Dispose(); }
+            catch { /* ignore cleanup errors */ }
+            Interlocked.Decrement(ref _channelPoolCount);
+        }
+
+        _channelPoolSemaphore!.Release();
+    }
+
+    /// <summary>
+    /// Create a new channel and declare required exchanges.
+    /// </summary>
+    private async Task<IChannel> CreateAndInitializeChannelAsync(CancellationToken cancellationToken = default)
+    {
+        var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await channel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
+        await channel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
+        return channel;
+    }
+
+    /// <summary>
+    /// Publish a message to a specific channel.
+    /// </summary>
+    private async Task PublishToChannelAsync(IChannel channel, string eventTypeName, BasicProperties properties, byte[] body, CancellationToken cancellationToken)
+    {
+        await channel.BasicPublishAsync(_exchangeName, eventTypeName, false, properties, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// 发布事件（使用独立的发布 Channel 或 Channel 池，IChannel v7.x 线程安全）
     /// </summary>
     public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
         where TEvent : class, IEvent
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         Check.NotNull(@event);
 
         var eventType = typeof(TEvent);
         var eventTypeName = eventType.FullName ?? eventType.Name;
-        var routingKey = eventTypeName;
 
-        await _channelLock.WaitAsync(cancellationToken);
         try
         {
-            var channel = await GetOrCreateChannelAsync();
-
-            // 序列化事件
             var json = JsonSerializer.Serialize(@event, TnziJsonDefaults.Options);
             var body = Encoding.UTF8.GetBytes(json);
 
-            // 发布消息
             var properties = new BasicProperties
             {
                 Persistent = true,
@@ -100,18 +187,31 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
                 Type = eventTypeName
             };
 
-            await channel.BasicPublishAsync(_exchangeName, routingKey, false, properties, body);
+            // Use channel pool if enabled, otherwise use single publish channel
+            if (_channelPool != null)
+            {
+                var channel = await AcquirePooledChannelAsync(cancellationToken);
+                try
+                {
+                    await PublishToChannelAsync(channel, eventTypeName, properties, body, cancellationToken);
+                }
+                finally
+                {
+                    ReturnPooledChannel(channel);
+                }
+            }
+            else
+            {
+                var channel = await GetPublishChannelAsync(cancellationToken);
+                await PublishToChannelAsync(channel, eventTypeName, properties, body, cancellationToken);
+            }
 
             _logger.LogDebug("Published event {EventType} with ID {EventId} to RabbitMQ", eventTypeName, @event.EventId);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not ObjectDisposedException)
         {
             _logger.LogError(ex, "Failed to publish event {EventType} to RabbitMQ", eventTypeName);
-            throw;
-        }
-        finally
-        {
-            _channelLock.Release();
+            throw new RabbitMQException($"Failed to publish event {eventTypeName}", innerException: ex);
         }
     }
 
@@ -123,10 +223,14 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
     public async Task PublishDelayedAsync<TEvent>(TEvent @event, TimeSpan delay, CancellationToken cancellationToken = default)
         where TEvent : class, IEvent
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         if (delay > TimeSpan.Zero)
         {
-            _logger.LogDebug(
-                "Delaying event {EventType} by {Delay}. Note: in-process delay will be lost on restart",
+            _logger.LogWarning(
+                "Delaying event {EventType} by {Delay} using in-process Task.Delay. " +
+                "This delay will be lost if the process restarts. " +
+                "For reliable delayed messaging, use the rabbitmq_delayed_message_exchange plugin.",
                 typeof(TEvent).Name, delay);
             await Task.Delay(delay, cancellationToken);
         }
@@ -135,16 +239,20 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
     }
 
     /// <summary>
-    /// 订阅事件（RabbitMQ特有方法，用于手动订阅）
+    /// 订阅事件（每个订阅创建独立的 Channel，RabbitMQ 最佳实践）
     /// </summary>
     public async Task SubscribeEventAsync<TEvent>() where TEvent : class, IEvent
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         var eventType = typeof(TEvent);
         var eventTypeName = eventType.FullName ?? eventType.Name;
         var queueName = $"Tnzi.Events.{eventTypeName}";
         var deadLetterQueueName = $"Tnzi.Events.DeadLetter.{eventTypeName}";
 
-        if (_queueNames.TryGetValue(eventType, out _))
+        // TryAdd 作为并发锁定，防止重复订阅
+        var subscription = new ConsumerSubscription(queueName);
+        if (!_subscriptions.TryAdd(eventType, subscription))
         {
             _logger.LogWarning("Event {EventType} is already subscribed", eventTypeName);
             return;
@@ -152,7 +260,13 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
 
         try
         {
-            var channel = await GetOrCreateChannelAsync();
+            // 每个消费者创建独立的 Channel（消除 publish/consume 跨 Channel 锁竞争）
+            var channel = await _connection.CreateChannelAsync();
+            subscription.Channel = channel;
+
+            // 声明交换机（幂等，确保消费者 Channel 可访问）
+            await channel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false);
+            await channel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false);
 
             // 设置 prefetchCount 控制消费者并发
             await channel.BasicQosAsync(0, _options.PrefetchCount, false);
@@ -167,125 +281,118 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
                 { "x-dead-letter-exchange", _options.DeadLetterExchange },
                 { "x-dead-letter-routing-key", eventTypeName }
             };
-
             await channel.QueueDeclareAsync(queueName, true, false, false, queueArgs);
-
-            // 绑定队列到交换机
             await channel.QueueBindAsync(queueName, _exchangeName, eventTypeName);
 
             // 创建消费者
             var consumer = new AsyncEventingBasicConsumer(channel);
-            consumer.ReceivedAsync += async (model, ea) =>
+            consumer.ReceivedAsync += async (_, ea) =>
             {
+                if (_disposed) return;
+
                 using var handlerScope = _serviceProvider.CreateScope();
                 try
                 {
-                    var body = ea.Body.ToArray();
-                    var json = Encoding.UTF8.GetString(body);
+                    // 使用 Span 避免额外数组分配
+                    var json = Encoding.UTF8.GetString(ea.Body.Span);
                     var @event = JsonSerializer.Deserialize<TEvent>(json, TnziJsonDefaults.Options);
 
                     if (@event == null)
                     {
                         _logger.LogWarning("Failed to deserialize event {EventType}", eventTypeName);
-                        await AckWithChannelLockAsync(ea.DeliveryTag, false);
+                        await channel.BasicAckAsync(ea.DeliveryTag, false);
                         return;
                     }
 
                     // 获取事件处理器并执行
                     var handlers = GetEventHandlers<TEvent>(eventType, handlerScope.ServiceProvider);
-
                     var tasks = new List<Task>();
                     foreach (var handler in handlers)
                     {
-                        if (handler == null) continue;
-                        var handlerTask = ExecuteHandlerWithErrorIsolationAsync(handler, @event, eventType);
-                        tasks.Add(handlerTask);
+                        if (handler != null)
+                            tasks.Add(ExecuteHandlerWithErrorIsolationAsync(handler, @event, eventType));
                     }
 
                     if (tasks.Count > 0)
-                    {
                         await Task.WhenAll(tasks);
-                    }
 
-                    // 确认消息已处理
-                    await AckWithChannelLockAsync(ea.DeliveryTag, false);
+                    // 在消费者自己的 Channel 上 ACK（无跨 Channel 竞争）
+                    await channel.BasicAckAsync(ea.DeliveryTag, false);
 
                     _logger.LogDebug("Processed event {EventType} with ID {EventId}", eventTypeName, @event.EventId);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error processing event {EventType}", eventTypeName);
-
-                    // 检查重试次数，超过最大次数后不再 requeue（由死信交换机处理）
-                    var retryCount = GetRetryCount(ea.BasicProperties);
-                    if (retryCount >= _options.MaxRetryCount)
-                    {
-                        _logger.LogWarning(
-                            "Event {EventType} exceeded max retry count ({MaxRetryCount}), sending to dead letter queue",
-                            eventTypeName, _options.MaxRetryCount);
-                        // requeue=false，消息会被发送到死信交换机
-                        await NackWithChannelLockAsync(ea.DeliveryTag, false, false);
-                    }
-                    else
-                    {
-                        // 重新入队前更新重试次数（通过 header）
-                        // 注意：BasicNack + requeue=true 会保留原始 header，
-                        // 但 RabbitMQ 不允许修改已入队的消息 header。
-                        // 因此使用 reject + republish 模式来追踪重试次数。
-                        await NackWithChannelLockAsync(ea.DeliveryTag, false, false);
-
-                        // 重新发布消息并递增重试计数
-                        try
-                        {
-                            var newProperties = new BasicProperties
-                            {
-                                Persistent = ea.BasicProperties.Persistent,
-                                MessageId = ea.BasicProperties.MessageId,
-                                Timestamp = ea.BasicProperties.Timestamp,
-                                Type = ea.BasicProperties.Type,
-                                Headers = ea.BasicProperties.Headers != null
-                                    ? new Dictionary<string, object?>(ea.BasicProperties.Headers)
-                                    : new Dictionary<string, object?>()
-                            };
-                            newProperties.Headers["x-retry-count"] = retryCount + 1;
-
-                            await _channelLock.WaitAsync();
-                            try
-                            {
-                                var ch = await GetOrCreateChannelAsync();
-                                await ch.BasicPublishAsync(_exchangeName, eventTypeName, false, newProperties, ea.Body);
-                            }
-                            finally
-                            {
-                                _channelLock.Release();
-                            }
-                        }
-                        catch (Exception republishEx)
-                        {
-                            _logger.LogError(republishEx, "Failed to republish event {EventType} for retry", eventTypeName);
-                        }
-                    }
+                    await HandleConsumerErrorAsync(channel, ea, eventTypeName);
                 }
             };
 
-            // 开始消费
-            await _channelLock.WaitAsync();
-            try
-            {
-                await channel.BasicConsumeAsync(queueName, false, consumer);
-            }
-            finally
-            {
-                _channelLock.Release();
-            }
+            // 开始消费（在消费者自己的 Channel 上）
+            await channel.BasicConsumeAsync(queueName, false, consumer);
 
-            _queueNames.TryAdd(eventType, queueName);
-            _logger.LogInformation("Subscribed to event {EventType} on queue {QueueName}", eventTypeName, queueName);
+            _logger.LogInformation("Subscribed to event {EventType} on queue {QueueName} (dedicated channel)",
+                eventTypeName, queueName);
         }
         catch (Exception ex)
         {
+            _subscriptions.TryRemove(eventType, out _);
             _logger.LogError(ex, "Failed to subscribe to event {EventType}", eventTypeName);
-            throw;
+            throw new RabbitMQException($"Failed to subscribe to event {eventTypeName}", queueName, ex);
+        }
+    }
+
+    /// <summary>
+    /// 处理消费者错误：重试或发送到死信队列
+    /// Nack 在消费者 Channel 上，republish 在发布 Channel 上（各自独立）
+    /// </summary>
+    private async Task HandleConsumerErrorAsync(IChannel consumerChannel, BasicDeliverEventArgs ea, string eventTypeName)
+    {
+        var retryCount = GetRetryCount(ea.BasicProperties);
+        if (retryCount >= _options.MaxRetryCount)
+        {
+            _logger.LogWarning(
+                "Event {EventType} exceeded max retry count ({MaxRetryCount}), sending to dead letter queue",
+                eventTypeName, _options.MaxRetryCount);
+            // requeue=false，消息会被发送到死信交换机
+            await consumerChannel.BasicNackAsync(ea.DeliveryTag, false, false);
+        }
+        else
+        {
+            // Reject 在消费者 Channel 上
+            await consumerChannel.BasicNackAsync(ea.DeliveryTag, false, false);
+
+            // Apply exponential backoff delay before republishing
+            var delay = _options.RetryDelay.GetDelay(retryCount + 1);
+            if (delay > TimeSpan.Zero)
+            {
+                _logger.LogDebug("Applying retry delay of {DelayMs}ms for event {EventType} (attempt {RetryCount})",
+                    delay.TotalMilliseconds, eventTypeName, retryCount + 1);
+                await Task.Delay(delay);
+            }
+
+            // 重新发布消息并递增重试计数（使用发布 Channel，无锁竞争）
+            try
+            {
+                var newProperties = new BasicProperties
+                {
+                    Persistent = ea.BasicProperties.Persistent,
+                    MessageId = ea.BasicProperties.MessageId,
+                    Timestamp = ea.BasicProperties.Timestamp,
+                    Type = ea.BasicProperties.Type,
+                    Headers = ea.BasicProperties.Headers != null
+                        ? new Dictionary<string, object?>(ea.BasicProperties.Headers)
+                        : new Dictionary<string, object?>()
+                };
+                newProperties.Headers["x-retry-count"] = retryCount + 1;
+
+                var publishChannel = await GetPublishChannelAsync();
+                await publishChannel.BasicPublishAsync(_exchangeName, eventTypeName, false, newProperties, ea.Body);
+            }
+            catch (Exception republishEx)
+            {
+                _logger.LogError(republishEx, "Failed to republish event {EventType} for retry", eventTypeName);
+            }
         }
     }
 
@@ -309,40 +416,6 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         }
 
         return 0;
-    }
-
-    /// <summary>
-    /// 线程安全的 BasicAck
-    /// </summary>
-    private async Task AckWithChannelLockAsync(ulong deliveryTag, bool multiple)
-    {
-        await _channelLock.WaitAsync();
-        try
-        {
-            if (_channel != null)
-                await _channel.BasicAckAsync(deliveryTag, multiple);
-        }
-        finally
-        {
-            _channelLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// 线程安全的 BasicNack
-    /// </summary>
-    private async Task NackWithChannelLockAsync(ulong deliveryTag, bool multiple, bool requeue)
-    {
-        await _channelLock.WaitAsync();
-        try
-        {
-            if (_channel != null)
-                await _channel.BasicNackAsync(deliveryTag, multiple, requeue);
-        }
-        finally
-        {
-            _channelLock.Release();
-        }
     }
 
     /// <summary>
@@ -382,7 +455,7 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
     /// <summary>
     /// 获取基类事件的处理器（支持事件继承）
     /// </summary>
-    private IEnumerable<object> GetBaseEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
+    private static IEnumerable<object> GetBaseEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
     {
         var handlers = new List<object>();
 
@@ -393,9 +466,7 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
             foreach (var handler in baseHandlers)
             {
                 if (handler != null)
-                {
                     handlers.Add(handler);
-                }
             }
         }
 
@@ -410,7 +481,6 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         var handlerType = handler.GetType();
         try
         {
-            // 获取或创建处理器元数据（编译委托缓存）
             var metadata = EventHandlerInvoker.GetMetadata(handlerType);
 
             // 检查条件处理器
@@ -424,7 +494,6 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
                 }
             }
 
-            // 执行 HandleAsync
             if (metadata.HandleDelegate != null)
             {
                 await metadata.HandleDelegate(handler, @event, CancellationToken.None);
@@ -437,7 +506,6 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         }
         catch (Exception ex)
         {
-            // 错误隔离：记录错误但不影响其他处理器
             _logger.LogError(ex,
                 "Error in handler {HandlerType} for event {EventType} (EventId: {EventId}). " +
                 "This error is isolated and will not affect other handlers.",
@@ -445,11 +513,13 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public bool HasHandlers<TEvent>() where TEvent : class, IEvent
     {
         return GetHandlerCount<TEvent>() > 0;
     }
 
+    /// <inheritdoc />
     public int GetHandlerCount<TEvent>() where TEvent : class, IEvent
     {
         var eventType = typeof(TEvent);
@@ -457,7 +527,6 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
 
         using var scope = _serviceProvider.CreateScope();
 
-        // 检查DI容器注册的处理器
         var handlerInterface = typeof(IEventHandler<>).MakeGenericType(eventType);
         var diHandlers = scope.ServiceProvider.GetServices(handlerInterface);
         foreach (var handler in diHandlers)
@@ -466,7 +535,6 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
                 handlerTypes.Add(handler.GetType());
         }
 
-        // 检查基类事件的处理器（去重）
         var baseHandlers = GetBaseEventHandlers<TEvent>(eventType, scope.ServiceProvider);
         foreach (var handler in baseHandlers)
         {
@@ -477,6 +545,7 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         return handlerTypes.Count;
     }
 
+    /// <inheritdoc />
     public void Subscribe<TEvent, THandler>()
         where TEvent : class, IEvent
         where THandler : class, IEventHandler<TEvent>
@@ -497,6 +566,7 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
                           "Use SubscribeEventAsync<TEvent>() method instead, or register handlers in DI container.");
     }
 
+    /// <inheritdoc />
     public void Unsubscribe<TEvent, THandler>()
         where TEvent : class, IEvent
         where THandler : class, IEventHandler<TEvent>
@@ -504,13 +574,78 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         _logger.LogWarning("Runtime unsubscription is not supported for RabbitMQEventBus.");
     }
 
+    /// <inheritdoc />
     public void UnsubscribeAll<TEvent>() where TEvent : class, IEvent
     {
         _logger.LogWarning("Runtime unsubscription is not supported for RabbitMQEventBus.");
     }
 
     /// <summary>
-    /// 释放资源
+    /// 异步释放资源，优雅关闭所有 Channel
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // 关闭所有消费者 Channel
+        foreach (var (eventType, subscription) in _subscriptions)
+        {
+            if (subscription.Channel != null)
+            {
+                try
+                {
+                    await subscription.Channel.CloseAsync();
+                    await subscription.Channel.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error closing consumer channel for {EventType}", eventType.Name);
+                }
+            }
+        }
+        _subscriptions.Clear();
+
+        // 关闭 Channel 池中的所有 Channel
+        if (_channelPool != null)
+        {
+            while (_channelPool.TryTake(out var pooledChannel))
+            {
+                try
+                {
+                    await pooledChannel.CloseAsync();
+                    await pooledChannel.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error closing pooled channel");
+                }
+            }
+            _channelPoolSemaphore?.Dispose();
+        }
+
+        // 关闭发布 Channel
+        var publishChannel = _publishChannel;
+        if (publishChannel != null)
+        {
+            try
+            {
+                await publishChannel.CloseAsync();
+                await publishChannel.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error closing publish channel");
+            }
+            _publishChannel = null;
+        }
+
+        _publishChannelLock.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// 同步释放资源
     /// 注意：不释放从 DI 注入的 _connection，由模块的 OnApplicationShutdownAsync 负责
     /// </summary>
     public void Dispose()
@@ -518,27 +653,38 @@ public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        try
+        foreach (var (_, subscription) in _subscriptions)
         {
-            if (_channel != null)
+            try { subscription.Channel?.Dispose(); }
+            catch { /* Dispose 不应抛出异常 */ }
+        }
+        _subscriptions.Clear();
+
+        // Dispose pooled channels
+        if (_channelPool != null)
+        {
+            while (_channelPool.TryTake(out var pooledChannel))
             {
-                try
-                {
-                    ((IDisposable)_channel).Dispose();
-                }
-                catch
-                {
-                    // Dispose 方法不应该抛出异常
-                }
+                try { pooledChannel.Dispose(); }
+                catch { /* Dispose 不应抛出异常 */ }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error disposing RabbitMQ channel");
+            _channelPoolSemaphore?.Dispose();
         }
 
-        _channelLock.Dispose();
+        try { _publishChannel?.Dispose(); }
+        catch { /* Dispose 不应抛出异常 */ }
+        _publishChannel = null;
 
-        // 不释放 _connection，由模块的 OnApplicationShutdownAsync 负责
+        _publishChannelLock.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// 消费者订阅信息（每个事件类型一个独立 Channel）
+    /// </summary>
+    private sealed class ConsumerSubscription(string queueName)
+    {
+        public string QueueName { get; } = queueName;
+        public IChannel? Channel { get; set; }
     }
 }

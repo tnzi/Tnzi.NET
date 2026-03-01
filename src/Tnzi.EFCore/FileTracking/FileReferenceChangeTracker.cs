@@ -167,16 +167,18 @@ public class FileReferenceChangeTracker
     /// </summary>
     public bool HasChanges => _changes.Count > 0;
 
+    private static readonly List<Guid> EmptyGuidList = [];
+
     /// <summary>
     /// 解析文件ID
     /// </summary>
-    private List<Guid> ParseFileIds(object? value, bool isMultiple)
+    private static List<Guid> ParseFileIds(object? value, bool isMultiple)
     {
         if (value == null)
-            return new List<Guid>();
+            return EmptyGuidList;
 
         if (value is Guid singleId)
-            return singleId != Guid.Empty ? new List<Guid> { singleId } : new List<Guid>();
+            return singleId != Guid.Empty ? [singleId] : EmptyGuidList;
 
         // 处理 Nullable<Guid>
         var nullableGuidType = Nullable.GetUnderlyingType(value.GetType());
@@ -184,8 +186,8 @@ public class FileReferenceChangeTracker
         {
             var nullableId = (Guid?)value;
             if (nullableId.HasValue && nullableId.Value != Guid.Empty)
-                return new List<Guid> { nullableId.Value };
-            return new List<Guid>();
+                return [nullableId.Value];
+            return EmptyGuidList;
         }
 
         if (value is string strValue && !string.IsNullOrWhiteSpace(strValue))
@@ -194,14 +196,11 @@ public class FileReferenceChangeTracker
             {
                 try
                 {
-                    // 尝试解析 JSON 数组
                     var list = JsonSerializer.Deserialize<List<Guid>>(strValue);
-                    return list?.Where(g => g != Guid.Empty).ToList() ?? new List<Guid>();
+                    return list?.Where(g => g != Guid.Empty).ToList() ?? EmptyGuidList;
                 }
                 catch (JsonException)
                 {
-                    // JSON 解析失败，回退到逗号分隔格式
-                    // 这是正常的回退逻辑，不需要记录日志
                     return strValue.Split(',')
                         .Select(s => Guid.TryParse(s.Trim(), out var g) ? g : Guid.Empty)
                         .Where(g => g != Guid.Empty)
@@ -210,16 +209,15 @@ public class FileReferenceChangeTracker
             }
             else
             {
-                // 单文件，尝试解析为 Guid
                 if (Guid.TryParse(strValue, out var g) && g != Guid.Empty)
-                    return new List<Guid> { g };
+                    return [g];
             }
         }
 
         if (value is IEnumerable<Guid> multipleIds)
             return multipleIds.Where(g => g != Guid.Empty).ToList();
 
-        return new List<Guid>();
+        return EmptyGuidList;
     }
 
     /// <summary>

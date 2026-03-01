@@ -489,6 +489,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // 清除该角色下所有用户的权限缓存
         await InvalidateRoleCacheAsync(roleId);
+        await PublishRoleFunctionsChangedAsync(roleId, PermissionChangeType.Assigned, newFunctionIds);
         LogInformation("Assigned {Count} functions to role: {RoleId}", newFunctionIds.Count, roleId);
         return Ok($"Assigned {newFunctionIds.Count} functions to role");
     }
@@ -511,6 +512,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // 清除该角色下所有用户的权限缓存
         await InvalidateRoleCacheAsync(roleId);
+        await PublishRoleFunctionsChangedAsync(roleId, PermissionChangeType.Removed, functionIdList);
         LogInformation("Removed functions from role: {RoleId}", roleId);
         return Ok("Functions removed from role");
     }
@@ -524,25 +526,50 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     {
         var functionIdList = functionIds.ToList();
 
-        // 先清空所有现有功能
-        var clearResult = await ClearRoleFunctionsAsync(roleId);
-        if (!clearResult.Succeeded)
-        {
-            return clearResult;
-        }
-
-        // 然后分配新功能
+        // 验证新功能是否存在
         if (functionIdList.Count > 0)
         {
-            var assignResult = await AssignFunctionsToRoleAsync(roleId, functionIdList);
-            if (!assignResult.Succeeded)
+            var existingFunctions = await _moduleFunctionRepository
+                .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled)
+                .Select(f => f.Id)
+                .ToListAsync();
+
+            var missingFunctions = functionIdList.Except(existingFunctions).ToList();
+            if (missingFunctions.Count > 0)
             {
-                return assignResult;
+                return Fail($"Functions not found: {string.Join(", ", missingFunctions)}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
             }
         }
 
-        LogInformation("Set {Count} functions for role: {RoleId}", functionIdList.Count, roleId);
-        return Ok($"Set {functionIdList.Count} functions for role");
+        // 原子操作：在同一个 UnitOfWork 中删除旧关联并创建新关联，避免权限窗口期
+        var result = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            // 删除旧关联
+            await _roleFunctionRepository.DeleteAsync(rf => rf.RoleId == roleId);
+
+            // 创建新关联
+            if (functionIdList.Count > 0)
+            {
+                var roleFunctions = functionIdList.Select(functionId => new RoleFunction
+                {
+                    RoleId = roleId,
+                    FunctionId = functionId,
+                    IsEnabled = true
+                }).ToList();
+                await _roleFunctionRepository.InsertManyAsync(roleFunctions);
+            }
+
+            LogInformation("Set {Count} functions for role: {RoleId}", functionIdList.Count, roleId);
+            return Ok($"Set {functionIdList.Count} functions for role");
+        });
+
+        if (result.Succeeded)
+        {
+            await InvalidateRoleCacheAsync(roleId);
+            await PublishRoleFunctionsChangedAsync(roleId, PermissionChangeType.Reset, functionIdList);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -612,6 +639,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // 清除该角色下所有用户的权限缓存
         await InvalidateRoleCacheAsync(roleId);
+        await PublishRoleFunctionsChangedAsync(roleId, PermissionChangeType.Cleared, []);
         LogInformation("Cleared all functions for role: {RoleId}", roleId);
         return Ok("Cleared all functions for role");
     }
@@ -754,6 +782,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         function.IsEnabled = true;
         await _moduleFunctionRepository.UpdateAsync(function);
         await InvalidateAllCacheAsync();
+        await PublishFunctionEnabledChangedAsync(function.Id, function.Code, function.ModuleId, true);
         LogInformation("Module function enabled: {Code}, Name: {Name}", function.Code, function.Name);
         return Ok("Module function enabled successfully");
     }
@@ -773,8 +802,470 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         function.IsEnabled = false;
         await _moduleFunctionRepository.UpdateAsync(function);
         await InvalidateAllCacheAsync();
+        await PublishFunctionEnabledChangedAsync(function.Id, function.Code, function.ModuleId, false);
         LogInformation("Module function disabled: {Code}, Name: {Name}", function.Code, function.Name);
         return Ok("Module function disabled successfully");
+    }
+
+    /// <summary>
+    /// 启用模块（级联启用所有子模块及其功能）
+    /// </summary>
+    /// <param name="id">模块ID</param>
+    public async Task<Result> EnableModuleAsync(Guid id)
+    {
+        var module = await _moduleRepository.FindAsync(id);
+        if (module == null)
+        {
+            return Fail("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        if (module.IsEnabled)
+        {
+            return Ok("Module is already enabled");
+        }
+
+        List<Guid>? affectedIds = null;
+        var result = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            affectedIds = await SetModuleEnabledCascadeAsync(id, true);
+            await InvalidateAllCacheAsync();
+            LogInformation("Module enabled (cascade): {Code}, affected {Count} modules", module.Code, affectedIds.Count);
+            return Ok($"Module enabled successfully, affected {affectedIds.Count} modules");
+        });
+
+        if (result.Succeeded && affectedIds != null)
+        {
+            await PublishModuleEnabledChangedAsync(id, module.Code, true, affectedIds);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 禁用模块（级联禁用所有子模块及其功能）
+    /// </summary>
+    /// <param name="id">模块ID</param>
+    public async Task<Result> DisableModuleAsync(Guid id)
+    {
+        var module = await _moduleRepository.FindAsync(id);
+        if (module == null)
+        {
+            return Fail("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        if (!module.IsEnabled)
+        {
+            return Ok("Module is already disabled");
+        }
+
+        List<Guid>? affectedIds = null;
+        var result = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            affectedIds = await SetModuleEnabledCascadeAsync(id, false);
+            await InvalidateAllCacheAsync();
+            LogInformation("Module disabled (cascade): {Code}, affected {Count} modules", module.Code, affectedIds.Count);
+            return Ok($"Module disabled successfully, affected {affectedIds.Count} modules");
+        });
+
+        if (result.Succeeded && affectedIds != null)
+        {
+            await PublishModuleEnabledChangedAsync(id, module.Code, false, affectedIds);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reverse permission query: get all roles that have a specific permission
+    /// </summary>
+    /// <param name="permissionName">Permission name (function code)</param>
+    /// <returns>List of roles with the permission</returns>
+    public async Task<Result<IEnumerable<PermissionRoleDto>>> GetPermissionRolesAsync(string permissionName)
+    {
+        if (string.IsNullOrWhiteSpace(permissionName))
+        {
+            return Fail<IEnumerable<PermissionRoleDto>>("Permission name cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // Find the function by code
+        var function = await _moduleFunctionRepository
+            .Where(f => f.Code == permissionName)
+            .FirstOrDefaultAsync();
+
+        if (function == null)
+        {
+            return Fail<IEnumerable<PermissionRoleDto>>($"Permission '{permissionName}' not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        // Find all role-function assignments for this function
+        var roleFunctions = await _roleFunctionRepository
+            .Where(rf => rf.FunctionId == function.Id)
+            .ToListAsync();
+
+        var result = roleFunctions.Select(rf => new PermissionRoleDto
+        {
+            RoleId = rf.RoleId,
+            IsEnabled = rf.IsEnabled,
+            FunctionId = function.Id,
+            FunctionCode = function.Code,
+            FunctionName = function.Name
+        });
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Reverse permission query: get all user IDs that have a specific permission (via roles)
+    /// </summary>
+    /// <param name="permissionName">Permission name (function code)</param>
+    /// <returns>List of users with the permission</returns>
+    public async Task<Result<IEnumerable<PermissionUserDto>>> GetPermissionUsersAsync(string permissionName)
+    {
+        if (string.IsNullOrWhiteSpace(permissionName))
+        {
+            return Fail<IEnumerable<PermissionUserDto>>("Permission name cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (_userRoleService == null)
+        {
+            return Fail<IEnumerable<PermissionUserDto>>("User role service is not available", 503, ErrorCodes.INTERNAL_SERVER_ERROR);
+        }
+
+        // Find the function by code
+        var function = await _moduleFunctionRepository
+            .Where(f => f.Code == permissionName)
+            .FirstOrDefaultAsync();
+
+        if (function == null)
+        {
+            return Fail<IEnumerable<PermissionUserDto>>($"Permission '{permissionName}' not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        // Find all roles that have this function (enabled only)
+        var roleIds = await _roleFunctionRepository
+            .Where(rf => rf.FunctionId == function.Id && rf.IsEnabled)
+            .Select(rf => rf.RoleId)
+            .Distinct()
+            .ToListAsync();
+
+        if (roleIds.Count == 0)
+        {
+            return Ok(Enumerable.Empty<PermissionUserDto>());
+        }
+
+        // For each role, get the users
+        var userRoleMap = new Dictionary<Guid, List<Guid>>(); // userId -> roleIds
+        foreach (var roleId in roleIds)
+        {
+            var userIds = await _userRoleService.GetRoleUserIdsAsync(roleId);
+            foreach (var userId in userIds)
+            {
+                if (!userRoleMap.TryGetValue(userId, out var roles))
+                {
+                    roles = new List<Guid>();
+                    userRoleMap[userId] = roles;
+                }
+                roles.Add(roleId);
+            }
+        }
+
+        var result = userRoleMap.Select(kvp => new PermissionUserDto
+        {
+            UserId = kvp.Key,
+            RoleIds = kvp.Value
+        });
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get authorization statistics overview
+    /// </summary>
+    /// <returns>Authorization statistics</returns>
+    public async Task<Result<AuthorizationStatisticsDto>> GetStatisticsAsync()
+    {
+        // Single query approach using GroupBy for modules
+        var moduleStats = await _moduleRepository.AsQueryable()
+            .GroupBy(o => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Enabled = g.Count(m => m.IsEnabled)
+            })
+            .FirstOrDefaultAsync();
+
+        // Single query approach using GroupBy for functions
+        var functionStats = await _moduleFunctionRepository.AsQueryable()
+            .GroupBy(o => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Enabled = g.Count(f => f.IsEnabled)
+            })
+            .FirstOrDefaultAsync();
+
+        // Single query approach using GroupBy for role-function assignments
+        var rfStats = await _roleFunctionRepository.AsQueryable()
+            .GroupBy(o => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Enabled = g.Count(rf => rf.IsEnabled)
+            })
+            .FirstOrDefaultAsync();
+
+        var moduleRoleCount = await _moduleRoleRepository.AsQueryable().CountAsync();
+        var moduleUserCount = await _moduleUserRepository.AsQueryable().CountAsync();
+
+        var statistics = new AuthorizationStatisticsDto
+        {
+            TotalModules = moduleStats?.Total ?? 0,
+            EnabledModules = moduleStats?.Enabled ?? 0,
+            TotalFunctions = functionStats?.Total ?? 0,
+            EnabledFunctions = functionStats?.Enabled ?? 0,
+            TotalRoleFunctionAssignments = rfStats?.Total ?? 0,
+            EnabledRoleFunctionAssignments = rfStats?.Enabled ?? 0,
+            TotalModuleRoleAssignments = moduleRoleCount,
+            TotalModuleUserAssignments = moduleUserCount
+        };
+
+        return Ok(statistics);
+    }
+
+    /// <summary>
+    /// Compare permissions between two roles
+    /// </summary>
+    public async Task<Result<PermissionComparisonDto>> CompareRolePermissionsAsync(Guid roleId1, Guid roleId2)
+    {
+        // Get function IDs for both roles (enabled only)
+        var functionIds1 = await _roleFunctionRepository
+            .Where(rf => rf.RoleId == roleId1 && rf.IsEnabled)
+            .Select(rf => rf.FunctionId)
+            .ToListAsync();
+
+        var functionIds2 = await _roleFunctionRepository
+            .Where(rf => rf.RoleId == roleId2 && rf.IsEnabled)
+            .Select(rf => rf.FunctionId)
+            .ToListAsync();
+
+        var set1 = new HashSet<Guid>(functionIds1);
+        var set2 = new HashSet<Guid>(functionIds2);
+
+        var onlyIn1 = set1.Except(set2).ToList();
+        var onlyIn2 = set2.Except(set1).ToList();
+        var shared = set1.Intersect(set2).ToList();
+
+        // Load function details for all referenced IDs
+        var allIds = onlyIn1.Concat(onlyIn2).Concat(shared).Distinct().ToList();
+        var functions = allIds.Count > 0
+            ? await _moduleFunctionRepository
+                .Where(f => allIds.Contains(f.Id))
+                .Include(f => f.FunctionModule)
+                .ToListAsync()
+            : [];
+
+        var functionMap = functions.ToDictionary(f => f.Id);
+
+        FunctionSummaryDto ToSummary(Guid id) => functionMap.TryGetValue(id, out var f)
+            ? new FunctionSummaryDto { Id = f.Id, Code = f.Code, Name = f.Name, ModuleCode = f.FunctionModule?.Code }
+            : new FunctionSummaryDto { Id = id };
+
+        var result = new PermissionComparisonDto
+        {
+            RoleId1 = roleId1,
+            RoleId2 = roleId2,
+            OnlyInRole1 = onlyIn1.Select(ToSummary).ToList(),
+            OnlyInRole2 = onlyIn2.Select(ToSummary).ToList(),
+            Shared = shared.Select(ToSummary).ToList()
+        };
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Clone all function assignments from source role to target role
+    /// </summary>
+    public async Task<Result<int>> CloneRoleFunctionsAsync(Guid sourceRoleId, Guid targetRoleId)
+    {
+        if (sourceRoleId == targetRoleId)
+        {
+            return Fail<int>("Source and target role cannot be the same", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // Get source role's enabled function IDs
+        var sourceFunctionIds = await _roleFunctionRepository
+            .Where(rf => rf.RoleId == sourceRoleId && rf.IsEnabled)
+            .Select(rf => rf.FunctionId)
+            .ToListAsync();
+
+        if (sourceFunctionIds.Count == 0)
+        {
+            return Ok(0);
+        }
+
+        // Get target role's existing function IDs
+        var existingTargetFunctionIds = await _roleFunctionRepository
+            .Where(rf => rf.RoleId == targetRoleId && sourceFunctionIds.Contains(rf.FunctionId))
+            .Select(rf => rf.FunctionId)
+            .ToListAsync();
+
+        // Only create assignments that don't already exist
+        var newFunctionIds = sourceFunctionIds.Except(existingTargetFunctionIds).ToList();
+        if (newFunctionIds.Count == 0)
+        {
+            return Ok(0);
+        }
+
+        var newAssignments = newFunctionIds.Select(fid => new RoleFunction
+        {
+            RoleId = targetRoleId,
+            FunctionId = fid,
+            IsEnabled = true
+        }).ToList();
+
+        await _roleFunctionRepository.InsertManyAsync(newAssignments);
+        await InvalidateRoleCacheAsync(targetRoleId);
+        await PublishRoleFunctionsChangedAsync(targetRoleId, PermissionChangeType.Assigned, newFunctionIds);
+
+        LogInformation("Cloned {Count} permissions from role {SourceRoleId} to {TargetRoleId}", newAssignments.Count, sourceRoleId, targetRoleId);
+        return Ok(newAssignments.Count);
+    }
+
+    /// <summary>
+    /// Export role's function assignments as portable JSON data
+    /// </summary>
+    public async Task<Result<RolePermissionExportDto>> ExportRolePermissionsAsync(Guid roleId)
+    {
+        // Get all enabled function IDs for the role
+        var functionIds = await _roleFunctionRepository
+            .Where(rf => rf.RoleId == roleId && rf.IsEnabled)
+            .Select(rf => rf.FunctionId)
+            .ToListAsync();
+
+        // Resolve function codes (codes are portable across environments)
+        var functionCodes = functionIds.Count > 0
+            ? await _moduleFunctionRepository
+                .Where(f => functionIds.Contains(f.Id))
+                .Select(f => f.Code)
+                .ToListAsync()
+            : [];
+
+        var exportData = new RolePermissionExportDto
+        {
+            Version = "1.0",
+            ExportedAt = DateTime.UtcNow,
+            SourceRoleId = roleId,
+            FunctionCodes = functionCodes
+        };
+
+        return Ok(exportData);
+    }
+
+    /// <summary>
+    /// Import function assignments to a role from exported data
+    /// </summary>
+    public async Task<Result<PermissionImportResultDto>> ImportRolePermissionsAsync(Guid roleId, RolePermissionExportDto importData)
+    {
+        if (importData.FunctionCodes.Count == 0)
+        {
+            return Ok(new PermissionImportResultDto());
+        }
+
+        // Resolve function codes to IDs
+        var codeList = importData.FunctionCodes.Distinct().ToList();
+        var functions = await _moduleFunctionRepository
+            .Where(f => codeList.Contains(f.Code) && f.IsEnabled)
+            .Select(f => new { f.Id, f.Code })
+            .ToListAsync();
+
+        var foundCodes = functions.Select(f => f.Code).ToHashSet();
+        var notFoundCodes = codeList.Where(c => !foundCodes.Contains(c)).ToList();
+        var resolvedFunctionIds = functions.Select(f => f.Id).ToList();
+
+        // Get existing assignments for this role
+        var existingFunctionIds = resolvedFunctionIds.Count > 0
+            ? await _roleFunctionRepository
+                .Where(rf => rf.RoleId == roleId && resolvedFunctionIds.Contains(rf.FunctionId))
+                .Select(rf => rf.FunctionId)
+                .ToListAsync()
+            : [];
+
+        var newFunctionIds = resolvedFunctionIds.Except(existingFunctionIds).ToList();
+
+        if (newFunctionIds.Count > 0)
+        {
+            var newAssignments = newFunctionIds.Select(fid => new RoleFunction
+            {
+                RoleId = roleId,
+                FunctionId = fid,
+                IsEnabled = true
+            }).ToList();
+
+            await _roleFunctionRepository.InsertManyAsync(newAssignments);
+            await InvalidateRoleCacheAsync(roleId);
+            await PublishRoleFunctionsChangedAsync(roleId, PermissionChangeType.Assigned, newFunctionIds);
+        }
+
+        var result = new PermissionImportResultDto
+        {
+            Imported = newFunctionIds.Count,
+            Skipped = existingFunctionIds.Count,
+            NotFound = notFoundCodes
+        };
+
+        LogInformation("Imported permissions to role {RoleId}: {Imported} new, {Skipped} skipped, {NotFound} not found",
+            roleId, result.Imported, result.Skipped, result.NotFound.Count);
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// 级联设置模块及其所有子模块的启用状态，同时更新关联功能
+    /// </summary>
+    private async Task<List<Guid>> SetModuleEnabledCascadeAsync(Guid moduleId, bool enabled)
+    {
+        var affectedIds = new List<Guid>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(moduleId);
+
+        while (queue.Count > 0)
+        {
+            var currentId = queue.Dequeue();
+            affectedIds.Add(currentId);
+
+            // 更新当前模块
+            var current = await _moduleRepository.FindAsync(currentId);
+            if (current != null && current.IsEnabled != enabled)
+            {
+                current.IsEnabled = enabled;
+                await _moduleRepository.UpdateAsync(current);
+            }
+
+            // 更新该模块下所有功能
+            var functions = await _moduleFunctionRepository
+                .Where(f => f.ModuleId == currentId && f.IsEnabled != enabled)
+                .ToListAsync();
+            foreach (var function in functions)
+            {
+                function.IsEnabled = enabled;
+            }
+            if (functions.Count > 0)
+            {
+                await _moduleFunctionRepository.UpdateManyAsync(functions);
+            }
+
+            // 找到子模块加入队列
+            var childIds = await _moduleRepository
+                .Where(m => m.ParentId == currentId)
+                .Select(m => m.Id)
+                .ToListAsync();
+            foreach (var childId in childIds)
+            {
+                queue.Enqueue(childId);
+            }
+        }
+
+        return affectedIds;
     }
 
     /// <summary>
@@ -826,10 +1317,75 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 await _functionAuthCache.RemoveUserPermissionNamesAsync(userIds);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 缓存失效失败不应影响主业务流程
-            // 权限缓存会在过期后自动刷新
+            // 缓存失效失败不应影响主业务流程，权限缓存会在过期后自动刷新
+            Logger.LogWarning(ex, "Failed to invalidate permission cache for role {RoleId}", roleId);
+        }
+    }
+
+    /// <summary>
+    /// 发布角色功能权限变更事件
+    /// </summary>
+    private async Task PublishRoleFunctionsChangedAsync(Guid roleId, PermissionChangeType changeType, List<Guid> functionIds)
+    {
+        if (EventBus == null) return;
+        try
+        {
+            await EventBus.PublishAsync(new RoleFunctionsChangedEvent
+            {
+                RoleId = roleId,
+                ChangeType = changeType,
+                AffectedFunctionIds = functionIds
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish RoleFunctionsChangedEvent for role {RoleId}", roleId);
+        }
+    }
+
+    /// <summary>
+    /// 发布模块启用/禁用变更事件
+    /// </summary>
+    private async Task PublishModuleEnabledChangedAsync(Guid moduleId, string moduleCode, bool isEnabled, List<Guid> affectedModuleIds)
+    {
+        if (EventBus == null) return;
+        try
+        {
+            await EventBus.PublishAsync(new ModuleEnabledChangedEvent
+            {
+                ModuleId = moduleId,
+                ModuleCode = moduleCode,
+                IsEnabled = isEnabled,
+                AffectedModuleIds = affectedModuleIds
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish ModuleEnabledChangedEvent for module {ModuleId}", moduleId);
+        }
+    }
+
+    /// <summary>
+    /// 发布功能启用/禁用变更事件
+    /// </summary>
+    private async Task PublishFunctionEnabledChangedAsync(Guid functionId, string functionCode, Guid moduleId, bool isEnabled)
+    {
+        if (EventBus == null) return;
+        try
+        {
+            await EventBus.PublishAsync(new FunctionEnabledChangedEvent
+            {
+                FunctionId = functionId,
+                FunctionCode = functionCode,
+                ModuleId = moduleId,
+                IsEnabled = isEnabled
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish FunctionEnabledChangedEvent for function {FunctionId}", functionId);
         }
     }
 }

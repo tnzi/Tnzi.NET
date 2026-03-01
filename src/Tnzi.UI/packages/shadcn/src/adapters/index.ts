@@ -7,8 +7,11 @@
 // Message adapter (vue-sonner)
 export { createShadcnMessageAdapter } from './message';
 
-// Dialog adapter (v-dialogs)
+// Dialog adapter (reactive singleton + TDialogProvider)
 export { createShadcnDialogAdapter } from './dialog';
+
+// Theme adapter (Tailwind CSS dark mode class strategy)
+export { createShadcnThemeAdapter } from './theme';
 
 // Store adapter (Pinia)
 export { createPiniaRuntime, installPinia } from './store/pinia-adapter';

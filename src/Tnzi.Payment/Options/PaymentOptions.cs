@@ -60,6 +60,11 @@ public class PaymentOptions
     /// 促销配置
     /// </summary>
     public PromotionOptions Promotion { get; set; } = new();
+
+    /// <summary>
+    /// 后台任务执行间隔（分钟），默认 5 分钟
+    /// </summary>
+    public int BackgroundTaskIntervalMinutes { get; set; } = 5;
 }
 
 /// <summary>
@@ -117,7 +122,7 @@ public class InvoiceOptions
     /// <summary>
     /// 默认模板
     /// </summary>
-    public string DefaultTemplate { get; set; } = "Standard";
+    public string DefaultTemplate { get; set; } = "InvoiceDefault";
 
     /// <summary>
     /// 支付成功后自动发送

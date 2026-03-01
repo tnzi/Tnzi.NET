@@ -202,11 +202,12 @@ public class HealthChecksModule : TnziFrameworkModule
     {
         context.Response.ContentType = "application/json";
 
-        // 尝试使用缓存响应
-        var cachedResponse = ResponseCache.TryGetCachedResponse();
-        if (cachedResponse != null)
+        // 尝试使用缓存响应（包含状态码，确保缓存窗口内状态一致）
+        var cached = ResponseCache.TryGetCachedResponse();
+        if (cached != null)
         {
-            await context.Response.WriteAsync(cachedResponse);
+            context.Response.StatusCode = cached.Value.StatusCode;
+            await context.Response.WriteAsync(cached.Value.Response);
             return;
         }
 
@@ -227,8 +228,8 @@ public class HealthChecksModule : TnziFrameworkModule
 
         var response = JsonSerializer.Serialize(result, DetailedResponseJsonOptions);
 
-        // 更新缓存
-        ResponseCache.UpdateCache(response);
+        // 更新缓存（含当前状态码）
+        ResponseCache.UpdateCache(response, context.Response.StatusCode);
 
         await context.Response.WriteAsync(response);
     }
@@ -240,6 +241,7 @@ public class HealthChecksModule : TnziFrameworkModule
     private sealed class HealthCheckResponseCache
     {
         private string? _cachedResponse;
+        private int _cachedStatusCode;
         private DateTimeOffset _cacheExpiry;
         private int _cacheDurationSeconds;
         private readonly object _lock = new();
@@ -253,10 +255,10 @@ public class HealthChecksModule : TnziFrameworkModule
         }
 
         /// <summary>
-        /// 尝试获取缓存的响应
+        /// 尝试获取缓存的响应（含状态码）
         /// </summary>
-        /// <returns>缓存的 JSON 响应字符串，如果缓存过期或未设置则返回 null</returns>
-        public string? TryGetCachedResponse()
+        /// <returns>缓存的 JSON 响应字符串和状态码，如果缓存过期或未设置则返回 null</returns>
+        public (string Response, int StatusCode)? TryGetCachedResponse()
         {
             if (_cacheDurationSeconds <= 0) return null;
 
@@ -264,22 +266,23 @@ public class HealthChecksModule : TnziFrameworkModule
             {
                 if (_cachedResponse != null && DateTimeOffset.UtcNow < _cacheExpiry)
                 {
-                    return _cachedResponse;
+                    return (_cachedResponse, _cachedStatusCode);
                 }
                 return null;
             }
         }
 
         /// <summary>
-        /// 更新缓存响应
+        /// 更新缓存响应（含状态码）
         /// </summary>
-        public void UpdateCache(string response)
+        public void UpdateCache(string response, int statusCode)
         {
             if (_cacheDurationSeconds <= 0) return;
 
             lock (_lock)
             {
                 _cachedResponse = response;
+                _cachedStatusCode = statusCode;
                 _cacheExpiry = DateTimeOffset.UtcNow.AddSeconds(_cacheDurationSeconds);
             }
         }

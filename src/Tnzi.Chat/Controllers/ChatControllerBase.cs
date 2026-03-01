@@ -107,6 +107,28 @@ public abstract class ChatControllerBase : ApiControllerBase
     }
 
     /// <summary>
+    /// 批量删除消息（从收件箱移除）
+    /// </summary>
+    [HttpPost("batch-delete")]
+    public virtual async Task<ApiResult<int>> BatchDeleteReceives([FromBody] List<Guid> messageIds)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await MessageService.BatchDeleteReceivesAsync(userId, messageIds);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量标记已读
+    /// </summary>
+    [HttpPost("batch-read")]
+    public virtual async Task<ApiResult<int>> BatchMarkAsRead([FromBody] List<Guid> messageIds)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await MessageService.BatchMarkAsReadAsync(userId, messageIds);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 回复消息
     /// </summary>
     [HttpPost("replies")]

@@ -4,7 +4,7 @@
  * Form controller - reactive headless logic.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive, toRaw } from '@vue/reactivity';
 import { deepEqual } from '../utils/deep-equal';
 import type { z } from 'zod';
 
@@ -196,7 +196,7 @@ export class FormController<T extends Record<string, unknown>> {
 
   /** Reset to initial values */
   reset(): void {
-    this.values = structuredClone(this._initialValues);
+    this.values = structuredClone(toRaw(this._initialValues));
     this.errors = [];
     this.isSubmitting = false;
     this.isSubmitted = false;

@@ -103,7 +103,7 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
 
         // 检查Layout名称是否已存在
         var exists = await _repository
-            .ExistsAsync(l => l.LayoutName == request.LayoutName
+            .AnyAsync(l => l.LayoutName == request.LayoutName
                 && l.Module == request.Module
                 && l.Category == request.Category
                 && !l.IsDeleted, cancellationToken);
@@ -144,7 +144,7 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
             || existing.Category != request.Category)
         {
             var nameExists = await _repository
-                .ExistsAsync(l => l.LayoutName == request.LayoutName
+                .AnyAsync(l => l.LayoutName == request.LayoutName
                     && l.Module == request.Module
                     && l.Category == request.Category
                     && l.Id != id
@@ -416,5 +416,194 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
             Logger.LogError(ex, "Unexpected error loading default layout for module '{Module}' category '{Category}'", module, category);
             return null;
         }
+    }
+
+    public async Task<Result<LayoutDto>> CloneLayoutAsync(Guid sourceId, string newLayoutName, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(newLayoutName);
+
+        var source = await _repository.GetAsync(sourceId, cancellationToken);
+        if (source == null)
+        {
+            return Fail<LayoutDto>("Source layout not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        // 检查新名称是否已存在
+        var exists = await _repository
+            .AnyAsync(l => l.LayoutName == newLayoutName
+                && l.Module == source.Module
+                && l.Category == source.Category
+                && !l.IsDeleted, cancellationToken);
+
+        if (exists)
+        {
+            return Fail<LayoutDto>(
+                $"Layout with name '{newLayoutName}' already exists in module '{source.Module}' and category '{source.Category}'",
+                409,
+                ErrorCodes.DATA_CONFLICT);
+        }
+
+        var clone = new Layout
+        {
+            LayoutName = newLayoutName,
+            Module = source.Module,
+            Category = source.Category,
+            LayoutContent = source.LayoutContent,
+            IsActive = source.IsActive,
+            IsDefault = false, // 克隆不继承默认状态
+            Description = $"Cloned from '{source.LayoutName}'",
+            Metadata = source.Metadata
+        };
+
+        await _repository.InsertAsync(clone, cancellationToken);
+        LogInformation("Layout cloned: {SourceName} -> {CloneName}, Module: {Module}", source.LayoutName, newLayoutName, source.Module);
+        return Ok(clone.MapTo<LayoutDto>(), "Layout cloned successfully");
+    }
+
+    public async Task<Result<string>> ExportLayoutsAsync(string? module = null, string? category = null, CancellationToken cancellationToken = default)
+    {
+        var query = _repository.AsQueryable().AsNoTracking().Where(l => !l.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(module))
+            query = query.Where(l => l.Module == module);
+
+        if (!string.IsNullOrWhiteSpace(category))
+            query = query.Where(l => l.Category == category);
+
+        var layouts = await query
+            .OrderBy(l => l.Module)
+            .ThenBy(l => l.Category)
+            .ThenBy(l => l.LayoutName)
+            .ToListAsync(cancellationToken);
+
+        var entries = layouts.Select(l => new LayoutExportEntry
+        {
+            LayoutName = l.LayoutName,
+            Module = l.Module,
+            Category = l.Category,
+            LayoutContent = l.LayoutContent,
+            IsActive = l.IsActive,
+            IsDefault = l.IsDefault,
+            Description = l.Description,
+            Metadata = l.Metadata
+        }).ToList();
+
+        var json = System.Text.Json.JsonSerializer.Serialize(entries, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+        });
+
+        LogInformation("Exported {Count} layouts (module: {Module}, category: {Category})", entries.Count, module ?? "all", category ?? "all");
+        return Ok(json, $"Exported {entries.Count} layouts");
+    }
+
+    public async Task<Result<LayoutImportResultDto>> ImportLayoutsAsync(string json, bool overwriteExisting = false, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(json);
+
+        List<LayoutExportEntry>? entries;
+        try
+        {
+            entries = System.Text.Json.JsonSerializer.Deserialize<List<LayoutExportEntry>>(json, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return Fail<LayoutImportResultDto>($"Invalid JSON format: {ex.Message}", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (entries == null || entries.Count == 0)
+            return Fail<LayoutImportResultDto>("No layouts found in import data", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var result = new LayoutImportResultDto();
+        var toInsert = new List<Layout>();
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.LayoutName) || string.IsNullOrWhiteSpace(entry.Module))
+            {
+                result.Errors.Add("Skipped entry with empty LayoutName or Module");
+                result.SkippedCount++;
+                continue;
+            }
+
+            var existing = await _repository.FirstOrDefaultAsync(
+                l => l.LayoutName == entry.LayoutName
+                    && l.Module == entry.Module
+                    && l.Category == entry.Category
+                    && !l.IsDeleted,
+                cancellationToken);
+
+            if (existing != null)
+            {
+                if (overwriteExisting)
+                {
+                    existing.LayoutContent = entry.LayoutContent;
+                    existing.IsActive = entry.IsActive;
+                    existing.IsDefault = entry.IsDefault;
+                    existing.Description = entry.Description;
+                    existing.Metadata = entry.Metadata;
+                    await _repository.UpdateAsync(existing, cancellationToken);
+                    result.UpdatedCount++;
+                }
+                else
+                {
+                    result.SkippedCount++;
+                }
+                continue;
+            }
+
+            toInsert.Add(new Layout
+            {
+                LayoutName = entry.LayoutName,
+                Module = entry.Module,
+                Category = entry.Category,
+                LayoutContent = entry.LayoutContent,
+                IsActive = entry.IsActive,
+                IsDefault = entry.IsDefault,
+                Description = entry.Description,
+                Metadata = entry.Metadata
+            });
+        }
+
+        if (toInsert.Count > 0)
+        {
+            await _repository.InsertManyAsync(toInsert, cancellationToken);
+            result.CreatedCount = toInsert.Count;
+        }
+
+        LogInformation("Imported layouts: {Created} created, {Updated} updated, {Skipped} skipped, {Errors} errors",
+            result.CreatedCount, result.UpdatedCount, result.SkippedCount, result.Errors.Count);
+
+        return Ok(result, $"Imported {result.CreatedCount} layouts, updated {result.UpdatedCount}, skipped {result.SkippedCount}");
+    }
+
+    public async Task<Result<int>> BatchActivateAsync(List<Guid> ids, bool isActive, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var layouts = await _repository.Where(l => ids.Contains(l.Id) && !l.IsDeleted).ToListAsync(cancellationToken);
+        if (layouts.Count == 0)
+            return Fail<int>("No layouts found for the specified IDs", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var changed = 0;
+        foreach (var layout in layouts)
+        {
+            if (layout.IsActive != isActive)
+            {
+                layout.IsActive = isActive;
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+            await _repository.UpdateManyAsync(layouts, cancellationToken);
+
+        LogInformation("Batch {Action} {Count} layouts", isActive ? "activated" : "deactivated", changed);
+        return Ok(changed, $"Successfully {(isActive ? "activated" : "deactivated")} {changed} layouts");
     }
 }

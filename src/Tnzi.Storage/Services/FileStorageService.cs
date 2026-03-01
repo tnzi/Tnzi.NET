@@ -34,7 +34,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return validation;
 
         // 文件验证
-        var fileValidation = ValidateFileAsync<FileRecord>(originalFileName, stream);
+        var fileValidation = ValidateFile<FileRecord>(originalFileName, stream);
         if (fileValidation != null)
             return fileValidation;
 
@@ -82,6 +82,9 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         await _repository.InsertAsync(fileRecord);
         LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", fileName, originalFileName, stream.Length);
+
+        await PublishFileUploadedEventAsync(fileRecord);
+
         return Ok(fileRecord, "File saved successfully");
     }
 
@@ -96,6 +99,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<Stream>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var stream = await _storage.DownloadAsync(GetSafePath(record!.Path));
+        await PublishFileAccessedEventAsync(id, FileAccessType.Download);
         return Ok(stream);
     }
 
@@ -113,6 +117,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<(Stream Stream, long Start, long End, long TotalLength)>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var result = await _storage.DownloadRangeAsync(GetSafePath(record!.Path), rangeStart, rangeEnd);
+        await PublishFileAccessedEventAsync(id, FileAccessType.RangeDownload);
         return Ok(result);
     }
 
@@ -158,6 +163,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<Stream>("Thumbnail not available", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var stream = await _storage.DownloadAsync(record.ThumbnailPath);
+        await PublishFileAccessedEventAsync(id, FileAccessType.Thumbnail);
         return Ok(stream);
     }
 
@@ -208,7 +214,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (validation != null)
             return validation;
 
-        validation = ValidateFileAsync<FileRecord>(fileName, stream);
+        validation = ValidateFile<FileRecord>(fileName, stream);
         if (validation != null)
             return validation;
 
@@ -278,12 +284,34 @@ public class FileStorageService : ApplicationService, IFileStorageService
             var records = await _repository
                 .ToListAsync(r => idList.Contains(r.Id), cancellationToken);
 
+            var deletedCount = 0;
+            var decrementedCount = 0;
+
             foreach (var record in records)
             {
+                var newCount = DecrementReferenceCount(record);
+                if (newCount > 0)
+                {
+                    // 还有引用，只更新计数
+                    await _repository.UpdateAsync(record, cancellationToken);
+                    decrementedCount++;
+                    continue;
+                }
+
+                // 引用归零，删除引用记录和物理文件
+                var references = await _referenceRepository
+                    .ToListAsync(r => r.FileId == record.Id, cancellationToken);
+                foreach (var reference in references)
+                {
+                    await _referenceRepository.DeleteAsync(reference, cancellationToken);
+                }
+
                 await DeleteFileAsync(record);
+                deletedCount++;
             }
-            LogInformation("Batch deleted {Count} files", records.Count);
-            return Ok($"Batch deleted {records.Count} files");
+
+            LogInformation("Batch delete: {Deleted} deleted, {Decremented} reference count decreased", deletedCount, decrementedCount);
+            return Ok($"Batch delete: {deletedCount} deleted, {decrementedCount} reference count decreased");
         });
     }
 
@@ -294,9 +322,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (check != null)
             return check;
 
-        record!.OriginalName = newFileName;
+        var oldName = record!.OriginalName;
+        record.OriginalName = newFileName;
         await _repository.UpdateAsync(record);
-        LogInformation("File renamed: {OldFileName} -> {NewFileName}", record.OriginalName, newFileName);
+        LogInformation("File renamed: {OldFileName} -> {NewFileName}", oldName, newFileName);
         return Ok(record, "File renamed successfully");
     }
 
@@ -447,7 +476,14 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         if (!string.IsNullOrEmpty(request.OriginalName))
         {
-            query = query.Where(f => f.OriginalName != null && f.OriginalName.Contains(request.OriginalName));
+            var keyword = request.OriginalName.ToLower();
+            query = query.Where(f => f.OriginalName != null && f.OriginalName.ToLower().Contains(keyword));
+        }
+
+        if (!string.IsNullOrEmpty(request.Tag))
+        {
+            var tag = request.Tag.Trim().ToLower();
+            query = query.Where(f => f.Tags != null && f.Tags.ToLower().Contains(tag));
         }
 
         if (!string.IsNullOrEmpty(request.SortBy))
@@ -609,12 +645,171 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok((IEnumerable<FileRecord>)extractedFiles, $"Decompressed {extractedFiles.Count} files");
     }
 
+    public async Task<Result<string>> GetPresignedUrlAsync(Guid id, int expiresInSeconds = 3600, string httpMethod = "GET")
+    {
+        if (expiresInSeconds <= 0)
+            return Fail<string>("ExpiresInSeconds must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var record = await _repository.GetAsync(id);
+        var check = EnsureFileRecordExists<string>(record);
+        if (check != null)
+            return check;
+
+        if (string.IsNullOrEmpty(record!.Path))
+            return Fail<string>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        // Try provider-level presigned URL first (S3, R2, Azure)
+        var presignedUrl = await _storage.GetPresignedUrlAsync(record.Path, expiresInSeconds, httpMethod);
+        if (!string.IsNullOrEmpty(presignedUrl))
+        {
+            LogInformation("Presigned URL generated for file {FileId}, method: {HttpMethod}, expires: {ExpiresIn}s", id, httpMethod, expiresInSeconds);
+            return Ok<string>(presignedUrl);
+        }
+
+        // Fallback: return controller-based URL for local storage
+        var fallbackUrl = $"/api/files/{id}/download";
+        return Ok<string>(fallbackUrl, "Presigned URL not supported by provider, returning controller URL");
+    }
+
+    public async Task<Result<UserStorageUsage>> GetUserStorageUsageAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var stats = await _repository.AsQueryable()
+            .Where(f => f.CreatorId == userId)
+            .GroupBy(f => f.CreatorId)
+            .Select(g => new
+            {
+                FileCount = g.Count(),
+                TotalSize = g.Sum(f => f.Size)
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var usage = new UserStorageUsage
+        {
+            UserId = userId,
+            FileCount = stats?.FileCount ?? 0,
+            TotalSize = stats?.TotalSize ?? 0
+        };
+
+        return Ok(usage);
+    }
+
+    public async Task<Result<IEnumerable<UserStorageUsage>>> GetTopUsersByStorageAsync(int top = 20, CancellationToken cancellationToken = default)
+    {
+        if (top <= 0)
+            return Fail<IEnumerable<UserStorageUsage>>("Top must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var usages = await _repository.AsQueryable()
+            .Where(f => f.CreatorId != null)
+            .GroupBy(f => f.CreatorId)
+            .Select(g => new UserStorageUsage
+            {
+                UserId = g.Key,
+                FileCount = g.Count(),
+                TotalSize = g.Sum(f => f.Size)
+            })
+            .OrderByDescending(u => u.TotalSize)
+            .Take(top)
+            .ToListAsync(cancellationToken);
+
+        return Ok((IEnumerable<UserStorageUsage>)usages);
+    }
+
+    public async Task<Result<FileIntegrityResult>> VerifyFileIntegrityAsync(Guid fileId, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(fileId, cancellationToken);
+        if (record == null)
+            return Fail<FileIntegrityResult>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var result = await VerifySingleFileIntegrityAsync(record, cancellationToken);
+        return Ok(result);
+    }
+
+    public async Task<Result<BatchIntegrityResult>> BatchVerifyIntegrityAsync(int maxFiles = 100, CancellationToken cancellationToken = default)
+    {
+        var query = _repository.AsQueryable().OrderBy(f => f.CreationTime);
+        var files = maxFiles > 0
+            ? await query.Take(maxFiles).ToListAsync(cancellationToken)
+            : await query.ToListAsync(cancellationToken);
+
+        var batch = new BatchIntegrityResult { TotalChecked = files.Count };
+
+        foreach (var file in files)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                break;
+
+            var result = await VerifySingleFileIntegrityAsync(file, cancellationToken);
+            switch (result.Status)
+            {
+                case FileIntegrityStatus.Healthy:
+                    batch.Healthy++;
+                    break;
+                case FileIntegrityStatus.Missing:
+                    batch.Missing++;
+                    batch.Problems.Add(result);
+                    break;
+                case FileIntegrityStatus.Corrupted:
+                    batch.Corrupted++;
+                    batch.Problems.Add(result);
+                    break;
+                case FileIntegrityStatus.Error:
+                    batch.Errors++;
+                    batch.Problems.Add(result);
+                    break;
+            }
+        }
+
+        LogInformation("Batch integrity check: {Total} checked, {Healthy} healthy, {Missing} missing, {Corrupted} corrupted, {Errors} errors",
+            batch.TotalChecked, batch.Healthy, batch.Missing, batch.Corrupted, batch.Errors);
+
+        return Ok(batch);
+    }
+
+    public async Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(fileId, cancellationToken);
+        var check = EnsureFileRecordExists<FileRecord>(record);
+        if (check != null)
+            return check;
+
+        record!.SetTagsList(tags);
+        await _repository.UpdateAsync(record, cancellationToken);
+
+        LogInformation("File tags updated: {FileId}, Tags: {Tags}", fileId, record.Tags);
+        return Ok(record, "File tags updated successfully");
+    }
+
+    public async Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(tag))
+            return Fail<IPagedList<FileRecord>>("Tag cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var normalizedTag = tag.Trim().ToLower();
+
+        // Use LIKE query for comma-separated tags column
+        var query = _repository.AsQueryable()
+            .Where(f => f.Tags != null && f.Tags.ToLower().Contains(normalizedTag))
+            .OrderByDescending(f => f.CreationTime);
+
+        var total = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Skip((pageIndex - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        // Post-filter: exact tag match (not substring match)
+        items = items.Where(f => f.GetTagsList().Any(t => t.Equals(tag.Trim(), StringComparison.OrdinalIgnoreCase))).ToList();
+
+        IPagedList<FileRecord> pagedList = new PagedList<FileRecord>(items, pageIndex, pageSize, total);
+        return Ok(pagedList);
+    }
+
     #region Private Methods
 
     /// <summary>
     /// 验证文件（大小和类型）
     /// </summary>
-    private Result<T>? ValidateFileAsync<T>(string fileName, Stream stream)
+    private Result<T>? ValidateFile<T>(string fileName, Stream stream)
     {
         if (stream.Length > _options.MaxFileSize)
         {
@@ -648,6 +843,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             existing.ReferenceCount++;
             await _repository.UpdateAsync(existing);
             LogInformation("File reused by MD5: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
+            await PublishFileUploadedEventAsync(existing, isReused: true);
             return Ok(existing, "File reused by MD5");
         }
         else
@@ -711,8 +907,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             EntityType = entityType,
             EntityId = entityId,
             FieldName = fieldName,
-            IsTemporary = isTemporary,
-            CreationTime = DateTime.UtcNow
+            IsTemporary = isTemporary
         };
 
         await _referenceRepository.InsertAsync(reference, cancellationToken);
@@ -773,6 +968,91 @@ public class FileStorageService : ApplicationService, IFileStorageService
     {
         fileRecord.ReferenceCount = Math.Max(0, fileRecord.ReferenceCount - 1);
         return fileRecord.ReferenceCount;
+    }
+
+    private async Task PublishFileUploadedEventAsync(FileRecord record, bool isReused = false)
+    {
+        if (EventBus == null)
+            return;
+
+        await EventBus.PublishAsync(new FileUploadedEvent
+        {
+            FileId = record.Id,
+            OriginalName = record.OriginalName ?? record.FileName,
+            Size = record.Size,
+            ContentType = record.ContentType,
+            Provider = record.Provider ?? "Local",
+            IsTemporary = record.IsTemporary,
+            Md5Hash = record.Md5Hash,
+            IsReused = isReused
+        });
+    }
+
+    private async Task PublishFileAccessedEventAsync(Guid fileId, FileAccessType accessType)
+    {
+        if (EventBus == null)
+            return;
+
+        await EventBus.PublishAsync(new FileAccessedEvent
+        {
+            FileId = fileId,
+            AccessType = accessType
+        });
+    }
+
+    private async Task<FileIntegrityResult> VerifySingleFileIntegrityAsync(FileRecord record, CancellationToken cancellationToken)
+    {
+        var result = new FileIntegrityResult
+        {
+            FileId = record.Id,
+            OriginalName = record.OriginalName ?? record.FileName,
+            ExpectedMd5 = record.Md5Hash
+        };
+
+        try
+        {
+            if (string.IsNullOrEmpty(record.Path))
+            {
+                result.Status = FileIntegrityStatus.Missing;
+                result.PhysicalFileExists = false;
+                return result;
+            }
+
+            var exists = await _storage.ExistsAsync(GetSafePath(record.Path));
+            result.PhysicalFileExists = exists;
+
+            if (!exists)
+            {
+                result.Status = FileIntegrityStatus.Missing;
+                return result;
+            }
+
+            // Verify MD5 if we have a stored hash
+            if (!string.IsNullOrEmpty(record.Md5Hash))
+            {
+                using var stream = await _storage.DownloadAsync(GetSafePath(record.Path));
+                var actualMd5 = await Md5Helper.CalculateAsync(stream);
+                result.ActualMd5 = actualMd5;
+                result.Md5Matches = string.Equals(record.Md5Hash, actualMd5, StringComparison.OrdinalIgnoreCase);
+
+                result.Status = result.Md5Matches == true
+                    ? FileIntegrityStatus.Healthy
+                    : FileIntegrityStatus.Corrupted;
+            }
+            else
+            {
+                // No MD5 stored, file exists — consider healthy
+                result.Md5Matches = null;
+                result.Status = FileIntegrityStatus.Healthy;
+            }
+        }
+        catch (Exception ex)
+        {
+            result.Status = FileIntegrityStatus.Error;
+            result.Error = ex.Message;
+        }
+
+        return result;
     }
 
     private async Task DeleteFileAsync(FileRecord record)

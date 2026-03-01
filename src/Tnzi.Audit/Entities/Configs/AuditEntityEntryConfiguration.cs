@@ -8,7 +8,6 @@ public class AuditEntityEntryConfiguration : EntityTypeConfigurationBase<AuditEn
     public override void Configure(EntityTypeBuilder<AuditEntityEntry> builder)
     {
         builder.ToTable("EntityEntry");
-        builder.HasKey(e => e.Id);
 
         builder.Property(e => e.EntityTypeName).IsRequired().HasMaxLength(200);
         builder.Property(e => e.EntityTypeFullName).IsRequired().HasMaxLength(500);

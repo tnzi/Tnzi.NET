@@ -67,6 +67,9 @@ export default {
   // Table
   table: {
     total: '共 {count} 条',
+    totalItems: '共 {count} 条',
+    actions: '操作',
+    noMore: '没有更多了',
     page: '页',
     size: '条/页',
     jumpTo: '跳至',

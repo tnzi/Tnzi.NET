@@ -155,8 +155,10 @@ public class RedisCachingModule : TnziInfrastructureModule
             var connectionMultiplexer = context.ServiceProvider.GetService<IConnectionMultiplexer>();
             if (connectionMultiplexer != null && connectionMultiplexer.IsConnected)
             {
+                // 仅调用 Close() 优雅断开连接
+                // 不调用 Dispose()，因为 IConnectionMultiplexer 作为 Singleton 注册，
+                // DI 容器关闭时会自动调用 Dispose()，避免 double-dispose
                 connectionMultiplexer.Close();
-                connectionMultiplexer.Dispose();
             }
         }
         catch (Exception ex)

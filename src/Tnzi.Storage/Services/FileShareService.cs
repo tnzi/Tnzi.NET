@@ -43,8 +43,7 @@ public class FileShareService : ApplicationService, IFileShareService
             RequirePassword = !string.IsNullOrEmpty(password),
             PasswordHash = passwordHash,
             IsEnabled = true,
-            AccessCount = 0,
-            CreationTime = DateTime.UtcNow
+            AccessCount = 0
         };
 
         await _shareRepository.InsertAsync(share, cancellationToken);
@@ -108,6 +107,101 @@ public class FileShareService : ApplicationService, IFileShareService
         share.AccessCount++;
         await _shareRepository.UpdateAsync(share, cancellationToken);
         return Ok("Share access count incremented");
+    }
+
+    public async Task<Result<IEnumerable<FileShareSummaryDto>>> GetSharesByFileAsync(Guid fileId, CancellationToken cancellationToken = default)
+    {
+        var shares = await _shareRepository.AsQueryable()
+            .Where(s => s.FileId == fileId)
+            .OrderByDescending(s => s.CreationTime)
+            .ToListAsync(cancellationToken);
+
+        // Get file original name for enrichment
+        var file = await _fileRepository.GetAsync(fileId, cancellationToken);
+        var originalName = file?.OriginalName ?? file?.FileName ?? string.Empty;
+
+        var dtos = shares.Select(s => MapToShareSummary(s, originalName)).ToList();
+        return Ok((IEnumerable<FileShareSummaryDto>)dtos);
+    }
+
+    public async Task<Result<IPagedList<FileShareSummaryDto>>> GetActiveSharesAsync(ActiveSharesQueryRequest request, CancellationToken cancellationToken = default)
+    {
+        var query = _shareRepository.AsQueryable();
+
+        if (request.FileId.HasValue)
+            query = query.Where(s => s.FileId == request.FileId.Value);
+
+        if (request.CreatorId.HasValue)
+            query = query.Where(s => s.CreatorId == request.CreatorId.Value);
+
+        if (!request.IncludeDisabled)
+            query = query.Where(s => s.IsEnabled);
+
+        if (!request.IncludeExpired)
+            query = query.Where(s => s.ExpiresAt == null || s.ExpiresAt > DateTime.UtcNow);
+
+        query = query.OrderByDescending(s => s.CreationTime);
+
+        var total = await query.CountAsync(cancellationToken);
+        var shares = await query
+            .Skip((request.PageIndex - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+
+        // Batch-load file names
+        var fileIds = shares.Select(s => s.FileId).Distinct().ToList();
+        var files = await _fileRepository.AsQueryable()
+            .Where(f => fileIds.Contains(f.Id))
+            .Select(f => new { f.Id, f.OriginalName, f.FileName })
+            .ToListAsync(cancellationToken);
+        var fileNameMap = files.ToDictionary(f => f.Id, f => f.OriginalName ?? f.FileName ?? string.Empty);
+
+        var dtos = shares.Select(s => MapToShareSummary(s, fileNameMap.GetValueOrDefault(s.FileId, string.Empty))).ToList();
+
+        IPagedList<FileShareSummaryDto> pagedList = new PagedList<FileShareSummaryDto>(dtos, request.PageIndex, request.PageSize, total);
+        return Ok(pagedList);
+    }
+
+    public async Task<Result<int>> BatchRevokeSharesAsync(IEnumerable<Guid> shareIds, CancellationToken cancellationToken = default)
+    {
+        var idList = shareIds.ToList();
+        if (idList.Count == 0)
+            return Ok(0);
+
+        var shares = await _shareRepository.AsQueryable()
+            .Where(s => idList.Contains(s.Id) && s.IsEnabled)
+            .ToListAsync(cancellationToken);
+
+        foreach (var share in shares)
+        {
+            share.IsEnabled = false;
+        }
+
+        if (shares.Count > 0)
+        {
+            await _shareRepository.UpdateManyAsync(shares, cancellationToken);
+        }
+
+        LogInformation("Batch revoked {Count} shares", shares.Count);
+        return Ok(shares.Count);
+    }
+
+    private static FileShareSummaryDto MapToShareSummary(FileShare share, string originalName)
+    {
+        return new FileShareSummaryDto
+        {
+            Id = share.Id,
+            FileId = share.FileId,
+            OriginalName = originalName,
+            ShareToken = share.ShareToken,
+            ExpiresAt = share.ExpiresAt,
+            AccessCount = share.AccessCount,
+            MaxAccessCount = share.MaxAccessCount,
+            RequirePassword = share.RequirePassword,
+            IsEnabled = share.IsEnabled,
+            CreationTime = share.CreationTime,
+            CreatorId = share.CreatorId
+        };
     }
 
     /// <summary>

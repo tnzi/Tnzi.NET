@@ -26,7 +26,7 @@ public class CouponService : ApplicationService, ICouponService
 
     public async Task<Result<CouponUsageDto>> ApplyCouponAsync(string couponCode, Guid userId, Guid orderId, decimal orderAmount, Guid? paymentId = null, CancellationToken cancellationToken = default)
     {
-        // 验证优惠券
+        // 验证优惠券（在事务外执行，避免长事务）
         var validationResult = await _promotionService.ValidateCouponAsync(couponCode, userId, cancellationToken);
         if (!validationResult.Data?.IsValid ?? true)
             return Fail<CouponUsageDto>(validationResult.Data?.ErrorMessage ?? ErrorCodes.CouponInvalid, 400);
@@ -35,54 +35,58 @@ public class CouponService : ApplicationService, ICouponService
         if (promotion == null)
             return Fail<CouponUsageDto>(ErrorCodes.PromotionNotFound, 404);
 
-        // 幂等性：同一订单同一优惠券不允许重复使用
-        var existingUsage = await _couponUsageRepository.FirstOrDefaultAsync(
-            c => c.CouponId == promotion.Id && c.UserId == userId && c.OrderId == orderId, cancellationToken);
-
-        if (existingUsage != null)
-            return Fail<CouponUsageDto>(ErrorCodes.CouponAlreadyUsedByUser, 400);
-
-        // 不可叠加：同一订单已有其他优惠券
-        if (!promotion.Stackable)
-        {
-            var orderHasOtherCoupon = await _couponUsageRepository.AsNoTracking()
-                .AnyAsync(c => c.OrderId == orderId && c.UserId == userId, cancellationToken);
-
-            if (orderHasOtherCoupon)
-                return Fail<CouponUsageDto>(ErrorCodes.CouponAlreadyUsedByUser, 400);
-        }
-
-        // 计算折扣金额
+        // 计算折扣金额（在事务外执行）
         var discountResult = await _promotionService.CalculateDiscountAsync(couponCode, orderAmount, cancellationToken);
         if (!discountResult.Succeeded)
             return Fail<CouponUsageDto>(discountResult.Message ?? ErrorCodes.CouponInvalid, 400);
 
         var discountAmount = discountResult.Data?.DiscountAmount ?? 0;
 
-        // 记录使用
-        var couponUsage = new CouponUsage
+        // 事务保护：优惠券使用记录 + UsedCount 原子更新，防止并发超发
+        return await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            CouponId = promotion.Id,
-            UserId = userId,
-            PaymentId = paymentId,
-            OrderId = orderId,
-            DiscountAmount = discountAmount
-        };
+            // 幂等性：同一订单同一优惠券不允许重复使用
+            var existingUsage = await _couponUsageRepository.FirstOrDefaultAsync(
+                c => c.CouponId == promotion.Id && c.UserId == userId && c.OrderId == orderId, ct);
 
-        await _couponUsageRepository.InsertAsync(couponUsage, cancellationToken);
+            if (existingUsage != null)
+                return Fail<CouponUsageDto>(ErrorCodes.CouponAlreadyUsedByUser, 400);
 
-        // 更新使用次数
-        var promotionEntity = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == promotion.Id, cancellationToken);
-        if (promotionEntity != null)
-        {
-            promotionEntity.UsedCount++;
-            await _promotionRepository.UpdateAsync(promotionEntity, cancellationToken);
-        }
+            // 不可叠加：同一订单已有其他优惠券
+            if (!promotion.Stackable)
+            {
+                var orderHasOtherCoupon = await _couponUsageRepository
+                    .AnyAsync(c => c.OrderId == orderId && c.UserId == userId, ct);
 
-        Logger.LogInformation("Coupon applied. UserId: {UserId}, Coupon: {Code}, OrderId: {OrderId}, Amount: {Amount}",
-            userId, couponCode, orderId, discountAmount);
+                if (orderHasOtherCoupon)
+                    return Fail<CouponUsageDto>(ErrorCodes.CouponAlreadyUsedByUser, 400);
+            }
 
-        return Ok(couponUsage.MapTo<CouponUsageDto>());
+            // 记录使用
+            var couponUsage = new CouponUsage
+            {
+                CouponId = promotion.Id,
+                UserId = userId,
+                PaymentId = paymentId,
+                OrderId = orderId,
+                DiscountAmount = discountAmount
+            };
+
+            await _couponUsageRepository.InsertAsync(couponUsage, ct);
+
+            // 更新使用次数（事务内原子操作，防止并发超发）
+            var promotionEntity = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == promotion.Id, ct);
+            if (promotionEntity != null)
+            {
+                promotionEntity.UsedCount++;
+                await _promotionRepository.UpdateAsync(promotionEntity, ct);
+            }
+
+            Logger.LogInformation("Coupon applied. UserId: {UserId}, Coupon: {Code}, OrderId: {OrderId}, Amount: {Amount}",
+                userId, couponCode, orderId, discountAmount);
+
+            return Ok(couponUsage.MapTo<CouponUsageDto>());
+        }, cancellationToken);
     }
 
     public async Task<Result<List<UserCouponDto>>> GetUserAvailableCouponsAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -95,14 +99,28 @@ public class CouponService : ApplicationService, ICouponService
             .OrderByDescending(p => p.Priority)
             .ToListAsync(cancellationToken);
 
+        if (promotions.Count == 0)
+            return Ok(new List<UserCouponDto>());
+
+        // 批量查询用户在所有有限制的促销上的使用次数（消除 N+1 查询）
+        var promotionIds = promotions
+            .Where(p => p.PerUserUsageLimit.HasValue)
+            .Select(p => p.Id)
+            .ToList();
+
+        var userUsageCounts = promotionIds.Count > 0
+            ? await _couponUsageRepository.AsNoTracking()
+                .Where(c => c.UserId == userId && promotionIds.Contains(c.CouponId))
+                .GroupBy(c => c.CouponId)
+                .Select(g => new { CouponId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.CouponId, x => x.Count, cancellationToken)
+            : new Dictionary<Guid, int>();
+
         var result = new List<UserCouponDto>();
 
         foreach (var promotion in promotions)
         {
-            var userUsageCount = promotion.PerUserUsageLimit.HasValue
-                ? await _couponUsageRepository.CountAsync(
-                    c => c.CouponId == promotion.Id && c.UserId == userId, cancellationToken)
-                : 0;
+            var userUsageCount = userUsageCounts.GetValueOrDefault(promotion.Id, 0);
 
             if (promotion.PerUserUsageLimit.HasValue && userUsageCount >= promotion.PerUserUsageLimit.Value)
                 continue;
@@ -140,62 +158,65 @@ public class CouponService : ApplicationService, ICouponService
 
     public async Task<Result<UserCouponDto>> RedeemAsync(string code, Guid userId, CancellationToken cancellationToken = default)
     {
-        var redemptionCode = await _redemptionCodeRepository.FirstOrDefaultAsync(
-            r => r.Code == code, cancellationToken);
-
-        if (redemptionCode == null)
-            return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotFound, 404);
-
-        if (redemptionCode.Status != RedemptionCodeStatus.Active)
-            return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotActive, 400);
-
-        if (redemptionCode.ValidFrom > DateTime.UtcNow)
-            return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotActive, 400);
-
-        if (redemptionCode.ValidUntil.HasValue && redemptionCode.ValidUntil.Value < DateTime.UtcNow)
-            return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeExpired, 400);
-
-        if (redemptionCode.TotalQuantity > 0 && redemptionCode.RedeemedQuantity >= redemptionCode.TotalQuantity)
-            return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeLimitReached, 400);
-
-        if (redemptionCode.PerUserLimit.HasValue)
+        // 事务保护：兑换码数量检查 + RedeemedQuantity 原子更新，防止并发超兑
+        return await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            var userRedemptionCount = await _couponUsageRepository.CountAsync(
-                c => c.CouponId == redemptionCode.PromotionId && c.UserId == userId,
-                cancellationToken);
+            var redemptionCode = await _redemptionCodeRepository.FirstOrDefaultAsync(
+                r => r.Code == code, ct);
 
-            if (userRedemptionCount >= redemptionCode.PerUserLimit.Value)
-                return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeUserLimitReached, 400);
-        }
+            if (redemptionCode == null)
+                return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotFound, 404);
 
-        var promotion = await _promotionRepository.FirstOrDefaultAsync(
-            p => p.Id == redemptionCode.PromotionId, cancellationToken);
+            if (redemptionCode.Status != RedemptionCodeStatus.Active)
+                return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotActive, 400);
 
-        if (promotion == null)
-            return Fail<UserCouponDto>(ErrorCodes.PromotionNotFound, 404);
+            if (redemptionCode.ValidFrom > DateTime.UtcNow)
+                return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotActive, 400);
 
-        // 更新兑换码
-        redemptionCode.RedeemedQuantity++;
-        if (redemptionCode.TotalQuantity > 0 && redemptionCode.RedeemedQuantity >= redemptionCode.TotalQuantity)
-            redemptionCode.Status = RedemptionCodeStatus.Expired;
+            if (redemptionCode.ValidUntil.HasValue && redemptionCode.ValidUntil.Value < DateTime.UtcNow)
+                return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeExpired, 400);
 
-        await _redemptionCodeRepository.UpdateAsync(redemptionCode, cancellationToken);
+            if (redemptionCode.TotalQuantity > 0 && redemptionCode.RedeemedQuantity >= redemptionCode.TotalQuantity)
+                return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeLimitReached, 400);
 
-        Logger.LogInformation("Redemption code redeemed. UserId: {UserId}, Code: {Code}", userId, code);
+            if (redemptionCode.PerUserLimit.HasValue)
+            {
+                var userRedemptionCount = await _couponUsageRepository.CountAsync(
+                    c => c.CouponId == redemptionCode.PromotionId && c.UserId == userId, ct);
 
-        return Ok(new UserCouponDto
-        {
-            Id = promotion.Id,
-            CouponCode = promotion.PromotionCode,
-            Name = promotion.Name,
-            Description = promotion.Description,
-            DiscountValue = promotion.DiscountValue,
-            DiscountType = promotion.DiscountType,
-            MaxDiscountAmount = promotion.MaxDiscountAmount,
-            RemainingUsageCount = promotion.PerUserUsageLimit ?? -1,
-            ExpireTime = promotion.EndTime,
-            Stackable = promotion.Stackable
-        });
+                if (userRedemptionCount >= redemptionCode.PerUserLimit.Value)
+                    return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeUserLimitReached, 400);
+            }
+
+            var promotion = await _promotionRepository.FirstOrDefaultAsync(
+                p => p.Id == redemptionCode.PromotionId, ct);
+
+            if (promotion == null)
+                return Fail<UserCouponDto>(ErrorCodes.PromotionNotFound, 404);
+
+            // 更新兑换码（事务内原子操作）
+            redemptionCode.RedeemedQuantity++;
+            if (redemptionCode.TotalQuantity > 0 && redemptionCode.RedeemedQuantity >= redemptionCode.TotalQuantity)
+                redemptionCode.Status = RedemptionCodeStatus.Expired;
+
+            await _redemptionCodeRepository.UpdateAsync(redemptionCode, ct);
+
+            Logger.LogInformation("Redemption code redeemed. UserId: {UserId}, Code: {Code}", userId, code);
+
+            return Ok(new UserCouponDto
+            {
+                Id = promotion.Id,
+                CouponCode = promotion.PromotionCode,
+                Name = promotion.Name,
+                Description = promotion.Description,
+                DiscountValue = promotion.DiscountValue,
+                DiscountType = promotion.DiscountType,
+                MaxDiscountAmount = promotion.MaxDiscountAmount,
+                RemainingUsageCount = promotion.PerUserUsageLimit ?? -1,
+                ExpireTime = promotion.EndTime,
+                Stackable = promotion.Stackable
+            });
+        }, cancellationToken);
     }
 
     public async Task<Result<bool>> CanUseFirstSubscriptionDiscountAsync(Guid userId, CancellationToken cancellationToken = default)

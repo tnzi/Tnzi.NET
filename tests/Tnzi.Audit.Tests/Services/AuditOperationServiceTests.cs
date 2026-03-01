@@ -7,14 +7,16 @@ namespace Tnzi.Audit.Tests.Services;
 public class AuditOperationServiceTests
 {
     private readonly Mock<IRepository<AuditOperation, Guid>> _repositoryMock;
+    private readonly Mock<IAuditStore> _auditStoreMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly AuditOperationService _service;
 
     public AuditOperationServiceTests()
     {
         _repositoryMock = new Mock<IRepository<AuditOperation, Guid>>();
+        _auditStoreMock = new Mock<IAuditStore>();
         _serviceProviderMock = new Mock<IServiceProvider>();
-        _service = new AuditOperationService(_repositoryMock.Object, _serviceProviderMock.Object);
+        _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _serviceProviderMock.Object);
     }
 
     #region GetAsync Tests
@@ -99,14 +101,14 @@ public class AuditOperationServiceTests
     public void Constructor_Should_Throw_When_Repository_Is_Null()
     {
         // Act & Assert
-        Should.Throw<ArgumentNullException>(() => new AuditOperationService(null!, _serviceProviderMock.Object));
+        Should.Throw<ArgumentNullException>(() => new AuditOperationService(null!, _auditStoreMock.Object, _serviceProviderMock.Object));
     }
 
     [Fact]
     public void Constructor_Should_Initialize_Successfully()
     {
         // Act
-        var service = new AuditOperationService(_repositoryMock.Object, _serviceProviderMock.Object);
+        var service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _serviceProviderMock.Object);
 
         // Assert
         service.ShouldNotBeNull();

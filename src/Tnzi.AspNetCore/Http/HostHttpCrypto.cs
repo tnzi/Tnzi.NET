@@ -3,30 +3,31 @@ namespace Tnzi.AspNetCore.Http;
 
 /// <summary>
 /// Http服务端加密解密功能
+/// 注意：此类为 Scoped 生命周期，每个请求一个实例，避免并发竞态条件
 /// </summary>
 public class HostHttpCrypto : IHostHttpCrypto
 {
     private readonly ILogger _logger;
     private readonly string? _privateKey;
+
+    /// <summary>
+    /// 当前请求的加密器实例（Scoped 生命周期，线程安全）
+    /// </summary>
     private TransmissionEncryptor? _encryptor;
 
     /// <summary>
     /// 初始化一个<see cref="HostHttpCrypto"/>类型的新实例
     /// </summary>
-    /// <param name="provider">服务提供者</param>
-    public HostHttpCrypto(IServiceProvider provider)
+    public HostHttpCrypto(IOptions<AspNetCoreOptions> aspNetCoreOptions, ILogger<HostHttpCrypto> logger)
     {
-        Check.NotNull(provider);
+        _logger = Check.NotNull(logger);
+        var options = Check.NotNull(aspNetCoreOptions).Value;
 
-        _logger = provider.GetLogger(typeof(HostHttpCrypto));
-        var aspNetCoreOptions = provider.GetService(typeof(IOptions<AspNetCoreOptions>)) as IOptions<AspNetCoreOptions>;
-        var options = aspNetCoreOptions?.Value;
-        
-        if (options?.HttpEncrypt?.Enabled == true)
+        if (options.HttpEncrypt?.Enabled == true)
         {
             HttpEncryptOptions httpEncrypt = options.HttpEncrypt;
             _privateKey = httpEncrypt.HostPrivateKey;
-            
+
             if (string.IsNullOrEmpty(_privateKey))
             {
                 throw new TnziException("The HostPrivateKey of the HttpEncrypt node in the configuration file cannot be empty");
@@ -53,12 +54,12 @@ public class HostHttpCrypto : IHostHttpCrypto
         {
             _encryptor = new TransmissionEncryptor(_privateKey, clientPublicKey);
         }
-        
+
         if (_encryptor == null)
         {
             return request;
         }
-        
+
         _logger.LogDebug("Use the incoming client public key and server private key to create a server communication encryptor");
 
         try
@@ -74,15 +75,15 @@ public class HostHttpCrypto : IHostHttpCrypto
             {
                 throw new TnziException("An exception occurred while the server was parsing the request data.");
             }
-            
+
             _logger.LogDebug("Use the server's private key to decrypt the request data, and use the client's public key to verify the data");
             await request.WriteBodyAsync(data);
             return request;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, ex is CryptographicException 
-                ? "An exception occurred when the server parsed the transmitted data." 
+            _logger.LogError(ex, ex is CryptographicException
+                ? "An exception occurred when the server parsed the transmitted data."
                 : "An exception occurred when the server decrypted the requested data.");
             throw new TnziException("An exception occurred while the server was decrypting the request data.", ex);
         }

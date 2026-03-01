@@ -10,7 +10,7 @@ public class LocalEventBus : IEventBus, IDisposable
     private readonly ConcurrentDictionary<Type, HashSet<Type>> _runtimeHandlers = new();
     private readonly SemaphoreSlim _concurrencySemaphore;
     private readonly int _maxConcurrency;
-    private bool _disposed = false;
+    private volatile bool _disposed;
 
     public LocalEventBus(
         IServiceProvider serviceProvider,
@@ -31,6 +31,7 @@ public class LocalEventBus : IEventBus, IDisposable
 
     public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default) where TEvent : class, IEvent
     {
+        ThrowIfDisposed();
         Check.NotNull(@event);
 
         var eventType = typeof(TEvent);
@@ -464,15 +465,19 @@ public class LocalEventBus : IEventBus, IDisposable
     }
 
 
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
     /// <summary>
     /// 释放资源
     /// </summary>
     public void Dispose()
     {
-        if (!_disposed)
-        {
-            _concurrencySemaphore?.Dispose();
-            _disposed = true;
-        }
+        if (_disposed) return;
+        _disposed = true;
+        _concurrencySemaphore?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
