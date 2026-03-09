@@ -8,18 +8,24 @@ public class MenuService : ApplicationService, IMenuService
     private readonly IRepository<Menu, Guid> _menuRepository;
     private readonly ICache _cache;
     private readonly IFunctionAuthorizationService? _functionAuthorizationService;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly bool _multiTenancyEnabled;
 
-    private const string CacheKeyAllMenus = "System:Menus:All";
+    private const string CacheKeyAllMenusPrefix = "System:Menus:All";
 
     public MenuService(
         IServiceProvider serviceProvider,
         IRepository<Menu, Guid> menuRepository,
         ICache cache,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         IFunctionAuthorizationService? functionAuthorizationService = null)
         : base(serviceProvider)
     {
         _menuRepository = Check.NotNull(menuRepository);
         _cache = Check.NotNull(cache);
+        _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _functionAuthorizationService = functionAuthorizationService;
     }
 
@@ -258,18 +264,30 @@ public class MenuService : ApplicationService, IMenuService
 
     private async Task<List<Menu>> GetAllMenusCachedAsync()
     {
-        var menus = await _cache.GetAsync<List<Menu>>(CacheKeyAllMenus);
+        var cacheKey = GetAllMenusCacheKey();
+        var menus = await _cache.GetAsync<List<Menu>>(cacheKey);
         if (menus != null)
             return menus;
 
         menus = await _menuRepository.AsQueryable().AsNoTracking().OrderBy(m => m.SortOrder).ToListAsync();
-        await _cache.SetAsync(CacheKeyAllMenus, menus, TimeSpan.FromHours(1));
+        await _cache.SetAsync(cacheKey, menus, TimeSpan.FromHours(1));
         return menus;
     }
 
     private async Task InvalidateMenuCacheAsync()
     {
-        await _cache.RemoveAsync(CacheKeyAllMenus);
+        await _cache.RemoveAsync(GetAllMenusCacheKey());
+    }
+
+    private string GetAllMenusCacheKey()
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return CacheKeyAllMenusPrefix;
+        }
+
+        var tenantPart = _currentTenant?.Id?.ToString() ?? "host";
+        return $"{CacheKeyAllMenusPrefix}:{tenantPart}";
     }
 
     /// <summary>

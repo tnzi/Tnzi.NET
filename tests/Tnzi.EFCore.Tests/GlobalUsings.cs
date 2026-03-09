@@ -1,3 +1,4 @@
+global using Microsoft.Data.Sqlite;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,7 @@ global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.EFCore.Data;
 global using Tnzi.EFCore.Internal;
+global using Tnzi.Utilities;
 global using Tnzi.EFCore.Options;
 global using Tnzi.EFCore.Services;
 global using Tnzi.EFCore.Tests.TestEntities;

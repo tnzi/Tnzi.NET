@@ -55,27 +55,43 @@ public class RateLimitServiceTests
     }
 
     [Fact]
-    public async Task IncrementAndGetAsync_WithTokenBucket_ShouldThrowNotSupportedException()
+    public async Task IncrementAndGetAsync_WithTokenBucket_ShouldFallbackToFixedWindow()
     {
         // Arrange
         var key = "test-key";
         var windowSeconds = 60;
+        var cacheKey = "RateLimit:fixed:test-key";
+        var expiration = TimeSpan.FromSeconds(windowSeconds);
 
-        // Act & Assert
-        await Assert.ThrowsAsync<NotSupportedException>(() =>
-            _service.IncrementAndGetAsync(key, windowSeconds, RateLimitAlgorithm.TokenBucket));
+        _cacheMock.Setup(c => c.IncrementAsync(cacheKey, 1, expiration, default))
+            .ReturnsAsync(2L);
+
+        // Act
+        var result = await _service.IncrementAndGetAsync(key, windowSeconds, RateLimitAlgorithm.TokenBucket);
+
+        // Assert
+        Assert.Equal(2L, result);
+        _cacheMock.Verify(c => c.IncrementAsync(cacheKey, 1, expiration, default), Times.Once);
     }
 
     [Fact]
-    public async Task IncrementAndGetAsync_WithLeakyBucket_ShouldThrowNotSupportedException()
+    public async Task IncrementAndGetAsync_WithLeakyBucket_ShouldFallbackToFixedWindow()
     {
         // Arrange
         var key = "test-key";
         var windowSeconds = 60;
+        var cacheKey = "RateLimit:fixed:test-key";
+        var expiration = TimeSpan.FromSeconds(windowSeconds);
 
-        // Act & Assert
-        await Assert.ThrowsAsync<NotSupportedException>(() =>
-            _service.IncrementAndGetAsync(key, windowSeconds, RateLimitAlgorithm.LeakyBucket));
+        _cacheMock.Setup(c => c.IncrementAsync(cacheKey, 1, expiration, default))
+            .ReturnsAsync(3L);
+
+        // Act
+        var result = await _service.IncrementAndGetAsync(key, windowSeconds, RateLimitAlgorithm.LeakyBucket);
+
+        // Assert
+        Assert.Equal(3L, result);
+        _cacheMock.Verify(c => c.IncrementAsync(cacheKey, 1, expiration, default), Times.Once);
     }
 
     [Fact]

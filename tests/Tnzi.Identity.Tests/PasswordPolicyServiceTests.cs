@@ -258,13 +258,6 @@ public class PasswordPolicyServiceTests
 
     #endregion
 
-    [Fact(Skip = "需要集成测试：CheckPasswordHistoryAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task CheckPasswordHistoryAsync_WithNewPassword_ReturnsFalse()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
     [Fact]
     public async Task CheckPasswordHistoryAsync_WhenHistoryDisabled_ReturnsFalse()
     {
@@ -288,24 +281,4 @@ public class PasswordPolicyServiceTests
         Assert.False(result);
     }
 
-    [Fact(Skip = "需要集成测试：SavePasswordHistoryAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task SavePasswordHistoryAsync_WithValidInput_SavesHistory()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：CheckPasswordExpirationAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task CheckPasswordExpirationAsync_WithNonExpiredPassword_ReturnsNotExpired()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetLastPasswordChangeTimeAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetLastPasswordChangeTimeAsync_WithUser_ReturnsTime()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
 }

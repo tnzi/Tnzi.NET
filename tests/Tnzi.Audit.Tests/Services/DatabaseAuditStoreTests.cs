@@ -140,13 +140,4 @@ public class DatabaseAuditStoreTests
 
     #endregion
 
-    #region DeleteExpiredAsync Tests
-
-    [Fact(Skip = "Requires IQueryable mock which Moq doesn't support")]
-    public async Task DeleteExpiredAsync_Should_Delete_Old_Operations()
-    {
-        // 此测试需要集成测试
-    }
-
-    #endregion
 }

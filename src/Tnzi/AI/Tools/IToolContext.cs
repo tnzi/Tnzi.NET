@@ -51,7 +51,7 @@ public interface IToolContext
 /// 工具上下文访问器 — 基于 AsyncLocal 的静态访问入口
 /// </summary>
 /// <remarks>
-/// ChatExecutionPipeline 在执行 Agent 前设置 Current，执行完成后清除。
+/// AgentRuntime 在执行 Agent 前设置 Current，执行完成后清除。
 /// 工具提供者通过 <c>ToolContextAccessor.Current</c> 获取当前请求的上下文。
 /// </remarks>
 [ExperimentalApi(Reason = "Tool context API may evolve based on usage patterns")]

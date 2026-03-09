@@ -2,43 +2,49 @@
 namespace Tnzi.Hosting;
 
 /// <summary>
-/// Hosting 模块（标准版）
-/// 包含：认证、授权、云存储、通知、系统管理、AI、审计
-/// 提供开箱即用的 Controller 实现和预制模板
+/// Hosting 模块（智能版）
+/// 基线依赖：AspNetCore + Swagger + Localization
+/// 通过 [OptionalDependsOn] 自适应已加载的业务模块，自动激活模块提供的 [DefaultController]
+/// 事件处理器仅在 Identity + Notification 同时加载时注册
 /// </summary>
 [DependsOn(
     typeof(AspNetCoreModule),
-    typeof(IdentityModule),
-    typeof(AuthorizationModule),
-    typeof(FeatureModule),
-    typeof(StorageModule),
-    typeof(TemplateModule),
-    typeof(NotificationModule),
-    typeof(AIModule),
-    typeof(AuditModule),
-    typeof(SystemModule),
     typeof(SwaggerModule),
     typeof(LocalizationModule)
 )]
+[OptionalDependsOn(typeof(IdentityModule))]
+[OptionalDependsOn(typeof(AuthorizationModule))]
+[OptionalDependsOn(typeof(FeatureModule))]
+[OptionalDependsOn(typeof(StorageModule))]
+[OptionalDependsOn(typeof(TemplateModule))]
+[OptionalDependsOn(typeof(NotificationModule))]
+[OptionalDependsOn(typeof(AIModule))]
+[OptionalDependsOn(typeof(AuditModule))]
+[OptionalDependsOn(typeof(SystemModule))]
 [OptionalDependsOn(typeof(HangfireModule))]
 [OptionalDependsOn(typeof(SignalRModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：
-    // - Controller 程序集注册：由 TnziApplication 自动处理
+    // - Controller 程序集注册：由 AspNetCoreModule 根据启动模块继承链自动注册
+    // - [DefaultController] 激活：由本模块注册 DefaultControllerEnabledMarker 实现
     // - 模板路径配置：由 TemplateModule 自动扫描（如果加载了 Template 模块）
-
-    // 如需自定义配置，可重写以下方法：
-    // - PreConfigureServicesAsync(ServiceConfigurationContext context)
-    // - ConfigureServicesAsync(ServiceConfigurationContext context)
-    // - PostConfigureServicesAsync(ServiceConfigurationContext context)
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 注册事件处理器（使用简化方式）
-        context.Services.AddEventHandler<UserRegisteredEvent, UserRegisteredEventHandler>();
-        context.Services.AddEventHandler<PasswordResetRequestedEvent, PasswordResetRequestedEventHandler>();
-        context.Services.AddEventHandler<TwoFactorCodeSentEvent, TwoFactorCodeSentEventHandler>();
+        // 激活 [DefaultController] 标记的 Controller
+        context.Services.AddSingleton<DefaultControllerEnabledMarker>();
+
+        // 条件注册事件处理器（需要 Identity + Notification 同时加载）
+        var appDescriptor = context.Services.FirstOrDefault(s => s.ServiceType == typeof(ITnziApplication));
+        if (appDescriptor?.ImplementationInstance is ITnziApplication app
+            && app.IsModuleLoaded<IdentityModule>()
+            && app.IsModuleLoaded<NotificationModule>())
+        {
+            context.Services.AddEventHandler<UserRegisteredEvent, UserRegisteredEventHandler>();
+            context.Services.AddEventHandler<PasswordResetRequestedEvent, PasswordResetRequestedEventHandler>();
+            context.Services.AddEventHandler<TwoFactorCodeSentEvent, TwoFactorCodeSentEventHandler>();
+        }
 
         return base.ConfigureServicesAsync(context);
     }

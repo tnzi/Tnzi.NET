@@ -17,6 +17,7 @@ public class CachingEmbeddingDecorator : IEmbeddingService
     private readonly Tnzi.Caching.ICache? _cache;
     private readonly AIRagOptions _options;
     private readonly ILogger<CachingEmbeddingDecorator> _logger;
+    private readonly ICurrentTenant? _currentTenant;
 
     /// <summary>
     /// Cache key prefix for embedding cache entries
@@ -27,12 +28,14 @@ public class CachingEmbeddingDecorator : IEmbeddingService
         IEmbeddingService inner,
         ILogger<CachingEmbeddingDecorator> logger,
         IOptions<AIRagOptions> options,
-        Tnzi.Caching.ICache? cache = null)
+        Tnzi.Caching.ICache? cache = null,
+        ICurrentTenant? currentTenant = null)
     {
         _inner = Check.NotNull(inner);
         _logger = Check.NotNull(logger);
         _options = Check.NotNull(options).Value;
         _cache = cache;
+        _currentTenant = currentTenant;
     }
 
     public async Task<Result<float[]>> GenerateEmbeddingAsync(string text, EmbeddingOptions? options = null, CancellationToken ct = default)
@@ -129,11 +132,12 @@ public class CachingEmbeddingDecorator : IEmbeddingService
     /// <summary>
     /// Build a cache key from text content and options using SHA256 hash
     /// </summary>
-    private static string BuildCacheKey(string text, EmbeddingOptions? options)
+    private string BuildCacheKey(string text, EmbeddingOptions? options)
     {
         var provider = options?.Provider ?? "default";
         var model = options?.Model ?? "default";
-        var input = $"{provider}:{model}:{text}";
+        var tenantId = _currentTenant?.Id?.ToString("N") ?? "global";
+        var input = $"{tenantId}:{provider}:{model}:{text}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return $"{CacheKeyPrefix}{Convert.ToHexStringLower(hash)}";
     }

@@ -7,6 +7,8 @@ public class FileShareConfiguration : EntityTypeConfigurationBase<FileShare, Gui
 {
     public override void Configure(EntityTypeBuilder<FileShare> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.ToTable("Share");
 
         builder.Property(e => e.FileId).IsRequired();
@@ -16,6 +18,11 @@ public class FileShareConfiguration : EntityTypeConfigurationBase<FileShare, Gui
         builder.Property(e => e.CreationTime).IsRequired();
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
+
         builder.HasIndex(e => e.FileId);
         builder.HasIndex(e => e.ShareToken).IsUnique();
         builder.HasIndex(e => e.IsEnabled);

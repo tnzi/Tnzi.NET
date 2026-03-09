@@ -7,7 +7,14 @@ public class MessageReplyConfiguration : EntityTypeConfigurationBase<MessageRepl
 {
     public override void Configure(EntityTypeBuilder<MessageReply> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(mr => mr.Content).IsRequired().HasMaxLength(4000);
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(mr => mr.TenantId);
+        }
 
         builder.HasIndex(mr => mr.BelongMessageId);
         builder.HasIndex(mr => mr.UserId);

@@ -3,8 +3,10 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 兑换码实体
 /// </summary>
-public class RedemptionCode : AuditedEntity<Guid>
+public class RedemptionCode : AuditedEntity<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 兑换码
     /// </summary>

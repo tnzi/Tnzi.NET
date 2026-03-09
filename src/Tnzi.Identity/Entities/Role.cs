@@ -4,10 +4,11 @@ namespace Tnzi.Identity.Entities;
 /// Tnzi 角色实体 (扩展自 ASP.NET Core Identity)
 /// </summary>
 [Table("Role")]
-public class Role : IdentityRole<Guid>, IEntity<Guid>, IHasCreationTime
+public class Role : IdentityRole<Guid>, IEntity<Guid>, IHasCreationTime, IMultiTenant
 {
     public string? Description { get; set; }
     public DateTime CreationTime { get; set; }
+    public Guid? TenantId { get; set; }
 
     /// <summary>
     /// 是否为系统内置角色（不可删除、不可重命名）

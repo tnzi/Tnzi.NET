@@ -183,18 +183,6 @@ public class UserServiceTests
         _userManagerMock.Verify(x => x.DeleteAsync(user), Times.Once);
     }
 
-    [Fact(Skip = "需要集成测试：GetByIdAsync 使用了 EF Core 的 Include 和异步查询，在单元测试中难以完全模拟")]
-    public async Task GetByIdAsync_WithValidUserId_ReturnsUserDto()
-    {
-        // 注意：此测试需要集成测试环境
-        // GetByIdAsync 使用了 _userRepository.Where().Include().FirstOrDefaultAsync()
-        // 这些 EF Core 扩展方法在单元测试中难以完全模拟
-        // 建议使用 EF Core InMemory 数据库进行集成测试
-
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
     [Fact]
     public async Task EnableAsync_WithValidUserId_EnablesUser()
     {

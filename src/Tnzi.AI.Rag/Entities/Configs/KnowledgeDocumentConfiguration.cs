@@ -9,6 +9,8 @@ public class KnowledgeDocumentConfiguration : EntityTypeConfigurationBase<Knowle
 
     public override void Configure(EntityTypeBuilder<KnowledgeDocument> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.FileName)
             .HasMaxLength(500)
             .IsRequired();
@@ -21,6 +23,11 @@ public class KnowledgeDocumentConfiguration : EntityTypeConfigurationBase<Knowle
 
         builder.Property(e => e.ContentHash)
             .HasMaxLength(64);
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
 
         builder.HasIndex(e => e.KnowledgeBaseId);
         builder.HasIndex(e => e.Status);

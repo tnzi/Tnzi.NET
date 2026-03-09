@@ -3,8 +3,10 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 促销活动实体
 /// </summary>
-public class Promotion : AuditedEntity<Guid>
+public class Promotion : AuditedEntity<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 促销代码
     /// </summary>

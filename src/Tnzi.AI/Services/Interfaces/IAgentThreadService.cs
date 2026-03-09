@@ -53,9 +53,9 @@ public interface IAgentThreadService
 public interface IAgentThreadInternalService
 {
     /// <summary>
-    /// 获取或创建线程对话上下文
+    /// 获取或创建线程对话上下文，返回上下文及实际使用的 ThreadId（创建新线程时为自动生成的 Id）
     /// </summary>
-    Task<ConversationContext> GetOrCreateThreadAsync(Guid? threadId, Guid agentId, CancellationToken ct = default);
+    Task<(ConversationContext context, Guid threadId)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
 
     /// <summary>
     /// 保存消息到线程

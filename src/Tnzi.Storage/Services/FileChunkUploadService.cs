@@ -220,7 +220,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                     {
                         await _storage.DeleteAsync(chunk.ChunkPath);
                     }
-                    await _chunkRepository.DeleteAsync(chunk, cancellationToken);
+                    await _chunkRepository.DeleteAsync(chunk.Id, cancellationToken);
                 }
 
                 LogInformation("Chunked upload completed: SessionId: {SessionId}, FileName: {FileName}, Size: {Size}", uploadSessionId, session.FileName, mergedSize);
@@ -251,7 +251,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
             {
                 await _storage.DeleteAsync(chunk.ChunkPath);
             }
-            await _chunkRepository.DeleteAsync(chunk, cancellationToken);
+            await _chunkRepository.DeleteAsync(chunk.Id, cancellationToken);
         }
 
         // 标记会话为已取消

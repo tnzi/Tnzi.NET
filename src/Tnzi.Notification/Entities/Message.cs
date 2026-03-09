@@ -1,9 +1,10 @@
+
 namespace Tnzi.Notification.Entities;
 
 /// <summary>
 /// 消息实体
 /// </summary>
-public class Message : FullAuditedEntity<Guid>
+public class Message : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 通知类型（Email, SMS, Push）

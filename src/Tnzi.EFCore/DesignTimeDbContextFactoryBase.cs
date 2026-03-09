@@ -27,11 +27,12 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
                 "3. Or execute command in a directory containing appsettings.json");
         }
 
-        // Build configuration
+        // Build configuration (include environment variables so ${VAR} placeholders can be resolved)
         var configuration = new ConfigurationBuilder()
             .SetBasePath(configPath)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
             .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables()
             .Build();
 
         // Read from Database configuration
@@ -99,10 +100,13 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
                 $"Please add a configuration entry with DbContextType matching your DbContext type, or use Name='Default' for simplified configuration.");
         }
 
-        // 如果 Provider 未指定或为默认值，尝试自动检测
-        if (config.Provider == DatabaseProvider.SqlServer && !string.IsNullOrWhiteSpace(config.ConnectionString))
+        // Expand ${VAR} / $(VAR) placeholders in connection string (environment variables + configuration)
+        var effectiveConnectionString = config.GetEffectiveConnectionString(configuration);
+
+        // 如果 Provider 未指定或为默认值，尝试自动检测（使用展开后的连接字符串）
+        if (config.Provider == DatabaseProvider.SqlServer && !string.IsNullOrWhiteSpace(effectiveConnectionString))
         {
-            if (Internal.DatabaseProviderDetector.TryDetectFromConnectionString(config.ConnectionString, out var detectedProvider, out _, null))
+            if (Internal.DatabaseProviderDetector.TryDetectFromConnectionString(effectiveConnectionString, out var detectedProvider, out _, null))
             {
                 if (detectedProvider != DatabaseProvider.SqlServer)
                 {
@@ -119,7 +123,7 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
 
         // Build options using provider from configuration
         var optionsBuilder = new DbContextOptionsBuilder<TDbContext>();
-        ConfigureOptionsByProvider(optionsBuilder, config.ConnectionString, config.Provider);
+        ConfigureOptionsByProvider(optionsBuilder, effectiveConnectionString, config.Provider);
 
         // Create design-time CurrentUser
         var currentUser = new DesignTimeCurrentUser();

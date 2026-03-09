@@ -393,7 +393,8 @@ public class AuthorizationEnhancedTests
 
         // Assert
         result.Succeeded.ShouldBeTrue();
-        result.Data.OnlyInRole1.Count.ShouldBe(1);
+        result.Data.ShouldNotBeNull();
+        result.Data!.OnlyInRole1.Count.ShouldBe(1);
         result.Data.OnlyInRole1[0].Id.ShouldBe(enabledFuncId);
         result.Data.OnlyInRole2.ShouldBeEmpty();
         result.Data.Shared.ShouldBeEmpty();
@@ -628,7 +629,8 @@ public class AuthorizationEnhancedTests
 
         // Assert
         result.Succeeded.ShouldBeTrue();
-        result.Data.FunctionCodes.Count.ShouldBe(1);
+        result.Data.ShouldNotBeNull();
+        result.Data!.FunctionCodes.Count.ShouldBe(1);
         result.Data.FunctionCodes.ShouldContain("enabled.func");
     }
 
@@ -860,7 +862,8 @@ public class AuthorizationEnhancedTests
 
         // Assert
         result.Succeeded.ShouldBeTrue();
-        result.Data.Imported.ShouldBe(1); // 只有 enabled.func 被导入
+        result.Data.ShouldNotBeNull();
+        result.Data!.Imported.ShouldBe(1); // 只有 enabled.func 被导入
         result.Data.NotFound.Count.ShouldBe(1);
         result.Data.NotFound.ShouldContain("disabled.func"); // 禁用的视为未找到
     }

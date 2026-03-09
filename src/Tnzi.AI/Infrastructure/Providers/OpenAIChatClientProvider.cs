@@ -30,7 +30,8 @@ public class OpenAIChatClientProvider : IChatClientProvider
         Check.NotNullOrWhiteSpace(model);
 
         var openAIClient = CreateOpenAIClient(options);
-        return openAIClient.GetChatClient(model).AsIChatClient();
+        var client = openAIClient.GetChatClient(model).AsIChatClient();
+        return new ReasoningAwareChatClientDecorator(client);
     }
 
     /// <summary>

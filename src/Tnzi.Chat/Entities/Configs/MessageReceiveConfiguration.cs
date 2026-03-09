@@ -7,6 +7,13 @@ public class MessageReceiveConfiguration : EntityTypeConfigurationBase<MessageRe
 {
     public override void Configure(EntityTypeBuilder<MessageReceive> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(mr => mr.TenantId);
+        }
+
         builder.HasIndex(mr => new { mr.MessageId, mr.UserId }).IsUnique();
         builder.HasIndex(mr => new { mr.UserId, mr.ReadTime });
 

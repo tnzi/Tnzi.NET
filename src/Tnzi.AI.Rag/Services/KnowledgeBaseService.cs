@@ -12,7 +12,6 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     private readonly IEmbeddingService _embeddingService;
     private readonly AIRagOptions _options;
     private readonly IReranker _reranker;
-    private readonly RagDbContext _dbContext;
     private readonly IBackgroundJobManager? _backgroundJobManager;
 
     public KnowledgeBaseService(
@@ -22,7 +21,6 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         IVectorStore vectorStore,
         IEmbeddingService embeddingService,
         IReranker reranker,
-        RagDbContext dbContext,
         IOptions<AIRagOptions> options,
         IServiceProvider serviceProvider,
         IBackgroundJobManager? backgroundJobManager = null) : base(serviceProvider)
@@ -33,7 +31,6 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         _vectorStore = Check.NotNull(vectorStore);
         _embeddingService = Check.NotNull(embeddingService);
         _reranker = Check.NotNull(reranker);
-        _dbContext = Check.NotNull(dbContext);
         _options = Check.NotNull(options).Value;
         _backgroundJobManager = backgroundJobManager;
     }
@@ -245,7 +242,6 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         }
 
         // 同步回退路径（无 Hangfire 模块时）
-        var prefix = _options.TableNamePrefix;
         var ingestResult = await _ingestionService.IngestAsync(kbId, doc.Id, content, fileName, ct);
 
         if (ingestResult.Succeeded)
@@ -253,9 +249,12 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
             doc.Status = DocumentStatus.Completed;
             doc.ChunkCount = ingestResult.ChunkCount;
 
-            // 原子更新知识库统计（避免并发竞态）
-            await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                $"""UPDATE "{prefix}_KnowledgeBase" SET "DocumentCount" = "DocumentCount" + 1, "ChunkCount" = "ChunkCount" + {ingestResult.ChunkCount} WHERE "Id" = {kbId}""", ct);
+            // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
+            await _kbRepository.AsQueryable()
+                .Where(k => k.Id == kbId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(k => k.DocumentCount, k => k.DocumentCount + 1)
+                    .SetProperty(k => k.ChunkCount, k => k.ChunkCount + ingestResult.ChunkCount), ct);
         }
         else
         {
@@ -288,11 +287,13 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         // 删除块
         await _vectorStore.DeleteByDocumentAsync(documentId, ct);
 
-        // 原子更新知识库统计（避免并发竞态）
-        var prefix = _options.TableNamePrefix;
+        // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
         var chunkCount = doc.ChunkCount;
-        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-            $"""UPDATE "{prefix}_KnowledgeBase" SET "DocumentCount" = CASE WHEN "DocumentCount" - 1 < 0 THEN 0 ELSE "DocumentCount" - 1 END, "ChunkCount" = CASE WHEN "ChunkCount" - {chunkCount} < 0 THEN 0 ELSE "ChunkCount" - {chunkCount} END WHERE "Id" = {kbId}""", ct);
+        await _kbRepository.AsQueryable()
+            .Where(k => k.Id == kbId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(k => k.DocumentCount, k => k.DocumentCount > 0 ? k.DocumentCount - 1 : 0)
+                .SetProperty(k => k.ChunkCount, k => k.ChunkCount >= chunkCount ? k.ChunkCount - chunkCount : 0), ct);
 
         await _docRepository.DeleteAsync(doc, ct);
 

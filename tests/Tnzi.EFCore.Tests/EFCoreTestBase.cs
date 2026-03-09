@@ -10,6 +10,7 @@ public abstract class EFCoreTestBase : IDisposable
     protected readonly TestDbContext DbContext;
     protected readonly ICurrentUser CurrentUser;
     protected readonly ICurrentTenant CurrentTenant;
+    private readonly SqliteConnection _connection;
 
     protected EFCoreTestBase()
     {
@@ -22,12 +23,13 @@ public abstract class EFCoreTestBase : IDisposable
         services.AddSingleton<ICurrentUser>(currentUser);
         services.AddSingleton<ICurrentTenant>(currentTenant);
 
-        // 注册 DbContext (使用 SQLite 数据库)
-        // 每个测试使用唯一的数据库文件,确保测试隔离
-        var dbName = $"test_{Guid.NewGuid():N}.db";
+        _connection = new SqliteConnection("Data Source=:memory:");
+        _connection.Open();
+
+        // 注册 DbContext (使用独立的 SQLite 内存连接)
         services.AddDbContext<TestDbContext>((sp, options) =>
         {
-            options.UseSqlite($"Data Source={dbName}");
+            options.UseSqlite(_connection);
             options.EnableSensitiveDataLogging();
             options.EnableDetailedErrors();
         });
@@ -39,24 +41,13 @@ public abstract class EFCoreTestBase : IDisposable
         CurrentUser = ServiceProvider.GetRequiredService<ICurrentUser>();
         CurrentTenant = ServiceProvider.GetRequiredService<ICurrentTenant>();
 
-        // 确保数据库已创建并应用迁移
-        DbContext.Database.EnsureDeleted(); // 清理旧数据
         DbContext.Database.EnsureCreated(); // 创建新数据库
     }
 
     public virtual void Dispose()
     {
-        // 清理数据库
-        try
-        {
-            DbContext.Database.EnsureDeleted();
-        }
-        catch
-        {
-            // 忽略清理错误
-        }
-
         DbContext?.Dispose();
+        _connection.Dispose();
         ServiceProvider?.Dispose();
         GC.SuppressFinalize(this);
     }

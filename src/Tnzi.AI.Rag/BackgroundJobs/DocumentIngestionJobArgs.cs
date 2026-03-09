@@ -3,8 +3,11 @@ namespace Tnzi.AI.Rag.BackgroundJobs;
 /// <summary>
 /// 文档摄取后台任务参数
 /// </summary>
-public class DocumentIngestionJobArgs
+public class DocumentIngestionJobArgs : ITenantAwareJobArgs
 {
+    /// <inheritdoc />
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 知识库 ID
     /// </summary>

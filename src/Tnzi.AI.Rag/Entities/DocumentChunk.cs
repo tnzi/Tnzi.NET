@@ -3,8 +3,10 @@ namespace Tnzi.AI.Rag.Entities;
 /// <summary>
 /// 文档块实体 — 存储文档块内容和向量嵌入
 /// </summary>
-public class DocumentChunk : EntityBase<Guid>
+public class DocumentChunk : EntityBase<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 所属知识库 ID
     /// </summary>

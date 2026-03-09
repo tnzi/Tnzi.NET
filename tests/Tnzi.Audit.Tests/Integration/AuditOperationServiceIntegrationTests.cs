@@ -272,8 +272,9 @@ public class AuditOperationServiceIntegrationTests : IntegrationTestBase
         // Assert
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldNotBeNull();
-        result.Data.TotalCount.ShouldBe(2);
-        result.Data.Items.All(o => o.FunctionName.Contains("UserController")).ShouldBeTrue();
+        var data = result.Data!;
+        data.TotalCount.ShouldBe(2);
+        data.Items.All(o => o.FunctionName != null && o.FunctionName.Contains("UserController")).ShouldBeTrue();
     }
 
     [Fact]

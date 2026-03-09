@@ -7,6 +7,8 @@ public class AttachmentConfiguration : EntityTypeConfigurationBase<Attachment, G
 {
     public override void Configure(EntityTypeBuilder<Attachment> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(a => a.FileName).IsRequired().HasMaxLength(500);
         builder.Property(a => a.FilePath).IsRequired().HasMaxLength(1000);
         builder.Property(a => a.ContentType).IsRequired().HasMaxLength(200).HasDefaultValue("application/octet-stream");
@@ -18,6 +20,11 @@ public class AttachmentConfiguration : EntityTypeConfigurationBase<Attachment, G
             .OnDelete(DeleteBehavior.Cascade);
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(a => a.TenantId);
+        }
+
         builder.HasIndex(a => a.MessageId);
         builder.HasIndex(a => a.FileId);
     }

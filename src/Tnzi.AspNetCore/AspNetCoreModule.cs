@@ -59,17 +59,17 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 自动添加 Controllers 支持
         var mvcBuilder = context.Services.AddControllers();
 
-        // 自动注册所有业务模块的程序集到 ApplicationPartManager
-        // 替代 TnziApplication.RegisterControllerAssemblies 的非标准做法
+        // 自动注册所有已加载模块的程序集到 ApplicationPartManager
+        // 扫描范围：所有模块（含 Framework/Infrastructure），让各模块可提供 [DefaultController]
         var appDescriptor = context.Services.FirstOrDefault(s => s.ServiceType == typeof(ITnziApplication));
         if (appDescriptor?.ImplementationInstance is ITnziApplication app)
         {
             foreach (var module in app.Modules)
             {
-                // 仅注册业务模块 (TnziApplicationModule) 的程序集
-                if (module.Instance is TnziApplicationModule)
+                var applicationPartAssemblies = GetApplicationPartAssemblies(module.Type);
+                foreach (var assembly in applicationPartAssemblies)
                 {
-                    mvcBuilder.AddApplicationPart(module.Type.Assembly);
+                    mvcBuilder.AddApplicationPart(assembly);
                 }
             }
         }
@@ -154,10 +154,26 @@ public class AspNetCoreModule : TnziFrameworkModule
                 _ => new Mvc.Conventions.ApiControllerRouteProvider(aspNetCoreOptions));
         }
 
-        // 注册条件控制器提供者，用于根据依赖可用性过滤Controller
+        // 注册默认 Controller 过滤提供者 (Order = -600)
+        // 当 HostingModule 未激活 DefaultControllerEnabledMarker 时，移除所有 [DefaultController] 标记的 Controller
+        context.Services.AddSingleton<IApplicationModelProvider>(
+            _ => new Mvc.Conventions.DefaultControllerFilterProvider(context.Services));
+
+        // 注册条件控制器提供者 (Order = -500)，用于根据依赖可用性过滤Controller
         // 支持Host模块的多个版本，根据依赖不同选择Controller的可见性
         context.Services.AddSingleton<IApplicationModelProvider>(
             _ => new Mvc.Conventions.ConditionalControllerProvider(context.Services));
+
+        // 注册模块 Controller 替换提供者 (Order = -450)
+        // 用户同路由 Controller 自动覆盖模块默认 [DefaultController]
+        context.Services.AddSingleton<IApplicationModelProvider, Mvc.Conventions.ModuleControllerReplacementProvider>();
+
+        // 注册配置化 Controller 过滤提供者 (Order = -400)（按名称/程序集通配符禁用 Controller）
+        if (aspNetCoreOptions.ControllerFilter != null)
+        {
+            context.Services.AddSingleton<IApplicationModelProvider>(
+                _ => new Mvc.Conventions.ConfigurationControllerFilterProvider(aspNetCoreOptions.ControllerFilter));
+        }
 
         // 注册过滤器服务
         // API 结果包装过滤器
@@ -244,7 +260,8 @@ public class AspNetCoreModule : TnziFrameworkModule
 
             // ===================================================================
             // 中间件注册顺序说明（从外到内）：
-            // 0. ForwardedHeaders - 最外层，确保所有后续中间件获取正确的客户端 IP 和协议
+            // -1. PathBase        - 最优先，剥离子路径前缀（IIS 虚拟目录 / 反向代理不剥离路径场景）
+            // 0. ForwardedHeaders - 确保所有后续中间件获取正确的客户端 IP 和协议
             // 1. ExceptionHandling - 捕获所有下游中间件的异常
             // 2. RequestTracking  - 请求追踪，生成 RequestId，确保异常响应也带 RequestId
             // 3. CORS             - 跨域处理，确保错误响应也包含 CORS 头
@@ -258,6 +275,15 @@ public class AspNetCoreModule : TnziFrameworkModule
             // 11. Authentication + Authorization - 认证和授权
             // 12. SPANotFound     - SPA 404 处理（最内层）
             // ===================================================================
+
+            // -1. PathBase（必须在所有中间件之前）
+            // 适用场景：反向代理不剥离路径、IIS 虚拟目录（ANCM 已处理时幂等安全）
+            // 原理：若 Path 以 PathBase 开头则剥离并追加到 HttpContext.Request.PathBase，
+            //       使后续路由能正确匹配不含前缀的路由定义。
+            if (!string.IsNullOrWhiteSpace(aspNetCoreOptions.PathBase))
+            {
+                app.UsePathBase(aspNetCoreOptions.PathBase);
+            }
 
             // 0. ForwardedHeaders 中间件（最外层，处理代理服务器转发的协议、主机和IP）
             // 必须在异常处理之前，确保所有后续中间件都能获取正确的客户端 IP 和协议
@@ -345,7 +371,9 @@ public class AspNetCoreModule : TnziFrameworkModule
             // 11.5. 租户解析中间件（在认证之后，以便 Claims 来源可用）
             var tenantResolverOptions = context.ServiceProvider
                 .GetRequiredService<IOptions<TenantResolverOptions>>().Value;
-            if (tenantResolverOptions.Enabled)
+            var multiTenancyOptions = context.ServiceProvider
+                .GetService<IOptions<MultiTenancyOptions>>()?.Value ?? new MultiTenancyOptions();
+            if (multiTenancyOptions.Enabled && tenantResolverOptions.Enabled)
             {
                 app.UseMiddleware<TenantResolverMiddleware>();
             }
@@ -397,6 +425,28 @@ public class AspNetCoreModule : TnziFrameworkModule
 
         // 映射所有控制器
         app.MapControllers();
+    }
+
+    private static IEnumerable<Assembly> GetApplicationPartAssemblies(Type moduleType)
+    {
+        var assemblies = new HashSet<Assembly> { moduleType.Assembly };
+        var currentType = moduleType.BaseType;
+
+        // 沿继承链向上扫描，直到不再是模块类型
+        while (currentType != null &&
+               typeof(ITnziModule).IsAssignableFrom(currentType) &&
+               currentType != typeof(object))
+        {
+            // 跳过框架基类本身（TnziApplicationModule、TnziFrameworkModule 等）
+            if (!currentType.IsAbstract || currentType.Assembly != typeof(ITnziModule).Assembly)
+            {
+                assemblies.Add(currentType.Assembly);
+            }
+
+            currentType = currentType.BaseType;
+        }
+
+        return assemblies;
     }
 
     /// <summary>

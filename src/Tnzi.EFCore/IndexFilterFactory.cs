@@ -154,6 +154,70 @@ public static class IndexFilterFactory
     }
 
     /// <summary>
+    /// 按数据库提供者的引用规则引用列名标识符
+    /// </summary>
+    /// <param name="identifier">列名标识符</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>引用后的标识符</returns>
+    /// <remarks>
+    /// SQL Server: [ColumnName]
+    /// PostgreSQL: "ColumnName"
+    /// MySQL: `ColumnName`
+    /// SQLite: "ColumnName"
+    /// </remarks>
+    public static string QuoteIdentifier(string identifier, DatabaseProvider provider) => provider switch
+    {
+        DatabaseProvider.SqlServer => $"[{identifier}]",
+        DatabaseProvider.MySql => $"`{identifier}`",
+        _ => $"\"{identifier}\""
+    };
+
+    /// <summary>
+    /// 获取 "columnName IS NOT NULL" 的过滤 SQL，用于唯一索引排除 NULL 值行
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotNull(string columnName, DatabaseProvider provider)
+    {
+        return $"{QuoteIdentifier(columnName, provider)} IS NOT NULL";
+    }
+
+    /// <summary>
+    /// 获取 "columnName IS NOT NULL" 的过滤 SQL（自动检测数据库提供者）
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotNull(string columnName)
+    {
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetColumnNotNull(columnName, provider);
+    }
+
+    /// <summary>
+    /// 获取 "columnName IS NOT NULL AND IsDeleted = false" 的过滤 SQL，
+    /// 用于可空列的唯一索引同时排除软删除行
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotNullAndIsDeletedFalse(string columnName, DatabaseProvider provider)
+    {
+        return $"{QuoteIdentifier(columnName, provider)} IS NOT NULL AND {GetIsDeletedFalse(provider)}";
+    }
+
+    /// <summary>
+    /// 获取 "columnName IS NOT NULL AND IsDeleted = false" 的过滤 SQL（自动检测数据库提供者）
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotNullAndIsDeletedFalse(string columnName)
+    {
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetColumnNotNullAndIsDeletedFalse(columnName, provider);
+    }
+
+    /// <summary>
     /// 检查是否支持指定的数据库提供者
     /// </summary>
     public static bool IsSupported(DatabaseProvider provider) => _filters.ContainsKey(provider);

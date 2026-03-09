@@ -34,4 +34,37 @@ public class StreamEvent
 
     /// <summary>是否为工具调用中间状态（用于心跳）</summary>
     public bool IsToolCall { get; set; }
+
+    /// <summary>推理增量文本（DeepSeek-R1 等模型的思考过程，如 reasoning_content）</summary>
+    public string? ReasoningDelta { get; set; }
+
+    /// <summary>Agent 名称变更（Handoff 场景：通知前端当前 Agent 已切换）</summary>
+    public string? AgentName { get; set; }
+
+    /// <summary>RAG 引用来源（仅在 IsDone=true 时包含）</summary>
+    public List<CitationDto>? Citations { get; set; }
+
+    /// <summary>工作流执行阶段（routing, executing, reviewing, synthesizing, awaiting_approval）</summary>
+    public string? Phase { get; set; }
+
+    /// <summary>节点类型（agent, review, approval, router, parallel, ...）</summary>
+    public string? NodeType { get; set; }
+
+    /// <summary>工作流步骤 ID</summary>
+    public string? NodeId { get; set; }
+
+    /// <summary>步骤名称（用于 UI 展示）</summary>
+    public string? NodeName { get; set; }
+
+    /// <summary>执行该节点的 Agent 名称</summary>
+    public string? WorkerName { get; set; }
+
+    /// <summary>审查结论（accept, rework, reject）</summary>
+    public string? ReviewVerdict { get; set; }
+
+    /// <summary>是否等待人工审批</summary>
+    public bool AwaitingApproval { get; set; }
+
+    /// <summary>关联的 Run ID</summary>
+    public Guid? RunId { get; set; }
 }

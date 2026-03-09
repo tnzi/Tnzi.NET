@@ -8,17 +8,20 @@ public class JwtTokenService : ApplicationService, ITokenService
 {
     private readonly JwtOptions _jwtOptions;
     private readonly string _secretKey;
+    private readonly bool _multiTenancyEnabled;
 
     /// <summary>
     /// 初始化一个<see cref="JwtTokenService"/>类型的新实例
     /// </summary>
     public JwtTokenService(
         IOptions<IdentityOptions> identityOptions,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions,
         IServiceProvider serviceProvider,
         IWebHostEnvironment? environment = null)
         : base(serviceProvider)
     {
         _jwtOptions = Check.NotNull(identityOptions).Value.Jwt;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
 
         // 安全检查：生产环境必须配置 JWT 密钥
         _secretKey = _jwtOptions.SecretKey;
@@ -53,6 +56,11 @@ public class JwtTokenService : ApplicationService, ITokenService
         foreach (var role in roles)
         {
             claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
+        if (_multiTenancyEnabled && user.TenantId.HasValue)
+        {
+            claims.Add(new Claim("tenant_id", user.TenantId.Value.ToString()));
         }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secretKey));

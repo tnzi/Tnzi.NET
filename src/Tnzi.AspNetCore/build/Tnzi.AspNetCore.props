@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Suppress language-specific satellite assemblies from .NET SDK (keep English only) -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ResourceLanguages>en</ResourceLanguages>
+  </PropertyGroup>
+</Project>

@@ -15,8 +15,9 @@ public class RagDbContext : TnziDbContext<RagDbContext>
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant = null,
         IDataFilterManager? dataFilterManager = null,
-        TimeProvider? timeProvider = null)
-        : base(options, currentUser, currentTenant, dataFilterManager, timeProvider)
+        TimeProvider? timeProvider = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        : base(options, currentUser, currentTenant, dataFilterManager, timeProvider, multiTenancyOptions)
     {
     }
 }

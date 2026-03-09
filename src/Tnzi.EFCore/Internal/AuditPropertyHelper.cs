@@ -10,7 +10,12 @@ internal static class AuditPropertyHelper
     /// <summary>
     /// 应用审计属性
     /// </summary>
-    public static void ApplyAuditProperties(DbContext dbContext, ICurrentUser currentUser, ICurrentTenant? currentTenant, TimeProvider? timeProvider = null)
+    public static void ApplyAuditProperties(
+        DbContext dbContext,
+        ICurrentUser currentUser,
+        ICurrentTenant? currentTenant,
+        TimeProvider? timeProvider = null,
+        bool multiTenancyEnabled = false)
     {
         var utcNow = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
 
@@ -28,9 +33,18 @@ internal static class AuditPropertyHelper
                     {
                         hasCreator.CreatorId = currentUser?.Id;
                     }
+                    // 无论是否启用租户隔离，都保留实体上的 TenantId 审计值。
+                    // 当多租户关闭时，EF 模型可能忽略该列，但实体内存状态仍应保持一致。
                     if (entry.Entity is IMultiTenant multiTenant && multiTenant.TenantId == null)
                     {
                         multiTenant.TenantId = currentTenant?.Id ?? currentUser?.TenantId;
+                    }
+                    // 多租户启用时，IMultiTenant 实体的 TenantId 不应为 null（防止数据泄露）
+                    if (multiTenancyEnabled && entry.Entity is IMultiTenant mtEntity && mtEntity.TenantId == null)
+                    {
+                        var entityType = entry.Entity.GetType().Name;
+                        // 使用 Trace 级别记录，避免在批量操作中产生大量日志
+                        Debug.WriteLine($"[MultiTenancy] Warning: Entity '{entityType}' created without TenantId while multi-tenancy is enabled. This may cause data isolation issues.");
                     }
                     if (entry.Entity is IConcurrencyStamp addedConcurrency)
                     {

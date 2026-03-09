@@ -1,3 +1,4 @@
+using Tnzi.Notification.Metadata;
 using Message = Tnzi.Notification.Entities.Message;
 
 namespace Tnzi.Notification.Services;

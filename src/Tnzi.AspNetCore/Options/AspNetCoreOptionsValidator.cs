@@ -11,6 +11,15 @@ public class AspNetCoreOptionsValidator : OptionsValidatorBase<AspNetCoreOptions
     /// </summary>
     protected override void ValidateOptions(AspNetCoreOptions options, List<string> errors)
     {
+        // 验证 PathBase 格式
+        if (!string.IsNullOrEmpty(options.PathBase))
+        {
+            if (!options.PathBase.StartsWith('/'))
+                errors.Add("PathBase must start with '/' (e.g., '/myapp').");
+            if (options.PathBase.EndsWith('/'))
+                errors.Add("PathBase must not end with '/' (e.g., use '/myapp' not '/myapp/').");
+        }
+
         // 验证HTTP加密配置
         if (options.HttpEncrypt?.Enabled == true)
         {

@@ -672,15 +672,6 @@ public class FileStorageServiceComprehensiveTests
 
     #region 文件版本管理测试（FileVersionService）
 
-    [Fact(Skip = "需要集成测试：使用了 AsQueryable().Where().Select().MaxAsync() 扩展方法，Moq 无法 Mock。建议使用 InMemory 数据库进行集成测试。")]
-    public async Task CreateVersionAsync_CreatesNewVersion()
-    {
-        // 注意：此测试需要集成测试环境
-        // 代码使用了 AsQueryable().Where().Select().MaxAsync() 在数据库层面执行聚合查询
-        // 这是正确的实现方式，可以避免加载所有数据到内存
-        // 建议使用 InMemory 数据库进行集成测试以验证功能正确性
-    }
-
     #endregion
 
     #region 文件分享测试（FileShareService）
@@ -906,24 +897,6 @@ public class FileStorageServiceComprehensiveTests
         Assert.Equal(chunkSize, result.Data.ChunkSize);
         Assert.Equal(2, result.Data.TotalChunks);
         Assert.False(result.Data.IsCompleted);
-    }
-
-    [Fact(Skip = "需要集成测试：使用了 AsQueryable().Where().SumAsync() 扩展方法，Moq 无法 Mock。建议使用 InMemory 数据库进行集成测试。")]
-    public async Task UploadChunkAsync_UploadsChunk()
-    {
-        // 注意：此测试需要集成测试环境
-        // 代码使用了 AsQueryable().Where().SumAsync() 在数据库层面执行聚合查询
-        // 这是正确的实现方式，可以避免加载所有数据到内存
-        // 建议使用 InMemory 数据库进行集成测试以验证功能正确性
-    }
-
-    [Fact(Skip = "需要集成测试：使用了 AsQueryable().Where().OrderBy().ToListAsync() 扩展方法，Moq 无法 Mock。建议使用 InMemory 数据库进行集成测试。")]
-    public async Task CompleteChunkedUploadAsync_MergesChunks()
-    {
-        // 注意：此测试需要集成测试环境
-        // 代码使用了 AsQueryable().Where().OrderBy().ToListAsync() 在数据库层面执行排序查询
-        // 这是正确的实现方式，可以避免加载所有数据到内存后再排序
-        // 建议使用 InMemory 数据库进行集成测试以验证功能正确性
     }
 
     [Fact]

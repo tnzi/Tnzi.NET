@@ -3,7 +3,7 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 发票实体
 /// </summary>
-public class Invoice : FullAuditedEntity<Guid>
+public class Invoice : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 发票号码

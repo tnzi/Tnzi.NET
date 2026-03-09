@@ -4,7 +4,7 @@ namespace Tnzi.Identity.Entities;
 /// 用户详细信息实体
 /// 与 User 表是一对一关系（通过 UserId 唯一约束）
 /// </summary>
-public class UserDetail : FullAuditedEntity<Guid>
+public class UserDetail : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 获取或设置 用户ID

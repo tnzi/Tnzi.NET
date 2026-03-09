@@ -3,8 +3,10 @@ namespace Tnzi.Storage.Entities;
 /// <summary>
 /// 文件分享记录
 /// </summary>
-public class FileShare : EntityBase<Guid>, IHasCreationTime, IHasCreator
+public class FileShare : EntityBase<Guid>, IHasCreationTime, IHasCreator, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 文件ID
     /// </summary>

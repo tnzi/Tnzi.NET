@@ -9,8 +9,8 @@ namespace Tnzi.AI.Dtos;
 [JsonDerivedType(typeof(FileContentPartDto), "file")]
 public abstract class ContentPartDto
 {
-    /// <summary>Content part type discriminator</summary>
-    public string Type { get; set; } = string.Empty;
+    // Type discriminator is handled automatically by [JsonPolymorphic] attribute.
+    // Do NOT add a "Type" property here — it conflicts with the JSON metadata property.
 }
 
 /// <summary>

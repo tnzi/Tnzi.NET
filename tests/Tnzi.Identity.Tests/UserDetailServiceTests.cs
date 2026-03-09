@@ -24,34 +24,6 @@ public class UserDetailServiceTests
         _userDetailService = new UserDetailService(_repositoryMock.Object, _userManagerMock.Object, _serviceProviderMock.Object);
     }
 
-    [Fact(Skip = "需要集成测试：GetByUserIdAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetByUserIdAsync_WithExistingDetail_ReturnsUserDetailDto()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetByUserIdAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetByUserIdAsync_WithNonExistingDetail_ReturnsNull()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：CreateOrUpdateAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task CreateOrUpdateAsync_WithNewDetail_CreatesDetail()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：CreateOrUpdateAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task CreateOrUpdateAsync_WithExistingDetail_UpdatesDetail()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
     [Fact]
     public async Task CreateOrUpdateAsync_WithNonExistentUser_ReturnsFailResult()
     {
@@ -69,17 +41,4 @@ public class UserDetailServiceTests
         Assert.False(result.Succeeded);
     }
 
-    [Fact(Skip = "需要集成测试：DeleteAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task DeleteAsync_WithExistingDetail_DeletesDetail()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：DeleteAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task DeleteAsync_WithNonExistingDetail_DoesNothing()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
 }

@@ -94,10 +94,5 @@ public class AzureBlobStorageTests
         await Assert.ThrowsAsync<ArgumentNullException>(() => storage.UploadAsync("test.txt", null!));
     }
 
-    [Fact(Skip = "Requires Azure Storage Emulator or real connection")]
-    public async Task UploadAsync_IntegrationTest()
-    {
-        // Placeholder for integration test
-    }
 }
 #endif

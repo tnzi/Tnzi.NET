@@ -29,12 +29,13 @@ public static class TnziDbContextHelper
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant,
         CancellationToken cancellationToken,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool multiTenancyEnabled = false)
     {
         var logger = DbContextServiceResolver.GetLogger(dbContext);
 
         // 1. 应用审计
-        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider);
+        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider, multiTenancyEnabled);
 
         // 2. 文件引用追踪 - 收集变更信息
         var fileTracker = new FileTracking.FileReferenceChangeTracker();
@@ -101,9 +102,14 @@ public static class TnziDbContextHelper
     /// <summary>
     /// 应用审计属性
     /// </summary>
-    public static void ApplyAuditProperties(DbContext dbContext, ICurrentUser currentUser, ICurrentTenant? currentTenant, TimeProvider? timeProvider = null)
+    public static void ApplyAuditProperties(
+        DbContext dbContext,
+        ICurrentUser currentUser,
+        ICurrentTenant? currentTenant,
+        TimeProvider? timeProvider = null,
+        bool multiTenancyEnabled = false)
     {
-        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider);
+        AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider, multiTenancyEnabled);
     }
 
     /// <summary>

@@ -4,13 +4,25 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
 {
     public override void Configure(EntityTypeBuilder<Subscription> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(s => s.SubscriptionNo).HasMaxLength(64).IsRequired();
         builder.Property(s => s.CancelReason).HasMaxLength(500);
         builder.Property(s => s.ChannelCode).HasMaxLength(32).IsRequired();
         builder.Property(s => s.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
 
-        builder.HasIndex(s => s.SubscriptionNo).IsUnique()
-            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(s => new { s.TenantId, s.SubscriptionNo }).IsUnique()
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+            builder.HasIndex(s => s.TenantId);
+        }
+        else
+        {
+            builder.HasIndex(s => s.SubscriptionNo).IsUnique()
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        }
+
         builder.HasIndex(s => s.UserId);
         builder.HasIndex(s => s.PlanId);
         builder.HasIndex(s => s.Status);

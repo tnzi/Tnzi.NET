@@ -3,8 +3,10 @@ namespace Tnzi.Storage.Entities;
 /// <summary>
 /// 文件上传会话（用于分块上传）
 /// </summary>
-public class FileUploadSession : EntityBase<Guid>, IHasCreationTime, IHasCreator
+public class FileUploadSession : EntityBase<Guid>, IHasCreationTime, IHasCreator, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 文件名
     /// </summary>

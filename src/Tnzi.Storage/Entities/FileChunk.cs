@@ -3,8 +3,10 @@ namespace Tnzi.Storage.Entities;
 /// <summary>
 /// 文件分块（用于分块上传）
 /// </summary>
-public class FileChunk : EntityBase<Guid>, IHasCreationTime
+public class FileChunk : EntityBase<Guid>, IHasCreationTime, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 上传会话ID
     /// </summary>

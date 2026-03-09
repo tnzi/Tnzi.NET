@@ -3,10 +3,18 @@ namespace Tnzi.Caching;
 
 /// <summary>
 /// 缓存键生成器实现
+/// 多租户模式下自动添加租户前缀，确保缓存数据隔离
 /// </summary>
 public class CacheKeyGenerator : ICacheKeyGenerator
 {
     private const string DefaultSeparator = ":";
+    private const string TenantKeyPrefix = "t";
+    private readonly IServiceProvider? _serviceProvider;
+
+    public CacheKeyGenerator(IServiceProvider? serviceProvider = null)
+    {
+        _serviceProvider = serviceProvider;
+    }
 
     /// <summary>
     /// 生成缓存键
@@ -18,30 +26,33 @@ public class CacheKeyGenerator : ICacheKeyGenerator
     {
         Check.NotNullOrEmpty(prefix);
 
-        if (parameters == null || parameters.Length == 0)
-            return prefix;
+        var parts = new List<string>();
+        AddTenantPrefix(parts);
+        parts.Add(prefix);
 
-        var parts = new List<string> { prefix };
-        foreach (var param in parameters)
+        if (parameters != null && parameters.Length > 0)
         {
-            if (param == null)
+            foreach (var param in parameters)
             {
-                parts.Add("null");
-            }
-            else if (param is string str)
-            {
-                parts.Add(str);
-            }
-            else if (param is ValueType)
-            {
-                parts.Add(param.ToString() ?? "null");
-            }
-            else
-            {
-                // 对于复杂对象，使用JSON序列化后计算哈希值
-                var json = JsonSerializer.Serialize(param);
-                var hash = ComputeHash(json);
-                parts.Add(hash);
+                if (param == null)
+                {
+                    parts.Add("null");
+                }
+                else if (param is string str)
+                {
+                    parts.Add(str);
+                }
+                else if (param is ValueType)
+                {
+                    parts.Add(param.ToString() ?? "null");
+                }
+                else
+                {
+                    // 对于复杂对象，使用JSON序列化后计算哈希值
+                    var json = JsonSerializer.Serialize(param);
+                    var hash = ComputeHash(json);
+                    parts.Add(hash);
+                }
             }
         }
 
@@ -59,7 +70,10 @@ public class CacheKeyGenerator : ICacheKeyGenerator
         Check.NotNullOrEmpty(parts);
 
         separator = separator ?? DefaultSeparator;
-        return string.Join(separator, parts);
+        var allParts = new List<string>();
+        AddTenantPrefix(allParts);
+        allParts.AddRange(parts);
+        return string.Join(separator, allParts);
     }
 
     /// <summary>
@@ -89,7 +103,7 @@ public class CacheKeyGenerator : ICacheKeyGenerator
     {
         var typeName = typeof(T).FullName ?? typeof(T).Name;
         var combined = $"{typeName}:{expressionString}";
-        
+
         if (additionalParams != null && additionalParams.Length > 0)
         {
             var paramsString = string.Join("|", additionalParams.Select(p => p?.ToString() ?? "null"));
@@ -98,7 +112,32 @@ public class CacheKeyGenerator : ICacheKeyGenerator
 
         // 使用哈希值生成短键
         var hash = ComputeHash(combined);
-        return $"cache:query:{typeName}:{hash}";
+        var tenantSegment = GetTenantSegment();
+        return tenantSegment != null
+            ? $"{tenantSegment}:cache:query:{typeName}:{hash}"
+            : $"cache:query:{typeName}:{hash}";
+    }
+
+    /// <summary>
+    /// 添加租户前缀到 parts 列表
+    /// </summary>
+    private void AddTenantPrefix(List<string> parts)
+    {
+        var segment = GetTenantSegment();
+        if (segment != null)
+        {
+            parts.Add(segment);
+        }
+    }
+
+    /// <summary>
+    /// 获取租户段（如 "t:xxxx"），无租户时返回 null
+    /// </summary>
+    private string? GetTenantSegment()
+    {
+        // 通过 IServiceProvider 按需获取 Scoped 的 ICurrentTenant（CacheKeyGenerator 是 Singleton）
+        var tenantId = _serviceProvider?.GetService<ICurrentTenant>()?.Id;
+        return tenantId.HasValue ? $"{TenantKeyPrefix}:{tenantId.Value:N}" : null;
     }
 
     /// <summary>

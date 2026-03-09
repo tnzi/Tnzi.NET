@@ -7,6 +7,8 @@ public class UserDetailConfiguration : EntityTypeConfigurationBase<UserDetail, G
 {
     public override void Configure(EntityTypeBuilder<UserDetail> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         // 表名由 TableNamePrefix 属性自动处理
         builder.HasKey(ud => ud.Id);
 
@@ -28,5 +30,9 @@ public class UserDetailConfiguration : EntityTypeConfigurationBase<UserDetail, G
 
         // 索引配置
         builder.HasIndex(ud => ud.UserId).IsUnique();
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(ud => ud.TenantId);
+        }
     }
 }

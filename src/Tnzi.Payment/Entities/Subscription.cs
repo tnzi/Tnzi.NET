@@ -3,7 +3,7 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 订阅实体
 /// </summary>
-public class Subscription : FullAuditedEntity<Guid>
+public class Subscription : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 订阅流水号

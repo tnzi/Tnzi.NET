@@ -7,6 +7,13 @@ public class MessageRoleConfiguration : EntityTypeConfigurationBase<MessageRole,
 {
     public override void Configure(EntityTypeBuilder<MessageRole> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(mr => mr.TenantId);
+        }
+
         builder.HasIndex(mr => new { mr.MessageId, mr.RoleId }).IsUnique();
         builder.HasIndex(mr => mr.RoleId);
 

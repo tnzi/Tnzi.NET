@@ -7,6 +7,12 @@ namespace Tnzi.EFCore.Data;
 public class DataFilterManager : IDataFilterManager
 {
     private readonly AsyncLocal<Dictionary<Type, Stack<bool>>> _filterStates = new();
+    private readonly ILogger<DataFilterManager>? _logger;
+
+    public DataFilterManager(ILogger<DataFilterManager>? logger = null)
+    {
+        _logger = logger;
+    }
 
     private Dictionary<Type, Stack<bool>> FilterStates
     {
@@ -22,6 +28,14 @@ public class DataFilterManager : IDataFilterManager
 
     public IDisposable Disable<TFilter>() where TFilter : class, IDataFilter
     {
+        // 审计日志：跨租户过滤器操作
+        if (typeof(TFilter) == typeof(IMultiTenantFilter))
+        {
+            _logger?.LogWarning(
+                "Multi-tenant filter disabled. Caller: {Caller}. Queries will bypass tenant isolation until scope is disposed.",
+                GetCallerInfo());
+        }
+
         return SetState<TFilter>(false);
     }
 
@@ -49,7 +63,7 @@ public class DataFilterManager : IDataFilterManager
             stack = new Stack<bool>();
             FilterStates[filterType] = stack;
         }
-        
+
         stack.Push(isEnabled);
         return new FilterStateScope(() =>
         {
@@ -58,6 +72,20 @@ public class DataFilterManager : IDataFilterManager
                 stack.Pop();
             }
         });
+    }
+
+    /// <summary>
+    /// 获取调用者信息（用于审计日志）
+    /// </summary>
+    private static string GetCallerInfo()
+    {
+        var stackTrace = new StackTrace(skipFrames: 2, fNeedFileInfo: false);
+        var frame = stackTrace.GetFrame(0);
+        if (frame?.GetMethod() is { } method)
+        {
+            return $"{method.DeclaringType?.Name}.{method.Name}";
+        }
+        return "Unknown";
     }
 
     /// <summary>

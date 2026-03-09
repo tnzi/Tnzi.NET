@@ -24,6 +24,9 @@ public static class TnziEFCoreExtensions
             // 先执行用户的配置
             optionsAction?.Invoke(options);
 
+            // 模型缓存键包含多租户开关，避免单/多租户模型串用
+            options.ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, Internal.MultiTenancyModelCacheKeyFactory>();
+
             // 添加慢查询拦截器（如果已注册）
             var interceptor = serviceProvider.GetService<Interceptors.SlowQueryLoggingInterceptor>();
             if (interceptor != null)

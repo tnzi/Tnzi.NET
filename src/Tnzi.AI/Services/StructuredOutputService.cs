@@ -263,17 +263,24 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
     /// <summary>
     /// 创建 JSON Schema 响应格式
     /// </summary>
-    private static ChatResponseFormatJson CreateJsonSchemaResponseFormat<T>(StructuredOutputOptions options)
+    private ChatResponseFormatJson CreateJsonSchemaResponseFormat<T>(StructuredOutputOptions options)
     {
         // 如果提供了自定义 Schema，使用自定义 Schema
         if (!string.IsNullOrEmpty(options.JsonSchema))
         {
-            var schemaElement = JsonSerializer.Deserialize<JsonElement>(options.JsonSchema);
-            return ChatResponseFormat.ForJsonSchema(schemaElement, typeof(T).Name);
+            try
+            {
+                var schemaElement = JsonSerializer.Deserialize<JsonElement>(options.JsonSchema);
+                return ChatResponseFormat.ForJsonSchema(schemaElement, typeof(T).Name);
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogWarning(ex, "Invalid custom JSON Schema, falling back to auto-generated schema");
+                // 回退到自动生成
+            }
         }
 
         // 使用类型名称生成简单的 JSON Schema
-        // 更完整的 Schema 生成可以使用 JsonSchemaExporter（需要额外依赖）
         var schema = GenerateSimpleJsonSchema<T>();
         return ChatResponseFormat.ForJsonSchema(schema, typeof(T).Name);
     }
@@ -281,14 +288,23 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
     /// <summary>
     /// 生成 JSON Schema（使用 .NET 内置 JsonSchemaExporter，支持嵌套类型、可空、枚举等）
     /// </summary>
-    private static JsonElement GenerateSimpleJsonSchema<T>()
+    private JsonElement GenerateSimpleJsonSchema<T>()
     {
-        var exporterOptions = new JsonSerializerOptions
+        try
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-        var schemaNode = exporterOptions.GetJsonSchemaAsNode(typeof(T));
-        return JsonSerializer.Deserialize<JsonElement>(schemaNode.ToJsonString());
+            var exporterOptions = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+            var schemaNode = exporterOptions.GetJsonSchemaAsNode(typeof(T));
+            return JsonSerializer.Deserialize<JsonElement>(schemaNode.ToJsonString());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to generate JSON Schema for type {TypeName}, using minimal schema", typeof(T).Name);
+            // 回退到最小 schema
+            return JsonSerializer.Deserialize<JsonElement>("""{"type":"object"}""");
+        }
     }
 
     /// <summary>

@@ -3,8 +3,10 @@ namespace Tnzi.Chat.Entities;
 /// <summary>
 /// 消息收件人（私人消息的目标用户）
 /// </summary>
-public class MessageRecipient : EntityBase<Guid>
+public class MessageRecipient : EntityBase<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 获取或设置 消息ID
     /// </summary>

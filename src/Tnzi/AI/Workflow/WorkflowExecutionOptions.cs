@@ -12,6 +12,16 @@ public class WorkflowExecutionOptions
     public string? ExecutionId { get; set; }
 
     /// <summary>
+    /// 关联的工作流定义 ID（用于 Run 追踪和恢复）
+    /// </summary>
+    public Guid? WorkflowDefinitionId { get; set; }
+
+    /// <summary>
+    /// 关联的 AgentRun ID（恢复已有 Run 时使用）
+    /// </summary>
+    public Guid? RunId { get; set; }
+
+    /// <summary>
     /// 是否从检查点恢复执行
     /// </summary>
     public bool Resume { get; set; }

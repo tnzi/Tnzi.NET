@@ -29,6 +29,10 @@ public class EFCoreModule : TnziInfrastructureModule
             .Bind(configuration.GetSection("EFCore:Outbox"))
             .ValidateWith<OutboxOptions, OutboxOptionsValidator>();
 
+        // 注册多租户开关
+        context.Services.AddOptions<MultiTenancyOptions>()
+            .Bind(configuration.GetSection("MultiTenancy"));
+
         return Task.CompletedTask;
     }
 
@@ -207,58 +211,11 @@ public class EFCoreModule : TnziInfrastructureModule
         var entityManager = serviceProvider.GetRequiredService<IEntityManager>();
         entityManager.Initialize();
 
-        // 注册 Repository（基于 EntityManager 发现的实体类型）
-        // 注意：由于 ServiceProvider 已构建，无法动态添加服务
-        // 这里我们通过 ITnziApplication 访问 ServiceCollection 来延迟注册
-        RegisterRepositoriesFromEntityManager(context);
+        var logger = serviceProvider.GetService<ILogger<EFCoreModule>>();
+        logger?.LogDebug(
+            "EntityManager initialized with {Count} discovered entities. Repository registration must be completed during ConfigureServicesAsync.",
+            entityManager.GetAllEntityTypes().Length);
 
         return Task.CompletedTask;
-    }
-
-
-    /// <summary>
-    /// 基于 EntityManager 注册 Repository（补充注册，用于遗漏的实体）
-    /// 注意：此方法在 OnApplicationInitialization 阶段执行，此时 ServiceProvider 已构建
-    /// 无法再添加服务，所以此方法主要用于日志记录和验证
-    /// </summary>
-    private void RegisterRepositoriesFromEntityManager(ApplicationInitializationContext context)
-    {
-        var serviceProvider = context.ServiceProvider;
-        var entityManager = serviceProvider.GetRequiredService<IEntityManager>();
-        var registrar = serviceProvider.GetRequiredService<Services.IRepositoryRegistrar>();
-        var logger = serviceProvider.GetService<ILogger<EFCoreModule>>();
-
-        // 获取 TnziApplication 以访问 ServiceCollection
-        var application = serviceProvider.GetService<ITnziApplication>();
-        if (application == null)
-        {
-            logger?.LogWarning("ITnziApplication not found, skipping Repository registration from EntityManager");
-            return;
-        }
-
-        var services = application.Services;
-        if (services == null)
-        {
-            logger?.LogWarning("ServiceCollection is no longer available (ServiceProvider already built), skipping Repository registration");
-            return;
-        }
-
-        var entityTypes = entityManager.GetAllEntityTypes();
-        logger?.LogDebug("EntityManager discovered {Count} entities", entityTypes.Length);
-
-        // 我们在这里只扫描并注册缺失的 Repository
-        // 注意：这种延迟注册方式仅供参考，生产环境建议通过 AddTnziDbContext 注册
-        foreach (var entityType in entityTypes)
-        {
-            // 查找该实体对应的 DbContext 类型
-            var dbContextType = entityManager.GetDbContextTypeForEntity(entityType);
-            if (dbContextType == null || dbContextType == typeof(object))
-            {
-                continue;
-            }
-
-            // 使用注册器执行注册（注册器内部会检查是否已存在）
-            registrar.RegisterRepository(services, entityType, dbContextType, logger: null);
-        }
     }
 }

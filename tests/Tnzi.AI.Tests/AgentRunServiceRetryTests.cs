@@ -1,0 +1,56 @@
+using Microsoft.Extensions.DependencyInjection;
+namespace Tnzi.AI.Tests;
+
+public class AgentRunServiceRetryTests
+{
+    [Fact]
+    public async Task RetryNodeAsync_FailedNode_DelegatesToRuntimeResume()
+    {
+        var runId = Guid.NewGuid();
+        var nodeId = Guid.NewGuid();
+
+        var runRepository = new Mock<IRepository<AgentRun, Guid>>();
+        runRepository.Setup(x => x.GetAsync(runId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRun
+            {
+                Id = runId,
+                Status = AgentRunStatus.Failed
+            });
+
+        var nodeRepository = new Mock<IRepository<AgentRunNode, Guid>>();
+        nodeRepository.Setup(x => x.GetAsync(nodeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunNode
+            {
+                Id = nodeId,
+                RunId = runId,
+                Status = AgentRunNodeStatus.Failed
+            });
+
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(x => x.ResumeAsync(runId, It.IsAny<ResumeRunInput>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult
+            {
+                Response = "retried",
+                RunId = runId,
+                Status = AgentRunStatus.Completed
+            });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        var service = new AgentRunService(
+            runRepository.Object,
+            nodeRepository.Object,
+            runtime.Object,
+            services.BuildServiceProvider());
+
+        var result = await service.RetryNodeAsync(runId, nodeId);
+
+        result.Succeeded.ShouldBeTrue();
+        runtime.Verify(x => x.ResumeAsync(
+            runId,
+            It.Is<ResumeRunInput>(i => i.RetryNodeId == nodeId),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+}

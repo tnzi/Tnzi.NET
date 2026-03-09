@@ -17,6 +17,8 @@ public class AuthService : ApplicationService, IAuthService
     private readonly ISessionService? _sessionService;
     private readonly ILoginSecurityService? _loginSecurityService;
     private readonly ITwoFactorService? _twoFactorService;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly bool _multiTenancyEnabled;
 
     public AuthService(
         UserManager<User> userManager,
@@ -30,7 +32,9 @@ public class AuthService : ApplicationService, IAuthService
         IPasswordPolicyService? passwordPolicyService = null,
         ISessionService? sessionService = null,
         ILoginSecurityService? loginSecurityService = null,
-        ITwoFactorService? twoFactorService = null)
+        ITwoFactorService? twoFactorService = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -44,6 +48,8 @@ public class AuthService : ApplicationService, IAuthService
         _sessionService = sessionService;
         _loginSecurityService = loginSecurityService;
         _twoFactorService = twoFactorService;
+        _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     public async Task<Result<string>> LoginAsync(LoginDto input)
@@ -65,7 +71,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 生成 Token
-        var roles = await _userManager.GetRolesAsync(user);
+        var roles = await GetRolesWithTenantContextAsync(user);
         var token = _tokenService.GenerateToken(user, roles);
 
         // 清除登录失败记录
@@ -424,7 +430,7 @@ public class AuthService : ApplicationService, IAuthService
     /// </summary>
     private async Task<TokenResult> GenerateAndSaveTokenResultAsync(User user, bool enableRefreshToken = true)
     {
-        var roles = await _userManager.GetRolesAsync(user);
+        var roles = await GetRolesWithTenantContextAsync(user);
         var jwtOptions = _identityOptions.Jwt;
 
         // 生成AccessToken
@@ -487,6 +493,19 @@ public class AuthService : ApplicationService, IAuthService
             user = await _userManager.FindByPhoneNumberAsync(loginInput, requireConfirmed: true);
         }
         return user;
+    }
+
+    private async Task<IList<string>> GetRolesWithTenantContextAsync(User user)
+    {
+        if (_multiTenancyEnabled && user.TenantId.HasValue && _currentTenant != null)
+        {
+            using (_currentTenant.Change(user.TenantId.Value))
+            {
+                return await _userManager.GetRolesAsync(user);
+            }
+        }
+
+        return await _userManager.GetRolesAsync(user);
     }
 
     private async Task<(bool Success, string Message)> CheckMultiLoginPolicyAsync(Guid userId, MultiLoginOptions multiLoginOptions)
@@ -631,6 +650,16 @@ public class AuthService : ApplicationService, IAuthService
                 RegistrationTime = DateTime.UtcNow
             }, cancellationToken: default);
         }
+    }
+
+    private Guid? ResolveNewUserTenantId()
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return null;
+        }
+
+        return _currentTenant?.Id ?? CurrentUser?.TenantId;
     }
 
     #endregion
@@ -847,7 +876,8 @@ public class AuthService : ApplicationService, IAuthService
             Email = email,
             PhoneNumber = phoneNumber,
             EmailConfirmed = type == TwoFactorType.Email,
-            PhoneNumberConfirmed = type == TwoFactorType.Sms
+            PhoneNumberConfirmed = type == TwoFactorType.Sms,
+            TenantId = ResolveNewUserTenantId()
         };
 
         var result = await _userManager.CreateAsync(user);

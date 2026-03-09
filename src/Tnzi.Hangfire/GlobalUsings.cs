@@ -14,4 +14,5 @@ global using Tnzi.Exceptions;
 global using Tnzi.Hangfire.Options;
 global using Tnzi.Modules;
 global using Tnzi.Options;
+global using Tnzi.MultiTenancy;
 global using Tnzi.Utilities;

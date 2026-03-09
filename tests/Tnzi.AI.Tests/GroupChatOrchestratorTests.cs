@@ -1,3 +1,4 @@
+
 namespace Tnzi.AI.Tests;
 
 /// <summary>
@@ -40,8 +41,8 @@ public class GroupChatOrchestratorTests
 
         var result = await orchestrator.RunAsync("Discuss this topic");
 
-        // Should terminate after first agent says TERMINATE
-        result.TotalRounds.ShouldBeLessThan(10);
+        // Should terminate after first agent says TERMINATE (round 1)
+        result.TotalRounds.ShouldBe(1);
     }
 
     [Fact]
@@ -88,7 +89,7 @@ public class GroupChatOrchestratorTests
         var result = await orchestrator.RunAsync("Topic");
 
         result.History.Count.ShouldBeGreaterThanOrEqualTo(2);
-        result.TotalRounds.ShouldBeLessThan(100);
+        result.TotalRounds.ShouldBe(2);
     }
 
     /// <summary>

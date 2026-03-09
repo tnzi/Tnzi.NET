@@ -1,0 +1,56 @@
+<Project>
+  <!--
+    TnziModules-driven optional dependency injection.
+    Consumer sets <TnziModules>Identity;Storage;...</TnziModules> in their csproj,
+    and matching Tnzi.* packages are automatically referenced.
+  -->
+
+  <ItemGroup Condition="$(TnziModules.Contains('Identity'))">
+    <PackageReference Include="Tnzi.Identity" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Authorization'))">
+    <PackageReference Include="Tnzi.Authorization" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Storage'))">
+    <PackageReference Include="Tnzi.Storage" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Template'))">
+    <PackageReference Include="Tnzi.Template" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Notification'))">
+    <PackageReference Include="Tnzi.Notification" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('System'))">
+    <PackageReference Include="Tnzi.System" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Audit'))">
+    <PackageReference Include="Tnzi.Audit" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Chat'))">
+    <PackageReference Include="Tnzi.Chat" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI'))">
+    <PackageReference Include="Tnzi.AI" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Feature'))">
+    <PackageReference Include="Tnzi.Feature" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Hangfire'))">
+    <PackageReference Include="Tnzi.Hangfire" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('SignalR'))">
+    <PackageReference Include="Tnzi.SignalR" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+</Project>

@@ -18,6 +18,15 @@ public class ContextProvidersOptions
     public bool Enabled { get; set; } = false;
 
     /// <summary>
+    /// 上下文注入的最大 token 预算（0 = 不限制，默认 4096）
+    /// </summary>
+    /// <remarks>
+    /// 当所有 ContextProvider 的注入内容总 token 超过此预算时，
+    /// 后续 Provider 的注入将被跳过。设为 0 则不进行 token 限制。
+    /// </remarks>
+    public int MaxTokenBudget { get; set; } = 4096;
+
+    /// <summary>
     /// 聊天历史记忆配置（向量化 Chat History）
     /// </summary>
     public ChatHistoryMemoryOptions ChatHistoryMemory { get; set; } = new();
@@ -41,6 +50,22 @@ public class ContextProvidersOptions
     /// 实体记忆配置（跨会话命名实体追踪）
     /// </summary>
     public EntityMemoryOptions EntityMemory { get; set; } = new();
+
+    /// <summary>
+    /// 项目上下文配置（通过 IProjectContextLoader 加载项目指令）
+    /// </summary>
+    public ProjectContextOptions ProjectContext { get; set; } = new();
+}
+
+/// <summary>
+/// 项目上下文配置选项
+/// </summary>
+public class ProjectContextOptions
+{
+    /// <summary>
+    /// 是否启用项目上下文注入
+    /// </summary>
+    public bool Enabled { get; set; }
 }
 
 /// <summary>

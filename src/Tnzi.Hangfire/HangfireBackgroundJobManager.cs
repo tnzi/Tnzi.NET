@@ -8,10 +8,18 @@ namespace Tnzi.Hangfire;
 /// </summary>
 public class HangfireBackgroundJobManager : IBackgroundJobManager
 {
+    private readonly ICurrentTenant? _currentTenant;
+
+    public HangfireBackgroundJobManager(ICurrentTenant? currentTenant = null)
+    {
+        _currentTenant = currentTenant;
+    }
+
     /// <inheritdoc />
     public string Enqueue<TArgs>(TArgs args) where TArgs : class
     {
         Check.NotNull(args);
+        CaptureTenantContext(args);
         return BackgroundJob.Enqueue<IBackgroundJob<TArgs>>(job => job.ExecuteAsync(args, default));
     }
 
@@ -19,6 +27,7 @@ public class HangfireBackgroundJobManager : IBackgroundJobManager
     public string Schedule<TArgs>(TArgs args, TimeSpan delay) where TArgs : class
     {
         Check.NotNull(args);
+        CaptureTenantContext(args);
         return BackgroundJob.Schedule<IBackgroundJob<TArgs>>(
             job => job.ExecuteAsync(args, default),
             delay);
@@ -28,6 +37,7 @@ public class HangfireBackgroundJobManager : IBackgroundJobManager
     public string Schedule<TArgs>(TArgs args, DateTimeOffset enqueueAt) where TArgs : class
     {
         Check.NotNull(args);
+        CaptureTenantContext(args);
         return BackgroundJob.Schedule<IBackgroundJob<TArgs>>(
             job => job.ExecuteAsync(args, default),
             enqueueAt);
@@ -39,6 +49,7 @@ public class HangfireBackgroundJobManager : IBackgroundJobManager
         Check.NotNullOrEmpty(jobId);
         Check.NotNull(args);
         Check.NotNullOrEmpty(cronExpression);
+        CaptureTenantContext(args);
         RecurringJob.AddOrUpdate<IBackgroundJob<TArgs>>(
             jobId,
             job => job.ExecuteAsync(args, default),
@@ -57,5 +68,16 @@ public class HangfireBackgroundJobManager : IBackgroundJobManager
     {
         Check.NotNullOrEmpty(jobId);
         RecurringJob.RemoveIfExists(jobId);
+    }
+
+    /// <summary>
+    /// 自动捕获当前租户上下文到任务参数
+    /// </summary>
+    private void CaptureTenantContext<TArgs>(TArgs args) where TArgs : class
+    {
+        if (args is ITenantAwareJobArgs tenantAware && tenantAware.TenantId == null)
+        {
+            tenantAware.TenantId = _currentTenant?.Id;
+        }
     }
 }

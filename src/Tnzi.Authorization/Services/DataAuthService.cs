@@ -60,12 +60,15 @@ public class DataAuthService : ApplicationService, IDataAuthService
         if (string.IsNullOrEmpty(entityTypeName))
             return null;
 
-        // 获取全局版本和用户版本，实现秒级缓存失效
-        var globalVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}GlobalVersion") : 0;
-        var userVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}UserVersion:{userId}") : 0;
+        // 获取租户标识用于缓存隔离
+        var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
 
-        // 生成版本化缓存键
-        var cacheKey = $"{DataFilterCachePrefix}{globalVersion}:{userVersion}:{userId}:{entityTypeName}:{(int)operation}";
+        // 获取全局版本和用户版本，实现秒级缓存失效
+        var globalVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion") : 0;
+        var userVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}{tenantSegment}:UserVersion:{userId}") : 0;
+
+        // 生成版本化缓存键（含租户隔离）
+        var cacheKey = $"{DataFilterCachePrefix}{tenantSegment}:{globalVersion}:{userVersion}:{userId}:{entityTypeName}:{(int)operation}";
 
         // 尝试从内存缓存获取表达式
         if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out var cached) && cached is Expression<Func<TEntity, bool>> cachedExpression)
@@ -145,7 +148,8 @@ public class DataAuthService : ApplicationService, IDataAuthService
     {
         if (_cache != null)
         {
-            var key = $"{DataFilterCachePrefix}UserVersion:{userId}";
+            var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
+            var key = $"{DataFilterCachePrefix}{tenantSegment}:UserVersion:{userId}";
             var version = await _cache.GetAsync<int>(key);
             await _cache.SetAsync(key, version + 1, TimeSpan.FromDays(7));
         }
@@ -158,7 +162,8 @@ public class DataAuthService : ApplicationService, IDataAuthService
     {
         if (_cache != null)
         {
-            var key = $"{DataFilterCachePrefix}GlobalVersion";
+            var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
+            var key = $"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion";
             var version = await _cache.GetAsync<int>(key);
             await _cache.SetAsync(key, version + 1, TimeSpan.FromDays(7));
         }

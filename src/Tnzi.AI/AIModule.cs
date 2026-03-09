@@ -1,4 +1,11 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using ModelContextProtocol.AspNetCore;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 using McpClientFactory = Tnzi.AI.Infrastructure.Mcp.McpClientFactory;
+using TnziMcpServerOptions = Tnzi.AI.Options.McpServerOptions;
 
 namespace Tnzi.AI;
 
@@ -26,8 +33,9 @@ public class AIModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI"))
             .ValidateWith<AIOptions, AIOptionsValidator>();
 
-        context.Services.AddOptions<FileConversationStoreOptions>()
-            .Bind(context.Configuration.GetSection("AI:Coder"));
+        context.Services.AddOptions<TnziMcpServerOptions>()
+            .Bind(context.Configuration.GetSection("AI:McpServer"))
+            .ValidateWith<TnziMcpServerOptions, McpServerOptionsValidator>();
 
         // 从环境变量补充 API Key（移自 Validator 的副作用）
         context.Services.PostConfigure<AIOptions>(options =>
@@ -52,12 +60,19 @@ public class AIModule : TnziApplicationModule
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var services = context.Services;
+        var mcpServerOptions = context.Configuration.GetSection("AI:McpServer").Get<TnziMcpServerOptions>() ?? new TnziMcpServerOptions();
+        var mcpHttpServiceProviderAccessor = new McpServerServiceProviderAccessor();
+        var mcpHttpHandlerBridge = new McpServerHttpHandlerBridge(mcpHttpServiceProviderAccessor);
 
         // 注册 HttpClient 工厂
         services.AddHttpClient();
 
+        // 注册推理内容捕获 Handler（拦截 SSE 流提取 reasoning_content）
+        services.AddTransient<ReasoningCapturingHandler>();
+
         // 配置带重试和熔断的命名 HttpClient（用于 AI 提供商调用）
         services.AddHttpClient("Tnzi.AI.Resilient")
+            .AddHttpMessageHandler<ReasoningCapturingHandler>()
             .AddStandardResilienceHandler(options =>
             {
                 // 配置重试策略
@@ -65,9 +80,9 @@ public class AIModule : TnziApplicationModule
                 options.Retry.Delay = TimeSpan.FromSeconds(1);
                 options.Retry.MaxDelay = TimeSpan.FromSeconds(10);
 
-                // 配置熔断器策略
+                // 配置熔断器策略（SamplingDuration 必须 >= 2 * AttemptTimeout）
                 options.CircuitBreaker.FailureRatio = 0.5;
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(10);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
                 options.CircuitBreaker.MinimumThroughput = 5;
                 options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
             });
@@ -75,24 +90,27 @@ public class AIModule : TnziApplicationModule
         // 注册基础设施
         services.AddSingleton<IChatClientProvider, OpenAIChatClientProvider>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
-        services.AddSingleton<IToolResolver, ToolResolver>();
-        services.AddSingleton<AgentExecutorOptionsBuilder>();
-        services.AddSingleton<IAgentFactory, AgentFactory>();
-        services.AddSingleton<IWorkflowBuilderFactory, WorkflowBuilderFactory>();
+        // Scoped: AgentFactory/ToolResolver/OptionsBuilder must be Scoped so that
+        // ToolAdapter captures the request-scoped IServiceProvider, enabling resolution of
+        // Scoped tool providers (CommonTools, CandidateTools, etc.) without relying on
+        // AsyncLocal propagation through async-iterator yield boundaries.
+        services.AddScoped<IToolResolver, ToolResolver>();
+        services.AddScoped<AgentExecutorOptionsBuilder>();
+        services.AddScoped<IAgentFactory, AgentFactory>();
 
         // 工具基础设施（TryAdd: 允许 Agent 模块提前注册）
         services.TryAddSingleton<IToolScanner, ToolScanner>();
         services.TryAddSingleton<IToolRegistry, ToolRegistry>();
 
-        // MCP：连接工厂与工具提供者（启用 AI:Mcp:Enabled 时生效）。IMcpToolProvider 为 Singleton 以匹配 IAgentFactory 生命周期，避免 captive dependency。
+        // MCP：连接工厂与工具提供者（启用 AI:Mcp:Enabled 时生效）。IMcpToolProvider/McpClientFactory 为 Singleton（无请求级状态），Scoped ToolResolver 可安全注入它们。
         services.AddSingleton<IMcpClientFactory, McpClientFactory>();
         services.AddSingleton<IMcpToolProvider, McpToolProvider>();
 
         // Token 估算器（TryAdd：允许用户注册 tiktoken 等精确实现）
         services.TryAddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
 
-        // 注册执行管道
-        services.AddScoped<IChatExecutionPipeline, ChatExecutionPipeline>();
+        // 注册 Agent 解析器
+        services.AddScoped<IAgentResolver, AgentResolver>();
 
         // 注册对话存储和记忆存储（使用 TryAdd，允许 Agent 模块替换）
         services.TryAddScoped<IConversationStore, DatabaseConversationStore>();
@@ -105,10 +123,14 @@ public class AIModule : TnziApplicationModule
         // 注册项目上下文提供器（从 DI 获取 IProjectContextLoader）
         services.AddScoped<ProjectContextProvider>();
 
+        // 注册 Prompt 模板引擎（TryAdd：允许用户注册自定义模板引擎）
+        services.TryAddScoped<IPromptTemplateEngine, SimplePromptTemplateEngine>();
+
         // 注册核心服务
         services.AddScoped<IUsageLogService, UsageLogService>();
         services.AddScoped<IUsageAnalyticsService, UsageAnalyticsService>();
-        services.AddScoped<IQuotaService, QuotaService>();
+        services.AddScoped<QuotaService>();
+        services.AddScoped<IQuotaService>(sp => sp.GetRequiredService<QuotaService>());
         services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
         services.AddScoped<IAgentService, AgentService>();
         services.AddScoped<AgentThreadService>();
@@ -154,22 +176,82 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
         services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
 
+        // 注册中间件管道组件（手动注册，框架程序集不使用自动注册）
+        services.AddScoped<QuotaMiddleware>();
+        services.AddScoped<InputGuardrailMiddleware>();
+        services.AddScoped<HistoryMiddleware>();
+        services.AddScoped<ContextInjectionMiddleware>();
+        services.AddScoped<UsageLoggingMiddleware>();
+        services.AddScoped<OutputGuardrailMiddleware>();
+
+        // 注册 Runtime（统一 AI 执行入口 + Run/Trace 持久化）
+        services.AddScoped<IRunStore, RunStore>();
+        services.AddScoped<ITraceStore, TraceStore>();
+        services.AddScoped<IAgentRuntime, AgentRuntime>();
+
+        // 注册 Run 管理服务（查询、取消、审批、重试）
+        services.AddScoped<IAgentRunService, AgentRunService>();
+        services.AddScoped<IAgentTraceService, AgentTraceService>();
+
+        // 注册工作流引擎组件
+        services.AddScoped<WorkflowNodeExecutor>();
+        services.AddScoped<WorkflowEngine>();
+
+        // 注册工作流节点
+        services.AddScoped<IWorkflowNode, Nodes.AgentNode>();
+        services.AddScoped<IWorkflowNode, Nodes.ReviewNode>();
+        services.AddScoped<IWorkflowNode, Nodes.ApprovalNode>();
+        services.AddScoped<IWorkflowNode, Nodes.RouterNode>();
+        services.AddScoped<IWorkflowNode, Nodes.ParallelNode>();
+        services.AddScoped<IWorkflowNode, Nodes.SynthesizeNode>();
+        services.AddScoped<IWorkflowNode, Nodes.DebateNode>();
+        services.AddScoped<IWorkflowNode, Nodes.ConditionalNode>();
+        services.AddScoped<IWorkflowNode, Nodes.TransformNode>();
+
         // 注册 A2A 客户端（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IA2AClient, HttpA2AClient>();
 
         // 注册 Agent 评估器（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IAgentEvaluator, DefaultAgentEvaluator>();
 
+        // MCP Server Host（可选，通过 AI:McpServer:Enabled 激活）— Singleton 以保持速率限制状态
+        services.AddSingleton<McpServerSecurityMiddleware>();
+        services.AddSingleton(mcpHttpServiceProviderAccessor);
+        services.AddSingleton(mcpHttpHandlerBridge);
+        services.AddScoped<McpServerHttpSecurityMiddleware>();
+        services.TryAddSingleton<IMcpServerHost, McpServerHost>();
+        services.AddHostedService<McpServerHostedService>();
+
+        if (mcpServerOptions.Enabled && !string.Equals(mcpServerOptions.Transport, "stdio", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddMcpServer(serverOptions =>
+                {
+                    serverOptions.ServerInfo = new()
+                    {
+                        Name = "Tnzi.AI",
+                        Version = typeof(AIModule).Assembly.GetName().Version?.ToString() ?? "1.0.0"
+                    };
+                })
+                .WithHttpTransport(options =>
+                {
+                    options.Stateless = false;
+                })
+                .WithListToolsHandler(mcpHttpHandlerBridge.HandleListToolsAsync)
+                .WithCallToolHandler(mcpHttpHandlerBridge.HandleCallToolAsync);
+        }
+
         return Task.CompletedTask;
     }
 
     public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
-        // 扫描并注册工具（在应用初始化阶段执行一次）
         var serviceProvider = context.ServiceProvider;
+        var logger = serviceProvider.GetRequiredService<ILogger<AIModule>>();
+        ValidateRuntimeConfiguration(serviceProvider, logger);
+
+        // 扫描并注册工具（在应用初始化阶段执行一次）
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
         var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();
-        var logger = serviceProvider.GetRequiredService<ILogger<AIModule>>();
 
         // 扫描自身程序集
         var assembly = Assembly.GetExecutingAssembly();
@@ -189,6 +271,32 @@ public class AIModule : TnziApplicationModule
             RegisterTools(toolRegistry, toolScanner, appAssembly, logger);
         }
 
+        var mcpServerOptions = serviceProvider.GetRequiredService<IOptions<TnziMcpServerOptions>>().Value;
+        if (mcpServerOptions.Enabled && !string.Equals(mcpServerOptions.Transport, "stdio", StringComparison.OrdinalIgnoreCase))
+        {
+            var mcpServiceProviderAccessor = serviceProvider.GetRequiredService<McpServerServiceProviderAccessor>();
+            mcpServiceProviderAccessor.ServiceProvider = serviceProvider;
+
+            if (context.App != null)
+            {
+                context.App.UseWhen(
+                    httpContext => httpContext.Request.Path.StartsWithSegments(mcpServerOptions.Endpoint, StringComparison.OrdinalIgnoreCase),
+                    branch => branch.UseMiddleware<McpServerHttpSecurityMiddleware>());
+            }
+
+            if (context.WebApp != null)
+            {
+                context.WebApp.MapMcp(mcpServerOptions.Endpoint);
+                logger.LogInformation("Mapped MCP HTTP/SSE endpoint at {Endpoint}", mcpServerOptions.Endpoint);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "MCP Server transport '{Transport}' is enabled but no WebApplication is available. HTTP/SSE endpoint was not mapped.",
+                    mcpServerOptions.Transport);
+            }
+        }
+
         // 根据 BuiltInToolsOptions 按 ProviderType 精确移除已禁用的内置工具
         // 使用 UnregisterByProviderType 而非 UnregisterGroup，避免误删用户注册的同名工具组
         var builtInOptions = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value.BuiltInTools;
@@ -206,6 +314,57 @@ public class AIModule : TnziApplicationModule
         }
 
         return Task.CompletedTask;
+    }
+
+    private static void ValidateRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
+        var hasEnabledProvider = options.Providers.Values.Any(p => p.Enabled);
+
+        if (options.History.Reduction.Mode == HistoryReductionMode.Summarize && !hasEnabledProvider)
+        {
+            throw new InvalidOperationException(
+                "AI:History:Reduction:Mode is set to Summarize, but no enabled AI provider is configured.");
+        }
+
+        if (options.Guardrails.Enabled && options.Guardrails.LlmJudge.Enabled && !hasEnabledProvider)
+        {
+            throw new InvalidOperationException(
+                "AI:Guardrails:LlmJudge is enabled, but no enabled AI provider is configured.");
+        }
+
+        if (options.ContextProviders.Enabled && options.ContextProviders.EntityMemory.Enabled && !hasEnabledProvider)
+        {
+            throw new InvalidOperationException(
+                "AI:ContextProviders:EntityMemory is enabled, but no enabled AI provider is configured for entity extraction.");
+        }
+
+        if (options.BuiltInTools.Enabled && options.BuiltInTools.EnableWebSearch
+            && serviceProvider.GetService<IWebSearchProvider>() == null)
+        {
+            throw new InvalidOperationException(
+                "AI:BuiltInTools:EnableWebSearch is enabled, but no IWebSearchProvider is registered.");
+        }
+
+        if (options.ContextProviders.Enabled)
+        {
+            using var scope = serviceProvider.CreateScope();
+            var textSearchService = scope.ServiceProvider.GetRequiredService<ITextSearchService>();
+            if (textSearchService is NoOpTextSearchService
+                && (options.ContextProviders.TextSearch.Enabled || options.ContextProviders.ChatHistoryMemory.Enabled))
+            {
+                throw new InvalidOperationException(
+                    "AI text search or chat history memory is enabled, but ITextSearchService is still the default NoOpTextSearchService. Register a real ITextSearchService implementation.");
+            }
+
+            if (options.ContextProviders.Skills.Enabled && options.ContextProviders.Skills.Paths.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "AI:ContextProviders:Skills is enabled, but no skill paths are configured.");
+            }
+        }
+
+        logger.LogDebug("AI runtime configuration validation passed.");
     }
 
     /// <summary>

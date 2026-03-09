@@ -270,7 +270,7 @@ public class TnziDbContextComprehensiveTests : EFCoreTestBase
         Assert.True(user.DeletionTime <= DateTime.UtcNow);
     }
 
-    [Fact(Skip = "查询过滤器在 SQLite InMemory 数据库中可能无法正常工作，需要在真实数据库中验证")]
+    [Fact]
     public async Task Query_WithISoftDelete_ShouldFilterDeletedEntities()
     {
         // Arrange

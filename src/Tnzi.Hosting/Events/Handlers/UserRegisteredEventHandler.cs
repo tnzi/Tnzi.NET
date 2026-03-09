@@ -1,3 +1,4 @@
+using Tnzi.Notification.Metadata;
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Hosting.Events.Handlers;

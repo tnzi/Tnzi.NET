@@ -72,7 +72,7 @@ public class SignalRModule : TnziFrameworkModule
         });
 
         // 配置 Redis Backplane（仅使用 SignalR:Backplane:ConnectionString，无回退）
-        ConfigureBackplane(signalRBuilder, signalROptions.Backplane);
+        ConfigureBackplane(signalRBuilder, signalROptions.Backplane, configuration);
 
         // 配置 MessagePack 协议（确保 MessagePack 不为 null）
         var messagePackConfig = signalROptions.MessagePack ?? new MessagePackOptions();
@@ -117,9 +117,11 @@ public class SignalRModule : TnziFrameworkModule
     /// </summary>
     /// <param name="builder">SignalR 服务构建器</param>
     /// <param name="options">Backplane 配置选项</param>
+    /// <param name="configuration">配置（用于展开 ${VAR} 占位符）</param>
     private static void ConfigureBackplane(
         ISignalRServerBuilder builder,
-        BackplaneOptions? options)
+        BackplaneOptions? options,
+        IConfiguration configuration)
     {
         if (options == null || options.Type == BackplaneType.None)
         {
@@ -135,7 +137,8 @@ public class SignalRModule : TnziFrameworkModule
                     "Redis connection string is required when using Redis backplane. Configure SignalR:Backplane:ConnectionString.");
             }
 
-            builder.AddStackExchangeRedis(options.ConnectionString, redisOptions =>
+            var connectionString = ConnectionStringExpander.Expand(options.ConnectionString, configuration);
+            builder.AddStackExchangeRedis(connectionString, redisOptions =>
             {
                 redisOptions.Configuration.ChannelPrefix =
                     RedisChannel.Literal(options.ChannelPrefix);

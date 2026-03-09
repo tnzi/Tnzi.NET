@@ -9,6 +9,8 @@ public class DocumentChunkConfiguration : EntityTypeConfigurationBase<DocumentCh
 
     public override void Configure(EntityTypeBuilder<DocumentChunk> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.Content)
             .IsRequired();
 
@@ -18,6 +20,11 @@ public class DocumentChunkConfiguration : EntityTypeConfigurationBase<DocumentCh
 
         builder.Property(e => e.Metadata)
             .HasMaxLength(4000);
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
 
         builder.HasIndex(e => e.KnowledgeBaseId);
         builder.HasIndex(e => e.DocumentId);

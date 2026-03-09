@@ -1,10 +1,13 @@
+
 namespace Tnzi.Notification.Entities;
 
 /// <summary>
 /// 消息接收者
 /// </summary>
-public class Recipient : EntityBase<Guid>
+public class Recipient : EntityBase<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 消息ID
     /// </summary>

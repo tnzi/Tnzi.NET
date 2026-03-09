@@ -4,6 +4,8 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
 {
     public override void Configure(EntityTypeBuilder<Invoice> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(i => i.InvoiceNo).HasMaxLength(64).IsRequired();
         builder.Property(i => i.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
         builder.Property(i => i.CustomerName).HasMaxLength(128);
@@ -23,8 +25,18 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
             .HasForeignKey(l => l.InvoiceId)
             .HasPrincipalKey(i => i.Id);
 
-        builder.HasIndex(i => i.InvoiceNo).IsUnique()
-            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(i => new { i.TenantId, i.InvoiceNo }).IsUnique()
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+            builder.HasIndex(i => i.TenantId);
+        }
+        else
+        {
+            builder.HasIndex(i => i.InvoiceNo).IsUnique()
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        }
+
         builder.HasIndex(i => i.Status);
         builder.HasIndex(i => i.InvoiceDate);
         builder.HasIndex(i => i.CustomerEmail);

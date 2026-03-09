@@ -23,6 +23,7 @@ global using Tnzi.EFCore;
 global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
 global using Tnzi.EventBus;
+global using Tnzi.Feature.Controllers.Admin;
 global using Tnzi.Feature.Dtos;
 global using Tnzi.Feature.Entities;
 global using Tnzi.Feature.Events;

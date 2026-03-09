@@ -7,6 +7,8 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
 {
     public override void Configure(EntityTypeBuilder<AuditOperation> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.ToTable("Operation");
 
         builder.Property(e => e.FunctionName).IsRequired().HasMaxLength(200);
@@ -32,7 +34,14 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
 
         // 创建索引
         builder.HasIndex(e => e.UserId);
-        builder.HasIndex(e => e.TenantId);
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
+        else
+        {
+            builder.Ignore(e => e.TenantId);
+        }
         builder.HasIndex(e => e.StartTime);
         builder.HasIndex(e => e.FunctionName);
         builder.HasIndex(e => e.PermissionName);

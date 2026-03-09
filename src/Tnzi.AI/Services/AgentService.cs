@@ -8,18 +8,18 @@ public class AgentService : ApplicationService, IAgentService
 {
     private readonly IRepository<Agent, Guid> _repository;
     private readonly IRepository<AgentVersion, Guid> _versionRepository;
-    private readonly IChatExecutionPipeline _pipeline;
+    private readonly IAgentRuntime _runtime;
 
     public AgentService(
         IRepository<Agent, Guid> repository,
         IRepository<AgentVersion, Guid> versionRepository,
-        IChatExecutionPipeline pipeline,
+        IAgentRuntime runtime,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _versionRepository = Check.NotNull(versionRepository);
-        _pipeline = Check.NotNull(pipeline);
+        _runtime = Check.NotNull(runtime);
     }
 
     public async Task<Result<AgentDto>> CreateAsync(CreateAgentDto input)
@@ -27,6 +27,9 @@ public class AgentService : ApplicationService, IAgentService
         Check.NotNull(input);
         var entity = input.MapTo<Agent>();
         entity.ToolGroups = input.ToolGroups != null ? JsonSerializer.Serialize(input.ToolGroups) : null;
+        entity.Domains = input.Domains != null ? JsonSerializer.Serialize(input.Domains) : null;
+        entity.Roles = input.Roles != null ? JsonSerializer.Serialize(input.Roles) : null;
+        entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
 
         await _repository.InsertAsync(entity);
         return Ok(MapToDto(entity));
@@ -51,6 +54,14 @@ public class AgentService : ApplicationService, IAgentService
         if (input.MaxTokens.HasValue) entity.MaxTokens = input.MaxTokens;
         if (input.TimeoutSeconds.HasValue) entity.TimeoutSeconds = input.TimeoutSeconds;
         if (input.IsEnabled.HasValue) entity.IsEnabled = input.IsEnabled.Value;
+        if (input.Domains != null) entity.Domains = JsonSerializer.Serialize(input.Domains);
+        if (input.Roles != null) entity.Roles = JsonSerializer.Serialize(input.Roles);
+        if (input.QualityTier.HasValue) entity.QualityTier = input.QualityTier.Value;
+        if (input.LatencyTier.HasValue) entity.LatencyTier = input.LatencyTier.Value;
+        if (input.CostTier.HasValue) entity.CostTier = input.CostTier.Value;
+        var executionModeChanged = input.ExecutionMode.HasValue && input.ExecutionMode.Value != entity.ExecutionMode;
+        if (input.ExecutionMode.HasValue) entity.ExecutionMode = input.ExecutionMode.Value;
+        if (input.ExecutionConfig != null || executionModeChanged) entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
 
         await _repository.UpdateAsync(entity);
         return Ok(MapToDto(entity));
@@ -88,6 +99,7 @@ public class AgentService : ApplicationService, IAgentService
             MaxTokens = source.MaxTokens,
             TimeoutSeconds = source.TimeoutSeconds,
             IsEnabled = source.IsEnabled,
+            ExecutionMode = source.ExecutionMode,
             Configuration = source.Configuration
         };
 
@@ -155,6 +167,7 @@ public class AgentService : ApplicationService, IAgentService
         agent.MaxTokens = snapshot.MaxTokens;
         agent.TimeoutSeconds = snapshot.TimeoutSeconds;
         agent.IsEnabled = snapshot.IsEnabled;
+        agent.ExecutionMode = snapshot.ExecutionMode;
         agent.Configuration = snapshot.Configuration;
 
         await _repository.UpdateAsync(agent);
@@ -178,58 +191,26 @@ public class AgentService : ApplicationService, IAgentService
 
     public async Task<Result<AgentResponseDto>> RunAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default)
     {
-        var stopwatch = Stopwatch.StartNew();
-
-        // 1. 构建消息（支持多模态：返回包含正确 AIContent 的 ChatMessage）
-        var userMessage = await _pipeline.BuildChatMessageAsync(message, content, ct);
-        var messageText = userMessage.Text ?? string.Empty;
-
-        // 2. 解析 Agent（固定 agentId，无 provider/model/toolGroups 覆盖）
-        var resolution = await _pipeline.ResolveAgentAsync(agentId, null, null, null, ct);
-        if (!resolution.IsSuccess)
-        {
-            return resolution.ErrorCode == ErrorCodes.AgentDisabled
-                ? Fail<AgentResponseDto>("Agent is disabled", 400, ErrorCodes.AgentDisabled)
-                : Fail<AgentResponseDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
-        }
-
-        // 3. 原子预留配额
-        var (reservation, quotaError) = await _pipeline.ReserveQuotaAsync<AgentResponseDto>(userId, messageText, ct);
-        if (quotaError != null) return quotaError;
-
         try
         {
-            // 4. 获取或创建线程
-            var (context, resolvedThreadId) = await _pipeline.PrepareThreadAsync(threadId, agentId, ct);
+            var runRequest = new AgentRunRequest
+            {
+                AgentId = agentId,
+                UserMessage = message,
+                ContentParts = content,
+                ThreadId = threadId,
+                UserId = userId
+            };
 
-            // 5. 执行对话
-            var response = await _pipeline.ExecuteAsync(resolution.Agent!, userMessage, context, resolvedThreadId, ct);
-
-            // 6. 持久化消息历史
-            await _pipeline.PersistAfterRunAsync(resolvedThreadId, context, userMessage, response.Text ?? string.Empty, ct);
-
-            // 7. 记录使用日志
-            var actualTokens = response.Usage?.TotalTokens ?? 0;
-            await _pipeline.LogUsageAsync(
-                AIOperationType.AgentRun,
-                resolution.Provider,
-                resolution.Model ?? "default",
-                response.Usage?.PromptTokens ?? 0,
-                response.Usage?.CompletionTokens ?? 0,
-                stopwatch.ElapsedMilliseconds,
-                true,
-                agentId: agentId,
-                threadId: resolvedThreadId,
-                ct: ct);
-
-            // 8. 结算配额（调整预估与实际的差值）
-            await _pipeline.SettleQuotaAsync(userId, reservation, actualTokens, ct);
+            var result = await _runtime.RunAsync(runRequest, ct);
 
             return Ok(new AgentResponseDto
             {
-                Content = response.Text ?? string.Empty,
-                Model = resolution.Model,
-                Usage = response.Usage
+                Content = result.Response,
+                Usage = result.Usage,
+                Citations = result.Citations,
+                HandoffPath = result.HandoffPath,
+                FinalAgentName = result.FinalAgentName
             });
         }
         catch (BusinessException ex)
@@ -241,57 +222,72 @@ public class AgentService : ApplicationService, IAgentService
             Logger.LogError(ex,
                 "Agent run failed: AgentId={AgentId}, ThreadId={ThreadId}, Message={Message}",
                 agentId, threadId, ex.Message);
-            await _pipeline.LogUsageAsync(AIOperationType.AgentRun, resolution.Provider, resolution.Model ?? "default", 0, 0, stopwatch.ElapsedMilliseconds, false, ex.Message, agentId, threadId, ct);
             return Fail<AgentResponseDto>("Agent execution failed.", 500, ErrorCodes.AgentRunFailed);
         }
     }
 
-    public async IAsyncEnumerable<StreamEvent> RunStreamingAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<StreamEvent> RunStreamingAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var stopwatch = Stopwatch.StartNew();
-
-        // 1. 构建消息（支持多模态：返回包含正确 AIContent 的 ChatMessage）
-        var userMessage = await _pipeline.BuildChatMessageAsync(message, content, ct);
-        var messageText = userMessage.Text ?? string.Empty;
-
-        // 2. 解析 Agent
-        var resolution = await _pipeline.ResolveAgentAsync(agentId, null, null, null, ct);
-        if (!resolution.IsSuccess)
+        var runRequest = new AgentRunRequest
         {
-            var errorMessage = resolution.ErrorCode == ErrorCodes.AgentDisabled ? "Agent is disabled" : "Agent not found";
-            var statusCode = resolution.ErrorCode == ErrorCodes.AgentDisabled ? 400 : 404;
-            throw new BusinessException(errorMessage, resolution.ErrorCode ?? ErrorCodes.AgentNotFound, statusCode);
-        }
+            AgentId = agentId,
+            UserMessage = message,
+            ContentParts = content,
+            ThreadId = threadId,
+            UserId = userId
+        };
 
-        // 3. 原子预留配额
-        var reservation = await _pipeline.ReserveQuotaOrThrowAsync(userId, messageText, ct);
-
-        // 4. 获取或创建线程
-        var (context, resolvedThreadId) = await _pipeline.PrepareThreadAsync(threadId, agentId, ct);
-
-        // 5. 流式执行（delta 模型 — 每个事件只包含增量内容）
-        var fullContent = new StringBuilder();
         int inputTokens = 0, outputTokens = 0;
         AgentStreamChunk? lastChunk = null;
+        string? streamErrorMessage = null;
+        string? streamFinishReason = null;
+        List<CitationDto>? citations = null;
 
-        await foreach (var chunk in _pipeline.ExecuteStreamingAsync(resolution.Agent!, userMessage, context, resolvedThreadId, ct).WithCancellation(ct))
+        await foreach (var chunk in _runtime.RunStreamingAsync(runRequest, ct).WithCancellation(ct))
         {
-            if (chunk.Text != null) fullContent.Append(chunk.Text);
-
             lastChunk = chunk;
 
+            // HistoryMiddleware 在首批 chunk 到达前已完成线程自动创建，直接从 runRequest 读取。
+            var currentThreadId = runRequest.ThreadId;
+
             // 提取 Token 使用信息
-            var (inp, outp) = ChatExecutionPipeline.ExtractStreamingUsage(chunk);
+            var (inp, outp) = ChatMessageHelper.ExtractStreamingUsage(chunk);
             if (inp > 0 || outp > 0) { inputTokens = inp; outputTokens = outp; }
 
-            // 发送 delta 事件或工具调用状态事件
-            if (chunk.Text != null)
+            // 收集 Citations（通常只在最终 chunk 中包含）
+            if (chunk.Citations != null)
+            {
+                citations = chunk.Citations;
+            }
+
+            // 发送 delta 事件、工具调用状态事件或错误事件（guardrail 拦截等）
+            if (chunk.Error != null)
+            {
+                streamErrorMessage = chunk.Error;
+                streamFinishReason = chunk.FinishReason;
+                yield return new StreamEvent
+                {
+                    IsError = true,
+                    ErrorMessage = chunk.Error,
+                    ErrorCode = chunk.FinishReason == "guardrail_rejected" ? ErrorCodes.GuardrailRejected : ErrorCodes.AgentRunFailed,
+                    FinishReason = chunk.FinishReason,
+                    ThreadId = currentThreadId
+                };
+            }
+            else if (chunk.ReasoningText != null)
+            {
+                yield return new StreamEvent
+                {
+                    ReasoningDelta = chunk.ReasoningText,
+                    ThreadId = currentThreadId
+                };
+            }
+            else if (chunk.Text != null)
             {
                 yield return new StreamEvent
                 {
                     Delta = chunk.Text,
-                    Model = resolution.Model,
-                    ThreadId = resolvedThreadId
+                    ThreadId = currentThreadId
                 };
             }
             else if (chunk.IsToolCall)
@@ -299,8 +295,7 @@ public class AgentService : ApplicationService, IAgentService
                 yield return new StreamEvent
                 {
                     IsToolCall = true,
-                    Model = resolution.Model,
-                    ThreadId = resolvedThreadId
+                    ThreadId = currentThreadId
                 };
             }
         }
@@ -308,53 +303,27 @@ public class AgentService : ApplicationService, IAgentService
         // 如果流式响应结束时还没有 Token 信息，尝试从最后一条 chunk 中查找
         if (lastChunk is not null && inputTokens == 0 && outputTokens == 0)
         {
-            var (inp, outp) = ChatExecutionPipeline.ExtractStreamingUsage(lastChunk);
+            var (inp, outp) = ChatMessageHelper.ExtractStreamingUsage(lastChunk);
             if (inp > 0 || outp > 0) { inputTokens = inp; outputTokens = outp; }
         }
 
-        // 6. 发送终止事件（含 Usage 和 FinishReason），先通知客户端再做清理
-        var totalTokens = inputTokens + outputTokens;
+        // 发送终止事件
+        var hasStreamError = streamErrorMessage != null;
         yield return new StreamEvent
         {
             IsDone = true,
-            FinishReason = "stop",
-            Model = resolution.Model,
-            ThreadId = resolvedThreadId,
+            FinishReason = hasStreamError ? (streamFinishReason ?? "error") : "stop",
+            ThreadId = runRequest.ThreadId,
+            IsError = hasStreamError,
+            ErrorMessage = hasStreamError ? streamErrorMessage : null,
             Usage = new TokenUsageDto
             {
                 PromptTokens = inputTokens,
                 CompletionTokens = outputTokens,
-                TotalTokens = totalTokens
-            }
+                TotalTokens = inputTokens + outputTokens
+            },
+            Citations = citations
         };
-
-        // 7-9: 使用 CancellationToken.None 防止客户端断连导致配额泄漏和数据丢失
-        try
-        {
-            await _pipeline.PersistAfterRunAsync(resolvedThreadId, context, userMessage, fullContent.ToString(), CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to persist agent streaming history: AgentId={AgentId}, ThreadId={ThreadId}", agentId, resolvedThreadId);
-        }
-
-        try
-        {
-            await _pipeline.LogUsageAsync(AIOperationType.AgentRunStreaming, resolution.Provider, resolution.Model ?? "default", inputTokens, outputTokens, stopwatch.ElapsedMilliseconds, true, agentId: agentId, threadId: resolvedThreadId, ct: CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to log agent streaming usage: AgentId={AgentId}, ThreadId={ThreadId}", agentId, resolvedThreadId);
-        }
-
-        try
-        {
-            await _pipeline.SettleQuotaAsync(userId, reservation, totalTokens, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to settle agent streaming quota: AgentId={AgentId}, UserId={UserId}", agentId, userId);
-        }
     }
 
     private async Task CreateVersionSnapshotAsync(Agent entity, string? changeNote)
@@ -381,6 +350,7 @@ public class AgentService : ApplicationService, IAgentService
                 MaxTokens = entity.MaxTokens,
                 TimeoutSeconds = entity.TimeoutSeconds,
                 IsEnabled = entity.IsEnabled,
+                ExecutionMode = entity.ExecutionMode,
                 Configuration = entity.Configuration
             };
 
@@ -405,6 +375,9 @@ public class AgentService : ApplicationService, IAgentService
     {
         var dto = entity.MapTo<AgentDto>();
         dto.ToolGroups = string.IsNullOrWhiteSpace(entity.ToolGroups) ? null : JsonSerializer.Deserialize<List<string>>(entity.ToolGroups);
+        dto.Domains = string.IsNullOrWhiteSpace(entity.Domains) ? null : JsonSerializer.Deserialize<List<string>>(entity.Domains);
+        dto.Roles = string.IsNullOrWhiteSpace(entity.Roles) ? null : JsonSerializer.Deserialize<List<string>>(entity.Roles);
+        dto.ExecutionConfig = AgentExecutionConfigDto.Deserialize(entity.Configuration);
         return dto;
     }
 }
@@ -424,5 +397,6 @@ internal class AgentConfigSnapshot
     public int? MaxTokens { get; set; }
     public int? TimeoutSeconds { get; set; }
     public bool IsEnabled { get; set; }
+    public AgentExecutionMode ExecutionMode { get; set; }
     public string? Configuration { get; set; }
 }

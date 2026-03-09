@@ -13,8 +13,10 @@ public class OrganizationService : ApplicationService, IOrganizationService
     private readonly DbContext? _dbContext;
     private readonly IEventBus? _eventBus;
     private readonly ICurrentUser? _currentUser;
+    private readonly ICurrentTenant? _currentTenant;
     private readonly ICache? _cache;
     private readonly UserManager<User>? _userManager;
+    private readonly bool _multiTenancyEnabled;
 
     /// <summary>
     /// 初始化一个<see cref="OrganizationService"/>类型的新实例
@@ -25,6 +27,8 @@ public class OrganizationService : ApplicationService, IOrganizationService
         DbContext? dbContext = null,
         IEventBus? eventBus = null,
         ICurrentUser? currentUser = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         ICache? cache = null,
         UserManager<User>? userManager = null)
         : base(serviceProvider)
@@ -33,23 +37,25 @@ public class OrganizationService : ApplicationService, IOrganizationService
         _dbContext = dbContext;
         _eventBus = eventBus;
         _currentUser = currentUser;
+        _currentTenant = currentTenant;
         _cache = cache;
         _userManager = userManager;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     /// <summary>
     /// 获取组织树
     /// </summary>
-    public async Task<Result<IEnumerable<OrganizationDto>>> GetTreeAsync()
+    public async Task<Result<IEnumerable<OrganizationTreeNodeDto>>> GetTreeAsync()
     {
         // 尝试从缓存获取组织树
-        const string cacheKey = CacheKeys.Identity.OrganizationTree;
+        var cacheKey = GetOrganizationTreeCacheKey();
         if (_cache != null)
         {
-            var cachedTree = await _cache.GetAsync<List<OrganizationDto>>(cacheKey);
+            var cachedTree = await _cache.GetAsync<List<OrganizationTreeNodeDto>>(cacheKey);
             if (cachedTree != null)
             {
-                return Ok<IEnumerable<OrganizationDto>>(cachedTree);
+                return Ok<IEnumerable<OrganizationTreeNodeDto>>(cachedTree);
             }
         }
 
@@ -57,7 +63,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             .Where(o => !o.IsDeleted)
             .OrderBy(o => o.SortOrder)
             .ThenBy(o => o.CreationTime)
-            .ProjectTo<Organization, OrganizationDto>()
+            .ProjectTo<Organization, OrganizationTreeItemDto>()
             .ToListAsync();
 
         var tree = BuildTree(dtos);
@@ -67,7 +73,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         {
             await _cache.SetAsync(cacheKey, tree, OrganizationTreeCacheExpiration);
         }
-        return Ok<IEnumerable<OrganizationDto>>(tree);
+        return Ok<IEnumerable<OrganizationTreeNodeDto>>(tree);
     }
 
     /// <summary>
@@ -78,7 +84,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         // 尝试从缓存获取
         if (_cache != null)
         {
-            var cacheKey = CacheKeys.Identity.Organization(id);
+            var cacheKey = GetOrganizationCacheKey(id);
             var cachedOrg = await _cache.GetAsync<OrganizationDto>(cacheKey);
             if (cachedOrg != null)
             {
@@ -97,7 +103,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         // 存入缓存（30分钟过期）
         if (_cache != null)
         {
-            var cacheKey = CacheKeys.Identity.Organization(id);
+            var cacheKey = GetOrganizationCacheKey(id);
             await _cache.SetAsync(cacheKey, dto, OrganizationCacheExpiration);
         }
 
@@ -326,7 +332,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         // 清除缓存
         await ClearOrganizationCacheAsync(id);
 
-        LogInformation("Organization moved: {Name} (ID: {Id}) to parent {NewParentId}", organization.Name, organization.Id, newParentId);
+        LogInformation("Organization moved: {Name} (ID: {Id}) to parent {NewParentId}", organization.Name, organization.Id, newParentId?.ToString() ?? "root");
         return Ok();
     }
 
@@ -452,22 +458,23 @@ public class OrganizationService : ApplicationService, IOrganizationService
     /// <summary>
     /// 构建组织树
     /// </summary>
-    private List<OrganizationDto> BuildTree(List<OrganizationDto> allOrganizations)
+    private static List<OrganizationTreeNodeDto> BuildTree(List<OrganizationTreeItemDto> allOrganizations)
     {
         if (allOrganizations == null || allOrganizations.Count == 0)
         {
-            return new List<OrganizationDto>();
+            return new List<OrganizationTreeNodeDto>();
         }
 
-        var dic = allOrganizations.ToDictionary(o => o.Id);
-        var roots = new List<OrganizationDto>();
+        var nodes = allOrganizations.MapToList<OrganizationTreeNodeDto>();
 
-        foreach (var org in allOrganizations)
+        var dic = nodes.ToDictionary(o => o.Id);
+        var roots = new List<OrganizationTreeNodeDto>();
+
+        foreach (var org in nodes)
         {
             if (org.ParentId.HasValue && dic.TryGetValue(org.ParentId.Value, out var parent))
             {
-                parent.Children ??= new List<OrganizationDto>();
-                ((List<OrganizationDto>)parent.Children).Add(org);
+                parent.Children.Add(org);
             }
             else
             {
@@ -763,14 +770,36 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         // 清除组织树缓存
-        await _cache.RemoveAsync(CacheKeys.Identity.OrganizationTree);
+        await _cache.RemoveAsync(GetOrganizationTreeCacheKey());
 
         // 如果指定了组织ID，清除该组织的缓存
         if (organizationId.HasValue)
         {
-            var cacheKey = CacheKeys.Identity.Organization(organizationId.Value);
+            var cacheKey = GetOrganizationCacheKey(organizationId.Value);
             await _cache.RemoveAsync(cacheKey);
         }
+    }
+
+    private string GetOrganizationTreeCacheKey()
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return CacheKeys.Identity.OrganizationTree;
+        }
+
+        var tenantPart = _currentTenant?.Id?.ToString() ?? "host";
+        return $"{CacheKeys.Identity.OrganizationTree}:{tenantPart}";
+    }
+
+    private string GetOrganizationCacheKey(Guid organizationId)
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return CacheKeys.Identity.Organization(organizationId);
+        }
+
+        var tenantPart = _currentTenant?.Id?.ToString() ?? "host";
+        return $"{CacheKeys.Identity.Organization(organizationId)}:{tenantPart}";
     }
 
     /// <summary>
@@ -876,7 +905,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
         }
 
-        LogInformation("User {UserName} removed from organization (ID: {OrgId})", user.UserName ?? string.Empty, oldOrganizationId);
+        LogInformation("User {UserName} removed from organization (ID: {OrgId})", user.UserName ?? string.Empty, oldOrganizationId?.ToString() ?? string.Empty);
         return Ok();
     }
 

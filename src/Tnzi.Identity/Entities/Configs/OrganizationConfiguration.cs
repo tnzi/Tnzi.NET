@@ -7,6 +7,8 @@ public class OrganizationConfiguration : EntityTypeConfigurationBase<Organizatio
 {
     public override void Configure(EntityTypeBuilder<Organization> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         // 表名由 TableNamePrefix 属性自动处理
         builder.HasKey(o => o.Id);
 
@@ -26,9 +28,20 @@ public class OrganizationConfiguration : EntityTypeConfigurationBase<Organizatio
             .OnDelete(DeleteBehavior.Restrict);
 
         // 索引配置（使用无参数方法自动检测数据库提供者，确保跨数据库兼容性）
-        builder.HasIndex(o => o.Code)
-            .IsUnique()
-            .HasFilter(IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse());
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(o => new { o.TenantId, o.Code })
+                .IsUnique()
+                .HasFilter(IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse());
+            builder.HasIndex(o => o.TenantId);
+        }
+        else
+        {
+            builder.HasIndex(o => o.Code)
+                .IsUnique()
+                .HasFilter(IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse());
+        }
+
         builder.HasIndex(o => o.ParentId);
         builder.HasIndex(o => o.Path);
     }

@@ -4,6 +4,8 @@ public class PromotionConfiguration : EntityTypeConfigurationBase<Promotion, Gui
 {
     public override void Configure(EntityTypeBuilder<Promotion> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(p => p.PromotionCode).HasMaxLength(32).IsRequired();
         builder.Property(p => p.Name).HasMaxLength(128).IsRequired();
         builder.Property(p => p.Description).HasMaxLength(500);
@@ -20,7 +22,16 @@ public class PromotionConfiguration : EntityTypeConfigurationBase<Promotion, Gui
             .HasForeignKey(r => r.PromotionId)
             .HasPrincipalKey(p => p.Id);
 
-        builder.HasIndex(p => p.PromotionCode).IsUnique();
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(p => new { p.TenantId, p.PromotionCode }).IsUnique();
+            builder.HasIndex(p => p.TenantId);
+        }
+        else
+        {
+            builder.HasIndex(p => p.PromotionCode).IsUnique();
+        }
+
         builder.HasIndex(p => p.IsActive);
         builder.HasIndex(p => p.StartTime);
         builder.HasIndex(p => p.EndTime);

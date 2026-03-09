@@ -20,16 +20,19 @@ public sealed class CompositeContextProvider : IContextProvider
     private readonly List<IContextProvider> _providers = [];
     private readonly ILogger<CompositeContextProvider> _logger;
     private readonly IOptions<AIOptions> _options;
+    private readonly ITokenEstimator _tokenEstimator;
 
     /// <summary>
     /// 初始化 CompositeContextProvider
     /// </summary>
     public CompositeContextProvider(
         ILogger<CompositeContextProvider> logger,
-        IOptions<AIOptions> options)
+        IOptions<AIOptions> options,
+        ITokenEstimator? tokenEstimator = null)
     {
         _logger = Check.NotNull(logger);
         _options = Check.NotNull(options);
+        _tokenEstimator = tokenEstimator ?? new HeuristicTokenEstimator();
     }
 
     /// <summary>
@@ -91,21 +94,53 @@ public sealed class CompositeContextProvider : IContextProvider
 
         var mergedMessages = new List<ChatMessage>();
         var mergedTools = new List<AITool>();
+        var mergedCitations = new List<CitationDto>();
+
+        var maxBudget = _options.Value.ContextProviders.MaxTokenBudget;
+        var usedTokens = 0;
 
         foreach (var provider in _providers)
         {
+            // Token 预算检查：当预算已耗尽时跳过后续 Provider
+            if (maxBudget > 0 && usedTokens >= maxBudget)
+            {
+                _logger.LogDebug(
+                    "Token budget exhausted ({UsedTokens}/{MaxBudget}), skipping {ProviderType}",
+                    usedTokens, maxBudget, provider.GetType().Name);
+                break;
+            }
+
             try
             {
                 var injection = await provider.GetContextAsync(messages, ct);
 
                 if (injection.Messages is { Count: > 0 })
                 {
+                    // 估算本次注入的 token 数
+                    if (maxBudget > 0)
+                    {
+                        var injectionTokens = EstimateMessageTokens(injection.Messages);
+                        if (usedTokens + injectionTokens > maxBudget)
+                        {
+                            _logger.LogDebug(
+                                "Skipping {ProviderType} context ({InjectionTokens} tokens) — would exceed budget ({UsedTokens}+{InjectionTokens}>{MaxBudget})",
+                                provider.GetType().Name, injectionTokens, usedTokens, injectionTokens, maxBudget);
+                            continue;
+                        }
+                        usedTokens += injectionTokens;
+                    }
+
                     mergedMessages.AddRange(injection.Messages);
                 }
 
                 if (injection.Tools is { Count: > 0 })
                 {
                     mergedTools.AddRange(injection.Tools);
+                }
+
+                if (injection.Citations is { Count: > 0 })
+                {
+                    mergedCitations.AddRange(injection.Citations);
                 }
             }
             catch (Exception ex)
@@ -115,11 +150,33 @@ public sealed class CompositeContextProvider : IContextProvider
             }
         }
 
+        if (maxBudget > 0)
+        {
+            _logger.LogDebug("Context injection used {UsedTokens}/{MaxBudget} token budget", usedTokens, maxBudget);
+        }
+
         return new ContextInjection
         {
             Messages = mergedMessages.Count > 0 ? mergedMessages : null,
-            Tools = mergedTools.Count > 0 ? mergedTools : null
+            Tools = mergedTools.Count > 0 ? mergedTools : null,
+            Citations = mergedCitations.Count > 0 ? mergedCitations : null
         };
+    }
+
+    /// <summary>
+    /// 估算一组 ChatMessage 的 token 数
+    /// </summary>
+    private int EstimateMessageTokens(List<ChatMessage> messages)
+    {
+        var totalTokens = 0;
+        foreach (var msg in messages)
+        {
+            if (msg.Text is { } text)
+            {
+                totalTokens += _tokenEstimator.Estimate(text, baseOverhead: 0);
+            }
+        }
+        return totalTokens;
     }
 
     /// <summary>

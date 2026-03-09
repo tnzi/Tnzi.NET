@@ -44,20 +44,6 @@ public class SessionServiceTests
             s.UserAgent == userAgent)), Times.Once);
     }
 
-    [Fact(Skip = "需要集成测试：GetUserSessionsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetUserSessionsAsync_WithValidUserId_ReturnsSessions()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetUserSessionsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetUserSessionsAsync_WithIncludeRevoked_ReturnsAllSessions()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
     [Fact]
     public async Task RevokeSessionAsync_WithValidSessionId_RevokesSession()
     {
@@ -83,20 +69,6 @@ public class SessionServiceTests
         Assert.True(session.IsRevoked);
         Assert.NotNull(session.RevokedAt);
         _repositoryMock.Verify(x => x.UpdateAsync(session), Times.Once);
-    }
-
-    [Fact(Skip = "需要集成测试：RevokeAllSessionsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task RevokeAllSessionsAsync_WithValidUserId_RevokesAllSessions()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：RevokeAllSessionsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task RevokeAllSessionsAsync_WithExcludeSessionId_ExcludesSession()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
     }
 
     [Fact]

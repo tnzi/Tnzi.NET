@@ -24,6 +24,15 @@ public class AspNetCoreOptions
     public bool EnableSPANotFoundHandler { get; set; } = false;
 
     /// <summary>
+    /// 获取或设置 应用的基础路径（用于部署在子路径下，如 IIS 虚拟目录或反向代理未剥离路径的场景）
+    /// 设置后将在所有中间件之前调用 UsePathBase()，把 Path 中匹配的前缀移到 PathBase，使路由能正确匹配。
+    /// 示例："/myapp"（部署在 /myapp 虚拟目录下）
+    /// 注意：设置 PathBase 时，建议同时将 ApiPathPrefix 设为空字符串，避免路由双重前缀。
+    /// IIS 虚拟目录场景下 ANCM 会自动设置 PathBase，UsePathBase 不会重复剥离（幂等安全）。
+    /// </summary>
+    public string? PathBase { get; set; }
+
+    /// <summary>
     /// 获取或设置 API 路径前缀（用于判断 API 请求，默认 "/api"）
     /// </summary>
     public string ApiPathPrefix { get; set; } = "/api";
@@ -102,6 +111,12 @@ public class AspNetCoreOptions
     /// 获取或设置 API 版本控制选项
     /// </summary>
     public Versioning.ApiVersionOptions? ApiVersion { get; set; }
+
+    /// <summary>
+    /// 获取或设置 Controller 过滤选项
+    /// 用于按名称通配符或程序集名称禁用特定 Controller
+    /// </summary>
+    public ControllerFilterOptions? ControllerFilter { get; set; }
 }
 
 /// <summary>
@@ -205,3 +220,29 @@ public class HttpEncryptOptions
     public bool Enabled { get; set; }
 }
 
+/// <summary>
+/// Controller 过滤选项
+/// 用于按名称通配符或程序集名称禁用特定 Controller，支持配置文件和代码两种方式
+/// </summary>
+public class ControllerFilterOptions
+{
+    /// <summary>
+    /// 要禁用的 Controller 类名（支持 * 通配符，大小写不敏感）
+    /// 例如: ["Default*"] ["*Admin*"] ["DefaultAdminAudit*", "DefaultAdminWorkflow*"]
+    /// </summary>
+    public string[]? DisabledControllers { get; set; }
+
+    /// <summary>
+    /// 要禁用其 Controller 的程序集名称（支持 * 通配符，大小写不敏感）
+    /// 例如: ["Tnzi.Hosting"] 禁用 Hosting 模块所有 Controller
+    /// </summary>
+    public string[]? DisabledAssemblies { get; set; }
+
+    /// <summary>
+    /// 自定义过滤谓词（返回 true = 保留, false = 移除）
+    /// 在 DisabledControllers / DisabledAssemblies 之后执行
+    /// 仅支持代码配置，不可序列化
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Func<Type, bool>? ControllerPredicate { get; set; }
+}

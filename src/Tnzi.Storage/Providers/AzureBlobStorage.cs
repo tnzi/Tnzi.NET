@@ -29,12 +29,15 @@ public class AzureBlobStorage : IFileStorage
         Check.NotNullOrEmpty(_options.ConnectionString);
         Check.NotNullOrEmpty(_options.ContainerName);
 
+        // 展开 ${VAR} 占位符后再初始化客户端
+        var connectionString = ConnectionStringExpander.Expand(_options.ConnectionString, configuration);
+
         // 初始化 Azure Blob 客户端
-        _blobServiceClient = new BlobServiceClient(_options.ConnectionString);
+        _blobServiceClient = new BlobServiceClient(connectionString);
         _containerClient = _blobServiceClient.GetBlobContainerClient(_options.ContainerName);
 
         // 从连接字符串中提取存储账户名称，构建基础URL
-        var accountName = ExtractAccountNameFromConnectionString(_options.ConnectionString);
+        var accountName = ExtractAccountNameFromConnectionString(connectionString);
         _baseUrl = configuration?["Storage:UrlPrefix"]
             ?? $"https://{accountName}.blob.core.windows.net/{_options.ContainerName}";
     }

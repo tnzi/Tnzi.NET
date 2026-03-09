@@ -7,6 +7,8 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
 {
     public override void Configure(EntityTypeBuilder<Message> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(n => n.Subject).IsRequired().HasMaxLength(500);
         builder.Property(n => n.Content);
         builder.Property(n => n.FailureReason).HasMaxLength(1000);
@@ -19,6 +21,11 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
         builder.Property(n => n.MaxRetryCount).HasDefaultValue(3);
 
         // 创建索引（优化查询性能）
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(n => n.TenantId);
+        }
+
         builder.HasIndex(n => n.Type);
         builder.HasIndex(n => n.Status);
         builder.HasIndex(n => n.CreationTime);

@@ -9,6 +9,8 @@ public class KnowledgeBaseConfiguration : EntityTypeConfigurationBase<KnowledgeB
 
     public override void Configure(EntityTypeBuilder<KnowledgeBase> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.Name)
             .HasMaxLength(200)
             .IsRequired();
@@ -22,6 +24,12 @@ public class KnowledgeBaseConfiguration : EntityTypeConfigurationBase<KnowledgeB
 
         builder.Property(e => e.EmbeddingModel)
             .HasMaxLength(200);
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId)
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        }
 
         builder.HasIndex(e => e.Name)
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());

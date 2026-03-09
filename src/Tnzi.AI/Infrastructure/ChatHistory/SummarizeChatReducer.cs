@@ -21,6 +21,7 @@ public sealed class SummarizeChatReducer : IHistoryReducer
 {
     private readonly SummarizeOptions _options;
     private readonly IChatClient _chatClient;
+    private readonly ITokenEstimator _tokenEstimator;
     private readonly ILogger<SummarizeChatReducer> _logger;
 
     // 缓存的摘要（避免重复生成）
@@ -45,14 +46,17 @@ public sealed class SummarizeChatReducer : IHistoryReducer
     /// </summary>
     /// <param name="options">摘要配置选项</param>
     /// <param name="chatClient">用于生成摘要的 ChatClient</param>
+    /// <param name="tokenEstimator">Token 估算器</param>
     /// <param name="logger">日志记录器</param>
     public SummarizeChatReducer(
         SummarizeOptions options,
         IChatClient chatClient,
+        ITokenEstimator tokenEstimator,
         ILogger<SummarizeChatReducer> logger)
     {
         _options = Check.NotNull(options);
         _chatClient = Check.NotNull(chatClient);
+        _tokenEstimator = Check.NotNull(tokenEstimator);
         _logger = Check.NotNull(logger);
     }
 
@@ -113,7 +117,8 @@ public sealed class SummarizeChatReducer : IHistoryReducer
         // 按估算 Token 数判断
         if (_options.TokenThreshold.HasValue)
         {
-            var estimatedTokens = EstimateTokenCount(nonSystemMessages);
+            var text = string.Join("\n", nonSystemMessages.Select(m => m.Text ?? string.Empty));
+            var estimatedTokens = _tokenEstimator.Estimate(text, baseOverhead: 0);
             if (estimatedTokens > _options.TokenThreshold.Value)
             {
                 return true;
@@ -249,26 +254,6 @@ public sealed class SummarizeChatReducer : IHistoryReducer
         }
 
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// 估算消息的 Token 数量
-    /// </summary>
-    /// <remarks>
-    /// 使用简单的启发式方法：约 4 个字符 = 1 个 Token（英文）
-    /// 中文约 1.5 个字符 = 1 个 Token
-    /// </remarks>
-    private static int EstimateTokenCount(List<ChatMessage> messages)
-    {
-        var totalChars = 0;
-
-        foreach (var message in messages)
-        {
-            totalChars += message.Text?.Length ?? 0;
-        }
-
-        // 混合语言估算：约 3 个字符 = 1 个 Token
-        return totalChars / 3;
     }
 
     /// <summary>

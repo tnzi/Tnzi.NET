@@ -8,6 +8,11 @@ namespace Tnzi.Identity.Entities;
 public class User : IdentityUser<Guid>, IEntity<Guid>, ISoftDelete, IHasCreationTime, IHasModificationTime
 {
     /// <summary>
+    /// 获取或设置 所属租户ID（null 表示全局用户/超级管理员）
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
+    /// <summary>
     /// 获取或设置 组织ID
     /// </summary>
     public Guid? OrganizationId { get; set; }

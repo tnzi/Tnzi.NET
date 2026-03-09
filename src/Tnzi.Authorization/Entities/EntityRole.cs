@@ -3,7 +3,7 @@ namespace Tnzi.Authorization.Entities;
 /// <summary>
 /// 实体角色实体（用于数据授权）
 /// </summary>
-public class EntityRole : FullAuditedEntity<Guid>
+public class EntityRole : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 获取或设置 实体信息ID

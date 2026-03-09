@@ -7,15 +7,49 @@ namespace Tnzi.Mapster;
 public static class MapperExtensions
 {
     private static IMapper? _mapper;
+    private static TypeAdapterConfig? _config;
+    private static readonly AsyncLocal<IMapper?> ScopedMapper = new();
+    private static readonly AsyncLocal<TypeAdapterConfig?> ScopedConfig = new();
 
     /// <summary>
     /// 设置对象映射执行者
     /// 使用 Volatile.Write 确保多线程环境下的内存可见性
     /// </summary>
     /// <param name="mapper">映射执行者</param>
-    public static void SetMapper(IMapper mapper)
+    public static void SetMapper(IMapper mapper, TypeAdapterConfig? config = null)
     {
-        Volatile.Write(ref _mapper, Check.NotNull(mapper));
+        mapper = Check.NotNull(mapper);
+        config ??= ResolveConfig(mapper);
+
+        Volatile.Write(ref _mapper, mapper);
+        if (config != null)
+        {
+            Volatile.Write(ref _config, config);
+        }
+    }
+
+    /// <summary>
+    /// 在当前异步上下文中临时覆盖映射器。
+    /// 主要用于测试或并行宿主隔离，释放后恢复之前的映射器。
+    /// </summary>
+    public static IDisposable PushMapper(IMapper mapper, TypeAdapterConfig? config = null)
+    {
+        mapper = Check.NotNull(mapper);
+        config ??= ResolveConfig(mapper);
+
+        var previous = ScopedMapper.Value;
+        var previousConfig = ScopedConfig.Value;
+        ScopedMapper.Value = mapper;
+        if (config != null)
+        {
+            ScopedConfig.Value = config;
+        }
+
+        return new DisposableAction(() =>
+        {
+            ScopedMapper.Value = previous;
+            ScopedConfig.Value = previousConfig;
+        });
     }
 
     /// <summary>
@@ -26,8 +60,7 @@ public static class MapperExtensions
     /// <returns>目标类型的对象</returns>
     public static TTarget MapTo<TTarget>(this object source)
     {
-        CheckMapper();
-        return Volatile.Read(ref _mapper)!.Map<TTarget>(source);
+        return GetRequiredMapper().Map<TTarget>(source);
     }
 
     /// <summary>
@@ -42,8 +75,7 @@ public static class MapperExtensions
         if (source == null)
             return null;
 
-        CheckMapper();
-        return Volatile.Read(ref _mapper)!.Map<TTarget>(source);
+        return GetRequiredMapper().Map<TTarget>(source);
     }
 
     /// <summary>
@@ -56,8 +88,7 @@ public static class MapperExtensions
     /// <returns>更新后的目标类型对象</returns>
     public static TTarget MapTo<TSource, TTarget>(this TSource source, TTarget target)
     {
-        CheckMapper();
-        return Volatile.Read(ref _mapper)!.Map(source, target);
+        return GetRequiredMapper().Map(source, target);
     }
 
     /// <summary>
@@ -71,8 +102,7 @@ public static class MapperExtensions
         if (source == null)
             return new List<TTarget>();
 
-        CheckMapper();
-        return Volatile.Read(ref _mapper)!.Map<List<TTarget>>(source);
+        return GetRequiredMapper().Map<List<TTarget>>(source);
     }
 
     /// <summary>
@@ -96,20 +126,62 @@ public static class MapperExtensions
         this IQueryable<TSource> source,
         TypeAdapterConfig? config = null)
     {
-        config ??= TypeAdapterConfig.GlobalSettings;
-        return source.ProjectToType<TDestination>(config);
+        return source.ProjectToType<TDestination>(config ?? GetRequiredConfig());
     }
 
     /// <summary>
     /// 验证映射执行者是否为空
     /// 使用 Volatile.Read 确保多线程环境下读取到最新值
     /// </summary>
-    private static void CheckMapper()
+    private static IMapper GetRequiredMapper()
     {
-        if (Volatile.Read(ref _mapper) == null)
+        var mapper = ScopedMapper.Value ?? Volatile.Read(ref _mapper);
+        if (mapper == null)
         {
             throw new InvalidOperationException(
                 "Mapper has not been initialized. Please ensure MapsterModule is properly configured.");
+        }
+
+        return mapper;
+    }
+
+    private static TypeAdapterConfig GetRequiredConfig()
+    {
+        var config = ScopedConfig.Value ?? Volatile.Read(ref _config);
+        if (config == null)
+        {
+            throw new InvalidOperationException(
+                "Mapster configuration has not been initialized. Please ensure MapsterModule is properly configured.");
+        }
+
+        return config;
+    }
+
+    private static TypeAdapterConfig? ResolveConfig(IMapper mapper)
+    {
+        var configProperty = mapper.GetType().GetProperty(
+            "Config",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        return configProperty?.GetValue(mapper) as TypeAdapterConfig;
+    }
+
+    private sealed class DisposableAction : IDisposable
+    {
+        private readonly Action _action;
+        private int _disposed;
+
+        public DisposableAction(Action action)
+        {
+            _action = action;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _action();
+            }
         }
     }
 }

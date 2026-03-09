@@ -3,7 +3,7 @@ namespace Tnzi.Authorization.Entities;
 /// <summary>
 /// 角色功能实体（角色与功能的关联）
 /// </summary>
-public class RoleFunction : FullAuditedEntity<Guid>
+public class RoleFunction : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 获取或设置 角色ID

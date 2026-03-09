@@ -69,45 +69,4 @@ public class LoginLogServiceTests
             l.FailureReason == failureReason)), Times.Once);
     }
 
-    [Fact(Skip = "需要集成测试：GetUserLoginLogsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetUserLoginLogsAsync_WithValidUserId_ReturnsPagedList()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetRecentLogsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetRecentLogsAsync_WithUserId_ReturnsRecentLogs()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetRecentLogsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetRecentLogsAsync_WithoutUserId_ReturnsGlobalRecentLogs()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：DeleteExpiredLogsAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task DeleteExpiredLogsAsync_WithValidDays_DeletesExpiredLogs()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetLogsByIpAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetLogsByIpAsync_WithValidIp_ReturnsPagedList()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：GetLogsByDateRangeAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetLogsByDateRangeAsync_WithValidRange_ReturnsPagedList()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
 }

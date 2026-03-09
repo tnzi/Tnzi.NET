@@ -3,8 +3,10 @@ namespace Tnzi.Chat.Entities;
 /// <summary>
 /// 消息接收记录实体
 /// </summary>
-public class MessageReceive : EntityBase<Guid>
+public class MessageReceive : EntityBase<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 获取或设置 消息ID
     /// </summary>

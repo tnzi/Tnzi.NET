@@ -148,9 +148,18 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
         {
             if (!TryApplyHttpHeaders(options, config.Headers))
             {
-                _logger.LogWarning(
-                    "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support custom headers in this SDK version.",
-                    config.Name);
+                if (TryApplyHttpQueryFallback(options, config.Headers))
+                {
+                    _logger.LogWarning(
+                        "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support custom headers in this SDK version. Falling back to query-based auth/tenant propagation.",
+                        config.Name);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support custom headers in this SDK version.",
+                        config.Name);
+                }
             }
         }
 
@@ -184,6 +193,53 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
         }
 
         return false;
+    }
+
+    private static bool TryApplyHttpQueryFallback(HttpClientTransportOptions options, Dictionary<string, string> headers)
+    {
+        string? apiKey = null;
+        if (headers.TryGetValue(McpServerSecurityMiddleware.ApiKeyHeaderName, out var apiKeyHeader)
+            && !string.IsNullOrWhiteSpace(apiKeyHeader))
+        {
+            apiKey = apiKeyHeader;
+        }
+        else if (headers.TryGetValue("Authorization", out var authorization)
+            && !string.IsNullOrWhiteSpace(authorization))
+        {
+            const string bearerPrefix = "Bearer ";
+            apiKey = authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
+                ? authorization[bearerPrefix.Length..].Trim()
+                : authorization.Trim();
+        }
+
+        headers.TryGetValue(McpServerSecurityMiddleware.TenantHeaderName, out var tenantId);
+
+        if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(tenantId))
+        {
+            return false;
+        }
+
+        var endpointBuilder = new UriBuilder(options.Endpoint);
+        var queryParts = new List<string>();
+        var existingQuery = endpointBuilder.Query.TrimStart('?');
+        if (!string.IsNullOrWhiteSpace(existingQuery))
+        {
+            queryParts.Add(existingQuery);
+        }
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            queryParts.Add($"apiKey={Uri.EscapeDataString(apiKey)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            queryParts.Add($"tenantId={Uri.EscapeDataString(tenantId)}");
+        }
+
+        endpointBuilder.Query = string.Join("&", queryParts);
+        options.Endpoint = endpointBuilder.Uri;
+        return true;
     }
 
     /// <inheritdoc />

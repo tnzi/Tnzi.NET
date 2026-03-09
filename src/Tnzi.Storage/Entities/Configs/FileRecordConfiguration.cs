@@ -7,6 +7,8 @@ public class FileRecordConfiguration : EntityTypeConfigurationBase<FileRecord, G
 {
     public override void Configure(EntityTypeBuilder<FileRecord> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         // 表名显式指定为 "Record" 以保持与现有数据库架构兼容；否则由 TableNamePrefix 生成 Storage_FileRecord
         builder.ToTable("Record");
 
@@ -23,6 +25,11 @@ public class FileRecordConfiguration : EntityTypeConfigurationBase<FileRecord, G
         builder.Property(e => e.Tags).HasMaxLength(1024);
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
+
         builder.HasIndex(e => e.Md5Hash);
         builder.HasIndex(e => e.CreatorId);
         builder.HasIndex(e => e.CreationTime);

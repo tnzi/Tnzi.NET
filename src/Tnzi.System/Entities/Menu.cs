@@ -25,7 +25,7 @@ public enum MenuType
 /// <summary>
 /// 菜单实体
 /// </summary>
-public class Menu : FullAuditedEntity<Guid>
+public class Menu : MultiTenantAuditedEntity<Guid>
 {
     public Guid? ParentId { get; set; }
     public string Name { get; set; } = string.Empty;

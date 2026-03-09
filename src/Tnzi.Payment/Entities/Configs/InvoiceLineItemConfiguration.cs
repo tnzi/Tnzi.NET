@@ -11,8 +11,15 @@ public class InvoiceLineItemConfiguration : EntityTypeConfigurationBase<InvoiceL
     /// </summary>
     public override void Configure(EntityTypeBuilder<InvoiceLineItem> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(l => l.Description).HasMaxLength(500).IsRequired();
         builder.Property(l => l.ProductCode).HasMaxLength(64);
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(l => l.TenantId);
+        }
 
         builder.HasIndex(l => l.InvoiceId);
     }

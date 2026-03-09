@@ -7,6 +7,7 @@
   <Folder Name="/build/">
     <File Path="build/version.props" />
     <File Path="build/public.props" />
+    <File Path="build/icon.png" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Tnzi.AspNetCore/Tnzi.AspNetCore.csproj" />
@@ -43,8 +44,8 @@
     <Project Path="src/Tnzi.Template/Tnzi.Template.csproj" />
   </Folder>
   <Folder Name="/src/modules/Tnzi.AI/">
-    <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
     <Project Path="src/Tnzi.AI.Coder/Tnzi.AI.Coder.csproj" />
+    <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
     <Project Path="src/Tnzi.AI/Tnzi.AI.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -58,18 +59,18 @@
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
+    <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
     <Project Path="tests/Tnzi.OpenTelemetry.Tests/Tnzi.OpenTelemetry.Tests.csproj" />
     <Project Path="tests/Tnzi.Payment.Tests/Tnzi.Payment.Tests.csproj" />
+    <Project Path="tests/Tnzi.Performance.Tests/Tnzi.Performance.Tests.csproj" />
     <Project Path="tests/Tnzi.RabbitMQ.Tests/Tnzi.RabbitMQ.Tests.csproj" />
     <Project Path="tests/Tnzi.Redis.Tests/Tnzi.Redis.Tests.csproj" />
     <Project Path="tests/Tnzi.SignalR.Tests/Tnzi.SignalR.Tests.csproj" />
     <Project Path="tests/Tnzi.Storage.Tests/Tnzi.Storage.Tests.csproj" />
     <Project Path="tests/Tnzi.System.Tests/Tnzi.System.Tests.csproj" />
     <Project Path="tests/Tnzi.Template.Tests/Tnzi.Template.Tests.csproj" />
-    <Project Path="tests/Tnzi.Performance.Tests/Tnzi.Performance.Tests.csproj" />
     <Project Path="tests/Tnzi.TestBase/Tnzi.TestBase.csproj" />
-    <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
     <Project Path="tests/Tnzi.Tests/Tnzi.Tests.csproj" />
   </Folder>
 </Solution>

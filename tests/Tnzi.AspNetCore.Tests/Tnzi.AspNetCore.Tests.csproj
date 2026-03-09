@@ -8,17 +8,28 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Moq" Version="4.*" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.*-*" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.3" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Hosting\Tnzi.Hosting.csproj" />
+    <!-- E2E 测试需要直接引用业务模块（Hosting 已改为 PrivateAssets="all"） -->
+    <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Storage\Tnzi.Storage.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Audit\Tnzi.Audit.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Feature\Tnzi.Feature.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
   </ItemGroup>
 

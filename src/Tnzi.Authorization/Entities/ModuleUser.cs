@@ -3,7 +3,7 @@ namespace Tnzi.Authorization.Entities;
 /// <summary>
 /// 模块用户实体（用户与模块的关联）
 /// </summary>
-public class ModuleUser : FullAuditedEntity<Guid>
+public class ModuleUser : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 获取或设置 模块ID

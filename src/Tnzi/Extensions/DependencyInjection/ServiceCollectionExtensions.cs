@@ -18,11 +18,13 @@ public static class TnziServiceCollectionExtensions
 
         var application = new TnziApplication(typeof(TStartupModule), services, configuration);
 
+        // 在模块 ConfigureServicesAsync 执行前注册应用实例，
+        // 使框架模块能够在服务注册阶段访问模块列表和容器元数据。
+        services.TryAddSingleton<ITnziApplication>(application);
+        services.TryAddSingleton<IModuleContainer>(new ModuleContainer(application.Modules));
+
         // 异步配置服务
         await application.ConfigureServicesAsync();
-
-        services.AddSingleton<ITnziApplication>(application);
-        services.AddSingleton<IModuleContainer>(new ModuleContainer(application.Modules));
 
         return application;
     }

@@ -30,11 +30,12 @@ public class FileVersionService : ApplicationService, IFileVersionService
         // 获取当前最大版本号
         var maxVersion = await _versionRepository.AsQueryable()
             .Where(v => v.FileId == fileId)
-            .Select(v => v.Version)
-            .DefaultIfEmpty(0)
-            .MaxAsync(cancellationToken);
+            .Select(v => (int?)v.Version)
+            .MaxAsync(cancellationToken) ?? 0;
 
+        // 首次版本化时 maxVersion=0，v1 由下方逻辑创建（当前文件快照），v2 为新上传版本
         var newVersion = maxVersion + 1;
+        if (newVersion < 2) newVersion = 2;
 
         // 保存当前版本（如果还没有保存）
         var currentVersion = await _versionRepository

@@ -13,6 +13,8 @@ public class OAuthService : ApplicationService, IOAuthService
     private readonly IEventBus? _eventBus;
     private readonly IUserDetailService? _userDetailService;
     private readonly IdentityOptions _identityOptions;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly bool _multiTenancyEnabled;
 
     public OAuthService(
         UserManager<User> userManager,
@@ -23,7 +25,9 @@ public class OAuthService : ApplicationService, IOAuthService
         IOptions<IdentityOptions> identityOptions,
         IAuthTokenService? authTokenService = null,
         IEventBus? eventBus = null,
-        IUserDetailService? userDetailService = null)
+        IUserDetailService? userDetailService = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -34,6 +38,8 @@ public class OAuthService : ApplicationService, IOAuthService
         _authTokenService = authTokenService;
         _eventBus = eventBus;
         _userDetailService = userDetailService;
+        _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     public async Task<Result<OAuthCallbackResultDto>> HandleOAuthCallbackAsync(string provider, ClaimsPrincipal principal)
@@ -141,6 +147,7 @@ public class OAuthService : ApplicationService, IOAuthService
             UserName = finalUserName,
             Email = email,
             EmailConfirmed = !string.IsNullOrEmpty(email), // OAuth 提供的邮箱视为已验证
+            TenantId = ResolveNewUserTenantId(),
         };
 
         // 创建用户（不设置密码，使用 CreateAsync 不带密码参数）
@@ -262,7 +269,7 @@ public class OAuthService : ApplicationService, IOAuthService
     /// </summary>
     private async Task<OAuthCallbackResultDto> GenerateTokenAndPublishLoginEventAsync(User user, string provider, ClaimsPrincipal principal)
     {
-        var roles = await _userManager.GetRolesAsync(user);
+        var roles = await GetRolesWithTenantContextAsync(user);
         var tokenResult = _tokenService.GenerateTokenResult(user, roles);
         var refreshTokenExpiresAt = DateTime.UtcNow.AddDays(_identityOptions.Jwt.RefreshTokenExpirationDays);
 
@@ -303,4 +310,27 @@ public class OAuthService : ApplicationService, IOAuthService
     }
 
     #endregion
+
+    private async Task<IList<string>> GetRolesWithTenantContextAsync(User user)
+    {
+        if (_multiTenancyEnabled && user.TenantId.HasValue && _currentTenant != null)
+        {
+            using (_currentTenant.Change(user.TenantId.Value))
+            {
+                return await _userManager.GetRolesAsync(user);
+            }
+        }
+
+        return await _userManager.GetRolesAsync(user);
+    }
+
+    private Guid? ResolveNewUserTenantId()
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return null;
+        }
+
+        return _currentTenant?.Id ?? CurrentUser?.TenantId;
+    }
 }

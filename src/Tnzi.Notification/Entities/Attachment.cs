@@ -3,8 +3,10 @@ namespace Tnzi.Notification.Entities;
 /// <summary>
 /// 消息附件（仅Email）
 /// </summary>
-public class Attachment : EntityBase<Guid>
+public class Attachment : EntityBase<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 消息ID
     /// </summary>

@@ -1,7 +1,9 @@
 namespace Tnzi.Storage.Entities;
 
-public class FileRecord : EntityBase<Guid>, IHasCreationTime, IHasCreator
+public class FileRecord : EntityBase<Guid>, IHasCreationTime, IHasCreator, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     public string FileName { get; set; } = string.Empty;
 
     public string OriginalName { get; set; } = string.Empty;

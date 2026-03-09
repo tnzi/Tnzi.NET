@@ -68,3 +68,15 @@ public interface IBackgroundJob<in TArgs>
     /// <param name="cancellationToken">取消令牌</param>
     Task ExecuteAsync(TArgs args, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// 租户感知的后台任务参数接口
+/// 实现此接口的任务参数会在入队时自动捕获当前租户 ID，执行时自动恢复租户上下文
+/// </summary>
+public interface ITenantAwareJobArgs
+{
+    /// <summary>
+    /// 租户 ID（入队时自动填充）
+    /// </summary>
+    Guid? TenantId { get; set; }
+}

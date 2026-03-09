@@ -3,8 +3,10 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 优惠券使用记录实体
 /// </summary>
-public class CouponUsage : CreationAuditedEntity<Guid>
+public class CouponUsage : CreationAuditedEntity<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 优惠券ID
     /// </summary>

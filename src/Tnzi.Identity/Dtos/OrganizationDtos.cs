@@ -57,11 +57,25 @@ public class OrganizationDto
     /// 获取或设置 创建时间
     /// </summary>
     public DateTime CreationTime { get; set; }
+}
 
+/// <summary>
+/// 组织树节点DTO，继承 OrganizationDto 并增加 Children 递归属性
+/// </summary>
+public class OrganizationTreeNodeDto : OrganizationDto
+{
     /// <summary>
     /// 获取或设置 子组织列表
     /// </summary>
-    public List<OrganizationDto> Children { get; set; } = new();
+    public List<OrganizationTreeNodeDto> Children { get; set; } = new();
+}
+
+/// <summary>
+/// 组织树平面投影DTO
+/// 仅用于 ProjectTo 查询，避免递归 Children 在投影阶段形成循环引用
+/// </summary>
+public class OrganizationTreeItemDto : OrganizationDto
+{
 }
 
 /// <summary>

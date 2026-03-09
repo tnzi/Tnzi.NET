@@ -47,12 +47,23 @@ public static class StreamingResponseWriter
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
         response.Headers["X-Accel-Buffering"] = "no"; // Nginx 反代支持
+
+        // 禁用 ASP.NET Core 响应缓冲（如 ResponseCompression 等中间件）
+        response.HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
     }
 
     /// <summary>
     /// 写入一个流式事件到 HttpResponse
     /// </summary>
     public static async Task WriteEventAsync(HttpResponse response, StreamEvent evt, StreamingFormat format, CancellationToken ct = default)
+    {
+        await WriteEventAsync<StreamEvent>(response, evt, format, ct);
+    }
+
+    /// <summary>
+    /// 写入一个任意类型的流式事件到 HttpResponse
+    /// </summary>
+    public static async Task WriteEventAsync<T>(HttpResponse response, T evt, StreamingFormat format, CancellationToken ct = default)
     {
         var json = JsonSerializer.Serialize(evt, _jsonOptions);
 

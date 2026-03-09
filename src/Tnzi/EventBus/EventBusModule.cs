@@ -61,7 +61,8 @@ public class EventBusModule : TnziInfrastructureModule
                 ? provider.GetService<IEventDeadLetterQueue>()
                 : null;
 
-            return new LocalEventBus(provider, eventBusLogger, eventBusOptions, deadLetterQueue, maxConcurrency);
+            var currentTenant = provider.GetService<ICurrentTenant>();
+            return new LocalEventBus(provider, eventBusLogger, eventBusOptions, deadLetterQueue, currentTenant, maxConcurrency);
         });
 
         return Task.CompletedTask;

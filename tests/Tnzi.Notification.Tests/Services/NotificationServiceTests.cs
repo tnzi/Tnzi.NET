@@ -1,4 +1,6 @@
 
+using Tnzi.Notification.Metadata;
+
 namespace Tnzi.Notification.Tests.Services;
 
 /// <summary>

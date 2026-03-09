@@ -7,6 +7,8 @@ public class ModuleUserConfiguration : EntityTypeConfigurationBase<ModuleUser, G
 {
     public override void Configure(EntityTypeBuilder<ModuleUser> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         // 配置与FunctionModule的关系
         builder.HasOne(e => e.FunctionModule)
             .WithMany()
@@ -14,8 +16,18 @@ public class ModuleUserConfiguration : EntityTypeConfigurationBase<ModuleUser, G
             .OnDelete(DeleteBehavior.Cascade);
 
         // 创建索引
-        builder.HasIndex(e => new { e.ModuleId, e.UserId }).IsUnique()
-            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => new { e.TenantId, e.ModuleId, e.UserId }).IsUnique()
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+            builder.HasIndex(e => e.TenantId);
+        }
+        else
+        {
+            builder.HasIndex(e => new { e.ModuleId, e.UserId }).IsUnique()
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        }
+
         builder.HasIndex(e => e.UserId);
     }
 }

@@ -7,6 +7,8 @@ public class FileChunkConfiguration : EntityTypeConfigurationBase<FileChunk, Gui
 {
     public override void Configure(EntityTypeBuilder<FileChunk> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.ToTable("Chunk");
 
         builder.Property(e => e.UploadSessionId).IsRequired();
@@ -17,6 +19,11 @@ public class FileChunkConfiguration : EntityTypeConfigurationBase<FileChunk, Gui
         builder.Property(e => e.CreationTime).IsRequired();
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
+
         builder.HasIndex(e => e.UploadSessionId);
         builder.HasIndex(e => new { e.UploadSessionId, e.ChunkIndex }).IsUnique();
         builder.HasIndex(e => e.CreationTime);

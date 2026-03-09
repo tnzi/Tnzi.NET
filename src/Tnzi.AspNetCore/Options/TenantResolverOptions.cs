@@ -44,7 +44,7 @@ public class TenantResolverOptions
     /// <summary>
     /// Claims 中的租户标识键
     /// </summary>
-    public string ClaimType { get; set; } = "TenantId";
+    public string ClaimType { get; set; } = "tenant_id";
 
     /// <summary>
     /// 解析顺序（按列表顺序尝试，找到即停止）

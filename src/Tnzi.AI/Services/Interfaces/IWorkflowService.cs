@@ -39,4 +39,24 @@ public interface IWorkflowService
     /// 流式运行工作流
     /// </summary>
     IAsyncEnumerable<WorkflowExecutionResultDto> RunStreamingAsync(Guid workflowId, string input, Guid? userId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 恢复暂停的工作流执行
+    /// </summary>
+    Task<Result<WorkflowExecutionResultDto>> ResumeAsync(string executionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 审批工作流步骤
+    /// </summary>
+    Task<Result> ApproveStepAsync(string executionId, string stepId, string? feedback = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 拒绝工作流步骤
+    /// </summary>
+    Task<Result> RejectStepAsync(string executionId, string stepId, string reason, CancellationToken ct = default);
+
+    /// <summary>
+    /// 获取工作流执行状态
+    /// </summary>
+    Task<Result<WorkflowExecutionStatusDto>> GetExecutionStatusAsync(string executionId, CancellationToken ct = default);
 }

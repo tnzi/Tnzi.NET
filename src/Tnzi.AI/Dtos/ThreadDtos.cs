@@ -7,8 +7,8 @@ public class AgentThreadDto
 {
     /// <summary>Thread ID</summary>
     public Guid Id { get; set; }
-    /// <summary>Agent ID</summary>
-    public Guid AgentId { get; set; }
+    /// <summary>Agent ID (null for agent-less threads)</summary>
+    public Guid? AgentId { get; set; }
     /// <summary>Thread title</summary>
     public string? Title { get; set; }
     /// <summary>Message count</summary>
@@ -24,8 +24,8 @@ public class AgentThreadDto
 /// </summary>
 public class CreateAgentThreadDto
 {
-    /// <summary>Agent ID</summary>
-    public Guid AgentId { get; set; }
+    /// <summary>Agent ID (null for agent-less threads)</summary>
+    public Guid? AgentId { get; set; }
     /// <summary>Thread title</summary>
     [MaxLength(200)]
     public string? Title { get; set; }
@@ -54,8 +54,8 @@ public class AgentThreadDetailDto
 {
     /// <summary>Thread ID</summary>
     public Guid Id { get; set; }
-    /// <summary>Agent ID</summary>
-    public Guid AgentId { get; set; }
+    /// <summary>Agent ID (null for agent-less threads)</summary>
+    public Guid? AgentId { get; set; }
     /// <summary>Agent name</summary>
     public string? AgentName { get; set; }
     /// <summary>Thread title</summary>
@@ -100,8 +100,8 @@ public class ThreadExportDto
 {
     /// <summary>Thread ID</summary>
     public Guid Id { get; set; }
-    /// <summary>Agent ID</summary>
-    public Guid AgentId { get; set; }
+    /// <summary>Agent ID (null for agent-less threads)</summary>
+    public Guid? AgentId { get; set; }
     /// <summary>Agent name</summary>
     public string? AgentName { get; set; }
     /// <summary>Thread title</summary>

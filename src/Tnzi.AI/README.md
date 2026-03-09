@@ -8,7 +8,7 @@
 - ✅ **自定义引擎** - 基于 Microsoft.Extensions.AI 的自定义 Agent 引擎
 - ✅ **工具系统** - 基于特性的 Function Calling，支持自动扫描和按需加载
 - ✅ **会话管理** - 完整的多轮对话线程管理
-- ✅ **Agent 编排** - 支持 Agent 执行、工作流编排（基于 WorkflowRunner）
+- ✅ **Agent 编排** - 支持 Agent 执行、Run/Trace 跟踪、基于 WorkflowEngine 的工作流编排
 - ✅ **流式响应** - 支持流式输出
 - ✅ **嵌入服务** - IEmbeddingService 基于 OpenAI 兼容 `/embeddings` 接口，供 RAG/向量检索使用
 - ✅ **历史压缩** - 可选 ConversationContext + Prune/Summarize 压缩策略，避免双写
@@ -71,13 +71,14 @@ public class MyService
 - **基于 Microsoft.Extensions.AI**：核心功能基于 M.E.AI 抽象层 + 自定义 Agent 引擎构建
   - `AgentExecutor` - 自定义 Agent 执行器
   - `ConversationContext` - 对话上下文管理
-  - `WorkflowRunner` - 工作流执行器
+  - `AgentRuntime` - 统一 AI 运行入口（中间件管道 + 执行策略）
+  - `WorkflowEngine` - 工作流执行引擎（图执行 + Checkpoint/HITL）
   - `AITool/AIFunction` - M.E.AI 工具系统
 
 - **Tnzi 扩展**：
   - `ChatClientFactory` - 多提供商 ChatClient 工厂
   - `AgentFactory` - 创建 AgentExecutor 实例
-  - `WorkflowBuilderFactory` - 构建工作流
+  - `WorkflowBuilder` / `WorkflowGraph` - 代码优先构建工作流图
   - `ToolRegistry` - 工具注册和管理
   - `ToolAdapter` - 将 Tnzi 工具转换为 M.E.AI AITool
 
@@ -86,13 +87,13 @@ Tnzi.AI
 ├── Infrastructure/          # 基础设施层
 │   ├── ChatClientFactory.cs     # ChatClient 工厂（多提供商支持）
 │   ├── AgentFactory.cs          # Agent 工厂（创建 AgentExecutor）
-│   ├── WorkflowBuilderFactory.cs # 工作流构建工厂
+│   ├── Workflow/WorkflowBuilder.cs # 工作流图构建器
 │   └── ToolRegistry.cs          # 工具注册表
 ├── Services/                # 业务服务层
 │   ├── ChatService.cs           # 聊天服务（基于 AgentExecutor）
 │   ├── AgentService.cs          # Agent 管理服务
 │   ├── AgentThreadService.cs    # 线程管理服务
-│   ├── WorkflowService.cs       # 工作流服务（基于 WorkflowRunner）
+│   ├── WorkflowService.cs       # 工作流服务（基于 WorkflowEngine）
 │   └── EmbeddingService.cs      # 嵌入服务（OpenAI 兼容 /embeddings）
 ├── Controllers/             # 控制器基类
 │   ├── ChatControllerBase.cs       # 聊天 API

@@ -3,8 +3,10 @@ namespace Tnzi.Storage.Entities;
 /// <summary>
 /// 文件版本记录
 /// </summary>
-public class FileVersion : EntityBase<Guid>, IHasCreationTime, IHasCreator
+public class FileVersion : EntityBase<Guid>, IHasCreationTime, IHasCreator, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 文件ID（关联到 FileRecord）
     /// </summary>

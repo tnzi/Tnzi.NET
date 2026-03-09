@@ -21,11 +21,6 @@ public class CoderOptions
     public string MemoryDirectory { get; set; } = ".tnzi/memory";
 
     /// <summary>
-    /// 对话存储目录（相对于 ProjectRoot）
-    /// </summary>
-    public string ConversationDirectory { get; set; } = ".tnzi/conversations";
-
-    /// <summary>
     /// 默认工具组列表
     /// </summary>
     public List<string> DefaultToolGroups { get; set; } = ["filesystem", "shell", "codesearch", "web", "memory", "project", "git", "diff", "process", "repl"];

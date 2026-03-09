@@ -9,21 +9,24 @@ public class McpToolProvider : IMcpToolProvider
 {
     private readonly IOptions<AIOptions> _options;
     private readonly IMcpClientFactory _clientFactory;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly IToolApprovalHandler? _approvalHandler;
     private readonly ILogger<McpToolProvider> _logger;
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ConcurrentDictionary<string, ToolCacheEntry> _toolCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _toolLocks = new(StringComparer.OrdinalIgnoreCase);
 
     public McpToolProvider(
         IOptions<AIOptions> options,
         IMcpClientFactory clientFactory,
+        ILoggerFactory loggerFactory,
         ILogger<McpToolProvider> logger,
-        IServiceScopeFactory scopeFactory)
+        IToolApprovalHandler? approvalHandler = null)
     {
         _options = Check.NotNull(options);
         _clientFactory = Check.NotNull(clientFactory);
+        _loggerFactory = Check.NotNull(loggerFactory);
         _logger = Check.NotNull(logger);
-        _scopeFactory = Check.NotNull(scopeFactory);
+        _approvalHandler = approvalHandler;
     }
 
     /// <inheritdoc />
@@ -34,11 +37,6 @@ public class McpToolProvider : IMcpToolProvider
         {
             return Array.Empty<AITool>();
         }
-
-        using var scope = _scopeFactory.CreateScope();
-        var scopedProvider = scope.ServiceProvider;
-        var scopedLoggerFactory = scopedProvider.GetService<ILoggerFactory>();
-        var scopedApprovalHandler = scopedProvider.GetService<IToolApprovalHandler>();
 
         var allTools = new List<AITool>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -65,9 +63,9 @@ public class McpToolProvider : IMcpToolProvider
                 IList<AITool> toAdd = filtered is IList<AITool> list ? list : filtered.ToList();
                 if (approvalOptions.Enabled)
                 {
-                    if (scopedApprovalHandler != null)
+                    if (_approvalHandler != null)
                     {
-                        var approvalLogger = scopedLoggerFactory?.CreateLogger<ApprovalToolWrapper>();
+                        var approvalLogger = _loggerFactory.CreateLogger<ApprovalToolWrapper>();
                         var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var t in toAdd)
                         {
@@ -81,14 +79,14 @@ public class McpToolProvider : IMcpToolProvider
                                 toolNameToGroup[originalName] = "mcp:" + server.Name;
                             }
                         }
-                        toAdd = ApprovalToolWrapper.Wrap(toAdd, scopedApprovalHandler, approvalOptions, approvalLogger, toolNameToGroup);
+                        toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, approvalLogger, toolNameToGroup);
                     }
                 }
 
                 // 审计：包装 AIFunction 以便在调用时记录 ServerName、ToolName、参数数量
                 if (toAdd.Count > 0)
                 {
-                    var auditLogger = scopedLoggerFactory?.CreateLogger<McpAuditToolWrapper>();
+                    var auditLogger = _loggerFactory.CreateLogger<McpAuditToolWrapper>();
                     toAdd = McpAuditToolWrapper.Wrap(toAdd, server.Name, auditLogger);
                 }
 

@@ -3,8 +3,10 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 发票明细实体
 /// </summary>
-public class InvoiceLineItem : EntityBase<Guid>
+public class InvoiceLineItem : EntityBase<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 关联发票ID
     /// </summary>

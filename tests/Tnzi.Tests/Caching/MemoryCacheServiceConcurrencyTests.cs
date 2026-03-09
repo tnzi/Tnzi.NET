@@ -33,10 +33,7 @@ public class MemoryCacheServiceConcurrencyTests
         Assert.Equal(new long[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, results);
     }
 
-    // TODO: 此并发测试在某些环境下不稳定，需要进一步调查
-    // 顺序测试已验证 IncrementAsync 的基本功能正确
-    // 问题可能与 Parallel.ForEachAsync 的调度或 xUnit 的测试隔离有关
-    [Fact(Skip = "并发测试不稳定，需进一步调查")]
+    [Fact]
     public async Task IncrementAsync_WithConcurrentAccess_ReturnsCorrectTotal()
     {
         // Arrange: 创建独立的缓存实例，避免与其他测试的状态污染
@@ -48,14 +45,10 @@ public class MemoryCacheServiceConcurrencyTests
         const string key = "concurrent-counter";
         const int totalIncrements = 100;
 
-        // Act: 使用 Parallel.ForEachAsync 并发执行
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, totalIncrements),
-            new ParallelOptions { MaxDegreeOfParallelism = 10 },
-            async (_, ct) =>
-            {
-                await cache.IncrementAsync(key);
-            });
+        // Act: 使用独立任务并发执行，避免 Parallel.ForEachAsync 在测试环境下的调度差异
+        var tasks = Enumerable.Range(0, totalIncrements)
+            .Select(_ => Task.Run(() => cache.IncrementAsync(key)));
+        await Task.WhenAll(tasks);
 
         // Assert: 验证最终值等于总增量（使用 IncrementAsync(0) 读取实际计数器值）
         var finalValue = await cache.IncrementAsync(key, 0);

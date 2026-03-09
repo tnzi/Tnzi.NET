@@ -3,7 +3,7 @@ namespace Tnzi.AI.Rag.Entities;
 /// <summary>
 /// 知识库实体
 /// </summary>
-public class KnowledgeBase : FullAuditedEntity<Guid>
+public class KnowledgeBase : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 知识库名称

@@ -22,4 +22,11 @@
     <EmbeddedResource Include="Resources\WelcomePage.html" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="build\Tnzi.AspNetCore.props" Pack="true" PackagePath="build/" />
+    <None Include="build\Tnzi.AspNetCore.targets" Pack="true" PackagePath="build/" />
+    <None Include="buildTransitive\Tnzi.AspNetCore.props" Pack="true" PackagePath="buildTransitive/" />
+    <None Include="buildTransitive\Tnzi.AspNetCore.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
 </Project>

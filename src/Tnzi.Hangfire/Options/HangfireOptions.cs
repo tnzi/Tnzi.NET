@@ -57,11 +57,6 @@ public enum StorageType
     /// </summary>
     PostgreSQL,
 
-    /// <summary>
-    /// MySQL 存储（暂未实现）
-    /// </summary>
-    [Obsolete("MySQL storage is not yet implemented. Use Redis, SqlServer, or PostgreSQL.")]
-    MySQL
 }
 
 /// <summary>

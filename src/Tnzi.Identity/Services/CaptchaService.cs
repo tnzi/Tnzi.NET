@@ -85,7 +85,7 @@ public class CaptchaService : ApplicationService, ICaptchaService
         if (_cache == null || string.IsNullOrEmpty(identifier))
             return;
 
-        var cacheKey = CacheKeys.Identity.LoginFailure(identifier);
+        var cacheKey = CacheKeys.WithTenant(CacheKeys.Identity.LoginFailure(identifier), CurrentUser?.TenantId);
         var currentCount = await _cache.GetAsync<int?>(cacheKey) ?? 0;
         await _cache.SetAsync(cacheKey, currentCount + 1, TimeSpan.FromMinutes(FailureRecordExpirationMinutes));
     }
@@ -96,7 +96,7 @@ public class CaptchaService : ApplicationService, ICaptchaService
         if (_cache == null || string.IsNullOrEmpty(identifier))
             return 0;
 
-        var cacheKey = CacheKeys.Identity.LoginFailure(identifier);
+        var cacheKey = CacheKeys.WithTenant(CacheKeys.Identity.LoginFailure(identifier), CurrentUser?.TenantId);
         return await _cache.GetAsync<int?>(cacheKey) ?? 0;
     }
 
@@ -106,7 +106,7 @@ public class CaptchaService : ApplicationService, ICaptchaService
         if (_cache == null || string.IsNullOrEmpty(identifier))
             return;
 
-        var cacheKey = CacheKeys.Identity.LoginFailure(identifier);
+        var cacheKey = CacheKeys.WithTenant(CacheKeys.Identity.LoginFailure(identifier), CurrentUser?.TenantId);
         await _cache.RemoveAsync(cacheKey);
     }
 

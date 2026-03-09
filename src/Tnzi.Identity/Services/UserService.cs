@@ -18,6 +18,8 @@ public class UserService : ApplicationService, IUserService
     private readonly ICache? _cache;
     private readonly IUserDetailService? _userDetailService;
     private readonly IUserRoleService? _userRoleService;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly bool _multiTenancyEnabled;
 
     public UserService(
         UserManager<User> userManager,
@@ -31,7 +33,9 @@ public class UserService : ApplicationService, IUserService
         ICache? cache = null,
         IUserDetailService? userDetailService = null,
         IUserRoleService? userRoleService = null,
-        IRepository<UserRole>? userRoleRepository = null)
+        IRepository<UserRole>? userRoleRepository = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -44,11 +48,17 @@ public class UserService : ApplicationService, IUserService
         _userDetailService = userDetailService;
         _userRoleService = userRoleService;
         _userRoleRepository = userRoleRepository;
+        _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
     {
         var user = input.MapTo<User>();
+        if (_multiTenancyEnabled && user.TenantId == null)
+        {
+            user.TenantId = ResolveNewUserTenantId();
+        }
 
         var result = await _userManager.CreateAsync(user, input.Password);
         if (!result.Succeeded)
@@ -1109,7 +1119,8 @@ public class UserService : ApplicationService, IUserService
                     Email = email,
                     PhoneNumber = phoneIdx >= 0 && fields.Length > phoneIdx ? fields[phoneIdx].Trim() : null,
                     EmailConfirmed = true, // Auto-confirm for imported users
-                    CreationTime = DateTime.UtcNow
+                    CreationTime = DateTime.UtcNow,
+                    TenantId = ResolveNewUserTenantId()
                 };
 
                 var createResult = await _userManager.CreateAsync(user, password);
@@ -1203,6 +1214,16 @@ public class UserService : ApplicationService, IUserService
 
         fields.Add(current.ToString());
         return fields.ToArray();
+    }
+
+    private Guid? ResolveNewUserTenantId()
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return null;
+        }
+
+        return _currentTenant?.Id ?? _currentUser?.TenantId ?? CurrentUser?.TenantId;
     }
 
     #endregion

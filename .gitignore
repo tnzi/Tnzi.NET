@@ -32,6 +32,7 @@ bld/
 *.snupkg
 *.nuspec
 /packages/
+.dotnet_home/
 
 # Build sensitive/binary files
 build/nuget.exe

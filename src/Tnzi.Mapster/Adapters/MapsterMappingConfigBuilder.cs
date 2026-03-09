@@ -65,6 +65,12 @@ internal class MapsterMappingConfigBuilder<TSource, TDestination>
         return this;
     }
 
+    public IMappingConfigBuilder<TSource, TDestination> MaxDepth(int depth)
+    {
+        _setter.MaxDepth(depth);
+        return this;
+    }
+
     public IMappingConfigBuilder<TSource, TDestination> AfterMapping(
         Action<TSource, TDestination> afterMapping)
     {

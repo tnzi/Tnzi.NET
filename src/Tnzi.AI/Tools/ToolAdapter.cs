@@ -4,8 +4,9 @@ namespace Tnzi.AI.Tools;
 /// 工具适配器 - 将 ToolDefinition 转换为 M.E.AI 的 AITool
 /// </summary>
 /// <remarks>
-/// 工具提供者（ToolDefinition.ProviderType）必须注册为 Singleton，
-/// 因为 ToolAdapter 从根 ServiceProvider 解析实例（非 Scoped）。
+/// 工具提供者（ToolDefinition.ProviderType）可注册为 Singleton 或 Scoped。
+/// 工具实例在调用时通过 <see cref="ToolContextAccessor.Current"/> 的 RequestServices 解析（request-scoped），
+/// 不可用时才回退到根 ServiceProvider。这允许工具提供者通过构造函数注入 Scoped 服务（如 IRepository、领域服务等）。
 /// </remarks>
 internal static class ToolAdapter
 {
@@ -14,10 +15,11 @@ internal static class ToolAdapter
     /// </summary>
     internal static List<AITool> ConvertToAITools(
         IReadOnlyList<ToolDefinition> tools,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ILogger? logger = null)
     {
         return tools
-            .Select(tool => ConvertToAITool(tool, serviceProvider))
+            .Select(tool => ConvertToAITool(tool, serviceProvider, logger))
             .Where(t => t != null)
             .Cast<AITool>()
             .ToList();
@@ -26,7 +28,7 @@ internal static class ToolAdapter
     /// <summary>
     /// 将单个 ToolDefinition 转换为 M.E.AI 的 AIFunction
     /// </summary>
-    private static AIFunction? ConvertToAITool(ToolDefinition tool, IServiceProvider serviceProvider)
+    private static AIFunction? ConvertToAITool(ToolDefinition tool, IServiceProvider serviceProvider, ILogger? logger)
     {
         Check.NotNull(tool);
 
@@ -39,9 +41,12 @@ internal static class ToolAdapter
         {
             // 使用 AIFunctionFactory 从 MethodInfo 创建 AIFunction
             // createInstanceFunc 从 DI 容器获取工具提供者实例
+            // 优先使用 ToolContextAccessor.Current?.RequestServices（执行时为 request-scoped）
+            // 以支持注册为 Scoped 的工具提供者（需要访问 Scoped 服务的工具）
             var createInstanceFunc = new Func<AIFunctionArguments, object>(args =>
             {
-                var instance = serviceProvider.GetService(tool.ProviderType);
+                var sp = ToolContextAccessor.Current?.RequestServices ?? serviceProvider;
+                var instance = sp.GetService(tool.ProviderType);
                 if (instance == null)
                 {
                     throw new InvalidOperationException(
@@ -65,8 +70,6 @@ internal static class ToolAdapter
         catch (Exception ex)
         {
             // 记录错误但不抛出，允许其他工具继续工作
-            var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
-            var logger = loggerFactory?.CreateLogger(typeof(ToolAdapter));
             logger?.LogWarning(ex, "Failed to convert tool '{ToolName}' to AIFunction", tool.Name);
             return null;
         }

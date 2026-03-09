@@ -3,7 +3,7 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 退款记录实体
 /// </summary>
-public class Refund : FullAuditedEntity<Guid>
+public class Refund : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 退款流水号

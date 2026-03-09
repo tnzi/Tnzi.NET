@@ -103,13 +103,9 @@ public class SequentialGuidTests
         }
     }
 
-    [Fact(Skip = "SequentialAsString 类型的GUID在快速生成时可能因为时间戳和计数器组合导致字符串顺序不完全递增，这是正常的实现行为，不影响功能正确性")]
+    [Fact]
     public void NewGuid_SequentialAsString_ShouldBeSequential()
     {
-        // 注意：SequentialAsString 类型的GUID设计目标是提高数据库插入性能，而不是严格保证字符串排序
-        // 在实际使用中，GUID主要用于唯一标识，字符串排序并不是必需的功能
-        // 如果确实需要测试有序性，应该使用 SequentialAtEnd 或 SequentialAsBinary 类型
-
         // Arrange
         const int count = 50;
         var guids = new List<Guid>();
@@ -118,16 +114,21 @@ public class SequentialGuidTests
         for (int i = 0; i < count; i++)
         {
             guids.Add(SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAsString));
-            Thread.Sleep(2); // 增加延迟确保时间戳不同
+            Thread.Sleep(1);
         }
 
         // Assert
-        // 验证所有GUID都是有效的
-        Assert.All(guids, g => Assert.NotEqual(Guid.Empty, g));
+        for (int i = 1; i < guids.Count; i++)
+        {
+            var previousBytes = guids[i - 1].ToByteArray();
+            var currentBytes = guids[i].ToByteArray();
 
-        // 验证至少有一些GUID是不同的（不是所有都相同）
-        var uniqueCount = guids.Distinct().Count();
-        Assert.True(uniqueCount > 1, "At least some GUIDs should be unique");
+            var previousOrderedBytes = previousBytes[6..14];
+            var currentOrderedBytes = currentBytes[6..14];
+
+            var comparison = CompareByteArrays(previousOrderedBytes, currentOrderedBytes);
+            Assert.True(comparison <= 0, $"GUID at index {i} should be >= GUID at index {i - 1}");
+        }
     }
 
     [Fact]

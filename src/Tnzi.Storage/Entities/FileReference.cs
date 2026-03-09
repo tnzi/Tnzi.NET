@@ -3,8 +3,10 @@ namespace Tnzi.Storage.Entities;
 /// <summary>
 /// 文件引用记录 - 记录文件被哪个表哪个字段引用
 /// </summary>
-public class FileReference : EntityBase<Guid>, IHasCreationTime
+public class FileReference : EntityBase<Guid>, IHasCreationTime, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 文件ID
     /// </summary>

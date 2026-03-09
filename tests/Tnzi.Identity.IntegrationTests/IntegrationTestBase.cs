@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Options;
+using Tnzi.MultiTenancy;
+
 namespace Tnzi.Identity.IntegrationTests;
 
 /// <summary>
@@ -7,8 +10,9 @@ public class TestIdentityDbContext : IdentityDbContext<TestIdentityDbContext>
 {
     public TestIdentityDbContext(
         DbContextOptions<TestIdentityDbContext> options,
-        ICurrentUser currentUser)
-        : base(options, currentUser)
+        ICurrentUser currentUser,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        : base(options, currentUser, multiTenancyOptions: multiTenancyOptions)
     {
     }
 

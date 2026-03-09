@@ -22,11 +22,6 @@ public class CoderOptionsValidator : OptionsValidatorBase<CoderOptions>
             errors.Add("MemoryDirectory cannot be null or empty");
         }
 
-        if (string.IsNullOrWhiteSpace(options.ConversationDirectory))
-        {
-            errors.Add("ConversationDirectory cannot be null or empty");
-        }
-
         if (options.InstructionFiles == null || options.InstructionFiles.Count == 0)
         {
             errors.Add("InstructionFiles must contain at least one file path");

@@ -7,6 +7,8 @@ public class RecipientConfiguration : EntityTypeConfigurationBase<Recipient, Gui
 {
     public override void Configure(EntityTypeBuilder<Recipient> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(r => r.Address).IsRequired().HasMaxLength(500);
         builder.Property(r => r.Name).HasMaxLength(200);
         builder.Property(r => r.ExternalMessageId).HasMaxLength(200);
@@ -19,6 +21,11 @@ public class RecipientConfiguration : EntityTypeConfigurationBase<Recipient, Gui
             .OnDelete(DeleteBehavior.Cascade);
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(r => r.TenantId);
+        }
+
         builder.HasIndex(r => r.MessageId);
         builder.HasIndex(r => r.Address);
         builder.HasIndex(r => r.Status);

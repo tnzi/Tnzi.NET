@@ -221,34 +221,4 @@ public class PushSenderTests
         result.FailureReason!.ShouldContain("not configured");
     }
 
-    [Fact(Skip = "Firebase Send requires real Firebase credentials")]
-    public async Task SendToAsync_Should_Send_Via_Firebase_Successfully()
-    {
-        // Arrange
-        var httpClient = new HttpClient(_httpMessageHandlerMock.Object);
-        _httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>()))
-            .Returns(httpClient);
-
-        var responseContent = "{\"message_id\":\"msg123\",\"success\":1}";
-        _httpMessageHandlerMock.Protected()
-            .Setup<Task<HttpResponseMessage>>(
-                "SendAsync",
-                ItExpr.IsAny<HttpRequestMessage>(),
-                ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage
-            {
-                StatusCode = HttpStatusCode.OK,
-                Content = new StringContent(responseContent)
-            });
-
-        var sender = new PushSender(_options, _loggerMock.Object);
-
-        // Act
-        var result = await sender.SendToAsync("device_token_123", "Test Title", "Test Body");
-
-        // Assert
-        result.Success.ShouldBeTrue();
-        result.ExternalMessageId.ShouldNotBeNullOrEmpty();
-    }
-
 }

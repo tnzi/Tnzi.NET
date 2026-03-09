@@ -8,6 +8,13 @@ public class MenuConfiguration : EntityTypeConfigurationBase<Menu, Guid>
 {
     public override void Configure(EntityTypeBuilder<Menu> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(m => m.TenantId);
+        }
+
         builder.HasIndex(m => m.ParentId);
         builder.HasIndex(m => m.Path);
         builder.HasOne<Menu>()

@@ -7,6 +7,8 @@ public class FileReferenceConfiguration : EntityTypeConfigurationBase<FileRefere
 {
     public override void Configure(EntityTypeBuilder<FileReference> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.ToTable("Reference");
 
         builder.Property(e => e.FileId).IsRequired();
@@ -17,6 +19,11 @@ public class FileReferenceConfiguration : EntityTypeConfigurationBase<FileRefere
         builder.Property(e => e.CreationTime).IsRequired();
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
+
         builder.HasIndex(e => e.FileId);
         builder.HasIndex(e => new { e.EntityType, e.EntityId, e.FieldName });
         builder.HasIndex(e => e.IsTemporary);

@@ -71,6 +71,13 @@ public interface IMappingConfigBuilder<TSource, TDestination>
         Expression<Func<TDestination, TProperty>> destinationMember);
 
     /// <summary>
+    /// 限制映射深度，避免递归对象图在投影时形成循环引用
+    /// </summary>
+    /// <param name="depth">最大深度</param>
+    /// <returns>配置构建器</returns>
+    IMappingConfigBuilder<TSource, TDestination> MaxDepth(int depth) => this;
+
+    /// <summary>
     /// 映射后处理
     /// </summary>
     /// <param name="afterMapping">映射后处理函数</param>

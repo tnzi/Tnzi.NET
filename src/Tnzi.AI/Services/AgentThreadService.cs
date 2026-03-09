@@ -1,4 +1,4 @@
-using AgentThreadEntity = Tnzi.AI.Entities.AgentThread;
+using AgentThreadEntity = Tnzi.AI.Domain.AgentThread;
 
 namespace Tnzi.AI.Services;
 
@@ -10,6 +10,11 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     private readonly IRepository<AgentThreadEntity, Guid> _repository;
     private readonly IRepository<AgentThreadMessage, Guid> _messageRepository;
     private readonly IRepository<Agent, Guid> _agentRepository;
+
+    /// <summary>
+    /// 按 threadId 的消息写入互斥锁，防止并发写入产生相同 Order
+    /// </summary>
+    private static readonly KeyedAsyncLock _messageOrderLock = new();
 
     public AgentThreadService(
         IRepository<AgentThreadEntity, Guid> repository,
@@ -25,11 +30,14 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
     public async Task<Result<AgentThreadDto>> CreateAsync(CreateAgentThreadDto input)
     {
-        // 验证 Agent 存在
-        var agent = await _agentRepository.GetAsync(input.AgentId);
-        if (agent == null)
+        // 仅当提供 AgentId 时验证 Agent 存在
+        if (input.AgentId.HasValue)
         {
-            return Fail<AgentThreadDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+            var agent = await _agentRepository.GetAsync(input.AgentId.Value);
+            if (agent == null)
+            {
+                return Fail<AgentThreadDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+            }
         }
 
         var entity = new AgentThreadEntity
@@ -161,23 +169,56 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok();
     }
 
-    public async Task<ConversationContext> GetOrCreateThreadAsync(Guid? threadId, Guid agentId, CancellationToken ct = default)
+    public async Task<(ConversationContext context, Guid threadId)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
     {
-        // 验证 Agent 存在
-        var agentDef = await _agentRepository.GetAsync(agentId, ct);
-        if (agentDef == null)
+        // 仅当提供 agentId 时验证 Agent 存在
+        if (agentId.HasValue)
         {
-            throw new BusinessException("Agent not found", ErrorCodes.AgentNotFound, 404);
+            var agentDef = await _agentRepository.GetAsync(agentId.Value, ct);
+            if (agentDef == null)
+            {
+                throw new BusinessException("Agent not found", ErrorCodes.AgentNotFound, 404);
+            }
         }
 
         // 如果提供了 threadId，尝试从数据库加载
         if (threadId.HasValue)
         {
             var threadEntity = await _repository.GetAsync(threadId.Value, ct);
-            if (threadEntity == null || threadEntity.AgentId != agentId)
+
+            // 所有权检查：AgentId 匹配 + CreatorId 匹配当前用户
+            if (threadEntity == null)
             {
-                Logger.LogWarning("Thread not found or agent mismatch: ThreadId={ThreadId}, AgentId={AgentId}", threadId.Value, agentId);
+                Logger.LogWarning("Thread not found: ThreadId={ThreadId}", threadId.Value);
                 throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
+            }
+
+            // 用户归属校验：已认证用户只能访问自己创建的线程
+            // CreatorId 为空的线程视为无主线程，已认证用户不可访问（防止跨用户泄漏）
+            var currentUserId = CurrentUser?.Id;
+            if (currentUserId.HasValue && threadEntity.CreatorId != currentUserId)
+            {
+                Logger.LogWarning("Thread ownership mismatch: ThreadId={ThreadId}, CreatorId={CreatorId}, CurrentUserId={CurrentUserId}", threadId.Value, threadEntity.CreatorId, currentUserId);
+                throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
+            }
+
+            if (agentId.HasValue)
+            {
+                // Agent-bound 模式：AgentId 必须匹配
+                if (threadEntity.AgentId != agentId.Value)
+                {
+                    Logger.LogWarning("Thread agent mismatch: ThreadId={ThreadId}, Expected={AgentId}, Actual={ThreadAgentId}", threadId.Value, agentId.Value, threadEntity.AgentId);
+                    throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
+                }
+            }
+            else
+            {
+                // Agent-less 模式：线程 AgentId 也必须为 null
+                if (threadEntity.AgentId.HasValue)
+                {
+                    Logger.LogWarning("Thread is agent-bound but no agentId provided: ThreadId={ThreadId}, ThreadAgentId={ThreadAgentId}", threadId.Value, threadEntity.AgentId);
+                    throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
+                }
             }
 
             // 如果有序列化数据，尝试反序列化恢复
@@ -187,14 +228,15 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
                 if (context != null)
                 {
                     Logger.LogDebug("Deserialized conversation context from database: {ThreadId}", threadId.Value);
-                    return context;
+                    return (context, threadEntity.Id);
                 }
 
                 Logger.LogWarning("Failed to deserialize conversation context: {ThreadId}. Rebuilding from history.", threadId.Value);
             }
 
             // 无序列化数据或反序列化失败，从历史消息重建
-            return await RebuildContextFromHistoryAsync(threadEntity.Id, ct);
+            var rebuilt = await RebuildContextFromHistoryAsync(threadEntity.Id, ct);
+            return (rebuilt, threadEntity.Id);
         }
 
         // 无 threadId，创建新的线程和空的 ConversationContext
@@ -214,7 +256,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // 序列化并保存
         await SaveThreadSerializedDataAsync(newEntity.Id, newContext, ct);
 
-        return newContext;
+        return (newContext, newEntity.Id);
     }
 
     /// <summary>
@@ -229,10 +271,14 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             return;
         }
 
-        // 获取当前消息数量作为顺序
-        var messageCount = await _messageRepository
+        // 按 threadId 加锁，确保 MAX(Order)+1 读写原子性（进程内互斥）
+        // 唯一索引 (ThreadId, Order) 作为多实例部署的最后防线
+        await using var _ = await _messageOrderLock.LockAsync($"thread-msg:{threadId:N}", ct);
+
+        var maxOrder = await _messageRepository
             .Where(m => m.ThreadId == threadId)
-            .CountAsync(ct);
+            .Select(m => (int?)m.Order)
+            .MaxAsync(ct) ?? 0;
 
         var message = new AgentThreadMessage
         {
@@ -241,7 +287,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             Content = content,
             ToolCalls = toolCalls,
             Usage = usage,
-            Order = messageCount + 1
+            Order = maxOrder + 1
         };
 
         await _messageRepository.InsertAsync(message);
@@ -365,7 +411,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         var sb = new StringBuilder();
         sb.AppendLine($"# {entity.Title ?? "Untitled Thread"}");
         sb.AppendLine();
-        sb.AppendLine($"- **Agent**: {entity.Agent?.Name ?? entity.AgentId.ToString()}");
+        sb.AppendLine($"- **Agent**: {entity.Agent?.Name ?? entity.AgentId?.ToString() ?? "(none)"}");
         sb.AppendLine($"- **Thread ID**: {entity.Id}");
         sb.AppendLine($"- **Created**: {entity.CreationTime:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine($"- **Last Activity**: {entity.LastActivityTime:yyyy-MM-dd HH:mm:ss} UTC");

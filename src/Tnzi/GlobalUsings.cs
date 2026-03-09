@@ -65,6 +65,7 @@ global using Tnzi.Security.Authorization;
 global using Tnzi.Security.Claims;
 global using Tnzi.Services;
 global using Tnzi.Threading;
+global using Tnzi.MultiTenancy;
 global using Tnzi.Utilities;
 
 global using Tnzi.AI.A2A;

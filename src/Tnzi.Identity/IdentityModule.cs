@@ -66,6 +66,8 @@ public class IdentityModule : TnziApplicationModule
 
         // 注册组织架构服务
         context.Services.AddScoped<IOrganizationService, OrganizationService>();
+        context.Services.AddScoped<ITenantService, TenantService>();
+        context.Services.TryAddScoped<ITenantChecker, TenantChecker>();
 
         // 注册用户登录记录服务
         context.Services.AddScoped<IUserLoginService, UserLoginService>();

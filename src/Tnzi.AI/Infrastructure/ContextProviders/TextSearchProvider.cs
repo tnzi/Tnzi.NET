@@ -92,9 +92,19 @@ public sealed class TextSearchProvider : IContextProvider
                 return ContextInjection.Empty;
             }
 
+            // 构建结构化 Citation 列表
+            var citations = resultList.Select(r => new CitationDto
+            {
+                SourceName = r.SourceName,
+                SourceLink = r.SourceLink,
+                Text = r.Text,
+                Score = r.Score
+            }).ToList();
+
             return new ContextInjection
             {
-                Messages = [new ChatMessage(ChatRole.User, formatted)]
+                Messages = [new ChatMessage(ChatRole.User, formatted)],
+                Citations = citations
             };
         }
         catch (Exception ex)

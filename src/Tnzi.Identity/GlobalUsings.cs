@@ -64,6 +64,7 @@ global using Tnzi.Identity.Events;
 global using Tnzi.Identity.Events.Handlers;
 global using Tnzi.Identity.Exceptions;
 global using Tnzi.Identity.Extensions;
+global using Tnzi.Identity.Controllers.Admin;
 global using Tnzi.Identity.Options;
 global using Tnzi.Identity.Services;
 global using Tnzi.Locking;

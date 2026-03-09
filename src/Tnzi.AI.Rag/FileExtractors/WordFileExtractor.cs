@@ -18,7 +18,8 @@ public class WordFileExtractor : IFileExtractorService
     public Task<string> ExtractTextAsync(Stream content, string fileName, CancellationToken ct = default)
     {
         using var document = WordprocessingDocument.Open(content, false);
-        var body = document.MainDocumentPart?.Document.Body;
+        var mainPart = document.MainDocumentPart;
+        var body = mainPart?.Document?.Body;
         if (body is null)
         {
             return Task.FromResult(string.Empty);

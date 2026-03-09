@@ -3,8 +3,10 @@ namespace Tnzi.AI.Rag.Entities;
 /// <summary>
 /// 知识文档实体 — 存储文档元数据
 /// </summary>
-public class KnowledgeDocument : AuditedEntity<Guid>
+public class KnowledgeDocument : AuditedEntity<Guid>, IMultiTenant
 {
+    public Guid? TenantId { get; set; }
+
     /// <summary>
     /// 所属知识库 ID
     /// </summary>

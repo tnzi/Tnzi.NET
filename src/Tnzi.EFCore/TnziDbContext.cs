@@ -7,6 +7,7 @@ namespace Tnzi.EFCore;
 /// <typeparam name="TDbContext">派生的 DbContext 类型</typeparam>
 [StableApi(Since = "0.1.0")]
 public abstract class TnziDbContext<TDbContext> : DbContext
+    , Internal.IMultiTenancySwitchProvider
     where TDbContext : DbContext
 {
     // 缓存泛型方法实例，避免每次调用 MakeGenericMethod
@@ -24,20 +25,25 @@ public abstract class TnziDbContext<TDbContext> : DbContext
     protected ICurrentTenant? CurrentTenant { get; }
     protected IDataFilterManager? DataFilterManager { get; }
     protected TimeProvider? TimeProvider { get; }
+    private readonly bool _multiTenancyEnabled;
 
     public TnziDbContext(
         DbContextOptions<TDbContext> options,
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant = null,
         IDataFilterManager? dataFilterManager = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(options)
     {
         CurrentUser = Check.NotNull(currentUser);
         CurrentTenant = currentTenant;
         DataFilterManager = dataFilterManager;
         TimeProvider = timeProvider;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
+
+    public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -64,8 +70,15 @@ public abstract class TnziDbContext<TDbContext> : DbContext
 
             if (typeof(IMultiTenant).IsAssignableFrom(clrType))
             {
-                var method = GetOrCreateMultiTenantFilterMethod(clrType);
-                method?.Invoke(this, new object[] { modelBuilder });
+                if (_multiTenancyEnabled)
+                {
+                    var method = GetOrCreateMultiTenantFilterMethod(clrType);
+                    method?.Invoke(this, new object[] { modelBuilder });
+                }
+                else
+                {
+                    modelBuilder.Entity(clrType).Ignore(nameof(IMultiTenant.TenantId));
+                }
             }
         }
     }
@@ -95,7 +108,7 @@ public abstract class TnziDbContext<TDbContext> : DbContext
     }
 
     protected virtual bool IsSoftDeleteFilterEnabled => DataFilterManager?.IsEnabled<ISoftDeleteFilter>() ?? true;
-    protected virtual bool IsMultiTenantFilterEnabled => DataFilterManager?.IsEnabled<IMultiTenantFilter>() ?? true;
+    protected virtual bool IsMultiTenantFilterEnabled => _multiTenancyEnabled && (DataFilterManager?.IsEnabled<IMultiTenantFilter>() ?? true);
 
     /// <summary>
     /// 获取当前租户ID（在查询时调用，表达式树延迟求值）
@@ -123,6 +136,7 @@ public abstract class TnziDbContext<TDbContext> : DbContext
             CurrentUser,
             CurrentTenant,
             cancellationToken,
-            TimeProvider);
+            TimeProvider,
+            _multiTenancyEnabled);
     }
 }

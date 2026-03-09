@@ -271,7 +271,7 @@ public class TemplateControllerTests
 /// <summary>
 /// 测试用的具体控制器实现
 /// </summary>
-public class TestTemplateController : TemplateAdminControllerBase
+public class TestTemplateController : DefaultTemplateAdminController
 {
     public TestTemplateController(
         ITemplateStoreService templateStoreService,

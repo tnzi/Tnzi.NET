@@ -47,16 +47,17 @@ public class RedisCachingModule : TnziInfrastructureModule
             return Task.CompletedTask;
         }
 
-        // 提取连接字符串获取逻辑（避免重复代码）
+        // 提取连接字符串获取逻辑（避免重复代码），并展开 ${VAR} 占位符
         string GetConnectionString(IConfiguration config, CachingOptions? cachingOpts, RedisOptions redisOpts)
         {
-            return redisOpts.ConnectionString
+            var raw = redisOpts.ConnectionString
                 ?? cachingOpts?.RedisConnectionString
                 ?? config.GetConnectionString("Redis")
                 ?? throw new InvalidOperationException(
                     "Redis connection string is required when using Redis caching. " +
                     "Configure Redis.ConnectionString, Caching.RedisConnectionString, " +
                     "or ConnectionStrings:Redis in your configuration file.");
+            return ConnectionStringExpander.Expand(raw, config);
         }
 
         // 注册 Redis 连接多路复用器

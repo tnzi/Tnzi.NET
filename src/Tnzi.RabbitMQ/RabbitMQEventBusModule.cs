@@ -44,12 +44,14 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
             return Task.CompletedTask;
         }
 
-        // 获取连接字符串（优先级：EventBusOptions.RabbitMqConnectionString > ConnectionStrings:RabbitMQ）
-        var connectionString = eventBusOptions.RabbitMqConnectionString
-            ?? configuration.GetConnectionString("RabbitMQ")
-            ?? throw new RabbitMQConnectionException(
-                "RabbitMQ connection string is required when EventBus.Type is RabbitMQ. " +
-                "Configure EventBus.RabbitMqConnectionString or ConnectionStrings:RabbitMQ in your configuration file.");
+        // 获取连接字符串（优先级：EventBusOptions.RabbitMqConnectionString > ConnectionStrings:RabbitMQ），并展开 ${VAR} 占位符
+        var connectionString = ConnectionStringExpander.Expand(
+            eventBusOptions.RabbitMqConnectionString
+                ?? configuration.GetConnectionString("RabbitMQ")
+                ?? throw new RabbitMQConnectionException(
+                    "RabbitMQ connection string is required when EventBus.Type is RabbitMQ. " +
+                    "Configure EventBus.RabbitMqConnectionString or ConnectionStrings:RabbitMQ in your configuration file."),
+            configuration);
 
         // 验证连接字符串格式
         if (string.IsNullOrWhiteSpace(connectionString))

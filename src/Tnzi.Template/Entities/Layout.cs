@@ -3,7 +3,7 @@ namespace Tnzi.Template.Entities;
 /// <summary>
 /// 通用布局实体（支持所有业务场景）
 /// </summary>
-public class Layout : FullAuditedEntity<Guid>
+public class Layout : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// Layout名称（在模块+分类下唯一）

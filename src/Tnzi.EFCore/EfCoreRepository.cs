@@ -326,9 +326,13 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         Check.NotNull(predicate);
         Check.NotNullOrWhiteSpace(cacheKey);
 
+        // 自动添加租户前缀，确保多租户缓存隔离
+        var tenantId = _serviceProvider?.GetService<ICurrentTenant>()?.Id;
+        var tenantAwareKey = CacheKeys.WithTenant(cacheKey, tenantId);
+
         if (_cache != null)
         {
-            var cached = await _cache.GetAsync<List<TEntity>>(cacheKey, cancellationToken);
+            var cached = await _cache.GetAsync<List<TEntity>>(tenantAwareKey, cancellationToken);
             if (cached != null)
             {
                 return cached;
@@ -339,7 +343,7 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
 
         if (_cache != null)
         {
-            await _cache.SetAsync(cacheKey, list, expiration, cancellationToken);
+            await _cache.SetAsync(tenantAwareKey, list, expiration, cancellationToken);
         }
 
         return list;

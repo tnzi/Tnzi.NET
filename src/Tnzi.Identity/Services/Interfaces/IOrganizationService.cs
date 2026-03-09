@@ -9,7 +9,7 @@ public interface IOrganizationService
     /// 获取组织树
     /// </summary>
     /// <returns>组织树</returns>
-    Task<Result<IEnumerable<OrganizationDto>>> GetTreeAsync();
+    Task<Result<IEnumerable<OrganizationTreeNodeDto>>> GetTreeAsync();
 
     /// <summary>
     /// 根据ID获取组织

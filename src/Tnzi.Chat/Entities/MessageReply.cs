@@ -3,7 +3,7 @@ namespace Tnzi.Chat.Entities;
 /// <summary>
 /// 消息回复实体
 /// </summary>
-public class MessageReply : FullAuditedEntity<Guid>
+public class MessageReply : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 获取或设置 回复内容

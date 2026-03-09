@@ -7,6 +7,8 @@ public class FileVersionConfiguration : EntityTypeConfigurationBase<FileVersion,
 {
     public override void Configure(EntityTypeBuilder<FileVersion> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.ToTable("Version");
 
         builder.Property(e => e.FileId).IsRequired();
@@ -18,6 +20,11 @@ public class FileVersionConfiguration : EntityTypeConfigurationBase<FileVersion,
         builder.Property(e => e.CreationTime).IsRequired();
 
         // 创建索引
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
+
         builder.HasIndex(e => e.FileId);
         builder.HasIndex(e => new { e.FileId, e.Version }).IsUnique();
         builder.HasIndex(e => e.IsCurrent);

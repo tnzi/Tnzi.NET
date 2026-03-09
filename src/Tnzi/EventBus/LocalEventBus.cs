@@ -7,6 +7,7 @@ public class LocalEventBus : IEventBus, IDisposable
     private readonly ILogger<LocalEventBus> _logger;
     private readonly EventBusOptions _options;
     private readonly IEventDeadLetterQueue? _deadLetterQueue;
+    private readonly ICurrentTenant? _currentTenant;
     private readonly ConcurrentDictionary<Type, HashSet<Type>> _runtimeHandlers = new();
     private readonly SemaphoreSlim _concurrencySemaphore;
     private readonly int _maxConcurrency;
@@ -17,12 +18,14 @@ public class LocalEventBus : IEventBus, IDisposable
         ILogger<LocalEventBus> logger,
         EventBusOptions? options = null,
         IEventDeadLetterQueue? deadLetterQueue = null,
+        ICurrentTenant? currentTenant = null,
         int maxConcurrency = 10)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         _options = options ?? new EventBusOptions();
         _deadLetterQueue = deadLetterQueue;
+        _currentTenant = currentTenant;
         _maxConcurrency = maxConcurrency > 0 ? maxConcurrency : 10;
         _concurrencySemaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
 
@@ -33,6 +36,12 @@ public class LocalEventBus : IEventBus, IDisposable
     {
         ThrowIfDisposed();
         Check.NotNull(@event);
+
+        // 自动捕获当前租户上下文到事件（仅当事件未显式设置 TenantId 时）
+        if (@event is EventBase eventBase && eventBase.TenantId == null)
+        {
+            eventBase.TenantId = _currentTenant?.Id;
+        }
 
         var eventType = typeof(TEvent);
 
@@ -79,15 +88,33 @@ public class LocalEventBus : IEventBus, IDisposable
         {
             var capturedEvent = @event;
             var capturedEventType = eventType;
+            // 捕获租户 ID，在新 scope 中恢复上下文
+            var capturedTenantId = (@event as EventBase)?.TenantId;
             _ = Task.Run(async () =>
             {
                 try
                 {
                     using var bgScope = _serviceProvider.CreateScope();
-                    var bgHandler = bgScope.ServiceProvider.GetService(handlerType);
-                    if (bgHandler == null) return;
 
-                    await ExecuteHandlerAsync(bgHandler, capturedEvent, capturedEventType, CancellationToken.None);
+                    // 恢复后台处理器的租户上下文
+                    IDisposable? tenantScope = null;
+                    if (capturedTenantId.HasValue)
+                    {
+                        var bgTenant = bgScope.ServiceProvider.GetService<ICurrentTenant>();
+                        tenantScope = bgTenant?.Change(capturedTenantId.Value);
+                    }
+
+                    try
+                    {
+                        var bgHandler = bgScope.ServiceProvider.GetService(handlerType);
+                        if (bgHandler == null) return;
+
+                        await ExecuteHandlerAsync(bgHandler, capturedEvent, capturedEventType, CancellationToken.None);
+                    }
+                    finally
+                    {
+                        tenantScope?.Dispose();
+                    }
                 }
                 catch (Exception ex)
                 {

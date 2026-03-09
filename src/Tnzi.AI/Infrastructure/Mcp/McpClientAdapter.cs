@@ -23,7 +23,7 @@ internal sealed class McpClientAdapter : IMcpClientAdapter
     /// <inheritdoc />
     public async Task<IReadOnlyList<AITool>> ListToolsAsync(CancellationToken ct = default)
     {
-        var tools = await _client.ListToolsAsync(null, ct).ConfigureAwait(false);
+        var tools = await _client.ListToolsAsync(cancellationToken: ct).ConfigureAwait(false);
         var list = new List<AITool>();
         var skipped = 0;
         var converted = 0;

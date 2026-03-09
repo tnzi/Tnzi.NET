@@ -7,7 +7,7 @@ public class MapsterModule : TnziInfrastructureModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        var config = TypeAdapterConfig.GlobalSettings;
+        var config = new TypeAdapterConfig();
 
         // 优先使用模块程序集进行扫描（更精确，避免扫描无关的系统/第三方程序集）
         var assemblies = GetAssembliesForScanning(context.Services);
@@ -57,11 +57,8 @@ public class MapsterModule : TnziInfrastructureModule
 
         context.Services.AddSingleton(config);
 
-        // 将 IMapper 注册为 Singleton，因为 ServiceMapper 是线程安全的。
-        // 之前使用 Scoped 导致 MapperExtensions 持有的静态引用在 Scope 销毁后失效。
-        // 设计约束: 当前 IMappingConfig 在 ConfigureServicesAsync 阶段通过 Activator.CreateInstance 创建，
-        // 不注入任何 Scoped 服务，因此 Singleton 是安全的。如果未来映射配置需要 Scoped 依赖
-        // (如 ICurrentUser, DbContext)，则需改为 Scoped 注册并调整 MapperExtensions 的静态引用策略。
+        // 将 IMapper 注册为 Singleton，因为 ServiceMapper 与 TypeAdapterConfig 均为线程安全实例。
+        // 这里使用模块级 TypeAdapterConfig，避免依赖 Mapster 全局静态配置导致不同宿主之间互相污染。
         context.Services.AddSingleton<IMapper>(sp => new ServiceMapper(sp, config));
 
         return Task.CompletedTask;
@@ -69,9 +66,9 @@ public class MapsterModule : TnziInfrastructureModule
 
     public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
-        // IMapper 现在是 Singleton，可以安全地获取并设置到静态扩展
+        var config = context.ServiceProvider.GetRequiredService<TypeAdapterConfig>();
         var mapper = context.ServiceProvider.GetRequiredService<IMapper>();
-        MapperExtensions.SetMapper(mapper);
+        MapperExtensions.SetMapper(mapper, config);
 
         var logger = context.ServiceProvider.GetService<ILogger<MapsterModule>>();
         logger?.LogInformation("MapperExtensions initialized with singleton IMapper instance.");
@@ -82,7 +79,7 @@ public class MapsterModule : TnziInfrastructureModule
         // 验证所有映射配置，提前发现配置错误
         try
         {
-            TypeAdapterConfig.GlobalSettings.Compile();
+            config.Compile();
             logger?.LogDebug("Mapster mapping configuration validation passed.");
         }
         catch (Exception ex)

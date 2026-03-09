@@ -19,22 +19,6 @@ public class AuditOperationServiceTests
         _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _serviceProviderMock.Object);
     }
 
-    #region GetAsync Tests
-
-    [Fact(Skip = "GetAsync uses IQueryable with Include, requires integration test")]
-    public async Task GetAsync_Should_Return_Operation_When_Exists()
-    {
-        // 此测试需要集成测试（使用 InMemory 数据库），因为 GetAsync 使用 LINQ Include
-    }
-
-    [Fact(Skip = "GetAsync uses IQueryable with Include, requires integration test")]
-    public async Task GetAsync_Should_Return_Null_When_Not_Exists()
-    {
-        // 此测试需要集成测试（使用 InMemory 数据库），因为 GetAsync 使用 LINQ Include
-    }
-
-    #endregion
-
     #region GetUserOperationsAsync Tests
 
     [Fact]
@@ -68,16 +52,6 @@ public class AuditOperationServiceTests
 
     #endregion
 
-    #region DeleteExpiredOperationsAsync Tests
-
-    [Fact(Skip = "Requires IQueryable mock which Moq doesn't support")]
-    public async Task DeleteExpiredOperationsAsync_Should_Delete_Expired_Operations()
-    {
-        // 此测试需要集成测试或 InMemory 数据库
-    }
-
-    #endregion
-
     #region CalculateStatistics Tests
 
     [Fact]
@@ -85,12 +59,6 @@ public class AuditOperationServiceTests
     {
         // Note: CalculateStatistics 是 private 方法，通过公共方法测试
         // 此测试需要 IQueryable mock，跳过
-    }
-
-    [Fact(Skip = "Requires IQueryable mock which Moq doesn't support")]
-    public async Task GetUserStatisticsAsync_Should_Calculate_User_Statistics()
-    {
-        // 此测试需要集成测试
     }
 
     #endregion

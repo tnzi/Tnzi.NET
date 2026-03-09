@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="MailKit" Version="4.14.1" />
+    <PackageReference Include="MailKit" Version="4.15.1" />
     <PackageReference Include="FirebaseAdmin" Version="3.4.0" />
     <!-- Twilio and Plivo SDK removed - using HTTP REST API instead -->
     <!-- Microsoft.EntityFrameworkCore is provided by Tnzi.EFCore project reference -->

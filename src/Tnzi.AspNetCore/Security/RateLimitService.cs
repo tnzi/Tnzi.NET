@@ -30,10 +30,20 @@ public class RateLimitService : IRateLimitService
         {
             RateLimitAlgorithm.FixedWindow => await IncrementFixedWindowAsync(key, windowSeconds),
             RateLimitAlgorithm.SlidingWindow => await IncrementSlidingWindowAsync(key, windowSeconds),
-            RateLimitAlgorithm.TokenBucket => throw new NotSupportedException("TokenBucket algorithm is not yet implemented."),
-            RateLimitAlgorithm.LeakyBucket => throw new NotSupportedException("LeakyBucket algorithm is not yet implemented."),
+            RateLimitAlgorithm.TokenBucket => await FallbackToFixedWindowAsync(key, windowSeconds, algorithm),
+            RateLimitAlgorithm.LeakyBucket => await FallbackToFixedWindowAsync(key, windowSeconds, algorithm),
             _ => await IncrementFixedWindowAsync(key, windowSeconds)
         };
+    }
+
+    private async Task<long> FallbackToFixedWindowAsync(string key, int windowSeconds, RateLimitAlgorithm algorithm)
+    {
+        _logger?.LogWarning(
+            "Rate limit algorithm {Algorithm} is not implemented. Falling back to FixedWindow for key {Key}.",
+            algorithm,
+            key);
+
+        return await IncrementFixedWindowAsync(key, windowSeconds);
     }
 
     /// <summary>

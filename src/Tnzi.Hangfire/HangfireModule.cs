@@ -33,6 +33,10 @@ public class HangfireModule : TnziInfrastructureModule
         var configuration = context.Configuration;
         var options = configuration.GetSection("Hangfire").Get<HangfireOptions>() ?? new HangfireOptions();
 
+        // 展开 ${VAR} 占位符（如有）
+        if (options.ConnectionString != null)
+            options.ConnectionString = ConnectionStringExpander.Expand(options.ConnectionString, configuration);
+
         if (!options.Enabled)
         {
             return Task.CompletedTask;
@@ -108,12 +112,6 @@ public class HangfireModule : TnziInfrastructureModule
                 // Use recommended Action<PostgreSqlBootstrapperOptions> overload (Hangfire.PostgreSql 1.20.13+)
                 config.UsePostgreSqlStorage(configure => configure.UseNpgsqlConnection(options.ConnectionString));
                 break;
-
-#pragma warning disable CS0618 // MySQL is [Obsolete] but we need to handle it explicitly
-            case StorageType.MySQL:
-#pragma warning restore CS0618
-                throw new InfrastructureException("Hangfire",
-                    "MySQL storage for Hangfire is not yet implemented. Use Redis, SqlServer, or PostgreSQL instead.");
 
             default:
                 throw new InfrastructureException("Hangfire",

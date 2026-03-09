@@ -6,6 +6,15 @@ namespace Tnzi.Caching;
 public static class CacheKeys
 {
     /// <summary>
+    /// 为缓存键添加租户前缀
+    /// </summary>
+    /// <param name="key">原始缓存键</param>
+    /// <param name="tenantId">租户 ID</param>
+    /// <returns>带租户前缀的缓存键</returns>
+    public static string WithTenant(string key, Guid? tenantId)
+        => tenantId.HasValue ? $"t:{tenantId.Value:N}:{key}" : key;
+
+    /// <summary>
     /// 身份认证模块缓存键
     /// </summary>
     public static class Identity

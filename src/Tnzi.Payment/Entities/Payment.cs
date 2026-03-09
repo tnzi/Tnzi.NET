@@ -3,7 +3,7 @@ namespace Tnzi.Payment.Entities;
 /// <summary>
 /// 支付交易实体
 /// </summary>
-public class Payment : FullAuditedEntity<Guid>
+public class Payment : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 交易流水号（内部生成）

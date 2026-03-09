@@ -5,12 +5,13 @@ namespace Tnzi.AI.Tests;
 /// </summary>
 public class WebSearchProviderTests
 {
+
     #region WebSearchTools
 
     [Fact]
     public async Task WebSearchTools_NoProvider_ReturnsError()
     {
-        var tools = new WebSearchTools(null, Mock.Of<ILogger<WebSearchTools>>());
+        var tools = new WebSearchTools(Mock.Of<ILogger<WebSearchTools>>());
 
         var result = await tools.SearchAsync("test query");
 
@@ -23,7 +24,7 @@ public class WebSearchProviderTests
     public async Task WebSearchTools_EmptyQuery_ReturnsError()
     {
         var mockProvider = new Mock<IWebSearchProvider>();
-        var tools = new WebSearchTools(mockProvider.Object, Mock.Of<ILogger<WebSearchTools>>());
+        var tools = new WebSearchTools(Mock.Of<ILogger<WebSearchTools>>(), mockProvider.Object);
 
         var result = await tools.SearchAsync("  ");
 
@@ -41,7 +42,7 @@ public class WebSearchProviderTests
                 new() { Title = "Result 1", Url = "https://example.com", Snippet = "A snippet" }
             });
 
-        var tools = new WebSearchTools(mockProvider.Object, Mock.Of<ILogger<WebSearchTools>>());
+        var tools = new WebSearchTools(Mock.Of<ILogger<WebSearchTools>>(), mockProvider.Object);
 
         var result = await tools.SearchAsync("test");
 
@@ -58,7 +59,7 @@ public class WebSearchProviderTests
         mockProvider.Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<WebSearchResult>());
 
-        var tools = new WebSearchTools(mockProvider.Object, Mock.Of<ILogger<WebSearchTools>>());
+        var tools = new WebSearchTools(Mock.Of<ILogger<WebSearchTools>>(), mockProvider.Object);
 
         // max_results = 100 should be clamped to 10
         await tools.SearchAsync("test", 100);
@@ -76,7 +77,7 @@ public class WebSearchProviderTests
         mockProvider.Setup(p => p.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Connection refused"));
 
-        var tools = new WebSearchTools(mockProvider.Object, Mock.Of<ILogger<WebSearchTools>>());
+        var tools = new WebSearchTools(Mock.Of<ILogger<WebSearchTools>>(), mockProvider.Object);
 
         var result = await tools.SearchAsync("test");
 

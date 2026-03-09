@@ -41,17 +41,11 @@ public class OrganizationServiceTests
             _dbContextMock.Object,
             _eventBusMock.Object,
             _currentUserMock.Object,
+            currentTenant: null,
+            multiTenancyOptions: null,
             _cacheMock.Object,
             _userManagerMock.Object
         );
-    }
-
-    [Fact(Skip = "需要集成测试：GetTreeAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task GetTreeAsync_ReturnsOrganizationTree()
-    {
-        // 注意：此测试需要集成测试环境
-        await Task.CompletedTask;
-        Assert.True(true);
     }
 
     [Fact]
@@ -249,13 +243,6 @@ public class OrganizationServiceTests
 
         // Assert
         _organizationRepositoryMock.Verify(x => x.DeleteAsync(orgId, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact(Skip = "需要集成测试：MoveAsync 使用了复杂的路径计算和子组织更新，在单元测试中难以完全模拟")]
-    public async Task MoveAsync_WithValidInput_MovesOrganization()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
     }
 
     [Fact]

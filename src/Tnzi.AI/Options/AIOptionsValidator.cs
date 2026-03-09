@@ -8,14 +8,15 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
 {
     protected override void ValidateOptions(AIOptions options, List<string> errors)
     {
+        // 允许零 provider 配置（AI 功能降级为不可用，但模块正常加载）
+        if (options.Providers == null || options.Providers.Count == 0)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(options.DefaultProvider))
         {
             errors.Add("DefaultProvider cannot be null or empty");
-        }
-        else if (options.Providers == null || options.Providers.Count == 0)
-        {
-            errors.Add("At least one provider must be configured");
-            return; // 如果没有提供商，后续验证无意义
         }
         else if (!options.Providers.ContainsKey(options.DefaultProvider))
         {
@@ -24,11 +25,6 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
         else if (!options.Providers[options.DefaultProvider].Enabled)
         {
             errors.Add($"DefaultProvider '{options.DefaultProvider}' is disabled");
-        }
-
-        if (options.Providers == null || options.Providers.Count == 0)
-        {
-            return; // 如果没有提供商，后续验证无意义
         }
 
         // MCP：Enabled 时必须有至少一个 Server；再校验各服务器配置（名称、连接方式与必填字段）

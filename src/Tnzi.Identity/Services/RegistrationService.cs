@@ -15,6 +15,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
     private readonly IPasswordPolicyService? _passwordPolicyService;
     private readonly IUserDetailService? _userDetailService;
     private readonly ITokenService? _tokenService;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly bool _multiTenancyEnabled;
 
     public RegistrationService(
         UserManager<User> userManager,
@@ -26,7 +28,9 @@ public class RegistrationService : ApplicationService, IRegistrationService
         IAuthTokenService? authTokenService = null,
         IPasswordPolicyService? passwordPolicyService = null,
         IUserDetailService? userDetailService = null,
-        ITokenService? tokenService = null)
+        ITokenService? tokenService = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -38,6 +42,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
         _passwordPolicyService = passwordPolicyService;
         _userDetailService = userDetailService;
         _tokenService = tokenService;
+        _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     public async Task<Result<TokenResult>> RegisterAsync(RegisterDto input)
@@ -77,7 +83,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
         var user = new User
         {
             UserName = userName,
-            Email = input.Email
+            Email = input.Email,
+            TenantId = ResolveNewUserTenantId()
         };
 
         var result = await _userManager.CreateAsync(user, input.Password);
@@ -116,7 +123,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
             return Fail<TokenResult>("Token service is not available", 500);
         }
 
-        var roles = await _userManager.GetRolesAsync(user);
+        var roles = await GetRolesWithTenantContextAsync(user);
         var token = _tokenService.GenerateToken(user, roles);
         var ipAddress = ScopedContext?.ClientIpAddress ?? string.Empty;
         var userAgent = ScopedContext?.UserAgent ?? string.Empty;
@@ -169,6 +176,19 @@ public class RegistrationService : ApplicationService, IRegistrationService
         };
 
         return Result<TokenResult>.Success(tokenResult);
+    }
+
+    private async Task<IList<string>> GetRolesWithTenantContextAsync(User user)
+    {
+        if (_multiTenancyEnabled && user.TenantId.HasValue && _currentTenant != null)
+        {
+            using (_currentTenant.Change(user.TenantId.Value))
+            {
+                return await _userManager.GetRolesAsync(user);
+            }
+        }
+
+        return await _userManager.GetRolesAsync(user);
     }
 
     public async Task<Result<string>> SendQuickRegisterCodeAsync(SendQuickRegisterCodeDto input)
@@ -308,7 +328,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
             Email = input.Email,
             PhoneNumber = input.PhoneNumber,
             EmailConfirmed = isEmailRequest,
-            PhoneNumberConfirmed = isSmsRequest
+            PhoneNumberConfirmed = isSmsRequest,
+            TenantId = ResolveNewUserTenantId()
         };
 
         var result = await _userManager.CreateAsync(user);
@@ -568,6 +589,16 @@ public class RegistrationService : ApplicationService, IRegistrationService
     }
 
     #region Private Methods
+
+    private Guid? ResolveNewUserTenantId()
+    {
+        if (!_multiTenancyEnabled)
+        {
+            return null;
+        }
+
+        return _currentTenant?.Id ?? CurrentUser?.TenantId;
+    }
 
     /// <summary>
     /// 发布用户注册事件

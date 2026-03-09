@@ -7,12 +7,14 @@ namespace Tnzi.Identity.Data;
 /// </summary>
 /// <typeparam name="TDbContext">派生的 DbContext 类型</typeparam>
 public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Role, Guid, UserClaim, UserRole, UserLogin, RoleClaim, UserToken>
+    , IMultiTenancySwitchProvider
     where TDbContext : DbContext
 {
     protected ICurrentUser CurrentUser { get; }
     protected ICurrentTenant? CurrentTenant { get; }
     protected IDataFilterManager? DataFilterManager { get; }
     protected TimeProvider? TimeProvider { get; }
+    private readonly bool _multiTenancyEnabled;
 
     /// <summary>
     /// 初始化 IdentityDbContext 实例
@@ -27,14 +29,20 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         ICurrentUser currentUser,
         ICurrentTenant? currentTenant = null,
         IDataFilterManager? dataFilterManager = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(options)
     {
         CurrentUser = Check.NotNull(currentUser);
         CurrentTenant = currentTenant;
         DataFilterManager = dataFilterManager;
         TimeProvider = timeProvider;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
+
+    public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
+
+    public DbSet<Tenant> Tenants { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -53,6 +61,12 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
 
         // 3. 配置查询过滤器
         ConfigureQueryFilters(builder);
+
+        // 4. 单租户模式下移除多租户专属身份模型
+        if (!_multiTenancyEnabled)
+        {
+            ConfigureSingleTenantIdentityModel(builder);
+        }
     }
 
     /// <summary>
@@ -132,10 +146,29 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
 
             if (typeof(IMultiTenant).IsAssignableFrom(clrType))
             {
-                var method = GetOrCreateMultiTenantFilterMethod(clrType);
-                method?.Invoke(this, new object[] { builder });
+                if (_multiTenancyEnabled)
+                {
+                    var method = GetOrCreateMultiTenantFilterMethod(clrType);
+                    method?.Invoke(this, new object[] { builder });
+                }
+                else
+                {
+                    builder.Entity(clrType).Ignore(nameof(IMultiTenant.TenantId));
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// 单租户模式下移除仅多租户需要的身份模型映射
+    /// </summary>
+    protected virtual void ConfigureSingleTenantIdentityModel(ModelBuilder builder)
+    {
+        // User.TenantId 作为身份租户列，在单租户模式下不生成数据库列
+        builder.Entity<User>().Ignore(u => u.TenantId);
+
+        // Tenant 主数据在单租户模式下不生成表
+        builder.Ignore<Tenant>();
     }
 
     /// <summary>
@@ -163,7 +196,7 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
     }
 
     protected virtual bool IsSoftDeleteFilterEnabled => DataFilterManager?.IsEnabled<ISoftDeleteFilter>() ?? true;
-    protected virtual bool IsMultiTenantFilterEnabled => DataFilterManager?.IsEnabled<IMultiTenantFilter>() ?? true;
+    protected virtual bool IsMultiTenantFilterEnabled => _multiTenancyEnabled && (DataFilterManager?.IsEnabled<IMultiTenantFilter>() ?? true);
 
     /// <summary>
     /// 获取当前租户ID（在查询时调用，表达式树延迟求值）
@@ -191,6 +224,7 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
             CurrentUser,
             CurrentTenant,
             cancellationToken,
-            TimeProvider);
+            TimeProvider,
+            _multiTenancyEnabled);
     }
 }

@@ -3,33 +3,30 @@ namespace Tnzi.AI.Rag.BackgroundJobs;
 /// <summary>
 /// 文档摄取后台任务 — 异步执行文档提取、切块、嵌入、存储流程
 /// </summary>
-public class DocumentIngestionBackgroundJob : IBackgroundJob<DocumentIngestionJobArgs>
+public class DocumentIngestionBackgroundJob : TenantAwareBackgroundJob<DocumentIngestionJobArgs>
 {
     private readonly IDocumentIngestionService _ingestionService;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
-    private readonly RagDbContext _dbContext;
-    private readonly AIRagOptions _options;
+    private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
     private readonly ILogger<DocumentIngestionBackgroundJob> _logger;
 
     public DocumentIngestionBackgroundJob(
         IDocumentIngestionService ingestionService,
         IRepository<KnowledgeDocument, Guid> docRepository,
-        RagDbContext dbContext,
-        IOptions<AIRagOptions> options,
-        ILogger<DocumentIngestionBackgroundJob> logger)
+        IRepository<KnowledgeBase, Guid> kbRepository,
+        ILogger<DocumentIngestionBackgroundJob> logger,
+        ICurrentTenant? currentTenant = null)
+        : base(currentTenant)
     {
         _ingestionService = Check.NotNull(ingestionService);
         _docRepository = Check.NotNull(docRepository);
-        _dbContext = Check.NotNull(dbContext);
-        _options = Check.NotNull(options).Value;
+        _kbRepository = Check.NotNull(kbRepository);
         _logger = Check.NotNull(logger);
     }
 
     /// <inheritdoc />
-    public async Task ExecuteAsync(DocumentIngestionJobArgs args, CancellationToken cancellationToken = default)
+    protected override async Task ExecuteInTenantContextAsync(DocumentIngestionJobArgs args, CancellationToken cancellationToken)
     {
-        Check.NotNull(args);
-
         _logger.LogInformation(
             "Starting background ingestion for document {DocumentId} in knowledge base {KbId}",
             args.DocumentId, args.KnowledgeBaseId);
@@ -53,10 +50,12 @@ public class DocumentIngestionBackgroundJob : IBackgroundJob<DocumentIngestionJo
                 doc.ChunkCount = ingestResult.ChunkCount;
                 await _docRepository.UpdateAsync(doc);
 
-                // 原子更新知识库统计（避免并发竞态）
-                var prefix = _options.TableNamePrefix;
-                await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"""UPDATE "{prefix}_KnowledgeBase" SET "DocumentCount" = "DocumentCount" + 1, "ChunkCount" = "ChunkCount" + {ingestResult.ChunkCount} WHERE "Id" = {args.KnowledgeBaseId}""");
+                // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
+                await _kbRepository.AsQueryable()
+                    .Where(k => k.Id == args.KnowledgeBaseId)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(k => k.DocumentCount, k => k.DocumentCount + 1)
+                        .SetProperty(k => k.ChunkCount, k => k.ChunkCount + ingestResult.ChunkCount));
 
                 _logger.LogInformation(
                     "Background ingestion completed for document {DocumentId}: {ChunkCount} chunks",

@@ -775,7 +775,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         record!.SetTagsList(tags);
         await _repository.UpdateAsync(record, cancellationToken);
 
-        LogInformation("File tags updated: {FileId}, Tags: {Tags}", fileId, record.Tags);
+        LogInformation("File tags updated: {FileId}, Tags: {Tags}", fileId, record.Tags ?? string.Empty);
         return Ok(record, "File tags updated successfully");
     }
 

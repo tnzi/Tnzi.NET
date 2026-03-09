@@ -21,7 +21,7 @@ public class AuditDeepIterationTests
 
     private void SetupOperationQueryable(List<AuditOperation> operations)
     {
-        var mock = operations.AsQueryable().BuildMock();
+        var mock = operations.BuildMock();
         _repositoryMock.Setup(r => r.AsQueryable()).Returns(mock);
 
         // Setup Where() for IQueryable extension method

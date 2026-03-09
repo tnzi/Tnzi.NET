@@ -48,7 +48,7 @@ public class KafkaEventBusModule : TnziInfrastructureModule
         var kafkaOptions = new KafkaOptions();
         configuration.GetSection("Kafka").Bind(kafkaOptions);
 
-        // 获取 BootstrapServers（优先级：EventBusOptions.KafkaBootstrapServers > ConnectionStrings:Kafka > KafkaOptions）
+        // 获取 BootstrapServers（优先级：EventBusOptions.KafkaBootstrapServers > ConnectionStrings:Kafka > KafkaOptions），并展开 ${VAR} 占位符
         var bootstrapServers = eventBusOptions.KafkaBootstrapServers
             ?? configuration.GetConnectionString("Kafka");
 
@@ -57,6 +57,8 @@ public class KafkaEventBusModule : TnziInfrastructureModule
             // 回退到 KafkaOptions 中的配置（可能是默认值 localhost:9092）
             bootstrapServers = kafkaOptions.BootstrapServers;
         }
+
+        bootstrapServers = ConnectionStringExpander.Expand(bootstrapServers, configuration);
 
         // 注册Kafka生产者
         services.AddSingleton<IProducer<string, string>>(provider =>

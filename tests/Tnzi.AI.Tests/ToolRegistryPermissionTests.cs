@@ -102,11 +102,6 @@ public class ToolRegistryPermissionTests
                 })
             .ReturnsAsync(new AgentExecutor(Mock.Of<IChatClient>(), new AgentExecutorOptions { Name = "test" }));
 
-        var threadService = new Mock<IAgentThreadInternalService>();
-        var usageLogService = new Mock<IUsageLogService>();
-        var quotaService = new Mock<IQuotaService>();
-        var tokenEstimator = new Mock<ITokenEstimator>();
-
         var agentRepository = new Mock<IRepository<Agent, Guid>>();
         agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Agent
@@ -139,11 +134,6 @@ public class ToolRegistryPermissionTests
         permissionChecker.Setup(p => p.IsGrantedAsync("perm.read")).ReturnsAsync(true);
         permissionChecker.Setup(p => p.IsGrantedAsync("perm.write")).ReturnsAsync(false);
 
-        var services = new ServiceCollection();
-        services.AddSingleton<IToolRegistry>(toolRegistry);
-        services.AddSingleton(permissionChecker.Object);
-        var serviceProvider = services.BuildServiceProvider();
-
         var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions
         {
             DefaultProvider = "OpenAI",
@@ -153,25 +143,16 @@ public class ToolRegistryPermissionTests
             }
         });
 
-        var guardrailRunner = new GuardrailRunner(
-            [],
-            [],
-            aiOptions,
-            Mock.Of<ILogger<GuardrailRunner>>());
-
-        var pipeline = new ChatExecutionPipeline(
+        var resolver = new AgentResolver(
             agentFactory.Object,
-            threadService.Object,
-            usageLogService.Object,
-            quotaService.Object,
-            tokenEstimator.Object,
-            guardrailRunner,
             aiOptions,
             agentRepository.Object,
-            serviceProvider,
-            Mock.Of<ILogger<ChatExecutionPipeline>>());
+            toolRegistry,
+            new SimplePromptTemplateEngine(),
+            Mock.Of<ILogger<AgentResolver>>(),
+            permissionChecker: permissionChecker.Object);
 
-        var resolution = await pipeline.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
+        var resolution = await resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
 
         resolution.IsSuccess.ShouldBeTrue();
         capturedPermissions.ShouldBe(["perm.read"]);

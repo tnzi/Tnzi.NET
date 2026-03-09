@@ -50,13 +50,6 @@ public class TwoFactorServiceTests
         );
     }
 
-    [Fact(Skip = "需要集成测试：SendSmsCodeAsync 使用了 EF Core 的复杂查询（Where、OrderByDescending、FirstOrDefaultAsync），在单元测试中难以完全模拟")]
-    public async Task SendSmsCodeAsync_WithValidInput_ReturnsTrue()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
     [Fact]
     public async Task SendSmsCodeAsync_WhenSmsDisabled_ReturnsFalse()
     {
@@ -79,34 +72,6 @@ public class TwoFactorServiceTests
 
         // Assert
         Assert.False(result.Succeeded);
-    }
-
-    [Fact(Skip = "需要集成测试：SendEmailCodeAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task SendEmailCodeAsync_WithValidInput_ReturnsTrue()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：VerifyCodeAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task VerifyCodeAsync_WithValidCode_ReturnsTrue()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：VerifyCodeAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task VerifyCodeAsync_WithExpiredCode_ReturnsFalse()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：DisableTwoFactorAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task DisableTwoFactorAsync_WithValidUserId_Disables2FA()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
     }
 
     #region GetTotpSetupInfoAsync

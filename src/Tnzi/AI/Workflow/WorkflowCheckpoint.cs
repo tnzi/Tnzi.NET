@@ -16,9 +16,9 @@ public class WorkflowCheckpoint
     public HashSet<string> CompletedStepIds { get; set; } = [];
 
     /// <summary>
-    /// 各步骤的输出（Key: StepId, Value: 输出文本）
+    /// 各步骤的输出（Key: StepId, Value: 步骤输出）
     /// </summary>
-    public Dictionary<string, string> StepOutputs { get; set; } = new();
+    public Dictionary<string, WorkflowStepOutput> StepOutputs { get; set; } = new();
 
     /// <summary>
     /// 工作流初始输入

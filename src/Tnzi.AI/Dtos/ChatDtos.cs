@@ -48,4 +48,23 @@ public class ChatResponseDto
     public TokenUsageDto? Usage { get; set; }
     /// <summary>Thread ID</summary>
     public Guid? ThreadId { get; set; }
+    /// <summary>Handoff path (only set when handoff execution mode was used)</summary>
+    public List<string>? HandoffPath { get; set; }
+    /// <summary>RAG citations (source documents used)</summary>
+    public List<CitationDto>? Citations { get; set; }
+}
+
+/// <summary>
+/// RAG 引用来源
+/// </summary>
+public class CitationDto
+{
+    /// <summary>Source document name</summary>
+    public string? SourceName { get; set; }
+    /// <summary>Source document link</summary>
+    public string? SourceLink { get; set; }
+    /// <summary>Referenced text excerpt</summary>
+    public string Text { get; set; } = string.Empty;
+    /// <summary>Relevance score</summary>
+    public double? Score { get; set; }
 }

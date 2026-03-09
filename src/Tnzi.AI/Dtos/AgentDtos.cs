@@ -27,6 +27,20 @@ public class AgentDto
     public int? TimeoutSeconds { get; set; }
     /// <summary>Whether enabled</summary>
     public bool IsEnabled { get; set; }
+    /// <summary>Execution mode</summary>
+    public AgentExecutionMode ExecutionMode { get; set; }
+    /// <summary>Typed execution configuration for multi-agent modes</summary>
+    public AgentExecutionConfigDto? ExecutionConfig { get; set; }
+    /// <summary>Domain tags (e.g. ["coding", "research", "writing"])</summary>
+    public List<string>? Domains { get; set; }
+    /// <summary>Role tags (e.g. ["reviewer", "implementer", "planner"])</summary>
+    public List<string>? Roles { get; set; }
+    /// <summary>Quality tier (1-5, 5=highest)</summary>
+    public int QualityTier { get; set; }
+    /// <summary>Latency tier (1-5, 1=fastest)</summary>
+    public int LatencyTier { get; set; }
+    /// <summary>Cost tier (1-5, 1=cheapest)</summary>
+    public int CostTier { get; set; }
     /// <summary>Creation time</summary>
     public DateTime CreationTime { get; set; }
     /// <summary>Last modification time</summary>
@@ -74,6 +88,30 @@ public class CreateAgentDto
 
     /// <summary>Whether enabled</summary>
     public bool IsEnabled { get; set; } = true;
+
+    /// <summary>Execution mode</summary>
+    public AgentExecutionMode ExecutionMode { get; set; } = AgentExecutionMode.Single;
+
+    /// <summary>Typed execution configuration for multi-agent modes</summary>
+    public AgentExecutionConfigDto? ExecutionConfig { get; set; }
+
+    /// <summary>Domain tags (e.g. ["coding", "research", "writing"])</summary>
+    public List<string>? Domains { get; set; }
+
+    /// <summary>Role tags (e.g. ["reviewer", "implementer", "planner"])</summary>
+    public List<string>? Roles { get; set; }
+
+    /// <summary>Quality tier (1-5, 5=highest)</summary>
+    [Range(1, 5)]
+    public int QualityTier { get; set; } = 3;
+
+    /// <summary>Latency tier (1-5, 1=fastest)</summary>
+    [Range(1, 5)]
+    public int LatencyTier { get; set; } = 3;
+
+    /// <summary>Cost tier (1-5, 1=cheapest)</summary>
+    [Range(1, 5)]
+    public int CostTier { get; set; } = 3;
 }
 
 /// <summary>
@@ -116,9 +154,106 @@ public class UpdateAgentDto
     /// <summary>Whether enabled</summary>
     public bool? IsEnabled { get; set; }
 
+    /// <summary>Execution mode</summary>
+    public AgentExecutionMode? ExecutionMode { get; set; }
+
+    /// <summary>Typed execution configuration for multi-agent modes</summary>
+    public AgentExecutionConfigDto? ExecutionConfig { get; set; }
+
+    /// <summary>Domain tags (e.g. ["coding", "research", "writing"])</summary>
+    public List<string>? Domains { get; set; }
+
+    /// <summary>Role tags (e.g. ["reviewer", "implementer", "planner"])</summary>
+    public List<string>? Roles { get; set; }
+
+    /// <summary>Quality tier (1-5, 5=highest)</summary>
+    [Range(1, 5)]
+    public int? QualityTier { get; set; }
+
+    /// <summary>Latency tier (1-5, 1=fastest)</summary>
+    [Range(1, 5)]
+    public int? LatencyTier { get; set; }
+
+    /// <summary>Cost tier (1-5, 1=cheapest)</summary>
+    [Range(1, 5)]
+    public int? CostTier { get; set; }
+
     /// <summary>Change note for version tracking</summary>
     [MaxLength(500)]
     public string? ChangeNote { get; set; }
+}
+
+/// <summary>
+/// Agent 执行配置 DTO — 统一序列化/反序列化入口
+/// </summary>
+public class AgentExecutionConfigDto
+{
+    private static readonly JsonSerializerOptions CamelCaseOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    /// <summary>Handoff 配置</summary>
+    public HandoffExecutionConfigDto? Handoff { get; set; }
+
+    /// <summary>Router 配置</summary>
+    public RouterExecutionConfigDto? Router { get; set; }
+
+    /// <summary>
+    /// 序列化为 JSON 字符串（存入 Agent.Configuration）
+    /// </summary>
+    public static string? Serialize(AgentExecutionConfigDto? config)
+    {
+        if (config == null) return null;
+        if (config.Handoff == null && config.Router == null) return null;
+        return JsonSerializer.Serialize(config, CamelCaseOptions);
+    }
+
+    /// <summary>
+    /// 从 Agent.Configuration JSON 反序列化
+    /// </summary>
+    public static AgentExecutionConfigDto? Deserialize(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var config = JsonSerializer.Deserialize<AgentExecutionConfigDto>(json, CamelCaseOptions);
+            if (config == null) return null;
+            return config.Handoff == null && config.Router == null
+                ? null
+                : config;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// Handoff 执行配置 DTO
+/// </summary>
+public class HandoffExecutionConfigDto
+{
+    /// <summary>目标 Agent 名称到 AgentId 的映射</summary>
+    public Dictionary<string, Guid> Targets { get; set; } = [];
+
+    /// <summary>最大转接次数</summary>
+    [Range(1, 20)]
+    public int? MaxHandoffs { get; set; }
+}
+
+/// <summary>
+/// Router 执行配置 DTO
+/// </summary>
+public class RouterExecutionConfigDto
+{
+    /// <summary>可路由的目标 Agent 名称到 AgentId 的映射</summary>
+    public Dictionary<string, Guid> Targets { get; set; } = [];
+
+    /// <summary>是否允许 Router 直接回答</summary>
+    public bool? AllowDirectResponse { get; set; }
 }
 
 /// <summary>
@@ -170,6 +305,14 @@ public class AgentResponseDto
     public string? Model { get; set; }
     /// <summary>Token usage</summary>
     public TokenUsageDto? Usage { get; set; }
+    /// <summary>RAG citations (source documents used)</summary>
+    public List<CitationDto>? Citations { get; set; }
+
+    /// <summary>Execution path for multi-agent orchestration modes</summary>
+    public List<string>? HandoffPath { get; set; }
+
+    /// <summary>Final agent name that produced the answer</summary>
+    public string? FinalAgentName { get; set; }
 }
 
 /// <summary>

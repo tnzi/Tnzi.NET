@@ -266,36 +266,9 @@ public class StorageDeepIterationTests
         Assert.Contains("Storage unavailable", result.Data.Error);
     }
 
-    [Fact(Skip = "需要集成测试：BatchVerifyIntegrityAsync 使用了 AsQueryable().OrderBy().Take().ToListAsync()，Moq 无法 Mock IQueryable 扩展方法。")]
-    public async Task BatchVerifyIntegrityAsync_ReturnsSummary_WithProblemsOnly()
-    {
-        // 注意：此测试需要集成测试环境
-        // BatchVerifyIntegrityAsync 使用 _repository.AsQueryable().OrderBy().Take().ToListAsync()
-        // Moq 无法 Mock IQueryable 扩展方法，建议使用 InMemory 数据库
-    }
-
     #endregion
 
     #region File Share Management Tests
-
-    [Fact(Skip = "需要集成测试：GetSharesByFileAsync 使用了 AsQueryable().Where().OrderByDescending().ToListAsync()，Moq 无法 Mock。")]
-    public async Task GetSharesByFileAsync_ReturnsShareSummaries()
-    {
-        // 注意：此测试需要集成测试环境
-        // GetSharesByFileAsync 使用 _shareRepository.AsQueryable().Where().OrderByDescending().ToListAsync()
-    }
-
-    [Fact(Skip = "需要集成测试：GetActiveSharesAsync 使用了 AsQueryable().Where().CountAsync().Skip().Take().ToListAsync()，Moq 无法 Mock。")]
-    public async Task GetActiveSharesAsync_ReturnsPaged()
-    {
-        // 注意：此测试需要集成测试环境
-    }
-
-    [Fact(Skip = "需要集成测试：BatchRevokeSharesAsync 使用了 AsQueryable().Where().ToListAsync() + UpdateManyAsync，Moq 无法 Mock IQueryable。")]
-    public async Task BatchRevokeSharesAsync_RevokesMultiple()
-    {
-        // 注意：此测试需要集成测试环境
-    }
 
     [Fact]
     public async Task CreateShareAsync_WithPassword_SetsRequirePasswordTrue()
@@ -683,12 +656,6 @@ public class StorageDeepIterationTests
         // "photo" 和 "Photo" 是不同的（Distinct 是大小写敏感的）
         // 但 "photo" 有两个，只保留一个
         Assert.True(tagsList.Count <= tags.Count);
-    }
-
-    [Fact(Skip = "需要集成测试：GetFilesByTagAsync 使用了 AsQueryable().Where().CountAsync().Skip().Take().ToListAsync()，Moq 无法 Mock。")]
-    public async Task GetFilesByTagAsync_ReturnsPagedFiles()
-    {
-        // 注意：此测试需要集成测试环境
     }
 
     [Fact]

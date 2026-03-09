@@ -99,6 +99,24 @@ public class WorkflowStepDto
 
     /// <summary>Custom instructions (overrides Agent default; supports {{stepId}} template variables)</summary>
     public string? Instructions { get; set; }
+
+    /// <summary>Maximum retry attempts on failure (0 = no retry, default)</summary>
+    [Range(0, 10)]
+    public int MaxRetries { get; set; }
+
+    /// <summary>Delay in seconds between retries (default: 2, uses exponential backoff)</summary>
+    [Range(1, 300)]
+    public int RetryDelaySeconds { get; set; } = 2;
+
+    /// <summary>Step execution timeout in seconds (null = use Agent default)</summary>
+    [Range(1, 3600)]
+    public int? TimeoutSeconds { get; set; }
+
+    /// <summary>Whether this step requires human approval before downstream steps can proceed</summary>
+    public bool RequiresApproval { get; set; }
+
+    /// <summary>Extra configuration key-value pairs (e.g., nodeType, loopId)</summary>
+    public Dictionary<string, string>? Configuration { get; set; }
 }
 
 /// <summary>
@@ -124,7 +142,7 @@ public class RunWorkflowRequestDto
     [MaxLength(10000)]
     public string Input { get; set; } = null!;
 
-    /// <summary>Optional user ID for quota check (workflow run does not deduct tokens; only pre-check when provided)</summary>
+    /// <summary>Optional user ID for quota reservation and settlement (tokens are reserved before execution and settled after completion)</summary>
     public Guid? UserId { get; set; }
 }
 
@@ -133,10 +151,73 @@ public class RunWorkflowRequestDto
 /// </summary>
 public class WorkflowExecutionResultDto
 {
+    /// <summary>Execution ID (set for resumable DAG runs)</summary>
+    public string? ExecutionId { get; set; }
+    /// <summary>Associated run ID when runtime tracking is enabled</summary>
+    public Guid? RunId { get; set; }
     /// <summary>Workflow output (final output text)</summary>
     public string Output { get; set; } = string.Empty;
     /// <summary>Execution status</summary>
     public string Status { get; set; } = string.Empty;
     /// <summary>Per-step results (DAG mode only; null for Sequential/Parallel)</summary>
     public List<WorkflowStepResultDto>? StepResults { get; set; }
+}
+
+/// <summary>
+/// 工作流执行状态 DTO
+/// </summary>
+public class WorkflowExecutionStatusDto
+{
+    /// <summary>Execution ID</summary>
+    public string ExecutionId { get; set; } = string.Empty;
+    /// <summary>Status (running, completed, failed, paused, awaiting_approval)</summary>
+    public string Status { get; set; } = string.Empty;
+    /// <summary>Completed step IDs</summary>
+    public List<string> CompletedStepIds { get; set; } = [];
+    /// <summary>Steps awaiting approval</summary>
+    public List<string> StepsAwaitingApproval { get; set; } = [];
+    /// <summary>Created time</summary>
+    public DateTime CreatedAt { get; set; }
+    /// <summary>Last updated time</summary>
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// 审批/拒绝工作流步骤请求 DTO
+/// </summary>
+public class WorkflowStepApprovalDto
+{
+    /// <summary>Optional feedback or reason</summary>
+    [MaxLength(2000)]
+    public string? Feedback { get; set; }
+}
+
+/// <summary>
+/// 工作流流式事件 DTO
+/// </summary>
+public class WorkflowStreamEventDto
+{
+    /// <summary>Execution ID (set for resumable DAG runs)</summary>
+    public string? ExecutionId { get; set; }
+
+    /// <summary>事件类型（step/completed/error）</summary>
+    public string EventType { get; set; } = string.Empty;
+
+    /// <summary>当前步骤 ID（仅单步骤事件时提供）</summary>
+    public string? StepId { get; set; }
+
+    /// <summary>工作流/步骤状态</summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>当前事件输出内容</summary>
+    public string? Output { get; set; }
+
+    /// <summary>结构化步骤结果（DAG 或最终汇总时提供）</summary>
+    public List<WorkflowStepResultDto>? StepResults { get; set; }
+
+    /// <summary>是否为终止事件</summary>
+    public bool IsDone { get; set; }
+
+    /// <summary>错误消息（仅错误事件时提供）</summary>
+    public string? ErrorMessage { get; set; }
 }

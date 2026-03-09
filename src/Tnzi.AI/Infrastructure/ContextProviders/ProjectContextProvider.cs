@@ -5,7 +5,7 @@ namespace Tnzi.AI.Infrastructure.ContextProviders;
 /// </summary>
 public class ProjectContextProvider : IContextProvider
 {
-    private readonly IProjectContextLoader _contextLoader;
+    private readonly IProjectContextLoader? _contextLoader;
     private readonly ILogger<ProjectContextProvider> _logger;
     private readonly SemaphoreSlim _loadLock = new(1, 1);
 
@@ -13,15 +13,20 @@ public class ProjectContextProvider : IContextProvider
     private volatile string? _cachedInstructions;
     private volatile bool _loaded;
 
-    public ProjectContextProvider(IProjectContextLoader contextLoader, ILogger<ProjectContextProvider> logger)
+    public ProjectContextProvider(ILogger<ProjectContextProvider> logger, IProjectContextLoader? contextLoader = null)
     {
-        _contextLoader = Check.NotNull(contextLoader);
         _logger = Check.NotNull(logger);
+        _contextLoader = contextLoader;
     }
 
     /// <inheritdoc />
     public async Task<ContextInjection> GetContextAsync(List<ChatMessage> messages, CancellationToken ct = default)
     {
+        if (_contextLoader == null)
+        {
+            return ContextInjection.Empty;
+        }
+
         if (!_loaded)
         {
             await _loadLock.WaitAsync(ct);

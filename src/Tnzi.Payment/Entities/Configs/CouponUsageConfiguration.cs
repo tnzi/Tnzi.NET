@@ -10,6 +10,13 @@ public class CouponUsageConfiguration : EntityTypeConfigurationBase<CouponUsage,
     /// </summary>
     public override void Configure(EntityTypeBuilder<CouponUsage> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(c => c.TenantId);
+        }
+
         builder.HasIndex(c => c.UserId);
         builder.HasIndex(c => c.CouponId);
         builder.HasIndex(c => new { c.CouponId, c.UserId });

@@ -16,13 +16,6 @@ public interface ITnziApplication : IDisposable, IAsyncDisposable
     IReadOnlyList<IModuleDescriptor> Modules { get; }
 
     /// <summary>
-    /// 获取服务集合（仅在 ServiceProvider 构建之前可用，构建后为 null）
-    /// 用于模块在 OnApplicationInitialization 阶段补充注册服务
-    /// </summary>
-    [ExperimentalApi(Reason = "Late service registration may be replaced by a more structured approach in future versions")]
-    IServiceCollection? Services { get; }
-
-    /// <summary>
     /// 配置服务（异步执行模块的 PreConfigureServices、ConfigureServices、PostConfigureServices）
     /// </summary>
     Task ConfigureServicesAsync();
@@ -49,9 +42,6 @@ public class TnziApplication : ITnziApplication
 
     /// <inheritdoc />
     public IReadOnlyList<IModuleDescriptor> Modules { get; }
-
-    /// <inheritdoc />
-    public IServiceCollection? Services => _services;
 
     private readonly IServiceCollection _services;
     private readonly IConfiguration _configuration;

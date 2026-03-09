@@ -63,20 +63,6 @@ public class LoginSecurityServiceTests
         Assert.Equal(0, result.RiskLevel);
     }
 
-    [Fact(Skip = "需要集成测试：DetectAbnormalLoginAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task DetectAbnormalLoginAsync_WithNewIp_ReturnsAbnormal()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
-    [Fact(Skip = "需要集成测试：DetectAbnormalLoginAsync 使用了 EF Core 的复杂查询，在单元测试中难以完全模拟")]
-    public async Task DetectAbnormalLoginAsync_WithKnownIp_ReturnsNormal()
-    {
-        await Task.CompletedTask;
-        Assert.True(true);
-    }
-
     [Fact]
     public void GenerateDeviceFingerprint_WithValidInput_ReturnsFingerprint()
     {

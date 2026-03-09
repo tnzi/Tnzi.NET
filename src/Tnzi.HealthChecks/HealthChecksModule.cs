@@ -187,10 +187,12 @@ public class HealthChecksModule : TnziFrameworkModule
         });
 
         // Readiness probe - 检查所有依赖
-        webApp.MapHealthChecks(options.ReadinessPath, new HealthCheckOptions
+        var readinessOptions = new HealthCheckOptions();
+        if (options.DetailedOutput)
         {
-            ResponseWriter = options.DetailedOutput ? WriteDetailedResponseAsync : null
-        });
+            readinessOptions.ResponseWriter = WriteDetailedResponseAsync;
+        }
+        webApp.MapHealthChecks(options.ReadinessPath, readinessOptions);
 
         return Task.CompletedTask;
     }

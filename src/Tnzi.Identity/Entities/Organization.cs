@@ -3,7 +3,7 @@ namespace Tnzi.Identity.Entities;
 /// <summary>
 /// 组织架构实体
 /// </summary>
-public class Organization : FullAuditedEntity<Guid>
+public class Organization : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
     /// 获取或设置 组织名称
