@@ -67,6 +67,12 @@ public class ContextInjectionMiddleware : IAiMiddleware
                 context.Citations.AddRange(injection.Citations);
                 _logger.LogDebug("Injected {Count} citations", injection.Citations.Count);
             }
+
+            if (injection.ActiveSkills is { Count: > 0 })
+            {
+                context.Properties["ActiveSkills"] = injection.ActiveSkills;
+                _logger.LogDebug("Propagated {Count} active skills to middleware context", injection.ActiveSkills.Count);
+            }
         }
         catch (Exception ex)
         {

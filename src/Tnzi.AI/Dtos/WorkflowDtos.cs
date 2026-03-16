@@ -193,6 +193,16 @@ public class WorkflowStepApprovalDto
 }
 
 /// <summary>
+/// 克隆工作流请求 DTO
+/// </summary>
+public class CloneWorkflowRequestDto
+{
+    /// <summary>新工作流名称（为空则使用 "{原名} (Copy)"）</summary>
+    [MaxLength(200)]
+    public string? NewName { get; set; }
+}
+
+/// <summary>
 /// 工作流流式事件 DTO
 /// </summary>
 public class WorkflowStreamEventDto

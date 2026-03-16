@@ -32,6 +32,16 @@ public class MailKitEmailSender : IEmailSender
             return SendResult.CreateFailure("Mail sender options not configured");
         }
 
+        // In development, redirect all outbound email to the configured override address
+        var devOverride = _options.MailSender.DevOverrideEmail;
+        if (!string.IsNullOrWhiteSpace(devOverride))
+        {
+            _logger.LogWarning("[DEV] Email redirected. OriginalTo={OriginalTo}, Override={Override}, Subject={Subject}", to, devOverride, subject);
+            subject = $"[DEV → {name ?? to} <{to}>] {subject}";
+            to = devOverride;
+            name = "Dev Override";
+        }
+
         try
         {
             var message = new MimeMessage();

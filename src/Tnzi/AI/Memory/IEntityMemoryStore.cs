@@ -15,6 +15,16 @@ public interface IEntityMemoryStore
     Task<IReadOnlyList<EntityMemoryEntry>> GetRelevantEntitiesAsync(Guid? userId, int maxEntities = 20, CancellationToken ct = default);
 
     /// <summary>
+    /// 获取用户的相关实体记忆（按最近提及时间排序，按 AgentId 隔离）
+    /// </summary>
+    /// <param name="userId">用户 ID（null 表示全局）</param>
+    /// <param name="agentId">Agent ID（null 表示不限 Agent）</param>
+    /// <param name="maxEntities">最大返回数量</param>
+    /// <param name="ct">取消令牌</param>
+    Task<IReadOnlyList<EntityMemoryEntry>> GetRelevantEntitiesAsync(Guid? userId, Guid? agentId, int maxEntities = 20, CancellationToken ct = default)
+        => GetRelevantEntitiesAsync(userId, maxEntities, ct);
+
+    /// <summary>
     /// 插入或更新实体记忆（按 EntityName + UserId 匹配）
     /// </summary>
     /// <param name="entry">实体记忆条目</param>
@@ -36,6 +46,17 @@ public interface IEntityMemoryStore
     /// <param name="maxResults">最大结果数</param>
     /// <param name="ct">取消令牌</param>
     Task<IReadOnlyList<EntityMemoryEntry>> SearchEntitiesAsync(string query, Guid? userId, int maxResults = 10, CancellationToken ct = default);
+
+    /// <summary>
+    /// 搜索实体记忆（按名称关键词匹配，按 AgentId 隔离）
+    /// </summary>
+    /// <param name="query">搜索关键词</param>
+    /// <param name="userId">用户 ID（null 表示全局）</param>
+    /// <param name="agentId">Agent ID（null 表示不限 Agent）</param>
+    /// <param name="maxResults">最大结果数</param>
+    /// <param name="ct">取消令牌</param>
+    Task<IReadOnlyList<EntityMemoryEntry>> SearchEntitiesAsync(string query, Guid? userId, Guid? agentId, int maxResults = 10, CancellationToken ct = default)
+        => SearchEntitiesAsync(query, userId, maxResults, ct);
 }
 
 /// <summary>
@@ -73,4 +94,9 @@ public class EntityMemoryEntry
     /// 关联用户 ID
     /// </summary>
     public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// 关联 Agent ID
+    /// </summary>
+    public Guid? AgentId { get; set; }
 }

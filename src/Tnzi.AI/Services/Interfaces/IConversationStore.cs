@@ -4,8 +4,14 @@ namespace Tnzi.AI.Services.Interfaces;
 /// 对话存储抽象 — 解耦对话持久化方式
 /// </summary>
 /// <remarks>
+/// <para>
 /// 默认实现为 DatabaseConversationStore（桥接 IAgentThreadInternalService）。
 /// Tnzi.AI.Coder 模块提供 FileConversationStore 替代实现（CLI 场景不需要数据库）。
+/// </para>
+/// <para>
+/// conversationId 是不透明标识符，具体格式取决于实现：
+/// DatabaseConversationStore 要求 GUID 格式字符串，FileConversationStore 接受任意合法文件名字符串。
+/// </para>
 /// </remarks>
 public interface IConversationStore
 {
@@ -57,7 +63,7 @@ public interface IConversationStore
 public class ConversationSummary
 {
     /// <summary>
-    /// 对话 ID
+    /// 对话 ID（不透明标识符，格式取决于 IConversationStore 实现）
     /// </summary>
     public string Id { get; set; } = string.Empty;
 

@@ -18,13 +18,14 @@ public class ContextProvidersOptions
     public bool Enabled { get; set; } = false;
 
     /// <summary>
-    /// 上下文注入的最大 token 预算（0 = 不限制，默认 4096）
+    /// 上下文注入的最大 token 预算（0 = 不限制，默认 16384）
     /// </summary>
     /// <remarks>
     /// 当所有 ContextProvider 的注入内容总 token 超过此预算时，
     /// 后续 Provider 的注入将被跳过。设为 0 则不进行 token 限制。
+    /// 推荐范围：仅记忆/Skill 场景用 4096–8192；RAG 为主用 8192–16384；全功能场景用 16384–32768。
     /// </remarks>
-    public int MaxTokenBudget { get; set; } = 4096;
+    public int MaxTokenBudget { get; set; } = 16_384;
 
     /// <summary>
     /// 聊天历史记忆配置（向量化 Chat History）
@@ -82,6 +83,83 @@ public class MemoryOptions
     /// 默认记忆 scope
     /// </summary>
     public string DefaultScope { get; set; } = "default";
+
+    /// <summary>
+    /// 是否启用用户级记忆隔离（按 UserId 隔离记忆）
+    /// </summary>
+    /// <remarks>
+    /// 启用后，不同用户的记忆互不可见。关闭时保持旧行为（所有用户共享同一 scope）。
+    /// </remarks>
+    public bool EnableUserIsolation { get; set; } = false;
+
+    /// <summary>
+    /// 是否启用自动记忆沉淀（对话结束时自动提取并持久化记忆）
+    /// </summary>
+    /// <remarks>
+    /// 启用后，每次对话结束时会调用 LLM 从对话中提炼持久记忆条目。
+    /// 默认关闭以避免额外的 LLM 调用成本。
+    /// </remarks>
+    public bool AutoPersist { get; set; }
+
+    /// <summary>
+    /// 自动沉淀使用的自定义提示词（null 时使用内置默认）
+    /// </summary>
+    public string? AutoPersistPrompt { get; set; }
+
+    /// <summary>
+    /// 自动沉淀的最大 token 数
+    /// </summary>
+    public int AutoPersistMaxTokens { get; set; } = 500;
+
+    /// <summary>
+    /// 沉淀时是否自动合并去重（仅在 AutoPersist=true 时生效）
+    /// </summary>
+    public bool AutoConsolidate { get; set; } = true;
+
+    /// <summary>
+    /// 当记忆条目数超过此阈值时触发合并
+    /// </summary>
+    public int ConsolidateThreshold { get; set; } = 30;
+
+    /// <summary>
+    /// 每个 scope 的最大条目数（null=不限制）
+    /// </summary>
+    /// <remarks>超过限制时自动删除最旧条目。</remarks>
+    public int? MaxEntriesPerScope { get; set; }
+
+    /// <summary>
+    /// 条目过期时间（null=不过期）
+    /// </summary>
+    public TimeSpan? EntryExpiration { get; set; }
+
+    /// <summary>
+    /// 是否启用增量合并（Mem0 式 ADD/UPDATE/DELETE 决策）
+    /// </summary>
+    /// <remarks>
+    /// 启用后，新记忆入库前会与已有记忆比对，由 IMemoryConsolidator 决定操作。
+    /// 仅在 AutoPersist=true 时有意义。默认启用。
+    /// </remarks>
+    public bool IncrementalConsolidate { get; set; } = true;
+
+    /// <summary>
+    /// 增量合并时检索的相似记忆数
+    /// </summary>
+    public int ConsolidateSearchTopK { get; set; } = 3;
+
+    /// <summary>
+    /// 每次自动沉淀的最大合并调用次数（限制 LLM 成本）
+    /// </summary>
+    public int MaxConsolidationCallsPerPersist { get; set; } = 5;
+
+    /// <summary>
+    /// 重要性权重系数（用于搜索评分）
+    /// </summary>
+    public double ImportanceWeight { get; set; } = 1.0;
+
+    /// <summary>
+    /// 时间衰减速率（越大衰减越快，默认 0.01 ≈ 半衰期 70 天）
+    /// </summary>
+    public double RecencyDecayRate { get; set; } = 0.01;
 }
 
 /// <summary>
@@ -105,7 +183,7 @@ public class ChatHistoryMemoryOptions
     /// <summary>
     /// 最大返回结果数
     /// </summary>
-    public int MaxResults { get; set; } = 5;
+    public int MaxResults { get; set; } = 10;
 
     /// <summary>
     /// 上下文注入提示词
@@ -194,6 +272,11 @@ public class SkillsOptions
     /// Instructions：全量注入到系统指令；OnDemandTools：暴露 skill_search/skill_get 工具；Both：两者都启用。
     /// </remarks>
     public SkillInjectionMode InjectionMode { get; set; } = SkillInjectionMode.OnDemandTools;
+
+    /// <summary>
+    /// 技能缓存 TTL（默认 15 分钟）
+    /// </summary>
+    public TimeSpan CacheTtl { get; set; } = TimeSpan.FromMinutes(15);
 }
 
 /// <summary>

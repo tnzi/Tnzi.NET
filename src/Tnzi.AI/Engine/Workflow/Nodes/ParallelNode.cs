@@ -73,6 +73,7 @@ public class ParallelNode : IWorkflowNode
                     model: model,
                     instructions: instructions,
                     name: worker.StepId,
+                    agentId: worker.AgentId,
                     ct: cancellationToken);
 
                 var messages = new List<ChatMessage> { new(ChatRole.User, inputText) };

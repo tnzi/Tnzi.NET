@@ -54,13 +54,15 @@ public class RouterNode : IWorkflowNode
         string? provider = step.Provider;
         string? model = step.Model;
 
+        Guid? routerAgentId = null;
         if (config.TryGetValue("routerAgentId", out var routerIdStr)
-            && Guid.TryParse(routerIdStr, out var routerAgentId))
+            && Guid.TryParse(routerIdStr, out var parsedRouterAgentId))
         {
+            routerAgentId = parsedRouterAgentId;
             var agentRepo = scope.ServiceProvider.GetService<IRepository<Agent, Guid>>();
             if (agentRepo != null)
             {
-                var routerAgent = await agentRepo.GetAsync(routerAgentId, cancellationToken);
+                var routerAgent = await agentRepo.GetAsync(parsedRouterAgentId, cancellationToken);
                 if (routerAgent != null)
                 {
                     provider ??= routerAgent.Provider;
@@ -74,6 +76,7 @@ public class RouterNode : IWorkflowNode
             model: model,
             instructions: "You are a router. Classify the input and respond with ONLY the route key, nothing else.",
             name: step.StepId ?? "router-node",
+            agentId: routerAgentId,
             ct: cancellationToken);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, routerPrompt) };

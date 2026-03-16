@@ -80,7 +80,10 @@ public sealed class PruneChatReducer : IHistoryReducer
         var keepTurns = _options.KeepLastTurns;
         var turnsToKeep = turns.Count > keepTurns ? turns.Skip(turns.Count - keepTurns).ToList() : turns;
 
-        // 步骤 4：对保留的轮次应用工具输出裁剪（如果配置了）
+        // 步骤 4：建立 CallId → ToolName 映射表（从 assistant 消息的 FunctionCallContent 中提取）
+        var callIdToToolName = ChatHistoryHelper.BuildCallIdToToolNameMap(turnsToKeep.SelectMany(t => t));
+
+        // 步骤 5：对保留的轮次应用工具输出裁剪（如果配置了）
         var keptMessages = new List<ChatMessage>();
         for (int i = 0; i < turnsToKeep.Count; i++)
         {
@@ -90,7 +93,7 @@ public sealed class PruneChatReducer : IHistoryReducer
             foreach (var message in turn)
             {
                 // 检查是否需要裁剪工具输出
-                if (ShouldPruneToolOutput(message, turnAge))
+                if (ShouldPruneToolOutput(message, turnAge, callIdToToolName))
                 {
                     _logger.LogTrace("Pruning tool output from turn {TurnAge}", turnAge);
                     continue; // 跳过此消息
@@ -100,7 +103,7 @@ public sealed class PruneChatReducer : IHistoryReducer
             }
         }
 
-        // 步骤 5：合并系统消息和保留的消息
+        // 步骤 6：合并系统消息和保留的消息
         var result = new List<ChatMessage>(systemMessages.Count + keptMessages.Count);
         result.AddRange(systemMessages);
         result.AddRange(keptMessages);
@@ -111,7 +114,7 @@ public sealed class PruneChatReducer : IHistoryReducer
     /// <summary>
     /// 判断是否应该裁剪工具输出
     /// </summary>
-    private bool ShouldPruneToolOutput(ChatMessage message, int turnAge)
+    private bool ShouldPruneToolOutput(ChatMessage message, int turnAge, Dictionary<string, string> callIdToToolName)
     {
         // 如果没有配置工具输出裁剪阈值，不裁剪
         if (!_options.DropToolOutputsOlderThan.HasValue)
@@ -131,42 +134,24 @@ public sealed class PruneChatReducer : IHistoryReducer
             return false;
         }
 
-        // 检查是否为受保护的工具（通过 CallId 匹配）
-        // 注：FunctionResultContent 只有 CallId，没有直接的工具名称
-        // ProtectedTools 配置可以包含 CallId 前缀或工具名称模式
+        // 检查是否为受保护的工具（通过 CallId → ToolName 映射查找真实工具名）
         if (_options.ProtectedTools.Count > 0)
         {
-            var callId = GetToolCallId(message);
-            if (callId != null)
+            foreach (var content in message.Contents)
             {
-                // 检查 CallId 是否匹配任何保护模式
-                foreach (var protectedPattern in _options.ProtectedTools)
+                if (content is FunctionResultContent functionResult && functionResult.CallId != null)
                 {
-                    if (callId.Contains(protectedPattern, StringComparison.OrdinalIgnoreCase))
+                    if (callIdToToolName.TryGetValue(functionResult.CallId, out var toolName))
                     {
-                        return false;
+                        if (_options.ProtectedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase))
+                        {
+                            return false;
+                        }
                     }
                 }
             }
         }
 
         return true;
-    }
-
-    /// <summary>
-    /// 从工具消息中获取调用 ID
-    /// </summary>
-    private static string? GetToolCallId(ChatMessage message)
-    {
-        // 尝试从消息内容中获取 CallId
-        foreach (var content in message.Contents)
-        {
-            if (content is FunctionResultContent functionResult)
-            {
-                return functionResult.CallId;
-            }
-        }
-
-        return null;
     }
 }

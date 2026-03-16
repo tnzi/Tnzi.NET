@@ -89,14 +89,14 @@ public class AIOptions
 public class QuotaOptions
 {
     /// <summary>
-    /// 新用户默认每日 Token 限额（默认 10 万）
+    /// 新用户默认每日 Token 限额（默认 100 万）
     /// </summary>
-    public long DefaultDailyTokenLimit { get; set; } = 100_000;
+    public long DefaultDailyTokenLimit { get; set; } = 1_000_000;
 
     /// <summary>
-    /// 新用户默认每月 Token 限额（默认 300 万）
+    /// 新用户默认每月 Token 限额（默认 2000 万）
     /// </summary>
-    public long DefaultMonthlyTokenLimit { get; set; } = 3_000_000;
+    public long DefaultMonthlyTokenLimit { get; set; } = 20_000_000;
 }
 
 /// <summary>
@@ -147,6 +147,62 @@ public class ProviderOptions
     /// 每个条目格式为 "ProviderName" 或 "ProviderName:ModelName"。
     /// </remarks>
     public List<string>? FallbackProviders { get; set; }
+
+    /// <summary>
+    /// Thinking/reasoning 配置
+    /// </summary>
+    /// <remarks>
+    /// 控制是否请求 LLM 的思考/推理内容。不同提供商格式不同：
+    /// DeepSeek R1 / Qwen QwQ / OpenAI o-series 自动返回 reasoning_content；
+    /// Gemini 2.5 需要在请求中注入 extra_body.google.thinking_config。
+    /// </remarks>
+    public ThinkingOptions? Thinking { get; set; }
+
+    /// <summary>
+    /// 模型别名字典，如 { "think": "o4-mini", "fast": "gpt-4.1-mini" }
+    /// </summary>
+    /// <remarks>
+    /// 通过别名引用模型：ChatRequestDto.Model = "think" → 自动解析为 "o4-mini"。
+    /// ThinkingMiddleware 在启用推理时自动查找 "think" 别名切换到推理模型。
+    /// </remarks>
+    public Dictionary<string, string>? Models { get; set; }
+}
+
+/// <summary>
+/// 推理强度等级
+/// </summary>
+public enum ReasoningEffort
+{
+    /// <summary>不启用推理</summary>
+    None = 0,
+
+    /// <summary>低强度推理</summary>
+    Low = 1,
+
+    /// <summary>中等强度推理</summary>
+    Medium = 2,
+
+    /// <summary>高强度推理（深度推理）</summary>
+    High = 3,
+
+    /// <summary>最高强度（Anthropic Opus / OpenAI xhigh）</summary>
+    Max = 4
+}
+
+/// <summary>
+/// Thinking/reasoning 配置选项
+/// </summary>
+public class ThinkingOptions
+{
+    /// <summary>
+    /// 推理强度等级。None = 不启用推理。
+    /// </summary>
+    public ReasoningEffort Effort { get; set; } = ReasoningEffort.None;
+
+    /// <summary>
+    /// 最大推理 Token 预算（可选，Provider 特定）
+    /// </summary>
+    public int? BudgetTokens { get; set; }
 }
 
 /// <summary>
@@ -195,13 +251,13 @@ public class GuardrailsOptions
     public GuardrailExecutionMode ExecutionMode { get; set; } = GuardrailExecutionMode.Sequential;
 
     /// <summary>
-    /// 流式输出 Guardrail 缓冲区大小（字符数，默认 200）
+    /// 流式输出 Guardrail 缓冲区大小（字符数，默认 500）
     /// </summary>
     /// <remarks>
     /// 流式场景下，每累积此数量的字符后执行一次输出 Guardrail 检查，
     /// 通过后才将缓冲的 chunk 释放给客户端。设为 0 禁用缓冲（退化为后验检查）。
     /// </remarks>
-    public int StreamingBufferSize { get; set; } = 200;
+    public int StreamingBufferSize { get; set; } = 500;
 
     /// <summary>
     /// LLM-as-Judge guardrail 配置

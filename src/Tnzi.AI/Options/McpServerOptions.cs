@@ -46,9 +46,9 @@ public class McpServerOptions
     public bool EnableAuditLog { get; set; } = true;
 
     /// <summary>
-    /// 每分钟速率限制（每客户端，默认 60）
+    /// 每分钟速率限制（每客户端，默认 600）
     /// </summary>
-    public int RateLimitPerMinute { get; set; } = 60;
+    public int RateLimitPerMinute { get; set; } = 600;
 
     /// <summary>
     /// 是否启用流式响应

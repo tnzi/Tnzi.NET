@@ -31,6 +31,9 @@ public class ChatRequestDto
 
     /// <summary>User ID (for quota check)</summary>
     public Guid? UserId { get; set; }
+
+    /// <summary>Per-request reasoning effort override (None = no reasoning)</summary>
+    public ReasoningEffort? ReasoningEffort { get; set; }
 }
 
 /// <summary>
@@ -52,6 +55,8 @@ public class ChatResponseDto
     public List<string>? HandoffPath { get; set; }
     /// <summary>RAG citations (source documents used)</summary>
     public List<CitationDto>? Citations { get; set; }
+    /// <summary>Reasoning/thinking content (populated in non-streaming mode)</summary>
+    public string? Reasoning { get; set; }
 }
 
 /// <summary>

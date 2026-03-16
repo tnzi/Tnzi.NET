@@ -110,6 +110,7 @@ public class RouterExecutionStrategyTests
                 It.IsAny<int?>(),
                 It.IsAny<AgentExecutorOptions?>(),
                 It.IsAny<IEnumerable<string>?>(),
+                targetAgentId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetAgent);
 

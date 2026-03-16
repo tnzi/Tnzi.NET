@@ -46,13 +46,15 @@ public class ReviewNode : IWorkflowNode
         string? provider = step.Provider;
         string? model = step.Model;
 
+        Guid? reviewerAgentId = null;
         if (config.TryGetValue("reviewerAgentId", out var reviewerIdStr)
-            && Guid.TryParse(reviewerIdStr, out var reviewerAgentId))
+            && Guid.TryParse(reviewerIdStr, out var parsedReviewerAgentId))
         {
+            reviewerAgentId = parsedReviewerAgentId;
             var agentRepo = scope.ServiceProvider.GetService<IRepository<Agent, Guid>>();
             if (agentRepo != null)
             {
-                var reviewerAgent = await agentRepo.GetAsync(reviewerAgentId, cancellationToken);
+                var reviewerAgent = await agentRepo.GetAsync(parsedReviewerAgentId, cancellationToken);
                 if (reviewerAgent != null)
                 {
                     provider ??= reviewerAgent.Provider;
@@ -66,6 +68,7 @@ public class ReviewNode : IWorkflowNode
             model: model,
             instructions: "You are a reviewer. Always respond with a JSON object containing 'verdict' and 'feedback' fields.",
             name: step.StepId ?? "review-node",
+            agentId: reviewerAgentId,
             ct: cancellationToken);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, reviewPrompt) };

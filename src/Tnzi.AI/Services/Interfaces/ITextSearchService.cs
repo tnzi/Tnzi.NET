@@ -25,6 +25,52 @@ public interface ITextSearchService
         string query,
         int maxResults = 5,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 执行语义搜索（含过滤条件）
+    /// </summary>
+    /// <param name="query">搜索查询文本</param>
+    /// <param name="filter">过滤条件（可选）</param>
+    /// <param name="maxResults">最大返回结果数</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>搜索结果列表</returns>
+    Task<IEnumerable<TextSearchResult>> SearchAsync(
+        string query,
+        TextSearchFilter? filter,
+        int maxResults = 5,
+        CancellationToken ct = default)
+        => SearchAsync(query, maxResults, ct);
+}
+
+/// <summary>
+/// 文本搜索过滤条件
+/// </summary>
+public class TextSearchFilter
+{
+    /// <summary>
+    /// 用户 ID 过滤
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// Agent ID 过滤
+    /// </summary>
+    public Guid? AgentId { get; set; }
+
+    /// <summary>
+    /// 线程 ID 过滤
+    /// </summary>
+    public string? ThreadId { get; set; }
+
+    /// <summary>
+    /// 集合名称过滤
+    /// </summary>
+    public string? CollectionName { get; set; }
+
+    /// <summary>
+    /// 额外元数据过滤
+    /// </summary>
+    public Dictionary<string, object?>? Metadata { get; set; }
 }
 
 /// <summary>

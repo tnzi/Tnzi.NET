@@ -137,6 +137,18 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             {
                 errors.Add($"Provider '{providerName}' TimeoutSeconds must be between 1 and 600");
             }
+
+            // 验证 Models 别名字典（如有）
+            if (providerOptions.Models != null)
+            {
+                foreach (var (alias, modelName) in providerOptions.Models)
+                {
+                    if (string.IsNullOrWhiteSpace(modelName))
+                    {
+                        errors.Add($"Provider '{providerName}' Models alias '{alias}' has empty model name");
+                    }
+                }
+            }
         }
     }
 

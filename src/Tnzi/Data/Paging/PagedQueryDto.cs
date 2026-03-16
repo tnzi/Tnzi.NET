@@ -29,7 +29,12 @@ public abstract class PagedQueryDto : PagedQuery
     public new int PageIndex
     {
         get => _pageIndex ?? DefaultPageIndex;
-        set => _pageIndex = value > 0 ? value : null;
+        set
+        {
+            _pageIndex = value > 0 ? value : null;
+            // Sync to base class so that Skip/Take (defined on PagedQuery) use the correct value.
+            base.PageIndex = _pageIndex ?? DefaultPageIndex;
+        }
     }
 
     /// <summary>
@@ -47,7 +52,14 @@ public abstract class PagedQueryDto : PagedQuery
 
             return _pageSize.Value;
         }
-        set => _pageSize = value > 0 ? value : null;
+        set
+        {
+            _pageSize = value > 0 ? value : null;
+            // Sync to base class so that Skip/Take (defined on PagedQuery) use the correct value.
+            base.PageSize = _pageSize.HasValue
+                ? (MaxPageSize > 0 && _pageSize.Value > MaxPageSize ? MaxPageSize : _pageSize.Value)
+                : DefaultPageSize;
+        }
     }
 }
 

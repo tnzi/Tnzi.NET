@@ -33,7 +33,8 @@ public class HistoryMiddleware : IAiMiddleware
         {
             try
             {
-                var history = await _threadService.GetMessageHistoryAsync(threadId.Value, ct: cancellationToken);
+                var maxLoaded = _options.Value.History.Store.MaxLoadedMessages;
+                var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
                 if (history.Count > 0)
                 {
                     // 将历史消息插入到 Messages 前面
@@ -118,7 +119,8 @@ public class HistoryMiddleware : IAiMiddleware
         {
             try
             {
-                var history = await _threadService.GetMessageHistoryAsync(threadId.Value, ct: cancellationToken);
+                var maxLoaded = _options.Value.History.Store.MaxLoadedMessages;
+                var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
                 if (history.Count > 0)
                 {
                     context.Messages.InsertRange(0, history);

@@ -34,6 +34,15 @@ public class HttpSmsSender : ISmsSender
             return SendResult.CreateFailure("SMS sender options not configured");
         }
 
+        // In development, redirect all outbound SMS to the configured override number
+        var devOverride = _options.SmsSender.DevOverridePhone;
+        if (!string.IsNullOrWhiteSpace(devOverride))
+        {
+            _logger.LogWarning("[DEV] SMS redirected. OriginalTo={OriginalTo}, Override={Override}", phoneNumber, devOverride);
+            message = $"[DEV → {phoneNumber}] {message}";
+            phoneNumber = devOverride;
+        }
+
         try
         {
             return _options.SmsSender.Provider.ToLower() switch

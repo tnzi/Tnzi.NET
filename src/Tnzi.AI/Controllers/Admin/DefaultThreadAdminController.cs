@@ -104,14 +104,3 @@ public class DefaultThreadAdminController : ApiAdminControllerBase
         return File(bytes, "text/markdown", $"thread-{id}.md");
     }
 }
-
-/// <summary>
-/// 更新线程标题请求 DTO
-/// </summary>
-public class UpdateThreadTitleDto
-{
-    /// <summary>New title</summary>
-    [Required]
-    [MaxLength(200)]
-    public string Title { get; set; } = null!;
-}

@@ -119,6 +119,12 @@ public class MailSenderOptions
     /// 获取或设置 发件人名称
     /// </summary>
     public string FromName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Development override: when set, all outbound emails are redirected to this address.
+    /// Configure via "Notification:MailSender:DevOverrideEmail" in appsettings.Development.json.
+    /// </summary>
+    public string? DevOverrideEmail { get; set; }
 }
 
 /// <summary>
@@ -160,6 +166,12 @@ public class SmsSenderOptions
     /// 获取或设置 Plivo From Phone Number (当Provider为plivo时使用)
     /// </summary>
     public string PlivoFromPhoneNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Development override: when set, all outbound SMS are redirected to this phone number.
+    /// Configure via "Notification:SmsSender:DevOverridePhone" in appsettings.Development.json.
+    /// </summary>
+    public string? DevOverridePhone { get; set; }
 }
 
 /// <summary>

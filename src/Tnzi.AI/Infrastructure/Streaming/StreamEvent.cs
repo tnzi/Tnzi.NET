@@ -67,4 +67,10 @@ public class StreamEvent
 
     /// <summary>关联的 Run ID</summary>
     public Guid? RunId { get; set; }
+
+    /// <summary>Rich component reference for frontend interactive rendering</summary>
+    public ComponentRefDto? ComponentRef { get; set; }
+
+    /// <summary>Tool call details (name + duration, for client-side benchmarking)</summary>
+    public List<ToolCallDetail>? ToolCalls { get; set; }
 }

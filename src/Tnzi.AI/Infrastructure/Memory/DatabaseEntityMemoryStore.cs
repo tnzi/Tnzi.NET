@@ -8,23 +8,42 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
 {
     private readonly IRepository<EntityMemory, Guid> _repository;
     private readonly ILogger<DatabaseEntityMemoryStore> _logger;
+    private readonly EntityMemoryOptions? _options;
 
     public DatabaseEntityMemoryStore(
         IRepository<EntityMemory, Guid> repository,
-        ILogger<DatabaseEntityMemoryStore> logger)
+        ILogger<DatabaseEntityMemoryStore> logger,
+        IOptions<AIOptions>? aiOptions = null)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);
+        _options = aiOptions?.Value.ContextProviders.EntityMemory;
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<EntityMemoryEntry>> GetRelevantEntitiesAsync(Guid? userId, int maxEntities = 20, CancellationToken ct = default)
+    public Task<IReadOnlyList<EntityMemoryEntry>> GetRelevantEntitiesAsync(Guid? userId, int maxEntities = 20, CancellationToken ct = default)
+        => GetRelevantEntitiesAsync(userId, agentId: null, maxEntities, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EntityMemoryEntry>> GetRelevantEntitiesAsync(Guid? userId, Guid? agentId, int maxEntities = 20, CancellationToken ct = default)
     {
         var query = _repository.AsQueryable();
 
         query = userId.HasValue
             ? query.Where(e => e.UserId == userId.Value)
             : query.Where(e => e.UserId == null);
+
+        if (agentId.HasValue)
+        {
+            query = query.Where(e => e.AgentId == agentId.Value);
+        }
+
+        // 过期过滤
+        if (_options?.EntityExpiration.HasValue == true)
+        {
+            var cutoff = DateTime.UtcNow - _options.EntityExpiration.Value;
+            query = query.Where(e => e.LastMentioned >= cutoff);
+        }
 
         var entities = await query
             .OrderByDescending(e => e.LastMentioned)
@@ -41,7 +60,7 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
         Check.NotNullOrWhiteSpace(entry.EntityName);
 
         var existing = await _repository.AsQueryable()
-            .FirstOrDefaultAsync(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId, ct);
+            .FirstOrDefaultAsync(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId && e.AgentId == entry.AgentId, ct);
 
         if (existing != null)
         {
@@ -66,7 +85,8 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
                 Properties = SerializeProperties(entry.Properties),
                 LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow,
                 MentionCount = Math.Max(entry.MentionCount, 1),
-                UserId = entry.UserId
+                UserId = entry.UserId,
+                AgentId = entry.AgentId
             };
 
             await _repository.InsertAsync(entity);
@@ -80,14 +100,85 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
     {
         Check.NotNull(entries);
 
-        foreach (var entry in entries)
+        var entryList = entries.ToList();
+        if (entryList.Count == 0) return;
+
+        // 单条时走原有逻辑避免额外查询开销
+        if (entryList.Count == 1)
         {
-            await UpsertEntityAsync(entry, ct);
+            await UpsertEntityAsync(entryList[0], ct);
+            return;
+        }
+
+        // 批量查询: 提取所有 EntityName 一次查询
+        var names = entryList.Select(e => e.EntityName).Distinct().ToList();
+        var userIds = entryList.Select(e => e.UserId).Distinct().ToList();
+
+        var existingEntities = await _repository.AsQueryable()
+            .Where(e => names.Contains(e.EntityName) && userIds.Contains(e.UserId))
+            .ToListAsync(ct);
+
+        // 按 (EntityName, UserId, AgentId) 建索引
+        var existingDict = existingEntities
+            .GroupBy(e => (e.EntityName, e.UserId, e.AgentId))
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var toUpdate = new List<EntityMemory>();
+        var toInsert = new List<EntityMemory>();
+
+        foreach (var entry in entryList)
+        {
+            Check.NotNullOrWhiteSpace(entry.EntityName);
+
+            var key = (entry.EntityName, entry.UserId, entry.AgentId);
+            if (existingDict.TryGetValue(key, out var existing))
+            {
+                // 更新
+                existing.MentionCount += Math.Max(entry.MentionCount, 1);
+                existing.LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow;
+                existing.EntityType = entry.EntityType;
+                existing.Properties = SerializeProperties(MergeProperties(
+                    DeserializeProperties(existing.Properties), entry.Properties));
+                toUpdate.Add(existing);
+            }
+            else
+            {
+                // 插入
+                var entity = new EntityMemory
+                {
+                    EntityName = entry.EntityName,
+                    EntityType = entry.EntityType,
+                    Properties = SerializeProperties(entry.Properties),
+                    LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow,
+                    MentionCount = Math.Max(entry.MentionCount, 1),
+                    UserId = entry.UserId,
+                    AgentId = entry.AgentId
+                };
+                toInsert.Add(entity);
+                // 避免同批次重复插入
+                existingDict[key] = entity;
+            }
+        }
+
+        if (toUpdate.Count > 0)
+        {
+            await _repository.UpdateManyAsync(toUpdate);
+            _logger.LogDebug("Batch updated {Count} entity memories", toUpdate.Count);
+        }
+
+        if (toInsert.Count > 0)
+        {
+            await _repository.InsertManyAsync(toInsert);
+            _logger.LogDebug("Batch inserted {Count} entity memories", toInsert.Count);
         }
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<EntityMemoryEntry>> SearchEntitiesAsync(string query, Guid? userId, int maxResults = 10, CancellationToken ct = default)
+    public Task<IReadOnlyList<EntityMemoryEntry>> SearchEntitiesAsync(string query, Guid? userId, int maxResults = 10, CancellationToken ct = default)
+        => SearchEntitiesAsync(query, userId, agentId: null, maxResults, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EntityMemoryEntry>> SearchEntitiesAsync(string query, Guid? userId, Guid? agentId, int maxResults = 10, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(query);
 
@@ -98,6 +189,11 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
         dbQuery = userId.HasValue
             ? dbQuery.Where(e => e.UserId == userId.Value)
             : dbQuery.Where(e => e.UserId == null);
+
+        if (agentId.HasValue)
+        {
+            dbQuery = dbQuery.Where(e => e.AgentId == agentId.Value);
+        }
 
         var entities = await dbQuery
             .Where(e => e.EntityName.ToLower().Contains(queryLower)
@@ -121,7 +217,8 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
             Properties = DeserializeProperties(entity.Properties),
             LastMentioned = entity.LastMentioned,
             MentionCount = entity.MentionCount,
-            UserId = entity.UserId
+            UserId = entity.UserId,
+            AgentId = entity.AgentId
         };
     }
 

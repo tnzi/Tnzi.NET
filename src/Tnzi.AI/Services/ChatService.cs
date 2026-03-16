@@ -35,7 +35,8 @@ public class ChatService : ApplicationService, IChatService
                 UserMessage = request.Message,
                 ContentParts = request.Content,
                 ThreadId = request.ThreadId,
-                UserId = request.UserId
+                UserId = request.UserId,
+                ReasoningEffort = request.ReasoningEffort
             };
 
             var result = await _runtime.RunAsync(runRequest, ct);
@@ -47,7 +48,8 @@ public class ChatService : ApplicationService, IChatService
                 Usage = result.Usage,
                 ThreadId = result.ThreadId,
                 Citations = result.Citations,
-                HandoffPath = result.HandoffPath
+                HandoffPath = result.HandoffPath,
+                Reasoning = result.Reasoning
             });
         }
         catch (BusinessException ex)
@@ -89,7 +91,8 @@ public class ChatService : ApplicationService, IChatService
             UserMessage = request.Message,
             ContentParts = request.Content,
             ThreadId = request.ThreadId,
-            UserId = request.UserId
+            UserId = request.UserId,
+            ReasoningEffort = request.ReasoningEffort
         };
 
         AgentStreamChunk? lastChunk = null;
@@ -153,6 +156,15 @@ public class ChatService : ApplicationService, IChatService
                 yield return new StreamEvent
                 {
                     Delta = chunk.Text,
+                    Model = request.Model,
+                    ThreadId = currentThreadId
+                };
+            }
+            else if (chunk.ToolCalls != null)
+            {
+                yield return new StreamEvent
+                {
+                    ToolCalls = chunk.ToolCalls,
                     Model = request.Model,
                     ThreadId = currentThreadId
                 };

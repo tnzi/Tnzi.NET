@@ -45,4 +45,9 @@ public class AgentStreamChunk
     /// RAG 引用来源（仅在最终 chunk 中包含）
     /// </summary>
     public List<CitationDto>? Citations { get; set; }
+
+    /// <summary>
+    /// Tool call details (name + duration, sent after each tool execution batch)
+    /// </summary>
+    public List<ToolCallDetail>? ToolCalls { get; set; }
 }

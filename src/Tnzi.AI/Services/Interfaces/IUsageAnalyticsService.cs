@@ -24,4 +24,14 @@ public interface IUsageAnalyticsService
     /// 按模型分组统计 Token 使用量
     /// </summary>
     Task<Result<List<ModelUsageDto>>> GetUsageByModelAsync(DateTime startTime, DateTime endTime, string? provider = null);
+
+    /// <summary>
+    /// 按时间粒度统计使用量趋势（Daily/Weekly/Monthly）
+    /// </summary>
+    Task<Result<List<UsageTrendPointDto>>> GetUsageTrendAsync(UsageTrendQueryDto query);
+
+    /// <summary>
+    /// 按 Agent 分组统计 Token 使用量，返回 Top N 消耗 Agent
+    /// </summary>
+    Task<Result<List<AgentUsageDto>>> GetUsageByAgentAsync(DateTime startTime, DateTime endTime, int topN = 20);
 }

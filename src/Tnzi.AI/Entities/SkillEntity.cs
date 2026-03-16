@@ -1,0 +1,52 @@
+namespace Tnzi.AI.Entities;
+
+/// <summary>
+/// 技能实体 — 存储租户级和用户级自定义技能
+/// </summary>
+public class SkillEntity : MultiTenantAuditedEntity<Guid>
+{
+    /// <summary>技能 slug（人类可读标识符，小写字母/数字/连字符）</summary>
+    public string Slug { get; set; } = string.Empty;
+
+    /// <summary>作用域（Tenant 或 User）</summary>
+    public SkillScope Scope { get; set; }
+
+    /// <summary>所有者用户 ID（User 作用域时非空）</summary>
+    public Guid? OwnerUserId { get; set; }
+
+    /// <summary>技能名称</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>技能描述</summary>
+    public string? Description { get; set; }
+
+    /// <summary>提示词模板内容</summary>
+    public string Content { get; set; } = string.Empty;
+
+    /// <summary>使用场景说明</summary>
+    public string? WhenToUse { get; set; }
+
+    /// <summary>参数定义 JSON（SkillParameter 列表）</summary>
+    public string ParametersJson { get; set; } = "[]";
+
+    /// <summary>约束配置 JSON（AllowedToolGroups, RequiredModel, RequiredProvider）</summary>
+    public string? ConstraintsJson { get; set; }
+
+    /// <summary>依赖要求 JSON（SkillRequirements）</summary>
+    public string? RequirementsJson { get; set; }
+
+    /// <summary>标签 JSON（string 列表）</summary>
+    public string? TagsJson { get; set; }
+
+    /// <summary>优先级（数值越大优先级越高）</summary>
+    public int Priority { get; set; }
+
+    /// <summary>版本</summary>
+    public string? Version { get; set; }
+
+    /// <summary>作者</summary>
+    public string? Author { get; set; }
+
+    /// <summary>是否启用</summary>
+    public bool Enabled { get; set; } = true;
+}

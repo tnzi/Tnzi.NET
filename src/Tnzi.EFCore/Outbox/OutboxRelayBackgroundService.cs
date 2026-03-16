@@ -112,7 +112,9 @@ public class OutboxRelayBackgroundService : BackgroundService
                 await eventStore.MarkAsFailedAsync(storedEvent.EventId, ex.Message, stoppingToken);
 
                 // 超过最大重试次数，标记为已处理（死信），避免无限重试
-                if (storedEvent.FailureCount + 1 >= _options.MaxRetryCount)
+                // 使用 MarkAsFailedAsync 后的实际 FailureCount（已在 DB 原子递增）
+                var updatedEvent = await eventStore.GetEventAsync(storedEvent.EventId, stoppingToken);
+                if (updatedEvent != null && updatedEvent.FailureCount >= _options.MaxRetryCount)
                 {
                     _logger.LogError("Outbox event {EventId} ({EventType}) exceeded max retry count ({MaxRetry}), marking as dead letter",
                         storedEvent.EventId, storedEvent.EventType, _options.MaxRetryCount);

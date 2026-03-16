@@ -9,9 +9,9 @@ public class OutboxOptions
 {
     /// <summary>
     /// 是否启用 Outbox 模式
-    /// 默认值：true
+    /// 默认值：false（需显式启用）
     /// </summary>
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
 
     /// <summary>
     /// 轮询间隔（秒）

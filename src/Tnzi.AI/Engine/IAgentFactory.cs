@@ -29,5 +29,6 @@ public interface IAgentFactory
         int? maxTokens = null,
         AgentExecutorOptions? options = null,
         IEnumerable<string>? userPermissions = null,
+        Guid? agentId = null,
         CancellationToken ct = default);
 }

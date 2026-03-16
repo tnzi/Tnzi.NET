@@ -30,4 +30,9 @@ public class AgentResponse
     /// RAG 引用来源（来自 ContextProvider 的结构化 Citation 数据）
     /// </summary>
     public List<CitationDto>? Citations { get; set; }
+
+    /// <summary>
+    /// 推理/思考过程内容（从 TextReasoningContent 提取）
+    /// </summary>
+    public string? Reasoning { get; set; }
 }

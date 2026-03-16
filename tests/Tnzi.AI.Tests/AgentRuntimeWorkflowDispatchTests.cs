@@ -91,9 +91,12 @@ public class AgentRuntimeWorkflowDispatchTests
     {
         return new AgentRuntime(
             Mock.Of<IAgentResolver>(),
+            Mock.Of<IAgentFactory>(),
+            Mock.Of<IRepository<Agent, Guid>>(),
             Mock.Of<IRunStore>(),
             Mock.Of<ITraceStore>(),
             workflowService,
+            new AgentExecutionContextAccessor(),
             new ServiceCollection().BuildServiceProvider(),
             Mock.Of<ILogger<AgentRuntime>>());
     }

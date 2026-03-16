@@ -56,6 +56,7 @@ public class AgentNode : IWorkflowNode
             model: model,
             instructions: instructions,
             name: step.StepId ?? "agent-node",
+            agentId: step.AgentId,
             ct: cancellationToken);
 
         // 构建输入

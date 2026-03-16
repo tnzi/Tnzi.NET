@@ -88,13 +88,17 @@ public class EFCoreModule : TnziInfrastructureModule
         // 注册 Dapper 相关服务
         services.AddScoped<Dapper.DapperExecutorFactory>();
 
-        // 注册 Outbox 事件存储（TryAdd 确保不会覆盖用户自定义实现）
-        services.TryAddScoped<IEventStore, EfCoreEventStore>();
-
-        // 条件性注册 Outbox 中继后台服务
+        // 读取 Outbox 配置，决定是否启用
         var outboxOptions = configuration.GetSection("EFCore:Outbox").Get<OutboxOptions>() ?? new OutboxOptions();
+
+        // 同步静态标志，控制 OutboxMessage 实体是否参与 DbContext 模型构建
+        // 必须在 EntityManager.Initialize() 之前设置（Initialize 在 OnApplicationInitializationAsync 中调用）
+        Outbox.Configs.OutboxMessageConfiguration.OutboxEnabled = outboxOptions.Enabled;
+
         if (outboxOptions.Enabled)
         {
+            // 注册 Outbox 事件存储（TryAdd 确保不会覆盖用户自定义实现）
+            services.TryAddScoped<IEventStore, EfCoreEventStore>();
             services.AddHostedService<OutboxRelayBackgroundService>();
         }
 

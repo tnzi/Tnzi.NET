@@ -7,10 +7,14 @@ namespace Tnzi.AI.Infrastructure.Streaming;
 /// IChatClient decorator that drains reasoning_content chunks emitted by
 /// ReasoningCapturingHandler and injects them into the streaming update sequence
 /// as TextReasoningContent blocks, before each corresponding MEAI update.
+/// Supports multiple reasoning formats via ReasoningExtractingStreamContent:
+/// - DeepSeek R1 / Qwen QwQ / OpenAI o-series: delta.reasoning_content
+/// - Gemini 2.5: delta.content with extra_content.google.thought=true (requires ThinkingOptions)
 /// </summary>
 public sealed class ReasoningAwareChatClientDecorator : IChatClient
 {
     private readonly IChatClient _inner;
+    private readonly ThinkingOptions? _thinking;
 
     /// <summary>
     /// AsyncLocal channel writer — set by this decorator before making the HTTP call,
@@ -20,9 +24,10 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
     /// </summary>
     internal static readonly AsyncLocal<ChannelWriter<string>?> ReasoningChannelWriter = new();
 
-    public ReasoningAwareChatClientDecorator(IChatClient inner)
+    public ReasoningAwareChatClientDecorator(IChatClient inner, ThinkingOptions? thinking = null)
     {
-        _inner = inner;
+        _inner = Check.NotNull(inner);
+        _thinking = thinking;
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -37,7 +42,21 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
             AllowSynchronousContinuations = false
         });
 
+        // Save and restore AsyncLocal values so nested decorator calls (Router → Specialist)
+        // don't lose the externally-set thinking context.
+        var previousWriter = ReasoningChannelWriter.Value;
+        var previousContext = ThinkingRequestPolicy.RequestContext.Value;
+
         ReasoningChannelWriter.Value = channel.Writer;
+
+        // Set thinking request context so ThinkingRequestPolicy can inject provider-specific params.
+        // Preserve any externally-set context (e.g., per-request override from ThinkingMiddleware).
+        if (ThinkingRequestPolicy.RequestContext.Value == null)
+        {
+            ThinkingRequestPolicy.RequestContext.Value = _thinking is { Effort: not ReasoningEffort.None }
+                ? new ThinkingRequestContext { Thinking = _thinking }
+                : null;
+        }
 
         try
         {
@@ -68,16 +87,35 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
         }
         finally
         {
-            ReasoningChannelWriter.Value = null;
+            ReasoningChannelWriter.Value = previousWriter;
+            ThinkingRequestPolicy.RequestContext.Value = previousContext;
             channel.Writer.TryComplete();
         }
     }
 
-    public Task<ChatResponse> GetResponseAsync(
+    public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> chatMessages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
-        => _inner.GetResponseAsync(chatMessages, options, cancellationToken);
+    {
+        // Set thinking request context for non-streaming calls too,
+        // so ThinkingRequestPolicy can inject provider-specific params (e.g., Gemini thinking_config).
+        var previousContext = ThinkingRequestPolicy.RequestContext.Value;
+
+        if (ThinkingRequestPolicy.RequestContext.Value == null && _thinking is { Effort: not ReasoningEffort.None })
+        {
+            ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext { Thinking = _thinking };
+        }
+
+        try
+        {
+            return await _inner.GetResponseAsync(chatMessages, options, cancellationToken);
+        }
+        finally
+        {
+            ThinkingRequestPolicy.RequestContext.Value = previousContext;
+        }
+    }
 
     public object? GetService(Type serviceType, object? serviceKey = null)
         => _inner.GetService(serviceType, serviceKey);

@@ -100,7 +100,12 @@ public class AgentService : ApplicationService, IAgentService
             TimeoutSeconds = source.TimeoutSeconds,
             IsEnabled = source.IsEnabled,
             ExecutionMode = source.ExecutionMode,
-            Configuration = source.Configuration
+            Configuration = source.Configuration,
+            Domains = source.Domains,
+            Roles = source.Roles,
+            QualityTier = source.QualityTier,
+            LatencyTier = source.LatencyTier,
+            CostTier = source.CostTier
         };
 
         await _repository.InsertAsync(clone);
@@ -169,6 +174,11 @@ public class AgentService : ApplicationService, IAgentService
         agent.IsEnabled = snapshot.IsEnabled;
         agent.ExecutionMode = snapshot.ExecutionMode;
         agent.Configuration = snapshot.Configuration;
+        agent.Domains = snapshot.Domains;
+        agent.Roles = snapshot.Roles;
+        agent.QualityTier = snapshot.QualityTier;
+        agent.LatencyTier = snapshot.LatencyTier;
+        agent.CostTier = snapshot.CostTier;
 
         await _repository.UpdateAsync(agent);
 
@@ -183,10 +193,28 @@ public class AgentService : ApplicationService, IAgentService
                 !string.IsNullOrWhiteSpace(query.Keyword))
             .WhereIf(a => a.Provider == query.Provider, !string.IsNullOrWhiteSpace(query.Provider))
             .WhereIf(a => a.IsEnabled == query.IsEnabled!.Value, query.IsEnabled.HasValue)
+            .WhereIf(a => a.ExecutionMode == query.ExecutionMode!.Value, query.ExecutionMode.HasValue)
+            .WhereIf(a => a.QualityTier >= query.MinQualityTier!.Value, query.MinQualityTier.HasValue)
+            .WhereIf(a => a.LatencyTier <= query.MaxLatencyTier!.Value, query.MaxLatencyTier.HasValue)
+            .WhereIf(a => a.CostTier <= query.MaxCostTier!.Value, query.MaxCostTier.HasValue)
             .OrderByDescending(a => a.CreationTime);
 
-        var pagedList = await queryable.ProjectTo<Agent, AgentDto>().CreateAsync(query);
-        return Ok(pagedList);
+        var hasJsonFilter = !string.IsNullOrWhiteSpace(query.Domain) || !string.IsNullOrWhiteSpace(query.Role);
+
+        if (!hasJsonFilter)
+        {
+            var pagedList = await queryable.ProjectTo<Agent, AgentDto>().CreateAsync(query);
+            return Ok(pagedList);
+        }
+
+        var entities = await queryable.ToListAsync();
+        var filtered = entities
+            .Where(a => string.IsNullOrWhiteSpace(query.Domain) || ContainsJsonElement(a.Domains, query.Domain!))
+            .Where(a => string.IsNullOrWhiteSpace(query.Role) || ContainsJsonElement(a.Roles, query.Role!))
+            .Select(MapToDto)
+            .ToList();
+
+        return Ok<IPagedList<AgentDto>>(PagedList<AgentDto>.Create(filtered, query.PageIndex, query.PageSize));
     }
 
     public async Task<Result<AgentResponseDto>> RunAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default)
@@ -290,6 +318,14 @@ public class AgentService : ApplicationService, IAgentService
                     ThreadId = currentThreadId
                 };
             }
+            else if (chunk.ToolCalls != null)
+            {
+                yield return new StreamEvent
+                {
+                    ToolCalls = chunk.ToolCalls,
+                    ThreadId = currentThreadId
+                };
+            }
             else if (chunk.IsToolCall)
             {
                 yield return new StreamEvent
@@ -351,7 +387,12 @@ public class AgentService : ApplicationService, IAgentService
                 TimeoutSeconds = entity.TimeoutSeconds,
                 IsEnabled = entity.IsEnabled,
                 ExecutionMode = entity.ExecutionMode,
-                Configuration = entity.Configuration
+                Configuration = entity.Configuration,
+                Domains = entity.Domains,
+                Roles = entity.Roles,
+                QualityTier = entity.QualityTier,
+                LatencyTier = entity.LatencyTier,
+                CostTier = entity.CostTier
             };
 
             var versionEntity = new AgentVersion
@@ -369,6 +410,13 @@ public class AgentService : ApplicationService, IAgentService
         {
             Logger.LogWarning(ex, "Failed to create version snapshot for Agent {AgentId}", entity.Id);
         }
+    }
+
+    private static bool ContainsJsonElement(string? json, string element)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        var list = JsonSerializer.Deserialize<List<string>>(json);
+        return list != null && list.Exists(x => string.Equals(x, element, StringComparison.OrdinalIgnoreCase));
     }
 
     private static AgentDto MapToDto(Agent entity)
@@ -399,4 +447,9 @@ internal class AgentConfigSnapshot
     public bool IsEnabled { get; set; }
     public AgentExecutionMode ExecutionMode { get; set; }
     public string? Configuration { get; set; }
+    public string? Domains { get; set; }
+    public string? Roles { get; set; }
+    public int QualityTier { get; set; }
+    public int LatencyTier { get; set; }
+    public int CostTier { get; set; }
 }

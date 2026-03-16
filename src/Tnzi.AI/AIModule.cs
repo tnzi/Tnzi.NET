@@ -13,7 +13,7 @@ namespace Tnzi.AI;
 /// AI 模块 - 基于 Microsoft.Extensions.AI 的自定义 Agent 引擎
 /// </summary>
 [DependsOn(typeof(EFCoreModule))]
-[DependsOn(typeof(Tnzi.AspNetCore.AspNetCoreModule))]
+[DependsOn(typeof(AspNetCoreModule))]
 public class AIModule : TnziApplicationModule
 {
     /// <summary>
@@ -67,12 +67,11 @@ public class AIModule : TnziApplicationModule
         // 注册 HttpClient 工厂
         services.AddHttpClient();
 
-        // 注册推理内容捕获 Handler（拦截 SSE 流提取 reasoning_content）
-        services.AddTransient<ReasoningCapturingHandler>();
-
         // 配置带重试和熔断的命名 HttpClient（用于 AI 提供商调用）
+        // Note: Thinking injection and reasoning extraction are handled by
+        // ThinkingRequestPolicy (PipelinePolicy) inside the OpenAI SDK pipeline,
+        // not via DelegatingHandlers (which don't work with HttpClientPipelineTransport).
         services.AddHttpClient("Tnzi.AI.Resilient")
-            .AddHttpMessageHandler<ReasoningCapturingHandler>()
             .AddStandardResilienceHandler(options =>
             {
                 // 配置重试策略
@@ -89,7 +88,9 @@ public class AIModule : TnziApplicationModule
 
         // 注册基础设施
         services.AddSingleton<IChatClientProvider, OpenAIChatClientProvider>();
+        services.AddSingleton<IChatClientProvider, AnthropicChatClientProvider>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
+        services.AddSingleton<IAgentExecutionContextAccessor, AgentExecutionContextAccessor>();
         // Scoped: AgentFactory/ToolResolver/OptionsBuilder must be Scoped so that
         // ToolAdapter captures the request-scoped IServiceProvider, enabling resolution of
         // Scoped tool providers (CommonTools, CandidateTools, etc.) without relying on
@@ -115,6 +116,7 @@ public class AIModule : TnziApplicationModule
         // 注册对话存储和记忆存储（使用 TryAdd，允许 Agent 模块替换）
         services.TryAddScoped<IConversationStore, DatabaseConversationStore>();
         services.TryAddScoped<IMemoryStore, DatabaseMemoryStore>();
+        services.TryAddScoped<IMemoryConsolidator, LlmMemoryConsolidator>();
 
         // 注册实体记忆存储和 LLM 实体抽取器
         services.TryAddScoped<IEntityMemoryStore, DatabaseEntityMemoryStore>();
@@ -145,9 +147,14 @@ public class AIModule : TnziApplicationModule
         // 用户可以注册自己的 ITextSearchService 实现来连接到向量存储（Redis、Qdrant、Pinecone 等）
         services.TryAddScoped<ITextSearchService, NoOpTextSearchService>();
 
-        // 注册技能加载器与按需工具提供者
-        services.AddSingleton<SkillLoader>();
-        services.AddSingleton<SkillToolsProvider>();
+        // 注册技能系统
+        services.AddSingleton<FileSystemSkillStore>();
+        services.TryAddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
+        services.TryAddSingleton<ISkillConstraintEnforcer, SkillConstraintEnforcer>();
+        services.TryAddScoped<ISkillSearchService, SkillSearchService>();
+        services.AddScoped<DatabaseSkillStore>();
+        services.TryAddScoped<ISkillRegistry, SkillRegistry>();
+        services.AddScoped<ISkillService, SkillService>();
 
         // 注册工具审批处理器（使用 TryAdd 允许用户覆盖）
         // 用户可以注册自己的 IToolApprovalHandler 实现来实现自定义审批逻辑
@@ -177,12 +184,32 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
 
         // 注册中间件管道组件（手动注册，框架程序集不使用自动注册）
+        // 每个中间件同时注册具体类型和 IAiMiddleware 接口转发，支持用户通过接口扩展
+        services.AddScoped<ThinkingMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ThinkingMiddleware>());
+
         services.AddScoped<QuotaMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<QuotaMiddleware>());
+
         services.AddScoped<InputGuardrailMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<InputGuardrailMiddleware>());
+
         services.AddScoped<HistoryMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<HistoryMiddleware>());
+
+        services.TryAddScoped<CompositeContextProvider>();
+
         services.AddScoped<ContextInjectionMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ContextInjectionMiddleware>());
+
+        services.AddScoped<SkillConstraintMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SkillConstraintMiddleware>());
+
         services.AddScoped<UsageLoggingMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<UsageLoggingMiddleware>());
+
         services.AddScoped<OutputGuardrailMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<OutputGuardrailMiddleware>());
 
         // 注册 Runtime（统一 AI 执行入口 + Run/Trace 持久化）
         services.AddScoped<IRunStore, RunStore>();
@@ -218,7 +245,8 @@ public class AIModule : TnziApplicationModule
         services.AddSingleton<McpServerSecurityMiddleware>();
         services.AddSingleton(mcpHttpServiceProviderAccessor);
         services.AddSingleton(mcpHttpHandlerBridge);
-        services.AddScoped<McpServerHttpSecurityMiddleware>();
+        // McpServerHttpSecurityMiddleware is convention-based ASP.NET middleware (RequestDelegate ctor)
+        // — instantiated by UseMiddleware<T>(), NOT by DI container
         services.TryAddSingleton<IMcpServerHost, McpServerHost>();
         services.AddHostedService<McpServerHostedService>();
 

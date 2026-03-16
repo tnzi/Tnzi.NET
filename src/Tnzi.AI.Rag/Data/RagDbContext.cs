@@ -1,3 +1,5 @@
+using Pgvector.EntityFrameworkCore;
+
 namespace Tnzi.AI.Rag.Data;
 
 /// <summary>
@@ -19,5 +21,30 @@ public class RagDbContext : TnziDbContext<RagDbContext>
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(options, currentUser, currentTenant, dataFilterManager, timeProvider, multiTenancyOptions)
     {
+    }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        if (!optionsBuilder.IsConfigured)
+            return;
+
+        // Register pgvector type mappings so EF Core treats Vector as a scalar type.
+        // We read the existing connection string from the NpgsqlOptionsExtension via reflection
+        // to avoid overriding it with null when calling UseNpgsql again.
+        var npgsqlExtension = optionsBuilder.Options.Extensions
+            .FirstOrDefault(ext => ext.GetType().Name == "NpgsqlOptionsExtension");
+
+        if (npgsqlExtension == null)
+            return;
+
+        var connString = npgsqlExtension.GetType()
+            .GetProperty("ConnectionString")
+            ?.GetValue(npgsqlExtension) as string;
+
+        if (string.IsNullOrEmpty(connString))
+            return;
+
+        optionsBuilder.UseNpgsql(connString, o => o.UseVector());
     }
 }

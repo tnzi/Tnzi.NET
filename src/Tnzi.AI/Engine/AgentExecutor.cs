@@ -89,7 +89,8 @@ public class AgentExecutor
                     Usage = ConvertUsage(response.Usage),
                     FinishReason = response.FinishReason?.ToString(),
                     Messages = messages,
-                    Citations = contextInjection.Citations
+                    Citations = contextInjection.Citations,
+                    Reasoning = ExtractReasoning(response.Messages)
                 };
             }
 
@@ -107,7 +108,8 @@ public class AgentExecutor
             Text = lastAssistantText,
             FinishReason = "max_tool_iterations",
             Messages = messages,
-            Citations = contextInjection.Citations
+            Citations = contextInjection.Citations,
+            Reasoning = ExtractReasoning(messages)
         };
     }
 
@@ -134,6 +136,7 @@ public class AgentExecutor
         {
             // 收集流式响应
             var responseText = new StringBuilder();
+            var accumulatedReasoning = new StringBuilder();
             var toolCallContents = new List<FunctionCallContent>();
             UsageDetails? usage = null;
             ChatFinishReason? finishReason = null;
@@ -148,6 +151,7 @@ public class AgentExecutor
                     // Reasoning chunks are synthetic — yield them but do not add to the assistant message history
                     if (content is TextReasoningContent reasoning)
                     {
+                        accumulatedReasoning.Append(reasoning.Text);
                         if (!toolCallSignaled)
                             yield return new AgentStreamChunk { ReasoningText = reasoning.Text };
                         continue;
@@ -184,11 +188,23 @@ public class AgentExecutor
                 finishReason = update.FinishReason ?? finishReason;
 
                 // Stream text chunks immediately for real-time typewriter effect.
-                // Skip text after a tool call has been detected (intermediate iteration).
-                if (update.Text != null && !toolCallSignaled)
+                // Always emit text — even in an iteration that also contains tool calls,
+                // so the model can output a one-line acknowledgment before/alongside tool use.
+                if (update.Text != null)
                 {
                     yield return new AgentStreamChunk { Text = update.Text };
                 }
+            }
+
+            // Fallback: deepseek-reasoner sometimes emits the final answer only inside reasoning_content
+            // with empty content, leaving the user with a blank response. If no text content was streamed
+            // but reasoning was accumulated and no tool calls were made, re-emit the reasoning as response text.
+            if (responseText.Length == 0 && accumulatedReasoning.Length > 0 && toolCallContents.Count == 0)
+            {
+                var fallbackText = accumulatedReasoning.ToString();
+                assistantContents.Add(new TextContent(fallbackText));
+                responseText.Append(fallbackText);
+                yield return new AgentStreamChunk { Text = fallbackText };
             }
 
             // 添加助手消息到历史
@@ -211,11 +227,14 @@ public class AgentExecutor
 
             // Intermediate iteration with tool call — tool call indicator was already sent above.
 
-            // 执行工具
-            var toolResults = await ExecuteToolCallsAsync(toolCallContents, allTools, ct);
+            // 执行工具（含详情，用于客户端性能基准）
+            var (toolResults, toolDetails) = await ExecuteToolCallsWithDetailsAsync(toolCallContents, allTools, ct);
             messages.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
 
-            // 注意: RecordToolCall 已在 ExecuteToolCallsAsync 内部调用，此处不重复记录
+            // Emit tool call details for client-side benchmarking
+            yield return new AgentStreamChunk { ToolCalls = toolDetails };
+
+            // 注意: RecordToolCall 已在 ExecuteToolCallsCoreAsync 内部调用，此处不重复记录
         }
 
         // 达到最大迭代次数
@@ -325,9 +344,26 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 并行执行工具调用（支持中间件管道和增强追踪）
+    /// 并行执行工具调用（非流式路径，不需要详情）
     /// </summary>
     private async Task<List<FunctionResultContent>> ExecuteToolCallsAsync(List<FunctionCallContent> toolCalls, IList<AITool> allTools, CancellationToken ct)
+    {
+        var (results, _) = await ExecuteToolCallsCoreAsync(toolCalls, allTools, ct);
+        return results;
+    }
+
+    /// <summary>
+    /// 并行执行工具调用并返回详情（流式路径，包含名称、耗时、成功状态）
+    /// </summary>
+    private Task<(List<FunctionResultContent> Results, List<ToolCallDetail> Details)> ExecuteToolCallsWithDetailsAsync(
+        List<FunctionCallContent> toolCalls, IList<AITool> allTools, CancellationToken ct)
+        => ExecuteToolCallsCoreAsync(toolCalls, allTools, ct);
+
+    /// <summary>
+    /// 并行执行工具调用核心实现（支持中间件管道、增强追踪、工具详情采集）
+    /// </summary>
+    private async Task<(List<FunctionResultContent> Results, List<ToolCallDetail> Details)> ExecuteToolCallsCoreAsync(
+        List<FunctionCallContent> toolCalls, IList<AITool> allTools, CancellationToken ct)
     {
         var tasks = toolCalls.Select(async toolCall =>
         {
@@ -335,7 +371,8 @@ public class AgentExecutor
             var tool = FindTool(toolCall.Name, allTools);
             if (tool == null)
             {
-                return new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found");
+                var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = "Tool not found" };
+                return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found"), detail);
             }
 
             // 构建参数摘要（用于追踪，截取前 200 字符避免大参数污染 trace）
@@ -370,7 +407,8 @@ public class AgentExecutor
                 AIActivitySource.RecordToolCallDetailed(toolCall.Name, sw.Elapsed.TotalSeconds, resultSummary: resultSummary);
                 AIActivitySource.CompleteToolActivity(activity, sw.Elapsed.TotalSeconds, resultSummary);
 
-                return new FunctionResultContent(toolCall.CallId, result);
+                var detail = new ToolCallDetail { Name = toolCall.Name, DurationMs = sw.Elapsed.TotalMilliseconds, IsSuccess = true };
+                return (new FunctionResultContent(toolCall.CallId, result), detail);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -378,18 +416,26 @@ public class AgentExecutor
             }
             catch (TimeoutException)
             {
-                return new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' timed out after {_options.ToolTimeoutSeconds} seconds");
+                var detail = new ToolCallDetail
+                {
+                    Name = toolCall.Name,
+                    DurationMs = _options.ToolTimeoutSeconds * 1000,
+                    IsSuccess = false,
+                    Error = $"Timed out after {_options.ToolTimeoutSeconds}s"
+                };
+                return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' timed out after {_options.ToolTimeoutSeconds} seconds"), detail);
             }
             catch (Exception ex)
             {
                 AIActivitySource.RecordToolCallDetailed(toolCall.Name, 0, isSuccess: false);
                 _options.Logger?.LogError(ex, "Tool '{ToolName}' execution failed", toolCall.Name);
-                return new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}");
+                var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = ex.Message };
+                return (new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}"), detail);
             }
         });
 
-        var results = await Task.WhenAll(tasks);
-        return [.. results];
+        var pairs = await Task.WhenAll(tasks);
+        return ([.. pairs.Select(p => p.Item1)], [.. pairs.Select(p => p.Item2)]);
     }
 
     /// <summary>
@@ -422,6 +468,25 @@ public class AgentExecutor
         }
 
         return await pipeline();
+    }
+
+    /// <summary>
+    /// 从消息列表中提取推理内容
+    /// </summary>
+    private static string? ExtractReasoning(IEnumerable<ChatMessage> messages)
+    {
+        var reasoningParts = new List<string>();
+        foreach (var message in messages)
+        {
+            foreach (var content in message.Contents)
+            {
+                if (content is TextReasoningContent reasoning && !string.IsNullOrEmpty(reasoning.Text))
+                {
+                    reasoningParts.Add(reasoning.Text);
+                }
+            }
+        }
+        return reasoningParts.Count > 0 ? string.Join("", reasoningParts) : null;
     }
 
     /// <summary>

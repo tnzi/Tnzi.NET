@@ -40,13 +40,15 @@ public class SynthesizeNode : IWorkflowNode
         string? provider = step.Provider;
         string? model = step.Model;
 
+        Guid? synthAgentId = null;
         if (config.TryGetValue("synthesizerAgentId", out var synthIdStr)
-            && Guid.TryParse(synthIdStr, out var synthAgentId))
+            && Guid.TryParse(synthIdStr, out var parsedSynthAgentId))
         {
+            synthAgentId = parsedSynthAgentId;
             var agentRepo = scope.ServiceProvider.GetService<IRepository<Agent, Guid>>();
             if (agentRepo != null)
             {
-                var synthAgent = await agentRepo.GetAsync(synthAgentId, cancellationToken);
+                var synthAgent = await agentRepo.GetAsync(parsedSynthAgentId, cancellationToken);
                 if (synthAgent != null)
                 {
                     provider ??= synthAgent.Provider;
@@ -63,6 +65,7 @@ public class SynthesizeNode : IWorkflowNode
             model: model,
             instructions: instructions,
             name: step.StepId ?? "synthesize-node",
+            agentId: synthAgentId,
             ct: cancellationToken);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, synthesizePrompt) };

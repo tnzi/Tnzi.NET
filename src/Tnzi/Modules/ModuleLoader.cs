@@ -160,7 +160,19 @@ public class ModuleLoader
     {
         foreach (var descriptor in modulesList)
         {
-            var optionalAttributes = descriptor.Type.GetCustomAttributes<OptionalDependsOnAttribute>();
+            IEnumerable<OptionalDependsOnAttribute> optionalAttributes;
+            try
+            {
+                // GetCustomAttributes may throw FileNotFoundException when the attribute
+                // references a type (typeof()) from an assembly that is not loaded.
+                // This is expected for optional dependencies — the assembly may not be present.
+                optionalAttributes = descriptor.Type.GetCustomAttributes<OptionalDependsOnAttribute>();
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+
             foreach (var attribute in optionalAttributes)
             {
                 foreach (var dependedModuleType in attribute.DependedModuleTypes)

@@ -1,5 +1,6 @@
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.DependencyInjection.Extensions;
+global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using System.Collections.Concurrent;
@@ -37,4 +38,5 @@ global using Tnzi.AI.Coder.Repl;
 global using Tnzi.AI.Coder.Shell;
 global using Tnzi.AI.Coder.Web;
 global using Tnzi.AI.Coder.WebSearch;
+global using Tnzi.Security.Claims;
 global using Tnzi.Utilities;

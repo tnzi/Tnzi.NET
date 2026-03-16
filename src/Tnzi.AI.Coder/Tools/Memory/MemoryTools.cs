@@ -7,12 +7,20 @@ namespace Tnzi.AI.Coder.Memory;
 public class MemoryTools : IAIToolProvider
 {
     private readonly IMemoryStore _memoryStore;
+    private readonly ICurrentUser? _currentUser;
+    private readonly IConfiguration? _configuration;
     private readonly ILogger<MemoryTools> _logger;
 
-    public MemoryTools(IMemoryStore memoryStore, ILogger<MemoryTools> logger)
+    public MemoryTools(
+        IMemoryStore memoryStore,
+        ILogger<MemoryTools> logger,
+        ICurrentUser? currentUser = null,
+        IConfiguration? configuration = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _logger = Check.NotNull(logger);
+        _currentUser = currentUser;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -24,7 +32,8 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            var content = await _memoryStore.ReadAsync(scope);
+            var memoryScope = BuildScope(scope);
+            var content = await _memoryStore.ReadAsync(memoryScope);
 
             if (content == null)
             {
@@ -59,7 +68,8 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            await _memoryStore.WriteAsync(scope, content);
+            var memoryScope = BuildScope(scope);
+            await _memoryStore.WriteAsync(memoryScope, content);
 
             _logger.LogDebug("Wrote memory scope '{Scope}': {Length} chars", scope, content.Length);
 
@@ -87,7 +97,8 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            await _memoryStore.AppendAsync(scope, entry);
+            var memoryScope = BuildScope(scope);
+            await _memoryStore.AppendAsync(memoryScope, entry);
 
             _logger.LogDebug("Appended to memory scope '{Scope}': {Length} chars", scope, entry.Length);
 
@@ -141,7 +152,8 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            var results = await _memoryStore.SearchAsync(scope, query, maxResults);
+            var memoryScope = BuildScope(scope);
+            var results = await _memoryStore.SearchAsync(memoryScope, query, maxResults);
 
             _logger.LogDebug("Searched memory scope '{Scope}' for '{Query}': {Count} results",
                 scope, query, results.Count);
@@ -164,5 +176,18 @@ public class MemoryTools : IAIToolProvider
             _logger.LogDebug(ex, "Failed to search memory scope '{Scope}'", scope);
             return new { error = $"Failed to search memory: {ex.Message}" };
         }
+    }
+
+    /// <summary>
+    /// 构建带用户隔离的 MemoryScope
+    /// </summary>
+    private MemoryScope BuildScope(string scope)
+    {
+        var enableUserIsolation = false;
+        if (bool.TryParse(_configuration?["AI:ContextProviders:Memory:EnableUserIsolation"], out var parsed))
+        {
+            enableUserIsolation = parsed;
+        }
+        return new MemoryScope(scope, enableUserIsolation ? _currentUser?.Id : null);
     }
 }

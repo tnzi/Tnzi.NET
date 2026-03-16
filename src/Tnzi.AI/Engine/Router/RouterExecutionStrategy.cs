@@ -24,8 +24,17 @@ public class RouterExecutionStrategy : IExecutionStrategy
 
         if (routeTarget == null)
         {
-            context.Logger.LogDebug("Router agent '{AgentName}' answered directly without routing", agent.Name);
-            return BuildResult(routerResponse, [agent.Name], agent.Name, promptTokens, completionTokens);
+            if (!_config.AllowDirectResponse && _config.Targets.Count > 0)
+            {
+                // Fallback: route to the first target when direct response is disallowed
+                routeTarget = _config.Targets.Keys.First();
+                context.Logger.LogInformation("Router did not route but AllowDirectResponse=false — falling back to '{Target}'", routeTarget);
+            }
+            else
+            {
+                context.Logger.LogDebug("Router agent '{AgentName}' answered directly without routing", agent.Name);
+                return BuildResult(routerResponse, [agent.Name], agent.Name, promptTokens, completionTokens);
+            }
         }
 
         if (!_config.Targets.TryGetValue(routeTarget, out var targetAgentId))
@@ -53,35 +62,38 @@ public class RouterExecutionStrategy : IExecutionStrategy
     {
         string? detectedRoute = null;
         var routerAgent = InjectRouteTool(agent, _config.Targets.Keys, target => detectedRoute = target);
+
+        // Buffer ALL router output (text + non-text) until we know whether routing occurs.
+        // If the model writes preamble text before calling route_to_agent, we must suppress it
+        // to avoid a duplicate response alongside the target agent's output.
         var preTextBuffer = new List<AgentStreamChunk>();
 
         await foreach (var chunk in routerAgent.ExecuteStreamingAsync(messages, ct).WithCancellation(ct))
         {
-            if (chunk.Text == null && chunk.ReasoningText == null)
-            {
-                preTextBuffer.Add(chunk);
-                continue;
-            }
+            preTextBuffer.Add(chunk);
 
+            // Once route is detected, stop consuming the router stream
             if (detectedRoute != null)
-            {
                 break;
-            }
-
-            if (preTextBuffer.Count > 0)
-            {
-                foreach (var buffered in preTextBuffer) yield return buffered;
-                preTextBuffer.Clear();
-            }
-
-            yield return chunk;
         }
 
         if (detectedRoute == null)
         {
-            foreach (var buffered in preTextBuffer) yield return buffered;
-            yield break;
+            if (!_config.AllowDirectResponse && _config.Targets.Count > 0)
+            {
+                // Fallback: route to the first target when direct response is disallowed
+                detectedRoute = _config.Targets.Keys.First();
+                context.Logger.LogInformation("Router did not route but AllowDirectResponse=false — falling back to '{Target}'", detectedRoute);
+            }
+            else
+            {
+                // No routing — direct response: yield everything the router produced
+                foreach (var buffered in preTextBuffer) yield return buffered;
+                yield break;
+            }
         }
+
+        // Routing occurred — discard buffered router text (suppressing any preamble the model wrote)
 
         if (!_config.Targets.TryGetValue(detectedRoute, out var targetAgentId))
         {

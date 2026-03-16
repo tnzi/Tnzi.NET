@@ -56,10 +56,13 @@
     <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
     <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Feature.Tests/Tnzi.Feature.Tests.csproj" />
+    <Project Path="tests/Tnzi.Hangfire.Tests/Tnzi.Hangfire.Tests.csproj" />
+    <Project Path="tests/Tnzi.HealthChecks.Tests/Tnzi.HealthChecks.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
     <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
+    <Project Path="tests/Tnzi.Mapster.Tests/Tnzi.Mapster.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
     <Project Path="tests/Tnzi.OpenTelemetry.Tests/Tnzi.OpenTelemetry.Tests.csproj" />
     <Project Path="tests/Tnzi.Payment.Tests/Tnzi.Payment.Tests.csproj" />
@@ -68,6 +71,7 @@
     <Project Path="tests/Tnzi.Redis.Tests/Tnzi.Redis.Tests.csproj" />
     <Project Path="tests/Tnzi.SignalR.Tests/Tnzi.SignalR.Tests.csproj" />
     <Project Path="tests/Tnzi.Storage.Tests/Tnzi.Storage.Tests.csproj" />
+    <Project Path="tests/Tnzi.Swagger.Tests/Tnzi.Swagger.Tests.csproj" />
     <Project Path="tests/Tnzi.System.Tests/Tnzi.System.Tests.csproj" />
     <Project Path="tests/Tnzi.Template.Tests/Tnzi.Template.Tests.csproj" />
     <Project Path="tests/Tnzi.TestBase/Tnzi.TestBase.csproj" />

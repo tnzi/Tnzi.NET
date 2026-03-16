@@ -59,9 +59,11 @@ public class AgentResolver : IAgentResolver
                 entity.Instructions ?? string.Empty,
                 new Dictionary<string, string> { ["agent.name"] = entity.Name });
 
+            // model param acts as an override (e.g. think-model auto-switch); fall back to entity default
+            var effectiveModel = model ?? entity.Model;
             var executor = await _agentFactory.CreateAgentAsync(
                 entity.Provider,
-                entity.Model,
+                effectiveModel,
                 renderedInstructions,
                 entity.Name,
                 entityToolGroups,
@@ -69,8 +71,10 @@ public class AgentResolver : IAgentResolver
                 entity.MaxTokens,
                 options: null,
                 userPermissions: userPermissions,
+                agentId: entity.Id,
                 ct: ct);
-            return AgentResolution.Success(executor, entity.Provider, entity.Model, agentId, entity.Configuration, entity.ExecutionMode);
+            var creationParams = new AgentCreationParameters(renderedInstructions, entity.Name, entityToolGroups, entity.Temperature, entity.MaxTokens, userPermissions);
+            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams);
         }
 
         // 2. 使用 ToolGroups（无 AgentId 但有工具组）

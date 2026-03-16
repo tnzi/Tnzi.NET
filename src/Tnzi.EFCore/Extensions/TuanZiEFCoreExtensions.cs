@@ -37,10 +37,12 @@ public static class TnziEFCoreExtensions
         services.AddScoped<IDbInitializer, EFCoreDbInitializer<TDbContext>>();
         services.AddScoped<IUnitOfWork, EFCoreUnitOfWork<TDbContext>>();
 
-        // 注意：基类 DbContext 的注册现在由自动发现机制处理
-        // 只有在明确标记为主 DbContext 时才会注册为基类
-        // 如果需要手动注册基类，请在调用 AddTnziDbContext 后手动添加：
-        // services.AddScoped<DbContext>(provider => provider.GetRequiredService<TDbContext>());
+        // 主 DbContext：注册为基类 DbContext，供 EfCoreEventStore 等基础设施组件使用
+        // DbContextRegistrar 也会做同样的事（自动发现模式），TryAdd 防止重复注册
+        if (isPrimary)
+        {
+            services.TryAddScoped<DbContext>(sp => sp.GetRequiredService<TDbContext>());
+        }
 
 
 

@@ -103,7 +103,7 @@ public sealed class TextSearchProvider : IContextProvider
 
             return new ContextInjection
             {
-                Messages = [new ChatMessage(ChatRole.User, formatted)],
+                Messages = [new ChatMessage(ChatRole.System, formatted)],
                 Citations = citations
             };
         }

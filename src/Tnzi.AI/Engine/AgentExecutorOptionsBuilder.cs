@@ -20,9 +20,12 @@ public class AgentExecutorOptionsBuilder
     private readonly IEntityMemoryStore _entityMemoryStore;
     private readonly LlmEntityExtractor _entityExtractor;
     private readonly IEnumerable<IToolExecutionMiddleware> _middlewares;
-    private readonly SkillToolsProvider _skillToolsProvider;
+    private readonly ISkillRegistry _skillRegistry;
+    private readonly ISkillTemplateEngine _skillTemplateEngine;
     private readonly ITokenEstimator _tokenEstimator;
     private readonly ProjectContextProvider _projectContextProvider;
+    private readonly IAgentExecutionContextAccessor _executionContextAccessor;
+    private readonly IMemoryConsolidator? _memoryConsolidator;
     private readonly ICurrentUser? _currentUser;
     private readonly ILogger<AgentExecutorOptionsBuilder> _logger;
 
@@ -35,11 +38,14 @@ public class AgentExecutorOptionsBuilder
         IEntityMemoryStore entityMemoryStore,
         LlmEntityExtractor entityExtractor,
         IEnumerable<IToolExecutionMiddleware> middlewares,
-        SkillToolsProvider skillToolsProvider,
+        ISkillRegistry skillRegistry,
+        ISkillTemplateEngine skillTemplateEngine,
         ITokenEstimator tokenEstimator,
         ProjectContextProvider projectContextProvider,
+        IAgentExecutionContextAccessor executionContextAccessor,
         ILogger<AgentExecutorOptionsBuilder> logger,
-        ICurrentUser? currentUser = null)
+        ICurrentUser? currentUser = null,
+        IMemoryConsolidator? memoryConsolidator = null)
     {
         _options = Check.NotNull(options);
         _loggerFactory = Check.NotNull(loggerFactory);
@@ -49,11 +55,14 @@ public class AgentExecutorOptionsBuilder
         _entityMemoryStore = Check.NotNull(entityMemoryStore);
         _entityExtractor = Check.NotNull(entityExtractor);
         _middlewares = Check.NotNull(middlewares);
-        _skillToolsProvider = Check.NotNull(skillToolsProvider);
+        _skillRegistry = Check.NotNull(skillRegistry);
+        _skillTemplateEngine = Check.NotNull(skillTemplateEngine);
         _tokenEstimator = Check.NotNull(tokenEstimator);
         _projectContextProvider = Check.NotNull(projectContextProvider);
+        _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _logger = Check.NotNull(logger);
         _currentUser = currentUser;
+        _memoryConsolidator = memoryConsolidator;
     }
 
     /// <summary>
@@ -65,7 +74,8 @@ public class AgentExecutorOptionsBuilder
         string? instructions,
         IList<AITool>? tools,
         double? temperature,
-        int? maxTokens)
+        int? maxTokens,
+        Guid? agentId = null)
     {
         // 从 DI 解析已注册的中间件
         var middlewares = ResolveMiddlewares();
@@ -89,7 +99,7 @@ public class AgentExecutorOptionsBuilder
 
         // 调用方未传入 options，根据配置自动创建 HistoryReducer 和 ContextProvider
         var historyReducer = CreateHistoryReducer();
-        var contextProvider = CreateContextProvider();
+        var contextProvider = CreateContextProvider(agentId);
 
         return new AgentExecutorOptions
         {
@@ -110,12 +120,12 @@ public class AgentExecutorOptionsBuilder
     private IHistoryReducer? CreateHistoryReducer()
     {
         var historyConfig = _options.Value.History;
-        if (!historyConfig.Store.Enabled)
+        var reductionMode = historyConfig.Reduction.Mode;
+
+        if (reductionMode == HistoryReductionMode.None)
         {
             return null;
         }
-
-        var reductionMode = historyConfig.Reduction.Mode;
 
         IHistoryReducer? reducer = reductionMode switch
         {
@@ -175,7 +185,7 @@ public class AgentExecutorOptionsBuilder
     /// <summary>
     /// 根据配置创建 IContextProvider（组合多个子 Provider）
     /// </summary>
-    private IContextProvider? CreateContextProvider()
+    private IContextProvider? CreateContextProvider(Guid? agentId = null)
     {
         var contextConfig = _options.Value.ContextProviders;
         if (!contextConfig.Enabled)
@@ -194,7 +204,7 @@ public class AgentExecutorOptionsBuilder
 
         if (contextConfig.ChatHistoryMemory.Enabled)
         {
-            var provider = CreateChatHistoryMemoryProvider();
+            var provider = CreateChatHistoryMemoryProvider(agentId);
             if (provider != null) compositeProvider.AddProvider(provider);
         }
 
@@ -212,7 +222,7 @@ public class AgentExecutorOptionsBuilder
 
         if (contextConfig.EntityMemory.Enabled)
         {
-            var provider = CreateEntityMemoryContextProvider();
+            var provider = CreateEntityMemoryContextProvider(agentId);
             if (provider != null) compositeProvider.AddProvider(provider);
         }
 
@@ -245,14 +255,18 @@ public class AgentExecutorOptionsBuilder
         }
     }
 
-    private IContextProvider? CreateChatHistoryMemoryProvider()
+    private IContextProvider? CreateChatHistoryMemoryProvider(Guid? agentId = null)
     {
         try
         {
             var chatHistoryOptions = _options.Value.ContextProviders.ChatHistoryMemory;
-            var scope = new ChatHistoryMemoryScope();
+            var scope = new ChatHistoryMemoryScope
+            {
+                UserId = ResolveCurrentUserId()?.ToString(),
+                AgentId = agentId?.ToString()
+            };
             var logger = _loggerFactory.CreateLogger<ChatHistoryMemoryProvider>();
-            return new ChatHistoryMemoryProvider(_textSearchService, chatHistoryOptions, scope, logger);
+            return new ChatHistoryMemoryProvider(_textSearchService, chatHistoryOptions, scope, logger, _executionContextAccessor);
         }
         catch (Exception ex)
         {
@@ -265,8 +279,11 @@ public class AgentExecutorOptionsBuilder
     {
         try
         {
+            var memoryOptions = _options.Value.ContextProviders.Memory;
+            var userId = memoryOptions.EnableUserIsolation ? ResolveCurrentUserId() : null;
+            var scope = new MemoryScope(defaultScope, userId);
             var logger = _loggerFactory.CreateLogger<MemoryContextProvider>();
-            return new MemoryContextProvider(_memoryStore, defaultScope, logger);
+            return new MemoryContextProvider(_memoryStore, scope, logger, _chatClientFactory, memoryOptions, _memoryConsolidator);
         }
         catch (Exception ex)
         {
@@ -284,14 +301,21 @@ public class AgentExecutorOptionsBuilder
         return middlewares.Count > 0 ? middlewares : null;
     }
 
-    private IContextProvider? CreateEntityMemoryContextProvider()
+    private IContextProvider? CreateEntityMemoryContextProvider(Guid? agentId = null)
     {
         try
         {
             var entityMemoryOptions = _options.Value.ContextProviders.EntityMemory;
             var logger = _loggerFactory.CreateLogger<EntityMemoryContextProvider>();
 
-            return new EntityMemoryContextProvider(_entityMemoryStore, entityMemoryOptions, _entityExtractor, logger, _currentUser);
+            return new EntityMemoryContextProvider(
+                _entityMemoryStore,
+                entityMemoryOptions,
+                _entityExtractor,
+                logger,
+                _currentUser,
+                agentId,
+                executionContextAccessor: _executionContextAccessor);
         }
         catch (Exception ex)
         {
@@ -305,25 +329,18 @@ public class AgentExecutorOptionsBuilder
         try
         {
             var skillsOptions = _options.Value.ContextProviders.Skills;
-            if (skillsOptions.Paths.Count == 0)
-            {
-                _logger.LogWarning("Skills context provider is enabled but no skill paths are configured.");
-                return null;
-            }
-
-            var skillLoaderLogger = _loggerFactory.CreateLogger<Skills.SkillLoader>();
-            var skillLoader = new Skills.SkillLoader(skillLoaderLogger, _options);
             var logger = _loggerFactory.CreateLogger<SkillContextProvider>();
-            var skillToolsProvider = skillsOptions.InjectionMode is SkillInjectionMode.OnDemandTools or SkillInjectionMode.Both
-                ? _skillToolsProvider
-                : null;
-
-            return new SkillContextProvider(skillLoader, skillsOptions, logger, skillToolsProvider);
+            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create SkillContextProvider");
             return null;
         }
+    }
+
+    private Guid? ResolveCurrentUserId()
+    {
+        return _currentUser?.Id ?? _executionContextAccessor.CurrentRequest?.UserId;
     }
 }

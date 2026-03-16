@@ -75,6 +75,7 @@ public class WorkflowEngine
         var failed = false;
         var awaitingApproval = false;
         string? awaitingApprovalStepId = null;
+        DateTime? checkpointCreatedAt = null;
 
         var nodeOrderIndex = graph.Nodes
             .Select((node, index) => new { node.StepId, Index = index })
@@ -171,8 +172,9 @@ public class WorkflowEngine
                     awaitingApprovalStepId = stepId;
                     if (checkpointStore != null)
                     {
+                        checkpointCreatedAt ??= DateTime.UtcNow;
                         await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                            "awaiting_approval", [stepId], cancellationToken);
+                            "awaiting_approval", [stepId], checkpointCreatedAt, cancellationToken);
                     }
                 }
 
@@ -248,8 +250,9 @@ public class WorkflowEngine
                             new WorkflowNodeResult { Output = state.GetOutput(approvalStepId) ?? string.Empty, AwaitingApproval = true },
                             null,
                             cancellationToken);
+                        checkpointCreatedAt ??= DateTime.UtcNow;
                         await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                            "awaiting_approval", [approvalStepId], cancellationToken);
+                            "awaiting_approval", [approvalStepId], checkpointCreatedAt, cancellationToken);
                         break;
                     }
                 }
@@ -261,15 +264,17 @@ public class WorkflowEngine
             if (checkpointStore != null && !awaitingApproval)
             {
                 var status = failed ? "failed" : (completed.Count >= graph.Nodes.Count ? "completed" : "running");
-                await SaveCheckpointAsync(checkpointStore, executionId, state, completed, status, null, cancellationToken);
+                checkpointCreatedAt ??= DateTime.UtcNow;
+                await SaveCheckpointAsync(checkpointStore, executionId, state, completed, status, null, checkpointCreatedAt, cancellationToken);
             }
         }
 
         // 最终检查点
         if (checkpointStore != null && !awaitingApproval)
         {
+            checkpointCreatedAt ??= DateTime.UtcNow;
             var finalStatus = failed ? "failed" : "completed";
-            await SaveCheckpointAsync(checkpointStore, executionId, state, completed, finalStatus, null, cancellationToken);
+            await SaveCheckpointAsync(checkpointStore, executionId, state, completed, finalStatus, null, checkpointCreatedAt, cancellationToken);
         }
 
         // 更新 Run 状态
@@ -707,6 +712,7 @@ public class WorkflowEngine
         HashSet<string> completed,
         string status,
         HashSet<string>? stepsAwaitingApproval,
+        DateTime? createdAt,
         CancellationToken ct)
     {
         var checkpoint = new WorkflowCheckpoint
@@ -715,7 +721,7 @@ public class WorkflowEngine
             CompletedStepIds = new HashSet<string>(completed),
             StepOutputs = state.ToDictionary(),
             InitialInput = state.InitialInput,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = createdAt ?? DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             Status = status,
             StepsAwaitingApproval = stepsAwaitingApproval ?? []

@@ -201,7 +201,7 @@ public class WorkflowService : ApplicationService, IWorkflowService
     /// 当前统一由 WorkflowEngine 驱动，输出节点完成事件和最终汇总事件。
     /// token 级流式尚未接入 WorkflowEngine，因此 Sequential/Parallel/DAG 目前都是步骤级流式。
     /// </summary>
-    public async IAsyncEnumerable<WorkflowExecutionResultDto> RunStreamingAsync(Guid workflowId, string input, Guid? userId = null, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    public async IAsyncEnumerable<WorkflowExecutionResultDto> RunStreamingAsync(Guid workflowId, string input, Guid? userId = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
         var workflowDef = await _repository.GetAsync(workflowId, ct);
@@ -501,6 +501,27 @@ public class WorkflowService : ApplicationService, IWorkflowService
             CreatedAt = checkpoint.CreatedAt,
             UpdatedAt = checkpoint.UpdatedAt
         });
+    }
+
+    public async Task<Result<WorkflowDefinitionDto>> CloneAsync(Guid id, string? newName = null)
+    {
+        var source = await _repository.GetAsync(id);
+        if (source == null)
+            return Fail<WorkflowDefinitionDto>("Workflow not found", 404, ErrorCodes.WorkflowNotFound);
+
+        var clone = new WorkflowDefinition
+        {
+            Name = newName ?? $"{source.Name} (Copy)",
+            Description = source.Description,
+            Steps = source.Steps,
+            ExecutionMode = source.ExecutionMode,
+            IsEnabled = source.IsEnabled,
+            Configuration = source.Configuration
+        };
+
+        await _repository.InsertAsync(clone);
+        Logger.LogInformation("Workflow cloned: {SourceId} -> {CloneId}, Name: {Name}", id, clone.Id, clone.Name);
+        return Ok(MapToDto(clone));
     }
 
     private static void AggregateUsage(TokenUsageDto? usage, ref int actualInputTokens, ref int actualOutputTokens)

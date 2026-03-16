@@ -13,7 +13,7 @@ internal static class ExecutionStrategyAgentLoader
 
         return await context.AgentFactory.CreateAgentAsync(
             entity.Provider, entity.Model, entity.Instructions, entity.Name,
-            toolGroups, entity.Temperature, entity.MaxTokens, ct: ct);
+            toolGroups, entity.Temperature, entity.MaxTokens, agentId: entity.Id, ct: ct);
     }
 
     public static string GetLatestUserQuestion(List<ChatMessage> messages)

@@ -7,6 +7,7 @@ public class QuotaMiddleware : IAiMiddleware
 {
     private readonly IQuotaService _quotaService;
     private readonly ITokenEstimator _tokenEstimator;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<QuotaMiddleware> _logger;
 
     public int Order => 100;
@@ -14,10 +15,12 @@ public class QuotaMiddleware : IAiMiddleware
     public QuotaMiddleware(
         IQuotaService quotaService,
         ITokenEstimator tokenEstimator,
+        IServiceProvider serviceProvider,
         ILogger<QuotaMiddleware> logger)
     {
         _quotaService = Check.NotNull(quotaService);
         _tokenEstimator = Check.NotNull(tokenEstimator);
+        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
     }
 
@@ -39,6 +42,7 @@ public class QuotaMiddleware : IAiMiddleware
         if (!reserveResult.Succeeded)
         {
             _logger.LogWarning("Quota reservation failed for user {UserId}: {Error}", userId, reserveResult.Message);
+            await PublishQuotaExceededEventAsync(userId.Value, estimatedTokens, reserveResult.Message ?? "Quota exceeded");
             return new AgentRunResult
             {
                 Response = reserveResult.Message ?? "Quota exceeded",
@@ -91,6 +95,7 @@ public class QuotaMiddleware : IAiMiddleware
         if (!reserveResult.Succeeded)
         {
             _logger.LogWarning("Quota reservation failed for user {UserId}: {Error}", userId, reserveResult.Message);
+            await PublishQuotaExceededEventAsync(userId, estimatedTokens, reserveResult.Message ?? "Quota exceeded");
             yield return new AgentStreamChunk
             {
                 Text = reserveResult.Message ?? "Quota exceeded",
@@ -131,6 +136,27 @@ public class QuotaMiddleware : IAiMiddleware
                     : estimatedTokens;
                 await _quotaService.SettleQuotaAsync(userId, reservation, tokensToSettle, CancellationToken.None);
             }
+        }
+    }
+
+    /// <summary>发布配额超限事件（静默失败）</summary>
+    private async Task PublishQuotaExceededEventAsync(Guid userId, int estimatedTokens, string reason)
+    {
+        try
+        {
+            var eventBus = _serviceProvider.GetService<IEventBus>();
+            if (eventBus == null) return;
+
+            await eventBus.PublishAsync(new QuotaExceededEvent
+            {
+                UserId = userId,
+                EstimatedTokens = estimatedTokens,
+                Reason = reason
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish QuotaExceededEvent for user {UserId}", userId);
         }
     }
 }

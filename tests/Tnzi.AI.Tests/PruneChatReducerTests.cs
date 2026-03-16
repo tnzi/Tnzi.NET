@@ -146,6 +146,100 @@ public class PruneChatReducerTests
         result.ShouldNotContain(m => m.Role == ChatRole.Tool);
     }
 
+    [Fact]
+    public async Task Reduce_ProtectedTools_PreservesMatchingToolOutputs()
+    {
+        var options = new PruneOptions
+        {
+            KeepLastTurns = 3,
+            DropToolOutputsOlderThan = 1,
+            ProtectedTools = ["get_weather"]
+        };
+        var reducer = CreateReducer(options);
+
+        // assistant 消息包含 FunctionCallContent（提供 CallId → Name 映射）
+        var functionCall = new FunctionCallContent("call_xyz", "get_weather", new Dictionary<string, object?> { ["city"] = "Tokyo" });
+        var functionResult = new FunctionResultContent("call_xyz", "Sunny, 25°C");
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Turn 1"),
+            new(ChatRole.Assistant, [functionCall]),          // assistant 发起工具调用
+            new(ChatRole.Tool, [functionResult]),              // 受保护工具的输出
+            new(ChatRole.User, "Turn 2"),
+            new(ChatRole.Assistant, "Reply 2"),
+            new(ChatRole.User, "Turn 3"),
+            new(ChatRole.Assistant, "Reply 3")
+        };
+
+        var result = await reducer.ReduceAsync(messages);
+
+        // 受保护工具的输出应保留（即使 turnAge > DropToolOutputsOlderThan）
+        result.ShouldContain(m => m.Role == ChatRole.Tool);
+    }
+
+    [Fact]
+    public async Task Reduce_ProtectedTools_UnmatchedToolOutputsPruned()
+    {
+        var options = new PruneOptions
+        {
+            KeepLastTurns = 3,
+            DropToolOutputsOlderThan = 1,
+            ProtectedTools = ["get_weather"] // 保护 get_weather，不保护 search
+        };
+        var reducer = CreateReducer(options);
+
+        var searchCall = new FunctionCallContent("call_001", "search", new Dictionary<string, object?> { ["q"] = "test" });
+        var searchResult = new FunctionResultContent("call_001", "Search results...");
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Turn 1"),
+            new(ChatRole.Assistant, [searchCall]),
+            new(ChatRole.Tool, [searchResult]),   // 不受保护的工具输出（turnAge=3 > 1）
+            new(ChatRole.User, "Turn 2"),
+            new(ChatRole.Assistant, "Reply 2"),
+            new(ChatRole.User, "Turn 3"),
+            new(ChatRole.Assistant, "Reply 3")
+        };
+
+        var result = await reducer.ReduceAsync(messages);
+
+        // 不受保护的工具输出应被裁剪
+        result.ShouldNotContain(m => m.Role == ChatRole.Tool);
+    }
+
+    [Fact]
+    public async Task Reduce_ProtectedTools_NoFunctionCallContent_SafelyHandled()
+    {
+        // 无 FunctionCallContent 的工具消息 → 安全处理（无法匹配，正常裁剪）
+        var options = new PruneOptions
+        {
+            KeepLastTurns = 3,
+            DropToolOutputsOlderThan = 1,
+            ProtectedTools = ["get_weather"]
+        };
+        var reducer = CreateReducer(options);
+
+        var orphanResult = new FunctionResultContent("orphan_call", "Some result");
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Turn 1"),
+            new(ChatRole.Assistant, "Regular reply"),          // 无 FunctionCallContent
+            new(ChatRole.Tool, [orphanResult]),                 // 孤立的工具结果
+            new(ChatRole.User, "Turn 2"),
+            new(ChatRole.Assistant, "Reply 2"),
+            new(ChatRole.User, "Turn 3"),
+            new(ChatRole.Assistant, "Reply 3")
+        };
+
+        var result = await reducer.ReduceAsync(messages);
+
+        // 无法匹配到受保护工具 → 被裁剪
+        result.ShouldNotContain(m => m.Role == ChatRole.Tool);
+    }
+
     private static PruneChatReducer CreateReducer(PruneOptions options)
     {
         return new PruneChatReducer(options, Mock.Of<ILogger<PruneChatReducer>>());

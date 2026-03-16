@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<MajorVersion>0</MajorVersion>
 		<MinorVersion>1</MinorVersion>
-		<PatchVersion>3</PatchVersion>
+		<PatchVersion>13</PatchVersion>
 
 		<!-- alpha, beta, rc or empty -->
 		<PreReleaseLabel></PreReleaseLabel>

@@ -33,7 +33,7 @@ public class ToolApprovalOptions
     /// <summary>
     /// 审批超时时间（秒）
     /// </summary>
-    public int TimeoutSeconds { get; set; } = 300;
+    public int TimeoutSeconds { get; set; } = 120;
 }
 
 /// <summary>

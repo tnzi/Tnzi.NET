@@ -8,7 +8,7 @@ public class AIRagOptions
     /// <summary>
     /// 默认切块大小（字符数）
     /// </summary>
-    public int DefaultChunkSize { get; set; } = 512;
+    public int DefaultChunkSize { get; set; } = 1024;
 
     /// <summary>
     /// 默认切块重叠（字符数）
@@ -23,7 +23,7 @@ public class AIRagOptions
     /// <summary>
     /// 嵌入生成的批量大小
     /// </summary>
-    public int EmbeddingBatchSize { get; set; } = 20;
+    public int EmbeddingBatchSize { get; set; } = 200;
 
     /// <summary>
     /// 默认嵌入提供商名称（对应 AI:Providers 中的配置）
@@ -92,7 +92,7 @@ public class EmbeddingCacheOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// 缓存 TTL（小时），默认 168 小时（7 天）
+    /// 缓存 TTL（小时），默认 720 小时（30 天）
     /// </summary>
-    public int TtlHours { get; set; } = 168;
+    public int TtlHours { get; set; } = 720;
 }

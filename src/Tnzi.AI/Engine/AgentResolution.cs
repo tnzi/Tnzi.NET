@@ -30,11 +30,16 @@ public class AgentResolution
     public bool IsSuccess => Agent != null;
 
     /// <summary>
+    /// 创建 AgentExecutor 时使用的原始参数 — 供 SkillConstraintMiddleware 触发模型/Provider 覆盖时重建 Executor 使用
+    /// </summary>
+    public AgentCreationParameters? CreationParameters { get; init; }
+
+    /// <summary>
     /// 创建成功结果
     /// </summary>
-    public static AgentResolution Success(AgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single)
+    public static AgentResolution Success(AgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single, AgentCreationParameters? creationParameters = null)
     {
-        return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode };
+        return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode, CreationParameters = creationParameters };
     }
 
     /// <summary>
@@ -45,3 +50,14 @@ public class AgentResolution
         return new AgentResolution { Provider = provider, Model = model, AgentId = agentId, ErrorCode = errorCode };
     }
 }
+
+/// <summary>
+/// AgentExecutor 创建时的原始参数快照 — 用于在模型/Provider 覆盖时重建执行器
+/// </summary>
+public record AgentCreationParameters(
+    string? Instructions,
+    string? Name,
+    IEnumerable<string>? ToolGroups,
+    double? Temperature,
+    int? MaxTokens,
+    IEnumerable<string>? UserPermissions);

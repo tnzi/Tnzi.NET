@@ -134,7 +134,7 @@ public class EntityMemoryTests
     {
         // Arrange
         var mockStore = new Mock<IEntityMemoryStore>();
-        mockStore.Setup(s => s.GetRelevantEntitiesAsync(It.IsAny<Guid?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        mockStore.Setup(s => s.GetRelevantEntitiesAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntityMemoryEntry>
             {
                 new()
@@ -182,7 +182,7 @@ public class EntityMemoryTests
     {
         // Arrange
         var mockStore = new Mock<IEntityMemoryStore>();
-        mockStore.Setup(s => s.GetRelevantEntitiesAsync(It.IsAny<Guid?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        mockStore.Setup(s => s.GetRelevantEntitiesAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntityMemoryEntry>());
 
         var mockExtractor = CreateMockExtractor([]);
@@ -203,7 +203,7 @@ public class EntityMemoryTests
     {
         // Arrange
         var mockStore = new Mock<IEntityMemoryStore>();
-        mockStore.Setup(s => s.GetRelevantEntitiesAsync(It.IsAny<Guid?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        mockStore.Setup(s => s.GetRelevantEntitiesAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<EntityMemoryEntry>());
 
         var extractedEntities = new List<EntityMemoryEntry>
@@ -232,6 +232,45 @@ public class EntityMemoryTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task EntityMemoryContextProvider_UsesAgentIdFromExecutionContext()
+    {
+        var requestAgentId = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor
+        {
+            CurrentRequest = new AgentRunRequest
+            {
+                AgentId = requestAgentId
+            }
+        };
+
+        try
+        {
+            var mockStore = new Mock<IEntityMemoryStore>();
+            mockStore.Setup(s => s.GetRelevantEntitiesAsync(
+                    It.IsAny<Guid?>(),
+                    requestAgentId,
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<EntityMemoryEntry>());
+
+            var provider = new EntityMemoryContextProvider(
+                mockStore.Object,
+                new EntityMemoryOptions { Enabled = true },
+                CreateMockExtractor([]),
+                Mock.Of<ILogger<EntityMemoryContextProvider>>(),
+                executionContextAccessor: accessor);
+
+            await provider.GetContextAsync([]);
+
+            mockStore.VerifyAll();
+        }
+        finally
+        {
+            accessor.CurrentRequest = null;
+        }
+    }
+
     #endregion
 
     #region EntityMemoryOptions
@@ -242,7 +281,7 @@ public class EntityMemoryTests
         var options = new EntityMemoryOptions();
 
         options.Enabled.ShouldBeFalse();
-        options.MaxEntitiesPerContext.ShouldBe(20);
+        options.MaxEntitiesPerContext.ShouldBe(30);
         options.ExtractionProvider.ShouldBeNull();
         options.ExtractionModel.ShouldBeNull();
     }

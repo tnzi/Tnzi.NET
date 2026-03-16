@@ -95,15 +95,15 @@ Tnzi.AI
 │   ├── AgentThreadService.cs    # 线程管理服务
 │   ├── WorkflowService.cs       # 工作流服务（基于 WorkflowEngine）
 │   └── EmbeddingService.cs      # 嵌入服务（OpenAI 兼容 /embeddings）
-├── Controllers/             # 控制器基类
-│   ├── ChatControllerBase.cs       # 聊天 API
+├── Controllers/             # 默认控制器
+│   ├── DefaultChatController.cs       # 聊天 API
 │   └── Admin/                      # 管理端 API
-│       ├── AgentAdminControllerBase.cs   # Agent 管理 (CRUD + Clone)
-│       ├── WorkflowAdminControllerBase.cs # 工作流管理
-│       ├── QuotaAdminControllerBase.cs    # 配额管理
-│       ├── ThreadAdminControllerBase.cs   # Thread 管理 (列表/详情/改标题)
-│       ├── UsageAnalyticsAdminControllerBase.cs # 使用量分析
-│       └── ProviderAdminControllerBase.cs # Provider 信息查询
+│       ├── DefaultAgentAdminController.cs   # Agent 管理 (CRUD + Clone)
+│       ├── DefaultWorkflowAdminController.cs # 工作流管理
+│       ├── DefaultQuotaAdminController.cs    # 配额管理
+│       ├── DefaultThreadAdminController.cs   # Thread 管理 (列表/详情/改标题)
+│       ├── DefaultUsageAnalyticsAdminController.cs # 使用量分析
+│       └── DefaultProviderAdminController.cs # Provider 信息查询
 ├── Tools/                   # 工具系统
 │   ├── ToolAdapter.cs     # 工具适配器
 │   └── Examples/                # 内置工具示例

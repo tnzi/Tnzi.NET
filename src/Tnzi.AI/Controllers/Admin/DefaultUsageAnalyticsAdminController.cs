@@ -57,4 +57,24 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
         var result = await AnalyticsService.GetUsageByModelAsync(startTime, endTime, provider);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 使用量趋势统计（按日/周/月聚合时序数据）
+    /// </summary>
+    [HttpPost("trend")]
+    public virtual async Task<ApiResult<List<UsageTrendPointDto>>> GetTrend([FromBody] UsageTrendQueryDto query)
+    {
+        var result = await AnalyticsService.GetUsageTrendAsync(query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 按 Agent 分组统计（Top N 消耗 Agent）
+    /// </summary>
+    [HttpGet("by-agent")]
+    public virtual async Task<ApiResult<List<AgentUsageDto>>> GetByAgent([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] int topN = 20)
+    {
+        var result = await AnalyticsService.GetUsageByAgentAsync(startTime, endTime, topN);
+        return result.ToApiResult();
+    }
 }

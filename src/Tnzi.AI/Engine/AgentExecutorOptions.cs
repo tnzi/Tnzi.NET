@@ -34,12 +34,12 @@ public class AgentExecutorOptions
     /// <summary>
     /// 最大工具调用迭代次数（防止无限循环）
     /// </summary>
-    public int MaxToolIterations { get; set; } = 10;
+    public int MaxToolIterations { get; set; } = 25;
 
     /// <summary>
     /// 单个工具调用超时时间（秒）
     /// </summary>
-    public int ToolTimeoutSeconds { get; set; } = 60;
+    public int ToolTimeoutSeconds { get; set; } = 120;
 
     /// <summary>
     /// 历史消息压缩器（可选）

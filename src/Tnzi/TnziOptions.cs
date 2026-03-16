@@ -47,4 +47,11 @@ public class TnziOptions
     /// 默认值：false
     /// </summary>
     public bool EnableModuleDependencyAudit { get; set; } = false;
+
+    /// <summary>
+    /// 启动失败时是否写入错误日志文件 (startup-error.log)
+    /// 文件写入 AppContext.BaseDirectory，适用于 IIS/Docker/Windows Service 等控制台输出不可见的场景
+    /// 默认值：true
+    /// </summary>
+    public bool WriteStartupErrorLog { get; set; } = true;
 }

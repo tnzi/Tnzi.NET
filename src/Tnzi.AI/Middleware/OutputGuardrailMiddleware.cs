@@ -7,21 +7,24 @@ namespace Tnzi.AI.Middleware;
 public class OutputGuardrailMiddleware : IAiMiddleware
 {
     private readonly GuardrailRunner _guardrailRunner;
+    private readonly IEnumerable<IOutputGuardrail> _outputGuardrails;
     private readonly IOptions<AIOptions> _options;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<OutputGuardrailMiddleware> _logger;
-
-    /// <summary>流式缓冲检查的默认窗口大小（字符数）</summary>
-    private const int DefaultBufferWindowSize = 500;
 
     public int Order => 900;
 
     public OutputGuardrailMiddleware(
         GuardrailRunner guardrailRunner,
+        IEnumerable<IOutputGuardrail> outputGuardrails,
         IOptions<AIOptions> options,
+        IServiceProvider serviceProvider,
         ILogger<OutputGuardrailMiddleware> logger)
     {
         _guardrailRunner = Check.NotNull(guardrailRunner);
+        _outputGuardrails = Check.NotNull(outputGuardrails);
         _options = Check.NotNull(options);
+        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
     }
 
@@ -50,6 +53,8 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             {
                 _logger.LogWarning("Output rejected by guardrail {GuardrailName}: {Reason}",
                     rejection.GuardrailName, rejection.Reason);
+
+                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Output rejected", "output");
 
                 return new AgentRunResult
                 {
@@ -83,6 +88,8 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             _logger.LogWarning("Output tripwire triggered by {GuardrailName}: {Reason}",
                 ex.GuardrailName, ex.Message);
 
+            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, "output");
+
             return new AgentRunResult
             {
                 Response = ex.Message,
@@ -98,13 +105,17 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 流式输出 Guardrail — 滑动窗口缓冲检查
+    /// 流式输出 Guardrail — 滑动窗口缓冲检查。
+    /// 当没有注册任何 IOutputGuardrail 或 StreamingBufferSize 为 0 时，直接透传不缓冲。
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!_options.Value.Guardrails.Enabled)
+        var guardrailOptions = _options.Value.Guardrails;
+        var hasOutputGuardrails = _outputGuardrails.Any();
+
+        // 无需缓冲的情况：Guardrails 未启用、无输出 guardrail 注册、或缓冲大小为 0
+        if (!guardrailOptions.Enabled || !hasOutputGuardrails || guardrailOptions.StreamingBufferSize <= 0)
         {
-            // Guardrails 未启用，直接传递
             await foreach (var chunk in next(context, cancellationToken))
             {
                 yield return chunk;
@@ -113,6 +124,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
         }
 
         // 滑动窗口缓冲：累积文本直到窗口大小，检查后释放
+        var bufferSize = guardrailOptions.StreamingBufferSize;
         var buffer = new StringBuilder();
         var pendingChunks = new List<AgentStreamChunk>();
         var rejected = false;
@@ -132,9 +144,9 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             pendingChunks.Add(chunk);
 
             // 达到窗口大小时检查
-            if (buffer.Length >= DefaultBufferWindowSize)
+            if (buffer.Length >= bufferSize)
             {
-                var checkResult = await CheckOutputSafeAsync(buffer.ToString(), cancellationToken);
+                var checkResult = await CheckOutputSafeAsync(context, buffer.ToString(), cancellationToken);
                 if (checkResult != null)
                 {
                     rejected = true;
@@ -148,7 +160,19 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                     yield return pending;
                 }
                 pendingChunks.Clear();
-                buffer.Clear(); // 清除已检查的缓冲区，避免重复检查
+
+                // 保留尾部重叠区域用于跨窗口检测（如关键词跨越窗口边界）
+                const int overlapSize = 50;
+                if (buffer.Length > overlapSize)
+                {
+                    var overlap = buffer.ToString(buffer.Length - overlapSize, overlapSize);
+                    buffer.Clear();
+                    buffer.Append(overlap);
+                }
+                else
+                {
+                    buffer.Clear();
+                }
             }
         }
 
@@ -167,7 +191,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
         {
             if (buffer.Length > 0)
             {
-                var checkResult = await CheckOutputSafeAsync(buffer.ToString(), cancellationToken);
+                var checkResult = await CheckOutputSafeAsync(context, buffer.ToString(), cancellationToken);
                 if (checkResult != null)
                 {
                     yield return new AgentStreamChunk
@@ -189,7 +213,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     /// <summary>
     /// 安全检查输出，返回拒绝原因（null 表示通过）
     /// </summary>
-    private async Task<string?> CheckOutputSafeAsync(string text, CancellationToken ct)
+    private async Task<string?> CheckOutputSafeAsync(AiMiddlewareContext context, string text, CancellationToken ct)
     {
         try
         {
@@ -198,15 +222,40 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             {
                 _logger.LogWarning("Streaming output rejected by guardrail {GuardrailName}: {Reason}",
                     rejection.GuardrailName, rejection.Reason);
+                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Output rejected", "output");
                 return rejection.Reason;
             }
         }
         catch (TripwireGuardrailException ex)
         {
             _logger.LogWarning("Streaming output tripwire triggered: {Message}", ex.Message);
+            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, "output");
             return ex.Message;
         }
 
         return null;
+    }
+
+    /// <summary>发布 Guardrail 拦截事件（静默失败）</summary>
+    private async Task PublishGuardrailRejectionEventAsync(AiMiddlewareContext context, string guardrailName, string reason, string direction)
+    {
+        try
+        {
+            var eventBus = _serviceProvider.GetService<IEventBus>();
+            if (eventBus == null) return;
+
+            await eventBus.PublishAsync(new GuardrailRejectionEvent
+            {
+                UserId = context.Request.UserId,
+                ThreadId = context.Request.ThreadId,
+                GuardrailName = guardrailName,
+                Reason = reason,
+                Direction = direction
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish GuardrailRejectionEvent");
+        }
     }
 }

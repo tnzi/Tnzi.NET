@@ -140,6 +140,16 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 克隆工作流（深拷贝定义，生成新 ID）
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    public virtual async Task<ApiResult<WorkflowDefinitionDto>> Clone(Guid id, [FromBody] CloneWorkflowRequestDto? request = null)
+    {
+        var result = await WorkflowService.CloneAsync(id, request?.NewName);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取工作流执行状态
     /// </summary>
     [HttpGet("executions/{executionId}/status")]

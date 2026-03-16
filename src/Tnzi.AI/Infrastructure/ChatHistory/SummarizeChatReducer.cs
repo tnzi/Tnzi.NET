@@ -24,19 +24,14 @@ public sealed class SummarizeChatReducer : IHistoryReducer
     private readonly ITokenEstimator _tokenEstimator;
     private readonly ILogger<SummarizeChatReducer> _logger;
 
-    // 缓存的摘要（避免重复生成）
+    // 缓存的摘要（避免重复生成，基于内容 hash 判断是否命中）
     private string? _cachedSummary;
-    private int _summarizedMessageCount;
+    private int _cachedMessagesHash;
 
     private const string DefaultSummaryPrompt = """
-        Please provide a concise summary of the following conversation history.
-        Focus on:
-        1. Key topics discussed
-        2. Important decisions made
-        3. Outstanding questions or tasks
-        4. Any context that would be important for continuing the conversation
-
-        Keep the summary brief but comprehensive. Output only the summary, no explanations.
+        Summarize the following conversation. Match the language of the conversation.
+        Focus on: key topics, decisions, outstanding questions.
+        Output only the summary.
 
         Conversation to summarize:
         """;
@@ -114,10 +109,10 @@ public sealed class SummarizeChatReducer : IHistoryReducer
             return true;
         }
 
-        // 按估算 Token 数判断
+        // 按估算 Token 数判断（使用 FormatMessageText 确保工具消息也被计算）
         if (_options.TokenThreshold.HasValue)
         {
-            var text = string.Join("\n", nonSystemMessages.Select(m => m.Text ?? string.Empty));
+            var text = string.Join("\n", nonSystemMessages.Select(ChatHistoryHelper.FormatMessageText));
             var estimatedTokens = _tokenEstimator.Estimate(text, baseOverhead: 0);
             if (estimatedTokens > _options.TokenThreshold.Value)
             {
@@ -153,9 +148,10 @@ public sealed class SummarizeChatReducer : IHistoryReducer
             return messages;
         }
 
-        // 检查是否可以使用缓存的摘要
+        // 检查是否可以使用缓存的摘要（基于内容 hash 而非消息数量）
         var messagesToSummarize = turnsToSummarize.SelectMany(t => t).ToList();
-        if (_cachedSummary != null && _summarizedMessageCount == messagesToSummarize.Count)
+        var messagesHash = ComputeMessagesHash(messagesToSummarize);
+        if (_cachedSummary != null && _cachedMessagesHash == messagesHash)
         {
             // 使用缓存的摘要
             return BuildResultWithSummary(systemMessages, _cachedSummary, turnsToKeep);
@@ -166,7 +162,7 @@ public sealed class SummarizeChatReducer : IHistoryReducer
 
         // 缓存摘要
         _cachedSummary = summary;
-        _summarizedMessageCount = messagesToSummarize.Count;
+        _cachedMessagesHash = messagesHash;
 
         return BuildResultWithSummary(systemMessages, summary, turnsToKeep);
     }
@@ -248,7 +244,7 @@ public sealed class SummarizeChatReducer : IHistoryReducer
         foreach (var message in messages)
         {
             var role = message.Role.Value;
-            var content = message.Text ?? "[non-text content]";
+            var content = ChatHistoryHelper.FormatMessageText(message);
 
             sb.AppendLine($"{role}: {content}");
         }
@@ -257,11 +253,24 @@ public sealed class SummarizeChatReducer : IHistoryReducer
     }
 
     /// <summary>
+    /// 计算消息列表的内容 hash（用于缓存判断）
+    /// </summary>
+    private static int ComputeMessagesHash(List<ChatMessage> messages)
+    {
+        var hash = new HashCode();
+        foreach (var m in messages)
+        {
+            hash.Add(ChatHistoryHelper.FormatMessageText(m));
+        }
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
     /// 清除缓存的摘要
     /// </summary>
     public void ClearCache()
     {
         _cachedSummary = null;
-        _summarizedMessageCount = 0;
+        _cachedMessagesHash = 0;
     }
 }

@@ -271,6 +271,27 @@ public class AgentListQueryDto : PagedQueryDto
 
     /// <summary>Filter by enabled status</summary>
     public bool? IsEnabled { get; set; }
+
+    /// <summary>Filter by execution mode</summary>
+    public AgentExecutionMode? ExecutionMode { get; set; }
+
+    /// <summary>Filter by domain tag (e.g. "coding", "research") — matches if agent has this domain</summary>
+    public string? Domain { get; set; }
+
+    /// <summary>Filter by role tag (e.g. "reviewer", "planner") — matches if agent has this role</summary>
+    public string? Role { get; set; }
+
+    /// <summary>Minimum quality tier (1-5, 5=highest)</summary>
+    [Range(1, 5)]
+    public int? MinQualityTier { get; set; }
+
+    /// <summary>Maximum latency tier (1-5, 1=fastest)</summary>
+    [Range(1, 5)]
+    public int? MaxLatencyTier { get; set; }
+
+    /// <summary>Maximum cost tier (1-5, 1=cheapest)</summary>
+    [Range(1, 5)]
+    public int? MaxCostTier { get; set; }
 }
 
 /// <summary>
@@ -313,6 +334,8 @@ public class AgentResponseDto
 
     /// <summary>Final agent name that produced the answer</summary>
     public string? FinalAgentName { get; set; }
+    /// <summary>Reasoning/thinking content (populated in non-streaming mode)</summary>
+    public string? Reasoning { get; set; }
 }
 
 /// <summary>

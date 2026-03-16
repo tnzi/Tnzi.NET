@@ -7,24 +7,33 @@ namespace Tnzi.AI.Infrastructure;
 public class AgentRuntime : IAgentRuntime
 {
     private readonly IAgentResolver _agentResolver;
+    private readonly IAgentFactory _agentFactory;
+    private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IRunStore _runStore;
     private readonly ITraceStore _traceStore;
     private readonly IWorkflowService _workflowService;
+    private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AgentRuntime> _logger;
 
     public AgentRuntime(
         IAgentResolver agentResolver,
+        IAgentFactory agentFactory,
+        IRepository<Agent, Guid> agentRepository,
         IRunStore runStore,
         ITraceStore traceStore,
         IWorkflowService workflowService,
+        IAgentExecutionContextAccessor executionContextAccessor,
         IServiceProvider serviceProvider,
         ILogger<AgentRuntime> logger)
     {
         _agentResolver = Check.NotNull(agentResolver);
+        _agentFactory = Check.NotNull(agentFactory);
+        _agentRepository = Check.NotNull(agentRepository);
         _runStore = Check.NotNull(runStore);
         _traceStore = Check.NotNull(traceStore);
         _workflowService = Check.NotNull(workflowService);
+        _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
     }
@@ -34,118 +43,135 @@ public class AgentRuntime : IAgentRuntime
     {
         Check.NotNull(request);
 
-        if (request.WorkflowId.HasValue)
-        {
-            return await ExecuteWorkflowAsync(request, cancellationToken);
-        }
+        var previousRequest = _executionContextAccessor.CurrentRequest;
+        _executionContextAccessor.CurrentRequest = request;
 
-        var sw = Stopwatch.StartNew();
-
-        // 1. 解析 Agent
-        var resolution = await _agentResolver.ResolveAgentAsync(
-            request.AgentId, request.Provider, request.Model, request.ToolGroups, cancellationToken);
-
-        if (!resolution.IsSuccess)
-        {
-            return new AgentRunResult
-            {
-                Response = $"Agent resolution failed: {resolution.ErrorCode}",
-                FinishReason = "error"
-            };
-        }
-
-        // 2. 创建 Run（如果启用追踪）
-        AgentRun? run = null;
-        if (request.EnableRunTracking)
-        {
-            run = await CreateRunAsync(request, resolution, cancellationToken);
-        }
-
-        // 3. 构建中间件上下文
-        var context = new AiMiddlewareContext
-        {
-            Request = request,
-            Agent = resolution,
-            Run = run,
-            ServiceProvider = _serviceProvider
-        };
-
-        // 4. 构建中间件管道
-        var middlewares = ResolveMiddlewares();
-        var pipeline = new AiMiddlewarePipeline();
-        foreach (var middleware in middlewares)
-        {
-            pipeline.Use(middleware);
-        }
-
-        // 5. 定义核心执行器（管道最内层）
-        AiMiddlewareDelegate coreExecutor = async (ctx, ct) =>
-        {
-            return await ExecuteCoreAsync(ctx, ct);
-        };
-
-        // 6. 执行管道
-        AgentRunResult result;
         try
         {
-            var pipelineDelegate = pipeline.Build(coreExecutor);
-            result = await pipelineDelegate(context, cancellationToken);
-
-            // 7. 更新 Run 状态为完成
-            if (run != null)
+            if (request.WorkflowId.HasValue)
             {
-                sw.Stop();
-                run.Status = AgentRunStatus.Completed;
-                run.OutputSummary = Truncate(result.Response, 500);
-                run.DurationMs = sw.ElapsedMilliseconds;
-                if (result.Usage != null)
+                return await ExecuteWorkflowAsync(request, cancellationToken);
+            }
+
+            var sw = Stopwatch.StartNew();
+
+            // 0. 自动模型切换（当 ReasoningEffort != None 且当前模型不支持推理时，查找 "think" 别名）
+            var effectiveModel = ResolveThinkingModel(request);
+
+            // 1. 解析 Agent
+            var resolution = await _agentResolver.ResolveAgentAsync(
+                request.AgentId, request.Provider, effectiveModel, request.ToolGroups, cancellationToken);
+
+            if (!resolution.IsSuccess)
+            {
+                return new AgentRunResult
                 {
-                    run.TotalInputTokens = result.Usage.PromptTokens;
-                    run.TotalOutputTokens = result.Usage.CompletionTokens;
-                }
-                await _runStore.UpdateAsync(run, cancellationToken);
-
-                // 记录 Trace
-                await RecordTraceAsync(run.Id, null, "run_completed", result, sw.ElapsedMilliseconds, cancellationToken);
+                    Response = $"Agent resolution failed: {resolution.ErrorCode}",
+                    FinishReason = "error"
+                };
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "AgentRuntime execution failed for request AgentId={AgentId}", request.AgentId);
 
-            // 更新 Run 状态为失败
+            // 2. 创建 Run（如果启用追踪）
+            AgentRun? run = null;
+            if (request.EnableRunTracking)
+            {
+                run = await CreateRunAsync(request, resolution, cancellationToken);
+            }
+
+            // 3. 构建中间件上下文
+            var context = new AiMiddlewareContext
+            {
+                Request = request,
+                Agent = resolution,
+                Run = run,
+                ServiceProvider = _serviceProvider
+            };
+
+            // 4. 构建中间件管道
+            var middlewares = ResolveMiddlewares();
+            var pipeline = new AiMiddlewarePipeline();
+            foreach (var middleware in middlewares)
+            {
+                pipeline.Use(middleware);
+            }
+
+            // 5. 定义核心执行器（管道最内层）
+            AiMiddlewareDelegate coreExecutor = async (ctx, ct) =>
+            {
+                return await ExecuteCoreAsync(ctx, ct);
+            };
+
+            // 6. 执行管道
+            AgentRunResult result;
+            try
+            {
+                var pipelineDelegate = pipeline.Build(coreExecutor);
+                result = await pipelineDelegate(context, cancellationToken);
+
+                // 7. 更新 Run 状态为完成
+                if (run != null)
+                {
+                    sw.Stop();
+                    run.Status = AgentRunStatus.Completed;
+                    run.OutputSummary = Truncate(result.Response, 500);
+                    run.DurationMs = sw.ElapsedMilliseconds;
+                    if (result.Usage != null)
+                    {
+                        run.TotalInputTokens = result.Usage.PromptTokens;
+                        run.TotalOutputTokens = result.Usage.CompletionTokens;
+                    }
+                    await _runStore.UpdateAsync(run, cancellationToken);
+
+                    // 记录 Trace
+                    await RecordTraceAsync(run.Id, null, "run_completed", result, sw.ElapsedMilliseconds, cancellationToken);
+                }
+
+                // 发布运行完成事件
+                await PublishRunCompletedEventAsync(request, result, run, sw.ElapsedMilliseconds, false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "AgentRuntime execution failed for request AgentId={AgentId}", request.AgentId);
+
+                // 更新 Run 状态为失败
+                if (run != null)
+                {
+                    sw.Stop();
+                    run.Status = AgentRunStatus.Failed;
+                    run.Error = ex.Message;
+                    run.DurationMs = sw.ElapsedMilliseconds;
+                    await _runStore.UpdateAsync(run, CancellationToken.None);
+
+                    await RecordTraceAsync(run.Id, null, "error",
+                        new { error = ex.Message, type = ex.GetType().Name },
+                        sw.ElapsedMilliseconds, CancellationToken.None);
+                }
+
+                throw;
+            }
+
+            // 如果启用了 Run 追踪，创建包含 RunId 和 Status 的新结果
             if (run != null)
             {
-                sw.Stop();
-                run.Status = AgentRunStatus.Failed;
-                run.Error = ex.Message;
-                run.DurationMs = sw.ElapsedMilliseconds;
-                await _runStore.UpdateAsync(run, CancellationToken.None);
-
-                await RecordTraceAsync(run.Id, null, "error",
-                    new { error = ex.Message, type = ex.GetType().Name },
-                    sw.ElapsedMilliseconds, CancellationToken.None);
+                return new AgentRunResult
+                {
+                    Response = result.Response,
+                    RunId = run.Id,
+                    ThreadId = result.ThreadId,
+                    Usage = result.Usage,
+                    Citations = result.Citations,
+                    FinishReason = result.FinishReason,
+                    Status = run.Status,
+                    Reasoning = result.Reasoning
+                };
             }
 
-            throw;
+            return result;
         }
-
-        // 如果启用了 Run 追踪，创建包含 RunId 和 Status 的新结果
-        if (run != null)
+        finally
         {
-            return new AgentRunResult
-            {
-                Response = result.Response,
-                RunId = run.Id,
-                ThreadId = result.ThreadId,
-                Usage = result.Usage,
-                Citations = result.Citations,
-                FinishReason = result.FinishReason,
-                Status = run.Status
-            };
+            _executionContextAccessor.CurrentRequest = previousRequest;
         }
-
-        return result;
     }
 
     /// <summary>执行一次 AI 运行（流式）</summary>
@@ -155,127 +181,149 @@ public class AgentRuntime : IAgentRuntime
     {
         Check.NotNull(request);
 
-        if (request.WorkflowId.HasValue)
-        {
-            await foreach (var chunk in ExecuteWorkflowStreamingAsync(request, cancellationToken).WithCancellation(cancellationToken))
-            {
-                yield return chunk;
-            }
-            yield break;
-        }
-
-        var sw = Stopwatch.StartNew();
-
-        // 1. 解析 Agent
-        var resolution = await _agentResolver.ResolveAgentAsync(
-            request.AgentId, request.Provider, request.Model, request.ToolGroups, cancellationToken);
-
-        if (!resolution.IsSuccess)
-        {
-            yield return new AgentStreamChunk
-            {
-                Error = $"Agent resolution failed: {resolution.ErrorCode}",
-                FinishReason = "error"
-            };
-            yield break;
-        }
-
-        // 2. 创建 Run（如果启用追踪）
-        AgentRun? run = null;
-        if (request.EnableRunTracking)
-        {
-            run = await CreateRunAsync(request, resolution, cancellationToken);
-        }
-
-        // 3. 构建中间件上下文
-        var context = new AiMiddlewareContext
-        {
-            Request = request,
-            Agent = resolution,
-            Run = run,
-            ServiceProvider = _serviceProvider
-        };
-
-        // 4. 构建流式中间件管道
-        var middlewares = ResolveMiddlewares();
-        var pipeline = new AiMiddlewarePipeline();
-        foreach (var middleware in middlewares)
-        {
-            pipeline.Use(middleware);
-        }
-
-        AiStreamingMiddlewareDelegate coreExecutor = (ctx, ct) =>
-        {
-            return ExecuteCoreStreamingAsync(ctx, ct);
-        };
-
-        var streamDelegate = pipeline.BuildStreaming(coreExecutor);
-
-        // 5. 执行流式管道
-        var totalInputTokens = 0;
-        var totalOutputTokens = 0;
-        string? lastFinishReason = null;
-        var completedNormally = false;
+        var previousRequest = _executionContextAccessor.CurrentRequest;
+        _executionContextAccessor.CurrentRequest = request;
 
         try
         {
-            await foreach (var chunk in streamDelegate(context, cancellationToken).WithCancellation(cancellationToken))
+            if (request.WorkflowId.HasValue)
             {
-                if (chunk.Usage != null)
+                await foreach (var chunk in ExecuteWorkflowStreamingAsync(request, cancellationToken).WithCancellation(cancellationToken))
                 {
-                    totalInputTokens += chunk.Usage.PromptTokens;
-                    totalOutputTokens += chunk.Usage.CompletionTokens;
+                    yield return chunk;
                 }
-                if (chunk.FinishReason != null)
-                {
-                    lastFinishReason = chunk.FinishReason;
-                }
-
-                yield return chunk;
+                yield break;
             }
-            completedNormally = true;
+
+            var sw = Stopwatch.StartNew();
+
+            // 0. 自动模型切换（当 ReasoningEffort != None 且当前模型不支持推理时，查找 "think" 别名）
+            var effectiveModel = ResolveThinkingModel(request);
+
+            // 1. 解析 Agent
+            var resolution = await _agentResolver.ResolveAgentAsync(
+                request.AgentId, request.Provider, effectiveModel, request.ToolGroups, cancellationToken);
+
+            if (!resolution.IsSuccess)
+            {
+                yield return new AgentStreamChunk
+                {
+                    Error = $"Agent resolution failed: {resolution.ErrorCode}",
+                    FinishReason = "error"
+                };
+                yield break;
+            }
+
+            // 2. 创建 Run（如果启用追踪）
+            AgentRun? run = null;
+            if (request.EnableRunTracking)
+            {
+                run = await CreateRunAsync(request, resolution, cancellationToken);
+            }
+
+            // 3. 构建中间件上下文
+            var context = new AiMiddlewareContext
+            {
+                Request = request,
+                Agent = resolution,
+                Run = run,
+                ServiceProvider = _serviceProvider
+            };
+
+            // 4. 构建流式中间件管道
+            var middlewares = ResolveMiddlewares();
+            var pipeline = new AiMiddlewarePipeline();
+            foreach (var middleware in middlewares)
+            {
+                pipeline.Use(middleware);
+            }
+
+            AiStreamingMiddlewareDelegate coreExecutor = (ctx, ct) =>
+            {
+                return ExecuteCoreStreamingAsync(ctx, ct);
+            };
+
+            var streamDelegate = pipeline.BuildStreaming(coreExecutor);
+
+            // 5. 执行流式管道
+            var totalInputTokens = 0;
+            var totalOutputTokens = 0;
+            string? lastFinishReason = null;
+            var completedNormally = false;
+
+            try
+            {
+                await foreach (var chunk in streamDelegate(context, cancellationToken).WithCancellation(cancellationToken))
+                {
+                    if (chunk.Usage != null)
+                    {
+                        totalInputTokens += chunk.Usage.PromptTokens;
+                        totalOutputTokens += chunk.Usage.CompletionTokens;
+                    }
+                    if (chunk.FinishReason != null)
+                    {
+                        lastFinishReason = chunk.FinishReason;
+                    }
+
+                    yield return chunk;
+                }
+                completedNormally = true;
+            }
+            finally
+            {
+                // 6. 更新 Run 状态（无论成功或失败都确保更新）
+                // 使用 CancellationToken.None，因为原始 token 可能已取消
+                if (run != null)
+                {
+                    sw.Stop();
+                    run.DurationMs = sw.ElapsedMilliseconds;
+                    run.TotalInputTokens = totalInputTokens;
+                    run.TotalOutputTokens = totalOutputTokens;
+
+                    if (completedNormally)
+                    {
+                        run.Status = AgentRunStatus.Completed;
+                        await _runStore.UpdateAsync(run, CancellationToken.None);
+
+                        await RecordTraceAsync(run.Id, null, "stream_completed",
+                            new { finishReason = lastFinishReason, inputTokens = totalInputTokens, outputTokens = totalOutputTokens },
+                            sw.ElapsedMilliseconds, CancellationToken.None);
+
+                        // 发布流式运行完成事件
+                        var streamResult = new AgentRunResult
+                        {
+                            Response = string.Empty,
+                            Usage = new TokenUsageDto { PromptTokens = totalInputTokens, CompletionTokens = totalOutputTokens },
+                            FinishReason = lastFinishReason
+                        };
+                        await PublishRunCompletedEventAsync(request, streamResult, run, sw.ElapsedMilliseconds, true);
+                    }
+                    else if (cancellationToken.IsCancellationRequested)
+                    {
+                        run.Status = AgentRunStatus.Cancelled;
+                        run.Error = "Streaming was cancelled by the caller";
+                        await _runStore.UpdateAsync(run, CancellationToken.None);
+
+                        await RecordTraceAsync(run.Id, null, "stream_cancelled",
+                            new { finishReason = lastFinishReason },
+                            sw.ElapsedMilliseconds, CancellationToken.None);
+                    }
+                    else
+                    {
+                        run.Status = AgentRunStatus.Failed;
+                        run.Error = "Streaming execution failed";
+                        await _runStore.UpdateAsync(run, CancellationToken.None);
+
+                        await RecordTraceAsync(run.Id, null, "error",
+                            new { error = run.Error, finishReason = lastFinishReason },
+                            sw.ElapsedMilliseconds, CancellationToken.None);
+                    }
+                }
+            }
         }
         finally
         {
-            // 6. 更新 Run 状态（无论成功或失败都确保更新）
-            // 使用 CancellationToken.None，因为原始 token 可能已取消
-            if (run != null)
-            {
-                sw.Stop();
-                run.DurationMs = sw.ElapsedMilliseconds;
-                run.TotalInputTokens = totalInputTokens;
-                run.TotalOutputTokens = totalOutputTokens;
-
-                if (completedNormally)
-                {
-                    run.Status = AgentRunStatus.Completed;
-                    await _runStore.UpdateAsync(run, CancellationToken.None);
-
-                    await RecordTraceAsync(run.Id, null, "stream_completed",
-                        new { finishReason = lastFinishReason, inputTokens = totalInputTokens, outputTokens = totalOutputTokens },
-                        sw.ElapsedMilliseconds, CancellationToken.None);
-                }
-                else if (cancellationToken.IsCancellationRequested)
-                {
-                    run.Status = AgentRunStatus.Cancelled;
-                    run.Error = "Streaming was cancelled by the caller";
-                    await _runStore.UpdateAsync(run, CancellationToken.None);
-
-                    await RecordTraceAsync(run.Id, null, "stream_cancelled",
-                        new { finishReason = lastFinishReason },
-                        sw.ElapsedMilliseconds, CancellationToken.None);
-                }
-                else
-                {
-                    run.Status = AgentRunStatus.Failed;
-                    run.Error = "Streaming execution failed";
-                    await _runStore.UpdateAsync(run, CancellationToken.None);
-
-                    await RecordTraceAsync(run.Id, null, "error",
-                        new { error = run.Error, finishReason = lastFinishReason },
-                        sw.ElapsedMilliseconds, CancellationToken.None);
-                }
-            }
+            _executionContextAccessor.CurrentRequest = previousRequest;
         }
     }
 
@@ -384,7 +432,8 @@ public class AgentRuntime : IAgentRuntime
             Usage = result.Usage,
             Citations = result.Citations,
             FinishReason = result.FinishReason,
-            Status = run.Status
+            Status = run.Status,
+            Reasoning = result.Reasoning
         };
     }
 
@@ -589,7 +638,8 @@ public class AgentRuntime : IAgentRuntime
     private async Task<AgentRunResult> ExecuteCoreAsync(AiMiddlewareContext context, CancellationToken ct)
     {
         var resolution = context.Agent;
-        var agent = resolution.Agent!;
+        // 应用 EffectiveModel/Provider 覆盖（由 SkillConstraintMiddleware 设置）
+        var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
         // 构建消息列表（包含中间件注入的消息）
         var messages = new List<ChatMessage>(context.Messages);
@@ -604,8 +654,8 @@ public class AgentRuntime : IAgentRuntime
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
         var strategyContext = new ExecutionStrategyContext
         {
-            AgentFactory = _serviceProvider.GetRequiredService<IAgentFactory>(),
-            AgentRepository = _serviceProvider.GetRequiredService<IRepository<Agent, Guid>>(),
+            AgentFactory = _agentFactory,
+            AgentRepository = _agentRepository,
             ServiceProvider = _serviceProvider,
             Logger = _logger
         };
@@ -623,7 +673,8 @@ public class AgentRuntime : IAgentRuntime
                 Citations = context.Citations.Count > 0 ? context.Citations : null,
                 FinishReason = response.FinishReason,
                 HandoffPath = executionResult.HandoffPath,
-                FinalAgentName = executionResult.FinalAgentName
+                FinalAgentName = executionResult.FinalAgentName,
+                Reasoning = response.Reasoning
             };
         }
     }
@@ -636,7 +687,8 @@ public class AgentRuntime : IAgentRuntime
         [EnumeratorCancellation] CancellationToken ct)
     {
         var resolution = context.Agent;
-        var agent = resolution.Agent!;
+        // 应用 EffectiveModel/Provider 覆盖（由 SkillConstraintMiddleware 设置）
+        var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
         // 构建消息列表
         var messages = new List<ChatMessage>(context.Messages);
@@ -650,8 +702,8 @@ public class AgentRuntime : IAgentRuntime
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
         var strategyContext = new ExecutionStrategyContext
         {
-            AgentFactory = _serviceProvider.GetRequiredService<IAgentFactory>(),
-            AgentRepository = _serviceProvider.GetRequiredService<IRepository<Agent, Guid>>(),
+            AgentFactory = _agentFactory,
+            AgentRepository = _agentRepository,
             ServiceProvider = _serviceProvider,
             Logger = _logger
         };
@@ -662,6 +714,50 @@ public class AgentRuntime : IAgentRuntime
         {
             yield return chunk;
         }
+    }
+
+    /// <summary>
+    /// 应用 SkillConstraintMiddleware 设置的 EffectiveModel/Provider 覆盖。
+    /// 若 Model 或 Provider 发生变化且保存了创建参数，则重建 AgentExecutor；否则返回原始 Agent。
+    /// </summary>
+    private async Task<AgentExecutor> ApplyModelOverrideAsync(AgentResolution resolution, AiMiddlewareContext context, CancellationToken ct)
+    {
+        var originalAgent = resolution.Agent!;
+        var effectiveModel = context.EffectiveModel;
+        var effectiveProvider = context.EffectiveProvider;
+
+        // 没有覆盖 → 直接使用原始 Agent
+        if (effectiveModel == null && effectiveProvider == null)
+            return originalAgent;
+
+        var modelChanged = effectiveModel != null && !string.Equals(effectiveModel, resolution.Model, StringComparison.OrdinalIgnoreCase);
+        var providerChanged = effectiveProvider != null && !string.Equals(effectiveProvider, resolution.Provider, StringComparison.OrdinalIgnoreCase);
+
+        if (!modelChanged && !providerChanged)
+            return originalAgent;
+
+        // 没有原始创建参数（无 AgentId 场景） → 无法重建，记录警告后继续
+        if (resolution.CreationParameters == null)
+        {
+            _logger.LogWarning(
+                "SkillConstraintMiddleware requested model/provider override (Model={Model}, Provider={Provider}) " +
+                "but AgentResolution has no CreationParameters. Override skipped.",
+                effectiveModel, effectiveProvider);
+            return originalAgent;
+        }
+
+        var p = resolution.CreationParameters;
+        var newProvider = effectiveProvider ?? resolution.Provider;
+        var newModel = effectiveModel ?? resolution.Model;
+
+        _logger.LogInformation(
+            "Skill constraint override: rebuilding AgentExecutor with Provider={Provider}, Model={Model}",
+            newProvider, newModel);
+
+        return await _agentFactory.CreateAgentAsync(
+            newProvider, newModel, p.Instructions, p.Name, p.ToolGroups,
+            p.Temperature, p.MaxTokens, options: null, userPermissions: p.UserPermissions,
+            agentId: resolution.AgentId, ct: ct);
     }
 
     /// <summary>创建 Run 记录</summary>
@@ -704,39 +800,73 @@ public class AgentRuntime : IAgentRuntime
 
     /// <summary>
     /// 从 DI 解析所有已注册的中间件，按 Order 排序。
-    /// 中间件按具体类型注册（框架程序集不使用自动注册），因此逐一解析。
+    /// 内置中间件和用户自定义中间件均通过 IAiMiddleware 接口注册。
     /// </summary>
     private List<IAiMiddleware> ResolveMiddlewares()
     {
-        var middlewares = new List<IAiMiddleware>();
-
-        // 按具体类型解析（与 AIModule 注册方式一致）
-        ResolveAndAdd<QuotaMiddleware>(middlewares);
-        ResolveAndAdd<InputGuardrailMiddleware>(middlewares);
-        ResolveAndAdd<HistoryMiddleware>(middlewares);
-        ResolveAndAdd<ContextInjectionMiddleware>(middlewares);
-        ResolveAndAdd<UsageLoggingMiddleware>(middlewares);
-        ResolveAndAdd<OutputGuardrailMiddleware>(middlewares);
-
-        // 同时获取通过 IAiMiddleware 接口注册的中间件（用户自定义）
-        var interfaceMiddlewares = _serviceProvider.GetServices<IAiMiddleware>();
-        foreach (var m in interfaceMiddlewares)
-        {
-            if (!middlewares.Contains(m))
-            {
-                middlewares.Add(m);
-            }
-        }
-
-        return middlewares.OrderBy(m => m.Order).ToList();
+        return _serviceProvider.GetServices<IAiMiddleware>().OrderBy(m => m.Order).ToList();
     }
 
-    private void ResolveAndAdd<T>(List<IAiMiddleware> middlewares) where T : class, IAiMiddleware
+    /// <summary>
+    /// 根据 ReasoningEffort 自动解析有效模型。
+    /// 当 ReasoningEffort != None 且当前模型不支持推理时，查找 Provider 的 "think" 模型别名。
+    /// </summary>
+    private string? ResolveThinkingModel(AgentRunRequest request)
     {
-        var middleware = _serviceProvider.GetService<T>();
-        if (middleware != null)
+        var model = request.Model;
+
+        // 没有指定推理需求 → 使用原始模型
+        if (request.ReasoningEffort is null or ReasoningEffort.None) return model;
+
+        // 当前模型已支持推理 → 不需要切换
+        if (ModelCapabilities.SupportsReasoning(model) || ModelCapabilities.IsAlwaysOnReasoning(model))
+            return model;
+
+        // 查找 Provider 配置中的 "think" 模型别名
+        var providerName = request.Provider;
+        var options = _serviceProvider.GetRequiredService<IOptionsMonitor<AIOptions>>().CurrentValue;
+        providerName ??= options.DefaultProvider;
+
+        if (!options.Providers.TryGetValue(providerName, out var providerOptions))
+            return model;
+
+        if (providerOptions.Models?.TryGetValue("think", out var thinkModel) == true)
         {
-            middlewares.Add(middleware);
+            _logger.LogDebug(
+                "Auto-switching to think model '{ThinkModel}' for provider '{Provider}' (ReasoningEffort={Effort})",
+                thinkModel, providerName, request.ReasoningEffort);
+            return thinkModel;
+        }
+
+        return model;
+    }
+
+    /// <summary>发布运行完成事件（静默失败，不影响主流程）</summary>
+    private async Task PublishRunCompletedEventAsync(AgentRunRequest request, AgentRunResult result, AgentRun? run, long durationMs, bool isStreaming)
+    {
+        try
+        {
+            var eventBus = _serviceProvider.GetService<IEventBus>();
+            if (eventBus == null) return;
+
+            await eventBus.PublishAsync(new AgentRunCompletedEvent
+            {
+                RunId = run?.Id,
+                ThreadId = request.ThreadId,
+                AgentId = request.AgentId,
+                UserId = request.UserId,
+                Provider = request.Provider,
+                Model = request.Model,
+                TotalTokens = (result.Usage?.PromptTokens ?? 0) + (result.Usage?.CompletionTokens ?? 0),
+                DurationMs = durationMs,
+                Status = (run?.Status ?? AgentRunStatus.Completed).ToString(),
+                FinishReason = result.FinishReason,
+                IsStreaming = isStreaming
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish AgentRunCompletedEvent");
         }
     }
 

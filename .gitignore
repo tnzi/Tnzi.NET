@@ -1,3 +1,6 @@
+# Git worktrees
+.worktrees/
+
 # Build output directory
 build/output/
 build/output-cli/

@@ -29,6 +29,15 @@ public class HistoryStoreOptions
     /// 而非在 Service 层手动持久化。默认关闭以保持向后兼容。
     /// </remarks>
     public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// 从存储加载的最大消息数量（防止长对话一次性加载全部历史）
+    /// </summary>
+    /// <remarks>
+    /// 仅限制初始加载量，HistoryReducer 在此基础上进一步裁剪/摘要。
+    /// 设为 null 则不限制。默认 100 条。
+    /// </remarks>
+    public int? MaxLoadedMessages { get; set; } = 100;
 }
 
 /// <summary>
@@ -40,14 +49,6 @@ public class HistoryReductionOptions
     /// 压缩模式
     /// </summary>
     public HistoryReductionMode Mode { get; set; } = HistoryReductionMode.None;
-
-    /// <summary>
-    /// 最大上下文 Token 数（超过此值触发压缩）
-    /// </summary>
-    /// <remarks>
-    /// 若为 null，则不进行基于 Token 的估算，仅按条数/字节判断
-    /// </remarks>
-    public int? MaxContextTokens { get; set; }
 
     /// <summary>
     /// Prune（裁剪）模式配置
@@ -89,7 +90,7 @@ public class PruneOptions
     /// <summary>
     /// 保留最近的对话轮数
     /// </summary>
-    public int KeepLastTurns { get; set; } = 10;
+    public int KeepLastTurns { get; set; } = 20;
 
     /// <summary>
     /// 删除超过指定轮数的工具输出
@@ -121,16 +122,6 @@ public class SummarizeOptions
     public string? SummaryModelId { get; set; }
 
     /// <summary>
-    /// 历史消息占上下文窗口的最大比例（0-1）
-    /// </summary>
-    public double MaxHistoryShare { get; set; } = 0.5;
-
-    /// <summary>
-    /// 为新对话保留的 Token 数
-    /// </summary>
-    public int ReserveTokens { get; set; } = 2000;
-
-    /// <summary>
     /// 摘要分段数（将历史分成多段分别摘要）
     /// </summary>
     public int Parts { get; set; } = 1;
@@ -143,20 +134,20 @@ public class SummarizeOptions
     /// <summary>
     /// 触发摘要的消息数量阈值
     /// </summary>
-    public int MessageThreshold { get; set; } = 20;
+    public int MessageThreshold { get; set; } = 50;
 
     /// <summary>
     /// 触发摘要的 Token 数量阈值（可选）
     /// </summary>
-    public int? TokenThreshold { get; set; } = 4000;
+    public int? TokenThreshold { get; set; } = 64_000;
 
     /// <summary>
     /// 保留最近的对话轮数（不摘要）
     /// </summary>
-    public int KeepRecentTurns { get; set; } = 5;
+    public int KeepRecentTurns { get; set; } = 10;
 
     /// <summary>
     /// 摘要的最大 Token 数
     /// </summary>
-    public int MaxSummaryTokens { get; set; } = 500;
+    public int MaxSummaryTokens { get; set; } = 4000;
 }

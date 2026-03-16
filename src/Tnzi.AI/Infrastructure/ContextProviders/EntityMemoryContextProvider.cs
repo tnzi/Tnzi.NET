@@ -11,6 +11,8 @@ public sealed class EntityMemoryContextProvider : IContextProvider
     private readonly EntityMemoryOptions _options;
     private readonly LlmEntityExtractor _extractor;
     private readonly ICurrentUser? _currentUser;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
+    private readonly Guid? _defaultAgentId;
     private readonly ILogger<EntityMemoryContextProvider> _logger;
 
     public EntityMemoryContextProvider(
@@ -18,13 +20,17 @@ public sealed class EntityMemoryContextProvider : IContextProvider
         EntityMemoryOptions options,
         LlmEntityExtractor extractor,
         ILogger<EntityMemoryContextProvider> logger,
-        ICurrentUser? currentUser = null)
+        ICurrentUser? currentUser = null,
+        Guid? agentId = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _entityMemoryStore = Check.NotNull(entityMemoryStore);
         _options = Check.NotNull(options);
         _extractor = Check.NotNull(extractor);
         _logger = Check.NotNull(logger);
         _currentUser = currentUser;
+        _defaultAgentId = agentId;
+        _executionContextAccessor = executionContextAccessor;
     }
 
     /// <inheritdoc />
@@ -32,8 +38,9 @@ public sealed class EntityMemoryContextProvider : IContextProvider
     {
         try
         {
-            var userId = _currentUser?.Id;
-            var entities = await _entityMemoryStore.GetRelevantEntitiesAsync(userId, _options.MaxEntitiesPerContext, ct);
+            var userId = ResolveUserId();
+            var agentId = ResolveAgentId();
+            var entities = await _entityMemoryStore.GetRelevantEntitiesAsync(userId, agentId, _options.MaxEntitiesPerContext, ct);
 
             if (entities.Count == 0)
             {
@@ -77,15 +84,22 @@ public sealed class EntityMemoryContextProvider : IContextProvider
     {
         try
         {
-            // 从最后一条助手消息中提取实体
-            var lastAssistantMessage = messages
-                .LastOrDefault(m => m.Role == ChatRole.Assistant);
+            // 从最后一轮 User+Assistant 消息中提取实体
+            var lastUser = messages.LastOrDefault(m => m.Role == ChatRole.User);
+            var lastAssistant = messages.LastOrDefault(m => m.Role == ChatRole.Assistant);
 
-            var text = lastAssistantMessage?.Text;
-            if (string.IsNullOrWhiteSpace(text))
+            var textParts = new List<string>(2);
+            if (!string.IsNullOrWhiteSpace(lastUser?.Text))
+                textParts.Add(lastUser.Text);
+            if (!string.IsNullOrWhiteSpace(lastAssistant?.Text))
+                textParts.Add(lastAssistant.Text);
+
+            if (textParts.Count == 0)
             {
                 return;
             }
+
+            var text = string.Join("\n", textParts);
 
             var extractedEntities = await _extractor.ExtractAsync(text, ct: ct);
             if (extractedEntities.Count == 0)
@@ -93,20 +107,32 @@ public sealed class EntityMemoryContextProvider : IContextProvider
                 return;
             }
 
-            // 设置用户 ID
-            var userId = _currentUser?.Id;
+            // 设置用户 ID 和 Agent ID
+            var userId = ResolveUserId();
+            var agentId = ResolveAgentId();
             foreach (var entity in extractedEntities)
             {
                 entity.UserId = userId;
+                entity.AgentId = agentId;
             }
 
             await _entityMemoryStore.UpsertEntitiesAsync(extractedEntities, ct);
-            _logger.LogDebug("Extracted and stored {Count} entities from assistant response", extractedEntities.Count);
+            _logger.LogDebug("Extracted and stored {Count} entities from conversation", extractedEntities.Count);
         }
         catch (Exception ex)
         {
             // 实体提取失败不影响主流程
             _logger.LogWarning(ex, "Failed to extract entities from assistant response");
         }
+    }
+
+    private Guid? ResolveUserId()
+    {
+        return _currentUser?.Id ?? _executionContextAccessor?.CurrentRequest?.UserId;
+    }
+
+    private Guid? ResolveAgentId()
+    {
+        return _executionContextAccessor?.CurrentRequest?.AgentId ?? _defaultAgentId;
     }
 }

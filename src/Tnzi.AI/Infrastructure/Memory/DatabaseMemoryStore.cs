@@ -6,6 +6,7 @@ namespace Tnzi.AI.Infrastructure.Memory;
 /// <remarks>
 /// 支持混合搜索模式：当 IEmbeddingService 可用时，使用 70% 向量相似度 + 30% 关键词匹配的融合评分；
 /// 否则降级为纯关键词搜索（向后兼容）。
+/// 融合评分后叠加重要性权重 (Importance) 和时间衰减 (RecencyDecayRate)。
 /// </remarks>
 public class DatabaseMemoryStore : IMemoryStore
 {
@@ -13,6 +14,7 @@ public class DatabaseMemoryStore : IMemoryStore
     private readonly IUnitOfWorkManager? _unitOfWorkManager;
     private readonly IEmbeddingService? _embeddingService;
     private readonly ILogger<DatabaseMemoryStore> _logger;
+    private readonly MemoryOptions? _memoryOptions;
 
     private const double VectorWeight = 0.7;
     private const double KeywordWeight = 0.3;
@@ -21,12 +23,14 @@ public class DatabaseMemoryStore : IMemoryStore
         IRepository<MemoryEntry, Guid> repository,
         ILogger<DatabaseMemoryStore> logger,
         IUnitOfWorkManager? unitOfWorkManager = null,
-        IEmbeddingService? embeddingService = null)
+        IEmbeddingService? embeddingService = null,
+        IOptions<AIOptions>? aiOptions = null)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);
         _unitOfWorkManager = unitOfWorkManager;
         _embeddingService = embeddingService;
+        _memoryOptions = aiOptions?.Value.ContextProviders.Memory;
     }
 
     /// <inheritdoc />
@@ -34,8 +38,16 @@ public class DatabaseMemoryStore : IMemoryStore
     {
         Check.NotNullOrWhiteSpace(scope);
 
-        var entries = await _repository.AsQueryable()
-            .Where(e => e.Scope == scope)
+        var query = _repository.AsQueryable().Where(e => e.Scope == scope);
+
+        // 过期过滤
+        if (_memoryOptions?.EntryExpiration.HasValue == true)
+        {
+            var cutoff = DateTime.UtcNow - _memoryOptions.EntryExpiration.Value;
+            query = query.Where(e => e.CreationTime >= cutoff);
+        }
+
+        var entries = await query
             .OrderBy(e => e.CreationTime)
             .Select(e => e.Content)
             .ToListAsync(ct);
@@ -112,18 +124,81 @@ public class DatabaseMemoryStore : IMemoryStore
         await _repository.InsertAsync(memoryEntry);
 
         _logger.LogDebug("Appended memory for scope {Scope}, length: {Length}", scope, entry.Length);
+
+        // 修剪: 超过最大条目数时删除最旧条目
+        await TrimExcessEntriesAsync(scope, ct);
+    }
+
+    /// <summary>
+    /// 追加带元数据的内容到指定 scope 的记忆
+    /// </summary>
+    public async Task AppendAsync(string scope, string entry, double importance, string? category, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(scope);
+        Check.NotNullOrWhiteSpace(entry);
+
+        var memoryEntry = new MemoryEntry
+        {
+            Scope = scope,
+            Content = entry,
+            Source = "append",
+            Importance = importance,
+            Category = category,
+            EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
+        };
+        await _repository.InsertAsync(memoryEntry);
+
+        _logger.LogDebug("Appended memory for scope {Scope} with importance {Importance}, category {Category}", scope, importance, category);
+
+        await TrimExcessEntriesAsync(scope, ct);
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MemorySearchResult>> SearchAsync(string scope, string query, int maxResults = 10, CancellationToken ct = default)
+        => await SearchInternalAsync(scope, query, maxResults, category: null, ct);
+
+    /// <summary>
+    /// 按类别搜索指定 scope 的记忆
+    /// </summary>
+    public async Task<IReadOnlyList<MemorySearchResult>> SearchByCategoryAsync(
+        string scope, string query, string category, int maxResults = 10,
+        CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(category);
+        return await SearchInternalAsync(scope, query, maxResults, category, ct);
+    }
+
+    private async Task<IReadOnlyList<MemorySearchResult>> SearchInternalAsync(
+        string scope, string query, int maxResults, string? category, CancellationToken ct)
     {
         Check.NotNullOrWhiteSpace(scope);
         Check.NotNullOrWhiteSpace(query);
 
-        var entries = await _repository.AsQueryable()
-            .Where(e => e.Scope == scope)
-            .OrderByDescending(e => e.CreationTime)
-            .ToListAsync(ct);
+        // 先尝试 DB 层关键词预过滤，减少内存加载量
+        var queryLower = query.ToLower();
+        var keywords = queryLower.Contains(' ')
+            ? queryLower.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [queryLower];
+
+        var baseQuery = _repository.AsQueryable().Where(e => e.Scope == scope);
+        if (!string.IsNullOrEmpty(category))
+            baseQuery = baseQuery.Where(e => e.Category == category);
+
+        // DB 层预过滤: 至少匹配一个关键词
+        var preFiltered = baseQuery
+            .Where(e => keywords.Any(k => e.Content.ToLower().Contains(k)))
+            .OrderByDescending(e => e.CreationTime);
+
+        var entries = await preFiltered.Take(maxResults * 3).ToListAsync(ct);
+
+        // 预过滤结果为空时回退全量加载（有界）
+        if (entries.Count == 0)
+        {
+            entries = await baseQuery
+                .OrderByDescending(e => e.CreationTime)
+                .Take(maxResults * 3)
+                .ToListAsync(ct);
+        }
 
         if (entries.Count == 0)
         {
@@ -145,12 +220,7 @@ public class DatabaseMemoryStore : IMemoryStore
             }
         }
 
-        // 关键词匹配搜索
-        var queryLower = query.ToLower();
-        var keywords = queryLower.Contains(' ')
-            ? queryLower.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            : [queryLower];
-
+        // 关键词匹配 + 向量融合评分
         var results = new List<MemorySearchResult>();
         foreach (var entry in entries)
         {
@@ -179,21 +249,60 @@ public class DatabaseMemoryStore : IMemoryStore
                 finalScore = keywordScore;
             }
 
+            // 重要性权重: 0.5 + importance * importanceWeight (范围 0.5~1.5)
+            var importanceWeight = _memoryOptions?.ImportanceWeight ?? 1.0;
+            var importanceBoost = 0.5 + entry.Importance * importanceWeight;
+            finalScore *= importanceBoost;
+
+            // 时间衰减
+            if (_memoryOptions?.RecencyDecayRate > 0)
+            {
+                var lastAccess = entry.LastAccessedTime ?? entry.CreationTime;
+                var daysSince = (DateTime.UtcNow - lastAccess).TotalDays;
+                var decay = Math.Exp(-_memoryOptions.RecencyDecayRate * daysSince);
+                finalScore *= decay;
+            }
+
             if (finalScore > 0)
             {
                 results.Add(new MemorySearchResult
                 {
+                    Id = entry.Id,
                     Content = entry.Content,
                     Source = entry.Source,
+                    Category = entry.Category,
                     Score = finalScore
                 });
             }
         }
 
-        return results
+        var finalResults = results
             .OrderByDescending(r => r.Score)
             .Take(maxResults)
             .ToList();
+
+        // 访问追踪：更新命中条目的 LastAccessedTime 和 AccessCount
+        if (finalResults.Count > 0)
+        {
+            try
+            {
+                var hitIds = finalResults.Where(r => r.Id.HasValue).Select(r => r.Id!.Value).ToList();
+                if (hitIds.Count > 0)
+                {
+                    await _repository.AsQueryable()
+                        .Where(e => hitIds.Contains(e.Id))
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(e => e.LastAccessedTime, DateTime.UtcNow)
+                            .SetProperty(e => e.AccessCount, e => e.AccessCount + 1), ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to update access tracking for search results");
+            }
+        }
+
+        return finalResults;
     }
 
     /// <inheritdoc />
@@ -209,6 +318,195 @@ public class DatabaseMemoryStore : IMemoryStore
         {
             await _repository.DeleteManyAsync(entries);
             _logger.LogDebug("Cleared {Count} memory entries for scope {Scope}", entries.Count, scope);
+        }
+    }
+
+    /// <summary>
+    /// 按 ID 更新指定条目的内容
+    /// </summary>
+    public async Task UpdateEntryAsync(string scope, Guid entryId, string newContent, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(scope);
+        Check.NotNull(newContent);
+
+        var entry = await _repository.GetAsync(entryId, ct);
+        if (entry == null || entry.Scope != scope)
+        {
+            _logger.LogWarning("UpdateEntryAsync: entry {Id} not found in scope {Scope}", entryId, scope);
+            return;
+        }
+
+        entry.Content = newContent;
+        entry.EmbeddingVector = await TryGenerateEmbeddingAsync(newContent, ct);
+        await _repository.UpdateAsync(entry);
+        _logger.LogDebug("Updated memory entry {Id} in scope {Scope}", entryId, scope);
+    }
+
+    /// <summary>
+    /// 按 ID 删除指定条目
+    /// </summary>
+    public async Task DeleteEntryAsync(string scope, Guid entryId, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(scope);
+
+        var entry = await _repository.GetAsync(entryId, ct);
+        if (entry == null || entry.Scope != scope)
+        {
+            _logger.LogWarning("DeleteEntryAsync: entry {Id} not found in scope {Scope}", entryId, scope);
+            return;
+        }
+
+        await _repository.DeleteAsync(entry);
+        _logger.LogDebug("Deleted memory entry {Id} from scope {Scope}", entryId, scope);
+    }
+
+    // --- MemoryScope 重载：写入 UserId/AgentId ---
+
+    /// <summary>
+    /// 追加带元数据的内容到指定 scope 的记忆（含用户/Agent 隔离）
+    /// </summary>
+    public async Task AppendAsync(MemoryScope scope, string entry, double importance, string? category, CancellationToken ct = default)
+    {
+        Check.NotNull(scope);
+        Check.NotNullOrWhiteSpace(entry);
+
+        var scopeKey = scope.ToScopeKey();
+        var memoryEntry = new MemoryEntry
+        {
+            Scope = scopeKey,
+            Content = entry,
+            Source = "append",
+            Importance = importance,
+            Category = category,
+            UserId = scope.UserId,
+            AgentId = scope.AgentId,
+            EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
+        };
+        await _repository.InsertAsync(memoryEntry);
+
+        _logger.LogDebug("Appended memory for scope {Scope} with importance {Importance}, category {Category}", scopeKey, importance, category);
+
+        await TrimExcessEntriesAsync(scopeKey, ct);
+    }
+
+    /// <summary>
+    /// 写入或替换指定 scope 的记忆内容（含用户/Agent 隔离）
+    /// </summary>
+    public async Task WriteAsync(MemoryScope scope, string content, CancellationToken ct = default)
+    {
+        Check.NotNull(scope);
+        Check.NotNull(content);
+
+        var scopeKey = scope.ToScopeKey();
+
+        if (_unitOfWorkManager != null)
+        {
+            await _unitOfWorkManager.BeginTransactionAsync(ct);
+            try
+            {
+                await WriteInternalAsync(scopeKey, content, scope.UserId, scope.AgentId, ct);
+                await _unitOfWorkManager.CommitTransactionAsync(ct);
+            }
+            catch
+            {
+                await _unitOfWorkManager.RollbackTransactionAsync(ct);
+                throw;
+            }
+        }
+        else
+        {
+            await WriteInternalAsync(scopeKey, content, scope.UserId, scope.AgentId, ct);
+        }
+
+        _logger.LogDebug("Written memory for scope {Scope}, length: {Length}", scopeKey, content.Length);
+    }
+
+    /// <summary>
+    /// 追加内容到指定 scope 的记忆（含用户/Agent 隔离）
+    /// </summary>
+    public async Task AppendAsync(MemoryScope scope, string entry, CancellationToken ct = default)
+    {
+        Check.NotNull(scope);
+        Check.NotNullOrWhiteSpace(entry);
+
+        var scopeKey = scope.ToScopeKey();
+
+        var memoryEntry = new MemoryEntry
+        {
+            Scope = scopeKey,
+            Content = entry,
+            Source = "append",
+            UserId = scope.UserId,
+            AgentId = scope.AgentId,
+            EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
+        };
+        await _repository.InsertAsync(memoryEntry);
+
+        _logger.LogDebug("Appended memory for scope {Scope}, length: {Length}", scopeKey, entry.Length);
+
+        // 修剪: 超过最大条目数时删除最旧条目
+        await TrimExcessEntriesAsync(scopeKey, ct);
+    }
+
+    private async Task WriteInternalAsync(string scope, string content, Guid? userId, Guid? agentId, CancellationToken ct)
+    {
+        // 删除该 scope 下所有旧条目
+        var existing = await _repository.AsQueryable()
+            .Where(e => e.Scope == scope)
+            .ToListAsync(ct);
+
+        if (existing.Count > 0)
+        {
+            await _repository.DeleteManyAsync(existing);
+        }
+
+        // 写入新条目
+        var entry = new MemoryEntry
+        {
+            Scope = scope,
+            Content = content,
+            Source = "write",
+            UserId = userId,
+            AgentId = agentId,
+            EmbeddingVector = await TryGenerateEmbeddingAsync(content, ct)
+        };
+        await _repository.InsertAsync(entry);
+    }
+
+    /// <summary>
+    /// 修剪超出限制的最旧条目
+    /// </summary>
+    private async Task TrimExcessEntriesAsync(string scopeKey, CancellationToken ct)
+    {
+        if (_memoryOptions?.MaxEntriesPerScope is not > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var max = _memoryOptions.MaxEntriesPerScope.Value;
+            var totalCount = await _repository.AsQueryable()
+                .Where(e => e.Scope == scopeKey)
+                .CountAsync(ct);
+
+            if (totalCount <= max) return;
+
+            var toDelete = await _repository.AsQueryable()
+                .Where(e => e.Scope == scopeKey)
+                .OrderBy(e => e.CreationTime)
+                .Take(totalCount - max)
+                .ToListAsync(ct);
+
+            if (toDelete.Count > 0)
+            {
+                await _repository.DeleteManyAsync(toDelete);
+                _logger.LogDebug("Trimmed {Count} excess memory entries for scope {Scope}", toDelete.Count, scopeKey);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to trim excess entries for scope {Scope}", scopeKey);
         }
     }
 
@@ -244,15 +542,6 @@ public class DatabaseMemoryStore : IMemoryStore
             return 0;
         }
 
-        double dotProduct = 0, normA = 0, normB = 0;
-        for (var i = 0; i < a.Length; i++)
-        {
-            dotProduct += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-
-        var denominator = Math.Sqrt(normA) * Math.Sqrt(normB);
-        return denominator > 0 ? dotProduct / denominator : 0;
+        return System.Numerics.Tensors.TensorPrimitives.CosineSimilarity(a, b);
     }
 }

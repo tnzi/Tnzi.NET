@@ -54,9 +54,12 @@ public class AgentRuntimeResumeTests
 
         var runtime = new AgentRuntime(
             Mock.Of<IAgentResolver>(),
+            Mock.Of<IAgentFactory>(),
+            Mock.Of<IRepository<Agent, Guid>>(),
             runStore.Object,
             traceStore.Object,
             workflowService.Object,
+            new AgentExecutionContextAccessor(),
             new ServiceCollection().BuildServiceProvider(),
             Mock.Of<ILogger<AgentRuntime>>());
 

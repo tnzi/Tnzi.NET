@@ -59,4 +59,9 @@ public interface IWorkflowService
     /// 获取工作流执行状态
     /// </summary>
     Task<Result<WorkflowExecutionStatusDto>> GetExecutionStatusAsync(string executionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 克隆工作流（深拷贝定义，生成新 ID）
+    /// </summary>
+    Task<Result<WorkflowDefinitionDto>> CloneAsync(Guid id, string? newName = null);
 }

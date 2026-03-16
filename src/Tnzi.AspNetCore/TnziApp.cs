@@ -159,6 +159,9 @@ public static class TnziApp
             await configureApp(app);
         }
 
+        // 启动成功，清理旧的错误日志文件
+        CleanupStartupErrorLog();
+
         logger?.LogInformation("Tnzi application created and configured successfully");
 
         return app;
@@ -177,8 +180,16 @@ public static class TnziApp
     public static async Task RunAsync<TStartupModule>(string[] args)
         where TStartupModule : ITnziModule
     {
-        var app = await CreateAsync<TStartupModule>(args);
-        await app.RunAsync();
+        try
+        {
+            var app = await CreateAsync<TStartupModule>(args);
+            await app.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            WriteStartupError(ex);
+            throw;
+        }
     }
 
     /// <summary>
@@ -204,7 +215,115 @@ public static class TnziApp
         Func<WebApplication, Task>? configureApp = null)
         where TStartupModule : ITnziModule
     {
-        var app = await CreateAsync<TStartupModule>(args, configureOptions, configureBuilder, configureApp);
-        await app.RunAsync();
+        try
+        {
+            var app = await CreateAsync<TStartupModule>(args, configureOptions, configureBuilder, configureApp);
+            await app.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            WriteStartupError(ex);
+            throw;
+        }
+    }
+
+    private const string StartupErrorLogFileName = "startup-error.log";
+
+    /// <summary>
+    /// 格式化输出启动错误到控制台和文件
+    /// </summary>
+    private static void WriteStartupError(Exception ex)
+    {
+        var sb = new System.Text.StringBuilder();
+        var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+        sb.AppendLine();
+        sb.AppendLine("========================================================");
+        sb.AppendLine("  Tnzi Application Startup Failed");
+        sb.AppendLine("========================================================");
+        sb.AppendLine($"  Time:    {timestamp}");
+
+        switch (ex)
+        {
+            case Modules.ModuleCircularDependencyException circularEx:
+                sb.AppendLine($"  Error:   Module circular dependency detected");
+                sb.AppendLine($"  Path:    {string.Join(" -> ", circularEx.CyclePath.Select(t => t.Name))}");
+                sb.AppendLine($"  Detail:  {circularEx.Message}");
+                break;
+
+            case Modules.ModuleMissingDependencyException missingEx:
+                sb.AppendLine($"  Module:  {missingEx.ModuleType.Name}");
+                sb.AppendLine($"  Error:   Missing required dependencies");
+                sb.AppendLine($"  Missing: {string.Join(", ", missingEx.MissingDependencies.Select(t => t.Name))}");
+                break;
+
+            case Modules.ModuleException moduleEx:
+                sb.AppendLine($"  Module:  {moduleEx.ModuleType.Name}");
+                sb.AppendLine($"  Phase:   {moduleEx.Phase}");
+                sb.AppendLine($"  Error:   {moduleEx.InnerException?.Message ?? moduleEx.Message}");
+                if (moduleEx.InnerException?.InnerException != null)
+                {
+                    sb.AppendLine($"  Cause:   {moduleEx.InnerException.InnerException.Message}");
+                }
+                break;
+
+            default:
+                sb.AppendLine($"  Error:   {ex.GetType().Name}: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    sb.AppendLine($"  Cause:   {ex.InnerException.Message}");
+                }
+                break;
+        }
+
+        sb.AppendLine("========================================================");
+        sb.AppendLine();
+
+        var message = sb.ToString();
+
+        // 控制台输出（带颜色高亮）
+        try
+        {
+            var originalColor = Console.ForegroundColor;
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.Write(message);
+            Console.ForegroundColor = originalColor;
+        }
+        catch
+        {
+            // 控制台不可用时静默忽略（如某些 Service 场景）
+            Console.Error.Write(message);
+        }
+
+        // 写入 startup-error.log（IIS/Docker/Service 场景保底）
+        try
+        {
+            var logPath = Path.Combine(AppContext.BaseDirectory, StartupErrorLogFileName);
+            var logContent = $"{message}--- Full Stack Trace ---\n{ex}\n";
+            File.WriteAllText(logPath, logContent);
+        }
+        catch
+        {
+            // 文件写入失败时静默忽略（权限不足等）
+        }
+    }
+
+    /// <summary>
+    /// 启动成功时清理旧的错误日志文件
+    /// </summary>
+    private static void CleanupStartupErrorLog()
+    {
+        try
+        {
+            var logPath = Path.Combine(AppContext.BaseDirectory, StartupErrorLogFileName);
+            if (File.Exists(logPath))
+            {
+                File.Delete(logPath);
+            }
+        }
+        catch
+        {
+            // 清理失败不影响正常运行
+        }
     }
 }

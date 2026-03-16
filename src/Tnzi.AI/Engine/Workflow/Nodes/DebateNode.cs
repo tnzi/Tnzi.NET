@@ -85,6 +85,7 @@ public class DebateNode : IWorkflowNode
                 model: model,
                 instructions: instructions,
                 name: name,
+                agentId: agentId,
                 ct: cancellationToken);
 
             orchestrator.AddAgent(executor);

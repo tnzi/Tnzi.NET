@@ -235,10 +235,15 @@ public class ChatClientFactory : IChatClientFactory
     }
 
     /// <summary>
-    /// 解析模型名称
+    /// 解析模型名称（支持别名）
     /// </summary>
     private static string ResolveModel(string providerName, ProviderOptions options, string? model)
     {
+        // 1. 别名解析：如果 model 是别名键，解析为实际模型名
+        if (model != null && options.Models?.TryGetValue(model, out var aliased) == true)
+            return aliased;
+
+        // 2. 直接使用或回退默认
         model ??= options.DefaultModel;
 
         if (string.IsNullOrWhiteSpace(model))

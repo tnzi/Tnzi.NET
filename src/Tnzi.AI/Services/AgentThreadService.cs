@@ -1,4 +1,4 @@
-using AgentThreadEntity = Tnzi.AI.Domain.AgentThread;
+using AgentThreadEntity = Tnzi.AI.Entities.AgentThread;
 
 namespace Tnzi.AI.Services;
 
@@ -109,6 +109,11 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     public async Task<Result<IPagedList<AgentThreadDto>>> GetListAsync(ThreadListQueryDto query)
     {
         var q = _repository.AsQueryable();
+
+        if (query.CreatorId.HasValue)
+        {
+            q = q.Where(t => t.CreatorId == query.CreatorId.Value);
+        }
 
         if (query.AgentId.HasValue)
         {
@@ -304,13 +309,24 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     /// </summary>
     public async Task<List<ChatMessage>> GetMessageHistoryAsync(Guid threadId, int? limit = null, CancellationToken ct = default)
     {
-        var query = _messageRepository
-            .Where(m => m.ThreadId == threadId)
-            .OrderBy(m => m.Order);
-
-        var messages = limit.HasValue
-            ? await query.Take(limit.Value).ToListAsync(ct)
-            : await query.ToListAsync(ct);
+        List<AgentThreadMessage> messages;
+        if (limit.HasValue)
+        {
+            // 取最新的 N 条消息，然后按时间顺序排列
+            messages = await _messageRepository
+                .Where(m => m.ThreadId == threadId)
+                .OrderByDescending(m => m.Order)
+                .Take(limit.Value)
+                .OrderBy(m => m.Order)
+                .ToListAsync(ct);
+        }
+        else
+        {
+            messages = await _messageRepository
+                .Where(m => m.ThreadId == threadId)
+                .OrderBy(m => m.Order)
+                .ToListAsync(ct);
+        }
 
         var result = new List<ChatMessage>();
         foreach (var m in messages)

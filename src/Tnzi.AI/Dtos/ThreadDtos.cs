@@ -38,6 +38,9 @@ public class ThreadListQueryDto : PagedQueryDto
 {
     /// <summary>Agent ID filter</summary>
     public Guid? AgentId { get; set; }
+    /// <summary>Creator ID filter (used by user-facing API for ownership scoping)</summary>
+    [JsonIgnore]
+    public Guid? CreatorId { get; set; }
     /// <summary>Keyword search (title)</summary>
     [MaxLength(100)]
     public string? Keyword { get; set; }
@@ -45,6 +48,17 @@ public class ThreadListQueryDto : PagedQueryDto
     public DateTime? StartTime { get; set; }
     /// <summary>End time filter</summary>
     public DateTime? EndTime { get; set; }
+}
+
+/// <summary>
+/// 更新线程标题请求 DTO
+/// </summary>
+public class UpdateThreadTitleDto
+{
+    /// <summary>New title</summary>
+    [Required]
+    [MaxLength(200)]
+    public string Title { get; set; } = null!;
 }
 
 /// <summary>
@@ -91,6 +105,8 @@ public class ThreadMessageDto
     public int Order { get; set; }
     /// <summary>Creation time</summary>
     public DateTime CreationTime { get; set; }
+    /// <summary>Component ref IDs (JSON array of GUIDs)</summary>
+    public string? ComponentRefs { get; set; }
 }
 
 /// <summary>

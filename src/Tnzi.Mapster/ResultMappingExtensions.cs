@@ -17,7 +17,7 @@ public static class ResultMappingExtensions
     /// <returns>映射后的结果</returns>
     public static Result<TTarget> Map<TSource, TTarget>(this Result<TSource> result)
     {
-        Check.NotNull(result);
+        result = Check.NotNull(result);
 
         if (!result.Succeeded)
         {
@@ -38,18 +38,21 @@ public static class ResultMappingExtensions
             var mappedData = result.Data.MapTo<TTarget>();
             return Result<TTarget>.Success(mappedData, result.Message, result.Code);
         }
+ #if DEBUG
+        catch (Exception)
+        {
+            throw;
+        }
+#else
         catch (Exception ex)
         {
-#if DEBUG
-            throw;
-#else
             return Result<TTarget>.Failure(
                 $"Mapping failed: {ex.Message}",
                 500,
                 "MAPPING_ERROR",
                 new { ExceptionType = ex.GetType().Name, OriginalMessage = ex.Message });
-#endif
         }
+#endif
     }
 
     /// <summary>
@@ -65,8 +68,8 @@ public static class ResultMappingExtensions
         this Task<Result<TSource>> resultTask,
         Func<TSource, Task<TTarget>> mapper)
     {
-        Check.NotNull(resultTask);
-        Check.NotNull(mapper);
+        resultTask = Check.NotNull(resultTask);
+        mapper = Check.NotNull(mapper);
 
         var result = await resultTask;
         return await result.MapAsync(mapper);
@@ -85,8 +88,8 @@ public static class ResultMappingExtensions
         this Result<TSource> result,
         Func<TSource, Task<TTarget>> mapper)
     {
-        Check.NotNull(result);
-        Check.NotNull(mapper);
+        result = Check.NotNull(result);
+        mapper = Check.NotNull(mapper);
 
         if (!result.Succeeded)
         {
@@ -107,17 +110,20 @@ public static class ResultMappingExtensions
             var mappedData = await mapper(result.Data);
             return Result<TTarget>.Success(mappedData, result.Message, result.Code);
         }
+ #if DEBUG
+        catch (Exception)
+        {
+            throw;
+        }
+#else
         catch (Exception ex)
         {
-#if DEBUG
-            throw;
-#else
             return Result<TTarget>.Failure(
                 $"Mapping failed: {ex.Message}",
                 500,
                 "MAPPING_ERROR",
                 new { ExceptionType = ex.GetType().Name, OriginalMessage = ex.Message });
-#endif
         }
+#endif
     }
 }

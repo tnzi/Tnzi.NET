@@ -82,6 +82,7 @@ public class ToolRegistryPermissionTests
     {
         var agentId = Guid.NewGuid();
         var capturedPermissions = Array.Empty<string>();
+        Guid? capturedAgentId = null;
 
         var agentFactory = new Mock<IAgentFactory>();
         agentFactory.Setup(f => f.CreateAgentAsync(
@@ -94,11 +95,13 @@ public class ToolRegistryPermissionTests
                 It.IsAny<int?>(),
                 It.IsAny<AgentExecutorOptions?>(),
                 It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, CancellationToken>(
-                (_, _, _, _, _, _, _, _, userPermissions, _) =>
+            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, Guid?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, userPermissions, resolvedAgentId, _) =>
                 {
                     capturedPermissions = userPermissions?.OrderBy(x => x).ToArray() ?? [];
+                    capturedAgentId = resolvedAgentId;
                 })
             .ReturnsAsync(new AgentExecutor(Mock.Of<IChatClient>(), new AgentExecutorOptions { Name = "test" }));
 
@@ -156,5 +159,6 @@ public class ToolRegistryPermissionTests
 
         resolution.IsSuccess.ShouldBeTrue();
         capturedPermissions.ShouldBe(["perm.read"]);
+        capturedAgentId.ShouldBe(agentId);
     }
 }

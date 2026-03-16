@@ -31,7 +31,7 @@ public class OpenAIChatClientProvider : IChatClientProvider
 
         var openAIClient = CreateOpenAIClient(options);
         var client = openAIClient.GetChatClient(model).AsIChatClient();
-        return new ReasoningAwareChatClientDecorator(client);
+        return new ReasoningAwareChatClientDecorator(client, options.Thinking);
     }
 
     /// <summary>
@@ -84,6 +84,10 @@ public class OpenAIChatClientProvider : IChatClientProvider
                 httpClient.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds.Value);
             }
             clientOptions.Transport = new HttpClientPipelineTransport(httpClient);
+
+            // Add thinking request policy to inject provider-specific thinking params (e.g., Gemini extra_body)
+            // PipelinePolicy runs inside the SDK's pipeline, guaranteed to intercept every request.
+            clientOptions.AddPolicy(new ThinkingRequestPolicy(), PipelinePosition.BeforeTransport);
 
             return new OpenAIClient(credential, clientOptions);
         }

@@ -19,9 +19,14 @@ namespace Tnzi.AI.Skills.Models;
 public class SkillDefinition
 {
     /// <summary>
-    /// 技能唯一标识
+    /// 技能唯一标识（人类可读的 slug，如 "code-review"）
     /// </summary>
-    public string Id { get; set; } = string.Empty;
+    public string Slug { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 技能作用域
+    /// </summary>
+    public SkillScope Scope { get; set; }
 
     /// <summary>
     /// 技能名称
@@ -39,14 +44,14 @@ public class SkillDefinition
     public string Content { get; set; } = string.Empty;
 
     /// <summary>
-    /// 技能文件路径
-    /// </summary>
-    public string? FilePath { get; set; }
-
-    /// <summary>
     /// 使用场景说明
     /// </summary>
     public string? WhenToUse { get; set; }
+
+    /// <summary>
+    /// 技能参数定义
+    /// </summary>
+    public List<SkillParameter> Parameters { get; set; } = [];
 
     /// <summary>
     /// 技能版本
@@ -82,6 +87,35 @@ public class SkillDefinition
     /// 元数据
     /// </summary>
     public Dictionary<string, string> Metadata { get; set; } = [];
+
+    /// <summary>
+    /// Skill 激活时限定可用工具组（对齐 Claude Skills 的 contextModifier）
+    /// </summary>
+    /// <remarks>
+    /// 非空时，Agent 运行时应仅暴露列出的工具组给模型。
+    /// 不在框架层强制执行，由调用方决定如何使用。
+    /// </remarks>
+    public List<string>? AllowedToolGroups { get; set; }
+
+    /// <summary>
+    /// Skill 激活时要求使用的模型
+    /// </summary>
+    public string? RequiredModel { get; set; }
+
+    /// <summary>
+    /// Skill 激活时要求使用的 provider
+    /// </summary>
+    public string? RequiredProvider { get; set; }
+
+    /// <summary>
+    /// 技能文件路径（来源为 FileSystem 时有值）
+    /// </summary>
+    public string? FilePath { get; set; }
+
+    /// <summary>
+    /// 技能来源
+    /// </summary>
+    public SkillSource Source { get; set; }
 }
 
 /// <summary>
@@ -114,3 +148,9 @@ public class SkillRequirements
     /// </summary>
     public List<string> ToolGroups { get; set; } = [];
 }
+
+/// <summary>技能作用域</summary>
+public enum SkillScope { System = 0, Tenant = 1, User = 2 }
+
+/// <summary>技能来源</summary>
+public enum SkillSource { FileSystem, Database }

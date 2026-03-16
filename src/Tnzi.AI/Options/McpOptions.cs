@@ -25,9 +25,9 @@ public class McpOptions
     public List<McpServerConfig> Servers { get; set; } = [];
 
     /// <summary>
-    /// MCP 工具调用结果缓存秒数，0 表示不缓存
+    /// MCP 工具列表缓存秒数（默认 300 秒即 5 分钟，0 表示不缓存）
     /// </summary>
-    public int ToolCacheSeconds { get; set; } = 0;
+    public int ToolCacheSeconds { get; set; } = 300;
 }
 
 /// <summary>
