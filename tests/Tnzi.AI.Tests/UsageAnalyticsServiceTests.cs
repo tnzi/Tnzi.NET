@@ -22,7 +22,7 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
         {
             StartTime = now.AddDays(-3),
             EndTime = now,
-            Granularity = "daily"
+            Granularity = UsageGranularity.Daily
         });
 
         result.Succeeded.ShouldBeTrue();
@@ -54,7 +54,7 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
         {
             StartTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             EndTime = new DateTime(2026, 2, 28, 0, 0, 0, DateTimeKind.Utc),
-            Granularity = "monthly"
+            Granularity = UsageGranularity.Monthly
         });
 
         result.Succeeded.ShouldBeTrue();
@@ -79,7 +79,7 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
         {
             StartTime = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc),
             EndTime = new DateTime(2026, 3, 14, 0, 0, 0, DateTimeKind.Utc),
-            Granularity = "weekly"
+            Granularity = UsageGranularity.Weekly
         });
 
         result.Succeeded.ShouldBeTrue();
@@ -96,7 +96,7 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
         {
             StartTime = DateTime.UtcNow.AddDays(-7),
             EndTime = DateTime.UtcNow,
-            Granularity = "daily"
+            Granularity = UsageGranularity.Daily
         });
 
         result.Succeeded.ShouldBeTrue();
@@ -117,7 +117,7 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
         {
             StartTime = now.AddDays(-1),
             EndTime = now.AddDays(1),
-            Granularity = "daily",
+            Granularity = UsageGranularity.Daily,
             Provider = "OpenAI"
         });
 
@@ -128,10 +128,10 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
     }
 
     [Theory]
-    [InlineData("daily")]
-    [InlineData("weekly")]
-    [InlineData("monthly")]
-    public async Task GetUsageTrendAsync_AllGranularities_ReturnSuccess(string granularity)
+    [InlineData(UsageGranularity.Daily)]
+    [InlineData(UsageGranularity.Weekly)]
+    [InlineData(UsageGranularity.Monthly)]
+    public async Task GetUsageTrendAsync_AllGranularities_ReturnSuccess(UsageGranularity granularity)
     {
         var now = DateTime.UtcNow;
         await SeedLogsAsync([

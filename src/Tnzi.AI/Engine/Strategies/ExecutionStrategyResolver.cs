@@ -20,6 +20,7 @@ public static class ExecutionStrategyResolver
         {
             AgentExecutionMode.Single => SingleAgentStrategy.Instance,
             AgentExecutionMode.Handoff => ResolveHandoff(config?.Handoff),
+            AgentExecutionMode.AgentAsTools => ResolveAgentAsTools(config?.AgentAsTools),
             AgentExecutionMode.Router => ResolveRouter(config?.Router),
             _ => throw new InvalidOperationException($"Unsupported AgentExecutionMode: {mode}")
         };
@@ -32,9 +33,21 @@ public static class ExecutionStrategyResolver
         {
             config.Targets = dto.Targets;
             if (dto.MaxHandoffs.HasValue) config.MaxHandoffs = dto.MaxHandoffs.Value;
+            if (dto.AllowReturnToSource.HasValue) config.AllowReturnToSource = dto.AllowReturnToSource.Value;
         }
 
         return new HandoffExecutionStrategy(config);
+    }
+
+    private static IExecutionStrategy ResolveAgentAsTools(AgentAsToolsExecutionConfigDto? dto)
+    {
+        var config = new AgentAsTools.AgentAsToolsConfiguration();
+        if (dto != null)
+        {
+            config.Agents = dto.Agents;
+        }
+
+        return new AgentAsTools.AgentAsToolsExecutionStrategy(config);
     }
 
     private static IExecutionStrategy ResolveRouter(RouterExecutionConfigDto? dto)

@@ -3,234 +3,412 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tnzi.NET - Welcome</title>
+    <title>Tnzi.NET</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,300,0,0" rel="stylesheet">
     <style>
-        * {
+        *, *::before, *::after {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+        :root {
+            --bg: #0a0d14;
+            --card: #111827;
+            --border: #1e293b;
+            --border-hover: #334155;
+            --primary: #dfff00;
+            --accent: #a3e635;
+            --text: #94A3B8;
+            --text-dim: #64748B;
+            --white: #f1f5f9;
+            --code-bg: #0f1219;
+        }
+        html {
+            scroll-behavior: smooth;
+            scrollbar-color: #334155 transparent;
+        }
         body {
-            font-family: 'Adobe Clean', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #1a1a1a;
-            background-image:
-                radial-gradient(circle at 20% 50%, rgba(0, 140, 255, 0.12) 0%, transparent 50%),
-                radial-gradient(circle at 80% 80%, rgba(0, 90, 200, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 40% 20%, rgba(80, 180, 255, 0.08) 0%, transparent 50%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 20px;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        ::selection {
+            background: rgba(223, 255, 0, 0.2);
+            color: #fff;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
+        }
+
+        /* Layout */
+        .page {
+            width: 100%;
+            max-width: 960px;
+            padding: 0 24px;
+        }
+
+        /* Hero */
+        .hero {
+            position: relative;
+            text-align: center;
+            padding: 160px 0 64px;
+        }
+        .hero-glow {
+            position: absolute;
+            left: 50%;
+            top: 64px;
+            width: 600px;
+            height: 600px;
+            transform: translateX(-50%);
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(175, 244, 37, 0.06) 0%, transparent 70%);
+            pointer-events: none;
+        }
+        .hero-badge {
+            position: relative;
+            font-size: 0.625rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--primary);
+            margin-bottom: 24px;
+        }
+        .hero-title {
+            position: relative;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 4rem;
+            font-weight: 700;
+            color: var(--white);
+            letter-spacing: -0.02em;
+            margin-bottom: 20px;
+        }
+        .hero-title .dot {
+            color: var(--primary);
+        }
+        .hero-subtitle {
+            position: relative;
+            font-size: 1.1rem;
+            font-weight: 300;
+            line-height: 1.7;
+            color: var(--text);
+            max-width: 540px;
+            margin: 0 auto 40px;
+        }
+
+        /* Status badge */
+        .status {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(163, 230, 53, 0.08);
+            border: 1px solid rgba(163, 230, 53, 0.2);
+            border-radius: 999px;
+            padding: 6px 16px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 48px;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Cards grid */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+            background: var(--border);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            margin-bottom: 32px;
+        }
+        .card {
             position: relative;
             overflow: hidden;
+            background: var(--card);
+            padding: 28px;
+            text-decoration: none;
+            color: inherit;
+            transition: background 250ms;
         }
-        body::before {
+        .card::before {
             content: '';
             position: absolute;
             top: 0;
             left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(180deg, rgba(26, 26, 26, 0) 0%, rgba(26, 26, 26, 0.8) 100%);
-            pointer-events: none;
+            height: 2px;
+            width: 0;
+            background: var(--primary);
+            transition: width 300ms;
         }
-        .container {
-            background: rgba(30, 30, 30, 0.95);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            box-shadow:
-                0 8px 32px rgba(0, 0, 0, 0.4),
-                inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            padding: 60px 50px;
-            max-width: 900px;
+        .card:hover {
+            background: #1a2030;
+        }
+        .card:hover::before {
             width: 100%;
-            text-align: center;
-            position: relative;
-            z-index: 1;
         }
-        .logo {
-            font-size: 56px;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 16px;
-            letter-spacing: -1px;
-            text-shadow:
-                0 0 20px rgba(0, 140, 255, 0.35),
-                0 2px 10px rgba(0, 0, 0, 0.5);
-        }
-        .logo::after {
-            content: '';
-            display: block;
-            width: 80px;
-            height: 4px;
-            background: linear-gradient(90deg, #00aaff, #005eff);
-            margin: 20px auto 0;
-            border-radius: 2px;
-            box-shadow: 0 0 12px rgba(0, 140, 255, 0.45);
-        }
-        .subtitle {
-            font-size: 20px;
-            color: rgba(255, 255, 255, 0.7);
-            margin-bottom: 32px;
-            font-weight: 300;
-            letter-spacing: 0.5px;
-        }
-        .description {
-            font-size: 15px;
-            color: rgba(255, 255, 255, 0.6);
-            line-height: 1.8;
-            margin-bottom: 50px;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-        .links {
+        .card-icon {
             display: flex;
-            flex-direction: column;
-            gap: 16px;
-            margin-top: 40px;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: rgba(163, 230, 53, 0.08);
+            margin-bottom: 16px;
         }
-        .link-card {
-            background: rgba(40, 40, 40, 0.8);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #ffffff;
-            padding: 24px 32px;
+        .card-icon .material-symbols-outlined {
+            font-size: 1.25rem;
+            color: var(--accent);
+        }
+        .card-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--white);
+            margin-bottom: 8px;
+        }
+        .card-desc {
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: var(--text-dim);
+        }
+
+        /* Info section */
+        .info {
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 12px;
-            text-decoration: none;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 24px 28px;
+            margin-bottom: 32px;
+        }
+        .info-title {
+            font-size: 0.625rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-dim);
+            margin-bottom: 16px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        .info-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.8rem;
+        }
+        .info-label {
+            color: var(--text-dim);
+            white-space: nowrap;
+        }
+        .info-value {
+            font-family: 'Space Grotesk', monospace;
+            font-weight: 500;
+            color: var(--primary);
+            background: rgba(223, 255, 0, 0.06);
+            border: 1px solid rgba(223, 255, 0, 0.12);
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            letter-spacing: 0.02em;
+        }
+
+        /* Stats */
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 48px;
+            border-top: 1px solid var(--border);
+            padding-top: 40px;
+            margin-bottom: 48px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--white);
+        }
+        .stat-label {
+            margin-top: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 1px solid var(--border);
+            padding: 40px 0;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            position: relative;
-            overflow: hidden;
         }
-        .link-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(0, 140, 255, 0.12), transparent);
-            transition: left 0.5s ease;
-        }
-        .link-card:hover {
-            transform: translateY(-2px);
-            background: rgba(50, 50, 50, 0.9);
-            border-color: rgba(0, 140, 255, 0.35);
-            box-shadow:
-                0 8px 24px rgba(0, 0, 0, 0.4),
-                0 0 22px rgba(0, 140, 255, 0.22);
-        }
-        .link-card:hover::before {
-            left: 100%;
-        }
-        .link-card:active {
-            transform: translateY(0);
-        }
-        .link-content {
-            flex: 1;
-            text-align: left;
-        }
-        .link-title {
-            font-size: 18px;
+        .footer-brand {
+            font-size: 0.65rem;
             font-weight: 600;
-            margin-bottom: 6px;
-            color: #ffffff;
-            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
         }
-        .link-description {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.6);
-            line-height: 1.5;
+        .footer-links {
+            display: flex;
+            gap: 24px;
         }
-        .link-icon {
-            font-size: 28px;
-            margin-left: 24px;
-            opacity: 0.8;
-            transition: opacity 0.3s ease;
-        }
-        .link-card:hover .link-icon {
-            opacity: 1;
-            transform: scale(1.1);
-        }
-        .api-prefix {
-            background: rgba(20, 20, 20, 0.8);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            padding: 16px 20px;
-            border-radius: 8px;
-            margin-top: 32px;
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.7);
-        }
-        .api-prefix code {
-            background: rgba(0, 140, 255, 0.16);
-            border: 1px solid rgba(0, 140, 255, 0.24);
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-family: 'Courier New', 'Monaco', monospace;
-            color: #33b1ff;
+        .footer-links a {
+            font-size: 0.65rem;
             font-weight: 600;
-            font-size: 12px;
-            letter-spacing: 0.5px;
-            margin-left: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+            text-decoration: none;
+            transition: color 200ms;
         }
-        @media (max-width: 600px) {
-            .container {
-                padding: 40px 24px;
+        .footer-links a:hover {
+            color: var(--primary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero {
+                padding-top: 112px;
             }
-            .logo {
-                font-size: 42px;
+            .hero-title {
+                font-size: 2.5rem;
             }
-            .subtitle {
-                font-size: 18px;
+            .cards {
+                grid-template-columns: 1fr;
             }
-            .link-card {
+            .stats {
+                gap: 24px;
+            }
+            .footer {
                 flex-direction: column;
+                gap: 16px;
                 text-align: center;
-                padding: 20px;
-            }
-            .link-content {
-                text-align: center;
-            }
-            .link-icon {
-                margin-left: 0;
-                margin-top: 12px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="logo">Tnzi.NET</div>
-        <div class="subtitle">Modular .NET Framework</div>
-        <div class="description">
-            Welcome to Tnzi.NET — a modular framework for building .NET applications.
-            Get started by exploring the API documentation or accessing the API endpoints.
-        </div>
-        <div class="links">
-            <a href="swagger/" class="link-card">
-                <div class="link-content">
-                    <div class="link-title">API Documentation</div>
-                    <div class="link-description">Explore and test all available API endpoints</div>
+    <div class="page">
+        <!-- Hero -->
+        <section class="hero">
+            <div class="hero-glow"></div>
+            <div class="hero-badge">Server Running</div>
+            <h1 class="hero-title">Tnzi<span class="dot">.</span>NET</h1>
+            <p class="hero-subtitle">
+                Your application is up and running. Explore the API documentation, browse endpoints, or check server health.
+            </p>
+            <div class="status">
+                <span class="status-dot"></span>
+                Operational
+            </div>
+        </section>
+
+        <!-- Quick Links -->
+        <div class="cards">
+            <a href="swagger/" class="card">
+                <div class="card-icon">
+                    <span class="material-symbols-outlined">description</span>
                 </div>
-                <div class="link-icon">📚</div>
+                <div class="card-title">API Documentation</div>
+                <div class="card-desc">Interactive Swagger UI to explore and test all available API endpoints.</div>
             </a>
-            <a href="{{API_PATH_PREFIX}}" class="link-card">
-                <div class="link-content">
-                    <div class="link-title">API Endpoints</div>
-                    <div class="link-description">Access the API base path</div>
+            <a href="{{SWAGGER_PATH}}" class="card">
+                <div class="card-icon">
+                    <span class="material-symbols-outlined">data_object</span>
                 </div>
-                <div class="link-icon">🔗</div>
+                <div class="card-title">OpenAPI Spec</div>
+                <div class="card-desc">Machine-readable OpenAPI JSON specification for code generation and tooling.</div>
+            </a>
+            <a href="health" class="card">
+                <div class="card-icon">
+                    <span class="material-symbols-outlined">monitor_heart</span>
+                </div>
+                <div class="card-title">Health Check</div>
+                <div class="card-desc">Monitor server health, database connectivity, and service dependencies.</div>
             </a>
         </div>
-        <div class="api-prefix">
-            API Base Path: <code>{{API_PATH_PREFIX}}</code>
+
+        <!-- Route Info -->
+        <div class="info">
+            <div class="info-title">Route Configuration</div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">PathBase</span>
+                    <span class="info-value">{{PATH_BASE}}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">API Prefix</span>
+                    <span class="info-value">{{API_PATH_PREFIX}}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Effective API Path</span>
+                    <span class="info-value">{{EFFECTIVE_API_PATH}}</span>
+                </div>
+            </div>
         </div>
+
+        <!-- Stats -->
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">.NET 10</div>
+                <div class="stat-label">Runtime</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{MODULE_COUNT}}</div>
+                <div class="stat-label">Modules Loaded</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{DB_PROVIDER}}</div>
+                <div class="stat-label">Database</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">v{{VERSION}}</div>
+                <div class="stat-label">Framework</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span class="footer-brand">Tnzi.NET</span>
+            <div class="footer-links">
+                <a href="https://github.com/tnzi/Tnzi.NET">GitHub</a>
+                <a href="https://www.nuget.org/packages?q=tnzi">NuGet</a>
+                <a href="https://tnzi.cc">Website</a>
+            </div>
+        </footer>
     </div>
 </body>
 </html>
-</CodeContent>
-<parameter name="EmptyFile">false

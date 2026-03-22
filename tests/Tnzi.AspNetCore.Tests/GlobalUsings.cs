@@ -17,6 +17,7 @@ global using Tnzi.AspNetCore.Middleware;
 global using Tnzi.AspNetCore.Middleware.Handlers;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
+global using Tnzi.AspNetCore.Mvc.Diagnostics;
 global using Tnzi.AspNetCore.Options;
 global using Tnzi.AspNetCore.ScopedContext;
 global using Tnzi.AspNetCore.Security;

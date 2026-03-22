@@ -24,7 +24,7 @@ public class AspNetCoreModule : TnziFrameworkModule
     /// 缓存欢迎页面 HTML，避免每次请求都读取嵌入资源
     /// </summary>
     private static string? _cachedWelcomePageHtml;
-    private static string? _cachedApiPathPrefix;
+    private static string? _cachedWelcomePageCacheKey;
     private static readonly object _welcomePageLock = new();
 
     /// <summary>
@@ -104,6 +104,10 @@ public class AspNetCoreModule : TnziFrameworkModule
         context.Services.TryAddScoped<IHostHttpCrypto, HostHttpCrypto>();
         context.Services.TryAddScoped<HostHttpCryptoMiddleware>();
 
+        // 创建 Controller 激活诊断收集器（在所有 Provider 注册之前）
+        var controllerDiagnostics = new ControllerActivationDiagnostics();
+        context.Services.AddSingleton(controllerDiagnostics);
+
         // 读取并配置 AspNetCore 选项
         var aspNetCoreOptions = context.Configuration
             .GetSection("AspNetCore")
@@ -157,16 +161,17 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册默认 Controller 过滤提供者 (Order = -600)
         // 当 HostingModule 未激活 DefaultControllerEnabledMarker 时，移除所有 [DefaultController] 标记的 Controller
         context.Services.AddSingleton<IApplicationModelProvider>(
-            _ => new Mvc.Conventions.DefaultControllerFilterProvider(context.Services));
+            _ => new Mvc.Conventions.DefaultControllerFilterProvider(context.Services, controllerDiagnostics));
 
         // 注册条件控制器提供者 (Order = -500)，用于根据依赖可用性过滤Controller
         // 支持Host模块的多个版本，根据依赖不同选择Controller的可见性
         context.Services.AddSingleton<IApplicationModelProvider>(
-            _ => new Mvc.Conventions.ConditionalControllerProvider(context.Services));
+            _ => new Mvc.Conventions.ConditionalControllerProvider(context.Services, controllerDiagnostics));
 
         // 注册模块 Controller 替换提供者 (Order = -450)
         // 用户同路由 Controller 自动覆盖模块默认 [DefaultController]
-        context.Services.AddSingleton<IApplicationModelProvider, Mvc.Conventions.ModuleControllerReplacementProvider>();
+        context.Services.AddSingleton<IApplicationModelProvider>(
+            _ => new Mvc.Conventions.ModuleControllerReplacementProvider(controllerDiagnostics));
 
         // 注册配置化 Controller 过滤提供者 (Order = -400)（按名称/程序集通配符禁用 Controller）
         if (aspNetCoreOptions.ControllerFilter != null)
@@ -394,6 +399,15 @@ public class AspNetCoreModule : TnziFrameworkModule
             ConfigureDefaultRoutes(webApp);
         }
 
+        // Flush controller activation diagnostics to logger
+        var diagnostics = context.ServiceProvider.GetService<ControllerActivationDiagnostics>();
+        if (diagnostics != null)
+        {
+            var logger = context.ServiceProvider.GetRequiredService<ILoggerFactory>()
+                .CreateLogger<ControllerActivationDiagnostics>();
+            diagnostics.FlushToLogger(logger);
+        }
+
         return Task.CompletedTask;
     }
 
@@ -402,14 +416,18 @@ public class AspNetCoreModule : TnziFrameworkModule
     /// </summary>
     private static void ConfigureDefaultRoutes(WebApplication app)
     {
-        // 获取 API 路径前缀配置
+        // 获取配置
         var aspNetCoreOptions = app.Services.GetService<IOptions<AspNetCoreOptions>>()?.Value ?? new AspNetCoreOptions();
         var apiPathPrefix = aspNetCoreOptions.ApiPathPrefix ?? "/api";
+        var pathBase = aspNetCoreOptions.PathBase ?? "";
 
-        // 配置默认首页（美观的 HTML 页面）
+        // 收集欢迎页面模板变量
+        var templateVars = BuildWelcomePageTemplateVars(app.Services, pathBase, apiPathPrefix);
+
+        // 配置默认首页
         app.MapGet("/", () =>
         {
-            var html = GetWelcomePageHtml(apiPathPrefix);
+            var html = GetWelcomePageHtml(templateVars);
             return Microsoft.AspNetCore.Http.Results.Content(html, "text/html; charset=utf-8");
         });
 
@@ -450,13 +468,53 @@ public class AspNetCoreModule : TnziFrameworkModule
     }
 
     /// <summary>
-    /// 生成欢迎页面 HTML（从嵌入资源加载，Adobe 暗黑系风格）
+    /// 构建欢迎页面的模板变量
+    /// </summary>
+    private static Dictionary<string, string> BuildWelcomePageTemplateVars(
+        IServiceProvider services, string pathBase, string apiPathPrefix)
+    {
+        // 计算外部客户端的有效 API 路径
+        var effectiveApiPath = (pathBase.TrimEnd('/') + "/" + apiPathPrefix.TrimStart('/')).TrimEnd('/');
+        if (string.IsNullOrEmpty(effectiveApiPath)) effectiveApiPath = "/";
+
+        // 获取已加载模块数量
+        var tnziApp = services.GetService<ITnziApplication>();
+        var moduleCount = tnziApp?.Modules.Count.ToString() ?? "-";
+
+        // 获取数据库提供者
+        var dbOptions = services.GetService<IOptions<EFCore.Options.DatabaseOptions>>()?.Value;
+        var dbProvider = dbOptions?.DbContexts.FirstOrDefault()?.Provider.ToString() ?? "-";
+
+        // 获取框架版本
+        var version = typeof(AspNetCoreModule).Assembly.GetName().Version;
+        var versionStr = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "0.1.0";
+
+        // Swagger JSON 路径（相对路径）
+        var swaggerPath = "swagger/v1/swagger.json";
+
+        return new Dictionary<string, string>
+        {
+            ["PATH_BASE"] = string.IsNullOrEmpty(pathBase) ? "(none)" : pathBase,
+            ["API_PATH_PREFIX"] = string.IsNullOrEmpty(apiPathPrefix) ? "(none)" : apiPathPrefix,
+            ["EFFECTIVE_API_PATH"] = effectiveApiPath,
+            ["MODULE_COUNT"] = moduleCount,
+            ["DB_PROVIDER"] = dbProvider,
+            ["VERSION"] = versionStr,
+            ["SWAGGER_PATH"] = swaggerPath,
+        };
+    }
+
+    /// <summary>
+    /// 生成欢迎页面 HTML（从嵌入资源加载，Tnzi.NET 官网风格）
     /// 使用缓存避免每次请求都读取嵌入资源
     /// </summary>
-    private static string GetWelcomePageHtml(string apiPathPrefix)
+    private static string GetWelcomePageHtml(Dictionary<string, string> templateVars)
     {
-        // 如果缓存有效（参数未变），直接返回缓存的 HTML
-        if (_cachedWelcomePageHtml != null && _cachedApiPathPrefix == apiPathPrefix)
+        // 生成缓存键
+        var cacheKey = string.Join("|", templateVars.Values);
+
+        // 如果缓存有效，直接返回
+        if (_cachedWelcomePageHtml != null && _cachedWelcomePageCacheKey == cacheKey)
         {
             return _cachedWelcomePageHtml;
         }
@@ -464,13 +522,10 @@ public class AspNetCoreModule : TnziFrameworkModule
         lock (_welcomePageLock)
         {
             // 双重检查锁定
-            if (_cachedWelcomePageHtml != null && _cachedApiPathPrefix == apiPathPrefix)
+            if (_cachedWelcomePageHtml != null && _cachedWelcomePageCacheKey == cacheKey)
             {
                 return _cachedWelcomePageHtml;
             }
-
-            // 对 apiPathPrefix 进行 HTML 编码，防止 XSS
-            var encodedPrefix = System.Net.WebUtility.HtmlEncode(apiPathPrefix);
 
             var assembly = typeof(AspNetCoreModule).Assembly;
             var resourceName = "Tnzi.AspNetCore.Resources.WelcomePage.html";
@@ -478,9 +533,8 @@ public class AspNetCoreModule : TnziFrameworkModule
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null)
             {
-                // 如果资源不存在，返回简单的欢迎页面
-                var fallback = $"<html><body><h1>Welcome to Tnzi.NET</h1><p>API Path: {encodedPrefix}</p></body></html>";
-                _cachedApiPathPrefix = apiPathPrefix;
+                var fallback = "<html><body><h1>Welcome to Tnzi.NET</h1></body></html>";
+                _cachedWelcomePageCacheKey = cacheKey;
                 _cachedWelcomePageHtml = fallback;
                 return fallback;
             }
@@ -488,11 +542,15 @@ public class AspNetCoreModule : TnziFrameworkModule
             using var reader = new StreamReader(stream);
             var html = reader.ReadToEnd();
 
-            // 替换占位符并缓存
-            var result = html.Replace("{{API_PATH_PREFIX}}", encodedPrefix);
-            _cachedApiPathPrefix = apiPathPrefix;
-            _cachedWelcomePageHtml = result;
-            return result;
+            // 替换所有模板占位符（HTML 编码防止 XSS）
+            foreach (var (key, value) in templateVars)
+            {
+                html = html.Replace($"{{{{{key}}}}}", System.Net.WebUtility.HtmlEncode(value));
+            }
+
+            _cachedWelcomePageCacheKey = cacheKey;
+            _cachedWelcomePageHtml = html;
+            return html;
         }
     }
 }

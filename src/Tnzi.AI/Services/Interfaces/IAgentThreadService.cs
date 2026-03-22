@@ -32,6 +32,11 @@ public interface IAgentThreadService
     Task<Result<AgentThreadDto>> UpdateTitleAsync(Guid id, string title);
 
     /// <summary>
+    /// 验证用户是否为线程所有者
+    /// </summary>
+    Task<bool> IsOwnerAsync(Guid threadId, Guid userId);
+
+    /// <summary>
     /// 删除线程
     /// </summary>
     Task<Result> DeleteAsync(Guid id);
@@ -48,14 +53,14 @@ public interface IAgentThreadService
 }
 
 /// <summary>
-/// Agent 线程内部服务接口（Pipeline 基础设施调用）
+/// Agent 线程内部服务接口（AgentRuntime 调用）
 /// </summary>
 public interface IAgentThreadInternalService
 {
     /// <summary>
-    /// 获取或创建线程对话上下文，返回上下文及实际使用的 ThreadId（创建新线程时为自动生成的 Id）
+    /// 获取或创建线程对话上下文，返回上下文、实际使用的 ThreadId 及是否为新建线程的标志
     /// </summary>
-    Task<(ConversationContext context, Guid threadId)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
+    Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
 
     /// <summary>
     /// 保存消息到线程

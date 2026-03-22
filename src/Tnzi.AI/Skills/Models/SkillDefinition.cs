@@ -98,6 +98,16 @@ public class SkillDefinition
     public List<string>? AllowedToolGroups { get; set; }
 
     /// <summary>
+    /// 单工具白名单（组级 AllowedToolGroups 之外额外放行的单个工具）
+    /// </summary>
+    public List<string>? AllowedTools { get; set; }
+
+    /// <summary>
+    /// 单工具黑名单（优先级最高，即使在 AllowedToolGroups 组中也会被移除）
+    /// </summary>
+    public List<string>? DeniedTools { get; set; }
+
+    /// <summary>
     /// Skill 激活时要求使用的模型
     /// </summary>
     public string? RequiredModel { get; set; }

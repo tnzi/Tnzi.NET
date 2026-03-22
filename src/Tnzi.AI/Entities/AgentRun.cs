@@ -4,7 +4,7 @@ namespace Tnzi.AI.Entities;
 /// AI 运行实例 — 复杂运行的一等对象。
 /// 不再只是一次 RunAsync 调用，而是可追踪、可恢复、可审计的执行实例。
 /// </summary>
-public class AgentRun : FullAuditedEntity<Guid>
+public class AgentRun : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>触发运行的 Agent</summary>
     public Guid? AgentId { get; set; }

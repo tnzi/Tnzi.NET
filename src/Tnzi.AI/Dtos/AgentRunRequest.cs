@@ -40,4 +40,7 @@ public class AgentRunRequest
 
     /// <summary>Per-request reasoning effort override (None = no reasoning)</summary>
     public ReasoningEffort? ReasoningEffort { get; init; }
+
+    /// <summary>扩展元数据（ExternalCli 工作目录等）</summary>
+    public Dictionary<string, object>? Metadata { get; init; }
 }

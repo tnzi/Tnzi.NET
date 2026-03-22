@@ -28,9 +28,9 @@ public class EvaluationRun : CreationAuditedEntity<Guid>, IMultiTenant
     public double AverageScore { get; set; }
 
     /// <summary>
-    /// 运行状态: "running", "completed", "failed"
+    /// 运行状态
     /// </summary>
-    public string Status { get; set; } = "running";
+    public EvaluationRunStatus Status { get; set; } = EvaluationRunStatus.Running;
 
     /// <summary>
     /// 评估结果 JSON 序列化

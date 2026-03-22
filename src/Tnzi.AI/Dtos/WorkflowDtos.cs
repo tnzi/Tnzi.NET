@@ -183,6 +183,23 @@ public class WorkflowExecutionStatusDto
 }
 
 /// <summary>
+/// 工作流定义查询 DTO
+/// </summary>
+public class WorkflowDefinitionQueryDto : PagedQueryDto
+{
+    protected override int DefaultPageSize => 20;
+
+    /// <summary>Keyword filter (name or description)</summary>
+    public string? Keyword { get; set; }
+
+    /// <summary>Filter by enabled status</summary>
+    public bool? IsEnabled { get; set; }
+
+    /// <summary>Filter by execution mode</summary>
+    public WorkflowExecutionMode? ExecutionMode { get; set; }
+}
+
+/// <summary>
 /// 审批/拒绝工作流步骤请求 DTO
 /// </summary>
 public class WorkflowStepApprovalDto

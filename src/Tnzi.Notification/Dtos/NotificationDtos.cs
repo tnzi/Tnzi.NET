@@ -114,3 +114,63 @@ public class QueryNotificationRequest : PagedQueryDto
     /// </summary>
     public Guid? SenderId { get; set; }
 }
+
+/// <summary>
+/// 通知预览结果
+/// </summary>
+public class NotificationPreviewDto
+{
+    /// <summary>Rendered subject</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Rendered content (HTML or plain text)</summary>
+    public string Content { get; set; } = string.Empty;
+
+    /// <summary>Whether content is HTML</summary>
+    public bool IsHtml { get; set; }
+
+    /// <summary>Resolved category</summary>
+    public string Category { get; set; } = "General";
+
+    /// <summary>Recipient count</summary>
+    public int RecipientCount { get; set; }
+
+    /// <summary>Template used (null if no template)</summary>
+    public string? TemplateName { get; set; }
+}
+
+/// <summary>
+/// 消息投递报告
+/// </summary>
+public class DeliveryReportDto
+{
+    /// <summary>Message ID</summary>
+    public Guid MessageId { get; set; }
+
+    /// <summary>Message subject</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Notification type</summary>
+    public NotificationType Type { get; set; }
+
+    /// <summary>Total recipients</summary>
+    public int TotalRecipients { get; set; }
+
+    /// <summary>Successfully sent</summary>
+    public int SentCount { get; set; }
+
+    /// <summary>Failed count</summary>
+    public int FailedCount { get; set; }
+
+    /// <summary>Pending count</summary>
+    public int PendingCount { get; set; }
+
+    /// <summary>Read count (for in-app notifications)</summary>
+    public int ReadCount { get; set; }
+
+    /// <summary>Delivery success rate (0-1)</summary>
+    public double SuccessRate { get; set; }
+
+    /// <summary>Recipient details</summary>
+    public List<RecipientOutput> Recipients { get; set; } = [];
+}

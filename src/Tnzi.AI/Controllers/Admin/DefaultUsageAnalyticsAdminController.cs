@@ -77,4 +77,24 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
         var result = await AnalyticsService.GetUsageByAgentAsync(startTime, endTime, topN);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// Agent 反馈统计（按好评率降序）
+    /// </summary>
+    [HttpGet("agent-feedback-stats")]
+    public virtual async Task<ApiResult<List<AgentFeedbackStatsDto>>> GetAgentFeedbackStats([FromQuery] int topN = 20)
+    {
+        var result = await AnalyticsService.GetAgentFeedbackStatsAsync(topN);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 成本摘要（按提供商和模型分组的美元成本统计）
+    /// </summary>
+    [HttpGet("cost-summary")]
+    public virtual async Task<ApiResult<CostSummaryDto>> GetCostSummary([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] string? provider = null, [FromQuery] string? model = null)
+    {
+        var result = await AnalyticsService.GetCostSummaryAsync(startTime, endTime, provider, model);
+        return result.ToApiResult();
+    }
 }

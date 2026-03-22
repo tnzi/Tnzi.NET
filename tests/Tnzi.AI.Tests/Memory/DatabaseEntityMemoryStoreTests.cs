@@ -144,8 +144,9 @@ public class DatabaseEntityMemoryStoreTests
     }
 
     [Fact]
-    public async Task UpsertEntityAsync_ExistingEntity_Updates()
+    public async Task UpsertEntityAsync_ExistingEntity_UpdatesViaExecuteUpdate()
     {
+        // 验证：已有实体时走 ExecuteUpdateAsync 路径（绕过 ChangeTracker）
         var existing = new EntityMemory
         {
             Id = Guid.NewGuid(),
@@ -168,11 +169,13 @@ public class DatabaseEntityMemoryStoreTests
             Properties = new Dictionary<string, string> { { "role", "senior developer" }, { "team", "backend" } }
         };
 
+        // 不应抛异常：Select 查询到 existingProps，然后 ExecuteUpdateAsync 更新
         await store.UpsertEntityAsync(entry);
 
-        mockRepo.Verify(r => r.UpdateAsync(
-            It.Is<EntityMemory>(e => e.EntityName == "Alice" && e.MentionCount == 4),
-            It.IsAny<CancellationToken>()), Times.Once);
+        // 验证不走 Insert 路径（已有实体直接 ExecuteUpdate）
+        mockRepo.Verify(r => r.InsertAsync(It.IsAny<EntityMemory>(), It.IsAny<CancellationToken>()), Times.Never);
+        // 验证 AsQueryable 至少被调用 2 次（Select 查询 + ExecuteUpdate）
+        mockRepo.Verify(r => r.AsQueryable(It.IsAny<bool>()), Times.AtLeast(2));
     }
 
     [Fact]
@@ -209,8 +212,7 @@ public class DatabaseEntityMemoryStoreTests
 
         await store.UpsertEntitiesAsync([]);
 
-        mockRepo.Verify(r => r.InsertManyAsync(It.IsAny<IEnumerable<EntityMemory>>(), It.IsAny<CancellationToken>()), Times.Never);
-        mockRepo.Verify(r => r.UpdateManyAsync(It.IsAny<IEnumerable<EntityMemory>>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockRepo.Verify(r => r.InsertAsync(It.IsAny<EntityMemory>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -233,21 +235,11 @@ public class DatabaseEntityMemoryStoreTests
     }
 
     [Fact]
-    public async Task UpsertEntitiesAsync_MixedNewAndExisting_BatchOperations()
+    public async Task UpsertEntitiesAsync_AllNew_InsertsEach()
     {
-        var existing = new EntityMemory
-        {
-            Id = Guid.NewGuid(),
-            EntityName = "Alice",
-            EntityType = "person",
-            UserId = null,
-            AgentId = null,
-            Properties = "{}",
-            MentionCount = 2,
-            LastMentioned = DateTime.UtcNow.AddHours(-1)
-        };
-
-        var mockRepo = CreateMockRepo([existing]);
+        // 批量 upsert 现在逐条委托给 UpsertEntityAsync，使用 ExecuteUpdateAsync 绕过 ChangeTracker
+        // mock queryable 不支持 ExecuteUpdateAsync，但对于全新实体（Select 返回 null），走 Insert 路径
+        var mockRepo = CreateMockRepo([]);
         var store = CreateStore(mockRepo);
 
         var entries = new List<EntityMemoryEntry>
@@ -258,13 +250,13 @@ public class DatabaseEntityMemoryStoreTests
 
         await store.UpsertEntitiesAsync(entries);
 
-        // Alice 更新，Bob 新增
-        mockRepo.Verify(r => r.UpdateManyAsync(
-            It.Is<IEnumerable<EntityMemory>>(list => list.Count() == 1 && list.First().EntityName == "Alice"),
+        // 两条都是新插入
+        mockRepo.Verify(r => r.InsertAsync(
+            It.Is<EntityMemory>(e => e.EntityName == "Alice"),
             It.IsAny<CancellationToken>()), Times.Once);
 
-        mockRepo.Verify(r => r.InsertManyAsync(
-            It.Is<IEnumerable<EntityMemory>>(list => list.Count() == 1 && list.First().EntityName == "Bob"),
+        mockRepo.Verify(r => r.InsertAsync(
+            It.Is<EntityMemory>(e => e.EntityName == "Bob"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

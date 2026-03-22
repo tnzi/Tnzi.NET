@@ -10,8 +10,8 @@ public class EvaluationRunConfiguration : EntityTypeConfigurationBase<Evaluation
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.Status)
-            .HasMaxLength(20)
-            .IsRequired();
+            .IsRequired()
+            .HasDefaultValue(EvaluationRunStatus.Running);
 
         builder.Property(e => e.ResultsJson)
             .IsRequired();

@@ -34,7 +34,10 @@ public class AgentExecutorOptions
     /// <summary>
     /// 最大工具调用迭代次数（防止无限循环）
     /// </summary>
-    public int MaxToolIterations { get; set; } = 25;
+    public const int DefaultMaxToolIterations = 25;
+
+    /// <inheritdoc cref="DefaultMaxToolIterations"/>
+    public int MaxToolIterations { get; set; } = DefaultMaxToolIterations;
 
     /// <summary>
     /// 单个工具调用超时时间（秒）

@@ -27,6 +27,11 @@ public class AgentStreamChunk
     public bool IsToolCall { get; set; }
 
     /// <summary>
+    /// Tool names being called (sent alongside IsToolCall = true for early UI feedback)
+    /// </summary>
+    public List<string>? ToolCallNames { get; set; }
+
+    /// <summary>
     /// 错误信息（工具调用超时、Guardrail 拒绝等）
     /// </summary>
     public string? Error { get; set; }

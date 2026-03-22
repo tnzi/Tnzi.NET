@@ -120,7 +120,7 @@ public class AccessLogService : ApplicationService, IAccessLogService
         var stats = await query.GroupBy(o => 1).Select(g => new
         {
             TotalRequests = g.Count(),
-            UniqueUsers = g.Select(log => log.UserId).Distinct().Count(),
+            UniqueUsers = g.Where(log => log.UserId != null).Select(log => log.UserId).Distinct().Count(),
             SuccessRequests = g.Count(log => log.StatusCode >= 200 && log.StatusCode < 300),
             ErrorRequests = g.Count(log => log.StatusCode >= 400),
             AverageResponseTime = g.Average(log => (double)log.ResponseTime)
@@ -181,10 +181,20 @@ public class AccessLogService : ApplicationService, IAccessLogService
         DateTime endDate,
         CancellationToken cancellationToken = default)
     {
-        var logs = await _accessLogRepository.AsQueryable()
+        // 按天在数据库端聚合，避免加载全部原始记录到内存
+        var dailyStats = await _accessLogRepository.AsQueryable()
             .AsNoTracking()
             .Where(l => l.CreationTime >= startDate && l.CreationTime <= endDate)
-            .Select(l => new { l.CreationTime, l.StatusCode, l.ResponseTime, l.UserId })
+            .GroupBy(l => l.CreationTime.Date)
+            .Select(g => new
+            {
+                Date = g.Key,
+                TotalRequests = g.Count(),
+                SuccessRequests = g.Count(l => l.StatusCode >= 200 && l.StatusCode < 300),
+                ErrorRequests = g.Count(l => l.StatusCode >= 400),
+                UniqueUsers = g.Where(l => l.UserId != null).Select(l => l.UserId).Distinct().Count(),
+                AverageResponseTime = g.Average(l => (double)l.ResponseTime)
+            })
             .ToListAsync(cancellationToken);
 
         var dataPoints = new List<AccessLogTrendDataPoint>();
@@ -200,17 +210,21 @@ public class AccessLogService : ApplicationService, IAccessLogService
                 _ => (current.AddDays(1), current.ToString("yyyy-MM-dd"))
             };
 
-            var bucketLogs = logs.Where(l => l.CreationTime >= current && l.CreationTime < bucketEnd).ToList();
+            // 从按天聚合结果中汇总当前区间的数据
+            var bucketDays = dailyStats.Where(d => d.Date >= current && d.Date < bucketEnd).ToList();
 
+            var totalRequests = bucketDays.Sum(d => d.TotalRequests);
             dataPoints.Add(new AccessLogTrendDataPoint
             {
                 Label = label,
                 StartTime = current,
-                TotalRequests = bucketLogs.Count,
-                SuccessRequests = bucketLogs.Count(l => l.StatusCode >= 200 && l.StatusCode < 300),
-                ErrorRequests = bucketLogs.Count(l => l.StatusCode >= 400),
-                UniqueUsers = bucketLogs.Where(l => l.UserId.HasValue).Select(l => l.UserId).Distinct().Count(),
-                AverageResponseTime = bucketLogs.Count > 0 ? bucketLogs.Average(l => (double)l.ResponseTime) : 0
+                TotalRequests = totalRequests,
+                SuccessRequests = bucketDays.Sum(d => d.SuccessRequests),
+                ErrorRequests = bucketDays.Sum(d => d.ErrorRequests),
+                UniqueUsers = bucketDays.Sum(d => d.UniqueUsers),
+                AverageResponseTime = totalRequests > 0
+                    ? bucketDays.Sum(d => d.AverageResponseTime * d.TotalRequests) / totalRequests
+                    : 0
             });
 
             current = bucketEnd;

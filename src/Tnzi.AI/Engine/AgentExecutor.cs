@@ -27,6 +27,11 @@ public class AgentExecutor
     public string Name => _options.Name;
 
     /// <summary>
+    /// 当前工具列表（只读）
+    /// </summary>
+    public IReadOnlyList<AITool> Tools => _options.Tools?.AsReadOnly() ?? (IReadOnlyList<AITool>)[];
+
+    /// <summary>
     /// 创建一个包含额外工具的新 AgentExecutor（不修改原实例）
     /// </summary>
     public AgentExecutor WithAdditionalTools(IEnumerable<AITool> additionalTools)
@@ -40,6 +45,28 @@ public class AgentExecutor
             Name = _options.Name,
             Instructions = _options.Instructions,
             Tools = mergedTools,
+            Temperature = _options.Temperature,
+            MaxOutputTokens = _options.MaxOutputTokens,
+            MaxToolIterations = _options.MaxToolIterations,
+            ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
+            HistoryReducer = _options.HistoryReducer,
+            ContextProvider = _options.ContextProvider,
+            Middlewares = _options.Middlewares
+        };
+
+        return new AgentExecutor(_chatClient, newOptions);
+    }
+
+    /// <summary>
+    /// 创建一个使用指定工具列表的新 AgentExecutor（替换原有工具，不修改原实例）
+    /// </summary>
+    public AgentExecutor WithFilteredTools(IEnumerable<AITool> tools)
+    {
+        var newOptions = new AgentExecutorOptions
+        {
+            Name = _options.Name,
+            Instructions = _options.Instructions,
+            Tools = tools.ToList(),
             Temperature = _options.Temperature,
             MaxOutputTokens = _options.MaxOutputTokens,
             MaxToolIterations = _options.MaxToolIterations,
@@ -69,9 +96,19 @@ public class AgentExecutor
         var chatOptions = BuildChatOptions(contextInjection, out var allTools);
 
         // 4. 工具调用循环
+        var totalInputTokens = 0;
+        var totalOutputTokens = 0;
+
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
         {
             var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+
+            // 累计 token 用量
+            if (response.Usage != null)
+            {
+                totalInputTokens += (int)(response.Usage.InputTokenCount ?? 0);
+                totalOutputTokens += (int)(response.Usage.OutputTokenCount ?? 0);
+            }
 
             // 将助手回复添加到消息列表
             messages.AddRange(response.Messages);
@@ -86,7 +123,12 @@ public class AgentExecutor
                 return new AgentResponse
                 {
                     Text = response.Text,
-                    Usage = ConvertUsage(response.Usage),
+                    Usage = new TokenUsageDto
+                    {
+                        InputTokens = totalInputTokens,
+                        OutputTokens = totalOutputTokens,
+                        TotalTokens = totalInputTokens + totalOutputTokens
+                    },
                     FinishReason = response.FinishReason?.ToString(),
                     Messages = messages,
                     Citations = contextInjection.Citations,
@@ -99,14 +141,21 @@ public class AgentExecutor
             messages.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
         }
 
-        // 达到最大迭代次数，返回最后的消息
+        // 达到最大迭代次数 — 附加提示告知用户 AI 因达到工具调用上限而停止
         await NotifyContextCompletedAsync(messages, ct);
 
         var lastAssistantText = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
+        var truncationNotice = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]";
         return new AgentResponse
         {
-            Text = lastAssistantText,
-            FinishReason = "max_tool_iterations",
+            Text = (lastAssistantText ?? "") + truncationNotice,
+            Usage = new TokenUsageDto
+            {
+                InputTokens = totalInputTokens,
+                OutputTokens = totalOutputTokens,
+                TotalTokens = totalInputTokens + totalOutputTokens
+            },
+            FinishReason = FinishReasons.MaxToolIterations,
             Messages = messages,
             Citations = contextInjection.Citations,
             Reasoning = ExtractReasoning(messages)
@@ -143,6 +192,17 @@ public class AgentExecutor
             var assistantContents = new List<AIContent>();
             var toolCallSignaled = false;
 
+            // Early tool call detection: when text stops but stream continues,
+            // the LLM likely switched to function call argument generation.
+            // MEAI buffers the entire function call internally and only yields
+            // FunctionCallContent after all arguments are received, causing
+            // 60-120s silence for large tool arguments. Detect the text→silence
+            // transition and emit an early hint so the frontend can show feedback.
+            var hasReceivedText = false;
+            var noTextUpdateCount = 0;
+            var earlyToolSignalSent = false;
+            const int noTextThreshold = 3;
+
             await foreach (var update in _chatClient.GetStreamingResponseAsync(messages, chatOptions, ct))
             {
                 // 收集内容（TextReasoningContent 为合成类型，不加入 assistantContents）
@@ -162,18 +222,53 @@ public class AgentExecutor
                     if (content is FunctionCallContent functionCall)
                     {
                         toolCallContents.Add(functionCall);
-                        // Signal tool call once — any text already streamed is acceptable
+                        // Signal tool call once with tool names — any text already streamed is acceptable
                         if (!toolCallSignaled)
                         {
                             toolCallSignaled = true;
-                            yield return new AgentStreamChunk { IsToolCall = true };
+                            yield return new AgentStreamChunk
+                            {
+                                IsToolCall = true,
+                                ToolCallNames = toolCallContents.Select(tc => tc.Name).ToList()
+                            };
                         }
+                    }
+                }
+
+                // Early tool call name detection from provider's raw streaming data.
+                // The function name appears in the very first chunk that contains a tool call,
+                // 60-120s BEFORE MEAI yields the complete FunctionCallContent.
+                if (!toolCallSignaled && !earlyToolSignalSent)
+                {
+                    var toolNames = ExtractPartialToolCallNames(update);
+                    if (toolNames.Count > 0)
+                    {
+                        earlyToolSignalSent = true;
+                        yield return new AgentStreamChunk
+                        {
+                            IsToolCall = true,
+                            ToolCallNames = toolNames
+                        };
                     }
                 }
 
                 if (update.Text != null)
                 {
                     responseText.Append(update.Text);
+                    hasReceivedText = true;
+                    noTextUpdateCount = 0;
+                }
+                else if (hasReceivedText && !toolCallSignaled && !earlyToolSignalSent)
+                {
+                    // Fallback: text was flowing but stopped — LLM may be generating function call arguments.
+                    // After noTextThreshold consecutive updates with no text, emit an early hint.
+                    // This covers non-OpenAI providers where RawRepresentation lacks ToolCallUpdates.
+                    noTextUpdateCount++;
+                    if (noTextUpdateCount >= noTextThreshold)
+                    {
+                        earlyToolSignalSent = true;
+                        yield return new AgentStreamChunk { IsToolCall = true };
+                    }
                 }
 
                 // 提取 Usage
@@ -237,12 +332,16 @@ public class AgentExecutor
             // 注意: RecordToolCall 已在 ExecuteToolCallsCoreAsync 内部调用，此处不重复记录
         }
 
-        // 达到最大迭代次数
+        // 达到最大迭代次数 — 发送提示文本告知用户
         await NotifyContextCompletedAsync(messages, ct);
 
         yield return new AgentStreamChunk
         {
-            FinishReason = "max_tool_iterations",
+            Text = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]"
+        };
+        yield return new AgentStreamChunk
+        {
+            FinishReason = FinishReasons.MaxToolIterations,
             Citations = contextInjection.Citations
         };
     }
@@ -515,17 +614,73 @@ public class AgentExecutor
     }
 
     /// <summary>
+    /// Extract function names from partial tool call data in the raw streaming update.
+    /// Works with OpenAI-compatible providers (DeepSeek, OpenAI, etc.) whose
+    /// RawRepresentation is OpenAI.Chat.StreamingChatCompletionUpdate with ToolCallUpdates.
+    /// Uses reflection to avoid hard dependency on the OpenAI SDK package.
+    /// </summary>
+    private static List<string> ExtractPartialToolCallNames(ChatResponseUpdate update)
+    {
+        var names = new List<string>();
+        try
+        {
+            var raw = update.RawRepresentation;
+            if (raw == null) return names;
+
+            var toolCallUpdatesProperty = raw.GetType().GetProperty("ToolCallUpdates");
+            if (toolCallUpdatesProperty?.GetValue(raw) is not System.Collections.IEnumerable toolCallUpdates)
+                return names;
+
+            foreach (var toolCallUpdate in toolCallUpdates)
+            {
+                var fnNameProp = toolCallUpdate.GetType().GetProperty("FunctionName");
+                if (fnNameProp?.GetValue(toolCallUpdate) is string fnName && !string.IsNullOrEmpty(fnName))
+                {
+                    names.Add(fnName);
+                }
+            }
+        }
+        catch
+        {
+            // Silently ignore — this is a best-effort optimization
+        }
+        return names;
+    }
+
+    /// <summary>
     /// 将 MEAI UsageDetails 转换为 TokenUsageDto（引擎层出口转换）
     /// </summary>
     private static TokenUsageDto? ConvertUsage(UsageDetails? usage)
     {
         if (usage == null) return null;
-        return new TokenUsageDto
+        var dto = new TokenUsageDto
         {
-            PromptTokens = (int)(usage.InputTokenCount ?? 0),
-            CompletionTokens = (int)(usage.OutputTokenCount ?? 0),
+            InputTokens = (int)(usage.InputTokenCount ?? 0),
+            OutputTokens = (int)(usage.OutputTokenCount ?? 0),
             TotalTokens = (int)(usage.TotalTokenCount ?? 0)
         };
+
+        // Extract cache metrics from AdditionalCounts (provider-specific fields)
+        // OpenAI: "CachedInputTokens" / Anthropic: "cache_creation_input_tokens", "cache_read_input_tokens"
+        // DeepSeek: "prompt_cache_hit_tokens" (via OpenAI-compatible API)
+        if (usage.AdditionalCounts is { Count: > 0 })
+        {
+            // OpenAI-style (Microsoft.Extensions.AI normalizes to this)
+            if (usage.AdditionalCounts.TryGetValue("CachedInputTokens", out var cached))
+                dto.CachedInputTokens = (int)cached;
+
+            // Anthropic-style
+            if (usage.AdditionalCounts.TryGetValue("cache_read_input_tokens", out var cacheRead))
+                dto.CachedInputTokens = (int)cacheRead;
+            if (usage.AdditionalCounts.TryGetValue("cache_creation_input_tokens", out var cacheCreate))
+                dto.CacheCreationTokens = (int)cacheCreate;
+
+            // DeepSeek-style (OpenAI-compatible, may pass through as-is)
+            if (usage.AdditionalCounts.TryGetValue("prompt_cache_hit_tokens", out var dsCache))
+                dto.CachedInputTokens = (int)dsCache;
+        }
+
+        return dto;
     }
 
     /// <summary>

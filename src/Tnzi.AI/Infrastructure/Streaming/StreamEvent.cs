@@ -35,6 +35,9 @@ public class StreamEvent
     /// <summary>是否为工具调用中间状态（用于心跳）</summary>
     public bool IsToolCall { get; set; }
 
+    /// <summary>Tool names being called (sent with IsToolCall = true for early UI feedback)</summary>
+    public List<string>? ToolCallNames { get; set; }
+
     /// <summary>推理增量文本（DeepSeek-R1 等模型的思考过程，如 reasoning_content）</summary>
     public string? ReasoningDelta { get; set; }
 

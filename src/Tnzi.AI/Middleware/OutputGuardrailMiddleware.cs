@@ -12,7 +12,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<OutputGuardrailMiddleware> _logger;
 
-    public int Order => 900;
+    public int Order => AiMiddlewareOrders.OutputGuardrail;
 
     public OutputGuardrailMiddleware(
         GuardrailRunner guardrailRunner,
@@ -63,7 +63,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                     ThreadId = result.ThreadId,
                     Usage = result.Usage,
                     Citations = result.Citations,
-                    FinishReason = "guardrail_rejected",
+                    FinishReason = FinishReasons.GuardrailRejected,
                     Status = AgentRunStatus.Failed
                 };
             }
@@ -96,7 +96,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                 RunId = result.RunId,
                 ThreadId = result.ThreadId,
                 Usage = result.Usage,
-                FinishReason = "guardrail_rejected",
+                FinishReason = FinishReasons.GuardrailRejected,
                 Status = AgentRunStatus.Failed
             };
         }
@@ -162,7 +162,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                 pendingChunks.Clear();
 
                 // 保留尾部重叠区域用于跨窗口检测（如关键词跨越窗口边界）
-                const int overlapSize = 50;
+                var overlapSize = _options.Value.Guardrails.StreamingOverlapSize;
                 if (buffer.Length > overlapSize)
                 {
                     var overlap = buffer.ToString(buffer.Length - overlapSize, overlapSize);
@@ -181,7 +181,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             yield return new AgentStreamChunk
             {
                 Text = $"\n\n[Output blocked: {rejectionMessage}]",
-                FinishReason = "guardrail_rejected"
+                FinishReason = FinishReasons.GuardrailRejected
             };
             yield break;
         }
@@ -197,7 +197,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                     yield return new AgentStreamChunk
                     {
                         Text = $"\n\n[Output blocked: {checkResult}]",
-                        FinishReason = "guardrail_rejected"
+                        FinishReason = FinishReasons.GuardrailRejected
                     };
                     yield break;
                 }

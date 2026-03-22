@@ -64,7 +64,7 @@ public class AgentRunService : ApplicationService, IAgentRunService
         });
     }
 
-    public async Task<Result<AgentRunDto>> GetAsync(Guid runId)
+    public async Task<Result<AgentRunDto>> GetByIdAsync(Guid runId)
     {
         var entity = await _repository.GetAsync(runId);
         if (entity == null)
@@ -79,7 +79,9 @@ public class AgentRunService : ApplicationService, IAgentRunService
 
         var queryable = _repository
             .WhereIf(r => r.AgentId == input.AgentId, input.AgentId.HasValue)
+            .WhereIf(r => r.WorkflowDefinitionId == input.WorkflowDefinitionId, input.WorkflowDefinitionId.HasValue)
             .WhereIf(r => r.Status == input.Status!.Value, input.Status.HasValue)
+            .WhereIf(r => r.ExecutionMode == input.ExecutionMode!.Value, input.ExecutionMode.HasValue)
             .WhereIf(r => r.CreationTime >= input.StartTime!.Value, input.StartTime.HasValue)
             .WhereIf(r => r.CreationTime <= input.EndTime!.Value, input.EndTime.HasValue)
             .OrderByDescending(r => r.CreationTime);
@@ -150,7 +152,7 @@ public class AgentRunService : ApplicationService, IAgentRunService
         return Ok();
     }
 
-    public async Task<Result> RejectAsync(Guid runId, string? feedback)
+    public async Task<Result> RejectAsync(Guid runId, string? comment)
     {
         var entity = await _repository.GetAsync(runId);
         if (entity == null)
@@ -162,10 +164,10 @@ public class AgentRunService : ApplicationService, IAgentRunService
         await _runtime.ResumeAsync(runId, new ResumeRunInput
         {
             ApprovalDecision = "reject",
-            ApprovalComment = feedback
+            ApprovalComment = comment
         });
 
-        Logger.LogInformation("Run {RunId} rejected with feedback: {Feedback}", runId, feedback);
+        Logger.LogInformation("Run {RunId} rejected with comment: {Comment}", runId, comment);
         return Ok();
     }
 
@@ -194,4 +196,5 @@ public class AgentRunService : ApplicationService, IAgentRunService
         Logger.LogInformation("Node {NodeId} in Run {RunId} retried via runtime resume", nodeId, runId);
         return Ok();
     }
+
 }

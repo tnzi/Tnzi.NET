@@ -338,4 +338,36 @@ public static class StringExtensions
     }
 
     #endregion
+
+    #region 截断
+
+    /// <summary>
+    /// 按文本元素截断字符串（正确处理 CJK、emoji 等多字节字符）
+    /// </summary>
+    /// <param name="str">待截断的字符串</param>
+    /// <param name="maxLength">最大文本元素数量</param>
+    /// <param name="suffix">截断后追加的后缀，默认 "..."</param>
+    /// <returns>截断后的字符串，null 输入返回 null</returns>
+    public static string? TruncateByTextElements(this string? str, int maxLength, string suffix = "...")
+    {
+        if (string.IsNullOrWhiteSpace(str))
+            return str;
+
+        var trimmed = str.Trim();
+        if (new StringInfo(trimmed).LengthInTextElements <= maxLength)
+            return trimmed;
+
+        var enumerator = StringInfo.GetTextElementEnumerator(trimmed);
+        var sb = new StringBuilder();
+        var count = 0;
+        while (enumerator.MoveNext() && count < maxLength)
+        {
+            sb.Append(enumerator.GetTextElement());
+            count++;
+        }
+
+        return sb.Append(suffix).ToString();
+    }
+
+    #endregion
 }

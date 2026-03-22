@@ -99,6 +99,7 @@ public class ChatService : ApplicationService, IChatService
         string? streamErrorMessage = null;
         string? streamFinishReason = null;
         List<CitationDto>? citations = null;
+        bool earlyDoneSent = false;
 
         await foreach (var chunk in _runtime.RunStreamingAsync(runRequest, ct).WithCancellation(ct))
         {
@@ -174,36 +175,61 @@ public class ChatService : ApplicationService, IChatService
                 yield return new StreamEvent
                 {
                     IsToolCall = true,
+                    ToolCallNames = chunk.ToolCallNames,
                     Model = request.Model,
                     ThreadId = currentThreadId
                 };
             }
-        }
 
-        // 如果流式响应结束时还没有 Token 信息，尝试从最后一条 chunk 中查找
-        if (lastChunk is not null && inputTokens == 0 && outputTokens == 0)
-        {
-            var (inp, outp) = ChatMessageHelper.ExtractStreamingUsage(lastChunk);
-            if (inp > 0 || outp > 0) { inputTokens = inp; outputTokens = outp; }
-        }
-
-        // 发送终止事件（含 Usage、FinishReason 和 Citations）
-        var hasStreamError = streamErrorMessage != null;
-        yield return new StreamEvent
-        {
-            IsDone = true,
-            FinishReason = hasStreamError ? (streamFinishReason ?? "error") : "stop",
-            Model = request.Model,
-            ThreadId = runRequest.ThreadId,
-            IsError = hasStreamError,
-            ErrorMessage = hasStreamError ? streamErrorMessage : null,
-            Usage = new TokenUsageDto
+            // Yield isDone early when a terminal FinishReason is detected, so the client
+            // receives it BEFORE the next MoveNextAsync() triggers middleware cleanup (DB writes).
+            if (!earlyDoneSent && chunk.FinishReason is "stop" or "max_tool_iterations")
             {
-                PromptTokens = inputTokens,
-                CompletionTokens = outputTokens,
-                TotalTokens = inputTokens + outputTokens
-            },
-            Citations = citations
-        };
+                earlyDoneSent = true;
+                yield return new StreamEvent
+                {
+                    IsDone = true,
+                    FinishReason = chunk.FinishReason,
+                    Model = request.Model,
+                    ThreadId = currentThreadId,
+                    Usage = new TokenUsageDto
+                    {
+                        InputTokens = inputTokens,
+                        OutputTokens = outputTokens,
+                        TotalTokens = inputTokens + outputTokens
+                    },
+                    Citations = citations
+                };
+            }
+        }
+
+        // Fallback: send isDone if it wasn't already sent early (e.g., error paths or missing FinishReason)
+        if (!earlyDoneSent)
+        {
+            // 如果流式响应结束时还没有 Token 信息，尝试从最后一条 chunk 中查找
+            if (lastChunk is not null && inputTokens == 0 && outputTokens == 0)
+            {
+                var (inp2, outp2) = ChatMessageHelper.ExtractStreamingUsage(lastChunk);
+                if (inp2 > 0 || outp2 > 0) { inputTokens = inp2; outputTokens = outp2; }
+            }
+
+            var hasStreamError = streamErrorMessage != null;
+            yield return new StreamEvent
+            {
+                IsDone = true,
+                FinishReason = hasStreamError ? (streamFinishReason ?? "error") : "stop",
+                Model = request.Model,
+                ThreadId = runRequest.ThreadId,
+                IsError = hasStreamError,
+                ErrorMessage = hasStreamError ? streamErrorMessage : null,
+                Usage = new TokenUsageDto
+                {
+                    InputTokens = inputTokens,
+                    OutputTokens = outputTokens,
+                    TotalTokens = inputTokens + outputTokens
+                },
+                Citations = citations
+            };
+        }
     }
 }

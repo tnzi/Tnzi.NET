@@ -148,7 +148,6 @@ public static class DatabaseProviderDetector
         // - Data Source=（且不包含 .db，已被 SQLite 检查排除）
         // - Database= 且包含 User Id= 或 Integrated Security=（SQL Server 特征）
         // 注意：如果已经匹配了 PostgreSQL、MySQL 或 SQLite，则不应该再匹配 SQL Server
-        // 注意：原第 102 行的条件 (Server= + Database= + User Id=) 已被第 101 行包含，已移除冗余
         if (!matches.Contains(DatabaseProvider.PostgreSQL) &&
             !matches.Contains(DatabaseProvider.Sqlite) &&
             !matches.Contains(DatabaseProvider.MySql))

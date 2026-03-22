@@ -9,13 +9,15 @@ namespace Tnzi.AI.Controllers.Admin;
 public class DefaultAgentAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentService AgentService;
+    protected readonly IAgentValidationService ValidationService;
 
     /// <summary>
     /// 初始化 Agent 管理控制器
     /// </summary>
-    public DefaultAgentAdminController(IAgentService agentService)
+    public DefaultAgentAdminController(IAgentService agentService, IAgentValidationService validationService)
     {
         AgentService = Check.NotNull(agentService);
+        ValidationService = Check.NotNull(validationService);
     }
 
     /// <summary>
@@ -180,4 +182,23 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
         await StreamingResponseWriter.WriteDoneAsync(Response, format, CancellationToken.None);
     }
 
+    /// <summary>
+    /// 验证 Agent 配置有效性
+    /// </summary>
+    [HttpPost("{id:guid}/validate")]
+    public virtual async Task<ApiResult<AgentValidationResultDto>> Validate(Guid id)
+    {
+        var result = await ValidationService.ValidateAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取所有 Agent 健康摘要
+    /// </summary>
+    [HttpGet("health")]
+    public virtual async Task<ApiResult<AgentHealthSummaryDto>> GetHealth()
+    {
+        var result = await ValidationService.GetHealthSummaryAsync();
+        return result.ToApiResult();
+    }
 }

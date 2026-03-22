@@ -9,8 +9,6 @@ public class AgentThreadConfiguration : EntityTypeConfigurationBase<AgentThread,
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.HasKey(e => e.Id);
-
         builder.Property(e => e.Title)
             .HasMaxLength(200);
 

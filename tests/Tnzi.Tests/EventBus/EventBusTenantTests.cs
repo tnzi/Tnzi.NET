@@ -68,19 +68,27 @@ public class EventBusTenantTests
 
     // ------------------------------------------------------------------
     // 辅助工厂：构建带租户上下文的 LocalEventBus
+    // ICurrentTenant 通过 DI 注册为 Scoped，由 LocalEventBus 在 PublishAsync 中从 scope 解析
     // ------------------------------------------------------------------
 
     private static (LocalEventBus bus, ServiceProvider sp) BuildBus(
-        ICurrentTenant? currentTenant = null,
+        Mock<ICurrentTenant>? tenantMock = null,
         Action<IServiceCollection>? configure = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+
+        // 注册 ICurrentTenant 为 Scoped（与生产环境一致）
+        if (tenantMock != null)
+        {
+            services.AddScoped<ICurrentTenant>(_ => tenantMock.Object);
+        }
+
         configure?.Invoke(services);
 
         var sp = services.BuildServiceProvider();
         var logger = sp.GetRequiredService<ILogger<LocalEventBus>>();
-        var bus = new LocalEventBus(sp, logger, currentTenant: currentTenant);
+        var bus = new LocalEventBus(sp, logger);
         return (bus, sp);
     }
 
@@ -139,7 +147,7 @@ public class EventBusTenantTests
 
         var handler = new RecordingEventHandler();
         var (bus, _) = BuildBus(
-            currentTenant: mockTenant.Object,
+            tenantMock: mockTenant,
             configure: svc => svc.AddScoped<IEventHandler<TenantTestEvent>>(_ => handler));
 
         var @event = new TenantTestEvent { Payload = "hello" };
@@ -166,7 +174,7 @@ public class EventBusTenantTests
 
         var handler = new RecordingEventHandler();
         var (bus, _) = BuildBus(
-            currentTenant: mockTenant.Object,
+            tenantMock: mockTenant,
             configure: svc => svc.AddScoped<IEventHandler<TenantTestEvent>>(_ => handler));
 
         var @event = new TenantTestEvent { Payload = "no-tenant" };
@@ -181,10 +189,10 @@ public class EventBusTenantTests
     [Fact]
     public async Task PublishAsync_WithNullCurrentTenant_TenantIdRemainsNull()
     {
-        // Arrange — 未传入 ICurrentTenant（多租户模块未加载场景）
+        // Arrange — 未注册 ICurrentTenant（多租户模块未加载场景）
         var handler = new RecordingEventHandler();
         var (bus, _) = BuildBus(
-            currentTenant: null,
+            tenantMock: null,
             configure: svc => svc.AddScoped<IEventHandler<TenantTestEvent>>(_ => handler));
 
         var @event = new TenantTestEvent { Payload = "no-module" };
@@ -212,7 +220,7 @@ public class EventBusTenantTests
 
         var handler = new RecordingEventHandler();
         var (bus, _) = BuildBus(
-            currentTenant: mockTenant.Object,
+            tenantMock: mockTenant,
             configure: svc => svc.AddScoped<IEventHandler<TenantTestEvent>>(_ => handler));
 
         // 事件已显式设置 TenantId
@@ -260,8 +268,7 @@ public class EventBusTenantTests
 
         var sp = services.BuildServiceProvider();
         var logger = sp.GetRequiredService<ILogger<LocalEventBus>>();
-        // 发布时传入有租户的 ICurrentTenant
-        var bus = new LocalEventBus(sp, logger, currentTenant: mockTenant.Object);
+        var bus = new LocalEventBus(sp, logger);
 
         var @event = new TenantTestEvent { Payload = "bg-tenant" };
 
@@ -299,7 +306,7 @@ public class EventBusTenantTests
 
         var sp = services.BuildServiceProvider();
         var logger = sp.GetRequiredService<ILogger<LocalEventBus>>();
-        var bus = new LocalEventBus(sp, logger, currentTenant: mockTenant.Object);
+        var bus = new LocalEventBus(sp, logger);
 
         var @event = new TenantTestEvent { Payload = "no-tenant-bg" };
 
@@ -340,7 +347,7 @@ public class EventBusTenantTests
 
         var sp = services.BuildServiceProvider();
         var logger = sp.GetRequiredService<ILogger<LocalEventBus>>();
-        var bus = new LocalEventBus(sp, logger, currentTenant: mockTenant.Object);
+        var bus = new LocalEventBus(sp, logger);
 
         var @event = new TenantTestEvent { Payload = "dispose-check" };
 

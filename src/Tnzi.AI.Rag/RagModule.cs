@@ -23,7 +23,7 @@ public class RagModule : TnziApplicationModule
     /// <summary>
     /// 在 AIModule(50)、AICoderModule(51) 之后加载
     /// </summary>
-    public override int LoadOrder => 52;
+    public override int LoadOrder => 55;
 
     /// <summary>
     /// 数据库表名前缀

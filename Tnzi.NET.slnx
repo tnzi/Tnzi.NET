@@ -44,11 +44,16 @@
     <Project Path="src/Tnzi.Template/Tnzi.Template.csproj" />
   </Folder>
   <Folder Name="/src/modules/Tnzi.AI/">
+    <Project Path="src/Tnzi.AI/Tnzi.AI.csproj" />
+    <Project Path="src/Tnzi.AI.Skills/Tnzi.AI.Skills.csproj" />
+    <Project Path="src/Tnzi.AI.Workflow/Tnzi.AI.Workflow.csproj" />
+    <Project Path="src/Tnzi.AI.Mcp/Tnzi.AI.Mcp.csproj" />
     <Project Path="src/Tnzi.AI.Coder/Tnzi.AI.Coder.csproj" />
     <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
-    <Project Path="src/Tnzi.AI/Tnzi.AI.csproj" />
+    <Project Path="src/Tnzi.AI.Cli/Tnzi.AI.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Tnzi.AI.Cli.Tests/Tnzi.AI.Cli.Tests.csproj" />
     <Project Path="tests/Tnzi.AI.Tests/Tnzi.AI.Tests.csproj" />
     <Project Path="tests/Tnzi.AspNetCore.Tests/Tnzi.AspNetCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Audit.Tests/Tnzi.Audit.Tests.csproj" />

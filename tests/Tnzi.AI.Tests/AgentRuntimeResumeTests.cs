@@ -61,6 +61,8 @@ public class AgentRuntimeResumeTests
             workflowService.Object,
             new AgentExecutionContextAccessor(),
             new ServiceCollection().BuildServiceProvider(),
+            Mock.Of<IServiceScopeFactory>(),
+            Mock.Of<IOptionsMonitor<AIOptions>>(),
             Mock.Of<ILogger<AgentRuntime>>());
 
         var result = await runtime.ResumeAsync(runId, new ResumeRunInput

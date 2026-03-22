@@ -1,11 +1,4 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using ModelContextProtocol.AspNetCore;
-using ModelContextProtocol.Protocol;
-using ModelContextProtocol.Server;
 using McpClientFactory = Tnzi.AI.Infrastructure.Mcp.McpClientFactory;
-using TnziMcpServerOptions = Tnzi.AI.Options.McpServerOptions;
 
 namespace Tnzi.AI;
 
@@ -33,9 +26,13 @@ public class AIModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI"))
             .ValidateWith<AIOptions, AIOptionsValidator>();
 
-        context.Services.AddOptions<TnziMcpServerOptions>()
-            .Bind(context.Configuration.GetSection("AI:McpServer"))
-            .ValidateWith<TnziMcpServerOptions, McpServerOptionsValidator>();
+        context.Services.AddOptions<AiUtilityOptions>()
+            .Bind(context.Configuration.GetSection("AI:Utility"))
+            .ValidateWith<AiUtilityOptions, AiUtilityOptionsValidator>();
+
+        context.Services.AddOptions<ThreadOptions>()
+            .Bind(context.Configuration.GetSection("AI:Thread"))
+            .ValidateWith<ThreadOptions, ThreadOptionsValidator>();
 
         // 从环境变量补充 API Key（移自 Validator 的副作用）
         context.Services.PostConfigure<AIOptions>(options =>
@@ -60,9 +57,6 @@ public class AIModule : TnziApplicationModule
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var services = context.Services;
-        var mcpServerOptions = context.Configuration.GetSection("AI:McpServer").Get<TnziMcpServerOptions>() ?? new TnziMcpServerOptions();
-        var mcpHttpServiceProviderAccessor = new McpServerServiceProviderAccessor();
-        var mcpHttpHandlerBridge = new McpServerHttpHandlerBridge(mcpHttpServiceProviderAccessor);
 
         // 注册 HttpClient 工厂
         services.AddHttpClient();
@@ -129,6 +123,7 @@ public class AIModule : TnziApplicationModule
         services.TryAddScoped<IPromptTemplateEngine, SimplePromptTemplateEngine>();
 
         // 注册核心服务
+        services.AddSingleton<ICostCalculator, CostCalculator>();
         services.AddScoped<IUsageLogService, UsageLogService>();
         services.AddScoped<IUsageAnalyticsService, UsageAnalyticsService>();
         services.AddScoped<QuotaService>();
@@ -138,8 +133,8 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<AgentThreadService>();
         services.AddScoped<IAgentThreadService>(sp => sp.GetRequiredService<AgentThreadService>());
         services.AddScoped<IAgentThreadInternalService>(sp => sp.GetRequiredService<AgentThreadService>());
+        services.AddScoped<IMessageFeedbackService, MessageFeedbackService>();
         services.AddScoped<IChatService, ChatService>();
-        services.AddScoped<IWorkflowService, WorkflowService>();
         services.AddScoped<IEmbeddingService, EmbeddingService>();
         services.AddScoped<IStructuredOutputService, StructuredOutputService>();
 
@@ -147,26 +142,18 @@ public class AIModule : TnziApplicationModule
         // 用户可以注册自己的 ITextSearchService 实现来连接到向量存储（Redis、Qdrant、Pinecone 等）
         services.TryAddScoped<ITextSearchService, NoOpTextSearchService>();
 
-        // 注册技能系统
-        services.AddSingleton<FileSystemSkillStore>();
-        services.TryAddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
-        services.TryAddSingleton<ISkillConstraintEnforcer, SkillConstraintEnforcer>();
-        services.TryAddScoped<ISkillSearchService, SkillSearchService>();
-        services.AddScoped<DatabaseSkillStore>();
-        services.TryAddScoped<ISkillRegistry, SkillRegistry>();
-        services.AddScoped<ISkillService, SkillService>();
-
         // 注册工具审批处理器（使用 TryAdd 允许用户覆盖）
         // 用户可以注册自己的 IToolApprovalHandler 实现来实现自定义审批逻辑
         services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
+
+        // [RequiresSkill] 兜底中间件 — 工具调用前检查 Skill 是否已加载
+        services.AddScoped<IToolExecutionMiddleware, RequiresSkillToolMiddleware>();
 
         // 注册内置工具（默认提供，运行时根据配置决定是否使用）
         services.TryAddScoped<DateTimeTools>();
         services.TryAddScoped<TextTools>();
         services.TryAddScoped<WebSearchTools>();
-
-        // 注册工作流检查点存储（TryAdd：允许用户注册自定义实现）
-        services.TryAddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();
+        services.TryAddScoped<MemoryTools>();
 
         // 注册 OpenAPI 工具生成器（运行时通过 OpenApiToolsOptions.Enabled 控制是否生效）
         services.AddSingleton<OpenApiToolGenerator>();
@@ -188,6 +175,9 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<ThinkingMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ThinkingMiddleware>());
 
+        services.AddScoped<PromptCachingMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<PromptCachingMiddleware>());
+
         services.AddScoped<QuotaMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<QuotaMiddleware>());
 
@@ -202,9 +192,6 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<ContextInjectionMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ContextInjectionMiddleware>());
 
-        services.AddScoped<SkillConstraintMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SkillConstraintMiddleware>());
-
         services.AddScoped<UsageLoggingMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<UsageLoggingMiddleware>());
 
@@ -216,24 +203,19 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<ITraceStore, TraceStore>();
         services.AddScoped<IAgentRuntime, AgentRuntime>();
 
-        // 注册 Run 管理服务（查询、取消、审批、重试）
+        // 注册 Run 管理服务（查询、取消、审批、重试、反馈）
         services.AddScoped<IAgentRunService, AgentRunService>();
         services.AddScoped<IAgentTraceService, AgentTraceService>();
 
-        // 注册工作流引擎组件
-        services.AddScoped<WorkflowNodeExecutor>();
-        services.AddScoped<WorkflowEngine>();
+        // 注册 Agent 验证服务（配置有效性检查）
+        services.AddScoped<IAgentValidationService, AgentValidationService>();
+        services.AddScoped<IEvaluationService, EvaluationService>();
 
-        // 注册工作流节点
-        services.AddScoped<IWorkflowNode, Nodes.AgentNode>();
-        services.AddScoped<IWorkflowNode, Nodes.ReviewNode>();
-        services.AddScoped<IWorkflowNode, Nodes.ApprovalNode>();
-        services.AddScoped<IWorkflowNode, Nodes.RouterNode>();
-        services.AddScoped<IWorkflowNode, Nodes.ParallelNode>();
-        services.AddScoped<IWorkflowNode, Nodes.SynthesizeNode>();
-        services.AddScoped<IWorkflowNode, Nodes.DebateNode>();
-        services.AddScoped<IWorkflowNode, Nodes.ConditionalNode>();
-        services.AddScoped<IWorkflowNode, Nodes.TransformNode>();
+        // IAiUtility — 轻量级系统级 AI 调用
+        services.TryAddScoped<IAiUtility, AiUtilityService>();
+
+        // Thread title generation event handler
+        services.AddEventHandler<ThreadFirstReplyCompletedEvent, ThreadTitleGenerationHandler>();
 
         // 注册 A2A 客户端（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IA2AClient, HttpA2AClient>();
@@ -241,37 +223,10 @@ public class AIModule : TnziApplicationModule
         // 注册 Agent 评估器（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IAgentEvaluator, DefaultAgentEvaluator>();
 
-        // MCP Server Host（可选，通过 AI:McpServer:Enabled 激活）— Singleton 以保持速率限制状态
-        services.AddSingleton<McpServerSecurityMiddleware>();
-        services.AddSingleton(mcpHttpServiceProviderAccessor);
-        services.AddSingleton(mcpHttpHandlerBridge);
-        // McpServerHttpSecurityMiddleware is convention-based ASP.NET middleware (RequestDelegate ctor)
-        // — instantiated by UseMiddleware<T>(), NOT by DI container
-        services.TryAddSingleton<IMcpServerHost, McpServerHost>();
-        services.AddHostedService<McpServerHostedService>();
-
-        if (mcpServerOptions.Enabled && !string.Equals(mcpServerOptions.Transport, "stdio", StringComparison.OrdinalIgnoreCase))
-        {
-            services.AddMcpServer(serverOptions =>
-                {
-                    serverOptions.ServerInfo = new()
-                    {
-                        Name = "Tnzi.AI",
-                        Version = typeof(AIModule).Assembly.GetName().Version?.ToString() ?? "1.0.0"
-                    };
-                })
-                .WithHttpTransport(options =>
-                {
-                    options.Stateless = false;
-                })
-                .WithListToolsHandler(mcpHttpHandlerBridge.HandleListToolsAsync)
-                .WithCallToolHandler(mcpHttpHandlerBridge.HandleCallToolAsync);
-        }
-
         return Task.CompletedTask;
     }
 
-    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
         var serviceProvider = context.ServiceProvider;
         var logger = serviceProvider.GetRequiredService<ILogger<AIModule>>();
@@ -299,49 +254,65 @@ public class AIModule : TnziApplicationModule
             RegisterTools(toolRegistry, toolScanner, appAssembly, logger);
         }
 
-        var mcpServerOptions = serviceProvider.GetRequiredService<IOptions<TnziMcpServerOptions>>().Value;
-        if (mcpServerOptions.Enabled && !string.Equals(mcpServerOptions.Transport, "stdio", StringComparison.OrdinalIgnoreCase))
+        // 校验 [RequiresSkill] 引用的 slug 是否存在
+        await ValidateRequiresSkillReferencesAsync(toolRegistry, serviceProvider, logger);
+
+        // Auto-disable framework built-in tools when an application assembly registers the same tool group.
+        // This prevents duplicate tools when an app ships its own MemoryTools (or similar) in the "memory" group.
+        var frameworkBuiltInTypes = new[] { typeof(DateTimeTools), typeof(TextTools), typeof(WebSearchTools), typeof(MemoryTools) };
+        foreach (var builtInType in frameworkBuiltInTypes)
         {
-            var mcpServiceProviderAccessor = serviceProvider.GetRequiredService<McpServerServiceProviderAccessor>();
-            mcpServiceProviderAccessor.ServiceProvider = serviceProvider;
+            var builtInGroupAttr = builtInType.GetCustomAttribute<AIToolGroupAttribute>();
+            if (builtInGroupAttr == null) continue;
 
-            if (context.App != null)
-            {
-                context.App.UseWhen(
-                    httpContext => httpContext.Request.Path.StartsWithSegments(mcpServerOptions.Endpoint, StringComparison.OrdinalIgnoreCase),
-                    branch => branch.UseMiddleware<McpServerHttpSecurityMiddleware>());
-            }
+            var groupName = builtInGroupAttr.GroupName;
+            var toolsInGroup = toolRegistry.GetToolsByGroup(groupName);
 
-            if (context.WebApp != null)
+            // Check if any tool in this group comes from a non-framework provider type
+            var hasAppProvider = toolsInGroup.Any(t =>
+                t.ProviderType != builtInType
+                && !IsFrameworkCoreAssembly(t.ProviderType.Assembly));
+
+            if (hasAppProvider)
             {
-                context.WebApp.MapMcp(mcpServerOptions.Endpoint);
-                logger.LogInformation("Mapped MCP HTTP/SSE endpoint at {Endpoint}", mcpServerOptions.Endpoint);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "MCP Server transport '{Transport}' is enabled but no WebApplication is available. HTTP/SSE endpoint was not mapped.",
-                    mcpServerOptions.Transport);
+                toolRegistry.UnregisterByProviderType(builtInType);
+                logger.LogInformation(
+                    "Auto-disabled built-in {ToolType} because application registered a provider in the same tool group '{Group}'",
+                    builtInType.Name, groupName);
             }
         }
 
         // 根据 BuiltInToolsOptions 按 ProviderType 精确移除已禁用的内置工具
         // 使用 UnregisterByProviderType 而非 UnregisterGroup，避免误删用户注册的同名工具组
-        var builtInOptions = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value.BuiltInTools;
+        var aiOptions = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
+        var builtInOptions = aiOptions.BuiltInTools;
         if (!builtInOptions.Enabled)
         {
             toolRegistry.UnregisterByProviderType(typeof(DateTimeTools));
             toolRegistry.UnregisterByProviderType(typeof(TextTools));
             toolRegistry.UnregisterByProviderType(typeof(WebSearchTools));
+            toolRegistry.UnregisterByProviderType(typeof(MemoryTools));
         }
         else
         {
             if (!builtInOptions.EnableDateTime) toolRegistry.UnregisterByProviderType(typeof(DateTimeTools));
             if (!builtInOptions.EnableText) toolRegistry.UnregisterByProviderType(typeof(TextTools));
             if (!builtInOptions.EnableWebSearch) toolRegistry.UnregisterByProviderType(typeof(WebSearchTools));
+            if (!builtInOptions.EnableMemory) toolRegistry.UnregisterByProviderType(typeof(MemoryTools));
         }
 
-        return Task.CompletedTask;
+        // Memory 工具依赖 ContextProviders 的记忆召回能力 —— 如果召回不可用，
+        // 注册 save_memory 工具只会产生永远不会被想起的记忆，误导 AI 和用户。
+        // 移除整个 "memory" 工具组（包含框架内置和应用自定义的 memory 工具）。
+        var contextProviders = aiOptions.ContextProviders;
+        if (!contextProviders.Enabled || !contextProviders.Memory.Enabled)
+        {
+            toolRegistry.UnregisterGroup("memory");
+            logger.LogInformation(
+                "Memory tool group disabled: ContextProviders.Enabled={ContextEnabled}, Memory.Enabled={MemoryEnabled}. " +
+                "Enable both to allow AI to save and recall memories",
+                contextProviders.Enabled, contextProviders.Memory.Enabled);
+        }
     }
 
     private static void ValidateRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
@@ -385,14 +356,39 @@ public class AIModule : TnziApplicationModule
                     "AI text search or chat history memory is enabled, but ITextSearchService is still the default NoOpTextSearchService. Register a real ITextSearchService implementation.");
             }
 
-            if (options.ContextProviders.Skills.Enabled && options.ContextProviders.Skills.Paths.Count == 0)
-            {
-                throw new InvalidOperationException(
-                    "AI:ContextProviders:Skills is enabled, but no skill paths are configured.");
-            }
+            // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
         }
 
         logger.LogDebug("AI runtime configuration validation passed.");
+    }
+
+    /// <summary>
+    /// 校验所有工具的 [RequiresSkill] 引用是否指向已注册的 Skill
+    /// </summary>
+    private static async Task ValidateRequiresSkillReferencesAsync(IToolRegistry toolRegistry, IServiceProvider serviceProvider, ILogger logger)
+    {
+        var allTools = toolRegistry.GetAllTools();
+        var toolsWithSkills = allTools.Where(t => t.RequiresSkillSlugs is { Count: > 0 }).ToList();
+        if (toolsWithSkills.Count == 0) return;
+
+        // ISkillRegistry is scoped — create a temporary scope for startup validation
+        using var scope = serviceProvider.CreateScope();
+        var skillRegistry = scope.ServiceProvider.GetService<ISkillRegistry>();
+        if (skillRegistry == null) return;
+
+        var allSlugs = toolsWithSkills.SelectMany(t => t.RequiresSkillSlugs!).Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var slug in allSlugs)
+        {
+            var skill = await skillRegistry.GetBySlugAsync(slug, CancellationToken.None);
+            if (skill == null)
+            {
+                logger.LogWarning(
+                    "[RequiresSkill] references skill '{Slug}' which does not exist. " +
+                    "Tools referencing this skill: {Tools}. Check for typos or missing SKILL.md files.",
+                    slug,
+                    string.Join(", ", toolsWithSkills.Where(t => t.RequiresSkillSlugs!.Contains(slug, StringComparer.OrdinalIgnoreCase)).Select(t => t.Name)));
+            }
+        }
     }
 
     /// <summary>

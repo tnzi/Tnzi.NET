@@ -25,6 +25,7 @@ public class AgentExecutorOptionsBuilder
     private readonly ITokenEstimator _tokenEstimator;
     private readonly ProjectContextProvider _projectContextProvider;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
+    private readonly ISkillLoadTracker _skillLoadTracker;
     private readonly IMemoryConsolidator? _memoryConsolidator;
     private readonly ICurrentUser? _currentUser;
     private readonly ILogger<AgentExecutorOptionsBuilder> _logger;
@@ -43,6 +44,7 @@ public class AgentExecutorOptionsBuilder
         ITokenEstimator tokenEstimator,
         ProjectContextProvider projectContextProvider,
         IAgentExecutionContextAccessor executionContextAccessor,
+        ISkillLoadTracker skillLoadTracker,
         ILogger<AgentExecutorOptionsBuilder> logger,
         ICurrentUser? currentUser = null,
         IMemoryConsolidator? memoryConsolidator = null)
@@ -60,6 +62,7 @@ public class AgentExecutorOptionsBuilder
         _tokenEstimator = Check.NotNull(tokenEstimator);
         _projectContextProvider = Check.NotNull(projectContextProvider);
         _executionContextAccessor = Check.NotNull(executionContextAccessor);
+        _skillLoadTracker = Check.NotNull(skillLoadTracker);
         _logger = Check.NotNull(logger);
         _currentUser = currentUser;
         _memoryConsolidator = memoryConsolidator;
@@ -330,7 +333,7 @@ public class AgentExecutorOptionsBuilder
         {
             var skillsOptions = _options.Value.ContextProviders.Skills;
             var logger = _loggerFactory.CreateLogger<SkillContextProvider>();
-            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger);
+            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillLoadTracker);
         }
         catch (Exception ex)
         {

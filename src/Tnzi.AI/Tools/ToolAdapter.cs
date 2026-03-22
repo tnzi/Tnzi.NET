@@ -56,13 +56,15 @@ internal static class ToolAdapter
                 return instance;
             });
 
+            var description = BuildDescription(tool);
+
             var aiFunction = AIFunctionFactory.Create(
                 method: tool.MethodInfo,
                 createInstanceFunc: createInstanceFunc,
                 options: new AIFunctionFactoryOptions
                 {
                     Name = tool.Name,
-                    Description = tool.Description ?? string.Empty
+                    Description = description
                 });
 
             return aiFunction;
@@ -73,5 +75,18 @@ internal static class ToolAdapter
             logger?.LogWarning(ex, "Failed to convert tool '{ToolName}' to AIFunction", tool.Name);
             return null;
         }
+    }
+
+    /// <summary>
+    /// 构建工具描述：原始描述（不再追加 RequiresSkill 提示）
+    /// </summary>
+    /// <remarks>
+    /// RequiresSkill 通过 RequiresSkillToolMiddleware 在运行时守门：
+    /// 首次调用未加载技能时自动返回技能内容并标记 loaded，第二次调用正常通过。
+    /// 不在工具描述中追加静态提示，避免 AI 在每次调用前预防性地调 skill_get，浪费 iteration。
+    /// </remarks>
+    private static string BuildDescription(ToolDefinition tool)
+    {
+        return tool.Description ?? string.Empty;
     }
 }

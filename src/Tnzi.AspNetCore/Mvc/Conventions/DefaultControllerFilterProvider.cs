@@ -15,6 +15,7 @@ public class DefaultControllerEnabledMarker;
 public class DefaultControllerFilterProvider : IApplicationModelProvider
 {
     private readonly bool _isEnabled;
+    private readonly ControllerActivationDiagnostics? _diagnostics;
 
     /// <summary>
     /// 执行顺序，在 ConditionalControllerProvider(-500) 之前执行
@@ -25,10 +26,12 @@ public class DefaultControllerFilterProvider : IApplicationModelProvider
     /// 初始化默认 Controller 过滤提供者
     /// </summary>
     /// <param name="services">服务集合，用于检查 <see cref="DefaultControllerEnabledMarker"/> 是否已注册</param>
-    public DefaultControllerFilterProvider(IServiceCollection services)
+    /// <param name="diagnostics">可选的诊断收集器</param>
+    public DefaultControllerFilterProvider(IServiceCollection services, ControllerActivationDiagnostics? diagnostics = null)
     {
         Check.NotNull(services);
         _isEnabled = services.Any(s => s.ServiceType == typeof(DefaultControllerEnabledMarker));
+        _diagnostics = diagnostics;
     }
 
     /// <inheritdoc />
@@ -51,6 +54,10 @@ public class DefaultControllerFilterProvider : IApplicationModelProvider
         foreach (var controller in controllersToRemove)
         {
             context.Result.Controllers.Remove(controller);
+            _diagnostics?.RecordSuppression(
+                controller.ControllerType.FullName ?? controller.ControllerType.Name,
+                "DefaultControllerEnabledMarker not registered",
+                SuppressionReason.MarkerAbsent);
         }
     }
 

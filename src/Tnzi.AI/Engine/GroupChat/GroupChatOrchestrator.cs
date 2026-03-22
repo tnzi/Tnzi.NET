@@ -59,8 +59,8 @@ public class GroupChatOrchestrator
             new(ChatRole.User, topic)
         };
         var citations = new List<CitationDto>();
-        int totalPromptTokens = 0;
-        int totalCompletionTokens = 0;
+        int totalInputTokens = 0;
+        int totalOutputTokens = 0;
 
         var currentAgentIndex = 0;
         var lastSpeakerName = string.Empty;
@@ -80,8 +80,8 @@ public class GroupChatOrchestrator
 
                 if (response.Usage != null)
                 {
-                    totalPromptTokens += response.Usage.PromptTokens;
-                    totalCompletionTokens += response.Usage.CompletionTokens;
+                    totalInputTokens += response.Usage.InputTokens;
+                    totalOutputTokens += response.Usage.OutputTokens;
                 }
 
                 if (response.Citations is { Count: > 0 })
@@ -146,12 +146,12 @@ public class GroupChatOrchestrator
             TotalRounds = history.Count > 0 ? history[^1].Round : 0,
             ConversationMessages = sharedMessages,
             Citations = citations.Count > 0 ? citations : null,
-            Usage = totalPromptTokens > 0 || totalCompletionTokens > 0
+            Usage = totalInputTokens > 0 || totalOutputTokens > 0
                 ? new TokenUsageDto
                 {
-                    PromptTokens = totalPromptTokens,
-                    CompletionTokens = totalCompletionTokens,
-                    TotalTokens = totalPromptTokens + totalCompletionTokens
+                    InputTokens = totalInputTokens,
+                    OutputTokens = totalOutputTokens,
+                    TotalTokens = totalInputTokens + totalOutputTokens
                 }
                 : null
         };

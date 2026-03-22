@@ -38,6 +38,16 @@ public class UserQuotaConfiguration : EntityTypeConfigurationBase<UserQuota, Gui
             .IsRequired()
             .HasDefaultValue(true);
 
+        builder.Property(e => e.WarningThreshold)
+            .IsRequired()
+            .HasDefaultValue(0.8m)
+            .HasPrecision(3, 2);
+
+        builder.Property(e => e.CriticalThreshold)
+            .IsRequired()
+            .HasDefaultValue(0.95m)
+            .HasPrecision(3, 2);
+
         // 乐观并发令牌
         builder.Property(e => e.Version)
             .IsConcurrencyToken();

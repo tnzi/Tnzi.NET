@@ -80,17 +80,28 @@ public class MemoryOptions
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// 默认记忆 scope
+    /// 默认记忆 scope（用于用户级记忆）
     /// </summary>
     public string DefaultScope { get; set; } = "default";
+
+    /// <summary>
+    /// 全局共享记忆 scope（所有用户可见，不受 EnableUserIsolation 影响）
+    /// </summary>
+    /// <remarks>
+    /// 设置后，MemoryContextProvider 在读取用户记忆的同时也会读取此 scope 的内容。
+    /// 适用于全局业务知识、共享规则等所有用户都应看到的记忆。
+    /// 为 null 时不读取全局记忆。save_memory 工具始终写入用户 scope，不写入全局 scope。
+    /// </remarks>
+    public string? SharedScope { get; set; }
 
     /// <summary>
     /// 是否启用用户级记忆隔离（按 UserId 隔离记忆）
     /// </summary>
     /// <remarks>
-    /// 启用后，不同用户的记忆互不可见。关闭时保持旧行为（所有用户共享同一 scope）。
+    /// 启用后，不同用户的记忆互不可见，这是多用户应用的安全默认值。
+    /// 设为 false 时所有用户共享同一 scope（仅适用于单用户或全局知识库场景）。
     /// </remarks>
-    public bool EnableUserIsolation { get; set; } = false;
+    public bool EnableUserIsolation { get; set; } = true;
 
     /// <summary>
     /// 是否启用自动记忆沉淀（对话结束时自动提取并持久化记忆）
@@ -160,6 +171,34 @@ public class MemoryOptions
     /// 时间衰减速率（越大衰减越快，默认 0.01 ≈ 半衰期 70 天）
     /// </summary>
     public double RecencyDecayRate { get; set; } = 0.01;
+
+    /// <summary>
+    /// 允许的记忆类别（应用可扩展，如添加 "rule", "formula" 等）
+    /// </summary>
+    /// <remarks>
+    /// 为空时不做类别校验。默认包含: preference, fact, decision, pattern, instruction。
+    /// </remarks>
+    public HashSet<string> ValidCategories { get; set; } =
+        ["preference", "fact", "decision", "pattern", "instruction"];
+
+    /// <summary>
+    /// 是否启用 PII 防护（save_memory 时检测个人信息模式）
+    /// </summary>
+    public bool EnablePiiProtection { get; set; } = true;
+
+    /// <summary>
+    /// 记忆嵌入向量使用的 Provider（null=使用 AI:DefaultProvider）
+    /// </summary>
+    /// <remarks>
+    /// 部分 Provider（如 DeepSeek）不支持 Embedding API，需要显式指定支持 Embedding 的 Provider。
+    /// 推荐使用 OpenAI 的 text-embedding-3-small 或其他支持 Embedding 的模型。
+    /// </remarks>
+    public string? EmbeddingProvider { get; set; }
+
+    /// <summary>
+    /// 记忆嵌入向量使用的模型（null=使用 Provider 的 DefaultModel）
+    /// </summary>
+    public string? EmbeddingModel { get; set; }
 }
 
 /// <summary>
@@ -277,6 +316,11 @@ public class SkillsOptions
     /// 技能缓存 TTL（默认 15 分钟）
     /// </summary>
     public TimeSpan CacheTtl { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// skill_search 工具的默认最大返回数
+    /// </summary>
+    public int SearchMaxResults { get; set; } = 10;
 }
 
 /// <summary>

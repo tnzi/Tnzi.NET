@@ -60,32 +60,45 @@ public class MailKitEmailSender : IEmailSender
             }
 
             // 添加附件
-            if (attachments != null && attachments.Any())
+            if (attachments is { Count: > 0 })
             {
                 foreach (var attachment in attachments)
                 {
-                    if (File.Exists(attachment.FilePath))
+                    var contentType = ContentType.Parse(attachment.ContentType);
+
+                    // 优先使用内存数据
+                    if (attachment.Content != null)
                     {
-                        await bodyBuilder.Attachments.AddAsync(attachment.FilePath, cancellationToken);
+                        bodyBuilder.Attachments.Add(attachment.FileName, attachment.Content, contentType);
                     }
-                    else if (Uri.TryCreate(attachment.FilePath, UriKind.Absolute, out var uri))
+                    else if (!string.IsNullOrEmpty(attachment.FilePath))
                     {
-                        // 从URL下载附件
-                        // 注意：IHttpClientFactory管理的HttpClient不需要手动Dispose，但使用using是良好的实践
-                        using var httpClient = _httpClientFactory.CreateClient();
-                        try
+                        // 先判断 URL，再判断本地文件
+                        if (Uri.TryCreate(attachment.FilePath, UriKind.Absolute, out var uri) && !uri.IsFile)
                         {
-                            using var stream = await httpClient.GetStreamAsync(uri, cancellationToken);
-                            bodyBuilder.Attachments.Add(attachment.FileName, stream, ContentType.Parse(attachment.ContentType));
+                            using var httpClient = _httpClientFactory.CreateClient();
+                            try
+                            {
+                                using var stream = await httpClient.GetStreamAsync(uri, cancellationToken);
+                                bodyBuilder.Attachments.Add(attachment.FileName, stream, contentType);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to download attachment from URL: {FilePath}", attachment.FilePath);
+                            }
                         }
-                        catch (Exception ex)
+                        else if (File.Exists(attachment.FilePath))
                         {
-                            _logger.LogWarning(ex, "Failed to download attachment from URL: {FilePath}", attachment.FilePath);
+                            await bodyBuilder.Attachments.AddAsync(attachment.FilePath, cancellationToken);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Attachment file not found: {FileName}, FilePath: {FilePath}", attachment.FileName, attachment.FilePath);
                         }
                     }
                     else
                     {
-                        _logger.LogWarning("Attachment file not found: {FilePath}", attachment.FilePath);
+                        _logger.LogWarning("Attachment has no content and no file path: {FileName}", attachment.FileName);
                     }
                 }
             }

@@ -29,7 +29,7 @@ public class DatabaseConversationStore : IConversationStore
             throw new InvalidOperationException($"DatabaseConversationStore requires GUID conversation IDs, got: '{conversationId}'");
         }
 
-        var (context, _) = await _threadService.GetOrCreateThreadAsync(threadId, agentId, ct);
+        var (context, _, _) = await _threadService.GetOrCreateThreadAsync(threadId, agentId, ct);
         return context;
     }
 

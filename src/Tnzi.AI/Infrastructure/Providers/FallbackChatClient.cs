@@ -14,18 +14,22 @@ internal sealed class FallbackChatClient : IChatClient
     private readonly IChatClient _primary;
     private readonly IReadOnlyList<IChatClient> _fallbacks;
     private readonly ILogger _logger;
+    private readonly IReadOnlyList<IChatClient> _allClients;
 
     public FallbackChatClient(IChatClient primary, IReadOnlyList<IChatClient> fallbacks, ILogger logger)
     {
         _primary = Check.NotNull(primary);
         _fallbacks = Check.NotNull(fallbacks);
         _logger = Check.NotNull(logger);
+        var allClients = new List<IChatClient>(_fallbacks.Count + 1) { _primary };
+        allClients.AddRange(_fallbacks);
+        _allClients = allClients;
     }
 
     public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> chatMessages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         // 非流式：依次尝试主客户端和降级客户端
-        var allClients = GetAllClients();
+        var allClients = _allClients;
         for (var i = 0; i < allClients.Count; i++)
         {
             var isLast = i == allClients.Count - 1;
@@ -58,7 +62,7 @@ internal sealed class FallbackChatClient : IChatClient
     /// </summary>
     private async IAsyncEnumerable<ChatResponseUpdate> StreamWithFallbackAsync(IEnumerable<ChatMessage> chatMessages, ChatOptions? options, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var allClients = GetAllClients();
+        var allClients = _allClients;
 
         for (var i = 0; i < allClients.Count; i++)
         {
@@ -110,13 +114,6 @@ internal sealed class FallbackChatClient : IChatClient
         }
 
         throw new InvalidOperationException("All providers failed");
-    }
-
-    private List<IChatClient> GetAllClients()
-    {
-        var all = new List<IChatClient>(_fallbacks.Count + 1) { _primary };
-        all.AddRange(_fallbacks);
-        return all;
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null)

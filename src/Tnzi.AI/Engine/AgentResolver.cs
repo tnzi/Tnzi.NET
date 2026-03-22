@@ -52,12 +52,21 @@ public class AgentResolver : IAgentResolver
             var entityToolGroups = string.IsNullOrWhiteSpace(entity.ToolGroups)
                 ? null
                 : JsonSerializer.Deserialize<List<string>>(entity.ToolGroups);
+
             var userPermissions = await ResolveUserPermissionsAsync(entityToolGroups, ct);
 
             // 渲染 Agent Instructions 模板变量（{{date}}, {{user.name}} 等）
             var renderedInstructions = _templateEngine.Render(
                 entity.Instructions ?? string.Empty,
                 new Dictionary<string, string> { ["agent.name"] = entity.Name });
+
+            // ExternalCli 模式不需要 AgentExecutor — 跳过 ChatClient 创建
+            if (entity.ExecutionMode == AgentExecutionMode.ExternalCli)
+            {
+                return AgentResolution.SuccessWithoutExecutor(
+                    entity.Provider, model ?? entity.Model, agentId,
+                    entity.Configuration, entity.ExecutionMode);
+            }
 
             // model param acts as an override (e.g. think-model auto-switch); fall back to entity default
             var effectiveModel = model ?? entity.Model;

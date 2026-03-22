@@ -92,17 +92,36 @@ public class ServiceConfigurationContext
     /// 服务集合
     /// </summary>
     public IServiceCollection Services { get; }
-    
+
     /// <summary>
     /// 配置对象
     /// </summary>
     public IConfiguration Configuration { get; }
-    
-    public ServiceConfigurationContext(IServiceCollection services, IConfiguration configuration)
+
+    /// <summary>
+    /// Host environment name (e.g., "Development", "Production").
+    /// </summary>
+    public string EnvironmentName { get; }
+
+    public ServiceConfigurationContext(IServiceCollection services, IConfiguration configuration, string? environmentName = null)
     {
         Services = Check.NotNull(services);
         Configuration = Check.NotNull(configuration);
+        EnvironmentName = environmentName
+            ?? configuration["ASPNETCORE_ENVIRONMENT"]
+            ?? configuration["DOTNET_ENVIRONMENT"]
+            ?? "Production"; // 安全默认值：未知环境视为生产环境
     }
+
+    /// <summary>
+    /// Check if the environment is Production.
+    /// </summary>
+    public bool IsProduction() => string.Equals(EnvironmentName, "Production", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Check if the environment is Development.
+    /// </summary>
+    public bool IsDevelopment() => string.Equals(EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>

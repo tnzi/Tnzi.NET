@@ -17,7 +17,6 @@
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.3.0" />
     <!-- MCP (Model Context Protocol) - official C# SDK for connecting to MCP servers -->
     <PackageReference Include="ModelContextProtocol" Version="1.0.0" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>

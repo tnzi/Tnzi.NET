@@ -10,7 +10,9 @@ using System.Net.Http.Json;
 using System.Reflection;
 using Tnzi.AI.Infrastructure.Mcp;
 using Tnzi.Modules;
-using Tnzi.AI.Infrastructure.Mcp.Server;
+using Tnzi.AI.Mcp.Server;
+using Tnzi.AI.Mcp;
+using Tnzi.AI.Mcp.Options;
 
 namespace Tnzi.AI.Tests;
 
@@ -261,7 +263,7 @@ public class McpServerHttpEndToEndTests
     }
 }
 
-[DependsOn(typeof(AIModule))]
+[DependsOn(typeof(AIMcpModule))]
 internal sealed class TestAiMcpStartupModule : TnziApplicationModule
 {
 }

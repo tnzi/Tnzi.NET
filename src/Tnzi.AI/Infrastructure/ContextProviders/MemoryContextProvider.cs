@@ -12,8 +12,6 @@ public sealed class MemoryContextProvider : IContextProvider
     private readonly MemoryOptions? _memoryOptions;
     private readonly IMemoryConsolidator? _memoryConsolidator;
     private readonly ILogger<MemoryContextProvider> _logger;
-    private string? _cachedMemory;
-
     /// <summary>
     /// 初始化（兼容旧签名）
     /// </summary>
@@ -46,18 +44,36 @@ public sealed class MemoryContextProvider : IContextProvider
     {
         try
         {
-            // 仅加载一次，后续返回缓存结果
-            _cachedMemory ??= await _memoryStore.ReadAsync(_scope, ct);
+            var parts = new List<string>(2);
 
-            if (string.IsNullOrWhiteSpace(_cachedMemory))
+            // 1. 读取用户级记忆（带 UserId 隔离的 scope）
+            var userMemory = await _memoryStore.ReadAsync(_scope, ct);
+            if (!string.IsNullOrWhiteSpace(userMemory))
+            {
+                parts.Add(userMemory);
+                _logger.LogDebug("Loaded user memory for scope {Scope}, length: {Length}", _scope.Name, userMemory.Length);
+            }
+
+            // 2. 读取全局共享记忆（不带 UserId，所有用户可见）
+            var sharedScope = _memoryOptions?.SharedScope;
+            if (!string.IsNullOrEmpty(sharedScope))
+            {
+                var sharedMemory = await _memoryStore.ReadAsync(sharedScope, ct);
+                if (!string.IsNullOrWhiteSpace(sharedMemory))
+                {
+                    parts.Add(sharedMemory);
+                    _logger.LogDebug("Loaded shared memory for scope {SharedScope}, length: {Length}", sharedScope, sharedMemory.Length);
+                }
+            }
+
+            if (parts.Count == 0)
             {
                 return ContextInjection.Empty;
             }
 
-            _logger.LogDebug("Injecting memory context for scope {Scope}, length: {Length}", _scope.Name, _cachedMemory.Length);
-
+            var combined = string.Join("\n", parts);
             var contextMessage = new ChatMessage(ChatRole.System,
-                $"## Persistent Memory\nThe following is your persistent memory for scope '{_scope.Name}':\n\n{_cachedMemory}");
+                $"## Persistent Memory\nThe following is your persistent memory for scope '{_scope.Name}':\n\n{combined}");
 
             return new ContextInjection
             {

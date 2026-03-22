@@ -33,6 +33,11 @@ public class AiMiddlewareContext
     /// <summary>当前 Run 实例（如果启用了 Run 追踪）</summary>
     public AgentRun? Run { get; set; }
 
+    /// <summary>
+    /// 本次执行是否创建了新线程（用于首轮事件触发）
+    /// </summary>
+    public bool IsNewThread { get; set; }
+
     /// <summary>服务提供者</summary>
     public required IServiceProvider ServiceProvider { get; init; }
 }

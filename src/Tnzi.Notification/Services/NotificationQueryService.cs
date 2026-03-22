@@ -1,4 +1,3 @@
-using Tnzi.Notification.Metadata;
 using Message = Tnzi.Notification.Entities.Message;
 
 namespace Tnzi.Notification.Services;
@@ -315,5 +314,36 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         };
 
         return Ok(trend);
+    }
+
+    public async Task<Result<DeliveryReportDto>> GetDeliveryReportAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        var notification = await _notificationRepository.AsQueryable().AsNoTracking()
+            .Include(m => m.Recipients)
+            .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+
+        if (notification == null)
+            return Fail<DeliveryReportDto>("Notification not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var recipients = notification.Recipients.ToList();
+
+        var report = new DeliveryReportDto
+        {
+            MessageId = notification.Id,
+            Subject = notification.Subject,
+            Type = notification.Type,
+            TotalRecipients = recipients.Count,
+            SentCount = recipients.Count(r => r.Status == NotificationStatus.Sent),
+            FailedCount = recipients.Count(r => r.Status == NotificationStatus.Failed),
+            PendingCount = recipients.Count(r => r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled),
+            ReadCount = recipients.Count(r => r.IsRead),
+            Recipients = recipients.MapToList<RecipientOutput>()
+        };
+
+        report.SuccessRate = report.TotalRecipients > 0
+            ? (double)report.SentCount / report.TotalRecipients
+            : 0;
+
+        return Ok(report);
     }
 }

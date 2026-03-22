@@ -5,10 +5,12 @@ namespace Tnzi.AI.Middleware;
 /// </summary>
 public class ContextInjectionMiddleware : IAiMiddleware
 {
+    private static readonly ConcurrentDictionary<string, bool> _contextDisabledCache = new();
+
     private readonly CompositeContextProvider _contextProvider;
     private readonly ILogger<ContextInjectionMiddleware> _logger;
 
-    public int Order => 400;
+    public int Order => AiMiddlewareOrders.ContextInjection;
 
     public ContextInjectionMiddleware(
         CompositeContextProvider contextProvider,
@@ -20,6 +22,9 @@ public class ContextInjectionMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
+        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+            return await next(context, cancellationToken);
+
         // Before: 注入上下文
         await InjectContextAsync(context, cancellationToken);
         return await next(context, cancellationToken);
@@ -30,6 +35,13 @@ public class ContextInjectionMiddleware : IAiMiddleware
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        {
+            await foreach (var chunk in next(context, cancellationToken))
+                yield return chunk;
+            yield break;
+        }
+
         // Before: 注入上下文（与非流式路径相同逻辑）
         await InjectContextAsync(context, cancellationToken);
 
@@ -45,6 +57,14 @@ public class ContextInjectionMiddleware : IAiMiddleware
     private async Task InjectContextAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
     {
         if (_contextProvider.ProviderCount <= 0) return;
+
+        // Per-agent context provider control via Agent.Configuration JSON:
+        // { "disableContextProviders": true } — skip all context injection for this agent
+        if (IsContextDisabledForAgent(context))
+        {
+            _logger.LogDebug("Context injection disabled for agent {AgentId} via Configuration", context.Agent.AgentId);
+            return;
+        }
 
         try
         {
@@ -78,5 +98,33 @@ public class ContextInjectionMiddleware : IAiMiddleware
         {
             _logger.LogWarning(ex, "Context injection failed, continuing without context");
         }
+    }
+
+    /// <summary>
+    /// 检查 Agent.Configuration 是否禁用了上下文注入
+    /// </summary>
+    /// <remarks>
+    /// 支持的 Configuration JSON 字段：
+    /// - "disableContextProviders": true — 禁用所有上下文注入（Memory/RAG/Skills 等）
+    /// 适用于纯工具型 Agent（如翻译、格式转换）不需要记忆和知识注入的场景。
+    /// </remarks>
+    private static bool IsContextDisabledForAgent(AiMiddlewareContext context)
+    {
+        var config = context.Agent.AgentConfiguration;
+        if (string.IsNullOrEmpty(config)) return false;
+
+        return _contextDisabledCache.GetOrAdd(config, static cfg =>
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(cfg);
+                return doc.RootElement.TryGetProperty("disableContextProviders", out var prop)
+                    && prop.ValueKind == JsonValueKind.True;
+            }
+            catch
+            {
+                return false;
+            }
+        });
     }
 }

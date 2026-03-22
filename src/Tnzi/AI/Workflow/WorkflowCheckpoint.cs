@@ -1,6 +1,27 @@
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
+/// 工作流执行状态枚举
+/// </summary>
+public enum WorkflowExecutionStatus
+{
+    /// <summary>执行中</summary>
+    Running,
+
+    /// <summary>执行完成</summary>
+    Completed,
+
+    /// <summary>执行失败</summary>
+    Failed,
+
+    /// <summary>已暂停</summary>
+    Paused,
+
+    /// <summary>等待人工审批</summary>
+    AwaitingApproval
+}
+
+/// <summary>
 /// 工作流检查点模型 — 保存工作流执行的中间状态，支持断点续执行
 /// </summary>
 public class WorkflowCheckpoint
@@ -36,9 +57,9 @@ public class WorkflowCheckpoint
     public DateTime UpdatedAt { get; set; }
 
     /// <summary>
-    /// 执行状态: running, completed, failed, paused, awaiting_approval
+    /// 执行状态
     /// </summary>
-    public string Status { get; set; } = "running";
+    public WorkflowExecutionStatus Status { get; set; } = WorkflowExecutionStatus.Running;
 
     /// <summary>
     /// 等待审批的步骤 ID 集合（HITL 场景下使用）

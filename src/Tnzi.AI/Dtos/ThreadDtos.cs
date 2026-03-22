@@ -107,6 +107,14 @@ public class ThreadMessageDto
     public DateTime CreationTime { get; set; }
     /// <summary>Component ref IDs (JSON array of GUIDs)</summary>
     public string? ComponentRefs { get; set; }
+    /// <summary>Feedback rating: true=👍, false=👎, null=not rated</summary>
+    public bool? FeedbackRating { get; set; }
+    /// <summary>Feedback tags (JSON array, for negative feedback)</summary>
+    public string? FeedbackTags { get; set; }
+    /// <summary>Feedback comment</summary>
+    public string? FeedbackComment { get; set; }
+    /// <summary>Feedback submission time</summary>
+    public DateTime? FeedbackTime { get; set; }
 }
 
 /// <summary>

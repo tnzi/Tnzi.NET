@@ -34,7 +34,7 @@ public class PerformanceModule : TnziInfrastructureModule
             // 注册空操作收集器，避免下游注入 IPerformanceCollector 时 DI 失败
             context.Services.AddSingleton<IPerformanceCollector>(provider =>
             {
-                return new PerformanceCollector(0);
+                return new PerformanceCollector(1);
             });
             return Task.CompletedTask;
         }

@@ -113,7 +113,7 @@ public class WorkflowServiceCheckpointIntegrationTests
 
         result.Succeeded.ShouldBeFalse();
         insertedExecution.ShouldNotBeNull();
-        insertedExecution!.Status.ShouldBe("failed");
+        insertedExecution!.Status.ShouldBe(WorkflowExecutionStatus.Failed);
         insertedExecution.CompletedTime.ShouldNotBeNull();
     }
 
@@ -158,7 +158,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             {
                 ExecutionId = executionId,
                 InitialInput = "input",
-                Status = "paused",
+                Status = WorkflowExecutionStatus.Paused,
                 CompletedStepIds = [],
                 StepOutputs = new Dictionary<string, WorkflowStepOutput>()
             });
@@ -216,7 +216,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             {
                 ExecutionId = executionId,
                 InitialInput = "input",
-                Status = "failed",
+                Status = WorkflowExecutionStatus.Failed,
                 CompletedStepIds = [],
                 StepOutputs = new Dictionary<string, WorkflowStepOutput>()
             });
@@ -270,7 +270,7 @@ public class WorkflowServiceCheckpointIntegrationTests
         executionRepository.Setup(x => x.InsertAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         executionRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new WorkflowExecution { ExecutionId = "wf-failed", Status = "failed" });
+            .ReturnsAsync(new WorkflowExecution { ExecutionId = "wf-failed", Status = WorkflowExecutionStatus.Failed });
         executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -301,7 +301,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             {
                 ExecutionId = "exec-001",
                 InitialInput = "input",
-                Status = "paused",
+                Status = WorkflowExecutionStatus.Paused,
                 UpdatedTime = updatedTime,
                 CompletedSteps = """["step-a"]""",
                 StepOutputs = """{"step-a":"done"}""",
@@ -327,7 +327,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             {
                 ExecutionId = "exec-structured-001",
                 InitialInput = "input",
-                Status = "paused",
+                Status = WorkflowExecutionStatus.Paused,
                 UpdatedTime = DateTime.UtcNow,
                 CompletedSteps = """["review"]""",
                 StepOutputs = """{"review":{"text":"needs revision","metadata":{"verdict":"rework","feedback":"needs revision"}}}""",

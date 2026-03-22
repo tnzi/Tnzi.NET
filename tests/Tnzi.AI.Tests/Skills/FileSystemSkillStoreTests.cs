@@ -250,14 +250,14 @@ public class FileSystemSkillStoreTests : IDisposable
     [InlineData("", "unknown")]
     public void GenerateSlug_ProducesCorrectSlug(string name, string expectedSlug)
     {
-        FileSystemSkillStore.GenerateSlug(name).ShouldBe(expectedSlug);
+        SkillMarkdownParser.GenerateSlug(name).ShouldBe(expectedSlug);
     }
 
     [Fact]
     public void GenerateSlug_TruncatesTo64Chars()
     {
         var longName = new string('a', 100);
-        var slug = FileSystemSkillStore.GenerateSlug(longName);
+        var slug = SkillMarkdownParser.GenerateSlug(longName);
         slug.Length.ShouldBeLessThanOrEqualTo(64);
     }
 

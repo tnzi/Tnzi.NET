@@ -10,12 +10,6 @@ public class DefaultAgentEvaluator : IAgentEvaluator
     private readonly IRepository<EvaluationRun, Guid> _repository;
     private readonly ILogger<DefaultAgentEvaluator> _logger;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     public DefaultAgentEvaluator(
         IChatService chatService,
         IRepository<EvaluationRun, Guid> repository,
@@ -88,7 +82,7 @@ public class DefaultAgentEvaluator : IAgentEvaluator
         {
             AgentId = agentId,
             CaseCount = cases.Count,
-            Status = "running"
+            Status = EvaluationRunStatus.Running
         };
         await _repository.InsertAsync(run, ct);
 
@@ -112,8 +106,8 @@ public class DefaultAgentEvaluator : IAgentEvaluator
             // 更新评估运行记录
             run.PassedCount = passedCount;
             run.AverageScore = averageScore;
-            run.Status = "completed";
-            run.ResultsJson = JsonSerializer.Serialize(results, JsonOptions);
+            run.Status = EvaluationRunStatus.Completed;
+            run.ResultsJson = JsonSerializer.Serialize(results, TnziJsonDefaults.Options);
             run.Duration = totalStopwatch.Elapsed;
             await _repository.UpdateAsync(run, ct);
 
@@ -133,8 +127,8 @@ public class DefaultAgentEvaluator : IAgentEvaluator
             // 更新运行记录为失败
             run.PassedCount = results.Count(r => r.Passed);
             run.AverageScore = results.Count > 0 ? results.Average(r => r.Score) : 0;
-            run.Status = "failed";
-            run.ResultsJson = JsonSerializer.Serialize(results, JsonOptions);
+            run.Status = EvaluationRunStatus.Failed;
+            run.ResultsJson = JsonSerializer.Serialize(results, TnziJsonDefaults.Options);
             run.Duration = totalStopwatch.Elapsed;
             await _repository.UpdateAsync(run, ct);
 

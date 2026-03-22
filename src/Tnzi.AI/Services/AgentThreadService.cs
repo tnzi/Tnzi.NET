@@ -54,6 +54,11 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok(entity.MapTo<AgentThreadDto>());
     }
 
+    public async Task<bool> IsOwnerAsync(Guid threadId, Guid userId)
+    {
+        return await _repository.Where(t => t.Id == threadId && t.CreatorId == userId).AnyAsync();
+    }
+
     public async Task<Result<AgentThreadDto>> GetByIdAsync(Guid id)
     {
         var entity = await _repository.GetAsync(id);
@@ -174,7 +179,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok();
     }
 
-    public async Task<(ConversationContext context, Guid threadId)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
+    public async Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
     {
         // 仅当提供 agentId 时验证 Agent 存在
         if (agentId.HasValue)
@@ -233,7 +238,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
                 if (context != null)
                 {
                     Logger.LogDebug("Deserialized conversation context from database: {ThreadId}", threadId.Value);
-                    return (context, threadEntity.Id);
+                    return (context, threadEntity.Id, false);
                 }
 
                 Logger.LogWarning("Failed to deserialize conversation context: {ThreadId}. Rebuilding from history.", threadId.Value);
@@ -241,7 +246,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
             // 无序列化数据或反序列化失败，从历史消息重建
             var rebuilt = await RebuildContextFromHistoryAsync(threadEntity.Id, ct);
-            return (rebuilt, threadEntity.Id);
+            return (rebuilt, threadEntity.Id, false);
         }
 
         // 无 threadId，创建新的线程和空的 ConversationContext
@@ -261,7 +266,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // 序列化并保存
         await SaveThreadSerializedDataAsync(newEntity.Id, newContext, ct);
 
-        return (newContext, newEntity.Id);
+        return (newContext, newEntity.Id, true);
     }
 
     /// <summary>
@@ -269,8 +274,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     /// </summary>
     public async Task SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, CancellationToken ct = default)
     {
-        var thread = await _repository.GetAsync(threadId, ct);
-        if (thread == null)
+        var exists = await _repository.AsQueryable().AnyAsync(t => t.Id == threadId, ct);
+        if (!exists)
         {
             Logger.LogWarning("Thread not found when saving message: {ThreadId}", threadId);
             return;
@@ -298,8 +303,9 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         await _messageRepository.InsertAsync(message);
 
         // 更新线程最后活动时间
-        thread.LastActivityTime = DateTime.UtcNow;
-        await _repository.UpdateAsync(thread);
+        await _repository.AsQueryable()
+            .Where(t => t.Id == threadId)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastActivityTime, DateTime.UtcNow), ct);
 
         Logger.LogDebug("Message saved to thread: {ThreadId}, Role: {Role}, Order: {Order}", threadId, role, message.Order);
     }
@@ -455,6 +461,17 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         }
 
         return Ok<string>(sb.ToString());
+    }
+
+    /// <summary>
+    /// 从用户消息生成 fallback 标题（截取前 N 个文本元素）
+    /// </summary>
+    public static string? GenerateFallbackTitle(string? userMessage, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return null;
+
+        return userMessage.TruncateByTextElements(maxLength);
     }
 
     /// <summary>

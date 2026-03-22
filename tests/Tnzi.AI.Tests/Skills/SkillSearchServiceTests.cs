@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Tnzi.AI.Skills;
 using Tnzi.AI.Skills.Models;
 
@@ -12,7 +13,8 @@ public class SkillSearchServiceTests
     // Test helpers
     // -------------------------------------------------------------------------
 
-    private static SkillSearchService CreateService() => new(embeddingService: null);
+    private static SkillSearchService CreateService() =>
+        new(logger: NullLogger<SkillSearchService>.Instance, embeddingService: null);
 
     private static List<SkillDefinition> BuildCandidates() =>
     [

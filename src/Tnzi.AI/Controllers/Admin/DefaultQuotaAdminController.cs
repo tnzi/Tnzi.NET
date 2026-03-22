@@ -40,6 +40,8 @@ public class DefaultQuotaAdminController : ApiAdminControllerBase
             request.UserId,
             request.DailyTokenLimit,
             request.MonthlyTokenLimit,
+            request.WarningThreshold,
+            request.CriticalThreshold,
             ct);
 
         return result.ToApiResult();

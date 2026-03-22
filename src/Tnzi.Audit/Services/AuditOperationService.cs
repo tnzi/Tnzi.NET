@@ -317,35 +317,64 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         if (endDate <= startDate)
             return Fail<List<AuditTrendPointDto>>("End date must be after start date", 400);
 
-        var operations = await _operationRepository
+        // 在数据库侧按日期分组聚合，避免加载全量记录到内存
+        var dailyAggregates = await _operationRepository
             .Where(o => o.CreationTime >= startDate && o.CreationTime <= endDate)
-            .ToListAsync(cancellationToken);
-
-        var grouped = groupBy switch
-        {
-            AuditTrendGroupBy.Daily => operations.GroupBy(o => o.CreationTime.ToString("yyyy-MM-dd")),
-            AuditTrendGroupBy.Weekly => operations.GroupBy(o =>
+            .GroupBy(o => o.CreationTime.Date)
+            .Select(g => new
             {
-                var cal = System.Globalization.CultureInfo.InvariantCulture.Calendar;
-                var week = cal.GetWeekOfYear(o.CreationTime, System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
-                return $"{o.CreationTime.Year}-W{week:D2}";
-            }),
-            AuditTrendGroupBy.Monthly => operations.GroupBy(o => o.CreationTime.ToString("yyyy-MM")),
-            _ => operations.GroupBy(o => o.CreationTime.ToString("yyyy-MM-dd"))
-        };
-
-        var trend = grouped
-            .OrderBy(g => g.Key)
-            .Select(g => new AuditTrendPointDto
-            {
-                Period = g.Key,
+                Date = g.Key,
                 TotalCount = g.Count(),
                 SuccessCount = g.Count(o => o.ResultType == AuditResultType.Success),
                 FailedCount = g.Count(o => o.ResultType == AuditResultType.Failed),
                 WarningCount = g.Count(o => o.ResultType == AuditResultType.Warning),
                 AverageElapsed = g.Average(o => (double)o.Elapsed)
             })
-            .ToList();
+            .OrderBy(g => g.Date)
+            .ToListAsync(cancellationToken);
+
+        // 按日直接返回；按周/月在已聚合的小数据集上二次分组
+        List<AuditTrendPointDto> trend;
+        if (groupBy == AuditTrendGroupBy.Daily)
+        {
+            trend = dailyAggregates.Select(g => new AuditTrendPointDto
+            {
+                Period = g.Date.ToString("yyyy-MM-dd"),
+                TotalCount = g.TotalCount,
+                SuccessCount = g.SuccessCount,
+                FailedCount = g.FailedCount,
+                WarningCount = g.WarningCount,
+                AverageElapsed = g.AverageElapsed
+            }).ToList();
+        }
+        else
+        {
+            trend = dailyAggregates
+                .GroupBy(g => groupBy switch
+                {
+                    AuditTrendGroupBy.Weekly =>
+                        $"{g.Date.Year}-W{System.Globalization.CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(g.Date, System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday):D2}",
+                    AuditTrendGroupBy.Monthly => g.Date.ToString("yyyy-MM"),
+                    _ => g.Date.ToString("yyyy-MM-dd")
+                })
+                .OrderBy(g => g.Key)
+                .Select(g =>
+                {
+                    var totalCount = g.Sum(d => d.TotalCount);
+                    return new AuditTrendPointDto
+                    {
+                        Period = g.Key,
+                        TotalCount = totalCount,
+                        SuccessCount = g.Sum(d => d.SuccessCount),
+                        FailedCount = g.Sum(d => d.FailedCount),
+                        WarningCount = g.Sum(d => d.WarningCount),
+                        AverageElapsed = totalCount > 0
+                            ? g.Sum(d => d.AverageElapsed * d.TotalCount) / totalCount
+                            : 0
+                    };
+                })
+                .ToList();
+        }
 
         return Ok(trend);
     }
@@ -369,9 +398,8 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         if (endDate.HasValue)
             queryable = queryable.Where(o => o.CreationTime <= endDate.Value);
 
-        var operations = await queryable.ToListAsync(cancellationToken);
-
-        var topFunctions = operations
+        // 在数据库侧分组聚合，避免加载全量记录到内存
+        var topFunctions = await queryable
             .GroupBy(o => o.FunctionName)
             .Select(g => new TopFunctionDto
             {
@@ -386,7 +414,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
             })
             .OrderByDescending(f => f.HitCount)
             .Take(topN)
-            .ToList();
+            .ToListAsync(cancellationToken);
 
         return Ok(topFunctions);
     }
@@ -410,11 +438,9 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         if (endDate.HasValue)
             queryable = queryable.Where(o => o.CreationTime <= endDate.Value);
 
-        var operations = await queryable
+        // 在数据库侧分组聚合，避免加载全量记录到内存
+        var topUsers = await queryable
             .Where(o => o.UserId != null)
-            .ToListAsync(cancellationToken);
-
-        var topUsers = operations
             .GroupBy(o => new { o.UserId, o.UserName })
             .Select(g => new TopUserDto
             {
@@ -429,7 +455,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
             })
             .OrderByDescending(u => u.OperationCount)
             .Take(topN)
-            .ToList();
+            .ToListAsync(cancellationToken);
 
         return Ok(topUsers);
     }

@@ -18,8 +18,8 @@ public class RouterExecutionStrategy : IExecutionStrategy
         var routerAgent = InjectRouteTool(agent, _config.Targets.Keys);
         var routerResponse = await routerAgent.ExecuteAsync(messages, ct);
 
-        var promptTokens = routerResponse.Usage?.PromptTokens ?? 0;
-        var completionTokens = routerResponse.Usage?.CompletionTokens ?? 0;
+        var promptTokens = routerResponse.Usage?.InputTokens ?? 0;
+        var completionTokens = routerResponse.Usage?.OutputTokens ?? 0;
         var routeTarget = ExtractRouteTarget(routerResponse);
 
         if (routeTarget == null)
@@ -52,8 +52,8 @@ public class RouterExecutionStrategy : IExecutionStrategy
 
         var delegatedMessages = BuildDelegatedMessages(messages, agent.Name, targetAgent.Name, routerResponse.Text);
         var targetResponse = await targetAgent.ExecuteAsync(delegatedMessages, ct);
-        promptTokens += targetResponse.Usage?.PromptTokens ?? 0;
-        completionTokens += targetResponse.Usage?.CompletionTokens ?? 0;
+        promptTokens += targetResponse.Usage?.InputTokens ?? 0;
+        completionTokens += targetResponse.Usage?.OutputTokens ?? 0;
 
         return BuildResult(targetResponse, [agent.Name, targetAgent.Name], targetAgent.Name, promptTokens, completionTokens);
     }

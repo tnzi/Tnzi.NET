@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Tnzi.AI.Options;
 using Tnzi.AI.Skills;
@@ -56,7 +57,7 @@ public class SkillRegistryTests : IDisposable
 
     private static SkillRegistry CreateRegistry(FileSystemSkillStore fileStore, ISkillSearchService? searchService = null)
     {
-        searchService ??= new SkillSearchService();
+        searchService ??= new SkillSearchService(NullLogger<SkillSearchService>.Instance);
         var logger = Mock.Of<ILogger<SkillRegistry>>();
         return new SkillRegistry(fileStore, searchService, logger);
     }
@@ -233,6 +234,84 @@ public class SkillRegistryTests : IDisposable
 
         results.ShouldNotBeEmpty();
         results.Any(r => r.Slug == "code-review").ShouldBeTrue();
+    }
+
+    // -------------------------------------------------------------------------
+    // GetBySlugAsync — Direct Lookup (no full scan)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetBySlugAsync_DirectLookup_DoesNotLoadAllSkills()
+    {
+        // Create two skills but only look up one — direct lookup should not load all
+        CreateSkillFile("skill-a", "# Skill A\n\nDescription A.");
+        CreateSkillFile("skill-b", "# Skill B\n\nDescription B.");
+
+        var registry = CreateRegistry(CreateFileStore());
+
+        // Direct lookup should find skill-a
+        var result = await registry.GetBySlugAsync("skill-a");
+        result.ShouldNotBeNull();
+        result!.Slug.ShouldBe("skill-a");
+    }
+
+    [Fact]
+    public async Task GetBySlugAsync_SystemScopeWinsOverTenantInMergedList()
+    {
+        // System scope skill from FileSystemSkillStore
+        CreateSkillFile("shared-skill", "# Shared Skill\n\nSystem version.");
+
+        var fileStore = CreateFileStore();
+        var registry = CreateRegistry(fileStore);
+
+        // Load all skills first so that GetBySlugAsync can use merged cache
+        var all = await registry.GetAvailableSkillsAsync();
+        all.ShouldNotBeEmpty();
+
+        // Direct lookup should find the System scope skill
+        var result = await registry.GetBySlugAsync("shared-skill");
+        result.ShouldNotBeNull();
+        result!.Scope.ShouldBe(SkillScope.System);
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-request merged cache
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetAvailableSkillsAsync_ReturnsCachedOnSecondCall()
+    {
+        CreateSkillFile("cached-skill", "# Cached Skill\n\nDescription.");
+
+        var registry = CreateRegistry(CreateFileStore());
+
+        var first = await registry.GetAvailableSkillsAsync();
+        var second = await registry.GetAvailableSkillsAsync();
+
+        // Same instance means cache was used
+        ReferenceEquals(first, second).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task InvalidateCache_ClearsMergedCache()
+    {
+        CreateSkillFile("initial-skill", "# Initial Skill\n\nDescription.");
+
+        var fileStore = CreateFileStore();
+        var registry = CreateRegistry(fileStore);
+
+        var first = await registry.GetAvailableSkillsAsync();
+        first.Count.ShouldBe(1);
+
+        // Invalidate merged cache and file store cache
+        registry.InvalidateCache();
+
+        // Add another skill
+        CreateSkillFile("new-skill", "# New Skill\n\nDescription.");
+
+        var second = await registry.GetAvailableSkillsAsync();
+        second.Count.ShouldBe(2);
+        ReferenceEquals(first, second).ShouldBeFalse();
     }
 
     // -------------------------------------------------------------------------

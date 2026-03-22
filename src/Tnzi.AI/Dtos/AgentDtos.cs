@@ -200,13 +200,19 @@ public class AgentExecutionConfigDto
     /// <summary>Router 配置</summary>
     public RouterExecutionConfigDto? Router { get; set; }
 
+    /// <summary>AgentAsTools 配置</summary>
+    public AgentAsToolsExecutionConfigDto? AgentAsTools { get; set; }
+
+    /// <summary>ExternalCli 模式配置</summary>
+    public ExternalCliExecutionConfigDto? ExternalCli { get; set; }
+
     /// <summary>
     /// 序列化为 JSON 字符串（存入 Agent.Configuration）
     /// </summary>
     public static string? Serialize(AgentExecutionConfigDto? config)
     {
         if (config == null) return null;
-        if (config.Handoff == null && config.Router == null) return null;
+        if (config.Handoff == null && config.Router == null && config.AgentAsTools == null && config.ExternalCli == null) return null;
         return JsonSerializer.Serialize(config, CamelCaseOptions);
     }
 
@@ -220,7 +226,7 @@ public class AgentExecutionConfigDto
         {
             var config = JsonSerializer.Deserialize<AgentExecutionConfigDto>(json, CamelCaseOptions);
             if (config == null) return null;
-            return config.Handoff == null && config.Router == null
+            return config.Handoff == null && config.Router == null && config.AgentAsTools == null && config.ExternalCli == null
                 ? null
                 : config;
         }
@@ -242,6 +248,9 @@ public class HandoffExecutionConfigDto
     /// <summary>最大转接次数</summary>
     [Range(1, 20)]
     public int? MaxHandoffs { get; set; }
+
+    /// <summary>是否允许目标 Agent 自动转回来源 Agent</summary>
+    public bool? AllowReturnToSource { get; set; }
 }
 
 /// <summary>
@@ -254,6 +263,27 @@ public class RouterExecutionConfigDto
 
     /// <summary>是否允许 Router 直接回答</summary>
     public bool? AllowDirectResponse { get; set; }
+}
+
+/// <summary>
+/// AgentAsTools 执行配置 DTO
+/// </summary>
+public class AgentAsToolsExecutionConfigDto
+{
+    /// <summary>可调用的子 Agent 名称到 AgentId 的映射</summary>
+    public Dictionary<string, Guid> Agents { get; set; } = [];
+}
+
+/// <summary>
+/// ExternalCli 执行配置 DTO
+/// </summary>
+public class ExternalCliExecutionConfigDto
+{
+    /// <summary>CLI 提供者名称（对应 AI:Cli:Providers 的 key）</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    /// <summary>默认工作目录</summary>
+    public string? WorkingDirectory { get; set; }
 }
 
 /// <summary>
@@ -341,14 +371,25 @@ public class AgentResponseDto
 /// <summary>
 /// Token 使用量 DTO
 /// </summary>
+/// <remarks>
+/// 序列化格式: {"InputTokens":11649,"OutputTokens":20,"TotalTokens":11669,"CachedInputTokens":0,"CacheCreationTokens":0}
+/// </remarks>
 public class TokenUsageDto
 {
-    /// <summary>Prompt tokens</summary>
-    public int PromptTokens { get; set; }
-    /// <summary>Completion tokens</summary>
-    public int CompletionTokens { get; set; }
-    /// <summary>Total tokens</summary>
+    /// <summary>输入 Token 数（发送给模型的）</summary>
+    public int InputTokens { get; set; }
+
+    /// <summary>输出 Token 数（模型生成的）</summary>
+    public int OutputTokens { get; set; }
+
+    /// <summary>总 Token 数</summary>
     public int TotalTokens { get; set; }
+
+    /// <summary>命中 Prompt Cache 的输入 Token 数（降低成本）</summary>
+    public int CachedInputTokens { get; set; }
+
+    /// <summary>首次写入 Prompt Cache 的 Token 数</summary>
+    public int CacheCreationTokens { get; set; }
 }
 
 /// <summary>

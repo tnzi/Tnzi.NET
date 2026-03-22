@@ -11,8 +11,21 @@ public class SkillConstraintMiddlewareTests
 {
     #region Helpers
 
-    private static SkillConstraintMiddleware CreateMiddleware()
-        => new(Mock.Of<ILogger<SkillConstraintMiddleware>>());
+    private static SkillConstraintMiddleware CreateMiddleware(
+        ISkillConstraintEnforcer? enforcer = null,
+        IToolRegistry? toolRegistry = null)
+    {
+        enforcer ??= new SkillConstraintEnforcer();
+
+        if (toolRegistry == null)
+        {
+            var mockRegistry = new Mock<IToolRegistry>();
+            mockRegistry.Setup(r => r.GetAllTools()).Returns([]);
+            toolRegistry = mockRegistry.Object;
+        }
+
+        return new(enforcer, toolRegistry, Mock.Of<ILogger<SkillConstraintMiddleware>>());
+    }
 
     private static AiMiddlewareContext CreateContext(
         string? model = null,
@@ -35,50 +48,6 @@ public class SkillConstraintMiddlewareTests
             ServiceProvider = new Mock<IServiceProvider>().Object,
             AdditionalTools = additionalTools ?? []
         };
-    }
-
-    private static AiMiddlewareContext CreateContextWithServiceProvider(
-        IServiceProvider serviceProvider,
-        string? model = null,
-        string? provider = null,
-        List<AITool>? additionalTools = null)
-    {
-        return new AiMiddlewareContext
-        {
-            Request = new AgentRunRequest
-            {
-                UserMessage = "Hello",
-                Model = model,
-                Provider = provider
-            },
-            Agent = AgentResolution.Success(
-                agent: null!,
-                provider: provider ?? "OpenAI",
-                model: model ?? "gpt-4o",
-                agentId: null),
-            ServiceProvider = serviceProvider,
-            AdditionalTools = additionalTools ?? []
-        };
-    }
-
-    private static IServiceProvider CreateServiceProvider(
-        ISkillConstraintEnforcer? enforcer = null,
-        IToolRegistry? toolRegistry = null)
-    {
-        var mockSp = new Mock<IServiceProvider>();
-
-        enforcer ??= new SkillConstraintEnforcer();
-
-        if (toolRegistry == null)
-        {
-            var mockRegistry = new Mock<IToolRegistry>();
-            mockRegistry.Setup(r => r.GetAllTools()).Returns([]);
-            toolRegistry = mockRegistry.Object;
-        }
-
-        mockSp.Setup(sp => sp.GetService(typeof(ISkillConstraintEnforcer))).Returns(enforcer);
-        mockSp.Setup(sp => sp.GetService(typeof(IToolRegistry))).Returns(toolRegistry);
-        return mockSp.Object;
     }
 
     private static AITool CreateAiTool(string name)
@@ -167,20 +136,18 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_WithAllowedToolGroups_FiltersTools()
     {
-        var middleware = CreateMiddleware();
         var toolRegistry = CreateToolRegistry(
             ("git_diff", "git"),
             ("git_commit", "git"),
             ("bash", "shell"));
 
-        var sp = CreateServiceProvider(toolRegistry: toolRegistry);
+        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
 
         var gitTool = CreateAiTool("git_diff");
         var gitCommitTool = CreateAiTool("git_commit");
         var bashTool = CreateAiTool("bash");
 
-        var context = CreateContextWithServiceProvider(
-            sp,
+        var context = CreateContext(
             additionalTools: [gitTool, gitCommitTool, bashTool]);
 
         var skill = CreateSkill(allowedToolGroups: ["git"]);
@@ -202,9 +169,8 @@ public class SkillConstraintMiddlewareTests
     public async Task InvokeAsync_WithRequiredModel_SetsEffectiveModel()
     {
         var middleware = CreateMiddleware();
-        var sp = CreateServiceProvider();
 
-        var context = CreateContextWithServiceProvider(sp, model: "gpt-4o");
+        var context = CreateContext(model: "gpt-4o");
 
         var skill = CreateSkill(requiredModel: "claude-opus");
         context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
@@ -222,9 +188,8 @@ public class SkillConstraintMiddlewareTests
     public async Task InvokeAsync_WithRequiredProvider_SetsEffectiveProvider()
     {
         var middleware = CreateMiddleware();
-        var sp = CreateServiceProvider();
 
-        var context = CreateContextWithServiceProvider(sp, provider: "OpenAI");
+        var context = CreateContext(provider: "OpenAI");
 
         var skill = CreateSkill(requiredProvider: "Anthropic");
         context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
@@ -241,20 +206,18 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_MultipleSkills_TakesIntersection()
     {
-        var middleware = CreateMiddleware();
         var toolRegistry = CreateToolRegistry(
             ("git_diff", "git"),
             ("bash", "shell"),
             ("web_search", "web"));
 
-        var sp = CreateServiceProvider(toolRegistry: toolRegistry);
+        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
 
         var gitTool = CreateAiTool("git_diff");
         var bashTool = CreateAiTool("bash");
         var webTool = CreateAiTool("web_search");
 
-        var context = CreateContextWithServiceProvider(
-            sp,
+        var context = CreateContext(
             additionalTools: [gitTool, bashTool, webTool]);
 
         // Skill A: allows git + shell
@@ -295,18 +258,15 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_UngroupedTools_PassThrough()
     {
-        var middleware = CreateMiddleware();
-
         // Registry only knows about "git_diff"
         var toolRegistry = CreateToolRegistry(("git_diff", "git"));
-        var sp = CreateServiceProvider(toolRegistry: toolRegistry);
+        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
 
         var gitTool = CreateAiTool("git_diff");
         // "mcp_tool" is not in the registry at all (OpenAPI/MCP dynamic tool)
         var mcpTool = CreateAiTool("mcp_tool");
 
-        var context = CreateContextWithServiceProvider(
-            sp,
+        var context = CreateContext(
             additionalTools: [gitTool, mcpTool]);
 
         // Only git allowed → git_diff filtered out (it's in registry as group "git" which is NOT "shell")
@@ -351,9 +311,8 @@ public class SkillConstraintMiddlewareTests
     public async Task InvokeStreamingAsync_WithRequiredModel_SetsEffectiveModel()
     {
         var middleware = CreateMiddleware();
-        var sp = CreateServiceProvider();
 
-        var context = CreateContextWithServiceProvider(sp, model: "gpt-4o");
+        var context = CreateContext(model: "gpt-4o");
 
         var skill = CreateSkill(requiredModel: "claude-opus");
         context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };

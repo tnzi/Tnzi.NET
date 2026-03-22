@@ -31,7 +31,7 @@ public class AiMiddlewarePipelineTests
         return new AgentRunResult
         {
             Response = response,
-            Usage = new TokenUsageDto { PromptTokens = promptTokens, CompletionTokens = completionTokens, TotalTokens = promptTokens + completionTokens }
+            Usage = new TokenUsageDto { InputTokens = promptTokens, OutputTokens = completionTokens, TotalTokens = promptTokens + completionTokens }
         };
     }
 
@@ -356,7 +356,7 @@ public class AiMiddlewarePipelineTests
         var autoThreadId = Guid.NewGuid();
         var threadService = new Mock<IAgentThreadInternalService>();
         threadService.Setup(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, autoThreadId));
+            .ReturnsAsync((default(ConversationContext)!, autoThreadId, true));
         threadService.Setup(s => s.GetMessageHistoryAsync(autoThreadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
 
@@ -487,6 +487,7 @@ public class AiMiddlewarePipelineTests
 
         var middleware = new UsageLoggingMiddleware(
             usageLogService.Object,
+            Mock.Of<IServiceScopeFactory>(),
             Mock.Of<ILogger<UsageLoggingMiddleware>>());
 
         var context = CreateContext();
@@ -499,6 +500,7 @@ public class AiMiddlewarePipelineTests
         usageLogService.Verify(s => s.LogUsageAsync(
             AIOperationType.Chat, "TestProvider", "test-model", 50, 25,
             It.IsAny<long>(), true, null, null, null,
+            0, 0,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -509,6 +511,7 @@ public class AiMiddlewarePipelineTests
 
         var middleware = new UsageLoggingMiddleware(
             usageLogService.Object,
+            Mock.Of<IServiceScopeFactory>(),
             Mock.Of<ILogger<UsageLoggingMiddleware>>());
 
         var context = CreateContext();
@@ -522,6 +525,7 @@ public class AiMiddlewarePipelineTests
         usageLogService.Verify(s => s.LogUsageAsync(
             AIOperationType.Chat, "TestProvider", "test-model", 0, 0,
             It.IsAny<long>(), false, "Test error", null, null,
+            0, 0,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

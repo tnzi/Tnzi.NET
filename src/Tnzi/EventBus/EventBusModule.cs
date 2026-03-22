@@ -52,6 +52,8 @@ public class EventBusModule : TnziInfrastructureModule
         }
 
         // 注册事件总线
+        // 注意：ICurrentTenant 是 Scoped 服务，不能在 Singleton 工厂中解析并持有引用
+        // LocalEventBus 在 PublishAsync 中通过 scope 动态解析 ICurrentTenant
         services.AddSingleton<IEventBus>(provider =>
         {
             var eventBusLogger = provider.GetRequiredService<ILogger<LocalEventBus>>();
@@ -61,8 +63,7 @@ public class EventBusModule : TnziInfrastructureModule
                 ? provider.GetService<IEventDeadLetterQueue>()
                 : null;
 
-            var currentTenant = provider.GetService<ICurrentTenant>();
-            return new LocalEventBus(provider, eventBusLogger, eventBusOptions, deadLetterQueue, currentTenant, maxConcurrency);
+            return new LocalEventBus(provider, eventBusLogger, eventBusOptions, deadLetterQueue, maxConcurrency);
         });
 
         return Task.CompletedTask;

@@ -22,6 +22,7 @@ global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
 global using Tnzi.Locking;
 global using Tnzi.Modules;
+global using Tnzi.Modules.Diagnostics;
 global using Tnzi.Reflection;
 global using Tnzi.Results;
 global using Tnzi.ScopedContext;

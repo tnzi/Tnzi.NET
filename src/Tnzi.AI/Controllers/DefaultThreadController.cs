@@ -5,15 +5,18 @@ namespace Tnzi.AI.Controllers;
 /// 所有操作自动限定为当前用户（CreatorId 过滤）。
 /// </summary>
 [DefaultController]
+[ApiAuthorize]
 [Route("threads")]
 [ApiExplorerSettings(GroupName = "user")]
 public class DefaultThreadController : ApiControllerBase
 {
     protected readonly IAgentThreadService ThreadService;
+    protected readonly IMessageFeedbackService FeedbackService;
 
-    public DefaultThreadController(IAgentThreadService threadService)
+    public DefaultThreadController(IAgentThreadService threadService, IMessageFeedbackService feedbackService)
     {
         ThreadService = Check.NotNull(threadService);
+        FeedbackService = Check.NotNull(feedbackService);
     }
 
     /// <summary>
@@ -90,6 +93,28 @@ public class DefaultThreadController : ApiControllerBase
     }
 
     /// <summary>
+    /// 提交消息反馈（👍/👎 + 标签 + 文本）
+    /// </summary>
+    [HttpPost("{threadId:guid}/messages/{messageId:guid}/feedback")]
+    public virtual async Task<ApiResult> SubmitFeedback(Guid threadId, Guid messageId, [FromBody] MessageFeedbackDto input)
+    {
+        var userId = GetCurrentUserId();
+        var result = await FeedbackService.SubmitAsync(threadId, messageId, userId, input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 撤回消息反馈
+    /// </summary>
+    [HttpDelete("{threadId:guid}/messages/{messageId:guid}/feedback")]
+    public virtual async Task<ApiResult> RevokeFeedback(Guid threadId, Guid messageId)
+    {
+        var userId = GetCurrentUserId();
+        var result = await FeedbackService.RevokeAsync(threadId, messageId, userId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取当前用户 ID，未认证时抛出异常
     /// </summary>
     private Guid GetCurrentUserId()
@@ -103,21 +128,12 @@ public class DefaultThreadController : ApiControllerBase
     }
 
     /// <summary>
-    /// 验证当前用户是否为线程所有者
+    /// 验证当前用户是否为线程所有者（单次查询）
     /// </summary>
     private async Task EnsureOwnershipAsync(Guid threadId)
     {
         var userId = GetCurrentUserId();
-        var result = await ThreadService.GetByIdAsync(threadId);
-        if (!result.Succeeded)
-        {
-            throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
-        }
-
-        // GetByIdAsync 不返回 CreatorId，使用 GetListAsync 验证所有权
-        var query = new ThreadListQueryDto { CreatorId = userId, PageSize = 1 };
-        var ownerCheck = await ThreadService.GetListAsync(query);
-        if (!ownerCheck.Succeeded || !ownerCheck.Data!.Items.Any(t => t.Id == threadId))
+        if (!await ThreadService.IsOwnerAsync(threadId, userId))
         {
             throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
         }

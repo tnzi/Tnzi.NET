@@ -89,6 +89,7 @@ public class AgentRuntimeWorkflowDispatchTests
 
     private static AgentRuntime CreateRuntime(IWorkflowService workflowService)
     {
+        var sp = new ServiceCollection().BuildServiceProvider();
         return new AgentRuntime(
             Mock.Of<IAgentResolver>(),
             Mock.Of<IAgentFactory>(),
@@ -97,7 +98,9 @@ public class AgentRuntimeWorkflowDispatchTests
             Mock.Of<ITraceStore>(),
             workflowService,
             new AgentExecutionContextAccessor(),
-            new ServiceCollection().BuildServiceProvider(),
+            sp,
+            Mock.Of<IServiceScopeFactory>(),
+            Mock.Of<IOptionsMonitor<AIOptions>>(),
             Mock.Of<ILogger<AgentRuntime>>());
     }
 

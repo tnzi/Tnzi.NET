@@ -21,6 +21,8 @@ public class UsageSummaryDto
     public double AverageDurationMs { get; set; }
     /// <summary>Success rate (0-1)</summary>
     public double SuccessRate { get; set; }
+    /// <summary>Total estimated cost (USD)</summary>
+    public decimal TotalEstimatedCostUsd { get; set; }
 }
 
 /// <summary>
@@ -71,6 +73,12 @@ public class UsageLogDto
     public string? ErrorMessage { get; set; }
     /// <summary>Creation time</summary>
     public DateTime CreationTime { get; set; }
+    /// <summary>Estimated cost (USD)</summary>
+    public decimal? EstimatedCostUsd { get; set; }
+    /// <summary>Cached input tokens</summary>
+    public int CachedInputTokens { get; set; }
+    /// <summary>Cache creation input tokens</summary>
+    public int CacheCreationTokens { get; set; }
 }
 
 /// <summary>
@@ -111,6 +119,8 @@ public class ProviderUsageDto
     public long TotalTokens { get; set; }
     /// <summary>Average duration (ms)</summary>
     public double AverageDurationMs { get; set; }
+    /// <summary>Total estimated cost (USD)</summary>
+    public decimal TotalEstimatedCostUsd { get; set; }
 }
 
 /// <summary>
@@ -132,6 +142,8 @@ public class ModelUsageDto
     public long TotalTokens { get; set; }
     /// <summary>Average duration (ms)</summary>
     public double AverageDurationMs { get; set; }
+    /// <summary>Total estimated cost (USD)</summary>
+    public decimal TotalEstimatedCostUsd { get; set; }
 }
 
 /// <summary>
@@ -162,6 +174,9 @@ public class UsageTrendPointDto
 
     /// <summary>Average duration (ms)</summary>
     public double AverageDurationMs { get; set; }
+
+    /// <summary>Total estimated cost (USD)</summary>
+    public decimal TotalEstimatedCostUsd { get; set; }
 }
 
 /// <summary>
@@ -175,8 +190,8 @@ public class UsageTrendQueryDto
     /// <summary>End time (inclusive)</summary>
     public DateTime EndTime { get; set; }
 
-    /// <summary>Granularity: "daily" | "weekly" | "monthly"</summary>
-    public string Granularity { get; set; } = "daily";
+    /// <summary>时间粒度: Daily / Weekly / Monthly</summary>
+    public UsageGranularity Granularity { get; set; } = UsageGranularity.Daily;
 
     /// <summary>Provider filter (optional)</summary>
     public string? Provider { get; set; }
@@ -216,4 +231,70 @@ public class AgentUsageDto
 
     /// <summary>Success rate (0-1)</summary>
     public double SuccessRate { get; set; }
+
+    /// <summary>Total estimated cost (USD)</summary>
+    public decimal TotalEstimatedCostUsd { get; set; }
+}
+
+/// <summary>
+/// 成本摘要 DTO — 按时段汇总成本
+/// </summary>
+public class CostSummaryDto
+{
+    /// <summary>Total estimated cost (USD)</summary>
+    public decimal TotalCostUsd { get; set; }
+
+    /// <summary>Total requests with cost data</summary>
+    public long TotalRequests { get; set; }
+
+    /// <summary>Total input tokens</summary>
+    public long TotalInputTokens { get; set; }
+
+    /// <summary>Total output tokens</summary>
+    public long TotalOutputTokens { get; set; }
+
+    /// <summary>Average cost per request (USD)</summary>
+    public decimal AverageCostPerRequest { get; set; }
+
+    /// <summary>Cost breakdown by provider</summary>
+    public List<ProviderCostDto> ByProvider { get; set; } = [];
+
+    /// <summary>Cost breakdown by model</summary>
+    public List<ModelCostDto> ByModel { get; set; } = [];
+}
+
+/// <summary>
+/// 按提供商的成本分组
+/// </summary>
+public class ProviderCostDto
+{
+    /// <summary>Provider name</summary>
+    public string Provider { get; set; } = string.Empty;
+    /// <summary>Total cost (USD)</summary>
+    public decimal TotalCostUsd { get; set; }
+    /// <summary>Request count</summary>
+    public long TotalRequests { get; set; }
+    /// <summary>Percentage of total cost</summary>
+    public decimal CostPercentage { get; set; }
+}
+
+/// <summary>
+/// 按模型的成本分组
+/// </summary>
+public class ModelCostDto
+{
+    /// <summary>Provider name</summary>
+    public string Provider { get; set; } = string.Empty;
+    /// <summary>Model name</summary>
+    public string Model { get; set; } = string.Empty;
+    /// <summary>Total cost (USD)</summary>
+    public decimal TotalCostUsd { get; set; }
+    /// <summary>Request count</summary>
+    public long TotalRequests { get; set; }
+    /// <summary>Total input tokens</summary>
+    public long TotalInputTokens { get; set; }
+    /// <summary>Total output tokens</summary>
+    public long TotalOutputTokens { get; set; }
+    /// <summary>Percentage of total cost</summary>
+    public decimal CostPercentage { get; set; }
 }

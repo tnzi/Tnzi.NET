@@ -28,6 +28,12 @@ public class SkillConstraintResult
     /// <summary>约束后可用工具组</summary>
     public List<string> EffectiveToolGroups { get; set; } = [];
 
+    /// <summary>单工具白名单</summary>
+    public List<string>? EffectiveTools { get; set; }
+
+    /// <summary>单工具黑名单</summary>
+    public List<string>? DeniedTools { get; set; }
+
     /// <summary>约束后模型</summary>
     public string? EffectiveModel { get; set; }
 

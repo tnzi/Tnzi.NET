@@ -9,7 +9,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<InputGuardrailMiddleware> _logger;
 
-    public int Order => 200;
+    public int Order => AiMiddlewareOrders.InputGuardrail;
 
     public InputGuardrailMiddleware(
         GuardrailRunner guardrailRunner,
@@ -40,7 +40,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
                 return new AgentRunResult
                 {
                     Response = rejection.Reason ?? "Input rejected by guardrail",
-                    FinishReason = "guardrail_rejected",
+                    FinishReason = FinishReasons.GuardrailRejected,
                     Status = AgentRunStatus.Failed
                 };
             }
@@ -61,7 +61,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
             return new AgentRunResult
             {
                 Response = ex.Message,
-                FinishReason = "guardrail_rejected",
+                FinishReason = FinishReasons.GuardrailRejected,
                 Status = AgentRunStatus.Failed
             };
         }
@@ -94,7 +94,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
                 rejectionChunk = new AgentStreamChunk
                 {
                     Text = rejection.Reason ?? "Input rejected by guardrail",
-                    FinishReason = "guardrail_rejected"
+                    FinishReason = FinishReasons.GuardrailRejected
                 };
             }
             else if (!string.Equals(text, inputText, StringComparison.Ordinal))
@@ -112,7 +112,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
             rejectionChunk = new AgentStreamChunk
             {
                 Text = ex.Message,
-                FinishReason = "guardrail_rejected"
+                FinishReason = FinishReasons.GuardrailRejected
             };
         }
 

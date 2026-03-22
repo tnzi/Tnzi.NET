@@ -4,8 +4,11 @@ namespace Tnzi.AI.Entities;
 /// 运行图中的一个节点实例。
 /// 记录每个执行步骤的输入/输出/状态。
 /// </summary>
-public class AgentRunNode : CreationAuditedEntity<Guid>
+public class AgentRunNode : CreationAuditedEntity<Guid>, IMultiTenant
 {
+    /// <summary>租户 ID</summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>关联的 Run ID</summary>
     public Guid RunId { get; set; }
 

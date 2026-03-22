@@ -14,6 +14,7 @@ public class ConditionalControllerProvider : IApplicationModelProvider
     private readonly HashSet<Type> _registeredServiceTypes;
     private readonly HashSet<Type> _registeredGenericDefinitions;
     private readonly List<(Type ServiceType, Type? ImplementationType, object? ImplementationInstance)> _serviceEntries;
+    private readonly ControllerActivationDiagnostics? _diagnostics;
 
     /// <summary>
     /// 执行顺序，在ApiControllerRouteProvider之后执行
@@ -25,7 +26,8 @@ public class ConditionalControllerProvider : IApplicationModelProvider
     /// 初始化条件控制器提供者
     /// </summary>
     /// <param name="services">服务集合，用于检查依赖是否已注册</param>
-    public ConditionalControllerProvider(IServiceCollection services)
+    /// <param name="diagnostics">可选的诊断收集器</param>
+    public ConditionalControllerProvider(IServiceCollection services, ControllerActivationDiagnostics? diagnostics = null)
     {
         Check.NotNull(services);
 
@@ -35,6 +37,7 @@ public class ConditionalControllerProvider : IApplicationModelProvider
             services.Where(s => s.ServiceType.IsGenericType)
                     .Select(s => s.ServiceType.GetGenericTypeDefinition()));
         _serviceEntries = services.Select(s => (s.ServiceType, s.ImplementationType, s.ImplementationInstance)).ToList();
+        _diagnostics = diagnostics;
     }
 
     /// <summary>
@@ -51,21 +54,25 @@ public class ConditionalControllerProvider : IApplicationModelProvider
     /// </summary>
     public void OnProvidersExecuting(ApplicationModelProviderContext context)
     {
-        var controllersToRemove = new List<ControllerModel>();
+        var controllersToRemove = new List<(ControllerModel Controller, Type? MissingDependency)>();
 
         foreach (var controller in context.Result.Controllers)
         {
             // 检查Controller的构造函数依赖是否可用
-            if (!AreDependenciesAvailable(controller.ControllerType))
+            if (!AreDependenciesAvailable(controller.ControllerType, out var missingDependency))
             {
-                controllersToRemove.Add(controller);
+                controllersToRemove.Add((controller, missingDependency));
             }
         }
 
         // 移除依赖不可用的Controller
-        foreach (var controller in controllersToRemove)
+        foreach (var (controller, missingDependency) in controllersToRemove)
         {
             context.Result.Controllers.Remove(controller);
+            _diagnostics?.RecordSuppression(
+                controller.ControllerType.FullName ?? controller.ControllerType.Name,
+                $"Missing dependency: {missingDependency?.FullName ?? missingDependency?.Name ?? "unknown"}",
+                SuppressionReason.MissingDependency);
         }
     }
 
@@ -73,9 +80,12 @@ public class ConditionalControllerProvider : IApplicationModelProvider
     /// 检查Controller的所有构造函数依赖是否可用
     /// </summary>
     /// <param name="controllerType">Controller类型</param>
+    /// <param name="missingDependency">第一个缺失的依赖类型（如果有）</param>
     /// <returns>如果所有依赖都可用则返回true，否则返回false</returns>
-    private bool AreDependenciesAvailable(Type controllerType)
+    private bool AreDependenciesAvailable(Type controllerType, out Type? missingDependency)
     {
+        missingDependency = null;
+
         // 获取所有公共构造函数
         var constructors = controllerType.GetConstructors();
 
@@ -84,6 +94,9 @@ public class ConditionalControllerProvider : IApplicationModelProvider
         {
             return true; // 无参构造函数，依赖可用
         }
+
+        // 记录最后一个构造函数中缺失的依赖类型
+        Type? lastMissing = null;
 
         // 检查每个构造函数
         // 只要有一个构造函数的依赖都可用，就认为Controller可用
@@ -106,6 +119,7 @@ public class ConditionalControllerProvider : IApplicationModelProvider
                 if (!IsServiceRegistered(parameterType))
                 {
                     allDependenciesAvailable = false;
+                    lastMissing = parameterType;
                     break;
                 }
             }
@@ -118,6 +132,7 @@ public class ConditionalControllerProvider : IApplicationModelProvider
         }
 
         // 所有构造函数的依赖都不可用
+        missingDependency = lastMissing;
         return false;
     }
 

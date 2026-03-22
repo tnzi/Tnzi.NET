@@ -9,8 +9,6 @@ public class UsageLogConfiguration : EntityTypeConfigurationBase<UsageLog, Guid>
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.HasKey(e => e.Id);
-
         builder.Property(e => e.Provider)
             .HasMaxLength(50)
             .IsRequired();

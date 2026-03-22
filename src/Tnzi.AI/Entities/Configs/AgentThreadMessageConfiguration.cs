@@ -9,8 +9,6 @@ public class AgentThreadMessageConfiguration : EntityTypeConfigurationBase<Agent
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.HasKey(e => e.Id);
-
         builder.Property(e => e.Role)
             .HasMaxLength(20)
             .IsRequired();
@@ -32,6 +30,12 @@ public class AgentThreadMessageConfiguration : EntityTypeConfigurationBase<Agent
         {
             builder.HasIndex(e => e.TenantId);
         }
+
+        builder.Property(e => e.FeedbackTags)
+            .HasMaxLength(500);
+
+        builder.Property(e => e.FeedbackComment)
+            .HasMaxLength(2000);
 
         builder.HasIndex(e => e.ThreadId);
         builder.HasIndex(e => new { e.ThreadId, e.Order }).IsUnique();

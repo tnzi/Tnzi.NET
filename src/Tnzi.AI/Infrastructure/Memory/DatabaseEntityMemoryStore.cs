@@ -3,7 +3,6 @@ namespace Tnzi.AI.Infrastructure.Memory;
 /// <summary>
 /// 数据库实体记忆存储 — 使用 EF Core 持久化命名实体记忆
 /// </summary>
-[ExperimentalApi(Reason = "Entity memory is in preview")]
 public class DatabaseEntityMemoryStore : IEntityMemoryStore
 {
     private readonly IRepository<EntityMemory, Guid> _repository;
@@ -59,39 +58,65 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
         Check.NotNull(entry);
         Check.NotNullOrWhiteSpace(entry.EntityName);
 
-        var existing = await _repository.AsQueryable()
-            .FirstOrDefaultAsync(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId && e.AgentId == entry.AgentId, ct);
+        var now = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow;
+        var mentionIncrement = Math.Max(entry.MentionCount, 1);
 
-        if (existing != null)
+        // 先读取已有属性用于合并（只查 Properties 字段，轻量查询）
+        var existingProps = await _repository.AsQueryable()
+            .Where(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId && e.AgentId == entry.AgentId)
+            .Select(e => e.Properties)
+            .FirstOrDefaultAsync(ct);
+
+        if (existingProps != null)
         {
-            // 更新已有实体：累加提及次数、合并属性、更新最后提及时间
-            existing.MentionCount += Math.Max(entry.MentionCount, 1);
-            existing.LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow;
-            existing.EntityType = entry.EntityType;
-            existing.Properties = SerializeProperties(MergeProperties(
-                DeserializeProperties(existing.Properties), entry.Properties));
+            // 合并属性后用 ExecuteUpdateAsync 直接执行 SQL UPDATE，绕过 ChangeTracker
+            var mergedProps = SerializeProperties(MergeProperties(DeserializeProperties(existingProps), entry.Properties));
+            await _repository.AsQueryable()
+                .Where(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId && e.AgentId == entry.AgentId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(e => e.MentionCount, e => e.MentionCount + mentionIncrement)
+                    .SetProperty(e => e.LastMentioned, now)
+                    .SetProperty(e => e.EntityType, entry.EntityType)
+                    .SetProperty(e => e.Properties, mergedProps), ct);
 
-            await _repository.UpdateAsync(existing);
-            _logger.LogDebug("Updated entity memory: {EntityName} (mentions: {MentionCount})",
-                existing.EntityName, existing.MentionCount);
+            _logger.LogDebug("Updated entity memory: {EntityName}", entry.EntityName);
+            return;
         }
-        else
+
+        var serializedProps = SerializeProperties(entry.Properties);
+
+        // 不存在则插入；如果并发冲突导致唯一约束失败，重试一次 UPDATE
+        // 注意: 极端并发下 InsertAsync 失败会在 ChangeTracker 留下脏实体（Added 状态），
+        // 可能导致同作用域后续 SaveChangesAsync 连带失败。此情况需要同一用户对同一 Agent
+        // 同时触发相同新实体提取，概率极低，且 History/UsageLogging 均有 silent try-catch 兜底。
+        try
         {
-            // 插入新实体
             var entity = new EntityMemory
             {
                 EntityName = entry.EntityName,
                 EntityType = entry.EntityType,
-                Properties = SerializeProperties(entry.Properties),
-                LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow,
-                MentionCount = Math.Max(entry.MentionCount, 1),
+                Properties = serializedProps,
+                LastMentioned = now,
+                MentionCount = mentionIncrement,
                 UserId = entry.UserId,
                 AgentId = entry.AgentId
             };
 
             await _repository.InsertAsync(entity);
-            _logger.LogDebug("Inserted entity memory: {EntityName} ({EntityType})",
-                entry.EntityName, entry.EntityType);
+            _logger.LogDebug("Inserted entity memory: {EntityName} ({EntityType})", entry.EntityName, entry.EntityType);
+        }
+        catch (DbUpdateException)
+        {
+            // 并发插入导致唯一约束冲突 — 回退到 UPDATE（绕过 ChangeTracker）
+            await _repository.AsQueryable()
+                .Where(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId && e.AgentId == entry.AgentId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(e => e.MentionCount, e => e.MentionCount + mentionIncrement)
+                    .SetProperty(e => e.LastMentioned, now)
+                    .SetProperty(e => e.EntityType, entry.EntityType)
+                    .SetProperty(e => e.Properties, serializedProps), ct);
+
+            _logger.LogDebug("Updated entity memory after conflict: {EntityName}", entry.EntityName);
         }
     }
 
@@ -103,74 +128,14 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
         var entryList = entries.ToList();
         if (entryList.Count == 0) return;
 
-        // 单条时走原有逻辑避免额外查询开销
-        if (entryList.Count == 1)
-        {
-            await UpsertEntityAsync(entryList[0], ct);
-            return;
-        }
-
-        // 批量查询: 提取所有 EntityName 一次查询
-        var names = entryList.Select(e => e.EntityName).Distinct().ToList();
-        var userIds = entryList.Select(e => e.UserId).Distinct().ToList();
-
-        var existingEntities = await _repository.AsQueryable()
-            .Where(e => names.Contains(e.EntityName) && userIds.Contains(e.UserId))
-            .ToListAsync(ct);
-
-        // 按 (EntityName, UserId, AgentId) 建索引
-        var existingDict = existingEntities
-            .GroupBy(e => (e.EntityName, e.UserId, e.AgentId))
-            .ToDictionary(g => g.Key, g => g.First());
-
-        var toUpdate = new List<EntityMemory>();
-        var toInsert = new List<EntityMemory>();
-
+        // 逐条 Upsert: 使用 ExecuteUpdateAsync 绕过 ChangeTracker，
+        // 避免批量 InsertManyAsync 失败时污染 DbContext 导致连锁故障
         foreach (var entry in entryList)
         {
-            Check.NotNullOrWhiteSpace(entry.EntityName);
-
-            var key = (entry.EntityName, entry.UserId, entry.AgentId);
-            if (existingDict.TryGetValue(key, out var existing))
-            {
-                // 更新
-                existing.MentionCount += Math.Max(entry.MentionCount, 1);
-                existing.LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow;
-                existing.EntityType = entry.EntityType;
-                existing.Properties = SerializeProperties(MergeProperties(
-                    DeserializeProperties(existing.Properties), entry.Properties));
-                toUpdate.Add(existing);
-            }
-            else
-            {
-                // 插入
-                var entity = new EntityMemory
-                {
-                    EntityName = entry.EntityName,
-                    EntityType = entry.EntityType,
-                    Properties = SerializeProperties(entry.Properties),
-                    LastMentioned = entry.LastMentioned != default ? entry.LastMentioned : DateTime.UtcNow,
-                    MentionCount = Math.Max(entry.MentionCount, 1),
-                    UserId = entry.UserId,
-                    AgentId = entry.AgentId
-                };
-                toInsert.Add(entity);
-                // 避免同批次重复插入
-                existingDict[key] = entity;
-            }
+            await UpsertEntityAsync(entry, ct);
         }
 
-        if (toUpdate.Count > 0)
-        {
-            await _repository.UpdateManyAsync(toUpdate);
-            _logger.LogDebug("Batch updated {Count} entity memories", toUpdate.Count);
-        }
-
-        if (toInsert.Count > 0)
-        {
-            await _repository.InsertManyAsync(toInsert);
-            _logger.LogDebug("Batch inserted {Count} entity memories", toInsert.Count);
-        }
+        _logger.LogDebug("Upserted {Count} entity memories", entryList.Count);
     }
 
     /// <inheritdoc />

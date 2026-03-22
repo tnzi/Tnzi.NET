@@ -7,7 +7,7 @@ public class AgentRunNodeConfiguration : EntityTypeConfigurationBase<AgentRunNod
 {
     public override void Configure(EntityTypeBuilder<AgentRunNode> builder)
     {
-        builder.HasKey(e => e.Id);
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.NodeType)
             .IsRequired()
@@ -29,7 +29,11 @@ public class AgentRunNodeConfiguration : EntityTypeConfigurationBase<AgentRunNod
         builder.Property(e => e.Status)
             .HasDefaultValue(AgentRunNodeStatus.Pending);
 
-        builder.HasIndex(e => e.RunId);
-        builder.HasIndex(e => e.Status);
+        builder.HasIndex(e => new { e.RunId, e.Status });
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
     }
 }

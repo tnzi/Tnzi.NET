@@ -35,4 +35,12 @@ public interface INotificationQueryService
     {
         return Task.FromResult(Result.Failure<NotificationTrendDto>("Statistics trend not implemented", 501));
     }
+
+    /// <summary>
+    /// 获取消息投递报告（按接收人维度）
+    /// </summary>
+    Task<Result<DeliveryReportDto>> GetDeliveryReportAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<DeliveryReportDto>("Delivery report not implemented", 501));
+    }
 }

@@ -207,14 +207,21 @@ public class AgentService : ApplicationService, IAgentService
             return Ok(pagedList);
         }
 
+        // JSON 字段无法在数据库级过滤，加载后在内存中过滤并正确计算分页
         var entities = await queryable.ToListAsync();
         var filtered = entities
             .Where(a => string.IsNullOrWhiteSpace(query.Domain) || ContainsJsonElement(a.Domains, query.Domain!))
             .Where(a => string.IsNullOrWhiteSpace(query.Role) || ContainsJsonElement(a.Roles, query.Role!))
+            .ToList();
+
+        var totalCount = filtered.Count;
+        var pagedItems = filtered
+            .Skip((query.PageIndex - 1) * query.PageSize)
+            .Take(query.PageSize)
             .Select(MapToDto)
             .ToList();
 
-        return Ok<IPagedList<AgentDto>>(PagedList<AgentDto>.Create(filtered, query.PageIndex, query.PageSize));
+        return Ok<IPagedList<AgentDto>>(new PagedList<AgentDto>(pagedItems, query.PageIndex, query.PageSize, totalCount));
     }
 
     public async Task<Result<AgentResponseDto>> RunAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default)
@@ -331,6 +338,7 @@ public class AgentService : ApplicationService, IAgentService
                 yield return new StreamEvent
                 {
                     IsToolCall = true,
+                    ToolCallNames = chunk.ToolCallNames,
                     ThreadId = currentThreadId
                 };
             }
@@ -354,8 +362,8 @@ public class AgentService : ApplicationService, IAgentService
             ErrorMessage = hasStreamError ? streamErrorMessage : null,
             Usage = new TokenUsageDto
             {
-                PromptTokens = inputTokens,
-                CompletionTokens = outputTokens,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
                 TotalTokens = inputTokens + outputTokens
             },
             Citations = citations

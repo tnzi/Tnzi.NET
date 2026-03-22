@@ -21,16 +21,25 @@ public class HandoffExecutionStrategy : IExecutionStrategy
         var currentMessages = messages;
         int totalInputTokens = 0, totalOutputTokens = 0;
 
+        // 双向 handoff：追踪上一个 Agent 以便注入回退目标
+        string? previousAgentName = null;
+        Guid? previousAgentId = null;
+
         for (var hop = 0; hop < _config.MaxHandoffs; hop++)
         {
-            var agentWithHandoff = InjectHandoffTool(currentAgent, _config.Targets.Keys);
+            // 首跳时使用 context.StartingAgentId 作为 previousAgentId
+            if (hop == 0 && previousAgentId == null)
+                previousAgentId = context.StartingAgentId;
+
+            var effectiveTargets = BuildEffectiveTargets(previousAgentName, previousAgentId);
+            var agentWithHandoff = InjectHandoffTool(currentAgent, effectiveTargets.Keys);
             var response = await agentWithHandoff.ExecuteAsync(currentMessages, ct);
 
             // 累加 token
             if (response.Usage != null)
             {
-                totalInputTokens += response.Usage.PromptTokens;
-                totalOutputTokens += response.Usage.CompletionTokens;
+                totalInputTokens += response.Usage.InputTokens;
+                totalOutputTokens += response.Usage.OutputTokens;
             }
 
             var handoffTarget = ExtractHandoffTarget(response);
@@ -41,8 +50,8 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 return BuildResult(response, handoffPath, currentAgent.Name, totalInputTokens, totalOutputTokens);
             }
 
-            // 验证目标是否在允许列表中
-            if (!_config.Targets.TryGetValue(handoffTarget, out var targetAgentId))
+            // 验证目标是否在有效列表中
+            if (!effectiveTargets.TryGetValue(handoffTarget, out var targetAgentId))
             {
                 context.Logger.LogWarning("Handoff target '{Target}' not in allowed targets", handoffTarget);
                 return BuildResult(response, handoffPath, currentAgent.Name, totalInputTokens, totalOutputTokens);
@@ -57,16 +66,28 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             }
 
             context.Logger.LogDebug("Handoff from '{Source}' to '{Target}'", currentAgent.Name, handoffTarget);
+
+            // 保存当前 Agent 作为"上一个"（供下一跳回退用）
+            previousAgentName = currentAgent.Name;
+            previousAgentId = effectiveTargets.TryGetValue(currentAgent.Name, out var currentId)
+                ? currentId
+                : context.StartingAgentId;
+
             handoffPath.Add(handoffTarget);
             currentAgent = targetAgent;
 
             // 将前一个 Agent 的输出作为新 Agent 的上下文，确保包含用户原始问题
             var userQuestion = ExecutionStrategyAgentLoader.GetLatestUserQuestion(messages);
-            currentMessages =
-            [
-                messages[0], // 保留原始用户消息
-                new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
-            ];
+            currentMessages = messages.Count > 0
+                ?
+                [
+                    messages[0], // 保留原始用户消息
+                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
+                ]
+                :
+                [
+                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
+                ];
         }
 
         context.Logger.LogWarning("Max handoffs ({MaxHandoffs}) reached", _config.MaxHandoffs);
@@ -84,10 +105,18 @@ public class HandoffExecutionStrategy : IExecutionStrategy
         var currentAgent = agent;
         var currentMessages = messages;
 
+        string? previousAgentName = null;
+        Guid? previousAgentId = null;
+
         for (var hop = 0; hop < _config.MaxHandoffs; hop++)
         {
+            if (hop == 0 && previousAgentId == null)
+                previousAgentId = context.StartingAgentId;
+
+            var effectiveTargets = BuildEffectiveTargets(previousAgentName, previousAgentId);
+
             string? detectedHandoff = null;
-            var agentWithHandoff = InjectHandoffTool(currentAgent, _config.Targets.Keys, target => detectedHandoff = target);
+            var agentWithHandoff = InjectHandoffTool(currentAgent, effectiveTargets.Keys, target => detectedHandoff = target);
 
             // 流式执行：工具调用阶段缓冲，文本到达时决策
             var preTextBuffer = new List<AgentStreamChunk>();
@@ -134,7 +163,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             }
 
             // handoff 触发 — 验证目标并循环
-            if (!_config.Targets.TryGetValue(detectedHandoff!, out var targetAgentId))
+            if (!effectiveTargets.TryGetValue(detectedHandoff!, out var targetAgentId))
             {
                 context.Logger.LogWarning("Handoff target '{Target}' not in allowed targets", detectedHandoff);
                 foreach (var buffered in preTextBuffer) yield return buffered;
@@ -150,6 +179,12 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             }
 
             context.Logger.LogDebug("Handoff from '{Source}' to '{Target}'", currentAgent.Name, detectedHandoff);
+
+            previousAgentName = currentAgent.Name;
+            previousAgentId = effectiveTargets.TryGetValue(currentAgent.Name, out var currentId)
+                ? currentId
+                : context.StartingAgentId;
+
             handoffPath.Add(detectedHandoff!);
             currentAgent = targetAgent;
 
@@ -158,15 +193,38 @@ public class HandoffExecutionStrategy : IExecutionStrategy
 
             // 用原始用户消息 + handoff 上下文构建新消息列表，下一轮循环从目标 agent 流式执行
             var userQuestion = ExecutionStrategyAgentLoader.GetLatestUserQuestion(messages);
-            currentMessages =
-            [
-                messages[0],
-                new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
-            ];
+            currentMessages = messages.Count > 0
+                ?
+                [
+                    messages[0],
+                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
+                ]
+                :
+                [
+                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
+                ];
         }
 
         // Max handoffs reached — yield error chunk
-        yield return new AgentStreamChunk { Text = "Max handoff limit reached", FinishReason = "max_handoffs" };
+        yield return new AgentStreamChunk { Text = "Max handoff limit reached", FinishReason = FinishReasons.MaxHandoffs };
+    }
+
+    /// <summary>
+    /// 构建有效的目标列表 — 基础 Targets + 自动注入来源 Agent
+    /// </summary>
+    private Dictionary<string, Guid> BuildEffectiveTargets(string? previousAgentName, Guid? previousAgentId)
+    {
+        if (!_config.AllowReturnToSource || previousAgentName == null || previousAgentId == null)
+            return _config.Targets;
+
+        if (_config.Targets.ContainsKey(previousAgentName))
+            return _config.Targets;
+
+        var effective = new Dictionary<string, Guid>(_config.Targets)
+        {
+            [previousAgentName] = previousAgentId.Value
+        };
+        return effective;
     }
 
     /// <summary>
@@ -237,7 +295,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             HandoffPath = handoffPath,
             FinalAgentName = finalAgentName,
             AggregatedUsage = inputTokens > 0 || outputTokens > 0
-                ? new TokenUsageDto { PromptTokens = inputTokens, CompletionTokens = outputTokens, TotalTokens = inputTokens + outputTokens }
+                ? new TokenUsageDto { InputTokens = inputTokens, OutputTokens = outputTokens, TotalTokens = inputTokens + outputTokens }
                 : null
         };
     }

@@ -3,8 +3,7 @@ namespace Tnzi.AI.Infrastructure.Memory;
 /// <summary>
 /// LLM 实体抽取器 — 使用 LLM 从文本中提取命名实体
 /// </summary>
-[ExperimentalApi(Reason = "LLM entity extraction is in preview")]
-public class LlmEntityExtractor
+public partial class LlmEntityExtractor
 {
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IOptions<AIOptions> _options;
@@ -134,7 +133,7 @@ public class LlmEntityExtractor
     private static string ExtractJsonArray(string text)
     {
         // 尝试提取 ```json ... ``` 代码块
-        var match = Regex.Match(text, @"```(?:json)?\s*\n?(.*?)\n?\s*```", RegexOptions.Singleline);
+        var match = JsonCodeBlockRegex().Match(text);
         if (match.Success)
         {
             return match.Groups[1].Value.Trim();
@@ -150,6 +149,9 @@ public class LlmEntityExtractor
 
         return text;
     }
+
+    [GeneratedRegex(@"```(?:json)?\s*\n?(.*?)\n?\s*```", RegexOptions.Singleline)]
+    private static partial Regex JsonCodeBlockRegex();
 
     /// <summary>
     /// LLM 返回的实体结构（内部 DTO）

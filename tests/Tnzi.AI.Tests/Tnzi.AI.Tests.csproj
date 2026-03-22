@@ -32,6 +32,9 @@
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\Tnzi.EFCore.Tests\Tnzi.EFCore.Tests.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Coder\Tnzi.AI.Coder.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" />
   </ItemGroup>

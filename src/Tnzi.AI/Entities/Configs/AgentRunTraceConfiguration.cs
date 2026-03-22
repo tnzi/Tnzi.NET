@@ -7,15 +7,19 @@ public class AgentRunTraceConfiguration : EntityTypeConfigurationBase<AgentRunTr
 {
     public override void Configure(EntityTypeBuilder<AgentRunTrace> builder)
     {
-        builder.HasKey(e => e.Id);
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.EventType)
             .IsRequired()
             .HasMaxLength(50);
 
-        builder.HasIndex(e => e.RunId);
+        builder.HasIndex(e => new { e.RunId, e.EventType });
         builder.HasIndex(e => e.NodeId);
-        builder.HasIndex(e => e.EventType);
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
 
         builder.HasOne(e => e.Run)
             .WithMany()

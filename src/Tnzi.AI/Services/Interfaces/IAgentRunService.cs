@@ -9,7 +9,7 @@ public interface IAgentRunService
     Task<Result<AgentRunStatsDto>> GetStatsAsync();
 
     /// <summary>获取运行详情</summary>
-    Task<Result<AgentRunDto>> GetAsync(Guid runId);
+    Task<Result<AgentRunDto>> GetByIdAsync(Guid id);
 
     /// <summary>分页查询运行列表</summary>
     Task<Result<IPagedList<AgentRunDto>>> GetListAsync(AgentRunQueryDto input);
@@ -27,7 +27,7 @@ public interface IAgentRunService
     Task<Result> ApproveAsync(Guid runId, string? comment);
 
     /// <summary>审批拒绝（HITL）</summary>
-    Task<Result> RejectAsync(Guid runId, string? feedback);
+    Task<Result> RejectAsync(Guid runId, string? comment);
 
     /// <summary>重试失败节点</summary>
     Task<Result> RetryNodeAsync(Guid runId, Guid nodeId);

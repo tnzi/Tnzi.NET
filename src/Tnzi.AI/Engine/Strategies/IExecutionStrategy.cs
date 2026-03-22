@@ -51,4 +51,7 @@ public class ExecutionStrategyContext
 
     /// <summary>日志记录器</summary>
     public required ILogger Logger { get; init; }
+
+    /// <summary>起始 Agent 的实体 ID（用于双向 handoff 来源追踪）</summary>
+    public Guid? StartingAgentId { get; init; }
 }

@@ -94,7 +94,7 @@ public class IdentityModule : TnziApplicationModule
         context.Services.AddScoped<IPasswordPolicyService, PasswordPolicyService>();
 
         // 注册会话管理服务（根据配置选择实现）
-        RegisterSessionService(context.Services, configuration);
+        RegisterSessionService(context.Services, configuration, context.IsProduction());
 
         // 注册登录安全服务
         context.Services.AddScoped<ILoginSecurityService, LoginSecurityService>();
@@ -161,7 +161,7 @@ public class IdentityModule : TnziApplicationModule
     /// 注册会话管理服务
     /// 根据配置选择使用数据库存储或 Redis 分布式存储
     /// </summary>
-    private void RegisterSessionService(IServiceCollection services, IConfiguration configuration)
+    private void RegisterSessionService(IServiceCollection services, IConfiguration configuration, bool isProduction)
     {
         // 读取会话配置
         var sessionOptions = configuration.GetSection("Identity:Session").Get<SessionOptions>() ?? new SessionOptions();
@@ -178,10 +178,17 @@ public class IdentityModule : TnziApplicationModule
                 // 使用 Redis 分布式会话存储
                 services.AddScoped<ISessionService, DistributedSessionService>();
             }
+            else if (isProduction)
+            {
+                // 生产环境：立即失败，防止静默配置错误
+                throw new ConfigurationException(
+                    "Identity:Session:StorageType",
+                    "Session storage type is configured as Redis, but IDistributedCache is not registered. " +
+                    "Load RedisCachingModule or change StorageType to Database.");
+            }
             else
             {
-                // 降级到数据库存储
-                // 注册一个启动时检查，在应用启动时记录警告
+                // 开发环境：降级到数据库存储，记录警告
                 services.AddScoped<ISessionService>(provider =>
                 {
                     var logger = provider.GetService<ILogger<IdentityModule>>();

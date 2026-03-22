@@ -88,14 +88,9 @@ public class DatabaseMemoryStore : IMemoryStore
     private async Task WriteInternalAsync(string scope, string content, CancellationToken ct)
     {
         // 删除该 scope 下所有旧条目
-        var existing = await _repository.AsQueryable()
+        await _repository.AsQueryable()
             .Where(e => e.Scope == scope)
-            .ToListAsync(ct);
-
-        if (existing.Count > 0)
-        {
-            await _repository.DeleteManyAsync(existing);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // 写入新条目
         var entry = new MemoryEntry
@@ -174,7 +169,6 @@ public class DatabaseMemoryStore : IMemoryStore
         Check.NotNullOrWhiteSpace(scope);
         Check.NotNullOrWhiteSpace(query);
 
-        // 先尝试 DB 层关键词预过滤，减少内存加载量
         var queryLower = query.ToLower();
         var keywords = queryLower.Contains(' ')
             ? queryLower.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -209,7 +203,17 @@ public class DatabaseMemoryStore : IMemoryStore
         float[]? queryVector = null;
         if (_embeddingService != null)
         {
-            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, ct: ct);
+            EmbeddingOptions? embOptions = null;
+            if (_memoryOptions is { EmbeddingProvider: not null } or { EmbeddingModel: not null })
+            {
+                embOptions = new EmbeddingOptions
+                {
+                    Provider = _memoryOptions.EmbeddingProvider,
+                    Model = _memoryOptions.EmbeddingModel
+                };
+            }
+
+            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, embOptions, ct);
             if (embeddingResult.Succeeded)
             {
                 queryVector = embeddingResult.Data;
@@ -310,14 +314,13 @@ public class DatabaseMemoryStore : IMemoryStore
     {
         Check.NotNullOrWhiteSpace(scope);
 
-        var entries = await _repository.AsQueryable()
+        var count = await _repository.AsQueryable()
             .Where(e => e.Scope == scope)
-            .ToListAsync(ct);
+            .ExecuteDeleteAsync(ct);
 
-        if (entries.Count > 0)
+        if (count > 0)
         {
-            await _repository.DeleteManyAsync(entries);
-            _logger.LogDebug("Cleared {Count} memory entries for scope {Scope}", entries.Count, scope);
+            _logger.LogDebug("Cleared {Count} memory entries for scope {Scope}", count, scope);
         }
     }
 
@@ -451,14 +454,9 @@ public class DatabaseMemoryStore : IMemoryStore
     private async Task WriteInternalAsync(string scope, string content, Guid? userId, Guid? agentId, CancellationToken ct)
     {
         // 删除该 scope 下所有旧条目
-        var existing = await _repository.AsQueryable()
+        await _repository.AsQueryable()
             .Where(e => e.Scope == scope)
-            .ToListAsync(ct);
-
-        if (existing.Count > 0)
-        {
-            await _repository.DeleteManyAsync(existing);
-        }
+            .ExecuteDeleteAsync(ct);
 
         // 写入新条目
         var entry = new MemoryEntry
@@ -492,16 +490,20 @@ public class DatabaseMemoryStore : IMemoryStore
 
             if (totalCount <= max) return;
 
-            var toDelete = await _repository.AsQueryable()
+            var excessCount = totalCount - max;
+            var idsToDelete = await _repository.AsQueryable()
                 .Where(e => e.Scope == scopeKey)
                 .OrderBy(e => e.CreationTime)
-                .Take(totalCount - max)
+                .Take(excessCount)
+                .Select(e => e.Id)
                 .ToListAsync(ct);
 
-            if (toDelete.Count > 0)
+            if (idsToDelete.Count > 0)
             {
-                await _repository.DeleteManyAsync(toDelete);
-                _logger.LogDebug("Trimmed {Count} excess memory entries for scope {Scope}", toDelete.Count, scopeKey);
+                await _repository.AsQueryable()
+                    .Where(e => idsToDelete.Contains(e.Id))
+                    .ExecuteDeleteAsync(ct);
+                _logger.LogDebug("Trimmed {Count} excess memory entries for scope {Scope}", idsToDelete.Count, scopeKey);
             }
         }
         catch (Exception ex)
@@ -522,7 +524,18 @@ public class DatabaseMemoryStore : IMemoryStore
 
         try
         {
-            var result = await _embeddingService.GenerateEmbeddingAsync(content, ct: ct);
+            // 使用 Memory 配置的 Embedding Provider/Model（避免回退到不支持 Embedding 的默认 Provider）
+            EmbeddingOptions? options = null;
+            if (_memoryOptions is { EmbeddingProvider: not null } or { EmbeddingModel: not null })
+            {
+                options = new EmbeddingOptions
+                {
+                    Provider = _memoryOptions.EmbeddingProvider,
+                    Model = _memoryOptions.EmbeddingModel
+                };
+            }
+
+            var result = await _embeddingService.GenerateEmbeddingAsync(content, options, ct);
             return result.Succeeded ? result.Data : null;
         }
         catch (Exception ex)

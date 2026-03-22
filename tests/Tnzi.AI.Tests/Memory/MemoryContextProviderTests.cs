@@ -42,19 +42,19 @@ public class MemoryContextProviderTests
     }
 
     [Fact]
-    public async Task GetContextAsync_CachesMemory_OnSecondCall()
+    public async Task GetContextAsync_ReadsFreshOnEachCall()
     {
         var mockStore = new Mock<IMemoryStore>();
         mockStore.Setup(s => s.ReadAsync(It.IsAny<MemoryScope>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("cached content");
+            .ReturnsAsync("fresh content");
 
         var provider = CreateProvider(mockStore.Object);
 
         await provider.GetContextAsync([]);
         await provider.GetContextAsync([]);
 
-        // 只调用一次
-        mockStore.Verify(s => s.ReadAsync(It.IsAny<MemoryScope>(), It.IsAny<CancellationToken>()), Times.Once);
+        // 每次调用都读取最新数据（支持同一对话中 save_memory 后刷新）
+        mockStore.Verify(s => s.ReadAsync(It.IsAny<MemoryScope>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]

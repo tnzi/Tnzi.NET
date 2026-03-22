@@ -18,7 +18,7 @@ public class ThinkingMiddleware : IAiMiddleware
     private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<ThinkingMiddleware> _logger;
 
-    public int Order => 50;
+    public int Order => AiMiddlewareOrders.Thinking;
 
     public ThinkingMiddleware(IOptionsMonitor<AIOptions> options, ILogger<ThinkingMiddleware> logger)
     {
@@ -28,6 +28,9 @@ public class ThinkingMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
+        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+            return await next(context, cancellationToken);
+
         SetupThinkingContext(context);
         try
         {
@@ -44,6 +47,13 @@ public class ThinkingMiddleware : IAiMiddleware
         AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        {
+            await foreach (var chunk in next(context, cancellationToken))
+                yield return chunk;
+            yield break;
+        }
+
         SetupThinkingContext(context);
         try
         {

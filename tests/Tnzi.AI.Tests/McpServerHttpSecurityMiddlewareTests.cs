@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
-using Tnzi.AI.Infrastructure.Mcp.Server;
+using Tnzi.AI.Mcp.Server;
+using Tnzi.AI.Mcp.Options;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests;

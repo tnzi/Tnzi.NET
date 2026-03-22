@@ -1,5 +1,3 @@
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Services;
 
 /// <summary>
@@ -56,14 +54,21 @@ public class UserNotificationService : ApplicationService, IUserNotificationServ
     public async Task<Result<UserNotificationDetail>> GetDetailAsync(Guid userId, Guid recipientId, CancellationToken cancellationToken = default)
     {
         var recipient = await _recipientRepository
-            .AsQueryable()
-            .AsNoTracking()
+            .AsQueryable(withTracking: true)
             .Include(r => r.Message)
             .Where(r => r.Id == recipientId && r.UserId == userId)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (recipient == null)
             return Fail<UserNotificationDetail>("Notification not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        // Auto mark as read on detail view
+        if (!recipient.IsRead)
+        {
+            recipient.IsRead = true;
+            recipient.ReadTime = DateTime.UtcNow;
+            await _recipientRepository.UpdateAsync(recipient, cancellationToken);
+        }
 
         var detail = new UserNotificationDetail
         {
@@ -74,7 +79,7 @@ public class UserNotificationService : ApplicationService, IUserNotificationServ
             IsHtml = recipient.Message.IsHtml,
             Category = recipient.Message.Category,
             Priority = recipient.Message.Priority,
-            IsRead = recipient.IsRead,
+            IsRead = true,
             ReadTime = recipient.ReadTime,
             CreationTime = recipient.Message.CreationTime
         };

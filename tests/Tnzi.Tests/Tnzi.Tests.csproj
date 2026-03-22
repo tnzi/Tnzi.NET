@@ -25,6 +25,7 @@
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\..\src\Tnzi\Tnzi.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Mapster\Tnzi.Mapster.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Hosting\Tnzi.Hosting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

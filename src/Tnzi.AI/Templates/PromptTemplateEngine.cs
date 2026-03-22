@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
-
 namespace Tnzi.AI.Templates;
 
 /// <summary>

@@ -63,10 +63,11 @@ public class SkillContextProviderTests
 
         injection.HasContent.ShouldBeTrue();
         injection.Tools.ShouldNotBeNull();
-        injection.Tools!.Count.ShouldBe(3); // skill_search + skill_get + skill_activate
+        injection.Tools!.Count.ShouldBe(4); // skill_search + skill_get + skill_activate + skill_deactivate
         injection.Tools.Select(t => t.Name).ShouldContain("skill_search");
         injection.Tools.Select(t => t.Name).ShouldContain("skill_get");
         injection.Tools.Select(t => t.Name).ShouldContain("skill_activate");
+        injection.Tools.Select(t => t.Name).ShouldContain("skill_deactivate");
     }
 
     #endregion
@@ -91,7 +92,7 @@ public class SkillContextProviderTests
         injection.Messages.ShouldNotBeNull();
         injection.Messages!.Count.ShouldBeGreaterThan(0);
         injection.Tools.ShouldNotBeNull();
-        injection.Tools!.Count.ShouldBe(3);
+        injection.Tools!.Count.ShouldBe(4);
     }
 
     #endregion
@@ -273,6 +274,101 @@ public class SkillContextProviderTests
 
         // Should not throw
         await provider.OnCompletedAsync([]);
+    }
+
+    #endregion
+
+    #region skill_deactivate
+
+    [Fact]
+    public async Task SkillDeactivate_RemovesActivatedSkill()
+    {
+        var skill = new SkillDefinition
+        {
+            Slug = "active-skill",
+            Name = "Active Skill",
+            Content = "content",
+            Enabled = true
+        };
+        var (registry, templateEngine) = CreateMocks([skill]);
+        registry.Setup(r => r.GetBySlugAsync("active-skill", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(skill);
+        templateEngine.Setup(e => e.Render(skill, null))
+            .Returns(new SkillRenderResult { Success = true, RenderedContent = "Rendered" });
+
+        var provider = CreateProvider(SkillInjectionMode.OnDemandTools, registry, templateEngine);
+        var injection = await provider.GetContextAsync([]);
+
+        // Activate first
+        var activateFunc = (AIFunction)injection.Tools!.First(t => t.Name == "skill_activate");
+        await activateFunc.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["slug"] = "active-skill" }),
+            CancellationToken.None);
+
+        // Verify activated
+        var injectionAfterActivate = await provider.GetContextAsync([]);
+        injectionAfterActivate.ActiveSkills.ShouldNotBeNull();
+        injectionAfterActivate.ActiveSkills!.Count.ShouldBe(1);
+
+        // Deactivate
+        var deactivateFunc = (AIFunction)injection.Tools!.First(t => t.Name == "skill_deactivate");
+        var result = (await deactivateFunc.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["slug"] = "active-skill" }),
+            CancellationToken.None))?.ToString() ?? string.Empty;
+
+        result.ShouldContain("deactivated");
+
+        // Verify deactivated
+        var injectionAfterDeactivate = await provider.GetContextAsync([]);
+        (injectionAfterDeactivate.ActiveSkills == null || injectionAfterDeactivate.ActiveSkills.Count == 0).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SkillDeactivate_NotActive_ReturnsNotActiveMessage()
+    {
+        var provider = CreateProvider(SkillInjectionMode.OnDemandTools, []);
+        var injection = await provider.GetContextAsync([]);
+
+        var deactivateFunc = (AIFunction)injection.Tools!.First(t => t.Name == "skill_deactivate");
+        var result = (await deactivateFunc.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["slug"] = "nonexistent" }),
+            CancellationToken.None))?.ToString() ?? string.Empty;
+
+        result.ShouldContain("was not active");
+    }
+
+    [Fact]
+    public async Task SkillDeactivate_CaseInsensitive()
+    {
+        var skill = new SkillDefinition
+        {
+            Slug = "My-Skill",
+            Name = "My Skill",
+            Content = "content",
+            Enabled = true
+        };
+        var (registry, templateEngine) = CreateMocks([skill]);
+        registry.Setup(r => r.GetBySlugAsync("My-Skill", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(skill);
+        templateEngine.Setup(e => e.Render(skill, null))
+            .Returns(new SkillRenderResult { Success = true, RenderedContent = "Rendered" });
+
+        var provider = CreateProvider(SkillInjectionMode.OnDemandTools, registry, templateEngine);
+        var injection = await provider.GetContextAsync([]);
+
+        // Activate with original case
+        var activateFunc = (AIFunction)injection.Tools!.First(t => t.Name == "skill_activate");
+        await activateFunc.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["slug"] = "My-Skill" }),
+            CancellationToken.None);
+
+        // Deactivate with different case
+        var deactivateFunc = (AIFunction)injection.Tools!.First(t => t.Name == "skill_deactivate");
+        var result = (await deactivateFunc.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?> { ["slug"] = "my-skill" }),
+            CancellationToken.None))?.ToString() ?? string.Empty;
+
+        result.ShouldContain("deactivated");
     }
 
     #endregion

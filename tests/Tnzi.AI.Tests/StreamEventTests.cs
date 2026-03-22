@@ -75,8 +75,8 @@ public class StreamEventTests
             Model = "gpt-4",
             Usage = new TokenUsageDto
             {
-                PromptTokens = 100,
-                CompletionTokens = 50,
+                InputTokens = 100,
+                OutputTokens = 50,
                 TotalTokens = 150
             }
         };

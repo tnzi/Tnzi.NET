@@ -243,7 +243,7 @@ public class AgentEvaluatorTests
         _repositoryMock.Setup(r => r.InsertAsync(It.IsAny<EvaluationRun>(), It.IsAny<CancellationToken>()))
             .Callback<EvaluationRun, CancellationToken>((run, _) =>
             {
-                insertStatus = run.Status;
+                insertStatus = run.Status.ToString();
                 insertCaseCount = run.CaseCount;
             })
             .Returns(Task.CompletedTask);
@@ -255,12 +255,12 @@ public class AgentEvaluatorTests
         await _evaluator.EvaluateBatchAsync(cases);
 
         // Assert — 验证 Insert 时状态为 running
-        insertStatus.ShouldBe("running");
+        insertStatus.ShouldBe("Running");
         insertCaseCount.ShouldBe(1);
 
         // Assert — 验证 Update 时状态为 completed（对象已被修改，直接验证最终状态）
         _repositoryMock.Verify(r => r.UpdateAsync(It.Is<EvaluationRun>(run =>
-            run.Status == "completed" && run.PassedCount == 1), It.IsAny<CancellationToken>()), Times.Once);
+            run.Status == EvaluationRunStatus.Completed && run.PassedCount == 1), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

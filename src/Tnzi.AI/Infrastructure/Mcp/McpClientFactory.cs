@@ -8,6 +8,10 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// </summary>
 public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
 {
+    // MCP 标准 Header 常量（与 McpServerSecurityMiddleware 共享语义）
+    private const string ApiKeyHeaderName = "X-Api-Key";
+    private const string TenantHeaderName = "X-Tenant-Id";
+
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<McpClientFactory> _logger;
     private readonly ConcurrentDictionary<string, IMcpClientAdapter> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -198,7 +202,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
     private static bool TryApplyHttpQueryFallback(HttpClientTransportOptions options, Dictionary<string, string> headers)
     {
         string? apiKey = null;
-        if (headers.TryGetValue(McpServerSecurityMiddleware.ApiKeyHeaderName, out var apiKeyHeader)
+        if (headers.TryGetValue(ApiKeyHeaderName, out var apiKeyHeader)
             && !string.IsNullOrWhiteSpace(apiKeyHeader))
         {
             apiKey = apiKeyHeader;
@@ -212,7 +216,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
                 : authorization.Trim();
         }
 
-        headers.TryGetValue(McpServerSecurityMiddleware.TenantHeaderName, out var tenantId);
+        headers.TryGetValue(TenantHeaderName, out var tenantId);
 
         if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(tenantId))
         {

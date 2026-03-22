@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Workflow engine module for Tnzi.NET AI - DAG execution, node types, workflow service, checkpoint management</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
+  </ItemGroup>
+
+</Project>

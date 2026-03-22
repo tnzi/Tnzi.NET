@@ -73,10 +73,6 @@ public class StorageModule : TnziApplicationModule
         // 注册文件清理后台任务（定时执行）
         services.AddHostedService<FileCleanupBackgroundService>();
 
-        // 注意：FileFieldActionFilter 已移除
-        // 文件引用现在由 TnziDbContext.SaveChangesAsync() 自动处理
-        // 在同一事务中确保数据一致性
-
         return Task.CompletedTask;
     }
 }

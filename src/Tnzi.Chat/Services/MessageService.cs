@@ -424,17 +424,15 @@ public class MessageService : ApplicationService, IMessageService
         if (endDate.HasValue)
             queryable = queryable.Where(m => m.CreationTime <= endDate.Value);
 
-        var messages = await queryable.ToListAsync(cancellationToken);
-
         var dto = new ChatStatisticsDto
         {
-            TotalMessages = messages.Count,
-            SentMessages = messages.Count(m => m.IsSent),
-            DraftMessages = messages.Count(m => !m.IsSent),
-            PublicMessages = messages.Count(m => m.MessageType == MessageType.Public),
-            PrivateMessages = messages.Count(m => m.MessageType == MessageType.Private),
-            ActiveSenders = messages.Select(m => m.SenderId).Distinct().Count(),
-            ImportantMessages = messages.Count(m => m.IsImportant)
+            TotalMessages = await queryable.CountAsync(cancellationToken),
+            SentMessages = await queryable.CountAsync(m => m.IsSent, cancellationToken),
+            DraftMessages = await queryable.CountAsync(m => !m.IsSent, cancellationToken),
+            PublicMessages = await queryable.CountAsync(m => m.MessageType == MessageType.Public, cancellationToken),
+            PrivateMessages = await queryable.CountAsync(m => m.MessageType == MessageType.Private, cancellationToken),
+            ActiveSenders = await queryable.Select(m => m.SenderId).Distinct().CountAsync(cancellationToken),
+            ImportantMessages = await queryable.CountAsync(m => m.IsImportant, cancellationToken)
         };
 
         // 回复数量需要单独查询

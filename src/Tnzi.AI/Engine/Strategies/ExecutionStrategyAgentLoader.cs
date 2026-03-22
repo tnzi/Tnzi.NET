@@ -26,8 +26,8 @@ internal static class ExecutionStrategyAgentLoader
         return promptTokens > 0 || completionTokens > 0
             ? new TokenUsageDto
             {
-                PromptTokens = promptTokens,
-                CompletionTokens = completionTokens,
+                InputTokens = promptTokens,
+                OutputTokens = completionTokens,
                 TotalTokens = promptTokens + completionTokens
             }
             : null;

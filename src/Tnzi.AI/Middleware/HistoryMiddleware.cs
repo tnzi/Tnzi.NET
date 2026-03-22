@@ -9,7 +9,7 @@ public class HistoryMiddleware : IAiMiddleware
     private readonly IOptions<AIOptions> _options;
     private readonly ILogger<HistoryMiddleware> _logger;
 
-    public int Order => 300;
+    public int Order => AiMiddlewareOrders.History;
 
     public HistoryMiddleware(
         IAgentThreadInternalService threadService,
@@ -23,6 +23,9 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
+        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+            return await next(context, cancellationToken);
+
         // Before: 自动创建线程（如果 ThreadId 为 null）
         await EnsureThreadAsync(context, cancellationToken);
 
@@ -109,6 +112,13 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        {
+            await foreach (var chunk in next(context, cancellationToken))
+                yield return chunk;
+            yield break;
+        }
+
         // Before: 自动创建线程（如果 ThreadId 为 null）
         await EnsureThreadAsync(context, cancellationToken);
 
@@ -133,8 +143,9 @@ public class HistoryMiddleware : IAiMiddleware
             }
         }
 
-        // 收集流式响应文本
+        // 收集流式响应文本和工具调用详情
         var responseBuilder = new StringBuilder();
+        var toolCallDetails = new List<ToolCallDetail>();
         TokenUsageDto? lastUsage = null;
         string? lastFinishReason = null;
 
@@ -142,7 +153,19 @@ public class HistoryMiddleware : IAiMiddleware
         {
             if (chunk.Text != null)
             {
-                responseBuilder.Append(chunk.Text);
+                // Fix streaming token fracture: some providers (e.g., DeepSeek) insert
+                // \n\n before each token after tool calls. Detect and replace with space.
+                var text = chunk.Text;
+                if (text.StartsWith("\n\n") && responseBuilder.Length > 0
+                    && responseBuilder[^1] != '\n' && text.AsSpan().TrimStart().Length <= 15)
+                {
+                    text = " " + text.AsSpan(2).TrimStart().ToString();
+                }
+                responseBuilder.Append(text);
+            }
+            if (chunk.ToolCalls is { Count: > 0 })
+            {
+                toolCallDetails.AddRange(chunk.ToolCalls);
             }
             if (chunk.Usage != null)
             {
@@ -156,6 +179,8 @@ public class HistoryMiddleware : IAiMiddleware
         }
 
         // After: 保存消息（guardrail 拒绝时不保存，避免将被拦截的内容写入历史）
+        // 使用 CancellationToken.None：流式结束后客户端可能已断开（token 已取消），
+        // 但消息持久化必须完成，否则对话历史会丢失
         if (threadId != null && lastFinishReason != "guardrail_rejected")
         {
             try
@@ -163,7 +188,7 @@ public class HistoryMiddleware : IAiMiddleware
                 if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
                 {
                     await _threadService.SaveMessageAsync(
-                        threadId.Value, "user", context.Request.UserMessage, ct: cancellationToken);
+                        threadId.Value, "user", context.Request.UserMessage, ct: CancellationToken.None);
                 }
 
                 var response = responseBuilder.ToString();
@@ -172,9 +197,12 @@ public class HistoryMiddleware : IAiMiddleware
                     var usageJson = lastUsage != null
                         ? JsonSerializer.Serialize(lastUsage)
                         : null;
+                    var toolCallsJson = toolCallDetails.Count > 0
+                        ? JsonSerializer.Serialize(toolCallDetails)
+                        : null;
 
                     await _threadService.SaveMessageAsync(
-                        threadId.Value, "assistant", response, usage: usageJson, ct: cancellationToken);
+                        threadId.Value, "assistant", response, toolCalls: toolCallsJson, usage: usageJson, ct: CancellationToken.None);
                 }
 
                 _logger.LogDebug("Persisted streaming messages for thread {ThreadId}", threadId);
@@ -195,8 +223,9 @@ public class HistoryMiddleware : IAiMiddleware
 
         try
         {
-            var (_, resolvedThreadId) = await _threadService.GetOrCreateThreadAsync(null, context.Request.AgentId, ct);
+            var (_, resolvedThreadId, isNewThread) = await _threadService.GetOrCreateThreadAsync(null, context.Request.AgentId, ct);
             context.Request.ThreadId = resolvedThreadId;
+            context.IsNewThread = isNewThread;
             _logger.LogDebug("Auto-created thread {ThreadId} for agent {AgentId}", resolvedThreadId, context.Request.AgentId);
         }
         catch (BusinessException)

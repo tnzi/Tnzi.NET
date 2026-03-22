@@ -32,8 +32,9 @@ public class ToolResolver : IToolResolver
     private readonly ILogger<ToolResolver> _logger;
 
     /// <summary>
-    /// OpenAPI 工具缓存（首次解析后缓存，避免重复拉取规范）
+    /// OpenAPI 工具缓存（线程安全的延迟初始化，避免重复拉取规范）
     /// </summary>
+    private readonly SemaphoreSlim _openApiCacheLock = new(1, 1);
     private IReadOnlyList<AITool>? _openApiToolsCache;
 
     public ToolResolver(
@@ -131,7 +132,7 @@ public class ToolResolver : IToolResolver
     }
 
     /// <summary>
-    /// 获取 OpenAPI 生成的工具（按 Scoped 生命周期缓存，避免重复拉取规范）
+    /// 获取 OpenAPI 生成的工具（线程安全的延迟初始化缓存，避免重复拉取规范）
     /// </summary>
     private async Task<IReadOnlyList<AITool>?> GetOpenApiToolsAsync(CancellationToken ct)
     {
@@ -140,13 +141,21 @@ public class ToolResolver : IToolResolver
             return null;
         }
 
+        // 双检锁：快速路径无锁读取，慢速路径仅在首次初始化时加锁
         if (_openApiToolsCache != null)
         {
             return _openApiToolsCache;
         }
 
+        await _openApiCacheLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // 二次检查：另一个线程可能已在等锁期间完成初始化
+            if (_openApiToolsCache != null)
+            {
+                return _openApiToolsCache;
+            }
+
             _openApiToolsCache = await _openApiToolGenerator.GenerateToolsAsync(ct).ConfigureAwait(false);
             if (_openApiToolsCache.Count > 0)
             {
@@ -158,6 +167,10 @@ public class ToolResolver : IToolResolver
         {
             _logger.LogWarning(ex, "Failed to generate OpenAPI tools, skipping");
             return null;
+        }
+        finally
+        {
+            _openApiCacheLock.Release();
         }
     }
 }

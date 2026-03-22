@@ -43,6 +43,26 @@ public class AgentThreadMessage : CreationAuditedEntity<Guid>, IMultiTenant
     public string? ComponentRefs { get; set; }
 
     /// <summary>
+    /// 反馈评价: true=👍, false=👎, null=未评价
+    /// </summary>
+    public bool? FeedbackRating { get; set; }
+
+    /// <summary>
+    /// 差评原因标签（JSON 数组，多选），如 ["incorrect","too_long"]
+    /// </summary>
+    public string? FeedbackTags { get; set; }
+
+    /// <summary>
+    /// 反馈文本
+    /// </summary>
+    public string? FeedbackComment { get; set; }
+
+    /// <summary>
+    /// 反馈提交时间
+    /// </summary>
+    public DateTime? FeedbackTime { get; set; }
+
+    /// <summary>
     /// 导航属性
     /// </summary>
     public virtual AgentThread? Thread { get; set; }

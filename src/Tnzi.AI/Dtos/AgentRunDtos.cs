@@ -104,8 +104,12 @@ public class AgentRunQueryDto : PagedQueryDto
 
     /// <summary>Filter by agent ID</summary>
     public Guid? AgentId { get; set; }
+    /// <summary>Filter by workflow definition ID</summary>
+    public Guid? WorkflowDefinitionId { get; set; }
     /// <summary>Filter by status</summary>
     public AgentRunStatus? Status { get; set; }
+    /// <summary>Filter by execution mode</summary>
+    public AgentExecutionMode? ExecutionMode { get; set; }
     /// <summary>Filter by start time (inclusive)</summary>
     public DateTime? StartTime { get; set; }
     /// <summary>Filter by end time (inclusive)</summary>
@@ -169,7 +173,8 @@ public class ApproveRunDto
 /// </summary>
 public class RejectRunDto
 {
-    /// <summary>Rejection feedback</summary>
+    /// <summary>Rejection comment</summary>
     [MaxLength(1000)]
-    public string? Feedback { get; set; }
+    public string? Comment { get; set; }
 }
+

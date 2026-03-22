@@ -19,13 +19,20 @@ public sealed class SkillContextProvider : IContextProvider
     private readonly ISkillRegistry _registry;
     private readonly ISkillTemplateEngine _templateEngine;
     private readonly SkillsOptions _options;
+    private readonly ISkillLoadTracker? _skillLoadTracker;
     private readonly ILogger<SkillContextProvider> _logger;
 
     // 按需工具（仅当 InjectionMode 为 OnDemandTools 或 Both 时非空）
     private readonly AITool[] _skillTools;
 
-    // 当前 session 已激活的技能
+    // 当前 session 已激活的技能（通过 _activatedLock 保护线程安全）
+    private readonly object _activatedLock = new();
     private readonly List<SkillDefinition> _activatedSkills = [];
+
+    /// <summary>
+    /// ToolContext.Items 中存储已加载 Skill slug 的 key
+    /// </summary>
+    internal const string LoadedSkillsKey = "RequiresSkill.LoadedSlugs";
 
     /// <summary>
     /// 初始化 SkillContextProvider
@@ -34,12 +41,14 @@ public sealed class SkillContextProvider : IContextProvider
         ISkillRegistry registry,
         ISkillTemplateEngine templateEngine,
         SkillsOptions options,
-        ILogger<SkillContextProvider> logger)
+        ILogger<SkillContextProvider> logger,
+        ISkillLoadTracker? skillLoadTracker = null)
     {
         _registry = Check.NotNull(registry);
         _templateEngine = Check.NotNull(templateEngine);
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
+        _skillLoadTracker = skillLoadTracker;
 
         var mode = options.InjectionMode;
         if (mode is SkillInjectionMode.OnDemandTools or SkillInjectionMode.Both)
@@ -57,7 +66,11 @@ public sealed class SkillContextProvider : IContextProvider
                 AIFunctionFactory.Create(
                     SkillActivateAsync,
                     name: "skill_activate",
-                    description: "Activate a skill with parameters. Applies constraints and returns rendered content.")
+                    description: "Activate a skill with parameters. Applies constraints and returns rendered content."),
+                AIFunctionFactory.Create(
+                    SkillDeactivateAsync,
+                    name: "skill_deactivate",
+                    description: "Deactivate a previously activated skill by slug. Removes its constraints.")
             ];
         }
         else
@@ -92,9 +105,12 @@ public sealed class SkillContextProvider : IContextProvider
                 _logger.LogDebug("Injected {Count} skill tools into context", _skillTools.Length);
             }
 
-            // Include activated skills
-            if (_activatedSkills.Count > 0)
-                injection.ActiveSkills = [.. _activatedSkills];
+            // Include activated skills (thread-safe snapshot)
+            lock (_activatedLock)
+            {
+                if (_activatedSkills.Count > 0)
+                    injection.ActiveSkills = [.. _activatedSkills];
+            }
 
             return injection.HasContent ? injection : ContextInjection.Empty;
         }
@@ -118,7 +134,7 @@ public sealed class SkillContextProvider : IContextProvider
         [Description("Search keyword")] string keyword,
         CancellationToken ct = default)
     {
-        var results = await _registry.SearchAsync(keyword, 10, ct);
+        var results = await _registry.SearchAsync(keyword, _options.SearchMaxResults, ct);
         if (results.Count == 0)
             return $"No skills found matching: {keyword}";
 
@@ -135,19 +151,45 @@ public sealed class SkillContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// Gets full content of a skill by slug.
+    /// Gets full content of one or more skills by slug (comma-separated for batch loading).
     /// </summary>
     private async Task<string> SkillGetAsync(
-        [Description("Skill slug")] string slug,
+        [Description("Skill slug (supports comma-separated for batch loading, e.g. 'sql-query-patterns, data-dictionary')")] string slug,
         CancellationToken ct = default)
     {
-        var skill = await _registry.GetBySlugAsync(slug, ct);
-        if (skill == null)
-            return $"Skill not found: {slug}";
+        var slugs = slug.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        // Render with default values (preview)
-        var result = _templateEngine.Render(skill);
-        return result.Success ? result.RenderedContent : skill.Content;
+        if (slugs.Length == 1)
+        {
+            var skill = await _registry.GetBySlugAsync(slugs[0], ct);
+            if (skill == null)
+                return $"Skill not found: {slugs[0]}";
+
+            MarkSkillLoaded(slugs[0]);
+            var result = _templateEngine.Render(skill);
+            return result.Success ? result.RenderedContent : skill.Content;
+        }
+
+        // 批量加载多个 Skill
+        var sb = new StringBuilder();
+        foreach (var s in slugs)
+        {
+            var skill = await _registry.GetBySlugAsync(s, ct);
+            if (skill == null)
+            {
+                sb.AppendLine($"--- Skill not found: {s} ---\n");
+                continue;
+            }
+
+            MarkSkillLoaded(s);
+            var result = _templateEngine.Render(skill);
+            var content = result.Success ? result.RenderedContent : skill.Content;
+            sb.AppendLine($"--- {skill.Name} ---\n");
+            sb.AppendLine(content);
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>
@@ -161,10 +203,6 @@ public sealed class SkillContextProvider : IContextProvider
         var skill = await _registry.GetBySlugAsync(slug, ct);
         if (skill == null)
             return $"Skill not found: {slug}";
-
-        // Idempotency check
-        if (_activatedSkills.Any(s => s.Slug == slug))
-            return $"Skill '{skill.Name}' is already activated.";
 
         // Parse parameters
         Dictionary<string, string>? paramDict = null;
@@ -180,11 +218,32 @@ public sealed class SkillContextProvider : IContextProvider
             }
         }
 
+        // 幂等检查：同 slug 已激活时，相同参数直接返回，不同参数更新
+        lock (_activatedLock)
+        {
+            var existing = _activatedSkills.FindIndex(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            if (existing >= 0 && paramDict == null)
+            {
+                MarkSkillLoaded(slug);
+                return $"Skill '{skill.Name}' is already activated.";
+            }
+        }
+
         var renderResult = _templateEngine.Render(skill, paramDict);
         if (!renderResult.Success)
             return $"Skill activation failed:\n{string.Join("\n", renderResult.Errors)}";
 
-        _activatedSkills.Add(skill);
+        lock (_activatedLock)
+        {
+            var existing = _activatedSkills.FindIndex(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            if (existing >= 0)
+                _activatedSkills.RemoveAt(existing);
+            _activatedSkills.Add(skill);
+        }
+
+        // Activation implies the AI has read the skill content — mark as loaded
+        // so RequiresSkillToolMiddleware doesn't reject tools requiring this skill
+        MarkSkillLoaded(slug);
 
         var sb = new StringBuilder();
         sb.AppendLine($"## Skill Activated: {skill.Name}");
@@ -195,6 +254,27 @@ public sealed class SkillContextProvider : IContextProvider
         if (skill.RequiredModel != null)
             sb.AppendLine($"**Model override**: Using {skill.RequiredModel}.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Deactivates a previously activated skill. Removes its constraints from the session.
+    /// </summary>
+    private Task<string> SkillDeactivateAsync(
+        [Description("Skill slug to deactivate")] string slug,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(slug))
+            return Task.FromResult("Slug is required.");
+
+        int removed;
+        lock (_activatedLock)
+        {
+            removed = _activatedSkills.RemoveAll(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult(removed > 0
+            ? $"Skill '{slug}' has been deactivated. Its constraints are no longer applied."
+            : $"Skill '{slug}' was not active.");
     }
 
     /// <summary>
@@ -221,5 +301,36 @@ public sealed class SkillContextProvider : IContextProvider
         }
         sb.AppendLine("Use skill_activate to activate a skill with parameters.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 标记 Skill 已通过 skill_get 加载。
+    /// Writes to ISkillLoadTracker (scoped, persists across tool calls) as primary store,
+    /// and also writes to ToolContext.Items for backward compatibility.
+    /// </summary>
+    internal void MarkSkillLoaded(string slug)
+    {
+        // Primary: scoped tracker persists across tool calls within the same HTTP request
+        _skillLoadTracker?.MarkLoaded(slug);
+
+        // Backward compatibility: also write to ToolContext.Items (per-tool-call, transient)
+        var toolContext = ToolContextAccessor.Current;
+        if (toolContext == null) return;
+
+        var loaded = GetOrCreateLoadedSlugs(toolContext);
+        loaded.TryAdd(slug, 0);
+    }
+
+    /// <summary>
+    /// 获取已加载的 Skill slug 集合（线程安全）
+    /// </summary>
+    internal static ConcurrentDictionary<string, byte> GetOrCreateLoadedSlugs(IToolContext toolContext)
+    {
+        if (toolContext.Items.TryGetValue(LoadedSkillsKey, out var obj) && obj is ConcurrentDictionary<string, byte> existing)
+            return existing;
+
+        var loaded = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        toolContext.Items[LoadedSkillsKey] = loaded;
+        return loaded;
     }
 }

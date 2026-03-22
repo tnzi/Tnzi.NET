@@ -46,7 +46,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     [HttpGet("{runId:guid}")]
     public virtual async Task<ApiResult<AgentRunDto>> Get(Guid runId)
     {
-        var result = await RunService.GetAsync(runId);
+        var result = await RunService.GetByIdAsync(runId);
         return result.ToApiResult();
     }
 
@@ -116,7 +116,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     [HttpPost("{runId:guid}/reject")]
     public virtual async Task<ApiResult> Reject(Guid runId, [FromBody] RejectRunDto? input)
     {
-        var result = await RunService.RejectAsync(runId, input?.Feedback);
+        var result = await RunService.RejectAsync(runId, input?.Comment);
         return result.ToApiResult();
     }
 
@@ -129,4 +129,5 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
         var result = await RunService.RetryNodeAsync(runId, nodeId);
         return result.ToApiResult();
     }
+
 }

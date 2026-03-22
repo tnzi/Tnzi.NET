@@ -3,7 +3,7 @@ namespace Tnzi.AI.Infrastructure.ChatHistory;
 /// <summary>
 /// 聊天历史辅助工具 — 提供 ChatReducer 共享的静态方法
 /// </summary>
-internal static class ChatHistoryHelper
+public static class ChatHistoryHelper
 {
     /// <summary>
     /// 将消息按对话轮次分组

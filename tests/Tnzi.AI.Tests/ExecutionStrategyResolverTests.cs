@@ -106,4 +106,49 @@ public class ExecutionStrategyResolverTests
         var strategy = ExecutionStrategyResolver.Resolve(AgentExecutionMode.Single, "{invalid json}");
         strategy.ShouldBeOfType<SingleAgentStrategy>();
     }
+
+    [Fact]
+    public void Resolve_AgentAsToolsMode_ReturnsAgentAsToolsStrategy()
+    {
+        var childId = Guid.NewGuid();
+        var json = $$"""
+        {
+            "agentAsTools": {
+                "agents": {
+                    "billing": "{{childId}}"
+                }
+            }
+        }
+        """;
+
+        var strategy = ExecutionStrategyResolver.Resolve(AgentExecutionMode.AgentAsTools, json);
+        strategy.ShouldBeOfType<AgentAsToolsExecutionStrategy>();
+    }
+
+    [Fact]
+    public void Resolve_AgentAsToolsModeWithoutConfig_ReturnsAgentAsToolsWithDefaults()
+    {
+        var strategy = ExecutionStrategyResolver.Resolve(AgentExecutionMode.AgentAsTools, null);
+        strategy.ShouldBeOfType<AgentAsToolsExecutionStrategy>();
+    }
+
+    [Fact]
+    public void Resolve_HandoffWithAllowReturnToSource_ParsesCorrectly()
+    {
+        var agentId = Guid.NewGuid();
+        var json = $$"""
+        {
+            "handoff": {
+                "targets": {
+                    "billing": "{{agentId}}"
+                },
+                "maxHandoffs": 5,
+                "allowReturnToSource": false
+            }
+        }
+        """;
+
+        var strategy = ExecutionStrategyResolver.Resolve(AgentExecutionMode.Handoff, json);
+        strategy.ShouldBeOfType<HandoffExecutionStrategy>();
+    }
 }

@@ -20,7 +20,7 @@ public class AICoderModule : TnziCustomModule
     /// <summary>
     /// 加载顺序（在 AIModule 之后）
     /// </summary>
-    public override int LoadOrder => 51;
+    public override int LoadOrder => 54;
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
@@ -60,8 +60,8 @@ public class AICoderModule : TnziCustomModule
         services.TryAddSingleton<IWebSearchProvider, DuckDuckGoSearchProvider>();
 
         // 工具基础设施（TryAdd: 如果 AIModule 已注册则跳过）
-        services.TryAddSingleton<ToolScanner>();
-        services.TryAddSingleton<ToolRegistry>();
+        services.TryAddSingleton<IToolScanner, ToolScanner>();
+        services.TryAddSingleton<IToolRegistry, ToolRegistry>();
         services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
 
         // 文件记忆存储（TryAdd: AIModule 已注册 DatabaseMemoryStore 时跳过）
@@ -89,8 +89,8 @@ public class AICoderModule : TnziCustomModule
     {
         // 扫描并注册本模块的工具到 ToolRegistry
         var serviceProvider = context.ServiceProvider;
-        var toolRegistry = serviceProvider.GetRequiredService<ToolRegistry>();
-        var toolScanner = serviceProvider.GetRequiredService<ToolScanner>();
+        var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
+        var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();
         var logger = serviceProvider.GetRequiredService<ILogger<AICoderModule>>();
 
         try

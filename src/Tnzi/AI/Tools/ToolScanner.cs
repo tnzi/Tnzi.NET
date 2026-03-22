@@ -47,6 +47,11 @@ public class ToolScanner : IToolScanner
     {
         var tools = new List<ToolDefinition>();
 
+        // 收集类级 [RequiresSkill] 属性
+        var classSlugs = providerType.GetCustomAttributes<RequiresSkillAttribute>()
+            .Select(a => a.Slug)
+            .ToList();
+
         // 查找所有标记了 [AIFunction] 的公共实例方法
         var methods = providerType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Where(m => m.GetCustomAttribute<AIFunctionAttribute>() != null);
@@ -67,6 +72,11 @@ public class ToolScanner : IToolScanner
                 toolName = toolName[..^5];
             }
 
+            // 合并类级和方法级 [RequiresSkill] slug（去重）
+            var methodSlugs = method.GetCustomAttributes<RequiresSkillAttribute>()
+                .Select(a => a.Slug);
+            var allSlugs = classSlugs.Union(methodSlugs, StringComparer.OrdinalIgnoreCase).ToList();
+
             var tool = new ToolDefinition
             {
                 Name = toolName,
@@ -78,7 +88,8 @@ public class ToolScanner : IToolScanner
                 RequiredPermissions = funcAttr.RequiredPermissions != null
                     ? funcAttr.RequiredPermissions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     : [],
-                Category = funcAttr.Category
+                Category = funcAttr.Category,
+                RequiresSkillSlugs = allSlugs
             };
 
             tools.Add(tool);

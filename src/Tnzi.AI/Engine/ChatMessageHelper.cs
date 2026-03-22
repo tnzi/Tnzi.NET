@@ -49,7 +49,7 @@ public static class ChatMessageHelper
     {
         if (chunk.Usage != null)
         {
-            return (chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens);
+            return (chunk.Usage.InputTokens, chunk.Usage.OutputTokens);
         }
         return (0, 0);
     }

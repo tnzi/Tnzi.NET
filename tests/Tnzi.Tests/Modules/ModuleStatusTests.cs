@@ -166,6 +166,7 @@ public class TestModuleDescriptor : IModuleDescriptor
     public bool IsEnabled => false;
     public ModuleInitializationState InitializationState => ModuleInitializationState.NotStarted;
     public Exception? InitializationError => null;
+    public ModuleManifest Manifest => ModuleManifest.Empty;
 
     public void AddDependency(IModuleDescriptor descriptor) { }
 }

@@ -18,15 +18,16 @@
     <ProjectReference Include="..\Tnzi.Swagger\Tnzi.Swagger.csproj" />
     <ProjectReference Include="..\Tnzi.Localization\Tnzi.Localization.csproj" />
 
-    <!-- 编译时引用（事件处理器 + 弃用模块类型需要）— 不传递给 NuGet 消费者 -->
+    <!-- 可选模块编译时引用（[OptionalDependsOn] + 事件处理器需要）— 不传递给 NuGet 消费者 -->
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.System\Tnzi.System.csproj" PrivateAssets="all" />
-
-    <!-- 弃用变体的编译时引用 — 不传递给 NuGet 消费者 -->
     <ProjectReference Include="..\Tnzi.Authorization\Tnzi.Authorization.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Audit\Tnzi.Audit.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Feature\Tnzi.Feature.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Template\Tnzi.Template.csproj" PrivateAssets="all" />

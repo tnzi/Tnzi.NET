@@ -34,4 +34,14 @@ public interface IUsageAnalyticsService
     /// 按 Agent 分组统计 Token 使用量，返回 Top N 消耗 Agent
     /// </summary>
     Task<Result<List<AgentUsageDto>>> GetUsageByAgentAsync(DateTime startTime, DateTime endTime, int topN = 20);
+
+    /// <summary>
+    /// 获取 Agent 反馈统计（按好评率降序）
+    /// </summary>
+    Task<Result<List<AgentFeedbackStatsDto>>> GetAgentFeedbackStatsAsync(int topN = 20);
+
+    /// <summary>
+    /// 获取成本摘要（按提供商和模型分组的成本统计）
+    /// </summary>
+    Task<Result<CostSummaryDto>> GetCostSummaryAsync(DateTime startTime, DateTime endTime, string? provider = null, string? model = null);
 }

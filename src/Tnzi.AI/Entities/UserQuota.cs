@@ -41,6 +41,16 @@ public class UserQuota : MultiTenantAuditedEntity<Guid>
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    /// 预警阈值（0-1，达到该比例时触发 Warning，默认 0.8 即 80%）
+    /// </summary>
+    public decimal WarningThreshold { get; set; } = 0.8m;
+
+    /// <summary>
+    /// 严重预警阈值（0-1，达到该比例时触发 Critical，默认 0.95 即 95%）
+    /// </summary>
+    public decimal CriticalThreshold { get; set; } = 0.95m;
+
+    /// <summary>
     /// 乐观并发令牌（用于防止并发更新竞态）
     /// </summary>
     public uint Version { get; set; }

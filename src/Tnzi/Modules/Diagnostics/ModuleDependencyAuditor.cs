@@ -1,35 +1,32 @@
 namespace Tnzi.Modules.Diagnostics;
 
 /// <summary>
-/// 模块依赖审计器
-/// 在开发环境中分析模块注册的服务与 [DependsOn] 声明的依赖关系，
-/// 对未声明的跨模块依赖输出警告
+/// Module dependency auditor
+/// Analyzes cross-module service dependencies and reports undeclared [DependsOn] violations
 /// </summary>
 public static class ModuleDependencyAuditor
 {
     /// <summary>
-    /// 审计模块依赖关系
+    /// Audit module dependencies and return structured violation results
     /// </summary>
-    /// <param name="modules">已加载的模块列表</param>
-    /// <param name="moduleServiceMap">每个模块注册的 ServiceDescriptor 列表</param>
-    /// <param name="logger">日志记录器</param>
-    public static void Audit(IReadOnlyList<IModuleDescriptor> modules, Dictionary<Type, List<ServiceDescriptor>> moduleServiceMap, ILogger? logger = null)
+    public static IReadOnlyList<DependencyViolation> AuditAndReport(
+        IReadOnlyList<IModuleDescriptor> modules,
+        Dictionary<Type, List<ServiceDescriptor>> moduleServiceMap)
     {
         if (modules == null || moduleServiceMap == null || modules.Count == 0)
-            return;
+            return [];
 
-        // 构建服务类型 -> 注册模块的映射
         var serviceTypeToModule = BuildServiceTypeToModuleMap(moduleServiceMap);
-
-        // 构建每个模块的完整依赖链（包括传递依赖）
         var moduleDependencyChains = BuildDependencyChains(modules);
-
-        var warningCount = 0;
+        var suppressions = BuildSuppressionMap(modules);
+        var violations = new List<DependencyViolation>();
 
         foreach (var module in modules)
         {
             if (!moduleServiceMap.TryGetValue(module.Type, out var descriptors))
                 continue;
+
+            var moduleSuppression = suppressions.GetValueOrDefault(module.Type);
 
             var declaredDependencies = moduleDependencyChains.TryGetValue(module.Type, out var deps)
                 ? deps
@@ -40,7 +37,6 @@ public static class ModuleDependencyAuditor
                 var implType = descriptor.ImplementationType;
                 if (implType == null) continue;
 
-                // 检查构造函数参数
                 var constructors = implType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
                 foreach (var ctor in constructors)
                 {
@@ -48,26 +44,28 @@ public static class ModuleDependencyAuditor
                     {
                         var paramType = param.ParameterType;
 
-                        // 跳过系统服务和框架基础设施
                         if (IsSystemService(paramType))
                             continue;
 
-                        // 查找该参数类型由哪个模块注册
                         if (serviceTypeToModule.TryGetValue(paramType, out var providerModuleType))
                         {
-                            // 跳过自身模块
                             if (providerModuleType == module.Type)
                                 continue;
 
-                            // 检查是否在依赖链中
                             if (!declaredDependencies.Contains(providerModuleType))
                             {
-                                logger?.LogWarning(
-                                    "Module dependency audit: {ModuleType} uses service {ServiceType} (registered by {ProviderModule}) " +
-                                    "but does not declare [DependsOn(typeof({ProviderModule}))]. " +
-                                    "Consider adding the dependency declaration.",
-                                    module.Type.Name, paramType.Name, providerModuleType.Name, providerModuleType.Name);
-                                warningCount++;
+                                // Check suppression
+                                if (moduleSuppression != null &&
+                                    moduleSuppression.Any(s => s.IgnoredServiceType == null || s.IgnoredServiceType == paramType))
+                                    continue;
+
+                                violations.Add(new DependencyViolation(
+                                    module.Type,
+                                    paramType,
+                                    providerModuleType,
+                                    $"Module {module.Type.Name} uses service {paramType.Name} " +
+                                    $"(registered by {providerModuleType.Name}) " +
+                                    $"but does not declare [DependsOn(typeof({providerModuleType.Name}))]"));
                             }
                         }
                     }
@@ -75,14 +73,26 @@ public static class ModuleDependencyAuditor
             }
         }
 
-        if (warningCount > 0)
+        return violations;
+    }
+
+    /// <summary>
+    /// Audit module dependencies (delegates to AuditAndReport, logs results)
+    /// </summary>
+    public static void Audit(IReadOnlyList<IModuleDescriptor> modules,
+        Dictionary<Type, List<ServiceDescriptor>> moduleServiceMap, ILogger? logger = null)
+    {
+        var violations = AuditAndReport(modules, moduleServiceMap);
+
+        foreach (var v in violations)
         {
-            logger?.LogWarning("Module dependency audit completed with {WarningCount} warning(s)", warningCount);
+            logger?.LogWarning("{Message}", v.Message);
         }
+
+        if (violations.Count > 0)
+            logger?.LogWarning("Module dependency audit completed with {WarningCount} warning(s)", violations.Count);
         else
-        {
             logger?.LogDebug("Module dependency audit completed with no warnings");
-        }
     }
 
     /// <summary>
@@ -159,5 +169,18 @@ public static class ModuleDependencyAuditor
             return true;
 
         return false;
+    }
+
+    private static Dictionary<Type, List<SuppressDependencyAuditAttribute>> BuildSuppressionMap(
+        IReadOnlyList<IModuleDescriptor> modules)
+    {
+        var map = new Dictionary<Type, List<SuppressDependencyAuditAttribute>>();
+        foreach (var module in modules)
+        {
+            var attrs = module.Type.GetCustomAttributes<SuppressDependencyAuditAttribute>().ToList();
+            if (attrs.Count > 0)
+                map[module.Type] = attrs;
+        }
+        return map;
     }
 }

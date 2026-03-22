@@ -1,4 +1,3 @@
-using Tnzi.Notification.Metadata;
 using Message = Tnzi.Notification.Entities.Message;
 
 namespace Tnzi.Notification.Services;
@@ -55,7 +54,6 @@ public class NotificationService : ApplicationService, INotificationService
             return Fail<NotificationInfo>("Notification data is null after creation", 500, ErrorCodes.NOTIFICATION_ERROR);
 
         var notificationInfo = createResult.Data;
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Handle scheduled notifications: defer sending until ScheduledTime
         if (request.ScheduledTime.HasValue && request.ScheduledTime.Value > DateTime.UtcNow)
@@ -266,8 +264,10 @@ public class NotificationService : ApplicationService, INotificationService
 
     public async Task<Result> SendAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
+        // Use tracking query to avoid conflict when entity is already tracked
+        // (e.g., CreateAndSendAsync inserts then immediately sends)
         var notification = await _notificationRepository
-            .AsQueryable()
+            .AsQueryable(withTracking: true)
             .Include(n => n.Recipients)
             .Include(n => n.Attachments)
             .FirstOrDefaultAsync(n => n.Id == messageId, cancellationToken);
@@ -400,7 +400,10 @@ public class NotificationService : ApplicationService, INotificationService
 
     public async Task<Result> CancelAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
-        var notification = await _notificationRepository.GetAsync(messageId, cancellationToken);
+        var notification = await _notificationRepository.AsQueryable(withTracking: true)
+            .Include(m => m.Recipients)
+            .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+
         if (notification == null)
             return Fail($"Notification {messageId} not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
@@ -411,6 +414,14 @@ public class NotificationService : ApplicationService, INotificationService
             return Ok("Notification is already cancelled");
 
         notification.Status = NotificationStatus.Cancelled;
+
+        // Cascade: update pending/scheduled recipients to cancelled
+        foreach (var recipient in notification.Recipients.Where(r =>
+            r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled))
+        {
+            recipient.Status = NotificationStatus.Cancelled;
+        }
+
         await _notificationRepository.UpdateAsync(notification, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -423,7 +434,8 @@ public class NotificationService : ApplicationService, INotificationService
         Check.NotNullOrEmpty(ids);
 
         var notifications = await _notificationRepository
-            .AsQueryable()
+            .AsQueryable(withTracking: true)
+            .Include(n => n.Recipients)
             .Where(n => ids.Contains(n.Id) && (n.Status == NotificationStatus.Pending || n.Status == NotificationStatus.Scheduled))
             .ToListAsync(cancellationToken);
 
@@ -433,6 +445,13 @@ public class NotificationService : ApplicationService, INotificationService
         foreach (var notification in notifications)
         {
             notification.Status = NotificationStatus.Cancelled;
+
+            // Cascade: update pending/scheduled recipients to cancelled
+            foreach (var recipient in notification.Recipients.Where(r =>
+                r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled))
+            {
+                recipient.Status = NotificationStatus.Cancelled;
+            }
         }
 
         await _notificationRepository.UpdateManyAsync(notifications, cancellationToken);
@@ -440,6 +459,100 @@ public class NotificationService : ApplicationService, INotificationService
 
         LogInformation("Batch cancelled {Count} notifications", notifications.Count);
         return Ok(notifications.Count, $"{notifications.Count} notifications cancelled");
+    }
+
+    public async Task<Result<NotificationPreviewDto>> PreviewAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(request);
+
+        var validationError = ValidateRecipients(request.Recipients);
+        if (validationError != null)
+            return Fail<NotificationPreviewDto>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var (subject, content, category) = await RenderContentAsync(request, cancellationToken);
+
+        return Ok(new NotificationPreviewDto
+        {
+            Subject = subject,
+            Content = content,
+            IsHtml = request.IsHtml,
+            Category = category,
+            RecipientCount = request.Recipients.Count,
+            TemplateName = request.TemplateName
+        });
+    }
+
+    public async Task<Result<int>> ResendToFailedRecipientsAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        var notification = await _notificationRepository.AsQueryable(withTracking: true)
+            .Include(m => m.Recipients)
+            .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+
+        if (notification == null)
+            return Fail<int>($"Notification {messageId} not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var failedRecipients = notification.Recipients
+            .Where(r => r.Status == NotificationStatus.Failed)
+            .ToList();
+
+        if (failedRecipients.Count == 0)
+            return Ok(0, "No failed recipients to resend to");
+
+        var successCount = 0;
+        foreach (var recipient in failedRecipients)
+        {
+            recipient.Status = NotificationStatus.Pending;
+            recipient.FailureReason = null;
+
+            await _sendSemaphore!.WaitAsync(cancellationToken);
+            try
+            {
+                var sendResult = await SendToRecipientAsync(notification, recipient, cancellationToken);
+                if (sendResult.Success)
+                {
+                    recipient.Status = NotificationStatus.Sent;
+                    recipient.SentTime = DateTime.UtcNow;
+                    recipient.ExternalMessageId = sendResult.ExternalMessageId;
+                    successCount++;
+                }
+                else
+                {
+                    recipient.Status = NotificationStatus.Failed;
+                    recipient.FailureReason = sendResult.FailureReason;
+                }
+            }
+            catch (Exception ex)
+            {
+                recipient.Status = NotificationStatus.Failed;
+                recipient.FailureReason = ex.Message;
+                Logger.LogError(ex, "Error resending notification {NotificationId} to {Address}", messageId, recipient.Address);
+            }
+            finally
+            {
+                _sendSemaphore!.Release();
+            }
+        }
+
+        // 更新消息统计
+        notification.SuccessCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Sent);
+        notification.FailureCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Failed);
+
+        if (notification.FailureCount == 0)
+        {
+            notification.Status = NotificationStatus.Sent;
+        }
+        else if (notification.SuccessCount > 0)
+        {
+            notification.Status = NotificationStatus.PartiallySent;
+        }
+
+        await _notificationRepository.UpdateAsync(notification, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogInformation("Resent notification {NotificationId} to {Count} failed recipients, {Success} succeeded",
+            messageId, failedRecipients.Count, successCount);
+
+        return Ok(successCount, $"{successCount}/{failedRecipients.Count} recipients resent successfully");
     }
 
     #region Private Methods

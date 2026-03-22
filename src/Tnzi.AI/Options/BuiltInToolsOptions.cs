@@ -29,4 +29,9 @@ public class BuiltInToolsOptions
     /// 启用 Web 搜索工具（需要注册 IWebSearchProvider）
     /// </summary>
     public bool EnableWebSearch { get; set; } = true;
+
+    /// <summary>
+    /// 是否启用 Memory 工具（save_memory, search_memory, delete_memory）
+    /// </summary>
+    public bool EnableMemory { get; set; } = true;
 }

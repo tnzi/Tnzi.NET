@@ -207,4 +207,34 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
         var result = await QueryService.GetStatisticsTrendAsync(interval, start, end);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 预览通知渲染结果（不创建、不发送）
+    /// </summary>
+    [HttpPost("preview")]
+    public virtual async Task<ApiResult<NotificationPreviewDto>> Preview([FromBody] CreateNotificationRequest request)
+    {
+        var result = await NotificationService.PreviewAsync(request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 重发消息给失败的接收人
+    /// </summary>
+    [HttpPost("{id:guid}/resend-failed")]
+    public virtual async Task<ApiResult<int>> ResendToFailed(Guid id)
+    {
+        var result = await NotificationService.ResendToFailedRecipientsAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取消息投递报告（按接收人维度）
+    /// </summary>
+    [HttpGet("{id:guid}/delivery-report")]
+    public virtual async Task<ApiResult<DeliveryReportDto>> GetDeliveryReport(Guid id)
+    {
+        var result = await QueryService.GetDeliveryReportAsync(id);
+        return result.ToApiResult();
+    }
 }

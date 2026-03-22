@@ -20,7 +20,7 @@ internal sealed class ToolContext : IToolContext, IDisposable
     public CancellationToken CancellationToken { get; }
 
     /// <inheritdoc />
-    public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+    public IDictionary<string, object?> Items { get; } = new ConcurrentDictionary<string, object?>();
 
     /// <inheritdoc />
     public T? GetService<T>() where T : class

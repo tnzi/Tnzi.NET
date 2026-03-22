@@ -10,7 +10,7 @@ public class QuotaMiddleware : IAiMiddleware
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<QuotaMiddleware> _logger;
 
-    public int Order => 100;
+    public int Order => AiMiddlewareOrders.Quota;
 
     public QuotaMiddleware(
         IQuotaService quotaService,
@@ -46,7 +46,7 @@ public class QuotaMiddleware : IAiMiddleware
             return new AgentRunResult
             {
                 Response = reserveResult.Message ?? "Quota exceeded",
-                FinishReason = "quota_exceeded"
+                FinishReason = FinishReasons.QuotaExceeded
             };
         }
 
@@ -58,7 +58,7 @@ public class QuotaMiddleware : IAiMiddleware
             var result = await next(context, cancellationToken);
 
             // After: 结算实际用量
-            var actualTokens = (result.Usage?.PromptTokens ?? 0) + (result.Usage?.CompletionTokens ?? 0);
+            var actualTokens = (result.Usage?.InputTokens ?? 0) + (result.Usage?.OutputTokens ?? 0);
             await _quotaService.SettleQuotaAsync(userId.Value, reservation, actualTokens, cancellationToken);
 
             return result;
@@ -99,7 +99,7 @@ public class QuotaMiddleware : IAiMiddleware
             yield return new AgentStreamChunk
             {
                 Text = reserveResult.Message ?? "Quota exceeded",
-                FinishReason = "quota_exceeded"
+                FinishReason = FinishReasons.QuotaExceeded
             };
             yield break;
         }
@@ -125,14 +125,14 @@ public class QuotaMiddleware : IAiMiddleware
             // After: 无论成功或失败都结算配额；用 CancellationToken.None 避免 token 已取消导致结算失败
             if (completedNormally)
             {
-                var actualTokens = (lastUsage?.PromptTokens ?? 0) + (lastUsage?.CompletionTokens ?? 0);
+                var actualTokens = (lastUsage?.InputTokens ?? 0) + (lastUsage?.OutputTokens ?? 0);
                 await _quotaService.SettleQuotaAsync(userId, reservation, actualTokens, CancellationToken.None);
             }
             else
             {
                 // 异常/取消时优先使用实际用量，若无则回退到预估值
                 var tokensToSettle = lastUsage != null
-                    ? (lastUsage.PromptTokens + lastUsage.CompletionTokens)
+                    ? (lastUsage.InputTokens + lastUsage.OutputTokens)
                     : estimatedTokens;
                 await _quotaService.SettleQuotaAsync(userId, reservation, tokensToSettle, CancellationToken.None);
             }

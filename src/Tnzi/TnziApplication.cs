@@ -145,6 +145,17 @@ public class TnziApplication : ITnziApplication
                 var auditLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
                 ModuleDependencyAuditor.Audit(Modules, _moduleServiceMap, auditLogger);
             }
+
+            // Build module manifests before releasing the service map
+            foreach (var module in Modules)
+            {
+                if (module is ModuleDescriptor descriptor &&
+                    _moduleServiceMap.TryGetValue(module.Type, out var moduleServices))
+                {
+                    descriptor.Manifest = ModuleManifestBuilder.Build(module, moduleServices);
+                }
+            }
+
             _moduleServiceMap = null; // 审计完成后释放
         }
 

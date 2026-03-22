@@ -9,8 +9,6 @@ public class AgentVersionConfiguration : EntityTypeConfigurationBase<AgentVersio
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.HasKey(e => e.Id);
-
         builder.Property(e => e.AgentId)
             .IsRequired();
 

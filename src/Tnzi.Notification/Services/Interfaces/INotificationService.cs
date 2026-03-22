@@ -39,4 +39,20 @@ public interface INotificationService
     {
         return Task.FromResult(Result.Failure<int>("Batch cancel not implemented", 501));
     }
+
+    /// <summary>
+    /// 预览通知渲染结果（不创建、不发送）
+    /// </summary>
+    Task<Result<NotificationPreviewDto>> PreviewAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<NotificationPreviewDto>("Preview not implemented", 501));
+    }
+
+    /// <summary>
+    /// 重发消息给失败的接收人
+    /// </summary>
+    Task<Result<int>> ResendToFailedRecipientsAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Failure<int>("Resend to failed not implemented", 501));
+    }
 }

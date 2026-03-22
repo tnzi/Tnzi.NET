@@ -7,7 +7,6 @@ public class LocalEventBus : IEventBus, IDisposable
     private readonly ILogger<LocalEventBus> _logger;
     private readonly EventBusOptions _options;
     private readonly IEventDeadLetterQueue? _deadLetterQueue;
-    private readonly ICurrentTenant? _currentTenant;
     private readonly ConcurrentDictionary<Type, HashSet<Type>> _runtimeHandlers = new();
     private readonly SemaphoreSlim _concurrencySemaphore;
     private readonly int _maxConcurrency;
@@ -18,14 +17,12 @@ public class LocalEventBus : IEventBus, IDisposable
         ILogger<LocalEventBus> logger,
         EventBusOptions? options = null,
         IEventDeadLetterQueue? deadLetterQueue = null,
-        ICurrentTenant? currentTenant = null,
         int maxConcurrency = 10)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         _options = options ?? new EventBusOptions();
         _deadLetterQueue = deadLetterQueue;
-        _currentTenant = currentTenant;
         _maxConcurrency = maxConcurrency > 0 ? maxConcurrency : 10;
         _concurrencySemaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
 
@@ -37,16 +34,18 @@ public class LocalEventBus : IEventBus, IDisposable
         ThrowIfDisposed();
         Check.NotNull(@event);
 
-        // 自动捕获当前租户上下文到事件（仅当事件未显式设置 TenantId 时）
-        if (@event is EventBase eventBase && eventBase.TenantId == null)
-        {
-            eventBase.TenantId = _currentTenant?.Id;
-        }
-
         var eventType = typeof(TEvent);
 
         // 在整个处理过程中保持scope活动，确保Scoped生命周期的处理器有效
         using var scope = _serviceProvider.CreateScope();
+
+        // 自动捕获当前租户上下文到事件（仅当事件未显式设置 TenantId 时）
+        // 从当前 scope 解析 ICurrentTenant，避免 Singleton 持有 Scoped 引用
+        if (@event is EventBase eventBase && eventBase.TenantId == null)
+        {
+            var currentTenant = scope.ServiceProvider.GetService<ICurrentTenant>();
+            eventBase.TenantId = currentTenant?.Id;
+        }
 
         // 获取所有处理器（包括直接匹配和基类匹配的，以及运行时注册的）
         var handlers = GetEventHandlers<TEvent>(eventType, scope.ServiceProvider).ToList();

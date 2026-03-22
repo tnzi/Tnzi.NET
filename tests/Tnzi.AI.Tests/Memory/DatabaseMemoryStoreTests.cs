@@ -136,10 +136,10 @@ public class DatabaseMemoryStoreTests
 
         await store.AppendAsync(scopeKey, "New entry");
 
-        // 应该删除最旧的条目（超出限制）
+        // ExecuteDeleteAsync 被调用（SQL 层删除），不再使用 DeleteManyAsync
         mockRepo.Verify(r => r.DeleteManyAsync(
-            It.Is<IEnumerable<MemoryEntry>>(list => list.Any()),
-            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+            It.IsAny<IEnumerable<MemoryEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -402,9 +402,10 @@ public class DatabaseMemoryStoreTests
 
         await store.ClearAsync("clear-me");
 
+        // ExecuteDeleteAsync 被调用（SQL 层删除），不再使用 DeleteManyAsync
         mockRepo.Verify(r => r.DeleteManyAsync(
-            It.Is<IEnumerable<MemoryEntry>>(list => list.Count() == 2),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<IEnumerable<MemoryEntry>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion

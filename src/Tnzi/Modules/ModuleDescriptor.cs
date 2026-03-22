@@ -43,7 +43,12 @@ public interface IModuleDescriptor
     /// 初始化失败时的异常信息
     /// </summary>
     Exception? InitializationError { get; }
-    
+
+    /// <summary>
+    /// Module architecture manifest — auto-generated during initialization
+    /// </summary>
+    ModuleManifest Manifest { get; }
+
     void AddDependency(IModuleDescriptor descriptor);
 }
 
@@ -80,6 +85,11 @@ public class ModuleDescriptor : IModuleDescriptor
     /// 模块初始化完成时间
     /// </summary>
     public DateTime? InitializationEndTime { get; internal set; }
+
+    /// <summary>
+    /// Module architecture manifest — auto-generated during initialization
+    /// </summary>
+    public ModuleManifest Manifest { get; internal set; } = ModuleManifest.Empty;
 
     public ModuleDescriptor(Type type, ITnziModule instance)
     {

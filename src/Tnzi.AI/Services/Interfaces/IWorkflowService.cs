@@ -28,7 +28,7 @@ public interface IWorkflowService
     /// <summary>
     /// 获取工作流列表
     /// </summary>
-    Task<Result<IPagedList<WorkflowDefinitionDto>>> GetListAsync(PagedQueryDto query);
+    Task<Result<IPagedList<WorkflowDefinitionDto>>> GetListAsync(WorkflowDefinitionQueryDto query);
 
     /// <summary>
     /// 运行工作流

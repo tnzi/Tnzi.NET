@@ -14,7 +14,7 @@ namespace Tnzi.AI.Infrastructure.Tools;
 /// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "OpenAPI tool generation is evolving")]
-public class OpenApiToolGenerator
+public partial class OpenApiToolGenerator
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptions<AIOptions> _aiOptions;
@@ -586,9 +586,9 @@ public class OpenApiToolGenerator
     public static string SanitizeToolName(string name)
     {
         // 替换非字母数字和下划线的字符为下划线
-        var sanitized = Regex.Replace(name, @"[^a-zA-Z0-9_]", "_");
+        var sanitized = NonAlphanumericRegex().Replace(name, "_");
         // 移除连续下划线
-        sanitized = Regex.Replace(sanitized, @"_+", "_");
+        sanitized = MultipleUnderscoreRegex().Replace(sanitized, "_");
         // 移除首尾下划线
         return sanitized.Trim('_');
     }
@@ -638,6 +638,12 @@ public class OpenApiToolGenerator
         // 未配置过滤条件，包含所有操作
         return true;
     }
+
+    [GeneratedRegex(@"[^a-zA-Z0-9_]")]
+    private static partial Regex NonAlphanumericRegex();
+
+    [GeneratedRegex(@"_+")]
+    private static partial Regex MultipleUnderscoreRegex();
 }
 
 /// <summary>

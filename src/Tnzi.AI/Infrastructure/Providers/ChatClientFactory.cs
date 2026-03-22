@@ -27,12 +27,16 @@ public class ChatClientFactory : IChatClientFactory
         _logger = Check.NotNull(logger);
 
         // 配置热更新时原子替换整个字典引用，避免 Clear() 的竞态窗口
-        _options.OnChange(_ =>
+        // 同时 Dispose 旧的 IChatClient 实例，防止资源泄漏（HTTP 连接等）
+        _options.OnChange(opts =>
         {
-            Volatile.Write(ref _chatClients, new ConcurrentDictionary<string, IChatClient>());
-            Volatile.Write(ref _embeddingClients, new ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>>());
+            var oldChatClients = Interlocked.Exchange(ref _chatClients, new ConcurrentDictionary<string, IChatClient>());
+            var oldEmbeddingClients = Interlocked.Exchange(ref _embeddingClients, new ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>>());
             Volatile.Write(ref _openAIChatClients, new ConcurrentDictionary<string, ChatClient>());
             Volatile.Write(ref _openAIEmbeddingClients, new ConcurrentDictionary<string, EmbeddingClient>());
+
+            // 异步 Dispose 旧客户端，避免阻塞 OnChange 回调
+            Task.Run(() => DisposeOldClientsAsync(oldChatClients, oldEmbeddingClients));
         });
 
         // 按 ProviderName 建立索引（不区分大小写），后注册的覆盖先注册的
@@ -232,6 +236,44 @@ public class ChatClientFactory : IChatClientFactory
             }
         }
         return clients;
+    }
+
+    /// <summary>
+    /// 异步释放旧的客户端实例，防止配置热更新时资源泄漏
+    /// </summary>
+    private async Task DisposeOldClientsAsync(
+        ConcurrentDictionary<string, IChatClient> oldChatClients,
+        ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>> oldEmbeddingClients)
+    {
+        foreach (var client in oldChatClients.Values)
+        {
+            try
+            {
+                if (client is IAsyncDisposable asyncDisposable)
+                    await asyncDisposable.DisposeAsync();
+                else if (client is IDisposable disposable)
+                    disposable.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to dispose old IChatClient: {Type}", client.GetType().Name);
+            }
+        }
+
+        foreach (var client in oldEmbeddingClients.Values)
+        {
+            try
+            {
+                if (client is IAsyncDisposable asyncDisposable)
+                    await asyncDisposable.DisposeAsync();
+                else if (client is IDisposable disposable)
+                    disposable.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to dispose old IEmbeddingGenerator: {Type}", client.GetType().Name);
+            }
+        }
     }
 
     /// <summary>

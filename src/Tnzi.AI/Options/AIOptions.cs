@@ -81,6 +81,14 @@ public class AIOptions
     /// 从 OpenAPI 3.x 规范自动生成 AITool，使 AI Agent 能够调用外部 REST API。默认关闭。
     /// </remarks>
     public OpenApiToolsOptions OpenApiTools { get; set; } = new();
+
+    /// <summary>
+    /// 成本追踪配置
+    /// </summary>
+    /// <remarks>
+    /// 配置各模型的 Token 成本率（美元/百万Token），启用后 UsageLog 自动计算 EstimatedCostUsd。
+    /// </remarks>
+    public CostTrackingOptions CostTracking { get; set; } = new();
 }
 
 /// <summary>
@@ -166,6 +174,42 @@ public class ProviderOptions
     /// ThinkingMiddleware 在启用推理时自动查找 "think" 别名切换到推理模型。
     /// </remarks>
     public Dictionary<string, string>? Models { get; set; }
+
+    /// <summary>
+    /// Prompt Caching 配置（减少重复 system prompt 和工具定义的 Token 成本）
+    /// </summary>
+    /// <remarks>
+    /// Anthropic: 自动注入 cache_control 断点（系统提示 + 工具定义）
+    /// OpenAI: 服务端自动缓存，无需客户端操作
+    /// Gemini: 通过 context caching API 缓存
+    /// </remarks>
+    public PromptCachingOptions? PromptCaching { get; set; }
+}
+
+/// <summary>
+/// Prompt Caching 配置选项
+/// </summary>
+public class PromptCachingOptions
+{
+    /// <summary>
+    /// 是否启用 Prompt Caching（默认关闭）
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// 是否缓存系统提示（默认启用）
+    /// </summary>
+    public bool CacheSystemPrompt { get; set; } = true;
+
+    /// <summary>
+    /// 是否缓存工具定义（默认启用）
+    /// </summary>
+    public bool CacheToolDefinitions { get; set; } = true;
+
+    /// <summary>
+    /// 缓存前 N 条历史消息（默认 0 = 不缓存历史）
+    /// </summary>
+    public int CacheFirstNMessages { get; set; }
 }
 
 /// <summary>
@@ -258,6 +302,12 @@ public class GuardrailsOptions
     /// 通过后才将缓冲的 chunk 释放给客户端。设为 0 禁用缓冲（退化为后验检查）。
     /// </remarks>
     public int StreamingBufferSize { get; set; } = 500;
+
+    /// <summary>
+    /// 流式输出防护滑动窗口重叠大小（Token 数），用于检测跨窗口边界的违规关键词。
+    /// 默认 50。
+    /// </summary>
+    public int StreamingOverlapSize { get; set; } = 50;
 
     /// <summary>
     /// LLM-as-Judge guardrail 配置

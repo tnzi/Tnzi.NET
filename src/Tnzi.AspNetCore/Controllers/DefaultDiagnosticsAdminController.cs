@@ -54,4 +54,71 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
         var result = ExceptionStatisticsService.Clear();
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// Get all active controllers with metadata
+    /// </summary>
+    [HttpGet("controllers")]
+    public virtual ApiResult<ControllerDiagnosticsResultDto> GetControllers(
+        [FromServices] IActionDescriptorCollectionProvider actionProvider)
+    {
+        var controllerActions = actionProvider.ActionDescriptors.Items
+            .OfType<ControllerActionDescriptor>()
+            .GroupBy(a => a.ControllerTypeInfo.AsType())
+            .Select(g =>
+            {
+                var controllerType = g.Key;
+                var isDefault = controllerType.GetCustomAttributes<DefaultControllerAttribute>().Any();
+                var route = g.First().AttributeRouteInfo?.Template ?? "";
+                var moduleName = controllerType.Assembly.GetName().Name ?? "";
+
+                return new ControllerInfoDto
+                {
+                    Type = controllerType.FullName ?? controllerType.Name,
+                    Route = route,
+                    Module = moduleName,
+                    IsDefault = isDefault,
+                    Methods = g.Select(a =>
+                    {
+                        var httpMethod = a.ActionConstraints?
+                            .OfType<HttpMethodActionConstraint>()
+                            .FirstOrDefault()?.HttpMethods.FirstOrDefault() ?? "GET";
+                        return $"{httpMethod} {a.ActionName}";
+                    }).ToList()
+                };
+            })
+            .ToList();
+
+        return Ok(new ControllerDiagnosticsResultDto
+        {
+            TotalCount = controllerActions.Count,
+            Controllers = controllerActions
+        });
+    }
+
+    /// <summary>
+    /// Get all loaded modules and their manifests
+    /// </summary>
+    [HttpGet("modules")]
+    public virtual ApiResult<List<ModuleDiagnosticsDto>> GetModules([FromServices] ITnziApplication tnziApp)
+    {
+        var modules = tnziApp.Modules.Select(m => new ModuleDiagnosticsDto
+        {
+            Type = m.Type.Name,
+            Assembly = m.Assembly.GetName().Name ?? m.Assembly.FullName ?? "",
+            IsEnabled = m.IsEnabled,
+            InitializationState = m.InitializationState.ToString(),
+            DependencyCount = m.Dependencies.Count,
+            Manifest = new ModuleManifestDto
+            {
+                ServiceCount = m.Manifest.Services.Count,
+                Controllers = m.Manifest.Controllers.ToList(),
+                Events = m.Manifest.Events.ToList(),
+                BackgroundTasks = m.Manifest.BackgroundTasks.ToList(),
+                Options = m.Manifest.Options.ToList()
+            }
+        }).ToList();
+
+        return Ok(modules);
+    }
 }

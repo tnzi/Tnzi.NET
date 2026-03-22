@@ -111,6 +111,12 @@ public class CreateSkillDto
     /// <summary>Allowed tool groups (constraint)</summary>
     public List<string>? AllowedToolGroups { get; set; }
 
+    /// <summary>Individual tool whitelist (constraint)</summary>
+    public List<string>? AllowedTools { get; set; }
+
+    /// <summary>Individual tool blacklist (constraint)</summary>
+    public List<string>? DeniedTools { get; set; }
+
     /// <summary>Required model (constraint)</summary>
     [MaxLength(100)]
     public string? RequiredModel { get; set; }
@@ -165,6 +171,12 @@ public class UpdateSkillDto
 
     /// <summary>Allowed tool groups (constraint)</summary>
     public List<string>? AllowedToolGroups { get; set; }
+
+    /// <summary>Individual tool whitelist (constraint)</summary>
+    public List<string>? AllowedTools { get; set; }
+
+    /// <summary>Individual tool blacklist (constraint)</summary>
+    public List<string>? DeniedTools { get; set; }
 
     /// <summary>Required model (constraint)</summary>
     [MaxLength(100)]

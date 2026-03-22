@@ -27,7 +27,7 @@ public class AgentResolution
     public string? ErrorCode { get; init; }
 
     /// <summary>是否解析成功</summary>
-    public bool IsSuccess => Agent != null;
+    public bool IsSuccess => Agent != null || ExecutionMode == AgentExecutionMode.ExternalCli;
 
     /// <summary>
     /// 创建 AgentExecutor 时使用的原始参数 — 供 SkillConstraintMiddleware 触发模型/Provider 覆盖时重建 Executor 使用
@@ -40,6 +40,21 @@ public class AgentResolution
     public static AgentResolution Success(AgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single, AgentCreationParameters? creationParameters = null)
     {
         return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode, CreationParameters = creationParameters };
+    }
+
+    /// <summary>
+    /// 创建无 AgentExecutor 的成功结果（用于 ExternalCli 模式，不需要 ChatClient）
+    /// </summary>
+    public static AgentResolution SuccessWithoutExecutor(
+        string provider, string? model, Guid? agentId,
+        string? agentConfiguration, AgentExecutionMode executionMode)
+    {
+        return new AgentResolution
+        {
+            Agent = null, Provider = provider, Model = model,
+            AgentId = agentId, AgentConfiguration = agentConfiguration,
+            ExecutionMode = executionMode
+        };
     }
 
     /// <summary>

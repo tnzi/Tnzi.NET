@@ -68,48 +68,6 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
         return quota.CurrentMonthlyUsage + additionalTokens > quota.MonthlyTokenLimit;
     }
 
-    /// <summary>
-    /// 带乐观并发重试的执行器（最多 3 次重试，遇到 DbUpdateConcurrencyException 时重新读取实体）
-    /// </summary>
-    private async Task<Result<T>> ExecuteWithConcurrencyRetryAsync<T>(Guid userId, Func<UserQuota, Task<Result<T>>> action, CancellationToken ct = default)
-    {
-        const int maxRetries = 3;
-        for (var attempt = 0; attempt <= maxRetries; attempt++)
-        {
-            var quota = await GetOrCreateQuotaAsync(userId, ct);
-            try
-            {
-                return await action(quota);
-            }
-            catch (DbUpdateConcurrencyException) when (attempt < maxRetries)
-            {
-                Logger.LogWarning("Concurrency conflict for user {UserId}, retry {Attempt}/{MaxRetries}", userId, attempt + 1, maxRetries);
-            }
-        }
-        return Fail<T>("Concurrency conflict after max retries", 409, ErrorCodes.QuotaConcurrencyConflict);
-    }
-
-    /// <summary>
-    /// 带乐观并发重试的执行器（无返回值版本）
-    /// </summary>
-    private async Task<Result> ExecuteWithConcurrencyRetryAsync(Guid userId, Func<UserQuota, Task<Result>> action, CancellationToken ct = default)
-    {
-        const int maxRetries = 3;
-        for (var attempt = 0; attempt <= maxRetries; attempt++)
-        {
-            var quota = await GetOrCreateQuotaAsync(userId, ct);
-            try
-            {
-                return await action(quota);
-            }
-            catch (DbUpdateConcurrencyException) when (attempt < maxRetries)
-            {
-                Logger.LogWarning("Concurrency conflict for user {UserId}, retry {Attempt}/{MaxRetries}", userId, attempt + 1, maxRetries);
-            }
-        }
-        return Fail("Concurrency conflict after max retries", 409, ErrorCodes.QuotaConcurrencyConflict);
-    }
-
     #endregion
 
     /// <summary>
@@ -151,11 +109,25 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                 return Ok(QuotaCheckResult.Deny($"Monthly quota exceeded. Current: {quota.CurrentMonthlyUsage}, Limit: {quota.MonthlyTokenLimit}"));
             }
 
-            // 配额足够，返回剩余配额信息
+            // 配额足够，计算使用率和预警级别
             var remainingDaily = quota.DailyTokenLimit - quota.CurrentDailyUsage - estimatedTokens;
             var remainingMonthly = quota.MonthlyTokenLimit - quota.CurrentMonthlyUsage - estimatedTokens;
 
-            return Ok(QuotaCheckResult.Allow(remainingDaily, remainingMonthly));
+            var dailyPct = quota.DailyTokenLimit > 0
+                ? (decimal)(quota.CurrentDailyUsage + estimatedTokens) / quota.DailyTokenLimit
+                : 0m;
+            var monthlyPct = quota.MonthlyTokenLimit > 0
+                ? (decimal)(quota.CurrentMonthlyUsage + estimatedTokens) / quota.MonthlyTokenLimit
+                : 0m;
+            var maxPct = Math.Max(dailyPct, monthlyPct);
+
+            var warningLevel = maxPct >= quota.CriticalThreshold
+                ? QuotaWarningLevel.Critical
+                : maxPct >= quota.WarningThreshold
+                    ? QuotaWarningLevel.Warning
+                    : QuotaWarningLevel.None;
+
+            return Ok(QuotaCheckResult.Allow(remainingDaily, remainingMonthly, dailyPct, monthlyPct, warningLevel));
         }
         catch (Exception ex)
         {
@@ -171,17 +143,14 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     {
         try
         {
-            return await ExecuteWithConcurrencyRetryAsync(userId, async quota =>
-            {
-                quota.CurrentDailyUsage += actualTokens;
-                quota.CurrentMonthlyUsage += actualTokens;
-                await _quotaRepository.UpdateAsync(quota);
+            await _quotaRepository.AsQueryable()
+                .Where(q => q.UserId == userId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(q => q.CurrentDailyUsage, q => q.CurrentDailyUsage + actualTokens)
+                    .SetProperty(q => q.CurrentMonthlyUsage, q => q.CurrentMonthlyUsage + actualTokens), ct);
 
-                Logger.LogDebug("Updated quota for user {UserId}. Added {Tokens} tokens. Daily: {Daily}, Monthly: {Monthly}",
-                    userId, actualTokens, quota.CurrentDailyUsage, quota.CurrentMonthlyUsage);
-
-                return Ok();
-            }, ct);
+            Logger.LogDebug("Updated quota for user {UserId}. Added {Tokens} tokens", userId, actualTokens);
+            return Ok();
         }
         catch (Exception ex)
         {
@@ -218,11 +187,11 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     /// <summary>
     /// 创建或更新用户配额
     /// </summary>
-    public async Task<Result<UserQuotaDto>> SetQuotaAsync(Guid userId, long dailyLimit, long monthlyLimit, CancellationToken ct = default)
+    public async Task<Result<UserQuotaDto>> SetQuotaAsync(Guid userId, long dailyLimit, long monthlyLimit, decimal? warningThreshold = null, decimal? criticalThreshold = null, CancellationToken ct = default)
     {
         try
         {
-            var quota = await _quotaRepository.AsQueryable()
+            var quota = await _quotaRepository.AsQueryable(withTracking: true)
                 .FirstOrDefaultAsync(q => q.UserId == userId, ct);
 
             if (quota == null)
@@ -236,7 +205,9 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                     CurrentDailyUsage = 0,
                     CurrentMonthlyUsage = 0,
                     LastResetDate = DateTime.UtcNow,
-                    IsEnabled = true
+                    IsEnabled = true,
+                    WarningThreshold = warningThreshold ?? 0.8m,
+                    CriticalThreshold = criticalThreshold ?? 0.95m
                 };
                 await _quotaRepository.InsertAsync(quota);
 
@@ -248,6 +219,10 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                 // 更新现有配额
                 quota.DailyTokenLimit = dailyLimit;
                 quota.MonthlyTokenLimit = monthlyLimit;
+                if (warningThreshold.HasValue)
+                    quota.WarningThreshold = warningThreshold.Value;
+                if (criticalThreshold.HasValue)
+                    quota.CriticalThreshold = criticalThreshold.Value;
                 await _quotaRepository.UpdateAsync(quota);
 
                 LogInformation("Updated quota for user {UserId}. Daily: {Daily}, Monthly: {Monthly}",
@@ -271,7 +246,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     {
         try
         {
-            var quota = await _quotaRepository.AsQueryable()
+            var quota = await _quotaRepository.AsQueryable(withTracking: true)
                 .FirstOrDefaultAsync(q => q.UserId == userId, ct);
 
             if (quota == null)
@@ -304,55 +279,72 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     }
 
     /// <summary>
-    /// 原子预留配额：在单次操作中检查并扣减预估 Token（带乐观并发重试）
+    /// 原子预留配额：在单次 SQL 操作中检查限额并扣减预估 Token，消除 TOCTOU 竞态
+    /// 使用 ExecuteUpdateAsync + WHERE 限额条件实现原子 check-and-decrement
     /// </summary>
     public async Task<Result<QuotaReservation>> ReserveQuotaAsync(Guid userId, long estimatedTokens, CancellationToken ct = default)
     {
         try
         {
-            return await ExecuteWithConcurrencyRetryAsync<QuotaReservation>(userId, async quota =>
+            var quota = await GetOrCreateQuotaAsync(userId, ct);
+
+            // 重置配额（如果需要）
+            var needsReset = ResetQuotaIfNeeded(quota);
+            if (needsReset)
             {
-                // 重置配额（如果需要）
-                ResetQuotaIfNeeded(quota);
+                await _quotaRepository.AsQueryable()
+                    .Where(q => q.UserId == userId)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(q => q.CurrentDailyUsage, quota.CurrentDailyUsage)
+                        .SetProperty(q => q.CurrentMonthlyUsage, quota.CurrentMonthlyUsage)
+                        .SetProperty(q => q.LastResetDate, quota.LastResetDate), ct);
+            }
 
-                // 如果未启用配额限制，直接允许
-                if (!quota.IsEnabled)
-                {
-                    await _quotaRepository.UpdateAsync(quota);
-                    return Ok(new QuotaReservation { ReservedTokens = 0, ReservedAt = DateTime.UtcNow });
-                }
+            // 如果未启用配额限制，直接允许
+            if (!quota.IsEnabled)
+            {
+                return Ok(new QuotaReservation { ReservedTokens = 0, ReservedAt = DateTime.UtcNow });
+            }
 
-                // 检查每日和每月配额
-                if (IsExceedDailyLimit(quota, estimatedTokens))
+            // 原子 check-and-decrement：单条 SQL 同时检查限额并扣减，避免 TOCTOU 竞态
+            // WHERE 条件确保仅在配额充足时才更新，返回受影响行数判断是否成功
+            var affectedRows = await _quotaRepository.AsQueryable()
+                .Where(q => q.UserId == userId
+                    && q.CurrentDailyUsage + estimatedTokens <= q.DailyTokenLimit
+                    && q.CurrentMonthlyUsage + estimatedTokens <= q.MonthlyTokenLimit)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(q => q.CurrentDailyUsage, q => q.CurrentDailyUsage + estimatedTokens)
+                    .SetProperty(q => q.CurrentMonthlyUsage, q => q.CurrentMonthlyUsage + estimatedTokens), ct);
+
+            if (affectedRows == 0)
+            {
+                // 重新读取最新值以提供准确的错误信息
+                var current = await _quotaRepository.AsQueryable()
+                    .Where(q => q.UserId == userId)
+                    .Select(q => new { q.CurrentDailyUsage, q.DailyTokenLimit, q.CurrentMonthlyUsage, q.MonthlyTokenLimit })
+                    .FirstOrDefaultAsync(ct);
+
+                if (current != null && current.CurrentDailyUsage + estimatedTokens > current.DailyTokenLimit)
                 {
                     return Fail<QuotaReservation>(
-                        $"Daily quota exceeded. Current: {quota.CurrentDailyUsage}, Limit: {quota.DailyTokenLimit}",
+                        $"Daily quota exceeded. Current: {current.CurrentDailyUsage}, Limit: {current.DailyTokenLimit}",
                         429, ErrorCodes.QuotaExceeded);
                 }
 
-                if (IsExceedMonthlyLimit(quota, estimatedTokens))
-                {
-                    return Fail<QuotaReservation>(
-                        $"Monthly quota exceeded. Current: {quota.CurrentMonthlyUsage}, Limit: {quota.MonthlyTokenLimit}",
-                        429, ErrorCodes.QuotaExceeded);
-                }
+                return Fail<QuotaReservation>(
+                    $"Monthly quota exceeded. Current: {current?.CurrentMonthlyUsage}, Limit: {current?.MonthlyTokenLimit}",
+                    429, ErrorCodes.QuotaExceeded);
+            }
 
-                // 原子扣减：在同一次 UpdateAsync 中完成检查和扣减
-                quota.CurrentDailyUsage += estimatedTokens;
-                quota.CurrentMonthlyUsage += estimatedTokens;
-                await _quotaRepository.UpdateAsync(quota);
+            Logger.LogDebug(
+                "Reserved {Tokens} tokens for user {UserId}",
+                estimatedTokens, userId);
 
-                Logger.LogDebug(
-                    "Reserved {Tokens} tokens for user {UserId}. Daily: {Daily}/{DailyLimit}, Monthly: {Monthly}/{MonthlyLimit}",
-                    estimatedTokens, userId, quota.CurrentDailyUsage, quota.DailyTokenLimit,
-                    quota.CurrentMonthlyUsage, quota.MonthlyTokenLimit);
-
-                return Ok(new QuotaReservation
-                {
-                    ReservedTokens = estimatedTokens,
-                    ReservedAt = DateTime.UtcNow
-                });
-            }, ct);
+            return Ok(new QuotaReservation
+            {
+                ReservedTokens = estimatedTokens,
+                ReservedAt = DateTime.UtcNow
+            });
         }
         catch (Exception ex)
         {
@@ -362,13 +354,14 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     }
 
     /// <summary>
-    /// 结算配额：根据实际使用量调整已预留的配额（补偿差值，带乐观并发重试）
+    /// 结算配额：根据实际使用量调整已预留的配额（补偿差值）
+    /// 使用 ExecuteUpdateAsync 绕过 ChangeTracker，避免与同请求中的 ReserveQuotaAsync 跟踪冲突
     /// </summary>
     public async Task<Result> SettleQuotaAsync(Guid userId, QuotaReservation reservation, long actualTokens, CancellationToken ct = default)
     {
         try
         {
-            // 如果预留为 0（未启用配额时），只需根据实际使用量更新
+            // 如果预留为 0（未启用配额时），无需调整
             if (reservation.ReservedTokens == 0)
             {
                 return Ok();
@@ -380,19 +373,19 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                 return Ok(); // 精确预估，无需调整
             }
 
-            return await ExecuteWithConcurrencyRetryAsync(userId, async quota =>
-            {
-                // 补偿差值：如果实际多则增加，如果实际少则减少（退还多预留的部分）
-                quota.CurrentDailyUsage = Math.Max(0, quota.CurrentDailyUsage + difference);
-                quota.CurrentMonthlyUsage = Math.Max(0, quota.CurrentMonthlyUsage + difference);
-                await _quotaRepository.UpdateAsync(quota);
+            // 使用 ExecuteUpdateAsync 原子性补偿差值，绕过 ChangeTracker
+            // SQL: SET CurrentDailyUsage = GREATEST(0, CurrentDailyUsage + @diff)
+            await _quotaRepository.AsQueryable()
+                .Where(q => q.UserId == userId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(q => q.CurrentDailyUsage, q => Math.Max(0, q.CurrentDailyUsage + difference))
+                    .SetProperty(q => q.CurrentMonthlyUsage, q => Math.Max(0, q.CurrentMonthlyUsage + difference)), ct);
 
-                Logger.LogDebug(
-                    "Settled quota for user {UserId}. Difference: {Difference} (Reserved: {Reserved}, Actual: {Actual})",
-                    userId, difference, reservation.ReservedTokens, actualTokens);
+            Logger.LogDebug(
+                "Settled quota for user {UserId}. Difference: {Difference} (Reserved: {Reserved}, Actual: {Actual})",
+                userId, difference, reservation.ReservedTokens, actualTokens);
 
-                return Ok();
-            }, ct);
+            return Ok();
         }
         catch (Exception ex)
         {
@@ -433,28 +426,40 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
 
     /// <summary>
     /// 获取或创建用户配额（内部方法）
+    /// 使用 try/catch 处理并发插入竞态：两个请求同时发现 null 并尝试插入时，
+    /// 第二个请求捕获唯一约束异常后重新查询
     /// </summary>
     private async Task<UserQuota> GetOrCreateQuotaAsync(Guid userId, CancellationToken ct = default)
     {
         var quota = await _quotaRepository.AsQueryable()
             .FirstOrDefaultAsync(q => q.UserId == userId, ct);
 
-        if (quota == null)
-        {
-            var quotaOptions = _options.Value.Quota;
-            quota = new UserQuota
-            {
-                UserId = userId,
-                DailyTokenLimit = quotaOptions.DefaultDailyTokenLimit,
-                MonthlyTokenLimit = quotaOptions.DefaultMonthlyTokenLimit,
-                CurrentDailyUsage = 0,
-                CurrentMonthlyUsage = 0,
-                LastResetDate = DateTime.UtcNow,
-                IsEnabled = true
-            };
-            await _quotaRepository.InsertAsync(quota);
+        if (quota != null) return quota;
 
+        var quotaOptions = _options.Value.Quota;
+        quota = new UserQuota
+        {
+            UserId = userId,
+            DailyTokenLimit = quotaOptions.DefaultDailyTokenLimit,
+            MonthlyTokenLimit = quotaOptions.DefaultMonthlyTokenLimit,
+            CurrentDailyUsage = 0,
+            CurrentMonthlyUsage = 0,
+            LastResetDate = DateTime.UtcNow,
+            IsEnabled = true
+        };
+
+        try
+        {
+            await _quotaRepository.InsertAsync(quota);
             LogInformation("Created default quota for user {UserId}", userId);
+        }
+        catch (DbUpdateException)
+        {
+            // 并发插入竞态：另一个请求已创建该用户的配额，重新查询
+            quota = await _quotaRepository.AsQueryable()
+                .FirstOrDefaultAsync(q => q.UserId == userId, ct)
+                ?? throw new InvalidOperationException($"Failed to get or create quota for user {userId}");
+            Logger.LogDebug("Quota already created by concurrent request for user {UserId}", userId);
         }
 
         return quota;

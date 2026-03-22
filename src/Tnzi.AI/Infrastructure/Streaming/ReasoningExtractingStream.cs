@@ -327,11 +327,43 @@ internal sealed class ReasoningExtractingStream : Stream
         {
             _cts.Cancel();
             _pipe.Writer.Complete();
-            try { _produceTask?.GetAwaiter().GetResult(); } catch { /* already handled in ProduceAsync */ }
+            // Do NOT block on _produceTask — ProduceAsync's finally already completes pipe and channel
             _inner.Dispose();
             _readerStream.Dispose();
             _cts.Dispose();
         }
+
         base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _pipe.Writer.Complete();
+
+        if (_produceTask != null)
+        {
+            try
+            {
+                await _produceTask;
+            }
+            catch
+            {
+                // Already handled in ProduceAsync
+            }
+        }
+
+        if (_inner is IAsyncDisposable asyncInner)
+            await asyncInner.DisposeAsync();
+        else
+            _inner.Dispose();
+
+        if (_readerStream is IAsyncDisposable asyncReader)
+            await asyncReader.DisposeAsync();
+        else
+            _readerStream.Dispose();
+
+        _cts.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

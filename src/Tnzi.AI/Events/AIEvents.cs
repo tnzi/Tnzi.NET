@@ -1,5 +1,3 @@
-using Tnzi.EventBus;
-
 namespace Tnzi.AI.Events;
 
 /// <summary>
@@ -48,6 +46,26 @@ public class QuotaExceededEvent : EventBase
     public long EstimatedTokens { get; set; }
     /// <summary>Rejection reason</summary>
     public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 配额预警阈值触达事件 — 当用户配额使用率达到预警或严重阈值时发布。
+/// 可用于发送预警通知、Dashboard 展示等。
+/// </summary>
+public class QuotaThresholdReachedEvent : EventBase
+{
+    /// <summary>User ID</summary>
+    public Guid UserId { get; set; }
+    /// <summary>Warning level (Warning or Critical)</summary>
+    public string Level { get; set; } = string.Empty;
+    /// <summary>Daily usage percentage (0-1)</summary>
+    public decimal DailyUsagePercentage { get; set; }
+    /// <summary>Monthly usage percentage (0-1)</summary>
+    public decimal MonthlyUsagePercentage { get; set; }
+    /// <summary>Remaining daily quota</summary>
+    public long RemainingDailyQuota { get; set; }
+    /// <summary>Remaining monthly quota</summary>
+    public long RemainingMonthlyQuota { get; set; }
 }
 
 /// <summary>

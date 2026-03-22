@@ -7,7 +7,7 @@ public class AgentRunConfiguration : EntityTypeConfigurationBase<AgentRun, Guid>
 {
     public override void Configure(EntityTypeBuilder<AgentRun> builder)
     {
-        builder.HasKey(e => e.Id);
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.InputSummary)
             .IsRequired()
@@ -45,6 +45,12 @@ public class AgentRunConfiguration : EntityTypeConfigurationBase<AgentRun, Guid>
 
         builder.HasIndex(e => e.CreationTime)
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId)
+                .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+        }
 
         builder.HasMany(e => e.Nodes)
             .WithOne(n => n.Run)

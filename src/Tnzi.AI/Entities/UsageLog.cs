@@ -53,6 +53,21 @@ public class UsageLog : CreationAuditedEntity<Guid>, IMultiTenant
     public long DurationMs { get; set; }
 
     /// <summary>
+    /// 预估成本（美元），根据模型成本率和 Token 用量在写入时计算
+    /// </summary>
+    public decimal? EstimatedCostUsd { get; set; }
+
+    /// <summary>
+    /// 缓存命中的输入 Token 数（Anthropic/OpenAI prompt caching）
+    /// </summary>
+    public int CachedInputTokens { get; set; }
+
+    /// <summary>
+    /// 缓存创建的输入 Token 数（首次缓存写入的 Token，Anthropic cache_creation_input_tokens）
+    /// </summary>
+    public int CacheCreationTokens { get; set; }
+
+    /// <summary>
     /// 是否成功
     /// </summary>
     public bool IsSuccess { get; set; }

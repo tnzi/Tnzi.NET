@@ -209,4 +209,49 @@ public static class ErrorCodes
     /// Skill operation requires authentication or higher privileges.
     /// </summary>
     public const string SkillUnauthorized = "AI_SKILL_UNAUTHORIZED";
+
+    /// <summary>
+    /// Agent validation failed (one or more checks did not pass).
+    /// </summary>
+    public const string AgentValidationFailed = "AI_AGENT_VALIDATION_FAILED";
+
+    /// <summary>
+    /// Feedback can only be submitted on assistant messages.
+    /// </summary>
+    public const string FeedbackOnlyAssistant = "AI_FEEDBACK_ONLY_ASSISTANT";
+
+    /// <summary>
+    /// Message not found in the specified thread.
+    /// </summary>
+    public const string MessageNotFound = "AI_MESSAGE_NOT_FOUND";
+
+    /// <summary>
+    /// No feedback exists on this message to revoke.
+    /// </summary>
+    public const string FeedbackNotFound = "AI_FEEDBACK_NOT_FOUND";
+
+    /// <summary>
+    /// Evaluation run not found.
+    /// </summary>
+    public const string EvaluationNotFound = "AI_EVALUATION_NOT_FOUND";
+
+    /// <summary>
+    /// Batch embedding generation failed.
+    /// </summary>
+    public const string EmbeddingBatchFailed = "AI_EMBEDDING_BATCH_FAILED";
+
+    /// <summary>
+    /// MCP tool execution failed.
+    /// </summary>
+    public const string McpToolExecutionFailed = "AI_MCP_TOOL_EXECUTION_FAILED";
+
+    /// <summary>
+    /// Thread export operation failed.
+    /// </summary>
+    public const string ThreadExportFailed = "AI_THREAD_EXPORT_FAILED";
+
+    /// <summary>
+    /// Cost calculation failed.
+    /// </summary>
+    public const string CostCalculationFailed = "AI_COST_CALCULATION_FAILED";
 }

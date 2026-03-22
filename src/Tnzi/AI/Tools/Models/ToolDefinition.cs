@@ -44,4 +44,9 @@ public class ToolDefinition
     /// 工具分类
     /// </summary>
     public string? Category { get; set; }
+
+    /// <summary>
+    /// 需要预先阅读的 Skill slug 列表（来自 [RequiresSkill] 属性，类级 + 方法级合并）
+    /// </summary>
+    public IReadOnlyList<string> RequiresSkillSlugs { get; set; } = [];
 }
