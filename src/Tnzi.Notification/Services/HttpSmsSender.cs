@@ -100,7 +100,7 @@ public class HttpSmsSender : ISmsSender
         {
             Content = formContent
         };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authHeader);
 
         try
         {
@@ -179,7 +179,7 @@ public class HttpSmsSender : ISmsSender
         {
             Content = content
         };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authHeader);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authHeader);
 
         try
         {

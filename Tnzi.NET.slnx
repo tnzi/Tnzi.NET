@@ -50,7 +50,9 @@
     <Project Path="src/Tnzi.AI.Mcp/Tnzi.AI.Mcp.csproj" />
     <Project Path="src/Tnzi.AI.Coder/Tnzi.AI.Coder.csproj" />
     <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
+    <Project Path="src/Tnzi.AI.Channels/Tnzi.AI.Channels.csproj" />
     <Project Path="src/Tnzi.AI.Cli/Tnzi.AI.Cli.csproj" />
+    <Project Path="src/Tnzi.AI.Sandbox/Tnzi.AI.Sandbox.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tnzi.AI.Cli.Tests/Tnzi.AI.Cli.Tests.csproj" />

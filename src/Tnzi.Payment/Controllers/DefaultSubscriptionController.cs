@@ -84,13 +84,24 @@ public class DefaultSubscriptionController : ApiControllerBase
     }
 
     /// <summary>
-    /// 变更订阅计划
+    /// 变更订阅计划（含按比例计费）
     /// </summary>
     [HttpPost("{id:guid}/change-plan")]
-    public virtual async Task<ApiResult<SubscriptionDto>> ChangePlan(Guid id, [FromBody] ChangeSubscriptionDto request)
+    public virtual async Task<ApiResult<SubscriptionChangeDto>> ChangePlan(Guid id, [FromBody] ChangeSubscriptionPlanDto request)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
-        var result = await _subscriptionService.ChangePlanAsync(id, request, userId);
+        var result = await _subscriptionService.ChangeSubscriptionPlanAsync(id, request, userId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 预览计划变更（按比例计费）
+    /// </summary>
+    [HttpGet("{id:guid}/change-plan-preview")]
+    public virtual async Task<ApiResult<SubscriptionChangeDto>> ChangePlanPreview(Guid id, [FromQuery] Guid newPlanId)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.GetPlanChangePreviewAsync(id, newPlanId, userId);
         return result.ToApiResult();
     }
 
@@ -123,6 +134,17 @@ public class DefaultSubscriptionController : ApiControllerBase
     public virtual async Task<ApiResult<List<SubscriptionPlanDto>>> GetPlans([FromQuery] bool activeOnly = true)
     {
         var result = await _subscriptionService.GetSubscriptionPlansAsync(activeOnly);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 取消待生效的计划变更
+    /// </summary>
+    [HttpPost("~/subscription-changes/{id:guid}/cancel")]
+    public virtual async Task<ApiResult> CancelPendingChange(Guid id)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.CancelPendingChangeAsync(id, userId);
         return result.ToApiResult();
     }
 }

@@ -41,6 +41,15 @@ public class AgentRunRequest
     /// <summary>Per-request reasoning effort override (None = no reasoning)</summary>
     public ReasoningEffort? ReasoningEffort { get; init; }
 
+    /// <summary>文件附件列表（由 FileUploadMiddleware 处理）</summary>
+    public List<FileAttachment>? Attachments { get; init; }
+
     /// <summary>扩展元数据（ExternalCli 工作目录等）</summary>
     public Dictionary<string, object>? Metadata { get; init; }
+
+    /// <summary>是否启用计划模式（启用 Todo 追踪）</summary>
+    public bool PlanMode { get; init; }
+
+    /// <summary>流式输出粒度模式（默认仅消息文本流）</summary>
+    public StreamMode StreamMode { get; set; } = StreamMode.Messages;
 }

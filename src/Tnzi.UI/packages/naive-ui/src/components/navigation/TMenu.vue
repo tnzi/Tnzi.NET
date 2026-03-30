@@ -4,15 +4,7 @@ import { NMenu } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import type { IMenuItem, IMenuProps } from '@tnzi/core'
 
-interface Props {
-  items: IMenuItem[]
-  activeKey?: string
-  openedKeys?: string[]
-  horizontal?: boolean
-  mode?: 'light' | 'dark'
-}
-
-const props = withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<IMenuProps>(), {
   horizontal: false,
   mode: 'light',
 })
@@ -53,9 +45,11 @@ function findMenuItem(items: IMenuItem[], key: string): IMenuItem | undefined {
 
 function handleSelect(key: string) {
   const item = findMenuItem(props.items, key)
-  if (item) {
-    emit('select', key, item)
+  if (!item) {
+    console.warn(`Menu item with key '${key}' not found`)
+    return
   }
+  emit('select', key, item)
 }
 
 function handleExpandedKeysUpdate(keys: string[]) {

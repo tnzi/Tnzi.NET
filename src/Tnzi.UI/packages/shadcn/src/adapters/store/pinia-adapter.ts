@@ -140,7 +140,7 @@ class PiniaStoreFactory implements StoreFactory {
       getters: options.getters as Record<string, (state: StateTree) => unknown>,
       actions: options.actions as Record<string, (...args: unknown[]) => unknown>,
     });
-    const store = useStore();
+    const store = useStore(this.pinia as Pinia);
 
     // Inject deps if configured
     if (this.deps && (store as WithDeps<StoreGeneric>).$deps === undefined) {

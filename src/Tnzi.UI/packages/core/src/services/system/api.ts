@@ -1,20 +1,31 @@
 /**
- * System Module API - Menu and access log operations
+ * System Module API - Settings, menus, access logs, and system info
  */
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
 import type {
   MenuInfoDto,
+  MenuTreeNode,
   CreateMenuDto,
   UpdateMenuDto,
+  MenuOrderDto,
   MenuQueryDto,
+  SettingDto,
+  CreateSettingDto,
+  UpdateSettingDto,
+  SettingGroupDto,
+  SystemInfoDto,
   AccessLogInfoDto,
   AccessLogQueryDto,
   AccessLogStatisticsDto,
+  AccessLogTrendDto,
+  TopEndpointDto,
 } from './types';
+import { type AccessLogTrendInterval, type TopEndpointSortBy } from './types';
 
 const ADMIN_MENU_BASE = '/admin/menus';
+const ADMIN_SETTING_BASE = '/admin/settings';
 const ADMIN_ACCESS_LOG_BASE = '/admin/access-logs';
 
 /**
@@ -22,7 +33,7 @@ const ADMIN_ACCESS_LOG_BASE = '/admin/access-logs';
  */
 export function useAdminMenuApi(client: HttpClient) {
   return {
-    /** Get menu list */
+    /** Get all menus */
     getList: (params?: MenuQueryDto) =>
       client.get<MenuInfoDto[]>(ADMIN_MENU_BASE, { params }),
 
@@ -32,7 +43,7 @@ export function useAdminMenuApi(client: HttpClient) {
 
     /** Get user menu tree */
     getUserTree: (userId: string) =>
-      client.get<MenuInfoDto[]>(`${ADMIN_MENU_BASE}/user/${userId}/tree`),
+      client.get<MenuTreeNode[]>(`${ADMIN_MENU_BASE}/user/${userId}/tree`),
 
     /** Create menu */
     create: (data: CreateMenuDto) =>
@@ -51,8 +62,14 @@ export function useAdminMenuApi(client: HttpClient) {
       client.delete<void>(`${ADMIN_MENU_BASE}/batch`, { body: ids }),
 
     /** Batch update menu orders */
-    batchUpdateOrders: (orders: Array<{ id: string; sortOrder: number }>) =>
+    batchUpdateOrders: (orders: MenuOrderDto[]) =>
       client.put<void>(`${ADMIN_MENU_BASE}/batch/orders`, orders),
+
+    /** Move menu to new parent */
+    move: (id: string, newParentId?: string) =>
+      client.put<void>(`${ADMIN_MENU_BASE}/${id}/move`, undefined, {
+        params: { newParentId },
+      }),
   };
 }
 
@@ -63,7 +80,48 @@ export function useMenuApi(client: HttpClient) {
   return {
     /** Get user menu tree by user ID */
     getUserTree: (userId: string) =>
-      client.get<MenuInfoDto[]>(`${ADMIN_MENU_BASE}/user/${userId}/tree`),
+      client.get<MenuTreeNode[]>(`${ADMIN_MENU_BASE}/user/${userId}/tree`),
+  };
+}
+
+/**
+ * Admin Setting Management API
+ */
+export function useAdminSettingApi(client: HttpClient) {
+  return {
+    /** Get all settings (optionally filtered by group) */
+    getList: (group?: string) =>
+      client.get<SettingDto[]>(ADMIN_SETTING_BASE, {
+        params: { group },
+      }),
+
+    /** Get setting by ID */
+    getById: (id: string) =>
+      client.get<SettingDto>(`${ADMIN_SETTING_BASE}/${id}`),
+
+    /** Create setting */
+    create: (data: CreateSettingDto) =>
+      client.post<SettingDto>(ADMIN_SETTING_BASE, data),
+
+    /** Update setting */
+    update: (id: string, data: UpdateSettingDto) =>
+      client.put<SettingDto>(`${ADMIN_SETTING_BASE}/${id}`, data),
+
+    /** Delete setting */
+    delete: (id: string) =>
+      client.delete<void>(`${ADMIN_SETTING_BASE}/${id}`),
+
+    /** Batch delete settings */
+    batchDelete: (ids: string[]) =>
+      client.delete<void>(`${ADMIN_SETTING_BASE}/batch`, { body: ids }),
+
+    /** Get system information (version, modules, uptime, environment) */
+    getSystemInfo: () =>
+      client.get<SystemInfoDto>(`${ADMIN_SETTING_BASE}/system-info`),
+
+    /** Get setting groups with counts */
+    getGroups: () =>
+      client.get<SettingGroupDto[]>(`${ADMIN_SETTING_BASE}/groups`),
   };
 }
 
@@ -72,19 +130,19 @@ export function useMenuApi(client: HttpClient) {
  */
 export function useAdminAccessLogApi(client: HttpClient) {
   return {
-    /** Get access log list */
+    /** Get access log list (paged) */
     getList: (params?: AccessLogQueryDto) =>
       client.get<PagedList<AccessLogInfoDto>>(ADMIN_ACCESS_LOG_BASE, {
-        params: {
-          ...params,
-          startTime: params?.startTime ?? params?.startDate,
-          endTime: params?.endTime ?? params?.endDate,
-        },
+        params,
       }),
 
     /** Get access log by ID */
     getById: (id: string) =>
       client.get<AccessLogInfoDto>(`${ADMIN_ACCESS_LOG_BASE}/${id}`),
+
+    /** Record an access log entry */
+    logAccess: (data: AccessLogInfoDto) =>
+      client.post<void>(ADMIN_ACCESS_LOG_BASE, data),
 
     /** Get access statistics */
     getStatistics: (startTime?: Date | string, endTime?: Date | string) =>
@@ -92,10 +150,35 @@ export function useAdminAccessLogApi(client: HttpClient) {
         params: { startTime, endTime },
       }),
 
+    /** Get access log trend (daily/weekly/monthly) */
+    getTrend: (params?: {
+      interval?: AccessLogTrendInterval;
+      startDate?: Date | string;
+      endDate?: Date | string;
+    }) =>
+      client.get<AccessLogTrendDto>(`${ADMIN_ACCESS_LOG_BASE}/statistics/trend`, {
+        params,
+      }),
+
+    /** Get top endpoints (most hits, slowest, most errors) */
+    getTopEndpoints: (params?: {
+      startDate?: Date | string;
+      endDate?: Date | string;
+      top?: number;
+      sortBy?: TopEndpointSortBy;
+    }) =>
+      client.get<TopEndpointDto[]>(`${ADMIN_ACCESS_LOG_BASE}/statistics/top-endpoints`, {
+        params,
+      }),
+
     /** Delete expired access logs */
     deleteExpired: (days?: number) =>
       client.delete<void>(`${ADMIN_ACCESS_LOG_BASE}/expired`, {
         params: { days },
       }),
+
+    /** Batch delete access logs */
+    batchDelete: (ids: string[]) =>
+      client.delete<void>(`${ADMIN_ACCESS_LOG_BASE}/batch`, { body: ids }),
   };
 }

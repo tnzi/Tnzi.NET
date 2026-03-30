@@ -362,4 +362,46 @@ public class ConnectionManager : IConnectionManager
         }
         return Task.FromResult<IEnumerable<string>>([]);
     }
+
+    /// <summary>
+    /// 批量获取多个连接的元数据（避免 N+1 查询）
+    /// </summary>
+    /// <param name="connectionIds">连接ID集合</param>
+    /// <returns>connectionId -> metadata 字典</returns>
+    public Task<IReadOnlyDictionary<string, ConnectionMetadata>> GetConnectionsMetadataBatchAsync(IEnumerable<string> connectionIds)
+    {
+        Check.NotNull(connectionIds);
+
+        var result = new Dictionary<string, ConnectionMetadata>();
+        foreach (var connectionId in connectionIds)
+        {
+            if (_connectionMetadata.TryGetValue(connectionId, out var metadata))
+            {
+                result[connectionId] = metadata;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, ConnectionMetadata>>(result);
+    }
+
+    /// <summary>
+    /// 批量获取多个连接所属的自定义组（避免 N+1 查询）
+    /// </summary>
+    /// <param name="connectionIds">连接ID集合</param>
+    /// <returns>connectionId -> groupNames 字典</returns>
+    public Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetConnectionsGroupsBatchAsync(IEnumerable<string> connectionIds)
+    {
+        Check.NotNull(connectionIds);
+
+        var result = new Dictionary<string, IReadOnlyList<string>>();
+        foreach (var connectionId in connectionIds)
+        {
+            if (_connectionGroups.TryGetValue(connectionId, out var groups))
+            {
+                result[connectionId] = groups.Keys.ToList();
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<string>>>(result);
+    }
 }

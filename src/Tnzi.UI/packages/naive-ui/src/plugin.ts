@@ -65,6 +65,15 @@ export function createTnziNaiveUi(options: TnziNaiveUiOptions = {}): Plugin {
         setMessageAdapter(createNaiveMessageAdapter());
         setDialogAdapter(createNaiveDialogAdapter());
       }
+
+      // 3. Initialize i18n locale
+      // TODO: Wire _locale to the i18n runtime. Currently, @tnzi/core i18n uses a
+      // module-level singleton (createI18nContext) with setLocale(). The plugin should
+      // call the shared i18n context's setLocale(_locale) here once a global i18n
+      // context accessor is exposed from @tnzi/core (e.g., getI18nContext().setLocale).
+      // For now, _locale is accepted but not applied — consumers must call setLocale()
+      // manually on the core i18n context if a non-default locale is needed.
+      void _locale;
     },
   };
 }

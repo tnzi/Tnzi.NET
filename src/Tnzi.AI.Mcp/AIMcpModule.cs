@@ -1,5 +1,7 @@
 using ModelContextProtocol.AspNetCore;
 using Tnzi.AI.Mcp.Options;
+using Tnzi.AI.Mcp.Services;
+using Tnzi.AI.Mcp.Services.Interfaces;
 using TnziMcpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 
 namespace Tnzi.AI.Mcp;
@@ -8,8 +10,13 @@ namespace Tnzi.AI.Mcp;
 /// MCP Server 模块 — 将 Tnzi.AI Agent 暴露为 MCP Server，支持 HTTP/SSE 和 stdio 传输
 /// </summary>
 [DependsOn(typeof(AIModule))]
-public class AIMcpModule : TnziCustomModule
+public class AIMcpModule : TnziApplicationModule
 {
+    /// <summary>
+    /// 表名前缀（与 AI 核心共享）
+    /// </summary>
+    public override string? TableNamePrefix => "AI";
+
     /// <summary>
     /// 加载顺序（在 AIModule(50) 之后）
     /// </summary>
@@ -21,6 +28,9 @@ public class AIMcpModule : TnziCustomModule
             .Bind(context.Configuration.GetSection("AI:McpServer"))
             .ValidateWith<TnziMcpServerOptions, McpServerOptionsValidator>();
 
+        context.Services.AddOptions<McpOAuthOptions>()
+            .Bind(context.Configuration.GetSection("AI:McpServer:OAuth"));
+
         return Task.CompletedTask;
     }
 
@@ -30,6 +40,12 @@ public class AIMcpModule : TnziCustomModule
         var mcpServerOptions = context.Configuration.GetSection("AI:McpServer").Get<TnziMcpServerOptions>() ?? new TnziMcpServerOptions();
         var mcpHttpServiceProviderAccessor = new McpServerServiceProviderAccessor();
         var mcpHttpHandlerBridge = new McpServerHttpHandlerBridge(mcpHttpServiceProviderAccessor);
+
+        // MCP Tool Analytics
+        services.AddScoped<IMcpToolAnalyticsService, McpToolAnalyticsService>();
+
+        // MCP OAuth Token Manager（Singleton — per-server 锁和缓存）
+        services.AddSingleton<IMcpOAuthTokenManager, McpOAuthTokenManager>();
 
         // MCP Server Host（可选，通过 AI:McpServer:Enabled 激活）— Singleton 以保持速率限制状态
         services.AddSingleton<McpServerSecurityMiddleware>();

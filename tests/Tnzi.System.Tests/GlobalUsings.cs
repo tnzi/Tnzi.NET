@@ -25,5 +25,7 @@ global using Tnzi.EFCore;
 global using Tnzi.Extensions;
 global using Tnzi.Mapster;
 global using Tnzi.Services;
+global using System.Security.Cryptography;
+global using Tnzi.Exceptions;
 global using Tnzi.TestBase;
 global using Xunit;

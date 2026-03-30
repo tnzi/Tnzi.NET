@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers;
 [DefaultController]
 [Route("skills")]
 [ApiExplorerSettings(GroupName = "user")]
+[ApiAuthorize]
 public class DefaultSkillController : ApiControllerBase
 {
     protected readonly ISkillService SkillService;
@@ -18,6 +19,7 @@ public class DefaultSkillController : ApiControllerBase
     /// <summary>
     /// 获取当前用户/租户可用的所有技能
     /// </summary>
+    [AllowAnonymous]
     [HttpGet]
     public virtual async Task<ApiResult<List<SkillSummaryDto>>> GetAvailable()
     {
@@ -28,6 +30,7 @@ public class DefaultSkillController : ApiControllerBase
     /// <summary>
     /// 按 slug 获取技能详情
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("{slug}")]
     public virtual async Task<ApiResult<SkillDetailDto>> GetBySlug(string slug)
     {
@@ -38,8 +41,9 @@ public class DefaultSkillController : ApiControllerBase
     /// <summary>
     /// 搜索技能
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("search")]
-    public virtual async Task<ApiResult<List<SkillSummaryDto>>> Search([FromQuery] string query, [FromQuery] int maxResults = 10)
+    public virtual async Task<ApiResult<List<SkillSummaryDto>>> Search([FromQuery] string query, [FromQuery][Range(1, 100)] int maxResults = 10)
     {
         var result = await SkillService.SearchAsync(query, maxResults);
         return result.ToApiResult();

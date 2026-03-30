@@ -26,7 +26,7 @@ public class PromptCachingMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (context.ShouldSkipMiddleware)
             return await next(context, cancellationToken);
 
         ApplyCacheMarkers(context);
@@ -35,7 +35,7 @@ public class PromptCachingMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (context.ShouldSkipMiddleware)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;
@@ -54,6 +54,13 @@ public class PromptCachingMiddleware : IAiMiddleware
         var providerName = context.EffectiveProvider ?? context.Agent.Provider;
         var cachingOptions = ResolveCachingOptions(providerName);
         if (cachingOptions is not { Enabled: true }) return;
+
+        // OAuth token 检测：Anthropic 4-block cache limit 下 OAuth 场景自动禁用
+        if (cachingOptions.DisableOnOAuthToken && context.Properties.ContainsKey("OAuthTokenDetected"))
+        {
+            _logger.LogDebug("Prompt caching disabled due to OAuth token");
+            return;
+        }
 
         // 标记上下文：启用了 prompt caching（供 UsageLoggingMiddleware 追踪指标）
         context.Properties["PromptCachingEnabled"] = true;
@@ -75,7 +82,7 @@ public class PromptCachingMiddleware : IAiMiddleware
         var messages = context.Messages;
         if (messages.Count == 0) return;
 
-        // 1. 缓存系统提示
+        // Tier 1: 缓存系统提示
         if (options.CacheSystemPrompt)
         {
             var lastSystemMsg = messages.LastOrDefault(m => m.Role == ChatRole.System);
@@ -86,7 +93,7 @@ public class PromptCachingMiddleware : IAiMiddleware
             }
         }
 
-        // 2. 缓存前 N 条历史消息（在最后一条上设置断点）
+        // Tier 2a: 缓存前 N 条历史消息（在最后一条上设置断点）
         if (options.CacheFirstNMessages > 0)
         {
             var userMessages = messages.Where(m => m.Role == ChatRole.User || m.Role == ChatRole.Assistant).ToList();
@@ -97,6 +104,29 @@ public class PromptCachingMiddleware : IAiMiddleware
                 SetCacheBreakpoint(lastCachedMsg);
                 _logger.LogDebug("Applied Anthropic cache_control to message {Index} of {Total}", cacheUpTo, userMessages.Count);
             }
+        }
+
+        // Tier 2b: 缓存最近 N 条用户消息
+        if (options.CacheRecentUserMessages > 0)
+        {
+            var userMessages = messages.Where(m => m.Role == ChatRole.User).ToList();
+            if (userMessages.Count > 0)
+            {
+                var startIdx = Math.Max(0, userMessages.Count - options.CacheRecentUserMessages);
+                for (var i = startIdx; i < userMessages.Count; i++)
+                {
+                    SetCacheBreakpoint(userMessages[i]);
+                }
+                _logger.LogDebug("Applied Anthropic cache_control to {Count} recent user messages",
+                    Math.Min(options.CacheRecentUserMessages, userMessages.Count));
+            }
+        }
+
+        // Tier 3: 标记最后一个工具定义用于缓存
+        if (options.CacheToolDefinitions && context.AdditionalTools.Count > 0)
+        {
+            context.Properties["CacheLastToolDefinition"] = true;
+            _logger.LogDebug("Marked last tool definition for Anthropic cache_control");
         }
     }
 

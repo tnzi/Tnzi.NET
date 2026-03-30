@@ -6,6 +6,11 @@ namespace Tnzi.AI.Services;
 /// </summary>
 public class AgentService : ApplicationService, IAgentService
 {
+    /// <summary>
+    /// Maximum records loaded for in-memory JSON field filtering (Domain/Role)
+    /// </summary>
+    private const int MaxInMemoryFilterRecords = 5000;
+
     private readonly IRepository<Agent, Guid> _repository;
     private readonly IRepository<AgentVersion, Guid> _versionRepository;
     private readonly IAgentRuntime _runtime;
@@ -26,9 +31,6 @@ public class AgentService : ApplicationService, IAgentService
     {
         Check.NotNull(input);
         var entity = input.MapTo<Agent>();
-        entity.ToolGroups = input.ToolGroups != null ? JsonSerializer.Serialize(input.ToolGroups) : null;
-        entity.Domains = input.Domains != null ? JsonSerializer.Serialize(input.Domains) : null;
-        entity.Roles = input.Roles != null ? JsonSerializer.Serialize(input.Roles) : null;
         entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
 
         await _repository.InsertAsync(entity);
@@ -49,13 +51,13 @@ public class AgentService : ApplicationService, IAgentService
         if (input.Instructions != null) entity.Instructions = input.Instructions;
         if (input.Provider != null) entity.Provider = input.Provider;
         if (input.Model != null) entity.Model = input.Model;
-        if (input.ToolGroups != null) entity.ToolGroups = JsonSerializer.Serialize(input.ToolGroups);
+        if (input.ToolGroups != null) entity.ToolGroups = input.ToolGroups;
         if (input.Temperature.HasValue) entity.Temperature = input.Temperature;
         if (input.MaxTokens.HasValue) entity.MaxTokens = input.MaxTokens;
         if (input.TimeoutSeconds.HasValue) entity.TimeoutSeconds = input.TimeoutSeconds;
         if (input.IsEnabled.HasValue) entity.IsEnabled = input.IsEnabled.Value;
-        if (input.Domains != null) entity.Domains = JsonSerializer.Serialize(input.Domains);
-        if (input.Roles != null) entity.Roles = JsonSerializer.Serialize(input.Roles);
+        if (input.Domains != null) entity.Domains = input.Domains;
+        if (input.Roles != null) entity.Roles = input.Roles;
         if (input.QualityTier.HasValue) entity.QualityTier = input.QualityTier.Value;
         if (input.LatencyTier.HasValue) entity.LatencyTier = input.LatencyTier.Value;
         if (input.CostTier.HasValue) entity.CostTier = input.CostTier.Value;
@@ -94,15 +96,15 @@ public class AgentService : ApplicationService, IAgentService
             Instructions = source.Instructions,
             Provider = source.Provider,
             Model = source.Model,
-            ToolGroups = source.ToolGroups,
+            ToolGroups = source.ToolGroups?.ToList(),
             Temperature = source.Temperature,
             MaxTokens = source.MaxTokens,
             TimeoutSeconds = source.TimeoutSeconds,
             IsEnabled = source.IsEnabled,
             ExecutionMode = source.ExecutionMode,
             Configuration = source.Configuration,
-            Domains = source.Domains,
-            Roles = source.Roles,
+            Domains = source.Domains?.ToList(),
+            Roles = source.Roles?.ToList(),
             QualityTier = source.QualityTier,
             LatencyTier = source.LatencyTier,
             CostTier = source.CostTier
@@ -208,10 +210,11 @@ public class AgentService : ApplicationService, IAgentService
         }
 
         // JSON 字段无法在数据库级过滤，加载后在内存中过滤并正确计算分页
-        var entities = await queryable.ToListAsync();
+        // 限制最大加载量防止大表全量加载导致 OOM
+        var entities = await queryable.Take(MaxInMemoryFilterRecords).ToListAsync();
         var filtered = entities
-            .Where(a => string.IsNullOrWhiteSpace(query.Domain) || ContainsJsonElement(a.Domains, query.Domain!))
-            .Where(a => string.IsNullOrWhiteSpace(query.Role) || ContainsJsonElement(a.Roles, query.Role!))
+            .Where(a => string.IsNullOrWhiteSpace(query.Domain) || (a.Domains != null && a.Domains.Exists(d => string.Equals(d, query.Domain, StringComparison.OrdinalIgnoreCase))))
+            .Where(a => string.IsNullOrWhiteSpace(query.Role) || (a.Roles != null && a.Roles.Exists(r => string.Equals(r, query.Role, StringComparison.OrdinalIgnoreCase))))
             .ToList();
 
         var totalCount = filtered.Count;
@@ -382,26 +385,7 @@ public class AgentService : ApplicationService, IAgentService
 
             var nextVersion = (latestVersion ?? 0) + 1;
 
-            var snapshot = new AgentConfigSnapshot
-            {
-                Name = entity.Name,
-                Description = entity.Description,
-                Instructions = entity.Instructions,
-                Provider = entity.Provider,
-                Model = entity.Model,
-                ToolGroups = entity.ToolGroups,
-                Temperature = entity.Temperature,
-                MaxTokens = entity.MaxTokens,
-                TimeoutSeconds = entity.TimeoutSeconds,
-                IsEnabled = entity.IsEnabled,
-                ExecutionMode = entity.ExecutionMode,
-                Configuration = entity.Configuration,
-                Domains = entity.Domains,
-                Roles = entity.Roles,
-                QualityTier = entity.QualityTier,
-                LatencyTier = entity.LatencyTier,
-                CostTier = entity.CostTier
-            };
+            var snapshot = entity.MapTo<AgentConfigSnapshot>();
 
             var versionEntity = new AgentVersion
             {
@@ -420,19 +404,9 @@ public class AgentService : ApplicationService, IAgentService
         }
     }
 
-    private static bool ContainsJsonElement(string? json, string element)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return false;
-        var list = JsonSerializer.Deserialize<List<string>>(json);
-        return list != null && list.Exists(x => string.Equals(x, element, StringComparison.OrdinalIgnoreCase));
-    }
-
     private static AgentDto MapToDto(Agent entity)
     {
         var dto = entity.MapTo<AgentDto>();
-        dto.ToolGroups = string.IsNullOrWhiteSpace(entity.ToolGroups) ? null : JsonSerializer.Deserialize<List<string>>(entity.ToolGroups);
-        dto.Domains = string.IsNullOrWhiteSpace(entity.Domains) ? null : JsonSerializer.Deserialize<List<string>>(entity.Domains);
-        dto.Roles = string.IsNullOrWhiteSpace(entity.Roles) ? null : JsonSerializer.Deserialize<List<string>>(entity.Roles);
         dto.ExecutionConfig = AgentExecutionConfigDto.Deserialize(entity.Configuration);
         return dto;
     }
@@ -448,15 +422,15 @@ internal class AgentConfigSnapshot
     public string? Instructions { get; set; }
     public string Provider { get; set; } = string.Empty;
     public string? Model { get; set; }
-    public string? ToolGroups { get; set; }
+    public List<string>? ToolGroups { get; set; }
     public double? Temperature { get; set; }
     public int? MaxTokens { get; set; }
     public int? TimeoutSeconds { get; set; }
     public bool IsEnabled { get; set; }
     public AgentExecutionMode ExecutionMode { get; set; }
     public string? Configuration { get; set; }
-    public string? Domains { get; set; }
-    public string? Roles { get; set; }
+    public List<string>? Domains { get; set; }
+    public List<string>? Roles { get; set; }
     public int QualityTier { get; set; }
     public int LatencyTier { get; set; }
     public int CostTier { get; set; }

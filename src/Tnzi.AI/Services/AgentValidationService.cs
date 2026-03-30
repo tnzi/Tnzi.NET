@@ -135,7 +135,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
 
     private ValidationCheckDto ValidateToolGroups(Agent agent)
     {
-        if (string.IsNullOrWhiteSpace(agent.ToolGroups))
+        if (agent.ToolGroups == null || agent.ToolGroups.Count == 0)
         {
             return new ValidationCheckDto
             {
@@ -145,40 +145,17 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
             };
         }
 
-        try
-        {
-            var toolGroups = System.Text.Json.JsonSerializer.Deserialize<List<string>>(agent.ToolGroups);
-            if (toolGroups == null || toolGroups.Count == 0)
-            {
-                return new ValidationCheckDto
-                {
-                    Name = "tool_groups",
-                    Passed = true,
-                    Details = "No tool groups configured"
-                };
-            }
+        var registeredGroups = _toolRegistry.GetAllGroupNames().ToList();
+        var missingGroups = agent.ToolGroups.Where(g => !registeredGroups.Contains(g, StringComparer.OrdinalIgnoreCase)).ToList();
 
-            var registeredGroups = _toolRegistry.GetAllGroupNames().ToList();
-            var missingGroups = toolGroups.Where(g => !registeredGroups.Contains(g, StringComparer.OrdinalIgnoreCase)).ToList();
-
-            return new ValidationCheckDto
-            {
-                Name = "tool_groups",
-                Passed = missingGroups.Count == 0,
-                Details = missingGroups.Count == 0
-                    ? $"All {toolGroups.Count} tool groups are registered"
-                    : $"Missing tool groups: {string.Join(", ", missingGroups)}"
-            };
-        }
-        catch (System.Text.Json.JsonException)
+        return new ValidationCheckDto
         {
-            return new ValidationCheckDto
-            {
-                Name = "tool_groups",
-                Passed = false,
-                Details = "ToolGroups JSON is malformed"
-            };
-        }
+            Name = "tool_groups",
+            Passed = missingGroups.Count == 0,
+            Details = missingGroups.Count == 0
+                ? $"All {agent.ToolGroups.Count} tool groups are registered"
+                : $"Missing tool groups: {string.Join(", ", missingGroups)}"
+        };
     }
 
     private async Task<ValidationCheckDto> ValidateHandoffTargetsAsync(Agent agent)
@@ -195,7 +172,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
 
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(agent.Configuration);
+            using var doc = JsonDocument.Parse(agent.Configuration);
             if (!doc.RootElement.TryGetProperty("HandoffTargets", out var targetsElement) &&
                 !doc.RootElement.TryGetProperty("handoffTargets", out targetsElement))
             {
@@ -243,7 +220,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
                     : $"Missing handoff target agents: {string.Join(", ", missingIds)}"
             };
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return new ValidationCheckDto
             {

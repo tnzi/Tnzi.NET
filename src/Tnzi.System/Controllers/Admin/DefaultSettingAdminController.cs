@@ -90,6 +90,26 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// Set an encrypted setting value
+    /// </summary>
+    [HttpPut("{group}/{key}/encrypted")]
+    public virtual async Task<ApiResult> SetEncrypted(string group, string key, [FromBody] SetEncryptedSettingDto input)
+    {
+        var result = await SettingService.SetEncryptedAsync(group, key, input.Value, input.Description);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Get decrypted setting value
+    /// </summary>
+    [HttpGet("{group}/{key}/decrypted")]
+    public virtual async Task<ApiResult<string?>> GetDecrypted(string group, string key)
+    {
+        var result = await SettingService.GetDecryptedAsync(group, key);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取配置分组列表（分组名称 + 每组配置数量）
     /// </summary>
     [HttpGet("groups")]

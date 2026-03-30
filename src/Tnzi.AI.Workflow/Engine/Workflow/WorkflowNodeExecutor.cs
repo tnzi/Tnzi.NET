@@ -26,6 +26,7 @@ public class WorkflowNodeExecutor
         WorkflowStepDto step,
         WorkflowState state,
         AgentRun? run = null,
+        Dictionary<string, object>? resumeData = null,
         CancellationToken cancellationToken = default)
     {
         Check.NotNull(step);
@@ -44,11 +45,50 @@ public class WorkflowNodeExecutor
             State = state,
             DependencyOutputs = dependencyOutputs,
             ServiceProvider = _serviceProvider,
-            Run = run
+            Run = run,
+            ResumeData = resumeData
         };
 
         // 查找匹配的 IWorkflowNode 实现
         var node = ResolveNode(step);
+
+        // 通用中断检查：非恢复状态下，在执行前询问节点是否需要中断
+        if (!context.IsResuming)
+        {
+            var interrupt = await node.CheckInterruptAsync(context, cancellationToken);
+            if (interrupt != null)
+            {
+                sw.Stop();
+                _logger.LogInformation("Workflow node '{StepId}' requested interrupt: {Reason} (type={InterruptType})",
+                    stepId, interrupt.Reason, interrupt.Type);
+
+                await RecordTraceAsync(run, stepId, AgentTraceEventTypes.NodeExecute, new
+                {
+                    nodeType = node.NodeType,
+                    durationMs = sw.ElapsedMilliseconds,
+                    interrupted = true,
+                    interruptType = interrupt.Type.ToString(),
+                    interruptReason = interrupt.Reason
+                }, sw.ElapsedMilliseconds, cancellationToken);
+
+                return new WorkflowNodeResult
+                {
+                    Output = new WorkflowStepOutput
+                    {
+                        Text = $"[Awaiting {interrupt.Type}: {interrupt.Reason}]",
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["status"] = "awaiting_input",
+                            ["interrupt_type"] = interrupt.Type.ToString(),
+                            ["step_id"] = stepId
+                        }
+                    },
+                    IsSuccess = true,
+                    AwaitingInterrupt = interrupt,
+                    DurationMs = sw.ElapsedMilliseconds
+                };
+            }
+        }
 
         // 执行（含重试 + 超时）
         var maxAttempts = step.MaxRetries + 1;

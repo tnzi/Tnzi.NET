@@ -69,6 +69,20 @@ public class QuotaThresholdReachedEvent : EventBase
 }
 
 /// <summary>
+/// Thread 删除事件 — 当会话线程被删除时发布。
+/// 用于触发级联清理（消息、运行记录、产物、沙箱资源、IM 映射等）。
+/// </summary>
+public class ThreadDeletedEvent : EventBase
+{
+    /// <summary>Thread ID</summary>
+    public Guid ThreadId { get; set; }
+    /// <summary>User ID (thread creator)</summary>
+    public Guid? UserId { get; set; }
+    /// <summary>Agent ID (if thread is bound to an agent)</summary>
+    public Guid? AgentId { get; set; }
+}
+
+/// <summary>
 /// Guardrail 拦截事件 — 当输入或输出被 Guardrail 拒绝时发布。
 /// 可用于安全监控、审计、报表等。
 /// </summary>

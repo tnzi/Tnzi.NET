@@ -7,16 +7,22 @@ public class UserSettingProvider : ISettingProvider
 {
     private readonly IRepository<Setting, Guid> _repository;
     private readonly ICurrentUser? _currentUser;
+    private readonly ISettingEncryptor? _settingEncryptor;
+    private readonly ILogger<UserSettingProvider> _logger;
 
     public string Name => "User";
     public int Priority => 300;
 
     public UserSettingProvider(
         IRepository<Setting, Guid> repository,
-        ICurrentUser? currentUser = null)
+        ILogger<UserSettingProvider> logger,
+        ICurrentUser? currentUser = null,
+        ISettingEncryptor? settingEncryptor = null)
     {
         _repository = Check.NotNull(repository);
+        _logger = Check.NotNull(logger);
         _currentUser = currentUser;
+        _settingEncryptor = settingEncryptor;
     }
 
     public async Task<string?> GetOrNullAsync(string key, CancellationToken cancellationToken = default)
@@ -30,6 +36,20 @@ public class UserSettingProvider : ISettingProvider
             .Where(s => s.Key == key && s.Scope == SettingScope.User && s.ScopeId == scopeId)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return setting?.Value;
+        if (setting == null)
+            return null;
+
+        if (setting.IsEncrypted)
+        {
+            if (_settingEncryptor == null)
+            {
+                _logger.LogWarning("Encrypted setting '{Key}' found but encryption is not enabled, returning null for safety", key);
+                return null;
+            }
+
+            return setting.Value != null ? _settingEncryptor.Decrypt(setting.Value) : null;
+        }
+
+        return setting.Value;
     }
 }

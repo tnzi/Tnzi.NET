@@ -28,12 +28,27 @@ const phoneNumber = ref('');
 const password = ref('');
 const confirmPassword = ref('');
 const captchaCode = ref('');
+const agreedToTerms = ref(false);
 
 const isDisabled = computed(() => props.disabled);
 const passwordMismatch = computed(() => confirmPassword.value !== '' && confirmPassword.value !== password.value);
 
+const emailRules = [
+  { required: true, message: 'Email is required' },
+  { pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Invalid email format' },
+];
+const passwordRules = [
+  { required: true, message: 'Password is required' },
+  { validator: (val: string) => val.length >= 6, message: 'Password must be at least 6 characters' },
+];
+const confirmPasswordRules = [
+  { required: true, message: 'Confirm password is required' },
+  { validator: (val: string) => val === password.value, message: 'Passwords do not match' },
+];
+
 const handleSubmit = () => {
   if (passwordMismatch.value) return;
+  if (!agreedToTerms.value) return;
 
   emit('submit', {
     email: email.value,
@@ -53,7 +68,13 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
 <template>
   <div class="rounded-xl bg-white">
     <van-form @submit="handleSubmit">
-      <van-field v-model="email" :label="props.emailLabel || t('auth.email')" :disabled="isDisabled" required />
+      <van-field
+        v-model="email"
+        name="email"
+        :label="props.emailLabel || t('auth.email')"
+        :disabled="isDisabled"
+        :rules="emailRules"
+      />
       <van-field
         v-if="props.showUsername"
         v-model="userName"
@@ -68,18 +89,19 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
       />
       <van-field
         v-model="password"
+        name="password"
         type="password"
         :label="props.passwordLabel || t('auth.password')"
         :disabled="isDisabled"
-        required
+        :rules="passwordRules"
       />
       <van-field
         v-model="confirmPassword"
+        name="confirmPassword"
         type="password"
         :label="props.confirmPasswordLabel || t('auth.confirmPassword')"
-        :error-message="passwordMismatch ? t('auth.passwordMismatch') : ''"
         :disabled="isDisabled"
-        required
+        :rules="confirmPasswordRules"
       />
 
       <van-field
@@ -128,12 +150,17 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
         </van-button>
       </div>
 
+      <div class="px-4 py-2">
+        <van-checkbox v-model="agreedToTerms" :disabled="isDisabled" shape="square">
+          {{ t('auth.agreeToTerms') }}
+        </van-checkbox>
+      </div>
+
       <div class="px-4 pb-4">
-        <van-button round block type="primary" native-type="submit" :loading="props.loading" :disabled="isDisabled || passwordMismatch">
+        <van-button round block type="primary" native-type="submit" :loading="props.loading" :disabled="isDisabled || passwordMismatch || !agreedToTerms">
           {{ props.submitLabel || t('auth.register') }}
         </van-button>
       </div>
     </van-form>
   </div>
 </template>
-

@@ -2,6 +2,20 @@
 import { computed } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { IDynamicFormEmits, IDynamicFormField, IDynamicFormProps } from '@tnzi/core/components';
+import { Input } from '../primitive/ui/input';
+import { Textarea } from '../primitive/ui/textarea';
+import { Button } from '../primitive/ui/button';
+import { Checkbox } from '../primitive/ui/checkbox';
+import { Switch } from '../primitive/ui/switch';
+import { Label } from '../primitive/ui/label';
+import { RadioGroup, RadioGroupItem } from '../primitive/ui/radio-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../primitive/ui/select';
 
 type DynamicFormCompatProps = IDynamicFormProps & { modelValue?: Record<string, any> };
 
@@ -25,16 +39,6 @@ const containerClass = computed(() => {
   return 'space-y-4';
 });
 
-const inputSizeClass = computed(() => {
-  const map = {
-    small: 'h-8 text-xs',
-    medium: 'h-10 text-sm',
-    large: 'h-11 text-base',
-  } as const;
-
-  return map[props.size];
-});
-
 const currentModel = computed(() => props.modelValue ?? props.model);
 const fieldValue = (key: string) => currentModel.value[key];
 
@@ -44,12 +48,16 @@ const updateField = (field: IDynamicFormField, value: any) => {
   emit('fieldChange', field.key, value);
 };
 
-const onFieldInput = (field: IDynamicFormField, event: Event) => {
-  const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-  if (field.type === 'checkbox') {
-    updateField(field, (target as HTMLInputElement).checked);
-    return;
-  }
+const onInputField = (field: IDynamicFormField, value: string | number) => {
+  updateField(field, String(value));
+};
+
+const onTextareaField = (field: IDynamicFormField, value: string | number) => {
+  updateField(field, String(value));
+};
+
+const onFileInput = (field: IDynamicFormField, event: Event) => {
+  const target = event.target as HTMLInputElement;
   updateField(field, target.value);
 };
 
@@ -61,110 +69,132 @@ const handleReset = () => emit('reset');
   <form class="space-y-4" @submit.prevent="handleSubmit">
     <div :class="containerClass">
       <div v-for="field in props.fields" :key="field.key" class="space-y-2">
-        <label v-if="field.label" class="text-sm font-medium">
+        <!-- Label (except for checkbox/switch which have inline labels) -->
+        <Label
+          v-if="field.label && !['checkbox', 'switch'].includes(field.type)"
+          :for="field.key"
+          class="text-sm font-medium"
+        >
           {{ field.label }}
           <span v-if="field.required" class="text-destructive">*</span>
-        </label>
+        </Label>
 
-        <input
+        <!-- Text / Password / Email / Number / Date / DateTime -->
+        <Input
           v-if="['text', 'password', 'email', 'number', 'date', 'datetime'].includes(field.type)"
+          :id="field.key"
           :type="field.type === 'datetime' ? 'datetime-local' : field.type"
-          :value="fieldValue(field.key)"
+          :model-value="fieldValue(field.key) ?? ''"
           :placeholder="field.placeholder"
           :disabled="props.disabled || field.disabled"
-          class="w-full rounded-md border bg-background px-3 outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring"
-          :class="inputSizeClass"
-          @input="onFieldInput(field, $event)"
+          @update:model-value="onInputField(field, $event)"
         />
 
-        <textarea
+        <!-- Textarea -->
+        <Textarea
           v-else-if="field.type === 'textarea'"
-          :value="fieldValue(field.key)"
+          :id="field.key"
+          :model-value="fieldValue(field.key) ?? ''"
           :placeholder="field.placeholder"
           :disabled="props.disabled || field.disabled"
-          class="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring"
-          @input="onFieldInput(field, $event)"
+          class="min-h-24"
+          @update:model-value="onTextareaField(field, $event)"
         />
 
-        <select
+        <!-- Select -->
+        <Select
           v-else-if="field.type === 'select'"
-          :value="fieldValue(field.key)"
+          :model-value="fieldValue(field.key) != null ? String(fieldValue(field.key)) : undefined"
           :disabled="props.disabled || field.disabled"
-          class="w-full rounded-md border bg-background px-3 outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring"
-          :class="inputSizeClass"
-          @change="onFieldInput(field, $event)"
+          @update:model-value="updateField(field, $event)"
         >
-          <option value="">{{ field.placeholder || t('common.select') }}</option>
-          <option v-for="option in field.options || []" :key="String(option.value)" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
+          <SelectTrigger class="w-full">
+            <SelectValue :placeholder="field.placeholder || t('common.select')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="option in field.options || []"
+              :key="String(option.value)"
+              :value="String(option.value)"
+            >
+              {{ option.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
-        <label v-else-if="field.type === 'checkbox'" class="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
+        <!-- Checkbox -->
+        <div v-else-if="field.type === 'checkbox'" class="flex items-center gap-2">
+          <Checkbox
+            :id="field.key"
             :checked="Boolean(fieldValue(field.key))"
             :disabled="props.disabled || field.disabled"
-            @change="onFieldInput(field, $event)"
+            @update:checked="updateField(field, $event)"
           />
-          <span>{{ field.placeholder || field.label }}</span>
-        </label>
-
-        <div v-else-if="field.type === 'radio'" class="flex flex-wrap gap-3">
-          <label
-            v-for="option in field.options || []"
-            :key="String(option.value)"
-            class="flex items-center gap-2 text-sm"
-          >
-            <input
-              type="radio"
-              :name="field.key"
-              :value="option.value"
-              :checked="fieldValue(field.key) === option.value"
-              :disabled="props.disabled || field.disabled"
-              @change="updateField(field, option.value)"
-            />
-            {{ option.label }}
-          </label>
+          <Label :for="field.key" class="text-sm text-muted-foreground">
+            {{ field.placeholder || field.label }}
+          </Label>
         </div>
 
-        <label v-else-if="field.type === 'switch'" class="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
+        <!-- Radio Group -->
+        <RadioGroup
+          v-else-if="field.type === 'radio'"
+          :model-value="fieldValue(field.key) != null ? String(fieldValue(field.key)) : undefined"
+          :disabled="props.disabled || field.disabled"
+          class="flex flex-wrap gap-3"
+          @update:model-value="updateField(field, $event)"
+        >
+          <div
+            v-for="option in field.options || []"
+            :key="String(option.value)"
+            class="flex items-center gap-2"
+          >
+            <RadioGroupItem :id="`${field.key}-${option.value}`" :value="String(option.value)" />
+            <Label :for="`${field.key}-${option.value}`" class="text-sm">
+              {{ option.label }}
+            </Label>
+          </div>
+        </RadioGroup>
+
+        <!-- Switch -->
+        <div v-else-if="field.type === 'switch'" class="flex items-center gap-2">
+          <Switch
+            :id="field.key"
             :checked="Boolean(fieldValue(field.key))"
             :disabled="props.disabled || field.disabled"
-            @change="onFieldInput(field, $event)"
+            @update:checked="updateField(field, $event)"
           />
-          <span>{{ field.placeholder || field.label }}</span>
-        </label>
+          <Label :for="field.key" class="text-sm text-muted-foreground">
+            {{ field.placeholder || field.label }}
+          </Label>
+        </div>
 
+        <!-- File -->
         <input
           v-else-if="field.type === 'file'"
+          :id="field.key"
           type="file"
           :disabled="props.disabled || field.disabled"
           class="w-full cursor-pointer rounded-md border bg-background px-3 py-2 text-sm"
-          @change="onFieldInput(field, $event)"
+          @change="onFileInput(field, $event)"
         />
       </div>
     </div>
 
     <div class="flex justify-end gap-2 pt-2">
-      <button
+      <Button
         type="button"
-        class="rounded-md border bg-background px-4 py-2 text-sm transition hover:bg-accent disabled:opacity-50"
+        variant="outline"
         :disabled="props.disabled"
         @click="handleReset"
       >
         {{ t('common.reset') }}
-      </button>
-      <button
+      </Button>
+      <Button
         type="submit"
-        class="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         :disabled="props.disabled"
       >
         {{ t('common.submit') }}
-      </button>
+      </Button>
     </div>
   </form>
 </template>
-

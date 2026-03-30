@@ -19,4 +19,17 @@ public interface IWorkflowNode
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>节点执行结果</returns>
     Task<WorkflowNodeResult> ExecuteAsync(WorkflowNodeContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 检查节点是否需要中断（在 ExecuteAsync 之前调用）
+    /// </summary>
+    /// <remarks>
+    /// 默认返回 null（不中断）。节点可重写此方法以请求人工输入、审批或外部事件回调。
+    /// 当工作流处于恢复状态（context.IsResuming == true）时，引擎跳过此检查直接执行。
+    /// </remarks>
+    /// <param name="context">节点执行上下文</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>中断描述（null 表示不中断）</returns>
+    Task<WorkflowInterrupt?> CheckInterruptAsync(WorkflowNodeContext context, CancellationToken cancellationToken = default)
+        => Task.FromResult<WorkflowInterrupt?>(null);
 }

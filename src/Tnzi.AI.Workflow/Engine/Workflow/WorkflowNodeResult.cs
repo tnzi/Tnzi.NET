@@ -26,6 +26,12 @@ public class WorkflowNodeResult
     /// <summary>是否等待人工审批</summary>
     public bool AwaitingApproval { get; init; }
 
+    /// <summary>
+    /// 通用中断描述（由 CheckInterruptAsync 返回，非 null 表示节点请求中断）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public WorkflowInterrupt? AwaitingInterrupt { get; init; }
+
     /// <summary>动态生成的子步骤（可选，用于动态工作流）</summary>
     public List<WorkflowStepDto>? DynamicSteps { get; init; }
 }

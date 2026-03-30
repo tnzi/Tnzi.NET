@@ -47,7 +47,8 @@ public class SkillRegistryTests : IDisposable
                     Paths = [_tempDir],
                     AllowList = [],
                     DenyList = [],
-                    RequireChecksEnabled = false
+                    RequireChecksEnabled = false,
+                    LoadBuiltIn = false
                 }
             }
         });
@@ -70,9 +71,10 @@ public class SkillRegistryTests : IDisposable
     public async Task GetAvailableSkillsAsync_ReturnsSystemSkills()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
 
             ## When to Use
 
@@ -92,9 +94,10 @@ public class SkillRegistryTests : IDisposable
     {
         // Two skills with the same slug but different scopes should deduplicate — System wins
         CreateSkillFile("skill-a", """
-            # Duplicate Skill
-
-            First instance.
+            ---
+            name: Duplicate Skill
+            description: First instance.
+            ---
             """);
 
         var fileStore = CreateFileStore();
@@ -115,9 +118,10 @@ public class SkillRegistryTests : IDisposable
     public async Task GetBySlugAsync_FindsBySlug()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
             """);
 
         var registry = CreateRegistry(CreateFileStore());
@@ -132,9 +136,10 @@ public class SkillRegistryTests : IDisposable
     public async Task GetBySlugAsync_WithNamespace_FiltersScope()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
             """);
 
         var registry = CreateRegistry(CreateFileStore());
@@ -151,9 +156,10 @@ public class SkillRegistryTests : IDisposable
     public async Task GetBySlugAsync_WithWrongScope_ReturnsNull()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
             """);
 
         var registry = CreateRegistry(CreateFileStore());
@@ -194,9 +200,10 @@ public class SkillRegistryTests : IDisposable
     public async Task SearchAsync_DelegatesToSearchService()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
             """);
 
         var mockSearch = new Mock<ISkillSearchService>();
@@ -223,9 +230,10 @@ public class SkillRegistryTests : IDisposable
     public async Task SearchAsync_ReturnsMatchingSkills()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
             """);
 
         var registry = CreateRegistry(CreateFileStore());
@@ -244,8 +252,8 @@ public class SkillRegistryTests : IDisposable
     public async Task GetBySlugAsync_DirectLookup_DoesNotLoadAllSkills()
     {
         // Create two skills but only look up one — direct lookup should not load all
-        CreateSkillFile("skill-a", "# Skill A\n\nDescription A.");
-        CreateSkillFile("skill-b", "# Skill B\n\nDescription B.");
+        CreateSkillFile("skill-a", "---\nname: Skill A\ndescription: Description A.\n---");
+        CreateSkillFile("skill-b", "---\nname: Skill B\ndescription: Description B.\n---");
 
         var registry = CreateRegistry(CreateFileStore());
 
@@ -259,7 +267,7 @@ public class SkillRegistryTests : IDisposable
     public async Task GetBySlugAsync_SystemScopeWinsOverTenantInMergedList()
     {
         // System scope skill from FileSystemSkillStore
-        CreateSkillFile("shared-skill", "# Shared Skill\n\nSystem version.");
+        CreateSkillFile("shared-skill", "---\nname: Shared Skill\ndescription: System version.\n---");
 
         var fileStore = CreateFileStore();
         var registry = CreateRegistry(fileStore);
@@ -281,7 +289,7 @@ public class SkillRegistryTests : IDisposable
     [Fact]
     public async Task GetAvailableSkillsAsync_ReturnsCachedOnSecondCall()
     {
-        CreateSkillFile("cached-skill", "# Cached Skill\n\nDescription.");
+        CreateSkillFile("cached-skill", "---\nname: Cached Skill\ndescription: Description.\n---");
 
         var registry = CreateRegistry(CreateFileStore());
 
@@ -295,7 +303,7 @@ public class SkillRegistryTests : IDisposable
     [Fact]
     public async Task InvalidateCache_ClearsMergedCache()
     {
-        CreateSkillFile("initial-skill", "# Initial Skill\n\nDescription.");
+        CreateSkillFile("initial-skill", "---\nname: Initial Skill\ndescription: Description.\n---");
 
         var fileStore = CreateFileStore();
         var registry = CreateRegistry(fileStore);
@@ -307,7 +315,7 @@ public class SkillRegistryTests : IDisposable
         registry.InvalidateCache();
 
         // Add another skill
-        CreateSkillFile("new-skill", "# New Skill\n\nDescription.");
+        CreateSkillFile("new-skill", "---\nname: New Skill\ndescription: Description.\n---");
 
         var second = await registry.GetAvailableSkillsAsync();
         second.Count.ShouldBe(2);
@@ -322,9 +330,10 @@ public class SkillRegistryTests : IDisposable
     public async Task InvalidateCache_ClearsFileStoreCache()
     {
         CreateSkillFile("code-review", """
-            # Code Review
-
-            Reviews code quality.
+            ---
+            name: Code Review
+            description: Reviews code quality.
+            ---
             """);
 
         var fileStore = CreateFileStore();
@@ -337,9 +346,10 @@ public class SkillRegistryTests : IDisposable
         // Invalidate and add a new skill file
         registry.InvalidateCache();
         CreateSkillFile("security-audit", """
-            # Security Audit
-
-            Audits security vulnerabilities.
+            ---
+            name: Security Audit
+            description: Audits security vulnerabilities.
+            ---
             """);
 
         // After invalidation, the new skill should be visible

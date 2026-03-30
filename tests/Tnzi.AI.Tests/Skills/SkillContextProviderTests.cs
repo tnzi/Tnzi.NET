@@ -63,7 +63,7 @@ public class SkillContextProviderTests
 
         injection.HasContent.ShouldBeTrue();
         injection.Tools.ShouldNotBeNull();
-        injection.Tools!.Count.ShouldBe(4); // skill_search + skill_get + skill_activate + skill_deactivate
+        injection.Tools!.Count.ShouldBe(5); // skill_search + skill_get + skill_activate + skill_deactivate
         injection.Tools.Select(t => t.Name).ShouldContain("skill_search");
         injection.Tools.Select(t => t.Name).ShouldContain("skill_get");
         injection.Tools.Select(t => t.Name).ShouldContain("skill_activate");
@@ -92,7 +92,39 @@ public class SkillContextProviderTests
         injection.Messages.ShouldNotBeNull();
         injection.Messages!.Count.ShouldBeGreaterThan(0);
         injection.Tools.ShouldNotBeNull();
-        injection.Tools!.Count.ShouldBe(4);
+        injection.Tools!.Count.ShouldBe(5);
+    }
+
+    #endregion
+
+    #region Internal Skills Filtering
+
+    [Fact]
+    public async Task GetContextAsync_ExcludesInternalSkills()
+    {
+        var internalSkill = new SkillDefinition
+        {
+            Slug = "office-scripts",
+            Name = "Office Scripts",
+            Description = "Shared dependency",
+            IsInternal = true,
+            Enabled = true
+        };
+        var normalSkill = new SkillDefinition
+        {
+            Slug = "code-review",
+            Name = "Code Review",
+            Description = "Reviews code",
+            Enabled = true
+        };
+        var provider = CreateProvider(SkillInjectionMode.Instructions, [internalSkill, normalSkill]);
+
+        var injection = await provider.GetContextAsync([]);
+
+        injection.HasContent.ShouldBeTrue();
+        var text = injection.Messages![0].Text!;
+        text.ShouldContain("Code Review");
+        text.ShouldNotContain("Office Scripts"); // Internal skill should be excluded
     }
 
     #endregion

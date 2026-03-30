@@ -184,13 +184,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Ok("File reference count decreased");
         }
 
-        // 1. 删除所有引用记录
-        var references = await _referenceRepository
-            .ToListAsync(r => r.FileId == id);
-        foreach (var reference in references)
-        {
-            await _referenceRepository.DeleteAsync(reference);
-        }
+        // 1. 批量删除所有引用记录
+        await _referenceRepository.DeleteAsync(r => r.FileId == id);
 
         // 2. 删除物理文件和数据库记录
         await DeleteFileAsync(record!);
@@ -298,13 +293,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
                     continue;
                 }
 
-                // 引用归零，删除引用记录和物理文件
-                var references = await _referenceRepository
-                    .ToListAsync(r => r.FileId == record.Id, cancellationToken);
-                foreach (var reference in references)
-                {
-                    await _referenceRepository.DeleteAsync(reference, cancellationToken);
-                }
+                // 引用归零，批量删除引用记录和物理文件
+                await _referenceRepository.DeleteAsync(r => r.FileId == record.Id, cancellationToken);
 
                 await DeleteFileAsync(record);
                 deletedCount++;
@@ -441,7 +431,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         if (!string.IsNullOrEmpty(request.Extension))
         {
-            query = query.Where(f => f.Extension == request.Extension);
+            var ext = request.Extension.ToLower();
+            query = query.Where(f => f.Extension != null && f.Extension.ToLower() == ext);
         }
 
         if (request.MinSize.HasValue)
@@ -471,7 +462,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         if (!string.IsNullOrEmpty(request.Provider))
         {
-            query = query.Where(f => f.Provider == request.Provider);
+            var provider = request.Provider.ToLower();
+            query = query.Where(f => f.Provider != null && f.Provider.ToLower() == provider);
         }
 
         if (!string.IsNullOrEmpty(request.OriginalName))
@@ -484,6 +476,26 @@ public class FileStorageService : ApplicationService, IFileStorageService
         {
             var tag = request.Tag.Trim().ToLower();
             query = query.Where(f => f.Tags != null && f.Tags.ToLower().Contains(tag));
+        }
+
+        // Metadata filtering: search within the JSON-serialized metadata column
+        // Use JsonSerializer.Serialize to properly escape key/value and prevent JSON injection
+        if (!string.IsNullOrEmpty(request.MetadataKey))
+        {
+            var escapedKey = JsonSerializer.Serialize(request.MetadataKey.Trim());
+            if (!string.IsNullOrEmpty(request.MetadataValue))
+            {
+                // Exact key-value match: search for "key":"value" pattern in JSON
+                var escapedValue = JsonSerializer.Serialize(request.MetadataValue.Trim());
+                var searchPattern = $"{escapedKey}:{escapedValue}";
+                query = query.Where(f => f.Metadata != null && f.Metadata.ToLower().Contains(searchPattern.ToLower()));
+            }
+            else
+            {
+                // Key existence: search for "key": pattern in JSON
+                var searchPattern = $"{escapedKey}:";
+                query = query.Where(f => f.Metadata != null && f.Metadata.ToLower().Contains(searchPattern.ToLower()));
+            }
         }
 
         if (!string.IsNullOrEmpty(request.SortBy))
@@ -765,10 +777,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(batch);
     }
 
-    public async Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default)
+    public async Task<Result<FileInfoDto>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(fileId, cancellationToken);
-        var check = EnsureFileRecordExists<FileRecord>(record);
+        var check = EnsureFileRecordExists<FileInfoDto>(record);
         if (check != null)
             return check;
 
@@ -776,7 +788,36 @@ public class FileStorageService : ApplicationService, IFileStorageService
         await _repository.UpdateAsync(record, cancellationToken);
 
         LogInformation("File tags updated: {FileId}, Tags: {Tags}", fileId, record.Tags ?? string.Empty);
-        return Ok(record, "File tags updated successfully");
+        return Ok(record.MapTo<FileInfoDto>(), "File tags updated successfully");
+    }
+
+    public async Task<Result<FileInfoDto>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(fileId, cancellationToken);
+        var check = EnsureFileRecordExists<FileInfoDto>(record);
+        if (check != null)
+            return check;
+
+        // Validate metadata size before saving
+        var serialized = JsonSerializer.Serialize(metadata);
+        if (serialized.Length > 4096)
+            return Fail<FileInfoDto>($"Metadata JSON exceeds maximum allowed size (4096 chars). Current size: {serialized.Length} chars.", 400, ErrorCodes.VALIDATION_ERROR);
+
+        record!.SetMetadata(metadata);
+        await _repository.UpdateAsync(record, cancellationToken);
+
+        LogInformation("File metadata updated: {FileId}, Keys: {Keys}", fileId, metadata.Count > 0 ? string.Join(", ", metadata.Keys) : "(cleared)");
+        return Ok(record.MapTo<FileInfoDto>(), "File metadata updated successfully");
+    }
+
+    public async Task<Result<Dictionary<string, string>>> GetMetadataAsync(Guid fileId, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(fileId, cancellationToken);
+        var check = EnsureFileRecordExists<Dictionary<string, string>>(record);
+        if (check != null)
+            return check;
+
+        return Ok(record!.GetMetadata());
     }
 
     public async Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default)

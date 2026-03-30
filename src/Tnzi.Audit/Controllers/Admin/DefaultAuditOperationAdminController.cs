@@ -161,7 +161,7 @@ public class DefaultAuditOperationAdminController : ApiAdminControllerBase
             return new BadRequestObjectResult(result.Message);
         }
 
-        var bytes = System.Text.Encoding.UTF8.GetBytes(result.Data!);
+        var bytes = Encoding.UTF8.GetBytes(result.Data!);
         var fileName = $"audit_export_{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
         return File(bytes, "text/csv", fileName);
     }
@@ -180,7 +180,7 @@ public class DefaultAuditOperationAdminController : ApiAdminControllerBase
             return new BadRequestObjectResult(result.Message);
         }
 
-        var bytes = System.Text.Encoding.UTF8.GetBytes(result.Data!);
+        var bytes = Encoding.UTF8.GetBytes(result.Data!);
         var fileName = $"audit_export_{DateTime.UtcNow:yyyyMMddHHmmss}.json";
         return File(bytes, "application/json", fileName);
     }

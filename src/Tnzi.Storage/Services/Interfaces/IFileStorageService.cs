@@ -108,10 +108,21 @@ public interface IFileStorageService
     /// <summary>
     /// Set tags for a file (replaces existing tags).
     /// </summary>
-    Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default);
+    Task<Result<FileInfoDto>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get files by tag (supports paging).
     /// </summary>
     Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default);
+
+    // File metadata
+    /// <summary>
+    /// Set metadata for a file (replaces existing metadata).
+    /// </summary>
+    Task<Result<FileInfoDto>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get metadata for a file.
+    /// </summary>
+    Task<Result<Dictionary<string, string>>> GetMetadataAsync(Guid fileId, CancellationToken cancellationToken = default);
 }

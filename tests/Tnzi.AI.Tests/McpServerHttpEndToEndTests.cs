@@ -104,6 +104,11 @@ public class McpServerHttpEndToEndTests
         {
             ["Database:AutoDiscoverDbContexts"] = "false",
             ["AspNetCore:EnableForwardedHeaders"] = "false",
+            ["AI:DefaultProvider"] = "Test",
+            ["AI:Providers:Test:Enabled"] = "true",
+            ["AI:Providers:Test:ApiKey"] = "test-key",
+            ["AI:Providers:Test:DefaultModel"] = "test-model",
+            ["AI:Providers:DeepSeek:Enabled"] = "false",
             ["AI:McpServer:Enabled"] = "true",
             ["AI:McpServer:Transport"] = "sse",
             ["AI:McpServer:Endpoint"] = "/mcp",

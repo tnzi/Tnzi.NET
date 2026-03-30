@@ -1,12 +1,13 @@
 
 
 
+
 namespace Tnzi.AI.Mcp.Server;
 
 /// <summary>
 /// MCP Server Host 实现 — 将 Agent 和自定义工具暴露为 MCP Server
 /// </summary>
-public class McpServerHost : IMcpServerHost
+public partial class McpServerHost : IMcpServerHost
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<McpServerOptions> _options;
@@ -18,6 +19,9 @@ public class McpServerHost : IMcpServerHost
 
     // 已注册的自定义工具
     private readonly ConcurrentDictionary<string, CustomToolRegistration> _customTools = new(StringComparer.OrdinalIgnoreCase);
+
+    // 工具名 → AgentId 缓存（BuildToolsAsync 时填充，避免 CallToolAsync 逐个查库）
+    private readonly ConcurrentDictionary<string, Guid> _agentToolNameMap = new(StringComparer.OrdinalIgnoreCase);
 
     public McpServerHost(
         IServiceProvider serviceProvider,
@@ -32,11 +36,7 @@ public class McpServerHost : IMcpServerHost
     }
 
     /// <inheritdoc />
-    public void ExposeAgent(Guid agentId, McpToolExposureOptions? options = null)
-    {
-        _agentTools[agentId] = new AgentToolRegistration(agentId, options);
-        _logger.LogInformation("Registered Agent '{AgentId}' for MCP exposure", agentId);
-    }
+    public IReadOnlyList<string> GetCustomToolNames() => [.. _customTools.Keys];
 
     /// <inheritdoc />
     public void ExposeTool(string name, string description, Func<JsonElement, Task<string>> handler)
@@ -225,94 +225,6 @@ public class McpServerHost : IMcpServerHost
     }
 
     /// <summary>
-    /// 将 Agent 构建为 MCP 工具（Agent 工具调用路由到 IAgentRuntime.RunAsync）
-    /// </summary>
-    private async Task<McpServerTool?> BuildAgentToolAsync(
-        Guid agentId,
-        AgentToolRegistration registration,
-        CancellationToken ct)
-    {
-        // 从数据库加载 Agent 信息（用 scope 以获取 scoped 服务）
-        using var scope = _serviceProvider.CreateScope();
-        var agentService = scope.ServiceProvider.GetRequiredService<IAgentService>();
-        var agentResult = await agentService.GetByIdAsync(agentId);
-        if (!agentResult.Succeeded || agentResult.Data == null)
-        {
-            _logger.LogWarning("Agent '{AgentId}' not found, skipping MCP exposure", agentId);
-            return null;
-        }
-
-        var agent = agentResult.Data;
-        var toolName = registration.Options?.ToolName ?? SanitizeToolName(agent.Name);
-        var description = registration.Options?.Description ?? agent.Description ?? $"Run AI Agent: {agent.Name}";
-
-        // 捕获 agentId 和 toolName 到闭包
-        var capturedAgentId = agentId;
-        var capturedToolName = toolName;
-
-        // 使用 McpServerTool.Create(Delegate) 创建工具
-        Func<string, CancellationToken, Task<string>> handler = (message, cancellation) =>
-            InvokeAgentAsync(capturedAgentId, capturedToolName, message, cancellation);
-
-        return McpServerTool.Create(handler, new McpServerToolCreateOptions
-        {
-            Name = toolName,
-            Description = description
-        });
-    }
-
-    /// <summary>
-    /// 调用 Agent（通过 IAgentRuntime），包含安全检查
-    /// </summary>
-    private async Task<string> InvokeAgentAsync(
-        Guid agentId,
-        string toolName,
-        string message,
-        CancellationToken ct)
-    {
-        var sw = Stopwatch.StartNew();
-        string? errorMessage = null;
-        var isSuccess = false;
-
-        try
-        {
-            // 速率限制检查
-            if (!_security.CheckRateLimit($"agent:{agentId}"))
-            {
-                throw new RateLimitException("Rate limit exceeded");
-            }
-
-            // 通过 scoped IAgentRuntime 执行
-            using var scope = _serviceProvider.CreateScope();
-            var runtime = scope.ServiceProvider.GetRequiredService<IAgentRuntime>();
-
-            var request = new AgentRunRequest
-            {
-                AgentId = agentId,
-                UserMessage = message
-            };
-
-            var result = await runtime.RunAsync(request, ct);
-            isSuccess = true;
-            return result.Response;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            _logger.LogError(ex, "MCP tool call failed for Agent '{AgentId}'", agentId);
-            // 仅暴露业务异常消息，内部错误使用通用提示
-            return ex is BusinessException
-                ? $"Error: {ex.Message}"
-                : "Error: An internal error occurred while processing the request.";
-        }
-        finally
-        {
-            sw.Stop();
-            await _security.AuditLogAsync(toolName, agentId, sw.ElapsedMilliseconds, isSuccess, errorMessage, CancellationToken.None);
-        }
-    }
-
-    /// <summary>
     /// 构建自定义 MCP 工具
     /// </summary>
     private McpServerTool BuildCustomTool(CustomToolRegistration registration)
@@ -417,38 +329,15 @@ public class McpServerHost : IMcpServerHost
         }
     }
 
-    private async Task<AgentToolMatch?> ResolveAgentToolAsync(string toolName, CancellationToken cancellationToken)
+    private Task<AgentToolMatch?> ResolveAgentToolAsync(string toolName, CancellationToken cancellationToken)
     {
-        foreach (var (agentId, registration) in _agentTools)
+        // 优先从缓存查找（BuildToolsAsync 时已填充）
+        if (_agentToolNameMap.TryGetValue(toolName, out var cachedAgentId))
         {
-            var metadata = await GetAgentToolMetadataAsync(agentId, registration, cancellationToken);
-            if (metadata != null
-                && string.Equals(metadata.Value.ToolName, toolName, StringComparison.OrdinalIgnoreCase))
-            {
-                return new AgentToolMatch(agentId, metadata.Value.ToolName);
-            }
+            return Task.FromResult<AgentToolMatch?>(new AgentToolMatch(cachedAgentId, toolName));
         }
 
-        return null;
-    }
-
-    private async Task<(string ToolName, string Description)?> GetAgentToolMetadataAsync(
-        Guid agentId,
-        AgentToolRegistration registration,
-        CancellationToken cancellationToken)
-    {
-        using var scope = _serviceProvider.CreateScope();
-        var agentService = scope.ServiceProvider.GetRequiredService<IAgentService>();
-        var agentResult = await agentService.GetByIdAsync(agentId);
-        if (!agentResult.Succeeded || agentResult.Data == null)
-        {
-            return null;
-        }
-
-        var agent = agentResult.Data;
-        var toolName = registration.Options?.ToolName ?? SanitizeToolName(agent.Name);
-        var description = registration.Options?.Description ?? agent.Description ?? $"Run AI Agent: {agent.Name}";
-        return (toolName, description);
+        return Task.FromResult<AgentToolMatch?>(null);
     }
 
     private static string ExtractMessage(IDictionary<string, JsonElement>? arguments)

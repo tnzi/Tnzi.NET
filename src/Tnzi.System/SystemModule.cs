@@ -23,6 +23,11 @@ public class SystemModule : TnziApplicationModule
             .Bind(configuration.GetSection("System"))
             .ValidateWith<ApplicationOptions, ApplicationOptionsValidator>();
 
+        // 注册配置加密选项
+        context.Services.AddOptions<SettingEncryptionOptions>()
+            .Bind(configuration.GetSection("System:Encryption"))
+            .ValidateWith<SettingEncryptionOptions, SettingEncryptionOptionsValidator>();
+
         return Task.CompletedTask;
     }
 
@@ -35,6 +40,15 @@ public class SystemModule : TnziApplicationModule
 
         // 注册配置服务
         services.AddScoped<ISettingService, SettingService>();
+
+        // 注册配置加密器（仅在启用加密时注册）
+        var encryptionOptions = context.Configuration
+            .GetSection("System:Encryption")
+            .Get<SettingEncryptionOptions>();
+        if (encryptionOptions is { Enabled: true })
+        {
+            services.AddSingleton<ISettingEncryptor, AesSettingEncryptor>();
+        }
 
         // 注册配置提供者（分层解析链：User → Tenant → Global）
         services.AddScoped<ISettingProvider, GlobalSettingProvider>();

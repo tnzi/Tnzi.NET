@@ -83,7 +83,13 @@ public class FileSystemSkillStore : ISkillStore
         var skills = new List<SkillDefinition>();
         var scannedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // 1. Auto-discover module assembly Skills/ directories
+        // 0. Load built-in skills from EmbeddedResource (lowest priority, overridden by file system)
+        var builtInCount = _options.LoadBuiltIn ? LoadBuiltInSkills(skills) : 0;
+
+        // 1. DataPath — tenant/user installed skills ({DataPath}/skills/{tenantId}/{userId}/)
+        var dataPathCount = await LoadFromDataPathAsync(skills, scannedPaths, ct);
+
+        // 2. Auto-discover module assembly Skills/ directories
         var autoDiscovered = DiscoverModuleSkillPaths();
         foreach (var path in autoDiscovered)
         {
@@ -99,7 +105,7 @@ public class FileSystemSkillStore : ISkillStore
             }
         }
 
-        // 2. Configured paths (absolute, relative, @Assembly syntax)
+        // 3. Configured paths (absolute, relative, @Assembly syntax)
         foreach (var path in _options.Paths)
         {
             var resolved = ResolvePath(path);
@@ -117,8 +123,8 @@ public class FileSystemSkillStore : ISkillStore
 
         skills = FilterSkills(skills);
 
-        _logger.LogInformation("Loaded {Count} skills from {PathCount} paths (auto-discovered: {AutoCount}, configured: {ConfigCount})",
-            skills.Count, scannedPaths.Count, autoDiscovered.Count, _options.Paths.Count);
+        _logger.LogInformation("Loaded {Count} skills (built-in: {BuiltIn}, file-system: {FileSystem})",
+            skills.Count, builtInCount, skills.Count - builtInCount);
 
         return skills;
     }
@@ -145,6 +151,8 @@ public class FileSystemSkillStore : ISkillStore
                 var skill = SkillMarkdownParser.Parse(content, file);
                 if (skill != null)
                 {
+                    var skillDir = Path.GetDirectoryName(file)!;
+                    await LoadResourcesFromDirectoryAsync(skill, skillDir, ct);
                     skills.Add(skill);
                     _logger.LogDebug("Loaded skill: {SkillName} from {FilePath}", skill.Name, file);
                 }
@@ -161,6 +169,127 @@ public class FileSystemSkillStore : ISkillStore
     // -------------------------------------------------------------------------
     // Path discovery
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 从 DataPath 加载租户/用户级技能。
+    /// 目录结构：{DataPath}/skills/{tenantId}/ → Tenant scope，{DataPath}/skills/{tenantId}/{userId}/ → User scope。
+    /// 直接在 {DataPath}/skills/ 下的技能为全局（System scope）。
+    /// </summary>
+    private async Task<int> LoadFromDataPathAsync(
+        List<SkillDefinition> skills, HashSet<string> scannedPaths, CancellationToken ct)
+    {
+        var dataPath = _options.DataPath;
+        if (string.IsNullOrWhiteSpace(dataPath)) return 0;
+
+        // 支持相对路径（相对于 ContentRoot）
+        if (!Path.IsPathRooted(dataPath) && _contentRootPath != null)
+            dataPath = Path.Combine(_contentRootPath, dataPath);
+
+        var skillsRoot = Path.Combine(dataPath, "skills");
+        if (!Directory.Exists(skillsRoot)) return 0;
+        if (!scannedPaths.Add(skillsRoot)) return 0;
+
+        var count = 0;
+
+        // 直接子目录（非 tenants/users）→ System scope
+        foreach (var topDir in Directory.GetDirectories(skillsRoot))
+        {
+            ct.ThrowIfCancellationRequested();
+            var topName = Path.GetFileName(topDir);
+            if (topName is "tenants" or "users") continue;
+
+            if (File.Exists(Path.Combine(topDir, "SKILL.md")))
+                count += await LoadScopedSkillAsync(skills, topDir, SkillScope.System, null, null, ct);
+        }
+
+        // tenants/{tenantId}/{skill-slug}/ → Tenant scope
+        // tenants/{tenantId}/users/{userId}/{skill-slug}/ → User scope（多租户隔离）
+        var tenantsDir = Path.Combine(skillsRoot, "tenants");
+        if (Directory.Exists(tenantsDir))
+        {
+            foreach (var tenantDir in Directory.GetDirectories(tenantsDir))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!Guid.TryParse(Path.GetFileName(tenantDir), out var tenantId)) continue;
+
+                foreach (var subDir in Directory.GetDirectories(tenantDir))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var subName = Path.GetFileName(subDir);
+
+                    // tenants/{tenantId}/users/{userId}/{skill-slug}/ → User scope with tenant isolation
+                    if (string.Equals(subName, "users", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var userDir in Directory.GetDirectories(subDir))
+                        {
+                            if (!Guid.TryParse(Path.GetFileName(userDir), out var tenantUserId)) continue;
+                            foreach (var skillDir in Directory.GetDirectories(userDir))
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                if (File.Exists(Path.Combine(skillDir, "SKILL.md")))
+                                    count += await LoadScopedSkillAsync(skills, skillDir, SkillScope.User, tenantId, tenantUserId, ct);
+                            }
+                        }
+                        continue;
+                    }
+
+                    // tenants/{tenantId}/{skill-slug}/ → Tenant scope
+                    if (File.Exists(Path.Combine(subDir, "SKILL.md")))
+                        count += await LoadScopedSkillAsync(skills, subDir, SkillScope.Tenant, tenantId, null, ct);
+                }
+            }
+        }
+
+        // users/{userId}/{skill-slug}/ → User scope（单租户 / 无租户场景）
+        var usersDir = Path.Combine(skillsRoot, "users");
+        if (Directory.Exists(usersDir))
+        {
+            foreach (var userDir in Directory.GetDirectories(usersDir))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!Guid.TryParse(Path.GetFileName(userDir), out var userId)) continue;
+
+                foreach (var skillDir in Directory.GetDirectories(userDir))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (File.Exists(Path.Combine(skillDir, "SKILL.md")))
+                        count += await LoadScopedSkillAsync(skills, skillDir, SkillScope.User, null, userId, ct);
+                }
+            }
+        }
+
+        if (count > 0)
+            _logger.LogDebug("Loaded {Count} installed skills from DataPath: {Path}", count, skillsRoot);
+
+        return count;
+    }
+
+    private async Task<int> LoadScopedSkillAsync(
+        List<SkillDefinition> skills, string skillDir,
+        SkillScope scope, Guid? tenantId, Guid? userId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var skillMdPath = Path.Combine(skillDir, "SKILL.md");
+            var content = await File.ReadAllTextAsync(skillMdPath, ct);
+            var skill = SkillMarkdownParser.Parse(content, skillMdPath);
+            if (skill == null) return 0;
+
+            skill.Scope = scope;
+            skill.TenantId = tenantId;
+            skill.OwnerUserId = userId;
+
+            await LoadResourcesFromDirectoryAsync(skill, skillDir, ct);
+            skills.Add(skill);
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load skill from {Path}", skillDir);
+            return 0;
+        }
+    }
 
     private List<string> DiscoverModuleSkillPaths()
     {
@@ -226,6 +355,124 @@ public class FileSystemSkillStore : ISkillStore
             return path;
 
         return _contentRootPath != null ? Path.Combine(_contentRootPath, path) : path;
+    }
+
+    // -------------------------------------------------------------------------
+    // Built-in skills (EmbeddedResource)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 从程序集嵌入资源加载内置技能（SKILL.md + 附属资源）。返回加载数量。
+    /// 内置技能优先级最低 — 文件系统中同 slug 的技能会在后续合并时覆盖。
+    /// </summary>
+    /// <remarks>
+    /// LogicalName 格式：<c>BuiltInSkill:{slug}/{relativePath}</c>，例如：
+    /// <code>
+    /// BuiltInSkill:deep-research/SKILL.md
+    /// BuiltInSkill:chart-visualization/references/generate_bar_chart.md
+    /// BuiltInSkill:data-analysis/scripts/analyze.py
+    /// </code>
+    /// 按 slug（路径第一段）分组，同 slug 的 SKILL.md 为主文件，其余为附属资源。
+    /// </remarks>
+    private int LoadBuiltInSkills(List<SkillDefinition> skills)
+    {
+        var assembly = typeof(FileSystemSkillStore).Assembly;
+        const string prefix = "BuiltInSkill:";
+
+        var allResources = assembly.GetManifestResourceNames()
+            .Where(n => n.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
+
+        if (allResources.Count == 0) return 0;
+
+        // %(RecursiveDir) 在 Windows 上使用反斜杠，统一替换为正斜杠用于路径处理
+        // 保留原始资源名用于 ReadResource
+        // 按 slug 分组（路径的第一段）
+        var skillGroups = allResources
+            .Select(n => (ResourceName: n, RelativePath: n[prefix.Length..].Replace('\\', '/')))
+            .GroupBy(r =>
+            {
+                var slashIndex = r.RelativePath.IndexOf('/');
+                return slashIndex > 0 ? r.RelativePath[..slashIndex] : r.RelativePath;
+            })
+            .ToList();
+
+        var count = 0;
+        foreach (var group in skillGroups)
+        {
+            var slug = group.Key;
+            var skillMdEntry = group.FirstOrDefault(r =>
+                r.RelativePath.EndsWith("/SKILL.md", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(r.RelativePath, "SKILL.md", StringComparison.OrdinalIgnoreCase));
+
+            if (skillMdEntry.ResourceName == null) continue;
+
+            try
+            {
+                var content = ReadResource(assembly, skillMdEntry.ResourceName);
+                if (content == null) continue;
+
+                var skill = SkillMarkdownParser.Parse(content, skillMdEntry.ResourceName);
+                if (skill == null) continue;
+
+                // 加载附属资源（scripts, references, templates 等）
+                foreach (var res in group)
+                {
+                    if (res.ResourceName == skillMdEntry.ResourceName) continue;
+
+                    var resContent = ReadResource(assembly, res.ResourceName);
+                    if (resContent == null) continue;
+
+                    // 去掉 slug/ 前缀，得到相对路径如 "scripts/generate.py"
+                    var relativePath = res.RelativePath[(slug.Length + 1)..];
+                    skill.Resources[relativePath] = resContent;
+                }
+
+                skills.Add(skill);
+                count++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to load built-in skill: {Slug}", slug);
+            }
+        }
+
+        if (count > 0)
+            _logger.LogDebug("Loaded {Count} built-in skills from embedded resources", count);
+
+        return count;
+    }
+
+    private static string? ReadResource(Assembly assembly, string resourceName)
+    {
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        if (stream == null) return null;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// 从技能目录加载附属资源文件（scripts/, references/, templates/, agents/, assets/）
+    /// </summary>
+    private static async Task LoadResourcesFromDirectoryAsync(
+        SkillDefinition skill, string skillDir, CancellationToken ct)
+    {
+        foreach (var subDir in new[] { "scripts", "references", "templates", "agents", "assets" })
+        {
+            var fullDir = Path.Combine(skillDir, subDir);
+            if (!Directory.Exists(fullDir)) continue;
+
+            foreach (var resourceFile in Directory.GetFiles(fullDir, "*", SearchOption.AllDirectories))
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var relPath = Path.GetRelativePath(skillDir, resourceFile).Replace('\\', '/');
+                    skill.Resources[relPath] = await File.ReadAllTextAsync(resourceFile, ct);
+                }
+                catch (Exception) { /* skip unreadable files */ }
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

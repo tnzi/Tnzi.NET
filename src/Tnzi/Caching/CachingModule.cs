@@ -25,8 +25,13 @@ public class CachingModule : TnziInfrastructureModule
     {
         var services = context.Services;
 
-        // 注册内存缓存
-        services.AddMemoryCache();
+        // 注册内存缓存（支持可选的条目数上限）
+        var cachingOptions = context.Configuration.GetSection("Caching").Get<CachingOptions>();
+        services.AddMemoryCache(options =>
+        {
+            if (cachingOptions?.MemorySizeLimit is > 0)
+                options.SizeLimit = cachingOptions.MemorySizeLimit;
+        });
 
         // 注册缓存键生成器
         services.AddSingleton<ICacheKeyGenerator, CacheKeyGenerator>();

@@ -36,4 +36,16 @@ public class WorkflowExecutionOptions
     /// </summary>
     [ExperimentalApi(Reason = "Workflow HITL is in preview")]
     public IWorkflowInterruptHandler? InterruptHandler { get; set; }
+
+    /// <summary>
+    /// 恢复时的目标步骤 ID（与 ResumeData 配合使用）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public string? ResumeStepId { get; set; }
+
+    /// <summary>
+    /// 恢复时的外部输入数据（传递给中断步骤的 ResumeData）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public Dictionary<string, object>? ResumeData { get; set; }
 }

@@ -54,4 +54,7 @@ public class ExecutionStrategyContext
 
     /// <summary>起始 Agent 的实体 ID（用于双向 handoff 来源追踪）</summary>
     public Guid? StartingAgentId { get; init; }
+
+    /// <summary>SSE 事件发射回调（流式模式下由 AgentRuntime 提供，用于子 Agent progress 事件）</summary>
+    public Action<AgentStreamChunk>? EmitEvent { get; init; }
 }

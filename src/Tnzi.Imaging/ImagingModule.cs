@@ -42,6 +42,9 @@ public class ImagingModule : TnziInfrastructureModule
         // 注册验证码服务
         context.Services.TryAddScoped<IVerifyCodeService, VerifyCodeService>();
 
+        // 注册滑动验证码服务
+        context.Services.TryAddScoped<ISlidingCaptchaService, SlidingCaptchaService>();
+
         return Task.CompletedTask;
     }
 }

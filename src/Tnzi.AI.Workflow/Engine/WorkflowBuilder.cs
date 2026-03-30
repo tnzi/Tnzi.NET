@@ -202,6 +202,9 @@ public class WorkflowBuilder : IWorkflowBuilder
             throw new InvalidOperationException($"Loop '{loopId}' must have at least one step.");
         }
 
+        if (_loops.ContainsKey(loopId))
+            throw new InvalidOperationException($"Loop with ID '{loopId}' already exists.");
+
         _loops[loopId] = new LoopDefinition
         {
             NodeIds = loopNodeIds.AsReadOnly(),

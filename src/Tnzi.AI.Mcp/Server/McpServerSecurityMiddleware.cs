@@ -158,7 +158,7 @@ public class McpServerSecurityMiddleware
             : "shared";
 
         var callerSegment = !string.IsNullOrWhiteSpace(apiKey)
-            ? apiKey
+            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)))[..16]
             : context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
 
         return $"{tenantSegment}:{callerSegment}";

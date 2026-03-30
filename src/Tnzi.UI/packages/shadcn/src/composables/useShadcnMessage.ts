@@ -23,6 +23,6 @@ export function useShadcnMessage() {
     error: (message: string) => toast.error(message),
     warning: (message: string) => toast.warning(message),
     info: (message: string) => toast.info(message),
-    loading: (message: string) => toast.loading(message),
+    loading: (message: string) => { const id = toast.loading(message); return () => toast.dismiss(id); },
   };
 }

@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers;
 [DefaultController]
 [Route("quotas")]
 [ApiExplorerSettings(GroupName = "user")]
+[ApiAuthorize]
 public class DefaultQuotaController : ApiControllerBase
 {
     protected readonly IQuotaService QuotaService;

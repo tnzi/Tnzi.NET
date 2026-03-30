@@ -61,7 +61,7 @@ public class AgentFactory : IAgentFactory
         var tools = await _toolResolver.ResolveToolsAsync(toolGroups, userPermissions, ct);
 
         // 4. 构建 AgentExecutorOptions
-        var executorOptions = _optionsBuilder.Build(options, name, instructions, tools, temperature, maxTokens, agentId);
+        var executorOptions = _optionsBuilder.Build(options, name, instructions, tools, temperature, maxTokens, agentId, agentName: name);
 
         // 5. 创建 AgentExecutor（注入 Logger 以便记录工具执行异常）
         executorOptions.Logger = _logger;

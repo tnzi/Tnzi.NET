@@ -151,19 +151,19 @@ export function useAuth() {
     tokenExpiresIn: computed(() => store.tokenExpiresIn),
 
     // Actions
-    login: store.login,
-    logout: store.logout,
-    refreshAccessToken: store.refreshAccessToken,
-    fetchUserProfile: store.fetchUserProfile,
-    updateProfile: store.updateProfile,
-    changePassword: store.changePassword,
-    setAuth: store.setAuth,
-    restoreAuth: store.restoreAuth,
+    login: store.login.bind(store),
+    logout: store.logout.bind(store),
+    refreshAccessToken: store.refreshAccessToken.bind(store),
+    fetchUserProfile: store.fetchUserProfile.bind(store),
+    updateProfile: store.updateProfile.bind(store),
+    changePassword: store.changePassword.bind(store),
+    setAuth: store.setAuth.bind(store),
+    restoreAuth: store.restoreAuth.bind(store),
 
     // Permission checks
-    hasRole: store.hasRole,
-    hasPermission: store.hasPermission,
-    hasAnyRole: store.hasAnyRole,
-    hasAnyPermission: store.hasAnyPermission,
+    hasRole: store.hasRole.bind(store),
+    hasPermission: store.hasPermission.bind(store),
+    hasAnyRole: store.hasAnyRole.bind(store),
+    hasAnyPermission: store.hasAnyPermission.bind(store),
   };
 }

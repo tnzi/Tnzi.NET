@@ -272,6 +272,12 @@ public class AgentAsToolsExecutionConfigDto
 {
     /// <summary>可调用的子 Agent 名称到 AgentId 的映射</summary>
     public Dictionary<string, Guid> Agents { get; set; } = [];
+
+    /// <summary>子 Agent 最大并发数（默认 3, 范围 [2,4]）</summary>
+    public int? MaxConcurrentSubAgents { get; set; }
+
+    /// <summary>单个子 Agent 超时秒数（默认 900 = 15 分钟）</summary>
+    public int? SubAgentTimeoutSeconds { get; set; }
 }
 
 /// <summary>

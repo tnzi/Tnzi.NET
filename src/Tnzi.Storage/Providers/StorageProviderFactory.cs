@@ -46,6 +46,7 @@ public static class StorageProviderFactory
                 throw new InvalidOperationException("R2 options are required when Provider is R2.");
             return new R2Storage(ctx.Options.R2, ctx.Configuration);
         });
+        Register("inmemory", _ => new InMemoryFileStorage());
         Register("azure", ctx =>
         {
             if (ctx.Options.Azure == null)

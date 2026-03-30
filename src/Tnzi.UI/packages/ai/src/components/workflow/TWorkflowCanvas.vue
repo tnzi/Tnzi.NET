@@ -1,0 +1,47 @@
+<script setup lang="ts">
+/**
+ * TWorkflowCanvas — @vue-flow canvas wrapper
+ */
+
+import { VueFlow, type Node, type Edge } from '@vue-flow/core';
+import { Background } from '@vue-flow/background';
+import '@vue-flow/core/dist/style.css';
+import '@vue-flow/core/dist/theme-default.css';
+
+defineProps<{
+  nodes: Node[];
+  edges: Edge[];
+  fitView?: boolean;
+}>();
+
+defineEmits<{
+  'nodes-change': [changes: unknown[]];
+  'edges-change': [changes: unknown[]];
+  'node-click': [event: unknown];
+  'edge-click': [event: unknown];
+  connect: [connection: unknown];
+}>();
+</script>
+
+<template>
+  <div class="h-full w-full">
+    <VueFlow
+      :nodes="nodes"
+      :edges="edges"
+      :fit-view-on-init="fitView ?? true"
+      :pan-on-drag="false"
+      :pan-on-scroll="true"
+      :selection-on-drag="true"
+      :zoom-on-double-click="false"
+      :delete-key-code="['Backspace', 'Delete']"
+      @nodes-change="$emit('nodes-change', $event)"
+      @edges-change="$emit('edges-change', $event)"
+      @node-click="$emit('node-click', $event)"
+      @edge-click="$emit('edge-click', $event)"
+      @connect="$emit('connect', $event)"
+    >
+      <Background :style="{ backgroundColor: 'var(--sidebar, hsl(var(--muted)))' }" />
+      <slot />
+    </VueFlow>
+  </div>
+</template>

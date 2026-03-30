@@ -89,3 +89,10 @@ export function setMessageAdapter(newAdapter: MessageAdapter) {
 export function resetMessageAdapter() {
   activeMessageRuntime.reset();
 }
+
+/**
+ * Reset message runtime to default. For tests and SSR isolation.
+ */
+export function resetMessageRuntime(): void {
+  activeMessageRuntime = defaultMessageRuntime;
+}

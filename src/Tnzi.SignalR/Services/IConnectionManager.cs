@@ -120,4 +120,26 @@ public interface IConnectionManager
     /// <param name="connectionId">连接ID</param>
     /// <returns>组名集合</returns>
     Task<IEnumerable<string>> GetConnectionGroupsAsync(string connectionId) => Task.FromResult<IEnumerable<string>>([]);
+
+    /// <summary>
+    /// 批量获取多个连接的元数据（避免 N+1 查询）
+    /// </summary>
+    /// <param name="connectionIds">连接ID集合</param>
+    /// <returns>connectionId -> metadata 字典</returns>
+    Task<IReadOnlyDictionary<string, ConnectionMetadata>> GetConnectionsMetadataBatchAsync(IEnumerable<string> connectionIds)
+    {
+        return Task.FromResult<IReadOnlyDictionary<string, ConnectionMetadata>>(
+            new Dictionary<string, ConnectionMetadata>());
+    }
+
+    /// <summary>
+    /// 批量获取多个连接所属的自定义组（避免 N+1 查询）
+    /// </summary>
+    /// <param name="connectionIds">连接ID集合</param>
+    /// <returns>connectionId -> groupNames 字典</returns>
+    Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetConnectionsGroupsBatchAsync(IEnumerable<string> connectionIds)
+    {
+        return Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<string>>>(
+            new Dictionary<string, IReadOnlyList<string>>());
+    }
 }

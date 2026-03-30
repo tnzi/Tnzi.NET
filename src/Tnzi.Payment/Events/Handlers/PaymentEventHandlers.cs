@@ -274,6 +274,37 @@ public class SubscriptionRenewedEventHandler : IEventHandler<SubscriptionRenewed
 }
 
 /// <summary>
+/// 订阅计划变更事件处理器
+/// 记录计划变更日志
+/// </summary>
+public class SubscriptionPlanChangedEventHandler : IEventHandler<SubscriptionPlanChangedEvent>
+{
+    private readonly ILogger<SubscriptionPlanChangedEventHandler> _logger;
+
+    public SubscriptionPlanChangedEventHandler(ILogger<SubscriptionPlanChangedEventHandler> logger)
+    {
+        _logger = Check.NotNull(logger);
+    }
+
+    public async Task HandleAsync(SubscriptionPlanChangedEvent eventData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "Subscription plan changed. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, FromPlan: {FromPlanId}, ToPlan: {ToPlanId}, ChangeType: {ChangeType}, ProratedAmount: {ProratedAmount}, Immediate: {Immediate}",
+                eventData.SubscriptionNo, eventData.UserId, eventData.FromPlanId, eventData.ToPlanId,
+                eventData.ChangeType, eventData.ProratedAmount, eventData.Immediate);
+
+            await Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to handle subscription plan changed event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
+        }
+    }
+}
+
+/// <summary>
 /// 试用转正事件处理器
 /// 记录试用转正日志
 /// </summary>

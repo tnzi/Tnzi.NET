@@ -8,7 +8,7 @@ public class DependsOnAttribute : Attribute
 
     public DependsOnAttribute(params Type[] dependedModuleTypes)
     {
-        DependedModuleTypes = dependedModuleTypes ?? new Type[0];
+        DependedModuleTypes = dependedModuleTypes ?? [];
     }
 }
 

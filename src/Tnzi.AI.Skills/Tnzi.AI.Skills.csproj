@@ -11,4 +11,11 @@
     <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
   </ItemGroup>
 
+  <!-- 内置技能 — 所有文件嵌入程序集，LogicalName 保留原始相对路径 -->
+  <ItemGroup>
+    <EmbeddedResource Include="Skills\BuiltIn\**\*" Exclude="Skills\BuiltIn\**\*.cs">
+      <LogicalName>BuiltInSkill:%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

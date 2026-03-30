@@ -104,21 +104,32 @@ public partial class AgentRuntime
         agent = MergeAdditionalTools(agent, context);
 
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
+        // Collect SSE events emitted by strategies (e.g., sub_agent_started/completed)
+        var pendingEvents = new ConcurrentQueue<AgentStreamChunk>();
         var strategyContext = new ExecutionStrategyContext
         {
             AgentFactory = _agentFactory,
             AgentRepository = _agentRepository,
             ServiceProvider = _serviceProvider,
             Logger = _logger,
-            StartingAgentId = resolution.AgentId
+            StartingAgentId = resolution.AgentId,
+            EmitEvent = chunk => pendingEvents.Enqueue(chunk)
         };
 
         using var scope = ToolContext.Establish(_serviceProvider, ct);
 
         await foreach (var chunk in strategy.ExecuteStreamingAsync(agent, messages, strategyContext, ct).WithCancellation(ct))
         {
+            // Flush any pending strategy events before each content chunk
+            while (pendingEvents.TryDequeue(out var evt))
+                yield return evt;
+
             yield return chunk;
         }
+
+        // Flush remaining events after stream ends
+        while (pendingEvents.TryDequeue(out var remaining))
+            yield return remaining;
     }
 
     /// <summary>

@@ -107,4 +107,5 @@ CLAUDE.md
 .aider
 .codeium
 .continue
+.playwright/
 # <<< Cloud Sync (managed by cloud-sync)

@@ -79,6 +79,11 @@ public class AIRagOptions
     /// Embedding 缓存配置
     /// </summary>
     public EmbeddingCacheOptions EmbeddingCache { get; set; } = new();
+
+    /// <summary>
+    /// 加权递减重排序器配置
+    /// </summary>
+    public RerankerOptions Reranker { get; set; } = new();
 }
 
 /// <summary>

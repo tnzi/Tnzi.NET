@@ -10,8 +10,8 @@ internal class TemplateOptionsPostConfigure : IPostConfigureOptions<TemplateOpti
 
     // 静态缓存已扫描的程序集列表（线程安全，只扫描一次）
     private static readonly Lazy<HashSet<Assembly>> _cachedApplicationModuleAssemblies =
-        new Lazy<HashSet<Assembly>>(() => ScanApplicationModuleAssemblies(), 
-            System.Threading.LazyThreadSafetyMode.ExecutionAndPublication);
+        new Lazy<HashSet<Assembly>>(() => ScanApplicationModuleAssemblies(),
+            LazyThreadSafetyMode.ExecutionAndPublication);
 
     public TemplateOptionsPostConfigure(ILogger<TemplateOptionsPostConfigure>? logger = null)
     {

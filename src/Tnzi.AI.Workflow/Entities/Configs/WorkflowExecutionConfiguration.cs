@@ -15,6 +15,8 @@ public class WorkflowExecutionConfiguration : EntityTypeConfigurationBase<Workfl
 
         builder.Property(e => e.Status)
             .IsRequired()
+            .HasConversion<string>()
+            .HasMaxLength(50)
             .HasDefaultValue(WorkflowExecutionStatus.Running);
 
         builder.Property(e => e.InitialInput)
@@ -31,6 +33,8 @@ public class WorkflowExecutionConfiguration : EntityTypeConfigurationBase<Workfl
 
         builder.Property(e => e.StepsAwaitingApproval)
             .IsRequired();
+
+        builder.HasIndex(e => new { e.WorkflowDefinitionId, e.Status });
 
         if (multiTenancyEnabled)
         {

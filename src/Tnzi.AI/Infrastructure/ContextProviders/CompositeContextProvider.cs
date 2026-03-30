@@ -36,6 +36,25 @@ public sealed class CompositeContextProvider : IContextProvider
     }
 
     /// <summary>
+    /// 初始化 CompositeContextProvider（DI 注入所有 IContextProvider）
+    /// </summary>
+    public CompositeContextProvider(
+        IEnumerable<IContextProvider> providers,
+        ILogger<CompositeContextProvider> logger,
+        IOptions<AIOptions> options,
+        ITokenEstimator? tokenEstimator = null)
+        : this(logger, options, tokenEstimator)
+    {
+        // 按 Order 排序后添加
+        foreach (var provider in providers.OrderBy(p => p.Order))
+        {
+            // 排除自身（避免循环引用）
+            if (provider is CompositeContextProvider) continue;
+            _providers.Add(provider);
+        }
+    }
+
+    /// <summary>
     /// 获取当前注册的子 provider 数量
     /// </summary>
     public int ProviderCount => _providers.Count;
@@ -77,6 +96,18 @@ public sealed class CompositeContextProvider : IContextProvider
     }
 
     /// <summary>
+    /// 在 Agent 执行前获取上下文注入（带 AiMiddlewareContext 过滤）
+    /// </summary>
+    /// <remarks>
+    /// 根据每个 provider 的 IsEnabled(ctx) 过滤不适用的 provider，
+    /// 然后依次调用所有启用的 provider 并合并它们的 ContextInjection。
+    /// </remarks>
+    public Task<ContextInjection> GetContextAsync(List<ChatMessage> messages, AiMiddlewareContext? ctx, CancellationToken ct = default)
+    {
+        return GetContextCoreAsync(messages, ctx, ct);
+    }
+
+    /// <summary>
     /// 在 Agent 执行前获取上下文注入
     /// </summary>
     /// <remarks>
@@ -84,7 +115,12 @@ public sealed class CompositeContextProvider : IContextProvider
     /// - Messages: 合并到同一个列表
     /// - Tools: 合并到同一个列表
     /// </remarks>
-    public async Task<ContextInjection> GetContextAsync(List<ChatMessage> messages, CancellationToken ct = default)
+    public Task<ContextInjection> GetContextAsync(List<ChatMessage> messages, CancellationToken ct = default)
+    {
+        return GetContextCoreAsync(messages, ctx: null, ct);
+    }
+
+    private async Task<ContextInjection> GetContextCoreAsync(List<ChatMessage> messages, AiMiddlewareContext? ctx, CancellationToken ct)
     {
         // 如果没有子 provider，返回空的 ContextInjection
         if (_providers.Count == 0)
@@ -101,6 +137,12 @@ public sealed class CompositeContextProvider : IContextProvider
 
         foreach (var provider in _providers)
         {
+            // IsEnabled 过滤
+            if (!provider.IsEnabled(ctx))
+            {
+                _logger.LogDebug("Context provider {ProviderName} is disabled for current context, skipping", provider.Name);
+                continue;
+            }
             // Token 预算检查：当预算已耗尽时跳过后续 Provider
             if (maxBudget > 0 && usedTokens >= maxBudget)
             {

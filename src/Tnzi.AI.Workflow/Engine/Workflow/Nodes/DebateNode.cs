@@ -11,14 +11,14 @@ namespace Tnzi.AI.Engine.Workflow.Nodes;
 /// </remarks>
 public class DebateNode : IWorkflowNode
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowNodeServiceContext _nodeContext;
     private readonly ILogger<DebateNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Debate;
 
-    public DebateNode(IServiceProvider serviceProvider, ILogger<DebateNode> logger)
+    public DebateNode(IWorkflowNodeServiceContext nodeContext, ILogger<DebateNode> logger)
     {
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _nodeContext = Check.NotNull(nodeContext);
         _logger = Check.NotNull(logger);
     }
 
@@ -44,11 +44,8 @@ public class DebateNode : IWorkflowNode
         var maxRounds = config.TryGetValue("maxRounds", out var mrStr) && int.TryParse(mrStr, out var mr) ? mr : 5;
 
         // 收集输入作为讨论主题
-        var topic = CollectInput(context);
+        var topic = WorkflowNodeHelper.CollectInput(context);
         topic = state.ResolveTemplate(topic);
-
-        // 创建作用域以避免使用根 ServiceProvider 解析 Scoped 服务
-        using var scope = _serviceProvider.CreateScope();
 
         var orchestrator = new GroupChatOrchestrator(_logger)
         {
@@ -68,10 +65,9 @@ public class DebateNode : IWorkflowNode
                 AgentName = $"debate-agent-{agentId:N}"
             };
 
-            await WorkflowNodeHelper.ResolveAgentConfigAsync(agentId, scope, agentConfig, cancellationToken);
+            await WorkflowNodeHelper.ResolveAgentConfigAsync(agentId, _nodeContext, agentConfig, cancellationToken);
 
-            var agentFactory = scope.ServiceProvider.GetRequiredService<IAgentFactory>();
-            var executor = await agentFactory.CreateAgentAsync(
+            var executor = await _nodeContext.AgentFactory.CreateAgentAsync(
                 providerName: agentConfig.Provider,
                 model: agentConfig.Model,
                 instructions: agentConfig.Instructions,
@@ -131,25 +127,4 @@ public class DebateNode : IWorkflowNode
         }
     }
 
-    /// <summary>
-    /// 收集输入
-    /// </summary>
-    private static string CollectInput(WorkflowNodeContext context)
-    {
-        if (context.DependencyOutputs.Count == 0)
-            return context.State.InitialInput;
-
-        if (context.DependencyOutputs.Count == 1)
-            return context.DependencyOutputs.Values.First().Text;
-
-        var sb = new StringBuilder();
-        foreach (var (depId, output) in context.DependencyOutputs)
-        {
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"[{depId}]");
-            sb.AppendLine(output.Text);
-        }
-
-        return sb.ToString().TrimEnd();
-    }
 }

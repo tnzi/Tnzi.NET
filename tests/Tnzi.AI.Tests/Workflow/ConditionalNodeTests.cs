@@ -7,7 +7,6 @@ public class ConditionalNodeTests
     public ConditionalNodeTests()
     {
         _node = new ConditionalNode(
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<ConditionalNode>>());
     }
 

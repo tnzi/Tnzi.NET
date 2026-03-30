@@ -31,9 +31,14 @@ export interface HttpClientConfig {
   defaultHeaders?: Record<string, string>;
   /** Request timeout in milliseconds */
   timeout?: number;
-  /** Token refresh function */
+  /**
+   * Token refresh function. When configured and a 401 response is received,
+   * the client will call this function to obtain a new token and automatically
+   * retry the failed request once. Concurrent 401 responses share the same
+   * refresh call (mutex pattern).
+   */
   refreshTokenFn?: () => Promise<string>;
-  /** Unauthorized callback (401). This is the primary handler for 401 responses. */
+  /** Unauthorized callback (401). Called when no refreshTokenFn is configured, or when refresh fails. */
   onUnauthorized?: () => void;
   /**
    * Token expired callback.
@@ -50,6 +55,12 @@ export interface HttpClientConfig {
   errorInterceptor?: (error: Error) => void;
   /** Retry configuration for failed requests */
   retry?: RetryConfig;
+  /**
+   * Whether to deduplicate concurrent identical GET requests (default: true).
+   * When enabled, multiple simultaneous GET requests to the same URL will share
+   * a single network call instead of making redundant requests.
+   */
+  deduplicateGets?: boolean;
 }
 
 /**
@@ -77,6 +88,10 @@ export class HttpClient {
   private accessToken: string | null = null;
   /** Guards against duplicate 401 callbacks from concurrent requests */
   private unauthorizedHandled = false;
+  /** Mutex: pending token refresh promise for deduplication */
+  private _refreshPromise: Promise<string> | null = null;
+  /** Map of inflight GET requests for deduplication */
+  private _inflightGets = new Map<string, Promise<ApiResult<unknown>>>();
 
   constructor(config: HttpClientConfig) {
     this.config = {
@@ -296,7 +311,7 @@ export class HttpClient {
   }
 
   /**
-   * Core request method with retry support
+   * Core request method with GET deduplication, retry, and 401 refresh support.
    */
   private async request<T>(
     method: RequestConfig['method'],
@@ -319,6 +334,29 @@ export class HttpClient {
       config = await this.config.requestInterceptor(config);
     }
 
+    // GET deduplication: reuse inflight promise for identical GET URLs
+    if (method === 'GET' && this.config.deduplicateGets !== false) {
+      const dedupKey = this.buildUrl(config.url, config.params);
+      const inflight = this._inflightGets.get(dedupKey);
+      if (inflight) {
+        // Return shallow clone to prevent shared mutation across callers
+        return inflight.then(r => ({ ...r })) as Promise<ApiResult<T>>;
+      }
+
+      const promise = this.executeWithRetry<T>(config, false);
+      this._inflightGets.set(dedupKey, promise as Promise<ApiResult<unknown>>);
+      promise.finally(() => this._inflightGets.delete(dedupKey));
+      return promise;
+    }
+
+    return this.executeWithRetry<T>(config, false);
+  }
+
+  /**
+   * Execute request with retry logic and 401 refresh support.
+   * @param isRetryAfterRefresh - true if this is a retry after token refresh (prevents infinite loop)
+   */
+  private async executeWithRetry<T>(config: RequestConfig, isRetryAfterRefresh: boolean): Promise<ApiResult<T>> {
     const retryConfig = this.config.retry;
     const maxRetries = retryConfig?.maxRetries ?? 0;
     const baseDelay = retryConfig?.baseDelay ?? 1000;
@@ -338,7 +376,17 @@ export class HttpClient {
 
       lastResult = await this.executeRequest<T>(config);
 
-      // Check if we should retry
+      // Handle 401 with auto-refresh (only if not already a retry after refresh)
+      if (lastResult.Code === 401 && !isRetryAfterRefresh) {
+        const refreshResult = await this.tryRefreshAndRetry<T>(config);
+        if (refreshResult) {
+          return refreshResult;
+        }
+        // Refresh not available or failed — return the 401 result
+        return lastResult;
+      }
+
+      // Check if we should retry on other status codes
       const statusCode = lastResult.Code;
       if (attempt < maxRetries && retryableStatuses.includes(statusCode)) {
         continue;
@@ -349,6 +397,46 @@ export class HttpClient {
 
     // Should not reach here, but return last result as safety
     return lastResult!;
+  }
+
+  /**
+   * Try to refresh token and retry the request.
+   * Uses mutex pattern: concurrent 401s share the same refresh promise.
+   * Returns the retry result on success, or null if refresh is not available or failed.
+   */
+  private async tryRefreshAndRetry<T>(config: RequestConfig): Promise<ApiResult<T> | null> {
+    if (!this.config.refreshTokenFn) {
+      this.notifyUnauthorized();
+      return null;
+    }
+
+    try {
+      // Mutex: if a refresh is already in progress, wait for it
+      if (!this._refreshPromise) {
+        this._refreshPromise = this.config.refreshTokenFn();
+      }
+      const newToken = await this._refreshPromise;
+      this.setAccessToken(newToken);
+
+      // Retry the original request once with new token
+      return await this.executeWithRetry<T>(config, true);
+    } catch {
+      this.notifyUnauthorized();
+      return null;
+    } finally {
+      this._refreshPromise = null;
+    }
+  }
+
+  /**
+   * Trigger the unauthorized handler (deduplicated — only fires once per auth cycle).
+   */
+  private notifyUnauthorized(): void {
+    if (!this.unauthorizedHandled) {
+      this.unauthorizedHandled = true;
+      const handler = this.config.onUnauthorized ?? this.config.onTokenExpired;
+      handler?.();
+    }
   }
 
   /**
@@ -380,17 +468,25 @@ export class HttpClient {
         credentials: config.withCredentials ? 'include' : 'same-origin',
       });
 
-      clearTimeout(timeoutId);
-
-      // Handle 401 Unauthorized - deduplicated across concurrent requests
-      if (response.status === 401 && !this.unauthorizedHandled) {
-        this.unauthorizedHandled = true;
-        // Prefer onUnauthorized; fall back to deprecated onTokenExpired
-        const handler = this.config.onUnauthorized ?? this.config.onTokenExpired;
-        handler?.();
+      let data: ApiResult<T>;
+      try {
+        data = normalizeApiResult<T>(await response.json());
+      } catch {
+        // Non-JSON response (e.g., 502/503 HTML pages)
+        if (!response.ok) {
+          data = createFailedApiResult<T>({
+            message: `HTTP ${response.status} ${response.statusText}`,
+            code: response.status,
+          });
+        } else {
+          data = createFailedApiResult<T>({
+            message: 'Invalid JSON response',
+            code: response.status,
+          });
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      let data = normalizeApiResult<T>(await response.json());
 
       // Apply response interceptor
       if (this.config.responseInterceptor) {
@@ -428,13 +524,17 @@ export class HttpClient {
   private combineSignals(signal1: AbortSignal, signal2: AbortSignal): AbortSignal {
     const combined = new AbortController();
 
-    const onAbort = () => combined.abort();
+    const onAbort = () => {
+      combined.abort();
+      signal1.removeEventListener('abort', onAbort);
+      signal2.removeEventListener('abort', onAbort);
+    };
     signal1.addEventListener('abort', onAbort);
     signal2.addEventListener('abort', onAbort);
 
     // If either signal is already aborted, abort immediately
     if (signal1.aborted || signal2.aborted) {
-      combined.abort();
+      onAbort();
     }
 
     return combined.signal;

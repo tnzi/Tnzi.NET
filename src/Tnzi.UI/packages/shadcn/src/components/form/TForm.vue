@@ -68,15 +68,16 @@ const applyRule = async (rule: IFormRule, value: any): Promise<string | undefine
 };
 
 const validate = async () => {
-  const nextErrors: Record<string, string[]> = {};
   const keys = Object.keys(props.rules ?? {});
+  const results = await Promise.all(keys.map((key) => validateField(key)));
 
-  for (const key of keys) {
-    const fieldErrors = await validateField(key);
-    if (fieldErrors.length > 0) {
+  const nextErrors: Record<string, string[]> = {};
+  keys.forEach((key, i) => {
+    const fieldErrors = results[i];
+    if (fieldErrors && fieldErrors.length > 0) {
       nextErrors[key] = fieldErrors;
     }
-  }
+  });
 
   errors.value = nextErrors;
   if (Object.keys(nextErrors).length > 0) {

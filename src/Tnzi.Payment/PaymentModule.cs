@@ -73,6 +73,7 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddEventHandler<SubscriptionCancelledEvent, SubscriptionCancelledEventHandler>();
         context.Services.AddEventHandler<SubscriptionExpiredEvent, SubscriptionExpiredEventHandler>();
         context.Services.AddEventHandler<SubscriptionRenewedEvent, SubscriptionRenewedEventHandler>();
+        context.Services.AddEventHandler<SubscriptionPlanChangedEvent, SubscriptionPlanChangedEventHandler>();
         context.Services.AddEventHandler<SubscriptionTrialConvertedEvent, SubscriptionTrialConvertedEventHandler>();
 
         return Task.CompletedTask;

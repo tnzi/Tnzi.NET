@@ -10,17 +10,20 @@ public class AuditMiddleware
     private readonly ILogger<AuditMiddleware> _logger;
     private readonly IAuditSender _auditSender;
     private readonly AuditOptions _auditOptions;
+    private readonly RequestBodyRedactor _redactor;
 
     public AuditMiddleware(
         RequestDelegate next,
         ILogger<AuditMiddleware> logger,
         IAuditSender auditSender,
-        IOptions<AuditOptions> auditOptions)
+        IOptions<AuditOptions> auditOptions,
+        RequestBodyRedactor redactor)
     {
         _next = Check.NotNull(next);
         _logger = Check.NotNull(logger);
         _auditSender = Check.NotNull(auditSender);
         _auditOptions = Check.NotNull(auditOptions).Value;
+        _redactor = Check.NotNull(redactor);
     }
 
     public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, IUserAgentParserService? userAgentParser = null)
@@ -46,6 +49,13 @@ public class AuditMiddleware
             return;
         }
 
+        // Enable request body buffering if capture is enabled
+        string? requestBody = null;
+        if (_auditOptions.EnableRequestBodyCapture)
+        {
+            requestBody = await CaptureRequestBodyAsync(context);
+        }
+
         var startTime = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         Exception? exception = null;
@@ -65,7 +75,7 @@ public class AuditMiddleware
 
             try
             {
-                await EnqueueAuditOperationAsync(context, currentUser, userAgentParser, startTime, stopwatch.ElapsedMilliseconds, exception);
+                await EnqueueAuditOperationAsync(context, currentUser, userAgentParser, startTime, stopwatch.ElapsedMilliseconds, exception, requestBody);
             }
             catch (Exception ex)
             {
@@ -84,7 +94,7 @@ public class AuditMiddleware
             return false;
 
         // Check action-level attribute first, then controller-level
-        return endpoint.Metadata.GetMetadata<Tnzi.Audit.Metadata.AuditDisabledAttribute>() != null;
+        return endpoint.Metadata.GetMetadata<AuditDisabledAttribute>() != null;
     }
 
     private bool IsExcludedPath(PathString path)
@@ -99,13 +109,68 @@ public class AuditMiddleware
         return false;
     }
 
+    /// <summary>
+    /// Capture and redact request body content.
+    /// Enables buffering so the body can be read by downstream middleware/controllers.
+    /// </summary>
+    private async Task<string?> CaptureRequestBodyAsync(HttpContext context)
+    {
+        var request = context.Request;
+
+        // Only capture for methods that typically have a body
+        if (request.Method is "GET" or "HEAD" or "OPTIONS" or "DELETE")
+        {
+            return null;
+        }
+
+        if (request.ContentLength is null or 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var maxSize = _auditOptions.MaxRequestBodySize;
+            request.EnableBuffering(bufferLimit: maxSize);
+
+            var buffer = new byte[Math.Min(request.ContentLength ?? maxSize, maxSize)];
+            var bytesRead = await request.Body.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false);
+
+            // Reset position so downstream can read the body
+            request.Body.Position = 0;
+
+            if (bytesRead == 0)
+            {
+                return null;
+            }
+
+            var body = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+            // Redact sensitive fields
+            if (_auditOptions.SensitiveFields.Count > 0)
+            {
+                body = _redactor.Redact(body, _auditOptions.SensitiveFields);
+            }
+
+            return body;
+        }
+        catch (Exception ex)
+        {
+            // Always reset position so downstream can read the body even if capture fails
+            try { request.Body.Position = 0; } catch { /* stream may not be seekable */ }
+            _logger.LogDebug(ex, "Failed to capture request body for audit");
+            return null;
+        }
+    }
+
     private async Task EnqueueAuditOperationAsync(
         HttpContext context,
         ICurrentUser currentUser,
         IUserAgentParserService? userAgentParser,
         DateTime startTime,
         long duration,
-        Exception? exception)
+        Exception? exception,
+        string? requestBody = null)
     {
         // 解析 UserAgent
         var userAgent = context.Request.Headers["User-Agent"].ToString();
@@ -140,12 +205,12 @@ public class AuditMiddleware
                 if (context.Request.HasFormContentType && context.Request.Form.Count > 0)
                 {
                     var formDict = context.Request.Form.ToDictionary(f => f.Key, f => f.Value.ToString());
-                    requestParameters = System.Text.Json.JsonSerializer.Serialize(formDict);
+                    requestParameters = JsonSerializer.Serialize(formDict);
                 }
                 else if (context.Request.Query.Count > 0)
                 {
                     var queryDict = context.Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
-                    requestParameters = System.Text.Json.JsonSerializer.Serialize(queryDict);
+                    requestParameters = JsonSerializer.Serialize(queryDict);
                 }
             }
             catch
@@ -174,6 +239,7 @@ public class AuditMiddleware
             HttpStatusCode = context.Response.StatusCode,
             Exception = exception?.ToString(),
             RequestParameters = requestParameters,
+            RequestBody = requestBody,
             TenantId = currentUser.TenantId,
             StartTime = startTime,
             EndTime = startTime.AddMilliseconds(duration)

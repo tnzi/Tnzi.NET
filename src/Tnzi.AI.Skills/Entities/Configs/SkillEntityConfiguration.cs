@@ -36,6 +36,20 @@ public class SkillEntityConfiguration : EntityTypeConfigurationBase<SkillEntity,
         builder.Property(e => e.Priority)
             .HasDefaultValue(0);
 
+        builder.Property(e => e.ActivationCount)
+            .HasDefaultValue(0L);
+
+        builder.Property(e => e.LastActivatedAt);
+
+        // 分类外键（可选）
+        builder.HasOne<SkillCategory>()
+            .WithMany()
+            .HasForeignKey(e => e.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(e => e.CategoryId)
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+
         // 唯一索引：同一租户/用户下同一作用域的 slug 唯一
         builder.HasIndex(e => new { e.Slug, e.Scope, e.TenantId, e.OwnerUserId })
             .IsUnique()

@@ -9,7 +9,7 @@ public class DebateNodeTests
         var agentId1 = Guid.NewGuid();
         var agentId2 = Guid.NewGuid();
 
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("Should we use microservices?", new Dictionary<string, string>
@@ -31,7 +31,7 @@ public class DebateNodeTests
     [Fact]
     public async Task ExecuteAsync_LessThanTwoAgents_ReturnsFailure()
     {
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("topic", new Dictionary<string, string>
@@ -48,7 +48,7 @@ public class DebateNodeTests
     [Fact]
     public async Task ExecuteAsync_NoAgentIds_ReturnsFailure()
     {
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("topic", new Dictionary<string, string>());
@@ -61,7 +61,7 @@ public class DebateNodeTests
     [Fact]
     public async Task ExecuteAsync_InvalidAgentIdsJson_ReturnsFailure()
     {
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("topic", new Dictionary<string, string>
@@ -80,7 +80,7 @@ public class DebateNodeTests
         var agentId1 = Guid.NewGuid();
         var agentId2 = Guid.NewGuid();
 
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("debate topic", new Dictionary<string, string>
@@ -104,7 +104,7 @@ public class DebateNodeTests
         var agentId1 = Guid.NewGuid();
         var agentId2 = Guid.NewGuid();
 
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("debate", new Dictionary<string, string>
@@ -124,7 +124,7 @@ public class DebateNodeTests
     public async Task ExecuteAsync_ThreeAgents_AllParticipate()
     {
         var ids = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var sp = BuildServiceProvider();
+        var sp = BuildNodeServiceContext();
         var node = new DebateNode(sp, Mock.Of<ILogger<DebateNode>>());
 
         var context = CreateContext("Three-way debate", new Dictionary<string, string>
@@ -140,9 +140,9 @@ public class DebateNodeTests
     }
 
     /// <summary>
-    /// 构建 ServiceProvider，包含 mock IAgentFactory（每个 agent 返回固定响应）
+    /// 构建 IWorkflowNodeServiceContext，包含 mock IAgentFactory（每个 agent 返回固定响应）
     /// </summary>
-    private static IServiceProvider BuildServiceProvider()
+    private static IWorkflowNodeServiceContext BuildNodeServiceContext()
     {
         var mockFactory = new Mock<IAgentFactory>();
 
@@ -170,10 +170,10 @@ public class DebateNodeTests
                 return new AgentExecutor(mockClient.Object, new AgentExecutorOptions { Name = name ?? "agent" });
             });
 
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(mockFactory.Object);
-        return services.BuildServiceProvider();
+        var mock = new Mock<IWorkflowNodeServiceContext>();
+        mock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
+        mock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
+        return mock.Object;
     }
 
     private static WorkflowNodeContext CreateContext(string initialInput, Dictionary<string, string> config)

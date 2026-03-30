@@ -95,7 +95,7 @@ public class ClientHttpCrypto : IClientHttpCrypto
         catch (Exception ex)
         {
             _logger.LogError(ex, "An exception occurred when the client decrypted the response data.");
-            response = new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError);
+            response = new HttpResponseMessage(HttpStatusCode.InternalServerError);
             return response;
         }
     }

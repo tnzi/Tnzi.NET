@@ -268,17 +268,5 @@ public class ReplTools : IAIToolProvider
         return (process.ExitCode, stdoutBuilder.ToString().TrimEnd(), stderrBuilder.ToString().TrimEnd());
     }
 
-    /// <summary>
-    /// 截断输出到最大大小
-    /// </summary>
-    private string TruncateOutput(string output)
-    {
-        if (output.Length <= _options.Sandbox.MaxOutputSize)
-        {
-            return output;
-        }
-
-        var truncated = output[..(int)_options.Sandbox.MaxOutputSize];
-        return truncated + $"\n... (truncated, {output.Length} total chars)";
-    }
+    private string TruncateOutput(string output) => OutputHelper.Truncate(output, _options.Sandbox.MaxOutputSize);
 }

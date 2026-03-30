@@ -28,6 +28,8 @@ public class EmbeddingService : ApplicationService, IEmbeddingService
             }
 
             var embeddings = await generator.GenerateAsync([text], cancellationToken: ct);
+            if (embeddings.Count == 0)
+                return Fail<float[]>("Embedding generator returned empty result", 500, ErrorCodes.EmbeddingFailed);
             return Ok(embeddings[0].Vector.ToArray());
         }
         catch (InvalidOperationException ex)

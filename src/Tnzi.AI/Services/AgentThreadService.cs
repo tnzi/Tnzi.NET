@@ -175,6 +175,26 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         await _repository.DeleteAsync(entity);
 
+        // 发布 ThreadDeletedEvent 触发级联清理（静默失败）
+        try
+        {
+            var eventBus = EventBus;
+            if (eventBus != null)
+            {
+                await eventBus.PublishAsync(new ThreadDeletedEvent
+                {
+                    ThreadId = id,
+                    UserId = entity.CreatorId,
+                    TenantId = entity.TenantId,
+                    AgentId = entity.AgentId
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish ThreadDeletedEvent for thread {ThreadId}", id);
+        }
+
         Logger.LogInformation("Agent thread deleted: {ThreadId}", id);
         return Ok();
     }

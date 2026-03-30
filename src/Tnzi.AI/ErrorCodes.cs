@@ -166,6 +166,11 @@ public static class ErrorCodes
     public const string WorkflowStepNotAwaitingApproval = "AI_WORKFLOW_STEP_NOT_AWAITING_APPROVAL";
 
     /// <summary>
+    /// Workflow definition version not found.
+    /// </summary>
+    public const string WorkflowVersionNotFound = "AI_WORKFLOW_VERSION_NOT_FOUND";
+
+    /// <summary>
     /// Agent run node not found.
     /// </summary>
     public const string NodeNotFound = "AI_NODE_NOT_FOUND";
@@ -209,6 +214,26 @@ public static class ErrorCodes
     /// Skill operation requires authentication or higher privileges.
     /// </summary>
     public const string SkillUnauthorized = "AI_SKILL_UNAUTHORIZED";
+
+    /// <summary>
+    /// Skill category not found.
+    /// </summary>
+    public const string SkillCategoryNotFound = "AI_SKILL_CATEGORY_NOT_FOUND";
+
+    /// <summary>
+    /// Skill category slug already exists in the same tenant.
+    /// </summary>
+    public const string SkillCategorySlugConflict = "AI_SKILL_CATEGORY_SLUG_CONFLICT";
+
+    /// <summary>
+    /// Cannot delete category because it has child categories.
+    /// </summary>
+    public const string SkillCategoryHasChildren = "AI_SKILL_CATEGORY_HAS_CHILDREN";
+
+    /// <summary>
+    /// Cannot delete category because it has associated skills.
+    /// </summary>
+    public const string SkillCategoryHasSkills = "AI_SKILL_CATEGORY_HAS_SKILLS";
 
     /// <summary>
     /// Agent validation failed (one or more checks did not pass).

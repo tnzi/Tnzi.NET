@@ -59,6 +59,7 @@ public class ModuleDescriptor : IModuleDescriptor
     public Assembly Assembly { get; }
     
     private readonly List<IModuleDescriptor> _dependencies;
+    private readonly HashSet<Type> _dependencyTypes = [];
     public IReadOnlyList<IModuleDescriptor> Dependencies => _dependencies;
 
     /// <summary>
@@ -101,17 +102,9 @@ public class ModuleDescriptor : IModuleDescriptor
 
     public void AddDependency(IModuleDescriptor descriptor)
     {
-        _dependencies.AddIfNotNull(descriptor);
-    }
-}
-
-internal static class ListExtensions
-{
-    public static void AddIfNotNull<T>(this List<T> list, T item)
-    {
-        if (item != null && !list.Contains(item))
+        if (descriptor != null && _dependencyTypes.Add(descriptor.Type))
         {
-            list.Add(item);
+            _dependencies.Add(descriptor);
         }
     }
 }

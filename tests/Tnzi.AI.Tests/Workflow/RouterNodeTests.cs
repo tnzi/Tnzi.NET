@@ -148,13 +148,11 @@ public class RouterNodeTests
                 It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
-        // 构建 ServiceProvider
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(mockFactory.Object);
-        var sp = services.BuildServiceProvider();
+        var nodeCtxMock = new Mock<IWorkflowNodeServiceContext>();
+        nodeCtxMock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
+        nodeCtxMock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
 
-        var node = new RouterNode(sp, Mock.Of<ILogger<RouterNode>>());
+        var node = new RouterNode(nodeCtxMock.Object, Mock.Of<ILogger<RouterNode>>());
         return (node, mockFactory);
     }
 

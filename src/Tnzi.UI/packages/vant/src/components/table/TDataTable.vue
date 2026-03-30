@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends Record<string, any>">
+<script setup lang="ts" generic="T extends Record<string, unknown>">
 import { computed } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { IDataTableEmits, IDataTableProps } from '@tnzi/core/components';
@@ -61,15 +61,17 @@ const onActionClick = (actionKey: string, row: T, index: number) => {
 
           <template #value>
             <div v-if="props.actions?.buttons?.length" class="mt-2 flex justify-end gap-1">
-              <van-button
-                v-for="btn in props.actions.buttons"
-                :key="btn.key"
-                size="mini"
-                :type="btn.type === 'danger' ? 'danger' : btn.type === 'primary' ? 'primary' : 'default'"
-                @click.stop="onActionClick(btn.key, row, rowIndex)"
-              >
-                {{ btn.label }}
-              </van-button>
+              <template v-for="btn in props.actions.buttons" :key="btn.key">
+                <van-button
+                  v-if="!btn.visible || btn.visible(row)"
+                  size="mini"
+                  :type="btn.type === 'danger' ? 'danger' : btn.type === 'primary' ? 'primary' : 'default'"
+                  :disabled="btn.disabled ? btn.disabled(row) : false"
+                  @click.stop="onActionClick(btn.key, row, rowIndex)"
+                >
+                  {{ btn.label }}
+                </van-button>
+              </template>
             </div>
           </template>
         </van-cell>
@@ -77,4 +79,3 @@ const onActionClick = (actionKey: string, row: T, index: number) => {
     </div>
   </div>
 </template>
-

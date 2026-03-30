@@ -23,7 +23,7 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (context.ShouldSkipMiddleware)
             return await next(context, cancellationToken);
 
         // Before: 自动创建线程（如果 ThreadId 为 null）
@@ -49,6 +49,15 @@ public class HistoryMiddleware : IAiMiddleware
             {
                 _logger.LogWarning(ex, "Failed to load history for thread {ThreadId}", threadId);
             }
+
+            // Patch dangling tool calls (from user interruption)
+            var patched = PatchDanglingToolCalls(context.Messages);
+            if (!ReferenceEquals(patched, context.Messages))
+            {
+                context.Messages.Clear();
+                context.Messages.AddRange(patched);
+                _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
+            }
         }
 
         // 执行下游管道
@@ -57,16 +66,7 @@ public class HistoryMiddleware : IAiMiddleware
         // 确保结果携带 ThreadId
         if (threadId != null && result.ThreadId == null)
         {
-            result = new AgentRunResult
-            {
-                Response = result.Response,
-                RunId = result.RunId,
-                ThreadId = threadId,
-                Usage = result.Usage,
-                Citations = result.Citations,
-                FinishReason = result.FinishReason,
-                Status = result.Status
-            };
+            result = result.CloneWith(threadId: threadId);
         }
 
         // After: 保存消息（guardrail 拒绝时不保存，避免将被拦截的内容写入历史）
@@ -112,7 +112,7 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (context.ShouldSkipMiddleware)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;
@@ -141,6 +141,15 @@ public class HistoryMiddleware : IAiMiddleware
             {
                 _logger.LogWarning(ex, "Failed to load history for thread {ThreadId}", threadId);
             }
+
+            // Patch dangling tool calls (from user interruption)
+            var patched = PatchDanglingToolCalls(context.Messages);
+            if (!ReferenceEquals(patched, context.Messages))
+            {
+                context.Messages.Clear();
+                context.Messages.AddRange(patched);
+                _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
+            }
         }
 
         // 收集流式响应文本和工具调用详情
@@ -148,19 +157,37 @@ public class HistoryMiddleware : IAiMiddleware
         var toolCallDetails = new List<ToolCallDetail>();
         TokenUsageDto? lastUsage = null;
         string? lastFinishReason = null;
+        var afterToolCall = false;
 
         await foreach (var chunk in next(context, cancellationToken))
         {
+            // 追踪工具调用状态，用于检测 provider 在 tool call 后注入 \n\n 的问题
+            var isToolCallChunk = chunk.IsToolCall || chunk.ToolCalls is { Count: > 0 };
+            if (isToolCallChunk)
+            {
+                afterToolCall = true;
+            }
+
             if (chunk.Text != null)
             {
+                var text = chunk.Text;
+
                 // Fix streaming token fracture: some providers (e.g., DeepSeek) insert
                 // \n\n before each token after tool calls. Detect and replace with space.
-                var text = chunk.Text;
-                if (text.StartsWith("\n\n") && responseBuilder.Length > 0
+                // 仅在 tool call 后的纯文本 chunk 触发，避免误清理正常的段落换行。
+                if (afterToolCall && !isToolCallChunk
+                    && text.StartsWith("\n\n") && responseBuilder.Length > 0
                     && responseBuilder[^1] != '\n' && text.AsSpan().TrimStart().Length <= 15)
                 {
                     text = " " + text.AsSpan(2).TrimStart().ToString();
+                    chunk.Text = text;
                 }
+                else if (afterToolCall && !isToolCallChunk && !text.StartsWith("\n\n"))
+                {
+                    // 纯文本 chunk 不以 \n\n 开头 → 正常文本流恢复，重置状态
+                    afterToolCall = false;
+                }
+
                 responseBuilder.Append(text);
             }
             if (chunk.ToolCalls is { Count: > 0 })
@@ -212,6 +239,71 @@ public class HistoryMiddleware : IAiMiddleware
                 _logger.LogWarning(ex, "Failed to persist streaming messages for thread {ThreadId}", threadId);
             }
         }
+    }
+
+    /// <summary>
+    /// Scans messages for FunctionCallContent without matching FunctionResultContent.
+    /// Injects synthetic error results for dangling calls (e.g., from user interruption).
+    /// </summary>
+    public static List<ChatMessage> PatchDanglingToolCalls(List<ChatMessage> messages)
+    {
+        // Collect all existing result call IDs
+        var existingResultIds = new HashSet<string>();
+        foreach (var msg in messages)
+        {
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionResultContent frc)
+                    existingResultIds.Add(frc.CallId);
+            }
+        }
+
+        // Find dangling calls and track insertion points
+        var patches = new List<(int InsertAfterIndex, List<FunctionResultContent> Results)>();
+
+        for (var i = 0; i < messages.Count; i++)
+        {
+            var msg = messages[i];
+            if (msg.Role != ChatRole.Assistant) continue;
+
+            var danglingResults = new List<FunctionResultContent>();
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionCallContent fc && !existingResultIds.Contains(fc.CallId))
+                {
+                    danglingResults.Add(new FunctionResultContent(
+                        fc.CallId,
+                        "[Tool call was interrupted and did not return a result.]"));
+                    existingResultIds.Add(fc.CallId); // Prevent duplicates
+                }
+            }
+
+            if (danglingResults.Count > 0)
+                patches.Add((i, danglingResults));
+        }
+
+        if (patches.Count == 0)
+            return messages;
+
+        // Build patched list with synthetic results inserted after each dangling assistant message
+        var patched = new List<ChatMessage>(messages.Count + patches.Sum(p => p.Results.Count));
+        var patchIndex = 0;
+
+        for (var i = 0; i < messages.Count; i++)
+        {
+            patched.Add(messages[i]);
+
+            if (patchIndex < patches.Count && patches[patchIndex].InsertAfterIndex == i)
+            {
+                foreach (var result in patches[patchIndex].Results)
+                {
+                    patched.Add(new ChatMessage(ChatRole.Tool, [result]));
+                }
+                patchIndex++;
+            }
+        }
+
+        return patched;
     }
 
     /// <summary>

@@ -6,6 +6,139 @@ namespace Tnzi.AI.Engine.Workflow;
 public partial class WorkflowEngine
 {
     /// <summary>
+    /// 处理节点级审批暂停和通用中断
+    /// </summary>
+    private async Task<(bool awaitingApproval, string? awaitingApprovalStepId, WorkflowInterrupt? awaitingInterrupt, DateTime? checkpointCreatedAt)>
+        HandleApprovalInterruptAsync(
+            WorkflowNodeResult result,
+            string stepId,
+            bool failed,
+            bool awaitingApproval,
+            string? awaitingApprovalStepId,
+            WorkflowInterrupt? awaitingInterrupt,
+            IWorkflowCheckpointStore? checkpointStore,
+            string executionId,
+            WorkflowState state,
+            HashSet<string> completed,
+            DateTime? checkpointCreatedAt,
+            CancellationToken cancellationToken)
+    {
+        // 处理节点级审批暂停（ApprovalNode 返回 AwaitingApproval=true）
+        if (result.AwaitingApproval && !failed)
+        {
+            awaitingApproval = true;
+            awaitingApprovalStepId = stepId;
+            if (checkpointStore != null)
+            {
+                checkpointCreatedAt ??= DateTime.UtcNow;
+                await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
+                    WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
+            }
+        }
+
+        // 处理通用中断（CheckInterruptAsync 返回 AwaitingInterrupt）
+        if (result.AwaitingInterrupt != null && !failed && !awaitingApproval)
+        {
+            awaitingInterrupt = result.AwaitingInterrupt;
+
+            // Approval 类型中断保持向后兼容
+            if (awaitingInterrupt.Type == InterruptType.Approval)
+            {
+                awaitingApproval = true;
+                awaitingApprovalStepId = stepId;
+                if (checkpointStore != null)
+                {
+                    checkpointCreatedAt ??= DateTime.UtcNow;
+                    await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
+                        WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
+                }
+            }
+            else if (checkpointStore != null)
+            {
+                checkpointCreatedAt ??= DateTime.UtcNow;
+                await SaveCheckpointWithInterruptAsync(checkpointStore, executionId, state, completed,
+                    awaitingInterrupt, checkpointCreatedAt, cancellationToken);
+            }
+        }
+
+        return (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt, checkpointCreatedAt);
+    }
+
+    /// <summary>
+    /// 构建最终执行结果（最终检查点 + Run 状态更新 + 结果对象）
+    /// </summary>
+    private static async Task<WorkflowEngineResult> BuildFinalResultAsync(
+        string executionId,
+        string initialInput,
+        IServiceProvider serviceProvider,
+        WorkflowState state,
+        HashSet<string> completed,
+        List<WorkflowStepResultDto> stepResults,
+        int totalInputTokens,
+        int totalOutputTokens,
+        bool failed,
+        bool awaitingApproval,
+        string? awaitingApprovalStepId,
+        WorkflowInterrupt? awaitingInterrupt,
+        IWorkflowCheckpointStore? checkpointStore,
+        DateTime? checkpointCreatedAt,
+        AgentRun? run,
+        IRunStore? runStore,
+        CancellationToken cancellationToken)
+    {
+        // 最终检查点
+        if (checkpointStore != null && !awaitingApproval && awaitingInterrupt == null)
+        {
+            checkpointCreatedAt ??= DateTime.UtcNow;
+            var finalStatus = failed ? WorkflowExecutionStatus.Failed : WorkflowExecutionStatus.Completed;
+            await SaveCheckpointAsync(checkpointStore, executionId, state, completed, finalStatus, null, checkpointCreatedAt, cancellationToken);
+        }
+
+        // 更新 Run 状态
+        if (run != null)
+        {
+            runStore ??= serviceProvider.GetService<IRunStore>();
+            if (runStore != null)
+            {
+                run.Status = failed
+                    ? AgentRunStatus.Failed
+                    : awaitingApproval || awaitingInterrupt != null
+                        ? AgentRunStatus.AwaitingApproval
+                        : AgentRunStatus.Completed;
+                run.TotalInputTokens = totalInputTokens;
+                run.TotalOutputTokens = totalOutputTokens;
+                run.OutputSummary = stepResults.LastOrDefault(r => !r.Skipped)?.Output;
+                await runStore.UpdateAsync(run, cancellationToken);
+            }
+        }
+
+        var finalOutput = stepResults
+            .Where(r => !r.Skipped)
+            .LastOrDefault()?.Output ?? initialInput;
+
+        return new WorkflowEngineResult
+        {
+            ExecutionId = executionId,
+            FinalOutput = finalOutput,
+            StepResults = stepResults,
+            State = state,
+            Usage = totalInputTokens > 0 || totalOutputTokens > 0
+                ? new TokenUsageDto
+                {
+                    InputTokens = totalInputTokens,
+                    OutputTokens = totalOutputTokens,
+                    TotalTokens = totalInputTokens + totalOutputTokens
+                }
+                : null,
+            HasFailure = failed,
+            AwaitingApproval = awaitingApproval,
+            AwaitingApprovalStepId = awaitingApprovalStepId,
+            AwaitingInterrupt = awaitingInterrupt,
+            RunId = run?.Id
+        };
+    }
+
+    /// <summary>
     /// 处理条件边路由
     /// </summary>
     private async Task HandleConditionalEdgeAsync(
@@ -414,6 +547,32 @@ public partial class WorkflowEngine
             UpdatedAt = DateTime.UtcNow,
             Status = status,
             StepsAwaitingApproval = stepsAwaitingApproval ?? []
+        };
+        await store.SaveCheckpointAsync(checkpoint, ct);
+    }
+
+    /// <summary>
+    /// 保存包含通用中断信息的检查点
+    /// </summary>
+    private static async Task SaveCheckpointWithInterruptAsync(
+        IWorkflowCheckpointStore store,
+        string executionId,
+        WorkflowState state,
+        HashSet<string> completed,
+        WorkflowInterrupt interrupt,
+        DateTime? createdAt,
+        CancellationToken ct)
+    {
+        var checkpoint = new WorkflowCheckpoint
+        {
+            ExecutionId = executionId,
+            CompletedStepIds = new HashSet<string>(completed),
+            StepOutputs = state.ToDictionary(),
+            InitialInput = state.InitialInput,
+            CreatedAt = createdAt ?? DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Status = WorkflowExecutionStatus.AwaitingInput,
+            PendingInterruptJson = JsonSerializer.Serialize(interrupt, TnziJsonDefaults.Options)
         };
         await store.SaveCheckpointAsync(checkpoint, ct);
     }

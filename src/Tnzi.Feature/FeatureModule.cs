@@ -46,6 +46,9 @@ public class FeatureModule : TnziApplicationModule
         // Register FeatureService (scoped, admin CRUD)
         services.AddScoped<IFeatureService, FeatureService>();
 
+        // Register FeatureUsageService (scoped, usage analytics)
+        services.AddScoped<IFeatureUsageService, FeatureUsageService>();
+
         // Register built-in value providers
         // TenantFeatureValueProvider resolves feature values per tenant (priority 200)
         // Applications can register custom IFeatureValueProvider implementations

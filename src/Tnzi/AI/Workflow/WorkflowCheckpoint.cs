@@ -18,7 +18,10 @@ public enum WorkflowExecutionStatus
     Paused,
 
     /// <summary>等待人工审批</summary>
-    AwaitingApproval
+    AwaitingApproval,
+
+    /// <summary>等待外部输入（通用中断：人工输入、外部事件等）</summary>
+    AwaitingInput
 }
 
 /// <summary>
@@ -66,4 +69,10 @@ public class WorkflowCheckpoint
     /// </summary>
     [ExperimentalApi(Reason = "Workflow HITL is in preview")]
     public HashSet<string> StepsAwaitingApproval { get; set; } = [];
+
+    /// <summary>
+    /// 当前等待中的通用中断描述（序列化为 JSON 存储）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public string? PendingInterruptJson { get; set; }
 }

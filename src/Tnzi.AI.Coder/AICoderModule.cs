@@ -81,6 +81,7 @@ public class AICoderModule : TnziCustomModule
         services.AddSingleton<DiffTools>();
         services.AddSingleton<ReplTools>();
         services.AddSingleton<ContextTools>();
+        services.AddSingleton<TaskTrackerTools>();
 
         return Task.CompletedTask;
     }

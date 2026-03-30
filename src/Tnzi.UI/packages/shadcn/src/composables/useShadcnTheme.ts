@@ -1,35 +1,26 @@
 /**
- * @tnzi/ui/hooks/useShadcnTheme
+ * @tnzi/shadcn/composables/useShadcnTheme
  *
- * Theme management hook for shadcn-vue.
+ * Theme management composable for shadcn-vue.
+ * Delegates to AppStore as the single source of truth — no standalone theme state.
  */
 
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
+import { useApp } from '../stores/app';
 
 export function useShadcnTheme() {
-  const isDark = ref(false);
-  const theme = computed(() => (isDark.value ? 'dark' : 'light'));
+  const app = useApp();
+
+  const isDark = computed(() => app.isDarkMode.value);
+  const theme = computed(() => app.theme.value);
 
   const toggleTheme = () => {
-    isDark.value = !isDark.value;
-    document.documentElement.classList.toggle('dark', isDark.value);
-    localStorage.setItem('tnzi:theme', isDark.value ? 'dark' : 'light');
+    app.toggleTheme();
   };
 
   const setTheme = (dark: boolean) => {
-    isDark.value = dark;
-    document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('tnzi:theme', dark ? 'dark' : 'light');
+    app.setTheme(dark ? 'dark' : 'light');
   };
-
-  // Initialize from localStorage
-  if (typeof window !== 'undefined') {
-    const savedTheme = localStorage.getItem('tnzi:theme');
-    if (savedTheme) {
-      isDark.value = savedTheme === 'dark';
-      document.documentElement.classList.toggle('dark', isDark.value);
-    }
-  }
 
   return {
     isDark,

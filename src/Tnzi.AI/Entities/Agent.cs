@@ -31,9 +31,9 @@ public class Agent : MultiTenantAuditedEntity<Guid>
     public string? Model { get; set; }
 
     /// <summary>
-    /// 工具组列表（JSON 数组）
+    /// 工具组列表
     /// </summary>
-    public string? ToolGroups { get; set; }
+    public List<string>? ToolGroups { get; set; }
 
     /// <summary>
     /// 温度参数
@@ -67,11 +67,11 @@ public class Agent : MultiTenantAuditedEntity<Guid>
 
     // === 能力标签（v2.1 新增） ===
 
-    /// <summary>领域标签（JSON 数组: ["coding", "research", "writing", "customer-service"]）</summary>
-    public string? Domains { get; set; }
+    /// <summary>领域标签（如: ["coding", "research", "writing", "customer-service"]）</summary>
+    public List<string>? Domains { get; set; }
 
-    /// <summary>角色标签（JSON 数组: ["reviewer", "implementer", "planner", "summarizer"]）</summary>
-    public string? Roles { get; set; }
+    /// <summary>角色标签（如: ["reviewer", "implementer", "planner", "summarizer"]）</summary>
+    public List<string>? Roles { get; set; }
 
     /// <summary>质量等级 (1-5, 5=最高)</summary>
     public int QualityTier { get; set; } = 3;
@@ -81,4 +81,20 @@ public class Agent : MultiTenantAuditedEntity<Guid>
 
     /// <summary>成本等级 (1-5, 1=最便宜)</summary>
     public int CostTier { get; set; } = 3;
+
+    // === YAML 定义同步字段 ===
+
+    /// <summary>定义来源（"database" = API 创建, "yaml" = 文件同步）</summary>
+    public string Source { get; set; } = AgentSources.Database;
+
+    /// <summary>YAML 定义文件的 SHA256 哈希（用于变更检测）</summary>
+    public string? DefinitionHash { get; set; }
+
+    // === 人格关联 ===
+
+    /// <summary>关联的人格 ID（可选）</summary>
+    public Guid? PersonaId { get; set; }
+
+    /// <summary>关联的人格</summary>
+    public virtual AgentPersona? Persona { get; set; }
 }

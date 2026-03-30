@@ -12,6 +12,7 @@ public class MessageDto
     public Guid SenderId { get; set; }
     public string? SenderName { get; set; }
     public bool IsSent { get; set; }
+    public bool IsDraft { get; set; }
     public bool CanReply { get; set; }
     public DateTime? BeginDate { get; set; }
     public DateTime? EndDate { get; set; }
@@ -186,6 +187,7 @@ public class AdminMessageQueryDto : PagedQueryDto
 {
     public MessageType? MessageType { get; set; }
     public bool? IsSent { get; set; }
+    public bool? IsDraft { get; set; }
     public Guid? SenderId { get; set; }
     public string? Keyword { get; set; }
     public DateTime? StartDate { get; set; }

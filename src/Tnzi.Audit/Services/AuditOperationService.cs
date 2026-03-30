@@ -193,7 +193,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     {
         var operations = await GetFilteredOperationsAsync(query, cancellationToken);
 
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         // CSV header
         sb.AppendLine("Id,FunctionName,UserName,Ip,HttpMethod,Url,HttpStatusCode,Elapsed,ResultType,Message,StartTime,EndTime,CreationTime");
 
@@ -228,13 +228,13 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         var operations = await GetFilteredOperationsAsync(query, cancellationToken);
         var dtos = operations.MapToList<AuditOperationDto>();
 
-        var jsonOptions = new System.Text.Json.JsonSerializerOptions
+        var jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
 
-        var json = System.Text.Json.JsonSerializer.Serialize(dtos, jsonOptions);
+        var json = JsonSerializer.Serialize(dtos, jsonOptions);
         LogInformation("Exported {Count} audit operations to JSON", operations.Count);
         return Ok<string>(json);
     }
@@ -353,7 +353,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
                 .GroupBy(g => groupBy switch
                 {
                     AuditTrendGroupBy.Weekly =>
-                        $"{g.Date.Year}-W{System.Globalization.CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(g.Date, System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday):D2}",
+                        $"{g.Date.Year}-W{CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(g.Date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday):D2}",
                     AuditTrendGroupBy.Monthly => g.Date.ToString("yyyy-MM"),
                     _ => g.Date.ToString("yyyy-MM-dd")
                 })

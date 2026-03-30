@@ -14,24 +14,21 @@ export type { TemplateVariableType };
 // ============================================
 
 /**
- * Template info DTO
+ * Template info DTO (paged list item, no large text fields)
+ * Aligned with backend TemplateInfoDto
  */
 export interface TemplateInfoDto extends AuditedEntity<string> {
   templateName: string;
   module: string;
   category: string;
-  subjectTemplate: string;
-  contentTemplate: string;
   defaultLayoutName?: string | null;
   isActive: boolean;
   description?: string | null;
-  metadata?: string | null;
-  variables?: TemplateVariableDto[];
-  usageCount?: number;
 }
 
 /**
  * Template entity DTO (detail CRUD endpoints)
+ * Aligned with backend TemplateDto
  */
 export interface TemplateEntityDto extends AuditedEntity<string> {
   templateName: string;
@@ -57,64 +54,123 @@ export interface TemplateVariableDto {
   exampleValue?: unknown;
 }
 
-/**
- * Template preview request
- */
-export interface TemplatePreviewDto {
-  templateName: string;
-  layoutName?: string;
-  variables: Record<string, unknown>;
-}
-
-/**
- * Template preview result
- */
-export interface TemplatePreviewResultDto {
-  subject: string;
-  content: string;
-  isHtml: boolean;
-}
-
 // ============================================
 // Template Request Types
 // ============================================
 
 /**
  * Create template request
+ * Aligned with backend CreateTemplateRequest (extends TemplateRequestBase)
  */
 export interface CreateTemplateDto {
   templateName: string;
   module: string;
   category: string;
-  subjectTemplate: string;
+  subjectTemplate?: string;
   contentTemplate: string;
   defaultLayoutName?: string;
   isActive?: boolean;
   description?: string;
-  variables?: TemplateVariableDto[];
+  metadata?: string;
 }
 
 /**
  * Update template request
+ * Aligned with backend UpdateTemplateRequest (extends TemplateRequestBase)
  */
 export interface UpdateTemplateDto {
+  templateName: string;
+  module: string;
+  category: string;
   subjectTemplate?: string;
-  contentTemplate?: string;
+  contentTemplate: string;
   defaultLayoutName?: string;
   isActive?: boolean;
   description?: string;
-  variables?: TemplateVariableDto[];
+  metadata?: string;
 }
 
 /**
  * Template list query
+ * Aligned with backend QueryTemplateRequest
  */
 export interface TemplateQueryDto extends SortedPagedQueryDto {
   module?: string;
   category?: string;
-  templateName?: string;
   isActive?: boolean;
   keyword?: string;
+}
+
+/**
+ * Validate template request
+ * Aligned with backend ValidateTemplateRequest
+ */
+export interface ValidateTemplateDto {
+  content: string;
+}
+
+/**
+ * Template validation result
+ * Aligned with backend TemplateValidationResult
+ */
+export interface TemplateValidationResultDto {
+  isValid: boolean;
+  errors: string[];
+}
+
+/**
+ * Preview template request
+ * Aligned with backend PreviewTemplateRequest
+ */
+export interface PreviewTemplateDto {
+  content: string;
+  layoutContent?: string;
+  model?: Record<string, unknown>;
+}
+
+// ============================================
+// Template Import/Export Types
+// ============================================
+
+/**
+ * Template import request
+ * Aligned with backend TemplateImportRequest
+ */
+export interface TemplateImportDto {
+  json: string;
+  overwriteExisting?: boolean;
+}
+
+/**
+ * Template import result
+ * Aligned with backend TemplateImportResultDto
+ */
+export interface TemplateImportResultDto {
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errors: string[];
+}
+
+/**
+ * Template variables discovery result
+ * Aligned with backend TemplateVariablesDto
+ */
+export interface TemplateVariablesDto {
+  templateId: string;
+  templateName: string;
+  subjectVariables: string[];
+  contentVariables: string[];
+  allVariables: string[];
+}
+
+/**
+ * Batch activate/deactivate request
+ * Aligned with backend BatchActivateRequest
+ */
+export interface BatchActivateDto {
+  ids: string[];
+  isActive: boolean;
 }
 
 // ============================================
@@ -122,23 +178,21 @@ export interface TemplateQueryDto extends SortedPagedQueryDto {
 // ============================================
 
 /**
- * Layout info DTO
+ * Layout info DTO (paged list item, no large text fields)
+ * Aligned with backend LayoutInfoDto
  */
 export interface LayoutInfoDto extends AuditedEntity<string> {
   layoutName: string;
   module: string;
-  category?: string | null;
-  layoutContent: string;
-  content?: string;
+  category: string;
   isActive: boolean;
-  isDefault?: boolean;
+  isDefault: boolean;
   description?: string | null;
-  metadata?: string | null;
-  usageCount?: number;
 }
 
 /**
  * Layout entity DTO (detail CRUD endpoints)
+ * Aligned with backend LayoutDto
  */
 export interface LayoutEntityDto extends AuditedEntity<string> {
   layoutName: string;
@@ -153,33 +207,68 @@ export interface LayoutEntityDto extends AuditedEntity<string> {
 
 /**
  * Create layout request
+ * Aligned with backend CreateLayoutRequest (extends LayoutRequestBase)
  */
 export interface CreateLayoutDto {
   layoutName: string;
   module: string;
-  category?: string;
-  content: string;
+  category: string;
+  layoutContent: string;
   isActive?: boolean;
+  isDefault?: boolean;
   description?: string;
+  metadata?: string;
 }
 
 /**
  * Update layout request
+ * Aligned with backend UpdateLayoutRequest (extends LayoutRequestBase)
  */
 export interface UpdateLayoutDto {
-  content?: string;
+  layoutName: string;
+  module: string;
+  category: string;
+  layoutContent: string;
   isActive?: boolean;
+  isDefault?: boolean;
   description?: string;
+  metadata?: string;
 }
 
 /**
  * Layout list query
+ * Aligned with backend QueryLayoutRequest
  */
 export interface LayoutQueryDto extends SortedPagedQueryDto {
   module?: string;
   category?: string;
-  layoutName?: string;
   isActive?: boolean;
+  isDefault?: boolean;
+  keyword?: string;
+}
+
+// ============================================
+// Layout Import/Export Types
+// ============================================
+
+/**
+ * Layout import request
+ * Aligned with backend LayoutImportRequest
+ */
+export interface LayoutImportDto {
+  json: string;
+  overwriteExisting?: boolean;
+}
+
+/**
+ * Layout import result
+ * Aligned with backend LayoutImportResultDto
+ */
+export interface LayoutImportResultDto {
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errors: string[];
 }
 
 // ============================================
@@ -208,10 +297,6 @@ export interface RenderedTemplateDto {
   usedLayout?: string | null;
 }
 
-// ============================================
-// Template Category Types
-// ============================================
-
 /**
  * Template category DTO
  */
@@ -221,80 +306,4 @@ export interface TemplateCategoryDto {
   displayName: string;
   description?: string | null;
   templateCount: number;
-}
-
-// ============================================
-// Template Validation Types
-// ============================================
-
-/**
- * Template validation request
- */
-export interface ValidateTemplateDto {
-  subjectTemplate?: string;
-  contentTemplate: string;
-  variables?: TemplateVariableDto[];
-}
-
-/**
- * Template validation result
- */
-export interface TemplateValidationResultDto {
-  isValid: boolean;
-  errors: TemplateValidationError[];
-  warnings: TemplateValidationWarning[];
-  detectedVariables: string[];
-}
-
-/**
- * Template validation error
- */
-export interface TemplateValidationError {
-  line: number;
-  column: number;
-  message: string;
-  code: string;
-}
-
-/**
- * Template validation warning
- */
-export interface TemplateValidationWarning {
-  line: number;
-  column: number;
-  message: string;
-  code: string;
-}
-
-// ============================================
-// Template Import/Export Types
-// ============================================
-
-/**
- * Template export data
- */
-export interface TemplateExportDto {
-  templates: TemplateInfoDto[];
-  layouts: LayoutInfoDto[];
-  includeVariables: boolean;
-}
-
-/**
- * Template import request
- */
-export interface TemplateImportDto {
-  data: TemplateExportDto;
-  overwrite: boolean;
-  activateImported: boolean;
-}
-
-/**
- * Template import result
- */
-export interface TemplateImportResultDto {
-  importedTemplates: number;
-  importedLayouts: number;
-  skippedTemplates: string[];
-  skippedLayouts: string[];
-  errors: string[];
 }

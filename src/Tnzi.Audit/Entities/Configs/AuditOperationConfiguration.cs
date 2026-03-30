@@ -24,6 +24,7 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
         builder.Property(e => e.Url).HasMaxLength(2000);
         builder.Property(e => e.Exception);
         builder.Property(e => e.RequestParameters);
+        builder.Property(e => e.RequestBody).HasMaxLength(8192);
         builder.Property(e => e.ResponseResult);
 
         // 配置与 AuditEntityEntry 的关系

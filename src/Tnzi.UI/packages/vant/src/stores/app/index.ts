@@ -32,6 +32,7 @@ const generateId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 };
 
+// TODO: add cleanup support for tests — removeEventListener on store disposal
 let _fullscreenListenerActive = false;
 
 // ============================================
@@ -380,19 +381,16 @@ export const useAppStore = defineStore('app', {
      * @param id - Notification ID
      */
     markNotificationRead(id: string): void {
-      const notification = this.ui.toasts.find((n: AppNotification) => n.id === id);
-      if (notification) {
-        notification.read = true;
-      }
+      this.ui.toasts = this.ui.toasts.map((n: AppNotification) =>
+        n.id === id ? { ...n, read: true } : n,
+      );
     },
 
     /**
      * Mark all notifications as read.
      */
     markAllNotificationsRead(): void {
-      this.ui.toasts.forEach((n: AppNotification) => {
-        n.read = true;
-      });
+      this.ui.toasts = this.ui.toasts.map((n: AppNotification) => ({ ...n, read: true }));
     },
 
     /**

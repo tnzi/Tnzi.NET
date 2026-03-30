@@ -9,7 +9,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     private readonly GuardrailRunner _guardrailRunner;
     private readonly IEnumerable<IOutputGuardrail> _outputGuardrails;
     private readonly IOptions<AIOptions> _options;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IEventBus? _eventBus;
     private readonly ILogger<OutputGuardrailMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.OutputGuardrail;
@@ -18,14 +18,14 @@ public class OutputGuardrailMiddleware : IAiMiddleware
         GuardrailRunner guardrailRunner,
         IEnumerable<IOutputGuardrail> outputGuardrails,
         IOptions<AIOptions> options,
-        IServiceProvider serviceProvider,
-        ILogger<OutputGuardrailMiddleware> logger)
+        ILogger<OutputGuardrailMiddleware> logger,
+        IEventBus? eventBus = null)
     {
         _guardrailRunner = Check.NotNull(guardrailRunner);
         _outputGuardrails = Check.NotNull(outputGuardrails);
         _options = Check.NotNull(options);
-        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
+        _eventBus = eventBus;
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
@@ -54,33 +54,18 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                 _logger.LogWarning("Output rejected by guardrail {GuardrailName}: {Reason}",
                     rejection.GuardrailName, rejection.Reason);
 
-                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Output rejected", "output");
+                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Output rejected", GuardrailDirections.Output);
 
-                return new AgentRunResult
-                {
-                    Response = rejection.Reason ?? "Output rejected by guardrail",
-                    RunId = result.RunId,
-                    ThreadId = result.ThreadId,
-                    Usage = result.Usage,
-                    Citations = result.Citations,
-                    FinishReason = FinishReasons.GuardrailRejected,
-                    Status = AgentRunStatus.Failed
-                };
+                return result.CloneWith(
+                    response: rejection.Reason ?? "Output rejected by guardrail",
+                    finishReason: FinishReasons.GuardrailRejected,
+                    status: AgentRunStatus.Failed);
             }
 
             // 如果 guardrail 修改了输出文本
             if (text != result.Response)
             {
-                return new AgentRunResult
-                {
-                    Response = text,
-                    RunId = result.RunId,
-                    ThreadId = result.ThreadId,
-                    Usage = result.Usage,
-                    Citations = result.Citations,
-                    FinishReason = result.FinishReason,
-                    Status = result.Status
-                };
+                return result.CloneWith(response: text);
             }
         }
         catch (TripwireGuardrailException ex)
@@ -88,7 +73,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             _logger.LogWarning("Output tripwire triggered by {GuardrailName}: {Reason}",
                 ex.GuardrailName, ex.Message);
 
-            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, "output");
+            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, GuardrailDirections.Output);
 
             return new AgentRunResult
             {
@@ -222,14 +207,14 @@ public class OutputGuardrailMiddleware : IAiMiddleware
             {
                 _logger.LogWarning("Streaming output rejected by guardrail {GuardrailName}: {Reason}",
                     rejection.GuardrailName, rejection.Reason);
-                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Output rejected", "output");
+                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Output rejected", GuardrailDirections.Output);
                 return rejection.Reason;
             }
         }
         catch (TripwireGuardrailException ex)
         {
             _logger.LogWarning("Streaming output tripwire triggered: {Message}", ex.Message);
-            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, "output");
+            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, GuardrailDirections.Output);
             return ex.Message;
         }
 
@@ -241,10 +226,9 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     {
         try
         {
-            var eventBus = _serviceProvider.GetService<IEventBus>();
-            if (eventBus == null) return;
+            if (_eventBus == null) return;
 
-            await eventBus.PublishAsync(new GuardrailRejectionEvent
+            await _eventBus.PublishAsync(new GuardrailRejectionEvent
             {
                 UserId = context.Request.UserId,
                 ThreadId = context.Request.ThreadId,

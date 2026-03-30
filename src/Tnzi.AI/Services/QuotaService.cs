@@ -110,8 +110,8 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             }
 
             // 配额足够，计算使用率和预警级别
-            var remainingDaily = quota.DailyTokenLimit - quota.CurrentDailyUsage - estimatedTokens;
-            var remainingMonthly = quota.MonthlyTokenLimit - quota.CurrentMonthlyUsage - estimatedTokens;
+            var remainingDaily = Math.Max(0, quota.DailyTokenLimit - quota.CurrentDailyUsage - estimatedTokens);
+            var remainingMonthly = Math.Max(0, quota.MonthlyTokenLimit - quota.CurrentMonthlyUsage - estimatedTokens);
 
             var dailyPct = quota.DailyTokenLimit > 0
                 ? (decimal)(quota.CurrentDailyUsage + estimatedTokens) / quota.DailyTokenLimit

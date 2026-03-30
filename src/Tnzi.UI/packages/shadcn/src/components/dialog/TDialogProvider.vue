@@ -60,7 +60,7 @@ function handleCancel() {
 </script>
 
 <template>
-  <AlertDialog :open="state.open">
+  <AlertDialog :open="state.open" @update:open="(v: boolean) => { if (!v) handleCancel() }">
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle class="flex items-center gap-2">

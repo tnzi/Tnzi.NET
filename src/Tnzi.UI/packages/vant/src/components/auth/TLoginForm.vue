@@ -53,18 +53,20 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
     <van-form @submit="handleSubmit">
       <van-field
         v-model="userName"
+        name="username"
         :label="props.usernameLabel || t('auth.username')"
         :placeholder="props.usernamePlaceholder || t('auth.username')"
         :disabled="isDisabled"
-        required
+        :rules="[{ required: true, message: 'Username is required' }]"
       />
       <van-field
         v-model="password"
+        name="password"
         type="password"
         :label="props.passwordLabel || t('auth.password')"
         :placeholder="props.passwordPlaceholder || t('auth.password')"
         :disabled="isDisabled"
-        required
+        :rules="[{ required: true, message: 'Password is required' }]"
       />
 
       <van-field
@@ -132,4 +134,3 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
   overflow: hidden;
 }
 </style>
-

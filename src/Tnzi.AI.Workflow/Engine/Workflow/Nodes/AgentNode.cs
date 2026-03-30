@@ -10,14 +10,14 @@ namespace Tnzi.AI.Engine.Workflow.Nodes;
 /// </remarks>
 public class AgentNode : IWorkflowNode
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowNodeServiceContext _nodeContext;
     private readonly ILogger<AgentNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Agent;
 
-    public AgentNode(IServiceProvider serviceProvider, ILogger<AgentNode> logger)
+    public AgentNode(IWorkflowNodeServiceContext nodeContext, ILogger<AgentNode> logger)
     {
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _nodeContext = Check.NotNull(nodeContext);
         _logger = Check.NotNull(logger);
     }
 
@@ -26,12 +26,9 @@ public class AgentNode : IWorkflowNode
         var step = context.Step;
         var state = context.State;
 
-        // 创建作用域以避免使用根 ServiceProvider 解析 Scoped 服务
-        using var scope = _serviceProvider.CreateScope();
-
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: step.AgentId,
-            scope: scope,
+            serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
             instructions: step.Instructions,

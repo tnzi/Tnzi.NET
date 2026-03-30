@@ -102,6 +102,15 @@ export function setStoreStorageAdapter(adapter: StorageAdapter): void {
   _storageAdapter = adapter;
 }
 
+/**
+ * Reset store runtime module-level singletons.
+ * Useful for testing or SSR to avoid shared state between requests.
+ */
+export function resetStoreRuntime(): void {
+  _httpClient = null;
+  _storageAdapter = null;
+}
+
 // ============================================
 // Store Creation Helper
 // ============================================

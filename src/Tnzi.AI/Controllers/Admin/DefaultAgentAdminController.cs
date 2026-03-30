@@ -128,58 +128,10 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     [HttpPost("{id:guid}/run/stream")]
     public virtual async Task RunStreaming(Guid id, [FromBody] RunAgentRequestDto request, CancellationToken cancellationToken = default)
     {
-        // 管理员可代理但默认用自身 ID
         var userId = CurrentUser?.Id ?? request.UserId;
         var format = StreamingResponseWriter.NegotiateFormat(Request);
-
         var stream = AgentService.RunStreamingAsync(id, request.Message, request.Content, request.ThreadId, userId, cancellationToken);
-        var enumerator = stream.GetAsyncEnumerator(cancellationToken);
-
-        try
-        {
-            if (!await enumerator.MoveNextAsync())
-            {
-                StreamingResponseWriter.ConfigureResponse(Response, format);
-                await StreamingResponseWriter.WriteDoneAsync(Response, format, cancellationToken);
-                return;
-            }
-        }
-        catch (BusinessException)
-        {
-            throw;
-        }
-
-        StreamingResponseWriter.ConfigureResponse(Response, format);
-
-        var firstEvent = enumerator.Current;
-        await StreamingResponseWriter.WriteEventAsync(Response, firstEvent, format, cancellationToken);
-        if (firstEvent.IsToolCall)
-        {
-            await StreamingResponseWriter.WriteHeartbeatAsync(Response, format, cancellationToken);
-        }
-
-        try
-        {
-            while (await enumerator.MoveNextAsync())
-            {
-                var evt = enumerator.Current;
-                await StreamingResponseWriter.WriteEventAsync(Response, evt, format, cancellationToken);
-                if (evt.IsToolCall)
-                {
-                    await StreamingResponseWriter.WriteHeartbeatAsync(Response, format, cancellationToken);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            await StreamingResponseWriter.WriteErrorAsync(Response, ex.Message, ErrorCodes.StreamingFailed, format, CancellationToken.None);
-        }
-        finally
-        {
-            await enumerator.DisposeAsync();
-        }
-
-        await StreamingResponseWriter.WriteDoneAsync(Response, format, CancellationToken.None);
+        await StreamingResponseWriter.WriteFullStreamAsync(Response, stream, format, cancellationToken);
     }
 
     /// <summary>

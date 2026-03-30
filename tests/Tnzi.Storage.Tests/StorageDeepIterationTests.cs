@@ -1,3 +1,6 @@
+using Mapster;
+using MapsterMapper;
+using Tnzi.Mapster;
 
 namespace Tnzi.Storage.Tests;
 
@@ -22,6 +25,11 @@ public class StorageDeepIterationTests
         _mockShareRepository = new Mock<IRepository<Entities.FileShare, Guid>>();
         _mockStorage = new Mock<IFileStorage>();
         _mockServiceProvider = new Mock<IServiceProvider>();
+
+        // Setup Mapster for MapTo calls
+        var config = new TypeAdapterConfig();
+        var mapper = new Mapper(config);
+        MapperExtensions.SetMapper(mapper);
 
         // ApplicationService.Logger 需要 ILoggerFactory
         var loggerFactory = new Mock<ILoggerFactory>();
@@ -550,8 +558,9 @@ public class StorageDeepIterationTests
         // Assert
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
-        Assert.NotNull(result.Data.Tags);
-        var tagsList = result.Data.GetTagsList();
+        // Verify entity state was updated
+        Assert.NotNull(fileRecord.Tags);
+        var tagsList = fileRecord.GetTagsList();
         Assert.Equal(3, tagsList.Count);
         Assert.Contains("photo", tagsList);
         Assert.Contains("vacation", tagsList);
@@ -583,7 +592,8 @@ public class StorageDeepIterationTests
 
         // Assert
         Assert.True(result.Succeeded);
-        var tagsList = result.Data!.GetTagsList();
+        // Verify entity state was updated
+        var tagsList = fileRecord.GetTagsList();
         Assert.Single(tagsList);
         Assert.Equal("new-tag", tagsList[0]);
     }
@@ -611,8 +621,9 @@ public class StorageDeepIterationTests
 
         // Assert
         Assert.True(result.Succeeded);
-        Assert.Null(result.Data!.Tags);
-        Assert.Empty(result.Data.GetTagsList());
+        // Verify entity state was cleared
+        Assert.Null(fileRecord.Tags);
+        Assert.Empty(fileRecord.GetTagsList());
     }
 
     [Fact]
@@ -651,8 +662,8 @@ public class StorageDeepIterationTests
 
         // Assert
         Assert.True(result.Succeeded);
-        // SetTagsList 通过 Distinct() 去重（大小写敏感），只保留唯一值
-        var tagsList = result.Data!.GetTagsList();
+        // Verify entity state — SetTagsList 通过 Distinct() 去重（大小写敏感），只保留唯一值
+        var tagsList = fileRecord.GetTagsList();
         // "photo" 和 "Photo" 是不同的（Distinct 是大小写敏感的）
         // 但 "photo" 有两个，只保留一个
         Assert.True(tagsList.Count <= tags.Count);

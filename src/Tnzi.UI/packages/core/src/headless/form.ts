@@ -9,6 +9,23 @@ import { deepEqual } from '../utils/deep-equal';
 import type { z } from 'zod';
 
 // ============================================
+// Helpers
+// ============================================
+
+/**
+ * Deep clone with structuredClone, falling back to JSON round-trip
+ * for values that structuredClone cannot handle (e.g., File, Blob, Symbol).
+ */
+function safeClone<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    console.warn('[FormController] structuredClone failed, falling back to JSON round-trip'); // TODO: Replace with logger injection
+    return JSON.parse(JSON.stringify(value));
+  }
+}
+
+// ============================================
 // Types
 // ============================================
 
@@ -62,10 +79,10 @@ export class FormController<T extends Record<string, unknown>> {
   private readonly _onSubmit?: (values: T) => Promise<void> | void;
 
   constructor(options: FormOptions<T>) {
-    this._initialValues = structuredClone(options.initialValues);
+    this._initialValues = safeClone(options.initialValues);
     this._schema = options.schema;
     this._onSubmit = options.onSubmit;
-    this.values = structuredClone(options.initialValues);
+    this.values = safeClone(options.initialValues);
     this.errors = [];
     this.isSubmitting = false;
     this.isSubmitted = false;
@@ -196,7 +213,7 @@ export class FormController<T extends Record<string, unknown>> {
 
   /** Reset to initial values */
   reset(): void {
-    this.values = structuredClone(toRaw(this._initialValues));
+    this.values = safeClone(toRaw(this._initialValues));
     this.errors = [];
     this.isSubmitting = false;
     this.isSubmitted = false;

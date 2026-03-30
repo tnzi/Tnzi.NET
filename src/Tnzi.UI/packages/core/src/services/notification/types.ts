@@ -3,107 +3,104 @@
  * Aligned with Tnzi.NET backend Notification module
  */
 
-import type { AuditedEntity, FullAuditedEntity } from '../../types/entities';
 import type { SortedPagedQueryDto } from '../../types/pagination';
 import {
   NotificationType,
   NotificationStatus,
   NotificationPriority,
-  RecipientType,
+  TrendInterval,
 } from './metadata';
 
 export {
   NotificationType,
   NotificationStatus,
   NotificationPriority,
-  RecipientType,
+  TrendInterval,
 };
 
 // ============================================
-// Message Types
+// Admin - Notification Types
 // ============================================
 
 /**
- * Message DTO
+ * Recipient input (for creating notifications)
+ * Backend: RecipientInput
  */
-export interface MessageDto extends AuditedEntity<string> {
-  type: NotificationType;
-  subject: string;
-  content: string;
-  isHtml: boolean;
-  category?: string | null;
-  priority: NotificationPriority;
-  status: NotificationStatus;
-  senderId?: string | null;
-  senderName?: string | null;
-  templateId?: string | null;
-  templateName?: string | null;
-  layoutId?: string | null;
-  layoutName?: string | null;
-  maxRetryCount: number;
-  retryCount: number;
-  lastError?: string | null;
-  scheduledAt?: Date | string | null;
-  sentAt?: Date | string | null;
-  recipientCount: number;
-  attachments: FileInfoDto[];
-  recipients: MessageRecipientDto[];
+export interface RecipientInput {
+  address: string;
+  name?: string | null;
+  userId?: string | null;
 }
 
 /**
- * Message recipient DTO
+ * Recipient output (for querying notifications)
+ * Backend: RecipientOutput
  */
-export interface MessageRecipientDto extends FullAuditedEntity<string> {
-  messageId: string;
-  recipientType: RecipientType;
-  recipientId?: string | null;
-  recipientName?: string | null;
-  recipientEmail?: string | null;
-  recipientPhone?: string | null;
+export interface RecipientOutput {
+  id: string;
+  address: string;
+  name?: string | null;
   status: NotificationStatus;
-  sentAt?: Date | string | null;
-  readAt?: Date | string | null;
-  errorMessage?: string | null;
+  sentTime?: string | null;
+  failureReason?: string | null;
+  externalMessageId?: string | null;
+  userId?: string | null;
+  isRead: boolean;
+  readTime?: string | null;
 }
 
 /**
  * File info for attachments
+ * Backend: Tnzi.Storage.FileInfoDto
  */
 export interface FileInfoDto {
-  id: string;
-  name: string;
-  url: string;
-  size: number;
-  contentType: string;
+  fileId?: string | null;
+  fileName: string;
+  url?: string | null;
+  size?: number;
+  contentType?: string | null;
 }
 
-// ============================================
-// Request Types
-// ============================================
-
 /**
- * Recipient info for create message
+ * Notification info (query result)
+ * Backend: NotificationInfo
  */
-export interface RecipientInfoDto {
-  type: RecipientType;
-  id?: string;
-  email?: string;
-  phone?: string;
-  name?: string;
+export interface NotificationInfo {
+  id: string;
+  type: NotificationType;
+  subject: string;
+  content: string;
+  isHtml: boolean;
+  status: NotificationStatus;
+  sentTime?: string | null;
+  failureReason?: string | null;
+  retryCount: number;
+  maxRetryCount: number;
+  totalRecipientCount: number;
+  successCount: number;
+  failureCount: number;
+  creationTime: string;
+  priority: NotificationPriority;
+  senderId?: string | null;
+  category: string;
+  templateName?: string | null;
+  scheduledTime?: string | null;
+  recipients: RecipientOutput[];
+  attachments: FileInfoDto[];
 }
 
 /**
  * Create notification request
+ * Backend: CreateNotificationRequest
  */
-export interface CreateNotificationDto {
+export interface CreateNotificationRequest {
   type: NotificationType;
   subject: string;
   content: string;
   isHtml?: boolean;
-  recipients: RecipientInfoDto[];
-  attachments?: string[];
+  recipients: RecipientInput[];
+  attachments?: FileInfoDto[];
   sendImmediately?: boolean;
-  scheduledAt?: Date | string;
   maxRetryCount?: number;
   templateName?: string;
   layoutName?: string;
@@ -111,123 +108,161 @@ export interface CreateNotificationDto {
   category?: string;
   priority?: NotificationPriority;
   senderId?: string;
+  scheduledTime?: string;
 }
 
 /**
- * Update notification request (only for pending messages)
+ * Query notification request (admin)
+ * Backend: QueryNotificationRequest extends PagedQueryDto
  */
-export interface UpdateNotificationDto {
-  subject?: string;
-  content?: string;
-  isHtml?: boolean;
-  scheduledAt?: Date | string;
-  priority?: NotificationPriority;
-  category?: string;
-}
-
-/**
- * Message list query parameters
- */
-export interface MessageListQueryDto extends SortedPagedQueryDto {
+export interface QueryNotificationRequest extends SortedPagedQueryDto {
   type?: NotificationType;
   status?: NotificationStatus;
-  priority?: NotificationPriority;
-  category?: string;
-  senderId?: string;
-  startDate?: Date | string;
-  endDate?: Date | string;
+  startTime?: string;
+  endTime?: string;
   keyword?: string;
+  category?: string;
+  priority?: NotificationPriority;
+  senderId?: string;
 }
 
-// ============================================
-// User Notification Types
-// ============================================
-
 /**
- * User notification (inbox)
+ * Notification preview result
+ * Backend: NotificationPreviewDto
  */
-export interface UserNotificationDto extends FullAuditedEntity<string> {
-  messageId: string;
-  userId: string;
+export interface NotificationPreviewDto {
   subject: string;
   content: string;
   isHtml: boolean;
-  isRead: boolean;
-  readAt?: Date | string | null;
-  isArchived: boolean;
-  archivedAt?: Date | string | null;
-  senderName?: string | null;
-  category?: string | null;
-  priority: NotificationPriority;
-  attachments: FileInfoDto[];
+  category: string;
+  recipientCount: number;
+  templateName?: string | null;
 }
 
 /**
- * User notification list query
+ * Delivery report
+ * Backend: DeliveryReportDto
  */
-export interface UserNotificationQueryDto extends SortedPagedQueryDto {
-  isRead?: boolean;
-  isArchived?: boolean;
-  category?: string;
-  priority?: NotificationPriority;
-  startDate?: Date | string;
-  endDate?: Date | string;
-}
-
-/**
- * Mark as read request
- */
-export interface MarkAsReadDto {
-  notificationIds: string[];
-}
-
-/**
- * Notification preferences
- */
-export interface NotificationPreferencesDto {
-  userId: string;
-  emailEnabled: boolean;
-  smsEnabled: boolean;
-  pushEnabled: boolean;
-  inAppEnabled: boolean;
-  emailDigest: boolean;
-  digestFrequency: 'daily' | 'weekly' | 'none';
-  quietHoursStart?: string;
-  quietHoursEnd?: string;
-  categoryPreferences: Record<string, NotificationChannelPreference>;
-}
-
-/**
- * Channel preference per category
- */
-export interface NotificationChannelPreference {
-  email: boolean;
-  sms: boolean;
-  push: boolean;
-  inApp: boolean;
+export interface DeliveryReportDto {
+  messageId: string;
+  subject: string;
+  type: NotificationType;
+  totalRecipients: number;
+  sentCount: number;
+  failedCount: number;
+  pendingCount: number;
+  readCount: number;
+  successRate: number;
+  recipients: RecipientOutput[];
 }
 
 // ============================================
-// Statistics Types
+// Admin - Statistics Types
 // ============================================
 
 /**
  * Notification statistics
+ * Backend: NotificationStatisticsDto
  */
 export interface NotificationStatisticsDto {
-  totalSent: number;
-  totalPending: number;
-  totalFailed: number;
-  byType: Record<NotificationType, TypeStatistics>;
-  byStatus: Record<NotificationStatus, number>;
-  byPriority: Record<NotificationPriority, number>;
+  totalNotifications: number;
+  sentCount: number;
+  sendingCount: number;
+  failedCount: number;
+  pendingCount: number;
+  cancelledCount: number;
+  successRate: number;
 }
 
 /**
- * Statistics by type
+ * Channel statistics
+ * Backend: ChannelStatisticsDto
  */
-export interface TypeStatistics {
-  sent: number;
-  failed: number;
-  pending: number;
+export interface ChannelStatisticsDto {
+  channel: NotificationType;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  successRate: number;
+}
+
+/**
+ * Status statistics
+ * Backend: StatusStatisticsDto
+ */
+export interface StatusStatisticsDto {
+  status: NotificationStatus;
+  count: number;
+  percentage: number;
+}
+
+/**
+ * Trend data point
+ * Backend: TrendDataPoint
+ */
+export interface TrendDataPoint {
+  label: string;
+  startTime: string;
+  totalCount: number;
+  sentCount: number;
+  failedCount: number;
+}
+
+/**
+ * Notification trend
+ * Backend: NotificationTrendDto
+ */
+export interface NotificationTrendDto {
+  interval: TrendInterval;
+  startDate: string;
+  endDate: string;
+  dataPoints: TrendDataPoint[];
+}
+
+// ============================================
+// User Notification Types (Inbox)
+// ============================================
+
+/**
+ * User notification inbox item
+ * Backend: UserNotificationItem
+ */
+export interface UserNotificationItem {
+  id: string;
+  type: NotificationType;
+  subject: string;
+  category: string;
+  priority: NotificationPriority;
+  isRead: boolean;
+  readTime?: string | null;
+  creationTime: string;
+}
+
+/**
+ * User notification detail (includes content)
+ * Backend: UserNotificationDetail extends UserNotificationItem
+ */
+export interface UserNotificationDetail extends UserNotificationItem {
+  content: string;
+  isHtml: boolean;
+}
+
+/**
+ * Query user notification request
+ * Backend: QueryUserNotificationRequest extends PagedQueryDto
+ */
+export interface QueryUserNotificationRequest extends SortedPagedQueryDto {
+  type?: NotificationType;
+  isRead?: boolean;
+  category?: string;
+  priority?: NotificationPriority;
+}
+
+/**
+ * Unread count
+ * Backend: UnreadCountDto
+ */
+export interface UnreadCountDto {
+  totalUnread: number;
+  unreadByCategory: Record<string, number>;
 }

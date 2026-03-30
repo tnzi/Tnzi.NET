@@ -130,12 +130,11 @@ public class SynthesizeNodeTests
                 It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(mockFactory.Object);
-        var sp = services.BuildServiceProvider();
+        var nodeCtxMock = new Mock<IWorkflowNodeServiceContext>();
+        nodeCtxMock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
+        nodeCtxMock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
 
-        var node = new SynthesizeNode(sp, Mock.Of<ILogger<SynthesizeNode>>());
+        var node = new SynthesizeNode(nodeCtxMock.Object, Mock.Of<ILogger<SynthesizeNode>>());
         return (node, mockFactory);
     }
 

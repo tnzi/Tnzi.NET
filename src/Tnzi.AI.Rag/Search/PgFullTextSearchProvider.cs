@@ -9,8 +9,8 @@ namespace Tnzi.AI.Rag.Search;
 /// 进行高效的关键词匹配。不需要额外的 schema 变更（tsvector 在查询时动态计算）。
 /// </para>
 /// <para>
-/// 生产环境可考虑在 <c>RAG_DocumentChunk.Content</c> 列上创建 GIN 索引以提升性能：
-/// <c>CREATE INDEX idx_chunk_content_fts ON "RAG_DocumentChunk" USING GIN (to_tsvector('english', "Content"));</c>
+/// 生产环境可考虑在 DocumentChunk.Content 列上创建 GIN 索引以提升性能：
+/// <c>CREATE INDEX idx_chunk_content_fts ON "{prefix}_DocumentChunk" USING GIN (to_tsvector('english', "Content"));</c>
 /// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "PostgreSQL full-text search is in preview")]
@@ -18,16 +18,20 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
 {
     private readonly ILogger<PgFullTextSearchProvider> _logger;
     private readonly string _connectionString;
+    private readonly string _chunkTable;
+    private readonly string _knowledgeBaseTable;
 
-    private const string ChunkTable = "RAG_DocumentChunk";
-    private const string KnowledgeBaseTable = "RAG_KnowledgeBase";
-
-    public PgFullTextSearchProvider(IConfiguration configuration, ILogger<PgFullTextSearchProvider> logger)
+    public PgFullTextSearchProvider(
+        IConfiguration configuration, IOptions<AIRagOptions> options, ILogger<PgFullTextSearchProvider> logger)
     {
         Check.NotNull(configuration);
         _logger = Check.NotNull(logger);
         _connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Connection string 'Default' not found for PgFullTextSearchProvider");
+
+        var prefix = Check.NotNull(options).Value.TableNamePrefix;
+        _chunkTable = $"{prefix}_DocumentChunk";
+        _knowledgeBaseTable = $"{prefix}_KnowledgeBase";
     }
 
     /// <inheritdoc />
@@ -49,7 +53,7 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
             ? $"""
               SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId",
                      ts_rank(to_tsvector('english', "Content"), plainto_tsquery('english', @query)) AS score
-              FROM "{ChunkTable}"
+              FROM "{_chunkTable}"
               WHERE "KnowledgeBaseId" = @kbId
                 AND to_tsvector('english', "Content") @@ plainto_tsquery('english', @query)
               ORDER BY score DESC
@@ -58,8 +62,8 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
             : $"""
               SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId",
                      ts_rank(to_tsvector('english', c."Content"), plainto_tsquery('english', @query)) AS score
-              FROM "{ChunkTable}" c
-              INNER JOIN "{KnowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"
+              FROM "{_chunkTable}" c
+              INNER JOIN "{_knowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"
               WHERE kb."IsEnabled" = true AND kb."IsDeleted" = false
                 AND to_tsvector('english', c."Content") @@ plainto_tsquery('english', @query)
               ORDER BY score DESC

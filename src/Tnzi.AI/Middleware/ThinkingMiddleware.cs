@@ -28,7 +28,7 @@ public class ThinkingMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (context.ShouldSkipMiddleware)
             return await next(context, cancellationToken);
 
         SetupThinkingContext(context);
@@ -47,7 +47,7 @@ public class ThinkingMiddleware : IAiMiddleware
         AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (context.ShouldSkipMiddleware)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;
@@ -98,11 +98,22 @@ public class ThinkingMiddleware : IAiMiddleware
             return;
         }
 
-        // 3. 构建 ThinkingOptions 并设置 AsyncLocal
+        // 3. 确定 BudgetTokens: 显式设置 > 自动分配 (80% of MaxTokens)
+        var budgetTokens = providerOptions.Thinking?.BudgetTokens;
+
+        if (budgetTokens == null && providerOptions.MaxTokens.HasValue && !isAlwaysOn)
+        {
+            // 自动分配: Anthropic 等模型需要 budget_tokens，auto = 80% of MaxTokens
+            budgetTokens = (int)(providerOptions.MaxTokens.Value * 0.8);
+            _logger.LogDebug("Auto-allocated thinking budget: {Budget} tokens (80% of MaxTokens {Max})",
+                budgetTokens, providerOptions.MaxTokens.Value);
+        }
+
+        // 4. 构建 ThinkingOptions 并设置 AsyncLocal
         var thinkingOptions = new ThinkingOptions
         {
             Effort = effort,
-            BudgetTokens = providerOptions.Thinking?.BudgetTokens
+            BudgetTokens = budgetTokens
         };
 
         ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext

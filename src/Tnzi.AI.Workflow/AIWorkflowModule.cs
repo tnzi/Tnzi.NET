@@ -27,6 +27,7 @@ public class AIWorkflowModule : TnziApplicationModule
         services.TryAddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();
 
         // 注册工作流引擎组件
+        services.AddScoped<IWorkflowNodeServiceContext, WorkflowNodeServiceContext>();
         services.AddScoped<WorkflowNodeExecutor>();
         services.AddScoped<WorkflowEngine>();
 

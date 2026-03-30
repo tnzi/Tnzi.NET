@@ -97,6 +97,7 @@
 </template>
 
 <script setup lang="ts">
+// TODO: Replace hardcoded strings with useI18n() translations
 import { ref } from 'vue'
 import {
   NForm,

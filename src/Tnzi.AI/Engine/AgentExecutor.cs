@@ -115,6 +115,23 @@ public class AgentExecutor
 
             // 检查是否有工具调用
             var toolCalls = ExtractToolCalls(response.Messages);
+
+            // When enabled, strip TextContent from assistant messages that contain tool calls.
+            // DeepSeek handles content + tool_calls poorly — sending both causes token
+            // fracturing (\n\n between every token) in the continuation.
+            if (_options.StripTextFromToolCallMessages && toolCalls.Count > 0)
+            {
+                for (var i = messages.Count - response.Messages.Count; i < messages.Count; i++)
+                {
+                    var msg = messages[i];
+                    if (msg.Role == ChatRole.Assistant && msg.Contents.OfType<FunctionCallContent>().Any())
+                    {
+                        var filtered = msg.Contents.Where(c => c is not TextContent).ToList();
+                        messages[i] = new ChatMessage(ChatRole.Assistant, [.. filtered]);
+                    }
+                }
+            }
+
             if (toolCalls.Count == 0)
             {
                 // 无工具调用，执行结束
@@ -303,7 +320,14 @@ public class AgentExecutor
             }
 
             // 添加助手消息到历史
-            var assistantMessage = new ChatMessage(ChatRole.Assistant, [.. assistantContents]);
+            // When enabled, exclude TextContent from the assistant message that has tool calls.
+            // DeepSeek handles content + tool_calls poorly — sending both causes token
+            // fracturing (\n\n between every token) in the continuation. The text was
+            // already streamed to the client, so omitting it from the history is safe.
+            var historyContents = _options.StripTextFromToolCallMessages && toolCallContents.Count > 0
+                ? assistantContents.Where(c => c is not TextContent).ToList()
+                : assistantContents;
+            var assistantMessage = new ChatMessage(ChatRole.Assistant, [.. historyContents]);
             messages.Add(assistantMessage);
 
             // 检查是否有工具调用

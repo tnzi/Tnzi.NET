@@ -8,7 +8,7 @@ namespace Tnzi.AI.Infrastructure.Memory;
 /// 否则降级为纯关键词搜索（向后兼容）。
 /// 融合评分后叠加重要性权重 (Importance) 和时间衰减 (RecencyDecayRate)。
 /// </remarks>
-public class DatabaseMemoryStore : IMemoryStore
+public partial class DatabaseMemoryStore : IMemoryStore
 {
     private readonly IRepository<MemoryEntry, Guid> _repository;
     private readonly IUnitOfWorkManager? _unitOfWorkManager;
@@ -31,6 +31,20 @@ public class DatabaseMemoryStore : IMemoryStore
         _unitOfWorkManager = unitOfWorkManager;
         _embeddingService = embeddingService;
         _memoryOptions = aiOptions?.Value.ContextProviders.Memory;
+
+        // 权重求和验证
+        var scoring = _memoryOptions?.Scoring;
+        if (scoring != null)
+        {
+            var weightSum = scoring.SemanticWeight + scoring.RecencyWeight + scoring.ImportanceBoostWeight;
+            if (Math.Abs(weightSum - 1.0) > 0.01)
+            {
+                _logger.LogWarning(
+                    "Memory scoring weights do not sum to 1.0 (actual: {WeightSum}). " +
+                    "Semantic={Semantic}, Recency={Recency}, ImportanceBoost={ImportanceBoost}",
+                    weightSum, scoring.SemanticWeight, scoring.RecencyWeight, scoring.ImportanceBoostWeight);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -225,6 +239,12 @@ public class DatabaseMemoryStore : IMemoryStore
         }
 
         // 关键词匹配 + 向量融合评分
+        // 缓存循环中的常量值，避免每次迭代重复访问
+        var now = DateTime.UtcNow;
+        var scoring = _memoryOptions?.Scoring;
+        var importanceWeight = _memoryOptions?.ImportanceWeight ?? 1.0;
+        var recencyDecayRate = _memoryOptions?.RecencyDecayRate ?? 0;
+
         var results = new List<MemorySearchResult>();
         foreach (var entry in entries)
         {
@@ -240,31 +260,58 @@ public class DatabaseMemoryStore : IMemoryStore
                 vectorScore = CosineSimilarity(queryVector, entry.EmbeddingVector);
             }
 
-            // 融合评分
+            // 可配置复合评分公式（CrewAI 风格）
             double finalScore;
-            if (queryVector != null && entry.EmbeddingVector != null)
+
+            if (scoring != null)
             {
-                // 混合模式：70% 向量 + 30% 关键词
-                finalScore = VectorWeight * vectorScore + KeywordWeight * keywordScore;
+                // 新配置模式：加权求和
+                var semanticScore = (queryVector != null && entry.EmbeddingVector != null)
+                    ? VectorWeight * vectorScore + KeywordWeight * keywordScore
+                    : keywordScore;
+
+                // 时间衰减分量
+                double recencyDecay = 1.0;
+                var lastAccess = entry.LastAccessedTime ?? entry.CreationTime;
+                var daysSince = (now - lastAccess).TotalDays;
+                if (scoring.RecencyHalfLifeDays is > 0)
+                {
+                    // 半衰期公式：exp(-ln2/halfLife * days)
+                    recencyDecay = Math.Exp(-Math.Log(2) / scoring.RecencyHalfLifeDays.Value * daysSince);
+                }
+                else if (recencyDecayRate > 0)
+                {
+                    // 向后兼容旧配置
+                    recencyDecay = Math.Exp(-recencyDecayRate * daysSince);
+                }
+                var importanceComponent = scoring.BaseScore + entry.Importance * importanceWeight;
+
+                finalScore = scoring.SemanticWeight * semanticScore
+                    + scoring.RecencyWeight * recencyDecay
+                    + scoring.ImportanceBoostWeight * importanceComponent;
             }
             else
             {
-                // 纯关键词模式
-                finalScore = keywordScore;
-            }
+                // 旧模式向后兼容：乘法叠加
+                if (queryVector != null && entry.EmbeddingVector != null)
+                {
+                    finalScore = VectorWeight * vectorScore + KeywordWeight * keywordScore;
+                }
+                else
+                {
+                    finalScore = keywordScore;
+                }
 
-            // 重要性权重: 0.5 + importance * importanceWeight (范围 0.5~1.5)
-            var importanceWeight = _memoryOptions?.ImportanceWeight ?? 1.0;
-            var importanceBoost = 0.5 + entry.Importance * importanceWeight;
-            finalScore *= importanceBoost;
+                var importanceBoost = 0.5 + entry.Importance * importanceWeight;
+                finalScore *= importanceBoost;
 
-            // 时间衰减
-            if (_memoryOptions?.RecencyDecayRate > 0)
-            {
-                var lastAccess = entry.LastAccessedTime ?? entry.CreationTime;
-                var daysSince = (DateTime.UtcNow - lastAccess).TotalDays;
-                var decay = Math.Exp(-_memoryOptions.RecencyDecayRate * daysSince);
-                finalScore *= decay;
+                if (recencyDecayRate > 0)
+                {
+                    var lastAccess = entry.LastAccessedTime ?? entry.CreationTime;
+                    var daysSince = (now - lastAccess).TotalDays;
+                    var decay = Math.Exp(-recencyDecayRate * daysSince);
+                    finalScore *= decay;
+                }
             }
 
             if (finalScore > 0)
@@ -556,5 +603,52 @@ public class DatabaseMemoryStore : IMemoryStore
         }
 
         return System.Numerics.Tensors.TensorPrimitives.CosineSimilarity(a, b);
+    }
+
+    // --- 静态辅助方法：去重 / 清洗 / 裁剪 ---
+
+    [GeneratedRegex(@"<uploaded_files>[\s\S]*?</uploaded_files>", RegexOptions.IgnoreCase)]
+    private static partial Regex UploadBlockRegex();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceCollapseRegex();
+
+    /// <summary>
+    /// 正规化内容用于去重比较 — 折叠空白字符
+    /// </summary>
+    public static string NormalizeForDedup(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return "";
+        return WhitespaceCollapseRegex().Replace(content.Trim(), " ");
+    }
+
+    /// <summary>
+    /// 清除 &lt;uploaded_files&gt; 块（避免将临时文件元数据持久化到记忆中）
+    /// </summary>
+    public static string ScrubUploadMentions(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return content;
+        return UploadBlockRegex().Replace(content, "").Trim();
+    }
+
+    /// <summary>
+    /// 判断两段内容在空白正规化后是否重复
+    /// </summary>
+    public static bool IsDuplicate(string existing, string incoming)
+        => string.Equals(NormalizeForDedup(existing), NormalizeForDedup(incoming), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 按置信度降序排序，裁剪低于阈值或超过 MaxFacts 的条目
+    /// </summary>
+    public static List<(string Content, double Confidence)> PruneByConfidence(
+        List<(string Content, double Confidence)> entries,
+        int maxFacts,
+        double confidenceThreshold)
+    {
+        return entries
+            .Where(e => e.Confidence >= confidenceThreshold)
+            .OrderByDescending(e => e.Confidence)
+            .Take(maxFacts)
+            .ToList();
     }
 }

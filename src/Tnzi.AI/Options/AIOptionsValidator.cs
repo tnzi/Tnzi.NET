@@ -90,6 +90,27 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             }
         }
 
+        // Guardrails options validation
+        if (options.Guardrails is { Enabled: true })
+        {
+            if (options.Guardrails.StreamingOverlapSize <= 0)
+                errors.Add("Guardrails StreamingOverlapSize must be greater than 0");
+        }
+
+        // Retry options validation
+        if (options.Retry is { Enabled: true })
+        {
+            if (options.Retry.MaxRetries < 0 || options.Retry.MaxRetries > 10)
+                errors.Add("Retry MaxRetries must be between 0 and 10");
+        }
+
+        // History reduction validation
+        if (options.History?.Reduction is { Mode: HistoryReductionMode.Summarize })
+        {
+            if (options.History.Reduction.Summarize.MaxSummaryTokens <= 0)
+                errors.Add("History Summarize MaxSummaryTokens must be greater than 0");
+        }
+
         // 验证每个启用的提供商
         foreach (var (providerName, providerOptions) in options.Providers)
         {

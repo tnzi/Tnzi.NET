@@ -488,10 +488,10 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
             Metadata = l.Metadata
         }).ToList();
 
-        var json = System.Text.Json.JsonSerializer.Serialize(entries, new System.Text.Json.JsonSerializerOptions
+        var json = JsonSerializer.Serialize(entries, new JsonSerializerOptions
         {
             WriteIndented = true,
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
 
         LogInformation("Exported {Count} layouts (module: {Module}, category: {Category})", entries.Count, module ?? "all", category ?? "all");
@@ -505,13 +505,13 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
         List<LayoutExportEntry>? entries;
         try
         {
-            entries = System.Text.Json.JsonSerializer.Deserialize<List<LayoutExportEntry>>(json, new System.Text.Json.JsonSerializerOptions
+            entries = JsonSerializer.Deserialize<List<LayoutExportEntry>>(json, new JsonSerializerOptions
             {
-                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 PropertyNameCaseInsensitive = true
             });
         }
-        catch (System.Text.Json.JsonException ex)
+        catch (JsonException ex)
         {
             return Fail<LayoutImportResultDto>($"Invalid JSON format: {ex.Message}", 400, ErrorCodes.VALIDATION_ERROR);
         }

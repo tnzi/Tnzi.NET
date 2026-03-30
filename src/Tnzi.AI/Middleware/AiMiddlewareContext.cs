@@ -40,4 +40,9 @@ public class AiMiddlewareContext
 
     /// <summary>服务提供者</summary>
     public required IServiceProvider ServiceProvider { get; init; }
+
+    /// <summary>
+    /// 当前执行模式是否应跳过内置中间件处理（如 ExternalCli 模式委托给外部进程，无需本地 thinking/caching/context/history）
+    /// </summary>
+    public bool ShouldSkipMiddleware => Agent.ExecutionMode == AgentExecutionMode.ExternalCli;
 }

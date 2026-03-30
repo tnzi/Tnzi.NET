@@ -50,6 +50,9 @@ public class StorageModule : TnziApplicationModule
         // 注册文件存储服务
         services.AddScoped<IFileStorageService, FileStorageService>();
 
+        // 注册文件目录服务
+        services.AddScoped<IFileFolderService, FileFolderService>();
+
         // 注册拆分后的专职服务
         services.AddScoped<IFileReferenceService, FileReferenceService>();
         services.AddScoped<IFileShareService, FileShareService>();

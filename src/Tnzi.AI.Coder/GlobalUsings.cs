@@ -36,6 +36,7 @@ global using Tnzi.AI.Coder.ProcessManagement;
 global using Tnzi.AI.Coder.Project;
 global using Tnzi.AI.Coder.Repl;
 global using Tnzi.AI.Coder.Shell;
+global using Tnzi.AI.Coder.TaskTracker;
 global using Tnzi.AI.Coder.Web;
 global using Tnzi.AI.Coder.WebSearch;
 global using Tnzi.Security.Claims;

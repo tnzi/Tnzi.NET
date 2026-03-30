@@ -41,11 +41,10 @@ public static class AgentCapabilityMatcher
         if (requiredDomains == null || requiredDomains.Count == 0)
             return true;
 
-        var agentDomains = ParseJsonArray(agent.Domains);
-        if (agentDomains.Count == 0)
+        if (agent.Domains == null || agent.Domains.Count == 0)
             return false;
 
-        return requiredDomains.Any(d => agentDomains.Contains(d, StringComparer.OrdinalIgnoreCase));
+        return requiredDomains.Any(d => agent.Domains.Contains(d, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -56,29 +55,10 @@ public static class AgentCapabilityMatcher
         if (requiredRoles == null || requiredRoles.Count == 0)
             return true;
 
-        var agentRoles = ParseJsonArray(agent.Roles);
-        if (agentRoles.Count == 0)
+        if (agent.Roles == null || agent.Roles.Count == 0)
             return false;
 
-        return requiredRoles.Any(r => agentRoles.Contains(r, StringComparer.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// 解析 JSON 数组字符串为 List
-    /// </summary>
-    private static List<string> ParseJsonArray(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<string>>(json, TnziJsonDefaults.Options) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
+        return requiredRoles.Any(r => agent.Roles.Contains(r, StringComparer.OrdinalIgnoreCase));
     }
 }
 

@@ -55,4 +55,28 @@ public class AgentStreamChunk
     /// Tool call details (name + duration, sent after each tool execution batch)
     /// </summary>
     public List<ToolCallDetail>? ToolCalls { get; set; }
+
+    /// <summary>
+    /// 流式输出粒度模式（标记此 chunk 属于哪种模式）
+    /// </summary>
+    public StreamMode Mode { get; set; } = StreamMode.Messages;
+
+    /// <summary>
+    /// 事件类型（Steps/Debug 模式下的具体事件标识）
+    /// </summary>
+    public string? EventType { get; set; }
+
+    /// <summary>
+    /// 事件附加数据
+    /// </summary>
+    public Dictionary<string, object>? EventData { get; set; }
+
+    /// <summary>后续建议问题（仅在最终 chunk 中包含，Mode=Suggestion 时）</summary>
+    public List<string>? Suggestions { get; set; }
+
+    /// <summary>Todo 列表快照（Plan Mode 中间状态更新）</summary>
+    public List<TodoItemDto>? Todos { get; set; }
+
+    /// <summary>产出的文件产物（最终 chunk 中包含）</summary>
+    public List<AgentArtifactDto>? Artifacts { get; set; }
 }

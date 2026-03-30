@@ -151,8 +151,12 @@ export function getBusinessTypeLabel(type: BusinessType): string {
 export enum RefundStatus {
   Pending = 0,
   Processing = 1,
-  Succeeded = 2,
-  Failed = 3,
+  Approved = 2,
+  Rejected = 3,
+  Refunding = 4,
+  Succeeded = 5,
+  Failed = 6,
+  Cancelled = 7,
 }
 
 /**
@@ -164,13 +168,229 @@ export function getRefundStatusLabel(status: RefundStatus): string {
       return 'Pending';
     case RefundStatus.Processing:
       return 'Processing';
+    case RefundStatus.Approved:
+      return 'Approved';
+    case RefundStatus.Rejected:
+      return 'Rejected';
+    case RefundStatus.Refunding:
+      return 'Refunding';
     case RefundStatus.Succeeded:
       return 'Succeeded';
     case RefundStatus.Failed:
       return 'Failed';
+    case RefundStatus.Cancelled:
+      return 'Cancelled';
     default:
       return 'Unknown';
   }
+}
+
+/**
+ * Subscription status
+ */
+export enum SubscriptionStatus {
+  Pending = 0,
+  Trial = 1,
+  Active = 2,
+  PendingRenewal = 3,
+  Paused = 4,
+  Cancelled = 5,
+  Expired = 6,
+}
+
+/**
+ * Get subscription status label
+ */
+export function getSubscriptionStatusLabel(status: SubscriptionStatus): string {
+  switch (status) {
+    case SubscriptionStatus.Pending:
+      return 'Pending';
+    case SubscriptionStatus.Trial:
+      return 'Trial';
+    case SubscriptionStatus.Active:
+      return 'Active';
+    case SubscriptionStatus.PendingRenewal:
+      return 'Pending Renewal';
+    case SubscriptionStatus.Paused:
+      return 'Paused';
+    case SubscriptionStatus.Cancelled:
+      return 'Cancelled';
+    case SubscriptionStatus.Expired:
+      return 'Expired';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Billing cycle type
+ */
+export enum BillingCycleType {
+  Day = 1,
+  Week = 2,
+  Month = 3,
+  Year = 4,
+  OneTime = 5,
+}
+
+/**
+ * Get billing cycle type label
+ */
+export function getBillingCycleTypeLabel(type: BillingCycleType): string {
+  switch (type) {
+    case BillingCycleType.Day:
+      return 'Daily';
+    case BillingCycleType.Week:
+      return 'Weekly';
+    case BillingCycleType.Month:
+      return 'Monthly';
+    case BillingCycleType.Year:
+      return 'Yearly';
+    case BillingCycleType.OneTime:
+      return 'One Time';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Invoice status
+ */
+export enum InvoiceStatus {
+  Draft = 0,
+  Pending = 1,
+  Sent = 2,
+  Paid = 3,
+  Overdue = 4,
+  Cancelled = 5,
+}
+
+/**
+ * Get invoice status label
+ */
+export function getInvoiceStatusLabel(status: InvoiceStatus): string {
+  switch (status) {
+    case InvoiceStatus.Draft:
+      return 'Draft';
+    case InvoiceStatus.Pending:
+      return 'Pending';
+    case InvoiceStatus.Sent:
+      return 'Sent';
+    case InvoiceStatus.Paid:
+      return 'Paid';
+    case InvoiceStatus.Overdue:
+      return 'Overdue';
+    case InvoiceStatus.Cancelled:
+      return 'Cancelled';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Invoice type
+ */
+export enum InvoiceType {
+  Standard = 1,
+  Vat = 2,
+  Receipt = 3,
+}
+
+/**
+ * Get invoice type label
+ */
+export function getInvoiceTypeLabel(type: InvoiceType): string {
+  switch (type) {
+    case InvoiceType.Standard:
+      return 'Standard';
+    case InvoiceType.Vat:
+      return 'VAT';
+    case InvoiceType.Receipt:
+      return 'Receipt';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Promotion type
+ */
+export enum PromotionType {
+  PercentageDiscount = 1,
+  FixedAmountDiscount = 2,
+  FirstSubscription = 3,
+  LimitedTime = 4,
+  ThresholdDiscount = 5,
+}
+
+/**
+ * Get promotion type label
+ */
+export function getPromotionTypeLabel(type: PromotionType): string {
+  switch (type) {
+    case PromotionType.PercentageDiscount:
+      return 'Percentage Discount';
+    case PromotionType.FixedAmountDiscount:
+      return 'Fixed Amount Discount';
+    case PromotionType.FirstSubscription:
+      return 'First Subscription';
+    case PromotionType.LimitedTime:
+      return 'Limited Time';
+    case PromotionType.ThresholdDiscount:
+      return 'Threshold Discount';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Discount type
+ */
+export enum DiscountType {
+  Percentage = 1,
+  Fixed = 2,
+}
+
+/**
+ * Get discount type label
+ */
+export function getDiscountTypeLabel(type: DiscountType): string {
+  switch (type) {
+    case DiscountType.Percentage:
+      return 'Percentage';
+    case DiscountType.Fixed:
+      return 'Fixed Amount';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Product type (for promotion scope)
+ */
+export enum ProductType {
+  Subscription = 1,
+  OneTime = 2,
+  Recharge = 3,
+  All = 99,
+}
+
+/**
+ * Apply scope (for promotions)
+ */
+export enum ApplyScope {
+  Global = 0,
+  Plan = 1,
+  Product = 2,
+}
+
+/**
+ * Trend granularity (for revenue trend queries)
+ */
+export enum TrendGranularity {
+  Day = 1,
+  Week = 2,
+  Month = 3,
 }
 
 /**

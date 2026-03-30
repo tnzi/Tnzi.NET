@@ -28,12 +28,14 @@ export function getAuditResultTypeLabel(type: AuditResultType): string {
 }
 
 /**
- * Entity change type
+ * Entity change type (maps to backend Tnzi.Audit.Entities.EntityState)
  */
 export enum EntityChangeType {
-  Created = 1,
-  Updated = 2,
+  Unchanged = 0,
+  Added = 1,
+  Modified = 2,
   Deleted = 3,
+  Detached = 4,
 }
 
 /**
@@ -41,12 +43,41 @@ export enum EntityChangeType {
  */
 export function getEntityChangeTypeLabel(type: EntityChangeType): string {
   switch (type) {
-    case EntityChangeType.Created:
-      return 'Created';
-    case EntityChangeType.Updated:
-      return 'Updated';
+    case EntityChangeType.Unchanged:
+      return 'Unchanged';
+    case EntityChangeType.Added:
+      return 'Added';
+    case EntityChangeType.Modified:
+      return 'Modified';
     case EntityChangeType.Deleted:
       return 'Deleted';
+    case EntityChangeType.Detached:
+      return 'Detached';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Audit trend grouping interval
+ */
+export enum AuditTrendGroupBy {
+  Daily = 0,
+  Weekly = 1,
+  Monthly = 2,
+}
+
+/**
+ * Get audit trend group-by label
+ */
+export function getAuditTrendGroupByLabel(groupBy: AuditTrendGroupBy): string {
+  switch (groupBy) {
+    case AuditTrendGroupBy.Daily:
+      return 'Daily';
+    case AuditTrendGroupBy.Weekly:
+      return 'Weekly';
+    case AuditTrendGroupBy.Monthly:
+      return 'Monthly';
     default:
       return 'Unknown';
   }

@@ -78,7 +78,7 @@ export function showConfirm(message: string, options?: DialogStateOptions): Prom
     state.type = options?.type ?? 'info';
     state.confirmText = options?.confirmText ?? 'OK';
     state.cancelText = options?.cancelText ?? 'Cancel';
-    state.resolve = (value: boolean) => resolve(value);
+    state.resolve = resolve as (value: boolean | string | null | void) => void;
     state.open = true;
   });
 }
@@ -96,7 +96,7 @@ export function showPrompt(message: string, options?: DialogStateOptions): Promi
     state.confirmText = options?.confirmText ?? 'OK';
     state.cancelText = options?.cancelText ?? 'Cancel';
     state.inputValue = '';
-    state.resolve = (value: string | null) => resolve(value);
+    state.resolve = resolve as (value: boolean | string | null | void) => void;
     state.open = true;
   });
 }

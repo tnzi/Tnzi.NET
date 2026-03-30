@@ -8,9 +8,11 @@ namespace Tnzi.AI.Guardrails;
 /// 基础防护层，使用关键词匹配检测明显的 Prompt 注入尝试。
 /// 对于高安全场景，建议配合 LLM-based 检测（自定义 IInputGuardrail 实现）。
 /// </remarks>
-public class PromptInjectionGuardrail : IInputGuardrail
+public class PromptInjectionGuardrail : IInputGuardrail, IGuardrailProvider
 {
     private readonly bool _enabled;
+
+    public string Name => nameof(PromptInjectionGuardrail);
 
     // 常见 Prompt 注入模式（不区分大小写匹配）
     private static readonly string[] InjectionPatterns =
@@ -57,4 +59,7 @@ public class PromptInjectionGuardrail : IInputGuardrail
 
         return Task.FromResult(GuardrailResult.Allowed());
     }
+
+    public Task<GuardrailDecision> EvaluateAsync(GuardrailRequest request, CancellationToken ct = default)
+        => IGuardrailProvider.BridgeValidateAsync(request, ValidateAsync, GuardrailReasonCodes.PromptInjectionDetected, "Prompt injection detected", ct);
 }

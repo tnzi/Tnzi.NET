@@ -7,12 +7,14 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
 {
     private readonly IRepository<Subscription, Guid> _subscriptionRepository;
     private readonly IRepository<SubscriptionPlan, Guid> _planRepository;
+    private readonly IRepository<SubscriptionChange, Guid> _changeRepository;
     private readonly IPaymentService _paymentService;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
 
     public SubscriptionService(
         IRepository<Subscription, Guid> subscriptionRepository,
         IRepository<SubscriptionPlan, Guid> planRepository,
+        IRepository<SubscriptionChange, Guid> changeRepository,
         IPaymentService paymentService,
         IPaymentProviderFactory paymentProviderFactory,
         IServiceProvider serviceProvider)
@@ -20,6 +22,7 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
     {
         _subscriptionRepository = Check.NotNull(subscriptionRepository);
         _planRepository = Check.NotNull(planRepository);
+        _changeRepository = Check.NotNull(changeRepository);
         _paymentService = Check.NotNull(paymentService);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
     }
@@ -451,6 +454,276 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
 
         Logger.LogInformation("Renewed {Count} subscriptions out of {Total} due", renewedCount, dueSubscriptions.Count);
         return Ok(renewedCount);
+    }
+
+    public async Task<Result<SubscriptionChangeDto>> ChangeSubscriptionPlanAsync(Guid subscriptionId, ChangeSubscriptionPlanDto input, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(input);
+
+        var subscription = await _subscriptionRepository
+            .Where(s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value))
+            .Include(s => s.Plan)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (subscription == null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionNotFound, 404);
+
+        if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.Trial)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionAlreadyCancelledOrExpired, 400);
+
+        if (subscription.PlanId == input.NewPlanId)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionSamePlan, 400);
+
+        var newPlan = await _planRepository.FirstOrDefaultAsync(p => p.Id == input.NewPlanId, cancellationToken);
+        if (newPlan == null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionNewPlanNotFound, 404);
+
+        if (!newPlan.IsActive)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionPlanNotActive, 400);
+
+        var currentPlan = subscription.Plan;
+        if (currentPlan == null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionPlanNotFound, 404);
+
+        if (!string.Equals(currentPlan.Currency, newPlan.Currency, StringComparison.OrdinalIgnoreCase))
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionCurrencyMismatch, 400);
+
+        // 检查是否有待生效的变更
+        var pendingChange = await _changeRepository.FirstOrDefaultAsync(
+            c => c.SubscriptionId == subscriptionId && c.Status == SubscriptionChangeStatus.Pending, cancellationToken);
+        if (pendingChange != null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionChangePending, 400);
+
+        // 计算按比例金额
+        var changeType = DetermineChangeType(currentPlan.Price, newPlan.Price);
+        var proratedAmount = CalculateProratedAmount(subscription, currentPlan, newPlan);
+
+        // 升级立即生效，降级周期结束生效
+        var isImmediate = changeType == SubscriptionChangeType.Upgrade
+            ? input.EffectiveImmediately
+            : false;
+        var effectiveDate = isImmediate
+            ? DateTime.UtcNow
+            : subscription.NextBillingTime ?? DateTime.UtcNow;
+
+        var change = new SubscriptionChange
+        {
+            SubscriptionId = subscriptionId,
+            FromPlanId = currentPlan.Id,
+            ToPlanId = newPlan.Id,
+            ChangeType = changeType,
+            ProratedAmount = proratedAmount,
+            EffectiveDate = effectiveDate,
+            Status = isImmediate ? SubscriptionChangeStatus.Applied : SubscriptionChangeStatus.Pending
+        };
+
+        await _changeRepository.InsertAsync(change, cancellationToken);
+
+        // 立即生效：更新订阅并创建补差支付
+        if (isImmediate)
+        {
+            await ApplyPlanChangeAsync(subscription, newPlan, cancellationToken);
+
+            if (proratedAmount > 0)
+            {
+                await _paymentService.CreatePaymentAsync(new CreatePaymentDto
+                {
+                    BusinessOrderNo = subscription.SubscriptionNo,
+                    BusinessType = BusinessType.Subscription,
+                    Amount = proratedAmount,
+                    Currency = newPlan.Currency,
+                    ChannelCode = subscription.ChannelCode,
+                    Description = $"Plan change proration: {currentPlan.PlanName} -> {newPlan.PlanName}"
+                }, cancellationToken);
+            }
+        }
+
+        // 发布事件
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new SubscriptionPlanChangedEvent
+            {
+                SubscriptionId = subscriptionId,
+                SubscriptionNo = subscription.SubscriptionNo,
+                UserId = subscription.UserId,
+                FromPlanId = currentPlan.Id,
+                ToPlanId = newPlan.Id,
+                ChangeType = changeType,
+                ProratedAmount = proratedAmount,
+                EffectiveDate = effectiveDate,
+                Immediate = isImmediate
+            });
+        }
+
+        Logger.LogInformation(
+            "Subscription plan change created. SubscriptionNo: {SubscriptionNo}, ChangeType: {ChangeType}, From: {FromPlan}, To: {ToPlan}, Immediate: {Immediate}",
+            subscription.SubscriptionNo, changeType, currentPlan.PlanName, newPlan.PlanName, isImmediate);
+
+        return Ok(BuildChangeDto(change, currentPlan, newPlan));
+    }
+
+    public async Task<Result<SubscriptionChangeDto>> GetPlanChangePreviewAsync(Guid subscriptionId, Guid newPlanId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
+    {
+        var subscription = await _subscriptionRepository
+            .Where(s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value))
+            .Include(s => s.Plan)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (subscription == null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionNotFound, 404);
+
+        if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.Trial)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionAlreadyCancelledOrExpired, 400);
+
+        if (subscription.PlanId == newPlanId)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionSamePlan, 400);
+
+        var newPlan = await _planRepository.FirstOrDefaultAsync(p => p.Id == newPlanId, cancellationToken);
+        if (newPlan == null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionNewPlanNotFound, 404);
+
+        if (!newPlan.IsActive)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionPlanNotActive, 400);
+
+        var currentPlan = subscription.Plan;
+        if (currentPlan == null)
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionPlanNotFound, 404);
+
+        if (!string.Equals(currentPlan.Currency, newPlan.Currency, StringComparison.OrdinalIgnoreCase))
+            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionCurrencyMismatch, 400);
+
+        var changeType = DetermineChangeType(currentPlan.Price, newPlan.Price);
+        var proratedAmount = CalculateProratedAmount(subscription, currentPlan, newPlan);
+        var isImmediate = changeType == SubscriptionChangeType.Upgrade;
+        var effectiveDate = isImmediate
+            ? DateTime.UtcNow
+            : subscription.NextBillingTime ?? DateTime.UtcNow;
+
+        var preview = new SubscriptionChangeDto
+        {
+            SubscriptionId = subscriptionId,
+            FromPlanId = currentPlan.Id,
+            FromPlanName = currentPlan.PlanName,
+            ToPlanId = newPlan.Id,
+            ToPlanName = newPlan.PlanName,
+            ChangeType = changeType,
+            ProratedAmount = proratedAmount,
+            EffectiveDate = effectiveDate,
+            Status = SubscriptionChangeStatus.Pending
+        };
+
+        return Ok(preview);
+    }
+
+    public async Task<Result> CancelPendingChangeAsync(Guid changeId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
+    {
+        var change = await _changeRepository
+            .Where(c => c.Id == changeId)
+            .Include(c => c.Subscription)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (change == null)
+            return Fail(ErrorCodes.SubscriptionChangeNotFound, 404);
+
+        if (ownerUserId.HasValue && change.Subscription?.UserId != ownerUserId.Value)
+            return Fail(ErrorCodes.SubscriptionChangeNotFound, 404);
+
+        if (change.Status != SubscriptionChangeStatus.Pending)
+            return Fail(ErrorCodes.SubscriptionChangeCannotCancel, 400);
+
+        change.Status = SubscriptionChangeStatus.Cancelled;
+        await _changeRepository.UpdateAsync(change, cancellationToken);
+
+        Logger.LogInformation("Pending subscription change cancelled. ChangeId: {ChangeId}", changeId);
+
+        return Ok();
+    }
+
+    /// <summary>
+    /// 应用计划变更到订阅
+    /// </summary>
+    private async Task ApplyPlanChangeAsync(Subscription subscription, SubscriptionPlan newPlan, CancellationToken cancellationToken)
+    {
+        subscription.PlanId = newPlan.Id;
+        subscription.Plan = newPlan;
+        subscription.CycleType = newPlan.CycleType;
+        subscription.CycleValue = newPlan.CycleValue;
+        subscription.OriginalPrice = newPlan.Price;
+        subscription.Currency = newPlan.Currency;
+        subscription.NextBillingTime = CalculateNextBillingTime(DateTime.UtcNow, newPlan.CycleType, newPlan.CycleValue);
+
+        await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+    }
+
+    /// <summary>
+    /// 判断变更类型
+    /// </summary>
+    private static SubscriptionChangeType DetermineChangeType(decimal currentPrice, decimal newPrice)
+    {
+        if (newPrice > currentPrice) return SubscriptionChangeType.Upgrade;
+        if (newPrice < currentPrice) return SubscriptionChangeType.Downgrade;
+        return SubscriptionChangeType.CrossGrade;
+    }
+
+    /// <summary>
+    /// 计算按比例金额：当前计划剩余天数的信用额度 vs 新计划剩余天数的费用
+    /// </summary>
+    private static decimal CalculateProratedAmount(Subscription subscription, SubscriptionPlan currentPlan, SubscriptionPlan newPlan)
+    {
+        var now = DateTime.UtcNow;
+        var periodEnd = subscription.NextBillingTime ?? now;
+
+        // 周期总天数
+        var periodStart = CalculatePeriodStart(periodEnd, currentPlan.CycleType, currentPlan.CycleValue);
+        var totalDays = (periodEnd - periodStart).TotalDays;
+        if (totalDays <= 0) return newPlan.Price;
+
+        // 剩余天数
+        var remainingDays = Math.Max(0, (periodEnd - now).TotalDays);
+
+        // 当前计划按天费率 × 剩余天数 = 信用额度
+        var dailyRateCurrent = currentPlan.Price / (decimal)totalDays;
+        var credit = dailyRateCurrent * (decimal)remainingDays;
+
+        // 新计划按天费率 × 剩余天数 = 新费用
+        var dailyRateNew = newPlan.Price / (decimal)totalDays;
+        var charge = dailyRateNew * (decimal)remainingDays;
+
+        // 差额：正数=需要补差价，负数=返还信用
+        return Math.Round(charge - credit, 2);
+    }
+
+    /// <summary>
+    /// 根据周期结束时间反推周期开始时间
+    /// </summary>
+    private static DateTime CalculatePeriodStart(DateTime periodEnd, BillingCycleType cycleType, int cycleValue)
+    {
+        return cycleType switch
+        {
+            BillingCycleType.Day => periodEnd.AddDays(-cycleValue),
+            BillingCycleType.Week => periodEnd.AddDays(-7 * cycleValue),
+            BillingCycleType.Month => periodEnd.AddMonths(-cycleValue),
+            BillingCycleType.Year => periodEnd.AddYears(-cycleValue),
+            _ => periodEnd.AddMonths(-1)
+        };
+    }
+
+    /// <summary>
+    /// 构建变更 DTO
+    /// </summary>
+    private static SubscriptionChangeDto BuildChangeDto(SubscriptionChange change, SubscriptionPlan fromPlan, SubscriptionPlan toPlan)
+    {
+        return new SubscriptionChangeDto
+        {
+            Id = change.Id,
+            SubscriptionId = change.SubscriptionId,
+            FromPlanId = change.FromPlanId,
+            FromPlanName = fromPlan.PlanName,
+            ToPlanId = change.ToPlanId,
+            ToPlanName = toPlan.PlanName,
+            ChangeType = change.ChangeType,
+            ProratedAmount = change.ProratedAmount,
+            EffectiveDate = change.EffectiveDate,
+            Status = change.Status,
+            CreationTime = change.CreationTime
+        };
     }
 
     /// <summary>

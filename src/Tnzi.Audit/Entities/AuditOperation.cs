@@ -113,6 +113,11 @@ public class AuditOperation : CreationAuditedEntity<Guid>
     public string? RequestParameters { get; set; }
 
     /// <summary>
+    /// 获取或设置 请求体（JSON格式，敏感字段已脱敏）
+    /// </summary>
+    public string? RequestBody { get; set; }
+
+    /// <summary>
     /// 获取或设置 响应结果（JSON格式，可选）
     /// </summary>
     public string? ResponseResult { get; set; }

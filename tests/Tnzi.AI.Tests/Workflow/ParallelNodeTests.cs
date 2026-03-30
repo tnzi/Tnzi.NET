@@ -6,7 +6,7 @@ public class ParallelNodeTests
     public async Task ExecuteAsync_MultipleWorkers_AllExecuteAndMerge()
     {
         // Arrange
-        var sp = BuildServiceProvider(new Dictionary<string, string>
+        var sp = BuildNodeServiceContext(new Dictionary<string, string>
         {
             ["w1"] = "Result from worker 1",
             ["w2"] = "Result from worker 2"
@@ -35,7 +35,7 @@ public class ParallelNodeTests
     [Fact]
     public async Task ExecuteAsync_NoWorkers_ReturnsFailure()
     {
-        var sp = BuildServiceProvider(new Dictionary<string, string>());
+        var sp = BuildNodeServiceContext(new Dictionary<string, string>());
         var node = new ParallelNode(sp, Mock.Of<ILogger<ParallelNode>>());
 
         var context = CreateContext("input", new Dictionary<string, string>());
@@ -49,7 +49,7 @@ public class ParallelNodeTests
     [Fact]
     public async Task ExecuteAsync_InvalidWorkersJson_ReturnsFailure()
     {
-        var sp = BuildServiceProvider(new Dictionary<string, string>());
+        var sp = BuildNodeServiceContext(new Dictionary<string, string>());
         var node = new ParallelNode(sp, Mock.Of<ILogger<ParallelNode>>());
 
         var context = CreateContext("input", new Dictionary<string, string>
@@ -98,9 +98,14 @@ public class ParallelNodeTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(mockFactory.Object);
-        var sp = services.BuildServiceProvider();
+        var builtSp = services.BuildServiceProvider();
 
-        var node = new ParallelNode(sp, Mock.Of<ILogger<ParallelNode>>());
+        var nodeCtxMock = new Mock<IWorkflowNodeServiceContext>();
+        nodeCtxMock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
+        nodeCtxMock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
+        nodeCtxMock.Setup(c => c.CreateScope()).Returns(() => builtSp.CreateScope());
+
+        var node = new ParallelNode(nodeCtxMock.Object, Mock.Of<ILogger<ParallelNode>>());
 
         var context = CreateContext("input", new Dictionary<string, string>
         {
@@ -118,7 +123,7 @@ public class ParallelNodeTests
     [Fact]
     public async Task ExecuteAsync_AggregatesTokenUsage()
     {
-        var sp = BuildServiceProvider(new Dictionary<string, string>
+        var sp = BuildNodeServiceContext(new Dictionary<string, string>
         {
             ["w1"] = "result1",
             ["w2"] = "result2"
@@ -139,7 +144,7 @@ public class ParallelNodeTests
         result.Usage!.OutputTokens.ShouldBe(40);  // 20 * 2 workers
     }
 
-    private static IServiceProvider BuildServiceProvider(
+    private static IWorkflowNodeServiceContext BuildNodeServiceContext(
         Dictionary<string, string> workerResponses,
         int inputTokens = 0,
         int outputTokens = 0)
@@ -177,10 +182,17 @@ public class ParallelNodeTests
                 return new AgentExecutor(mockClient.Object, new AgentExecutorOptions { Name = name ?? "worker" });
             });
 
+        // 构建 IServiceProvider 用于 CreateScope（ParallelNode 每个 worker 需要独立 scope）
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(mockFactory.Object);
-        return services.BuildServiceProvider();
+        var sp = services.BuildServiceProvider();
+
+        var mock = new Mock<IWorkflowNodeServiceContext>();
+        mock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
+        mock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
+        mock.Setup(c => c.CreateScope()).Returns(() => sp.CreateScope());
+        return mock.Object;
     }
 
     private static WorkflowNodeContext CreateContext(string initialInput, Dictionary<string, string> config)

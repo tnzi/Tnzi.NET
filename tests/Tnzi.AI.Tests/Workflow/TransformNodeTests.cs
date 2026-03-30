@@ -7,7 +7,6 @@ public class TransformNodeTests
     public TransformNodeTests()
     {
         _node = new TransformNode(
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<TransformNode>>());
     }
 

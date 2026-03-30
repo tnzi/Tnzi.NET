@@ -9,14 +9,14 @@ namespace Tnzi.AI.Engine.Workflow.Nodes;
 /// </remarks>
 public class SynthesizeNode : IWorkflowNode
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowNodeServiceContext _nodeContext;
     private readonly ILogger<SynthesizeNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Synthesize;
 
-    public SynthesizeNode(IServiceProvider serviceProvider, ILogger<SynthesizeNode> logger)
+    public SynthesizeNode(IWorkflowNodeServiceContext nodeContext, ILogger<SynthesizeNode> logger)
     {
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _nodeContext = Check.NotNull(nodeContext);
         _logger = Check.NotNull(logger);
     }
 
@@ -27,20 +27,17 @@ public class SynthesizeNode : IWorkflowNode
         var config = step.Configuration ?? new Dictionary<string, string>();
 
         // 收集所有上游输出
-        var upstreamText = CollectAllUpstreamOutputs(context);
+        var upstreamText = WorkflowNodeHelper.CollectAllUpstreamOutputs(context);
 
         // 构建综合提示
         var synthesizePrompt = BuildSynthesizePrompt(step.Instructions, upstreamText);
         synthesizePrompt = state.ResolveTemplate(synthesizePrompt);
 
-        // 创建作用域以避免使用根 ServiceProvider 解析 Scoped 服务
-        using var scope = _serviceProvider.CreateScope();
-
         var synthAgentId = WorkflowNodeHelper.ParseAgentIdFromConfig(config, "synthesizerAgentId");
 
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: synthAgentId,
-            scope: scope,
+            serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
             instructions: step.Instructions
@@ -64,25 +61,6 @@ public class SynthesizeNode : IWorkflowNode
             Usage = response.Usage,
             IsSuccess = true
         };
-    }
-
-    /// <summary>
-    /// 收集所有上游输出
-    /// </summary>
-    private static string CollectAllUpstreamOutputs(WorkflowNodeContext context)
-    {
-        if (context.DependencyOutputs.Count == 0)
-            return context.State.InitialInput;
-
-        var sb = new StringBuilder();
-        foreach (var (depId, output) in context.DependencyOutputs)
-        {
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"[{depId}]");
-            sb.AppendLine(output.Text);
-        }
-
-        return sb.ToString().TrimEnd();
     }
 
     /// <summary>

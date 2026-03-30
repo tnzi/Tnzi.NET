@@ -11,6 +11,7 @@ const registry = new Map<string, IconRegistryEntry>();
 
 /**
  * Register an icon
+ * @deprecated Use unplugin-icons or @iconify/vue instead. Will be removed in next major version.
  */
 export function registerIcon(entry: IconRegistryEntry): void {
   registry.set(entry.name, entry);
@@ -18,6 +19,7 @@ export function registerIcon(entry: IconRegistryEntry): void {
 
 /**
  * Get an icon from registry
+ * @deprecated Use unplugin-icons or @iconify/vue instead. Will be removed in next major version.
  */
 export function getIcon(name: string): IconRegistryEntry | undefined {
   return registry.get(name);
@@ -25,6 +27,7 @@ export function getIcon(name: string): IconRegistryEntry | undefined {
 
 /**
  * Check if icon exists in registry
+ * @deprecated Use unplugin-icons or @iconify/vue instead. Will be removed in next major version.
  */
 export function hasIcon(name: string): boolean {
   return registry.has(name);
@@ -32,6 +35,7 @@ export function hasIcon(name: string): boolean {
 
 /**
  * Get all registered icon names
+ * @deprecated Use unplugin-icons or @iconify/vue instead. Will be removed in next major version.
  */
 export function getIconNames(): string[] {
   return Array.from(registry.keys());
@@ -39,8 +43,17 @@ export function getIconNames(): string[] {
 
 /**
  * Clear all icons from registry
+ * @deprecated Use unplugin-icons or @iconify/vue instead. Will be removed in next major version.
  */
 export function clearIcons(): void {
+  registry.clear();
+}
+
+/**
+ * Reset icon registry (alias for clearIcons). For tests and SSR isolation.
+ * @deprecated Use unplugin-icons or @iconify/vue instead. Will be removed in next major version.
+ */
+export function resetIconRegistry(): void {
   registry.clear();
 }
 

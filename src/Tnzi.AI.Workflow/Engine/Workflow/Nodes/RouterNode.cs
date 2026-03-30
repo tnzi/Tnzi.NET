@@ -10,14 +10,14 @@ namespace Tnzi.AI.Engine.Workflow.Nodes;
 /// </remarks>
 public class RouterNode : IWorkflowNode
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowNodeServiceContext _nodeContext;
     private readonly ILogger<RouterNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Router;
 
-    public RouterNode(IServiceProvider serviceProvider, ILogger<RouterNode> logger)
+    public RouterNode(IWorkflowNodeServiceContext nodeContext, ILogger<RouterNode> logger)
     {
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _nodeContext = Check.NotNull(nodeContext);
         _logger = Check.NotNull(logger);
     }
 
@@ -41,20 +41,17 @@ public class RouterNode : IWorkflowNode
         }
 
         // 构建输入
-        var inputText = CollectInput(context);
+        var inputText = WorkflowNodeHelper.CollectInput(context);
         inputText = state.ResolveTemplate(inputText);
 
         // 构建路由提示
         var routerPrompt = BuildRouterPrompt(step.Instructions, inputText, routes);
 
-        // 创建作用域以避免使用根 ServiceProvider 解析 Scoped 服务
-        using var scope = _serviceProvider.CreateScope();
-
         var routerAgentId = WorkflowNodeHelper.ParseAgentIdFromConfig(config, "routerAgentId");
 
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: routerAgentId,
-            scope: scope,
+            serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
             instructions: "You are a router. Classify the input and respond with ONLY the route key, nothing else.",
@@ -109,28 +106,6 @@ public class RouterNode : IWorkflowNode
         {
             return new Dictionary<string, string>();
         }
-    }
-
-    /// <summary>
-    /// 收集输入（上游输出或初始输入）
-    /// </summary>
-    private static string CollectInput(WorkflowNodeContext context)
-    {
-        if (context.DependencyOutputs.Count == 0)
-            return context.State.InitialInput;
-
-        if (context.DependencyOutputs.Count == 1)
-            return context.DependencyOutputs.Values.First().Text;
-
-        var sb = new StringBuilder();
-        foreach (var (depId, output) in context.DependencyOutputs)
-        {
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"[{depId}]");
-            sb.AppendLine(output.Text);
-        }
-
-        return sb.ToString().TrimEnd();
     }
 
     /// <summary>

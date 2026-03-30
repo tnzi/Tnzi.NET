@@ -15,7 +15,10 @@ export { useUserStore } from './user';
 export { useAppStore } from './app';
 
 // Store initialization
-export { initStoreRuntime, getStoreRuntime, getStoreHttpClient, getStoreStorage, createStore } from './factory';
+export { initStoreRuntime, getStoreRuntime, getStoreHttpClient, getStoreStorage, createStore, resetStoreRuntime } from './factory';
+
+// Store reset (for testing / SSR)
+export { resetAuthRuntime } from './auth';
 
 // Re-export types from core
 export type {

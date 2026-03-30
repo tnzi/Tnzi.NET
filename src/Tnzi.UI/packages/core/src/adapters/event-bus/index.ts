@@ -94,7 +94,7 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
 
       // Check max listeners
       if (handlers.size >= maxListeners) {
-        console.warn(`[EventBus] Max listeners (${maxListeners}) reached for event: ${event}`);
+        console.warn(`[EventBus] Max listeners (${maxListeners}) reached for event: ${event}`); // TODO: Replace with logger injection
       }
 
       handlers.add(handler as EventHandler);
@@ -156,7 +156,7 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
         try {
           handler(payload as T);
         } catch (error) {
-          console.error(`[EventBus] Error in handler for event "${event}":`, error);
+          console.error(`[EventBus] Error in handler for event "${event}":`, error); // TODO: Replace with logger injection
         }
       }
     },
@@ -217,4 +217,11 @@ export function getActiveEventBusRuntime(): EventBusRuntime {
  */
 export function useEventBus(): EventBus {
   return activeEventBusRuntime.use();
+}
+
+/**
+ * Reset event bus runtime to default. For tests and SSR isolation.
+ */
+export function resetEventBusRuntime(): void {
+  activeEventBusRuntime = defaultEventBusRuntime;
 }

@@ -52,6 +52,15 @@ public class SkillEntity : FullAuditedEntity<Guid>
     /// <summary>作者</summary>
     public string? Author { get; set; }
 
+    /// <summary>所属分类 ID</summary>
+    public Guid? CategoryId { get; set; }
+
     /// <summary>是否启用</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>激活次数</summary>
+    public long ActivationCount { get; set; }
+
+    /// <summary>最近一次激活时间</summary>
+    public DateTime? LastActivatedAt { get; set; }
 }

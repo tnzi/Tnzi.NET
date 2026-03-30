@@ -8,9 +8,11 @@ namespace Tnzi.AI.Guardrails;
 /// 检测邮箱、电话号码、身份证号等常见 PII 模式。
 /// 默认行为为拒绝包含 PII 的输入，可通过配置切换为脱敏模式。
 /// </remarks>
-public partial class PiiDetectionGuardrail : IInputGuardrail
+public partial class PiiDetectionGuardrail : IInputGuardrail, IGuardrailProvider
 {
     private readonly bool _enabled;
+
+    public string Name => nameof(PiiDetectionGuardrail);
 
     // 邮箱地址
     [GeneratedRegex(@"[\w.+-]+@[\w-]+\.[\w.-]+", RegexOptions.Compiled)]
@@ -60,4 +62,7 @@ public partial class PiiDetectionGuardrail : IInputGuardrail
 
         return Task.FromResult(GuardrailResult.Allowed());
     }
+
+    public Task<GuardrailDecision> EvaluateAsync(GuardrailRequest request, CancellationToken ct = default)
+        => IGuardrailProvider.BridgeValidateAsync(request, ValidateAsync, GuardrailReasonCodes.PiiDetected, "PII detected", ct);
 }

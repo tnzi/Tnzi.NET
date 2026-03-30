@@ -33,8 +33,12 @@ public class LlmMemoryConsolidator : IMemoryConsolidator
                 new(ChatRole.User, $"NEW MEMORY:\n{newMemory}\n\nEXISTING MEMORIES:\n{existingText}")
             };
 
+            // 超时保护：LLM 无响应时降级为 Add，避免阻塞上下文持久化流程
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
             var response = await chatClient.GetResponseAsync(messages,
-                new ChatOptions { MaxOutputTokens = 300 }, ct);
+                new ChatOptions { MaxOutputTokens = 300 }, timeoutCts.Token);
 
             return ParseResponse(response.Text, existingMemories);
         }

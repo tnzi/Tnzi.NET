@@ -22,5 +22,6 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
         builder.HasIndex(m => m.MessageType);
         builder.HasIndex(m => m.IsSent);
         builder.HasIndex(m => new { m.IsSent, m.MessageType, m.CreationTime });
+        builder.HasIndex(m => new { m.SenderId, m.IsDraft });
     }
 }

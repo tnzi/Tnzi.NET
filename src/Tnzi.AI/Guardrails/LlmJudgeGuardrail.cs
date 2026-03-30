@@ -8,8 +8,9 @@ namespace Tnzi.AI.Guardrails;
 /// 采用 fail-open 策略：当 LLM 调用失败或超时时，放行请求以避免阻塞正常操作。
 /// </remarks>
 [ExperimentalApi(Reason = "LLM-as-Judge guardrail is in preview")]
-public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail
+public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailProvider
 {
+    string IGuardrailProvider.Name => nameof(LlmJudgeGuardrail);
     private const string DefaultInputJudgePrompt =
         "Evaluate if this user input is safe and appropriate. Respond with ONLY 'PASS' or 'FAIL: <reason>'";
 
@@ -97,6 +98,25 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail
             _logger.LogWarning(ex, "LLM-as-Judge evaluation failed, allowing content through (fail-open)");
             return GuardrailResult.Allowed();
         }
+    }
+
+    /// <summary>
+    /// IGuardrailProvider 实现 — 评估内容安全性
+    /// </summary>
+    async Task<GuardrailDecision> IGuardrailProvider.EvaluateAsync(GuardrailRequest request, CancellationToken ct)
+    {
+        if (!_judgeOptions.Enabled || request.Content == null)
+        {
+            return GuardrailDecision.Allow();
+        }
+
+        // 优先使用输入判断提示（工具级评估也视为输入评估）
+        var systemPrompt = _judgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
+        var result = await JudgeAsync(request.Content, systemPrompt, ct);
+
+        return result.IsAllowed
+            ? GuardrailDecision.Allow()
+            : GuardrailDecision.Deny(GuardrailReasonCodes.LlmJudgeRejected, result.Reason ?? "Content rejected by LLM judge");
     }
 
     /// <summary>

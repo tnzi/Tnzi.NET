@@ -4,7 +4,7 @@
  */
 
 import type { CreationAuditedEntity } from '../../types/entities';
-import type { SortedPagedQueryDto } from '../../types/pagination';
+import type { PagedQueryDto, SortedPagedQueryDto } from '../../types/pagination';
 
 // ============================================
 // File Types
@@ -32,6 +32,7 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
 
 /**
  * File query request
+ * Aligned with backend FileQueryRequest
  */
 export interface FileQueryDto extends SortedPagedQueryDto {
   extension?: string;
@@ -43,6 +44,7 @@ export interface FileQueryDto extends SortedPagedQueryDto {
   creatorId?: string;
   provider?: string;
   originalName?: string;
+  tag?: string;
 }
 
 /**
@@ -73,6 +75,7 @@ export interface ChunkUploadDto {
 
 /**
  * Initiate chunked upload request
+ * Aligned with backend InitiateChunkedUploadRequest
  */
 export interface InitiateChunkedUploadDto {
   fileName: string;
@@ -83,6 +86,7 @@ export interface InitiateChunkedUploadDto {
 
 /**
  * Complete chunked upload request
+ * Aligned with backend CompleteChunkedUploadRequest
  */
 export interface CompleteChunkedUploadDto {
   isTemporary?: boolean;
@@ -102,6 +106,7 @@ export interface ChunkUploadResultDto {
 
 /**
  * Upload session DTO
+ * Aligned with backend FileUploadSession entity
  */
 export interface FileUploadSessionDto {
   id: string;
@@ -122,6 +127,7 @@ export interface FileUploadSessionDto {
 
 /**
  * File chunk DTO
+ * Aligned with backend FileChunk entity
  */
 export interface FileChunkDto {
   id: string;
@@ -131,6 +137,118 @@ export interface FileChunkDto {
   chunkPath?: string | null;
   md5Hash?: string | null;
   creationTime: Date | string;
+}
+
+/**
+ * File upload progress
+ * Aligned with backend FileUploadProgress DTO
+ */
+export interface FileUploadProgressDto {
+  uploadSessionId: string;
+  fileName: string;
+  totalSize: number;
+  uploadedSize: number;
+  totalChunks: number;
+  uploadedChunks: number;
+  progressPercentage: number;
+  isCompleted: boolean;
+  isCancelled: boolean;
+}
+
+// ============================================
+// File Version Types
+// ============================================
+
+/**
+ * File version DTO
+ * Aligned with backend FileVersion entity
+ */
+export interface FileVersionDto {
+  id: string;
+  fileId: string;
+  version: number;
+  path: string;
+  size: number;
+  md5Hash?: string | null;
+  description?: string | null;
+  isCurrent: boolean;
+  creationTime: Date | string;
+  creatorId?: string | null;
+}
+
+// ============================================
+// File Share Types
+// ============================================
+
+/**
+ * File share DTO
+ * Aligned with backend FileShare entity
+ */
+export interface FileShareDto {
+  id: string;
+  fileId: string;
+  shareToken: string;
+  expiresAt?: Date | string | null;
+  accessCount: number;
+  maxAccessCount?: number | null;
+  requirePassword: boolean;
+  isEnabled: boolean;
+  creationTime: Date | string;
+  creatorId?: string | null;
+}
+
+/**
+ * Create share request
+ * Aligned with backend CreateShareRequest
+ */
+export interface CreateShareDto {
+  expiresAt?: Date | string | null;
+  maxAccessCount?: number | null;
+  password?: string | null;
+}
+
+/**
+ * File share summary DTO (for admin listing)
+ * Aligned with backend FileShareSummaryDto
+ */
+export interface FileShareSummaryDto {
+  id: string;
+  fileId: string;
+  originalName: string;
+  shareToken: string;
+  expiresAt?: Date | string | null;
+  accessCount: number;
+  maxAccessCount?: number | null;
+  requirePassword: boolean;
+  isEnabled: boolean;
+  isExpired: boolean;
+  isExhausted: boolean;
+  creationTime: Date | string;
+  creatorId?: string | null;
+}
+
+/**
+ * Active shares query request
+ * Aligned with backend ActiveSharesQueryRequest
+ */
+export interface ActiveSharesQueryDto extends PagedQueryDto {
+  fileId?: string;
+  creatorId?: string;
+  includeExpired?: boolean;
+  includeDisabled?: boolean;
+}
+
+// ============================================
+// File Compression Types
+// ============================================
+
+/**
+ * Compress files request
+ * Aligned with backend CompressRequest
+ */
+export interface CompressDto {
+  fileIds: string[];
+  zipFileName?: string | null;
 }
 
 // ============================================
@@ -162,6 +280,67 @@ export interface StorageStatisticsDto {
  * Backend alias (FileStorageStatistics)
  */
 export type FileStorageStatisticsDto = StorageStatisticsDto;
+
+/**
+ * User storage usage statistics
+ * Aligned with backend UserStorageUsage DTO
+ */
+export interface UserStorageUsageDto {
+  userId?: string | null;
+  fileCount: number;
+  totalSize: number;
+  formattedSize: string;
+}
+
+// ============================================
+// File Integrity Types
+// ============================================
+
+/**
+ * File integrity status
+ * Aligned with backend FileIntegrityStatus enum
+ */
+export type FileIntegrityStatus = 'Healthy' | 'Missing' | 'Corrupted' | 'Error';
+
+/**
+ * File integrity verification result
+ * Aligned with backend FileIntegrityResult DTO
+ */
+export interface FileIntegrityResultDto {
+  fileId: string;
+  originalName: string;
+  physicalFileExists: boolean;
+  md5Matches?: boolean | null;
+  expectedMd5?: string | null;
+  actualMd5?: string | null;
+  status: FileIntegrityStatus;
+  error?: string | null;
+}
+
+/**
+ * Batch integrity verification result
+ * Aligned with backend BatchIntegrityResult DTO
+ */
+export interface BatchIntegrityResultDto {
+  totalChecked: number;
+  healthy: number;
+  missing: number;
+  corrupted: number;
+  errors: number;
+  problems: FileIntegrityResultDto[];
+}
+
+// ============================================
+// File Tags Types
+// ============================================
+
+/**
+ * Set file tags request
+ * Aligned with backend SetFileTagsRequest
+ */
+export interface SetFileTagsDto {
+  tags: string[];
+}
 
 // ============================================
 // Provider Types
@@ -231,15 +410,39 @@ export interface CreateFolderDto {
 // ============================================
 
 /**
- * File reference info (for tracking file usage)
+ * File reference DTO (full)
+ * Aligned with backend FileReferenceDto
  */
 export interface FileReferenceDto {
   id: string;
   fileId: string;
   entityType: string;
   entityId: string;
-  propertyName: string;
+  fieldName: string;
+  isTemporary: boolean;
   creationTime: Date | string;
+}
+
+/**
+ * File reference info (compact, for batch operations)
+ * Aligned with backend FileReferenceInfo
+ */
+export interface FileReferenceInfoDto {
+  fileId: string;
+  entityType: string;
+  entityId: string;
+  fieldName: string;
+}
+
+/**
+ * File reference statistics
+ * Aligned with backend FileReferenceStatistics DTO
+ */
+export interface FileReferenceStatisticsDto {
+  totalReferences: number;
+  permanentReferences: number;
+  temporaryReferences: number;
+  referencesByEntityType: Record<string, number>;
 }
 
 /**

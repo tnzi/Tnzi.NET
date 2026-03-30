@@ -87,56 +87,24 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     [HttpPost("{id:guid}/run/stream")]
     public virtual async Task RunStreaming(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
-        // 管理员可代理但默认用自身 ID
         var userId = CurrentUser?.Id ?? request.UserId;
         var format = StreamingResponseWriter.NegotiateFormat(Request);
 
         var stream = WorkflowService.RunStreamingAsync(id, request.Input, userId, cancellationToken);
-        var enumerator = stream.GetAsyncEnumerator(cancellationToken);
-
-        try
-        {
-            if (!await enumerator.MoveNextAsync())
-            {
-                StreamingResponseWriter.ConfigureResponse(Response, format);
-                await StreamingResponseWriter.WriteDoneAsync(Response, format, cancellationToken);
-                return;
-            }
-        }
-        catch (BusinessException)
-        {
-            throw;
-        }
-
-        StreamingResponseWriter.ConfigureResponse(Response, format);
-
-        var firstResult = enumerator.Current;
-        await StreamingResponseWriter.WriteEventAsync(Response, ToWorkflowStreamEvent(firstResult), format, cancellationToken);
-
-        try
-        {
-            while (await enumerator.MoveNextAsync())
-            {
-                var result = enumerator.Current;
-                await StreamingResponseWriter.WriteEventAsync(Response, ToWorkflowStreamEvent(result), format, cancellationToken);
-            }
-        }
-        catch (Exception ex)
-        {
-            await StreamingResponseWriter.WriteEventAsync(Response, new WorkflowStreamEventDto
+        await StreamingResponseWriter.WriteFullStreamAsync(
+            Response,
+            stream,
+            mapper: ToWorkflowStreamEvent,
+            isDone: evt => evt.IsDone,
+            errorFactory: ex => new WorkflowStreamEventDto
             {
                 EventType = WorkflowStreamEventTypes.Error,
                 Status = "Failed",
-                ErrorMessage = ex.Message,
+                ErrorMessage = ex is BusinessException ? ex.Message : "An internal error occurred",
                 IsDone = true
-            }, format, CancellationToken.None);
-        }
-        finally
-        {
-            await enumerator.DisposeAsync();
-        }
-
-        await StreamingResponseWriter.WriteDoneAsync(Response, format, CancellationToken.None);
+            },
+            format,
+            cancellationToken);
     }
 
     /// <summary>
@@ -170,6 +138,26 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 使用外部输入恢复中断的工作流（通用 HITL 恢复）
+    /// </summary>
+    [HttpPost("executions/{executionId}/resume-with-input")]
+    public virtual async Task<ApiResult<WorkflowExecutionResultDto>> ResumeWithInput(string executionId, [FromBody] ResumeWorkflowInputDto input, CancellationToken cancellationToken = default)
+    {
+        var result = await WorkflowService.ResumeWithInputAsync(executionId, input.StepId, input.Input, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取工作流执行的待处理中断
+    /// </summary>
+    [HttpGet("executions/{executionId}/interrupt")]
+    public virtual async Task<ApiResult<WorkflowInterruptDto>> GetPendingInterrupt(string executionId, CancellationToken cancellationToken = default)
+    {
+        var result = await WorkflowService.GetPendingInterruptAsync(executionId, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 审批工作流步骤
     /// </summary>
     [HttpPost("executions/{executionId}/steps/{stepId}/approve")]
@@ -189,11 +177,122 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 批量删除工作流
+    /// </summary>
+    [HttpPost("batch-delete")]
+    public virtual async Task<ApiResult<int>> BatchDelete([FromBody] List<Guid> ids)
+    {
+        var result = await WorkflowService.BatchDeleteAsync(ids);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量启用工作流
+    /// </summary>
+    [HttpPost("batch-enable")]
+    public virtual async Task<ApiResult<int>> BatchEnable([FromBody] List<Guid> ids)
+    {
+        var result = await WorkflowService.BatchSetEnabledAsync(ids, true);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量禁用工作流
+    /// </summary>
+    [HttpPost("batch-disable")]
+    public virtual async Task<ApiResult<int>> BatchDisable([FromBody] List<Guid> ids)
+    {
+        var result = await WorkflowService.BatchSetEnabledAsync(ids, false);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取工作流统计
+    /// </summary>
+    [HttpGet("stats")]
+    public virtual async Task<ApiResult<WorkflowStatsDto>> GetStats()
+    {
+        var result = await WorkflowService.GetStatsAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 查询工作流执行历史
+    /// </summary>
+    [HttpGet("executions")]
+    public virtual async Task<ApiResult<IPagedList<WorkflowExecutionSummaryDto>>> GetExecutions([FromQuery] WorkflowExecutionQueryDto query)
+    {
+        var result = await WorkflowService.GetExecutionsAsync(query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取执行详情
+    /// </summary>
+    [HttpGet("executions/{executionId}/detail")]
+    public virtual async Task<ApiResult<WorkflowExecutionDetailDto>> GetExecutionDetail(string executionId)
+    {
+        var result = await WorkflowService.GetExecutionDetailAsync(executionId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 验证工作流定义（预运行检查）
+    /// </summary>
+    [HttpPost("{id:guid}/validate")]
+    public virtual async Task<ApiResult<WorkflowValidationResultDto>> Validate(Guid id)
+    {
+        var result = await WorkflowService.ValidateAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取工作流版本历史
+    /// </summary>
+    [HttpGet("{id:guid}/versions")]
+    public virtual async Task<ApiResult<List<WorkflowDefinitionVersionDto>>> GetVersionHistory(Guid id)
+    {
+        var result = await WorkflowService.GetVersionHistoryAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取指定版本详情
+    /// </summary>
+    [HttpGet("{id:guid}/versions/{versionNumber:int}")]
+    public virtual async Task<ApiResult<WorkflowDefinitionVersionDto>> GetVersion(Guid id, int versionNumber)
+    {
+        var result = await WorkflowService.GetVersionAsync(id, versionNumber);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 恢复到指定版本
+    /// </summary>
+    [HttpPost("{id:guid}/versions/{versionNumber:int}/restore")]
+    public virtual async Task<ApiResult> RestoreVersion(Guid id, int versionNumber, [FromBody] RestoreWorkflowVersionRequestDto? request = null)
+    {
+        var result = await WorkflowService.RestoreVersionAsync(id, versionNumber, request?.ChangeDescription);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取工作流执行统计（耗时分析）
+    /// </summary>
+    [HttpGet("{id:guid}/execution-stats")]
+    public virtual async Task<ApiResult<WorkflowExecutionStatsDto>> GetExecutionStats(Guid id)
+    {
+        var result = await WorkflowService.GetExecutionStatsAsync(id);
+        return result.ToApiResult();
+    }
+
     private static WorkflowStreamEventDto ToWorkflowStreamEvent(WorkflowExecutionResultDto result)
     {
         var isCompleted = result.Status == "Completed"
             || result.Status == "Failed"
             || result.Status == "AwaitingApproval"
+            || result.Status == "AwaitingInput"
             || result.Status.StartsWith("PartialFailure", StringComparison.Ordinal);
         var stepId = result.StepResults is { Count: 1 } ? result.StepResults[0].StepId : null;
 

@@ -1,14 +1,17 @@
 /**
  * Chat Module Metadata
+ * Aligned with Tnzi.Chat/Entities/Message.cs
  */
 
 /**
  * Message type (visibility)
+ * Backend: MessageType enum
  */
 export enum MessageType {
+  /** 公共消息（发送给角色） */
   Public = 1,
+  /** 私人消息（发送给指定用户） */
   Private = 2,
-  Announcement = 3,
 }
 
 /**
@@ -20,36 +23,6 @@ export function getMessageTypeLabel(type: MessageType): string {
       return 'Public';
     case MessageType.Private:
       return 'Private';
-    case MessageType.Announcement:
-      return 'Announcement';
-    default:
-      return 'Unknown';
-  }
-}
-
-/**
- * Message status
- */
-export enum MessageStatus {
-  Draft = 0,
-  Scheduled = 1,
-  Sent = 2,
-  Cancelled = 3,
-}
-
-/**
- * Get message status label
- */
-export function getMessageStatusLabel(status: MessageStatus): string {
-  switch (status) {
-    case MessageStatus.Draft:
-      return 'Draft';
-    case MessageStatus.Scheduled:
-      return 'Scheduled';
-    case MessageStatus.Sent:
-      return 'Sent';
-    case MessageStatus.Cancelled:
-      return 'Cancelled';
     default:
       return 'Unknown';
   }

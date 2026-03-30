@@ -26,7 +26,9 @@ public class AgentExecutorOptionsBuilder
     private readonly ProjectContextProvider _projectContextProvider;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly ISkillLoadTracker _skillLoadTracker;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IMemoryConsolidator? _memoryConsolidator;
+    private readonly ISkillConstraintEnforcer? _skillConstraintEnforcer;
     private readonly ICurrentUser? _currentUser;
     private readonly ILogger<AgentExecutorOptionsBuilder> _logger;
 
@@ -45,9 +47,11 @@ public class AgentExecutorOptionsBuilder
         ProjectContextProvider projectContextProvider,
         IAgentExecutionContextAccessor executionContextAccessor,
         ISkillLoadTracker skillLoadTracker,
+        IServiceProvider serviceProvider,
         ILogger<AgentExecutorOptionsBuilder> logger,
         ICurrentUser? currentUser = null,
-        IMemoryConsolidator? memoryConsolidator = null)
+        IMemoryConsolidator? memoryConsolidator = null,
+        ISkillConstraintEnforcer? skillConstraintEnforcer = null)
     {
         _options = Check.NotNull(options);
         _loggerFactory = Check.NotNull(loggerFactory);
@@ -63,9 +67,11 @@ public class AgentExecutorOptionsBuilder
         _projectContextProvider = Check.NotNull(projectContextProvider);
         _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _skillLoadTracker = Check.NotNull(skillLoadTracker);
+        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         _currentUser = currentUser;
         _memoryConsolidator = memoryConsolidator;
+        _skillConstraintEnforcer = skillConstraintEnforcer;
     }
 
     /// <summary>
@@ -78,7 +84,8 @@ public class AgentExecutorOptionsBuilder
         IList<AITool>? tools,
         double? temperature,
         int? maxTokens,
-        Guid? agentId = null)
+        Guid? agentId = null,
+        string? agentName = null)
     {
         // 从 DI 解析已注册的中间件
         var middlewares = ResolveMiddlewares();
@@ -96,13 +103,14 @@ public class AgentExecutorOptionsBuilder
                 MaxToolIterations = callerOptions.MaxToolIterations,
                 HistoryReducer = callerOptions.HistoryReducer,
                 ContextProvider = callerOptions.ContextProvider,
-                Middlewares = callerOptions.Middlewares ?? middlewares
+                Middlewares = callerOptions.Middlewares ?? middlewares,
+                StripTextFromToolCallMessages = callerOptions.StripTextFromToolCallMessages
             };
         }
 
         // 调用方未传入 options，根据配置自动创建 HistoryReducer 和 ContextProvider
         var historyReducer = CreateHistoryReducer();
-        var contextProvider = CreateContextProvider(agentId);
+        var contextProvider = CreateContextProvider(agentId, agentName);
 
         return new AgentExecutorOptions
         {
@@ -113,7 +121,8 @@ public class AgentExecutorOptionsBuilder
             MaxOutputTokens = maxTokens,
             HistoryReducer = historyReducer,
             ContextProvider = contextProvider,
-            Middlewares = middlewares
+            Middlewares = middlewares,
+            StripTextFromToolCallMessages = _options.Value.StripTextFromToolCallMessages
         };
     }
 
@@ -188,7 +197,7 @@ public class AgentExecutorOptionsBuilder
     /// <summary>
     /// 根据配置创建 IContextProvider（组合多个子 Provider）
     /// </summary>
-    private IContextProvider? CreateContextProvider(Guid? agentId = null)
+    private IContextProvider? CreateContextProvider(Guid? agentId = null, string? agentName = null)
     {
         var contextConfig = _options.Value.ContextProviders;
         if (!contextConfig.Enabled)
@@ -213,7 +222,7 @@ public class AgentExecutorOptionsBuilder
 
         if (contextConfig.Skills.Enabled)
         {
-            var provider = CreateSkillContextProvider();
+            var provider = CreateSkillContextProvider(agentName);
             if (provider != null) compositeProvider.AddProvider(provider);
         }
 
@@ -327,13 +336,13 @@ public class AgentExecutorOptionsBuilder
         }
     }
 
-    private IContextProvider? CreateSkillContextProvider()
+    private IContextProvider? CreateSkillContextProvider(string? agentName = null)
     {
         try
         {
             var skillsOptions = _options.Value.ContextProviders.Skills;
             var logger = _loggerFactory.CreateLogger<SkillContextProvider>();
-            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillLoadTracker);
+            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillConstraintEnforcer, _skillLoadTracker, agentName);
         }
         catch (Exception ex)
         {

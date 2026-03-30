@@ -181,15 +181,19 @@ public class ChatService : ApplicationService, IChatService
                 };
             }
 
-            // Yield isDone early when a terminal FinishReason is detected, so the client
+            // Yield isDone early when ANY terminal FinishReason is detected, so the client
             // receives it BEFORE the next MoveNextAsync() triggers middleware cleanup (DB writes).
-            if (!earlyDoneSent && chunk.FinishReason is "stop" or "max_tool_iterations")
+            // All non-null FinishReasons are terminal for the current stream.
+            if (!earlyDoneSent && chunk.FinishReason != null)
             {
                 earlyDoneSent = true;
+                var hasError = streamErrorMessage != null;
                 yield return new StreamEvent
                 {
                     IsDone = true,
                     FinishReason = chunk.FinishReason,
+                    IsError = hasError,
+                    ErrorMessage = hasError ? streamErrorMessage : null,
                     Model = request.Model,
                     ThreadId = currentThreadId,
                     Usage = new TokenUsageDto

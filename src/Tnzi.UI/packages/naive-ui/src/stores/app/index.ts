@@ -263,23 +263,20 @@ export const useAppStore = defineStore('app', {
     removeNotification(id: string): void {
       const index = this.ui.toasts.findIndex((n: AppNotification) => n.id === id);
       if (index !== -1) {
-        const notification = this.ui.toasts[index];
-        notification.onDismiss?.();
+        const notification = this.ui.toasts[index] as AppNotification | undefined;
+        notification?.onDismiss?.();
         this.ui.toasts = this.ui.toasts.filter((n: AppNotification) => n.id !== id);
       }
     },
 
     markNotificationRead(id: string): void {
-      const notification = this.ui.toasts.find((n: AppNotification) => n.id === id);
-      if (notification) {
-        notification.read = true;
-      }
+      this.ui.toasts = this.ui.toasts.map((n: AppNotification) =>
+        n.id === id ? { ...n, read: true } : n
+      );
     },
 
     markAllNotificationsRead(): void {
-      this.ui.toasts.forEach((n: AppNotification) => {
-        n.read = true;
-      });
+      this.ui.toasts = this.ui.toasts.map((n: AppNotification) => ({ ...n, read: true }));
     },
 
     clearNotifications(): void {
@@ -308,8 +305,8 @@ export const useAppStore = defineStore('app', {
 
     closeTopModal(): void {
       if (this.ui.modalStack.length > 0) {
-        const topModal = this.ui.modalStack[this.ui.modalStack.length - 1];
-        this.closeModal(topModal.id);
+        const topModal = this.ui.modalStack[this.ui.modalStack.length - 1] as AppModalState | undefined;
+        if (topModal) this.closeModal(topModal.id);
       }
     },
 

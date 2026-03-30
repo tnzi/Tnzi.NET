@@ -29,6 +29,16 @@ public class SkillDefinition
     public SkillScope Scope { get; set; }
 
     /// <summary>
+    /// 租户 ID（Tenant/User scope 时有值，用于数据隔离）
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
+    /// <summary>
+    /// 所有者用户 ID（User scope 时有值）
+    /// </summary>
+    public Guid? OwnerUserId { get; set; }
+
+    /// <summary>
     /// 技能名称
     /// </summary>
     public string Name { get; set; } = string.Empty;
@@ -79,14 +89,19 @@ public class SkillDefinition
     public bool Enabled { get; set; } = true;
 
     /// <summary>
+    /// 是否为内部技能（不对 Agent 暴露，仅作为其他技能的共享资源依赖）
+    /// </summary>
+    public bool IsInternal { get; set; }
+
+    /// <summary>
     /// 优先级（数值越大优先级越高）
     /// </summary>
     public int Priority { get; set; } = 0;
 
     /// <summary>
-    /// 元数据
+    /// 可见此技能的 Agent 名称列表（支持通配符如 rpi-*），为空表示所有 Agent 可见
     /// </summary>
-    public Dictionary<string, string> Metadata { get; set; } = [];
+    public List<string>? Agents { get; set; }
 
     /// <summary>
     /// Skill 激活时限定可用工具组（对齐 Claude Skills 的 contextModifier）
@@ -126,6 +141,13 @@ public class SkillDefinition
     /// 技能来源
     /// </summary>
     public SkillSource Source { get; set; }
+
+    /// <summary>
+    /// 附属资源文件列表（脚本、模板、参考文档等）。
+    /// Key = 相对路径（如 "scripts/generate.py"），Value = 文件内容。
+    /// 来自 EmbeddedResource 的内置技能在加载时填充，文件系统技能按需读取。
+    /// </summary>
+    public Dictionary<string, string> Resources { get; set; } = [];
 }
 
 /// <summary>

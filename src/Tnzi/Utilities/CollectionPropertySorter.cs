@@ -50,15 +50,15 @@ public static class CollectionPropertySorter<T>
     /// <param name="source"><see cref="IEnumerable{T}"/>序列</param>
     /// <param name="propertyName">属性名称</param>
     /// <param name="sortDirection">排序方向</param>
-    public static IOrderedEnumerable<T> OrderBy(System.Collections.Generic.IEnumerable<T> source, string propertyName, ListSortDirection sortDirection)
+    public static IOrderedEnumerable<T> OrderBy(IEnumerable<T> source, string propertyName, ListSortDirection sortDirection)
     {
         Check.NotNullOrEmpty(propertyName);
 
         dynamic expression = GetKeySelector(propertyName);
         dynamic keySelector = expression.Compile();
         return sortDirection == ListSortDirection.Ascending
-            ? System.Linq.Enumerable.OrderBy(source, keySelector)
-            : System.Linq.Enumerable.OrderByDescending(source, keySelector);
+            ? Enumerable.OrderBy(source, keySelector)
+            : Enumerable.OrderByDescending(source, keySelector);
     }
 
     /// <summary>

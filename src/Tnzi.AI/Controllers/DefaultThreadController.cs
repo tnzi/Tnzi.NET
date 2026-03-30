@@ -35,7 +35,7 @@ public class DefaultThreadController : ApiControllerBase
     /// 获取当前用户的线程详情（含最近消息）
     /// </summary>
     [HttpGet("{id:guid}")]
-    public virtual async Task<ApiResult<AgentThreadDetailDto>> GetDetail(Guid id, [FromQuery] int messageLimit = 50)
+    public virtual async Task<ApiResult<AgentThreadDetailDto>> GetDetail(Guid id, [FromQuery][Range(1, 200)] int messageLimit = 50)
     {
         await EnsureOwnershipAsync(id);
         var result = await ThreadService.GetDetailAsync(id, messageLimit);
@@ -90,6 +90,22 @@ public class DefaultThreadController : ApiControllerBase
 
         var bytes = Encoding.UTF8.GetBytes(result.Data!);
         return File(bytes, "text/markdown", $"thread-{id}.md");
+    }
+
+    /// <summary>
+    /// 生成对话的后续建议问题
+    /// </summary>
+    [HttpPost("{threadId:guid}/suggestions")]
+    public virtual async Task<ApiResult<List<string>>> GetSuggestions(Guid threadId, [FromQuery] int count = 3, CancellationToken ct = default)
+    {
+        await EnsureOwnershipAsync(threadId);
+
+        var suggestionService = HttpContext.RequestServices.GetService<ISuggestionService>();
+        if (suggestionService == null)
+            return ApiResult<List<string>>.Error("Suggestion service not available.", 503);
+
+        var suggestions = await suggestionService.GenerateAsync(threadId, count, ct);
+        return ApiResult<List<string>>.Ok(suggestions);
     }
 
     /// <summary>

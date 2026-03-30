@@ -142,7 +142,7 @@ public class S3Storage : IFileStorage, IDisposable
             await _s3Client.GetObjectMetadataAsync(request);
             return true;
         }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
             return false;
         }

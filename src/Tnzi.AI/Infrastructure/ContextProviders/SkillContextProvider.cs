@@ -19,8 +19,10 @@ public sealed class SkillContextProvider : IContextProvider
     private readonly ISkillRegistry _registry;
     private readonly ISkillTemplateEngine _templateEngine;
     private readonly SkillsOptions _options;
+    private readonly ISkillConstraintEnforcer? _constraintEnforcer;
     private readonly ISkillLoadTracker? _skillLoadTracker;
     private readonly ILogger<SkillContextProvider> _logger;
+    private readonly string? _agentName;
 
     // 按需工具（仅当 InjectionMode 为 OnDemandTools 或 Both 时非空）
     private readonly AITool[] _skillTools;
@@ -42,13 +44,17 @@ public sealed class SkillContextProvider : IContextProvider
         ISkillTemplateEngine templateEngine,
         SkillsOptions options,
         ILogger<SkillContextProvider> logger,
-        ISkillLoadTracker? skillLoadTracker = null)
+        ISkillConstraintEnforcer? constraintEnforcer = null,
+        ISkillLoadTracker? skillLoadTracker = null,
+        string? agentName = null)
     {
         _registry = Check.NotNull(registry);
         _templateEngine = Check.NotNull(templateEngine);
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
+        _constraintEnforcer = constraintEnforcer;
         _skillLoadTracker = skillLoadTracker;
+        _agentName = agentName;
 
         var mode = options.InjectionMode;
         if (mode is SkillInjectionMode.OnDemandTools or SkillInjectionMode.Both)
@@ -70,7 +76,11 @@ public sealed class SkillContextProvider : IContextProvider
                 AIFunctionFactory.Create(
                     SkillDeactivateAsync,
                     name: "skill_deactivate",
-                    description: "Deactivate a previously activated skill by slug. Removes its constraints.")
+                    description: "Deactivate a previously activated skill by slug. Removes its constraints."),
+                AIFunctionFactory.Create(
+                    SkillGetResourceAsync,
+                    name: "skill_get_resource",
+                    description: "Get a skill's attached resource file (scripts, templates, references). Returns file content.")
             ];
         }
         else
@@ -87,14 +97,15 @@ public sealed class SkillContextProvider : IContextProvider
             var injection = new ContextInjection();
             var mode = _options.InjectionMode;
 
-            // Instructions mode: inject skill summary (NOT full content)
+            // Instructions mode: inject skill summary (name + description only)
             if (mode is SkillInjectionMode.Instructions or SkillInjectionMode.Both)
             {
-                var skills = await _registry.GetAvailableSkillsAsync(ct);
+                var allSkills = await _registry.GetAvailableSkillsAsync(ct);
+                var skills = FilterByAgent(allSkills);
                 if (skills.Count > 0)
                 {
                     injection.Messages = [new ChatMessage(ChatRole.System, BuildSkillSummary(skills))];
-                    _logger.LogDebug("Injected {Count} skill summaries into context as instructions", skills.Count);
+                    _logger.LogDebug("Injected {Count} skill summaries into context for agent '{Agent}'", skills.Count, _agentName ?? "(all)");
                 }
             }
 
@@ -106,10 +117,25 @@ public sealed class SkillContextProvider : IContextProvider
             }
 
             // Include activated skills (thread-safe snapshot)
+            List<SkillDefinition>? activeSnapshot = null;
             lock (_activatedLock)
             {
                 if (_activatedSkills.Count > 0)
-                    injection.ActiveSkills = [.. _activatedSkills];
+                {
+                    activeSnapshot = [.. _activatedSkills];
+                    injection.ActiveSkills = activeSnapshot;
+                }
+            }
+
+            // 将已激活的 Skill 包装为 AIFunction，使 LLM 可原生调用
+            if (activeSnapshot is { Count: > 0 })
+            {
+                injection.Tools ??= [];
+                foreach (var activeSkill in activeSnapshot)
+                {
+                    injection.Tools.Add(new SkillAIFunction(activeSkill, _templateEngine, _constraintEnforcer));
+                }
+                _logger.LogDebug("Injected {Count} activated skills as AIFunction tools", activeSnapshot.Count);
             }
 
             return injection.HasContent ? injection : ContextInjection.Empty;
@@ -134,7 +160,8 @@ public sealed class SkillContextProvider : IContextProvider
         [Description("Search keyword")] string keyword,
         CancellationToken ct = default)
     {
-        var results = await _registry.SearchAsync(keyword, _options.SearchMaxResults, ct);
+        var allResults = await _registry.SearchAsync(keyword, _options.SearchMaxResults, ct);
+        var results = FilterByAgent(allResults);
         if (results.Count == 0)
             return $"No skills found matching: {keyword}";
 
@@ -167,7 +194,8 @@ public sealed class SkillContextProvider : IContextProvider
 
             MarkSkillLoaded(slugs[0]);
             var result = _templateEngine.Render(skill);
-            return result.Success ? result.RenderedContent : skill.Content;
+            var content = result.Success ? result.RenderedContent : skill.Content;
+            return AppendResourceHint(skill, content);
         }
 
         // 批量加载多个 Skill
@@ -190,6 +218,60 @@ public sealed class SkillContextProvider : IContextProvider
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Gets a specific resource file from a skill (scripts, templates, references).
+    /// </summary>
+    private async Task<string> SkillGetResourceAsync(
+        [Description("Skill slug")] string slug,
+        [Description("Resource path (e.g. 'scripts/generate.py', 'templates/SOUL.template.md')")] string path,
+        CancellationToken ct = default)
+    {
+        var skill = await _registry.GetBySlugAsync(slug, ct);
+        if (skill == null)
+            return $"Skill not found: {slug}";
+
+        if (skill.Resources.Count == 0)
+            return $"Skill '{slug}' has no attached resources.";
+
+        // 精确匹配
+        if (skill.Resources.TryGetValue(path, out var content))
+            return content;
+
+        // 模糊匹配（文件名）
+        var fileName = path.Contains('/') ? path[(path.LastIndexOf('/') + 1)..] : path;
+        var match = skill.Resources.FirstOrDefault(r =>
+            r.Key.EndsWith("/" + fileName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(r.Key, fileName, StringComparison.OrdinalIgnoreCase));
+
+        if (match.Key != null)
+            return match.Value;
+
+        var available = string.Join("\n", skill.Resources.Keys.Select(k => $"  - {k}"));
+        return $"Resource not found: '{path}' in skill '{slug}'.\n\nAvailable resources:\n{available}";
+    }
+
+    /// <summary>
+    /// 在 skill_get 返回内容末尾附加可用资源列表提示（如果有附属资源）
+    /// </summary>
+    private static string AppendResourceHint(SkillDefinition skill, string content)
+    {
+        if (skill.Resources.Count == 0)
+            return content;
+
+        var sb = new StringBuilder(content);
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine($"This skill has {skill.Resources.Count} attached resource(s):");
+        foreach (var key in skill.Resources.Keys)
+            sb.AppendLine($"  - /mnt/skills/{skill.Slug}/{key}");
+        sb.AppendLine();
+        sb.AppendLine($"Access via sandbox: `read_file(\"/mnt/skills/{skill.Slug}/path\")` or `bash(\"python /mnt/skills/{skill.Slug}/scripts/script.py\")`");
+        sb.AppendLine($"Fallback (no sandbox): `skill_get_resource(\"{skill.Slug}\", \"path\")`");
+
+        return sb.ToString();
     }
 
     /// <summary>
@@ -278,7 +360,54 @@ public sealed class SkillContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// Builds a skill summary (name + description + WhenToUse), NOT the full content.
+    /// 按 Agent 名称过滤技能列表（支持通配符匹配）。
+    /// </summary>
+    private IReadOnlyList<SkillDefinition> FilterByAgent(IReadOnlyList<SkillDefinition> skills)
+    {
+        // 内部技能不暴露给 Agent（仅作为共享资源依赖存在）
+        // 无 agent 上下文时，只返回无 agents 限制的 skill
+        if (string.IsNullOrWhiteSpace(_agentName))
+            return skills.Where(s => !s.IsInternal && s.Agents is not { Count: > 0 }).ToList();
+
+        return skills.Where(s => !s.IsInternal && IsAgentAllowed(s, _agentName)).ToList();
+    }
+
+    /// <summary>
+    /// 检查 Agent 名称是否匹配 agents 列表（支持通配符 *）。
+    /// </summary>
+    /// <remarks>
+    /// Wildcard pattern: "rpi-*" matches "rpi-assistant", "rpi-finance", etc.
+    /// </remarks>
+    public static bool IsAgentAllowed(SkillDefinition skill, string? agentName)
+    {
+        // 无 agents 限制 = 所有 agent 可见
+        if (skill.Agents is not { Count: > 0 })
+            return true;
+
+        // 无 agent 上下文（匿名调用）= 仅显示无限制的 skill
+        if (string.IsNullOrWhiteSpace(agentName))
+            return false;
+
+        foreach (var pattern in skill.Agents)
+        {
+            if (pattern.EndsWith('*'))
+            {
+                // 通配符前缀匹配: rpi-* matches rpi-assistant, rpi-finance
+                var prefix = pattern[..^1];
+                if (agentName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            else if (pattern.Equals(agentName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Builds a skill summary (name + description only) for system prompt injection.
     /// </summary>
     private static string BuildSkillSummary(IReadOnlyList<SkillDefinition> skills)
     {
@@ -287,19 +416,13 @@ public sealed class SkillContextProvider : IContextProvider
         sb.AppendLine();
         foreach (var skill in skills)
         {
-            sb.AppendLine($"### {skill.Name} (slug: {skill.Slug})");
+            sb.Append($"- **{skill.Name}** (`{skill.Slug}`)");
             if (!string.IsNullOrWhiteSpace(skill.Description))
-                sb.AppendLine(skill.Description);
-            if (!string.IsNullOrWhiteSpace(skill.WhenToUse))
-            {
-                sb.AppendLine();
-                sb.AppendLine($"**When to use:** {skill.WhenToUse}");
-            }
-            if (skill.Parameters.Count > 0)
-                sb.AppendLine($"**Parameters:** {string.Join(", ", skill.Parameters.Select(p => p.Required ? p.Name : $"{p.Name}?"))}");
+                sb.Append($" — {skill.Description}");
             sb.AppendLine();
         }
-        sb.AppendLine("Use skill_activate to activate a skill with parameters.");
+        sb.AppendLine();
+        sb.AppendLine("Use `skill_get` to load a skill's full content, or `skill_activate` to activate with parameters.");
         return sb.ToString();
     }
 

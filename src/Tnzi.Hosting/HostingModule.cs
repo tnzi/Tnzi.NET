@@ -26,6 +26,13 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(SystemModule))]
 [OptionalDependsOn(typeof(HangfireModule))]
 [OptionalDependsOn(typeof(SignalRModule))]
+[OptionalDependsOn(typeof(ChatModule))]
+[OptionalDependsOn(typeof(PaymentModule))]
+[OptionalDependsOn(typeof(RagModule))]
+[OptionalDependsOn(typeof(AICoderModule))]
+[OptionalDependsOn(typeof(AICliModule))]
+[OptionalDependsOn(typeof(Tnzi.AI.Sandbox.SandboxModule))]
+[OptionalDependsOn(typeof(ChannelsModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：

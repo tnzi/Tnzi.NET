@@ -13,6 +13,22 @@ namespace Tnzi.AI.Engine;
 public interface IContextProvider
 {
     /// <summary>
+    /// 提供器名称（默认为类型名）
+    /// </summary>
+    string Name => GetType().Name;
+
+    /// <summary>
+    /// 执行顺序（值越小越先执行，默认 0）
+    /// </summary>
+    int Order => 0;
+
+    /// <summary>
+    /// 是否在当前上下文中启用（默认始终启用）
+    /// </summary>
+    /// <param name="ctx">当前中间件上下文（可为 null）</param>
+    bool IsEnabled(AiMiddlewareContext? ctx) => true;
+
+    /// <summary>
     /// 在 Agent 执行前获取上下文注入
     /// </summary>
     /// <param name="messages">当前消息列表</param>

@@ -44,18 +44,29 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult<List<OnlineUserDto>>> GetOnlineUsers()
     {
         var userIds = await ConnectionManager.GetAllOnlineUserIdsAsync();
-        var result = new List<OnlineUserDto>();
+
+        // Collect all connection IDs per user in a single pass
+        var userConnectionMap = new Dictionary<Guid, List<string>>();
+        var allConnectionIds = new List<string>();
 
         foreach (var userId in userIds)
         {
-            var connections = await ConnectionManager.GetUserConnectionsAsync(userId);
-            var connectionInfos = new List<ConnectionInfoDto>();
+            var connections = (await ConnectionManager.GetUserConnectionsAsync(userId)).ToList();
+            userConnectionMap[userId] = connections;
+            allConnectionIds.AddRange(connections);
+        }
 
-            foreach (var connId in connections)
-            {
-                var info = await BuildConnectionInfoAsync(connId);
-                connectionInfos.Add(info);
-            }
+        // Batch fetch metadata and groups for all connections at once
+        var metadataMap = await ConnectionManager.GetConnectionsMetadataBatchAsync(allConnectionIds);
+        var groupsMap = await ConnectionManager.GetConnectionsGroupsBatchAsync(allConnectionIds);
+
+        // Build result using pre-fetched data
+        var result = new List<OnlineUserDto>();
+        foreach (var (userId, connectionIds) in userConnectionMap)
+        {
+            var connectionInfos = connectionIds
+                .Select(connId => BuildConnectionInfoFromBatch(connId, userId, metadataMap, groupsMap))
+                .ToList();
 
             result.Add(new OnlineUserDto
             {
@@ -84,14 +95,15 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
     [HttpGet("users/{userId:guid}/connections")]
     public virtual async Task<ApiResult<OnlineUserDto>> GetUserConnections(Guid userId)
     {
-        var connections = await ConnectionManager.GetUserConnectionsAsync(userId);
-        var connectionInfos = new List<ConnectionInfoDto>();
+        var connectionIds = (await ConnectionManager.GetUserConnectionsAsync(userId)).ToList();
 
-        foreach (var connId in connections)
-        {
-            var info = await BuildConnectionInfoAsync(connId);
-            connectionInfos.Add(info);
-        }
+        // Batch fetch metadata and groups for all connections at once
+        var metadataMap = await ConnectionManager.GetConnectionsMetadataBatchAsync(connectionIds);
+        var groupsMap = await ConnectionManager.GetConnectionsGroupsBatchAsync(connectionIds);
+
+        var connectionInfos = connectionIds
+            .Select(connId => BuildConnectionInfoFromBatch(connId, userId, metadataMap, groupsMap))
+            .ToList();
 
         var dto = new OnlineUserDto
         {
@@ -134,7 +146,7 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Build connection info DTO from connection ID
+    /// Build connection info DTO from connection ID (single connection, used by GetConnection endpoint)
     /// </summary>
     private async Task<ConnectionInfoDto> BuildConnectionInfoAsync(string connectionId)
     {
@@ -163,6 +175,41 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
             ConnectionId = connectionId,
             UserId = userId,
             Groups = groups.ToList(),
+        };
+    }
+
+    /// <summary>
+    /// Build connection info DTO from pre-fetched batch data (avoids N+1 queries)
+    /// </summary>
+    private static ConnectionInfoDto BuildConnectionInfoFromBatch(
+        string connectionId,
+        Guid userId,
+        IReadOnlyDictionary<string, ConnectionMetadata> metadataMap,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groupsMap)
+    {
+        var groups = groupsMap.TryGetValue(connectionId, out var g) ? g.ToList() : [];
+
+        if (metadataMap.TryGetValue(connectionId, out var metadata))
+        {
+            return new ConnectionInfoDto
+            {
+                ConnectionId = connectionId,
+                UserId = metadata.UserId,
+                UserName = metadata.UserName,
+                ConnectedAt = metadata.ConnectedAt,
+                IpAddress = metadata.IpAddress,
+                UserAgent = metadata.UserAgent,
+                HubName = metadata.HubName,
+                Groups = groups,
+            };
+        }
+
+        // Fallback: only userId from caller context
+        return new ConnectionInfoDto
+        {
+            ConnectionId = connectionId,
+            UserId = userId,
+            Groups = groups,
         };
     }
 }

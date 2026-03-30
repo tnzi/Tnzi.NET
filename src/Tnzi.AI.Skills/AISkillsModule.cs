@@ -25,6 +25,10 @@ public class AISkillsModule : TnziCustomModule
         services.AddScoped<DatabaseSkillStore>();
         services.TryAddScoped<ISkillRegistry, SkillRegistry>();
         services.AddScoped<ISkillService, SkillService>();
+        services.AddScoped<ISkillCategoryService, SkillCategoryService>();
+
+        // 注册事件处理器
+        services.AddEventHandler<SkillActivatedEvent, SkillActivatedEventHandler>();
 
         // 注册技能约束中间件
         services.AddScoped<SkillConstraintMiddleware>();

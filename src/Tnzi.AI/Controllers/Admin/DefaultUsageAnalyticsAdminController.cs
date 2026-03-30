@@ -72,7 +72,7 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
     /// 按 Agent 分组统计（Top N 消耗 Agent）
     /// </summary>
     [HttpGet("by-agent")]
-    public virtual async Task<ApiResult<List<AgentUsageDto>>> GetByAgent([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] int topN = 20)
+    public virtual async Task<ApiResult<List<AgentUsageDto>>> GetByAgent([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery][Range(1, 100)] int topN = 20)
     {
         var result = await AnalyticsService.GetUsageByAgentAsync(startTime, endTime, topN);
         return result.ToApiResult();
@@ -82,7 +82,7 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
     /// Agent 反馈统计（按好评率降序）
     /// </summary>
     [HttpGet("agent-feedback-stats")]
-    public virtual async Task<ApiResult<List<AgentFeedbackStatsDto>>> GetAgentFeedbackStats([FromQuery] int topN = 20)
+    public virtual async Task<ApiResult<List<AgentFeedbackStatsDto>>> GetAgentFeedbackStats([FromQuery][Range(1, 100)] int topN = 20)
     {
         var result = await AnalyticsService.GetAgentFeedbackStatsAsync(topN);
         return result.ToApiResult();

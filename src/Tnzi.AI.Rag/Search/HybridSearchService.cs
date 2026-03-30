@@ -196,10 +196,16 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         return fusedScores.Values
             .OrderByDescending(e => e.Score)
             .Take(topK)
-            .Select(e =>
+            .Select(e => new VectorSearchResult
             {
-                e.VectorResult.Score = e.Score;
-                return e.VectorResult;
+                Id = e.VectorResult.Id,
+                Content = e.VectorResult.Content,
+                DocumentId = e.VectorResult.DocumentId,
+                KnowledgeBaseId = e.VectorResult.KnowledgeBaseId,
+                ChunkIndex = e.VectorResult.ChunkIndex,
+                Metadata = e.VectorResult.Metadata,
+                ParentChunkId = e.VectorResult.ParentChunkId,
+                Score = e.Score
             })
             .ToList();
     }

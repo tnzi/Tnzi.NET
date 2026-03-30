@@ -140,7 +140,7 @@ public class TwoFactorCodeSentEvent : EventBase
     public string UserName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty; // "Email" 或 "Sms"
     public string Address { get; set; } = string.Empty; // 邮箱地址或手机号
-    [System.Text.Json.Serialization.JsonIgnore] // 防止验证码明文泄露到日志/消息队列
+    [JsonIgnore] // 防止验证码明文泄露到日志/消息队列
     public string Code { get; set; } = string.Empty; // 验证码
     public DateTime ExpiresAt { get; set; }
     public int ExpirationMinutes { get; set; }
@@ -208,7 +208,7 @@ public class QuickRegisterCodeSentEvent : EventBase
     /// <summary>
     /// 验证码
     /// </summary>
-    [System.Text.Json.Serialization.JsonIgnore]
+    [JsonIgnore]
     public string Code { get; set; } = string.Empty;
 
     /// <summary>

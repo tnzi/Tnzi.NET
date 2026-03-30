@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends Record<string, any>">
+<script setup lang="ts" generic="T extends Record<string, unknown>">
 import { computed, ref } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { IMobileDataListEmits, IMobileDataListProps } from '@tnzi/core/components';
@@ -124,4 +124,3 @@ pre {
   font-size: 12px;
 }
 </style>
-

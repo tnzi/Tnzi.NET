@@ -104,7 +104,7 @@ const handleRefreshCaptcha = () => props.onRefreshCaptcha?.();
         class="flex items-center justify-between text-sm"
       >
         <label v-if="props.showRememberMe" class="flex items-center gap-2 text-muted-foreground">
-          <Checkbox v-model="rememberMe" :disabled="isDisabled" />
+          <Checkbox v-model:checked="rememberMe" :disabled="isDisabled" />
           {{ t('auth.rememberMe') }}
         </label>
         <Button

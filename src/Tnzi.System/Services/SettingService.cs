@@ -11,6 +11,8 @@ public class SettingService : ApplicationService, ISettingService
     private readonly ApplicationOptions _applicationOptions;
     private readonly ICache _cache;
     private readonly IEnumerable<ISettingProvider> _settingProviders;
+    private readonly ISettingEncryptor? _settingEncryptor;
+    private readonly SettingEncryptionOptions _encryptionOptions;
     private readonly ITnziApplication? _tnziApplication;
     private readonly IHostEnvironment? _hostEnvironment;
 
@@ -21,22 +23,26 @@ public class SettingService : ApplicationService, ISettingService
     /// <summary>
     /// 缓存条目，用于区分"不存在"和"值为null"
     /// </summary>
-    private record SettingCacheEntry(string? Value, bool Exists);
+    private record SettingCacheEntry(string? Value, bool Exists, bool IsEncrypted);
 
     public SettingService(
         IServiceProvider serviceProvider,
         IRepository<Setting, Guid> settingRepository,
         IOptions<ApplicationOptions> applicationOptions,
+        IOptions<SettingEncryptionOptions> encryptionOptions,
         ICache cache,
         IEnumerable<ISettingProvider> settingProviders,
+        ISettingEncryptor? settingEncryptor = null,
         ITnziApplication? tnziApplication = null,
         IHostEnvironment? hostEnvironment = null)
         : base(serviceProvider)
     {
         _settingRepository = Check.NotNull(settingRepository);
         _applicationOptions = Check.NotNull(applicationOptions).Value;
+        _encryptionOptions = Check.NotNull(encryptionOptions).Value;
         _cache = Check.NotNull(cache);
         _settingProviders = Check.NotNull(settingProviders);
+        _settingEncryptor = settingEncryptor;
         _tnziApplication = tnziApplication;
         _hostEnvironment = hostEnvironment;
     }
@@ -76,7 +82,14 @@ public class SettingService : ApplicationService, ISettingService
             var cached = await _cache.GetAsync<SettingCacheEntry>(cacheKey);
             if (cached != null)
             {
-                return Ok<string?>(cached.Exists ? cached.Value : defaultValue);
+                if (!cached.Exists)
+                    return Ok<string?>(defaultValue);
+
+                // Decrypt after reading from cache (cache stores ciphertext)
+                var cachedValue = cached.IsEncrypted && cached.Value != null
+                    ? DecryptValue(cached.Value)
+                    : cached.Value;
+                return Ok<string?>(cachedValue);
             }
 
             var setting = await _settingRepository
@@ -86,11 +99,14 @@ public class SettingService : ApplicationService, ISettingService
                 .FirstOrDefaultAsync(s => s.Key == key);
 
             var exists = setting != null;
-            var value = setting?.Value;
+            var isEncrypted = exists && setting!.IsEncrypted;
+            var rawValue = setting?.Value;
 
-            // 写入缓存，有效期 1 小时
-            await _cache.SetAsync(cacheKey, new SettingCacheEntry(value, exists), TimeSpan.FromHours(1));
+            // 写入缓存，有效期 1 小时（缓存密文，读取时解密）
+            await _cache.SetAsync(cacheKey, new SettingCacheEntry(rawValue, exists, isEncrypted), TimeSpan.FromHours(1));
 
+            // 解密后返回
+            var value = isEncrypted && rawValue != null ? DecryptValue(rawValue) : rawValue;
             return Ok<string?>(exists ? value : defaultValue);
         }
         catch (Exception)
@@ -114,7 +130,7 @@ public class SettingService : ApplicationService, ISettingService
         }
         catch (Exception)
         {
-            LogWarning("Failed to convert setting {Key} value '{Value}' to type {Type}, returning default value", key, result.Data, typeof(T).Name);
+            LogWarning("Failed to convert setting {Key} to type {Type}, returning default value", key, typeof(T).Name);
             return Ok<T?>(defaultValue);
         }
     }
@@ -134,6 +150,10 @@ public class SettingService : ApplicationService, ISettingService
 
             if (setting != null)
             {
+                // 加密设置必须通过 SetEncryptedAsync 更新，防止明文覆盖密文后 IsEncrypted 标记不一致
+                if (setting.IsEncrypted)
+                    throw new BusinessException("Cannot update encrypted setting via SetSettingAsync, use SetEncryptedAsync instead", ErrorCodes.VALIDATION_ERROR);
+
                 // 更新现有配置
                 setting.Value = value;
                 if (!string.IsNullOrWhiteSpace(description))
@@ -182,6 +202,13 @@ public class SettingService : ApplicationService, ISettingService
             .ToListAsync();
 
         var settingDtos = settings.MapToList<SettingDto>();
+
+        // Mask encrypted setting values to prevent ciphertext exposure
+        foreach (var dto in settingDtos.Where(d => d.IsEncrypted))
+        {
+            dto.Value = "******";
+        }
+
         return Ok((IEnumerable<SettingDto>)settingDtos);
     }
 
@@ -192,7 +219,15 @@ public class SettingService : ApplicationService, ISettingService
         if (setting == null)
             return Fail<SettingDto>("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
-        return Ok(setting.MapTo<SettingDto>());
+        var dto = setting.MapTo<SettingDto>();
+
+        // Mask encrypted setting value to prevent ciphertext exposure
+        if (dto.IsEncrypted)
+        {
+            dto.Value = "******";
+        }
+
+        return Ok(dto);
     }
 
     /// <inheritdoc />
@@ -235,7 +270,10 @@ public class SettingService : ApplicationService, ISettingService
         await _cache.RemoveAsync($"Setting:{setting.Key}");
 
         LogInformation("Setting updated: {Key}", setting.Key);
-        return Ok(setting.MapTo<SettingDto>(), "Setting updated successfully");
+        var dto = setting.MapTo<SettingDto>();
+        if (dto.IsEncrypted)
+            dto.Value = "******";
+        return Ok(dto, "Setting updated successfully");
     }
 
     /// <inheritdoc />
@@ -326,7 +364,12 @@ public class SettingService : ApplicationService, ISettingService
             .Where(s => s.Key == key && s.Scope == scope && s.ScopeId == scopeId)
             .FirstOrDefaultAsync();
 
-        return Ok<string?>(setting?.Value);
+        if (setting == null)
+            return Ok<string?>(null);
+
+        // 自动解密加密配置
+        var value = setting.IsEncrypted ? DecryptValue(setting.Value) : setting.Value;
+        return Ok<string?>(value);
     }
 
     /// <inheritdoc />
@@ -364,6 +407,92 @@ public class SettingService : ApplicationService, ISettingService
         await _cache.RemoveAsync($"Setting:{key}");
 
         return Ok("Setting updated successfully");
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> SetEncryptedAsync(string group, string key, string value, string? description = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return Fail("Key cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
+
+        Check.NotNullOrWhiteSpace(value);
+
+        if (!_encryptionOptions.Enabled || _settingEncryptor == null)
+            return Fail("Setting encryption is not enabled", 400, ErrorCodes.CONFIGURATION_ERROR);
+
+        var encryptedValue = _settingEncryptor.Encrypt(value);
+
+        await ExecuteInUnitOfWorkAsync(async cancellationToken =>
+        {
+            var setting = await _settingRepository
+                .AsQueryable()
+                .Where(s => s.Scope == SettingScope.Global && s.Group == group)
+                .FirstOrDefaultAsync(s => s.Key == key, cancellationToken);
+
+            if (setting != null)
+            {
+                setting.Value = encryptedValue;
+                setting.IsEncrypted = true;
+                if (!string.IsNullOrWhiteSpace(description))
+                    setting.Description = description;
+                await _settingRepository.UpdateAsync(setting, cancellationToken);
+            }
+            else
+            {
+                setting = new Setting
+                {
+                    Key = key,
+                    Value = encryptedValue,
+                    Description = description,
+                    Group = group,
+                    IsEncrypted = true,
+                    ValueType = SettingValueType.String
+                };
+                await _settingRepository.InsertAsync(setting, cancellationToken);
+            }
+        });
+
+        // 缓存清理在事务提交后执行
+        await _cache.RemoveAsync($"Setting:{key}");
+
+        LogInformation("Encrypted setting updated: {Key}", key);
+        return Ok("Encrypted setting saved successfully");
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<string?>> GetDecryptedAsync(string group, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return Ok<string?>(null);
+
+        var setting = await _settingRepository.AsQueryable()
+            .AsNoTracking()
+            .Where(s => s.Key == key && s.Scope == SettingScope.Global && s.Group == group)
+            .FirstOrDefaultAsync();
+
+        if (setting == null)
+            return Ok<string?>(null);
+
+        if (!setting.IsEncrypted)
+            return Ok<string?>(setting.Value);
+
+        var decrypted = DecryptValue(setting.Value);
+        return Ok<string?>(decrypted);
+    }
+
+    /// <summary>
+    /// Decrypt value using the configured encryptor.
+    /// Returns null when encryptor is unavailable (fail-safe: never expose ciphertext).
+    /// </summary>
+    private string? DecryptValue(string encryptedValue)
+    {
+        if (_settingEncryptor == null)
+        {
+            LogWarning("Encrypted setting value found but encryption is not enabled, returning null for safety");
+            return null;
+        }
+
+        return _settingEncryptor.Decrypt(encryptedValue);
     }
 
     /// <inheritdoc />

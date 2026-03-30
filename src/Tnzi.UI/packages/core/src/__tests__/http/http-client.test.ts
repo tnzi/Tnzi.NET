@@ -400,4 +400,192 @@ describe('HttpClient', () => {
       expect(result.data?.processed).toBe(true);
     });
   });
+
+  // ------------------------------------------
+  // normalizeApiResult: `success` field support
+  // ------------------------------------------
+
+  describe('normalizeApiResult success field', () => {
+    it('should normalize response with success:true', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ success: true, code: 200, data: { id: 1 } }));
+      const result = await client.get<{ id: number }>('/test');
+      expect(result.succeeded).toBe(true);
+      expect(result.data?.id).toBe(1);
+    });
+
+    it('should normalize response with success:false', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ success: false, code: 400, message: 'Bad' }));
+      const result = await client.get('/test');
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(400);
+    });
+  });
+
+  // ------------------------------------------
+  // 401 auto-refresh + retry
+  // ------------------------------------------
+
+  describe('401 refresh and retry', () => {
+    it('should refresh token and retry on 401 when refreshTokenFn is configured', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('new-token');
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: refreshFn,
+        onUnauthorized,
+      });
+
+      // First call returns 401, second call (retry) returns success
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 401, message: 'Unauthorized' }, 401))
+        .mockResolvedValueOnce(apiSuccessResponse({ id: 1 }));
+
+      const result = await c.get<{ id: number }>('/protected');
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(result.succeeded).toBe(true);
+      expect(result.data?.id).toBe(1);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(c.getAccessToken()).toBe('new-token');
+    });
+
+    it('should deduplicate concurrent refresh calls', async () => {
+      let resolveRefresh: (value: string) => void;
+      const refreshPromise = new Promise<string>(r => { resolveRefresh = r; });
+      const refreshFn = vi.fn().mockReturnValue(refreshPromise);
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: refreshFn,
+      });
+
+      // All calls return 401 first, then success on retry
+      mockFetch.mockImplementation(() =>
+        Promise.resolve(
+          mockFetch.mock.calls.length <= 2
+            ? jsonResponse({ succeeded: false, code: 401 }, 401)
+            : apiSuccessResponse({ ok: true })
+        )
+      );
+
+      const p1 = c.get('/a');
+      const p2 = c.get('/b');
+
+      // Allow microtasks to run
+      await vi.waitFor(() => expect(refreshFn).toHaveBeenCalledTimes(1));
+      resolveRefresh!('refreshed-token');
+
+      await Promise.all([p1, p2]);
+      // Only one refresh call despite two 401s
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call onUnauthorized when refreshTokenFn fails', async () => {
+      const refreshFn = vi.fn().mockRejectedValue(new Error('refresh failed'));
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: refreshFn,
+        onUnauthorized,
+      });
+
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      const result = await c.get('/protected');
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(result.succeeded).toBe(false);
+    });
+
+    it('should call onUnauthorized when no refreshTokenFn is configured', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        onUnauthorized,
+      });
+
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      await c.get('/protected');
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not attempt refresh on retry 401 (prevent infinite loop)', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('new-token');
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: refreshFn,
+        onUnauthorized,
+      });
+
+      // Both original and retry return 401
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      const result = await c.get('/protected');
+      expect(refreshFn).toHaveBeenCalledTimes(1); // Only one refresh attempt
+      expect(result.succeeded).toBe(false);
+    });
+  });
+
+  // ------------------------------------------
+  // GET request deduplication
+  // ------------------------------------------
+
+  describe('GET deduplication', () => {
+    it('should deduplicate concurrent identical GET requests', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ items: [] }));
+
+      const [r1, r2, r3] = await Promise.all([
+        client.get('/users'),
+        client.get('/users'),
+        client.get('/users'),
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(r1.succeeded).toBe(true);
+      expect(r2.succeeded).toBe(true);
+      expect(r3.succeeded).toBe(true);
+    });
+
+    it('should NOT deduplicate different GET URLs', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+
+      await Promise.all([
+        client.get('/users'),
+        client.get('/roles'),
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should NOT deduplicate POST requests', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+
+      await Promise.all([
+        client.post('/users', { name: 'a' }),
+        client.post('/users', { name: 'b' }),
+      ]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should make new request after previous GET completes', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ v: 1 }));
+      await client.get('/data');
+
+      mockFetch.mockResolvedValue(apiSuccessResponse({ v: 2 }));
+      const result = await client.get('/data');
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result.data).toEqual({ v: 2 });
+    });
+
+    it('should skip deduplication when deduplicateGets is false', async () => {
+      const c = new HttpClient({ baseUrl: '/api', deduplicateGets: false });
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+
+      await Promise.all([c.get('/users'), c.get('/users')]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
 });

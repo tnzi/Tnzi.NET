@@ -4,7 +4,7 @@
   "private": true,
   "description": "Tnzi.NET Frontend Packages Monorepo - core + shadcn/vant/naive-ui UI components.",
   "scripts": {
-    "build": "pnpm -r --filter @tnzi/core build && pnpm -r --filter @tnzi/shadcn build && pnpm -r --filter @tnzi/vant build && pnpm -r --filter @tnzi/naive-ui build",
+    "build": "pnpm -r --filter @tnzi/core build && pnpm -r --filter @tnzi/ai build && pnpm -r --filter @tnzi/shadcn build && pnpm -r --filter @tnzi/vant build && pnpm -r --filter @tnzi/naive-ui build",
     "build:all": "pnpm -r build",
     "test": "pnpm -r test",
     "test:unit": "pnpm -r test:unit",

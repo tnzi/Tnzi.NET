@@ -39,4 +39,39 @@ public interface ISkillService
     /// 删除技能
     /// </summary>
     Task<Result> DeleteAsync(Guid id);
+
+    /// <summary>
+    /// 批量删除技能
+    /// </summary>
+    Task<Result<int>> BatchDeleteAsync(List<Guid> ids);
+
+    /// <summary>
+    /// 批量启用/禁用技能
+    /// </summary>
+    Task<Result<int>> BatchSetEnabledAsync(List<Guid> ids, bool enabled);
+
+    /// <summary>
+    /// 分页查询技能（管理端）
+    /// </summary>
+    Task<Result<IPagedList<SkillSummaryDto>>> GetPagedAsync(SkillQueryDto query);
+
+    /// <summary>
+    /// 获取技能使用统计
+    /// </summary>
+    Task<Result<SkillUsageStatsDto>> GetUsageStatsAsync();
+
+    /// <summary>
+    /// 获取热门技能（按激活次数降序）
+    /// </summary>
+    Task<Result<List<PopularSkillDto>>> GetPopularSkillsAsync(int topN = 10);
+
+    /// <summary>
+    /// 导出技能为 JSON
+    /// </summary>
+    Task<Result<List<SkillExportDto>>> ExportSkillsAsync(SkillScope? scope = null);
+
+    /// <summary>
+    /// 批量导入技能
+    /// </summary>
+    Task<Result<SkillImportResultDto>> ImportSkillsAsync(List<SkillExportDto> skills, SkillScope targetScope);
 }

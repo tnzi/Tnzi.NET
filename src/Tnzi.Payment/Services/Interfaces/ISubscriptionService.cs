@@ -74,4 +74,19 @@ public interface ISubscriptionService
     /// 续费过期订阅
     /// </summary>
     Task<Result<int>> RenewExpiredSubscriptionsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 变更订阅计划（含按比例计费）
+    /// </summary>
+    Task<Result<SubscriptionChangeDto>> ChangeSubscriptionPlanAsync(Guid subscriptionId, ChangeSubscriptionPlanDto input, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 预览计划变更（按比例计费预览，不持久化）
+    /// </summary>
+    Task<Result<SubscriptionChangeDto>> GetPlanChangePreviewAsync(Guid subscriptionId, Guid newPlanId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 取消待生效的计划变更
+    /// </summary>
+    Task<Result> CancelPendingChangeAsync(Guid changeId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 }

@@ -1,77 +1,70 @@
 /**
  * Chat Module Types - Internal messaging system
- * Aligned with Tnzi.NET backend Chat module
+ * Aligned with Tnzi.NET backend Chat module (Tnzi.Chat/Dtos/ChatDtos.cs)
  */
 
-import type { AuditedEntity, FullAuditedEntity } from '../../types/entities';
 import type { SortedPagedQueryDto } from '../../types/pagination';
-import { MessageType, MessageStatus } from './metadata';
+import { MessageType } from './metadata';
 
-export { MessageType, MessageStatus };
+export { MessageType };
 
 // ============================================
 // Message Types
 // ============================================
 
 /**
- * Message DTO
+ * Message list item DTO (without replies and full content)
+ * Backend: MessageListItemDto
  */
-export interface ChatMessageDto extends AuditedEntity<string> {
+export interface MessageListItemDto {
+  id: string;
+  title: string;
+  messageType: MessageType;
+  senderId: string;
+  senderName?: string | null;
+  canReply: boolean;
+  creationTime: string;
+  isRead: boolean;
+  replyCount: number;
+  isImportant: boolean;
+}
+
+/**
+ * Message detail DTO (with replies and full content)
+ * Backend: MessageDto
+ */
+export interface MessageDto {
+  id: string;
   title: string;
   content: string;
   messageType: MessageType;
-  status: MessageStatus;
   senderId: string;
   senderName?: string | null;
-  senderAvatar?: string | null;
-  newReplyCount: number;
-  isPinned: boolean;
+  isSent: boolean;
   canReply: boolean;
-  beginDate?: Date | string | null;
-  endDate?: Date | string | null;
-  scheduledAt?: Date | string | null;
-  sentAt?: Date | string | null;
-  recipientCount: number;
-  readCount: number;
-  tags: string[];
-  attachments: AttachmentDto[];
-}
-
-/**
- * Message detail with replies
- */
-export interface ChatMessageDetailDto extends ChatMessageDto {
-  replies: ChatReplyDto[];
+  beginDate?: string | null;
+  endDate?: string | null;
+  creationTime: string;
   isRead: boolean;
-  readAt?: Date | string | null;
+  readTime?: string | null;
+  replyCount: number;
+  isImportant: boolean;
+  replies: MessageReplyDto[];
 }
 
 /**
- * Message reply DTO
+ * Message reply DTO (tree structure)
+ * Backend: MessageReplyDto
  */
-export interface ChatReplyDto extends AuditedEntity<string> {
-  messageId: string;
-  parentId?: string | null;
-  content: string;
-  senderId: string;
-  senderName?: string | null;
-  senderAvatar?: string | null;
-  isApproved: boolean;
-  approvedAt?: Date | string | null;
-  approvedBy?: string | null;
-  likeCount: number;
-  replies: ChatReplyDto[];
-}
-
-/**
- * Message attachment
- */
-export interface AttachmentDto {
+export interface MessageReplyDto {
   id: string;
-  fileName: string;
-  url: string;
-  size: number;
-  contentType: string;
+  content: string;
+  userId: string;
+  userName?: string | null;
+  belongMessageId: string;
+  parentReplyId?: string | null;
+  creationTime: string;
+  replies: MessageReplyDto[];
 }
 
 // ============================================
@@ -80,138 +73,67 @@ export interface AttachmentDto {
 
 /**
  * Create message request
+ * Backend: CreateMessageDto
  */
-export interface CreateChatMessageDto {
+export interface CreateMessageDto {
   title: string;
   content: string;
   messageType: MessageType;
+  roleIds?: string[];
   recipientIds?: string[];
-  recipientRoleIds?: string[];
-  recipientOrgIds?: string[];
   canReply?: boolean;
-  beginDate?: Date | string;
-  endDate?: Date | string;
-  scheduledAt?: Date | string;
-  sendImmediately?: boolean;
-  tags?: string[];
-  attachmentIds?: string[];
+  isImportant?: boolean;
+  beginDate?: string;
+  endDate?: string;
 }
 
 /**
- * Update message request
+ * Update message request (only sender can update)
+ * Backend: UpdateMessageDto
  */
-export interface UpdateChatMessageDto {
+export interface UpdateMessageDto {
   title?: string;
   content?: string;
-  messageType?: MessageType;
   canReply?: boolean;
-  beginDate?: Date | string;
-  endDate?: Date | string;
-  scheduledAt?: Date | string;
-  tags?: string[];
+  isImportant?: boolean;
+  beginDate?: string;
+  endDate?: string;
 }
 
 /**
  * Create reply request
+ * Backend: CreateMessageReplyDto
  */
-export interface CreateChatReplyDto {
+export interface CreateMessageReplyDto {
   messageId: string;
-  parentId?: string;
   content: string;
+  parentReplyId?: string;
 }
 
 /**
- * Message list query
+ * Message query (user inbox)
+ * Backend: MessageQueryDto extends PagedQueryDto
  */
-export interface ChatMessageQueryDto extends SortedPagedQueryDto {
+export interface MessageQueryDto extends SortedPagedQueryDto {
   messageType?: MessageType;
-  status?: MessageStatus;
-  senderId?: string;
-  isPinned?: boolean;
-  tag?: string;
-  startDate?: Date | string;
-  endDate?: Date | string;
-  keyword?: string;
-}
-
-// ============================================
-// Message Receive Types
-// ============================================
-
-/**
- * Message receive record (for inbox)
- */
-export interface MessageReceiveDto extends FullAuditedEntity<string> {
-  messageId: string;
-  userId: string;
-  title: string;
-  content: string;
-  messageType: MessageType;
-  senderId: string;
-  senderName?: string | null;
-  senderAvatar?: string | null;
-  isRead: boolean;
-  readAt?: Date | string | null;
-  isPinned: boolean;
-  hasReplies: boolean;
-  newReplyCount: number;
-  tags: string[];
-}
-
-/**
- * Inbox query parameters
- */
-export interface InboxQueryDto extends SortedPagedQueryDto {
   isRead?: boolean;
-  isPinned?: boolean;
+  isImportant?: boolean;
+  keyword?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+/**
+ * Admin message query
+ * Backend: AdminMessageQueryDto extends PagedQueryDto
+ */
+export interface AdminMessageQueryDto extends SortedPagedQueryDto {
   messageType?: MessageType;
-  tag?: string;
+  isSent?: boolean;
   senderId?: string;
-  startDate?: Date | string;
-  endDate?: Date | string;
-}
-
-// ============================================
-// Conversation Types (if direct messaging)
-// ============================================
-
-/**
- * Conversation DTO
- */
-export interface ConversationDto {
-  id: string;
-  type: 'direct' | 'group';
-  name?: string | null;
-  avatar?: string | null;
-  participants: ConversationParticipantDto[];
-  lastMessage?: LastMessageDto;
-  unreadCount: number;
-  isPinned: boolean;
-  isMuted: boolean;
-  updatedAt: Date | string;
-}
-
-/**
- * Conversation participant
- */
-export interface ConversationParticipantDto {
-  userId: string;
-  userName: string;
-  avatar?: string | null;
-  lastReadAt?: Date | string | null;
-  isOnline: boolean;
-}
-
-/**
- * Last message preview
- */
-export interface LastMessageDto {
-  id: string;
-  senderId: string;
-  senderName: string;
-  content: string;
-  sentAt: Date | string;
-  isRead: boolean;
+  keyword?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 // ============================================
@@ -220,22 +142,15 @@ export interface LastMessageDto {
 
 /**
  * Chat statistics
+ * Backend: ChatStatisticsDto
  */
 export interface ChatStatisticsDto {
   totalMessages: number;
+  sentMessages: number;
+  draftMessages: number;
+  publicMessages: number;
+  privateMessages: number;
   totalReplies: number;
-  unreadCount: number;
-  byType: Record<MessageType, number>;
-  byStatus: Record<MessageStatus, number>;
-  recentActivity: DailyActivityDto[];
-}
-
-/**
- * Daily activity
- */
-export interface DailyActivityDto {
-  date: string;
-  messages: number;
-  replies: number;
-  reads: number;
+  activeSenders: number;
+  importantMessages: number;
 }

@@ -382,6 +382,172 @@ public class ConnectionManagerEnhancedTests
 
     #endregion
 
+    #region Batch Metadata
+
+    [Fact]
+    public async Task GetConnectionsMetadataBatchAsync_Should_Return_Empty_For_No_Connections()
+    {
+        // Act
+        var result = await _connectionManager.GetConnectionsMetadataBatchAsync([]);
+
+        // Assert
+        result.ShouldNotBeNull();
+        result.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetConnectionsMetadataBatchAsync_Should_Return_All_Metadata_In_Single_Call()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn1", new ConnectionMetadata { IpAddress = "1.1.1.1", UserName = "user1" });
+        await _connectionManager.AddConnectionAsync(userId, "conn2", new ConnectionMetadata { IpAddress = "2.2.2.2", UserName = "user2" });
+        await _connectionManager.AddConnectionAsync(userId, "conn3", new ConnectionMetadata { IpAddress = "3.3.3.3", UserName = "user3" });
+
+        // Act
+        var result = await _connectionManager.GetConnectionsMetadataBatchAsync(["conn1", "conn2", "conn3"]);
+
+        // Assert
+        result.Count.ShouldBe(3);
+        result["conn1"].IpAddress.ShouldBe("1.1.1.1");
+        result["conn2"].IpAddress.ShouldBe("2.2.2.2");
+        result["conn3"].IpAddress.ShouldBe("3.3.3.3");
+        result["conn1"].UserName.ShouldBe("user1");
+    }
+
+    [Fact]
+    public async Task GetConnectionsMetadataBatchAsync_Should_Skip_Unknown_Connections()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn1", new ConnectionMetadata { IpAddress = "1.1.1.1" });
+
+        // Act
+        var result = await _connectionManager.GetConnectionsMetadataBatchAsync(["conn1", "unknown1", "unknown2"]);
+
+        // Assert
+        result.Count.ShouldBe(1);
+        result.ShouldContainKey("conn1");
+        result.ShouldNotContainKey("unknown1");
+    }
+
+    [Fact]
+    public async Task GetConnectionsMetadataBatchAsync_Should_Skip_Connections_Without_Metadata()
+    {
+        // Arrange — add connection without metadata
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn-no-meta");
+        await _connectionManager.AddConnectionAsync(userId, "conn-with-meta", new ConnectionMetadata { IpAddress = "5.5.5.5" });
+
+        // Act
+        var result = await _connectionManager.GetConnectionsMetadataBatchAsync(["conn-no-meta", "conn-with-meta"]);
+
+        // Assert
+        result.Count.ShouldBe(1);
+        result.ShouldContainKey("conn-with-meta");
+        result.ShouldNotContainKey("conn-no-meta");
+    }
+
+    [Fact]
+    public async Task GetConnectionsMetadataBatchAsync_Should_Return_Empty_After_Removal()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn1", new ConnectionMetadata { IpAddress = "1.1.1.1" });
+        await _connectionManager.RemoveConnectionAsync(userId, "conn1");
+
+        // Act
+        var result = await _connectionManager.GetConnectionsMetadataBatchAsync(["conn1"]);
+
+        // Assert
+        result.ShouldBeEmpty();
+    }
+
+    #endregion
+
+    #region Batch Groups
+
+    [Fact]
+    public async Task GetConnectionsGroupsBatchAsync_Should_Return_Empty_For_No_Connections()
+    {
+        // Act
+        var result = await _connectionManager.GetConnectionsGroupsBatchAsync([]);
+
+        // Assert
+        result.ShouldNotBeNull();
+        result.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetConnectionsGroupsBatchAsync_Should_Return_All_Groups_In_Single_Call()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn1");
+        await _connectionManager.AddConnectionAsync(userId, "conn2");
+        await _connectionManager.AddToGroupAsync("conn1", "groupA");
+        await _connectionManager.AddToGroupAsync("conn1", "groupB");
+        await _connectionManager.AddToGroupAsync("conn2", "groupC");
+
+        // Act
+        var result = await _connectionManager.GetConnectionsGroupsBatchAsync(["conn1", "conn2"]);
+
+        // Assert
+        result.Count.ShouldBe(2);
+        result["conn1"].Count.ShouldBe(2);
+        result["conn1"].ShouldContain("groupA");
+        result["conn1"].ShouldContain("groupB");
+        result["conn2"].Count.ShouldBe(1);
+        result["conn2"].ShouldContain("groupC");
+    }
+
+    [Fact]
+    public async Task GetConnectionsGroupsBatchAsync_Should_Skip_Connections_Without_Groups()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn1");
+        await _connectionManager.AddConnectionAsync(userId, "conn2");
+        await _connectionManager.AddToGroupAsync("conn1", "group1");
+
+        // Act
+        var result = await _connectionManager.GetConnectionsGroupsBatchAsync(["conn1", "conn2"]);
+
+        // Assert
+        result.Count.ShouldBe(1);
+        result.ShouldContainKey("conn1");
+        result.ShouldNotContainKey("conn2");
+    }
+
+    [Fact]
+    public async Task GetConnectionsGroupsBatchAsync_Should_Skip_Unknown_Connections()
+    {
+        // Act
+        var result = await _connectionManager.GetConnectionsGroupsBatchAsync(["unknown1", "unknown2"]);
+
+        // Assert
+        result.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetConnectionsGroupsBatchAsync_Should_Return_Empty_After_Group_Removal()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        await _connectionManager.AddConnectionAsync(userId, "conn1");
+        await _connectionManager.AddToGroupAsync("conn1", "group1");
+        await _connectionManager.RemoveFromGroupAsync("conn1", "group1");
+
+        // Act
+        var result = await _connectionManager.GetConnectionsGroupsBatchAsync(["conn1"]);
+
+        // Assert
+        // After removing last group, the connection's group set becomes empty and is cleaned up
+        result.ShouldBeEmpty();
+    }
+
+    #endregion
+
     #region Concurrent Access
 
     [Fact]

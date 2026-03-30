@@ -1,5 +1,6 @@
 <script setup lang="ts" generic="T extends Record<string, any>">
-import { computed, ref, watch } from 'vue';
+import { computed, h, isVNode, ref, watch } from 'vue';
+import type { VNode } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type {
   IDataTableEmits,
@@ -88,9 +89,19 @@ const toggleSelectRow = (row: T, index: number) => {
   emit('update:selectedKeys', localSelectedKeys.value);
 };
 
-const renderCell = (row: T, column: ITableColumn<T>, index: number) => {
+const renderCell = (row: T, column: ITableColumn<T>, index: number): unknown => {
   if (column.render) return column.render(row, index);
   return row[column.key as keyof T] as unknown;
+};
+
+/**
+ * Functional component wrapper for cell rendering.
+ * Handles both VNode and primitive return values from renderCell.
+ */
+const CellRenderer = (cellProps: { row: T; column: ITableColumn<T>; index: number }) => {
+  const result = renderCell(cellProps.row, cellProps.column, cellProps.index);
+  if (isVNode(result)) return result as VNode;
+  return h('span', {}, String(result ?? ''));
 };
 
 const getAlignClass = (align?: 'left' | 'center' | 'right') => {
@@ -204,7 +215,7 @@ const handleAction = (actionKey: string, row: T, index: number) => emit('action'
               :class="getAlignClass(column.align)"
             >
               <slot :name="`cell-${column.key}`" :row="row" :column="column" :index="index">
-                {{ renderCell(row, column, index) }}
+                <CellRenderer :row="row" :column="column" :index="index" />
               </slot>
             </td>
             <td v-if="props.actions" class="px-3 py-3 text-right" @click.stop>

@@ -32,10 +32,10 @@ public class ExceptionHandlingMiddleware
         _serviceProvider = Check.NotNull(serviceProvider);
         _exceptionStats = exceptionStats;
 
-        // 初始化异常处理器链（按优先级顺序）
+        // 初始化异常处理器链（按优先级降序预排序，避免每次请求重新排序）
         // 优先从DI容器获取，如果不存在则创建新实例
-        _handlers = new List<ExceptionHandlerBase>
-        {
+        _handlers =
+        [
             serviceProvider.GetService<Handlers.ValidationExceptionHandler>() ??
                 new Handlers.ValidationExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.ValidationExceptionHandler>>()),
             serviceProvider.GetService<Handlers.BusinessExceptionHandler>() ??
@@ -44,7 +44,8 @@ public class ExceptionHandlingMiddleware
                 new Handlers.InfrastructureExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.InfrastructureExceptionHandler>>()),
             serviceProvider.GetService<Handlers.DefaultExceptionHandler>() ??
                 new Handlers.DefaultExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.DefaultExceptionHandler>>())
-        };
+        ];
+        _handlers.Sort((a, b) => b.Priority.CompareTo(a.Priority));
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -150,11 +151,8 @@ public class ExceptionHandlingMiddleware
         }
         else
         {
-            // 使用处理器链处理异常（按优先级降序选择第一个匹配的处理器）
-            var handler = _handlers
-                .Where(h => h.CanHandle(exception))
-                .OrderByDescending(h => h.Priority)
-                .FirstOrDefault();
+            // 使用处理器链处理异常（已按优先级降序预排序，选择第一个匹配的处理器）
+            var handler = _handlers.Find(h => h.CanHandle(exception));
             if (handler != null)
             {
                 result = await handler.HandleAsync(context, exception);
@@ -177,14 +175,13 @@ public class ExceptionHandlingMiddleware
     private Task WriteResponseAsync(HttpContext context, ExceptionHandlingResult result)
     {
         var options = _options.CurrentValue;
-        var isDevelopment = _environment.IsDevelopment();
+        var hasExtendedInfo = result.ContextData != null || result.IsRetryable.HasValue;
 
-        // 构建响应对象
         object responseObject;
 
-        if (isDevelopment && (result.ErrorDetail != null || result.ContextData != null || result.IsRetryable.HasValue))
+        if (hasExtendedInfo || (_environment.IsDevelopment() && result.ErrorDetail != null))
         {
-            // 开发环境：包含详细信息
+            // 包含扩展信息（ContextData/IsRetryable），开发环境额外包含 Detail
             responseObject = new
             {
                 Code = result.StatusCode ?? 500,
@@ -193,22 +190,7 @@ public class ExceptionHandlingMiddleware
                 Errors = result.ErrorDetails,
                 ContextData = result.ContextData,
                 IsRetryable = result.IsRetryable,
-                Detail = result.ErrorDetail,
-                RequestId = options.IncludeRequestId ? context.TraceIdentifier : null,
-                Success = false
-            };
-        }
-        else if (result.ContextData != null || result.IsRetryable.HasValue)
-        {
-            // 生产环境：包含上下文数据和重试信息
-            responseObject = new
-            {
-                Code = result.StatusCode ?? 500,
-                Message = result.Message ?? "An error occurred while processing your request.",
-                ErrorCode = result.ErrorCode,
-                Errors = result.ErrorDetails,
-                ContextData = result.ContextData,
-                IsRetryable = result.IsRetryable,
+                Detail = _environment.IsDevelopment() ? result.ErrorDetail : null,
                 RequestId = options.IncludeRequestId ? context.TraceIdentifier : null,
                 Success = false
             };

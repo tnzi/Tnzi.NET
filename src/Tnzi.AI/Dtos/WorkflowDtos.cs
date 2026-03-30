@@ -220,6 +220,122 @@ public class CloneWorkflowRequestDto
 }
 
 /// <summary>
+/// 工作流执行历史查询 DTO
+/// </summary>
+public class WorkflowExecutionQueryDto : PagedQueryDto
+{
+    protected override int DefaultPageSize => 20;
+
+    /// <summary>Filter by workflow definition ID</summary>
+    public Guid? WorkflowDefinitionId { get; set; }
+
+    /// <summary>Filter by status</summary>
+    public WorkflowExecutionStatus? Status { get; set; }
+}
+
+/// <summary>
+/// 工作流执行历史摘要 DTO
+/// </summary>
+public class WorkflowExecutionSummaryDto
+{
+    /// <summary>Database entity ID</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Execution ID (business ID)</summary>
+    public string ExecutionId { get; set; } = string.Empty;
+
+    /// <summary>Associated workflow definition ID</summary>
+    public Guid? WorkflowDefinitionId { get; set; }
+
+    /// <summary>Execution status</summary>
+    public WorkflowExecutionStatus Status { get; set; }
+
+    /// <summary>Number of completed steps</summary>
+    public int CompletedStepCount { get; set; }
+
+    /// <summary>Number of steps awaiting approval</summary>
+    public int AwaitingApprovalCount { get; set; }
+
+    /// <summary>Execution start time</summary>
+    public DateTime? StartedAt { get; set; }
+
+    /// <summary>Execution duration in milliseconds</summary>
+    public long? DurationMs { get; set; }
+
+    /// <summary>Creation time</summary>
+    public DateTime CreationTime { get; set; }
+
+    /// <summary>Completed time</summary>
+    public DateTime? CompletedTime { get; set; }
+
+    /// <summary>Last updated time</summary>
+    public DateTime UpdatedTime { get; set; }
+}
+
+/// <summary>
+/// 工作流执行详情 DTO
+/// </summary>
+public class WorkflowExecutionDetailDto : WorkflowExecutionSummaryDto
+{
+    /// <summary>Initial input</summary>
+    public string InitialInput { get; set; } = string.Empty;
+
+    /// <summary>Completed step IDs</summary>
+    public List<string> CompletedStepIds { get; set; } = [];
+
+    /// <summary>Steps awaiting approval</summary>
+    public List<string> StepsAwaitingApproval { get; set; } = [];
+
+    /// <summary>Step outputs (stepId → output text)</summary>
+    public Dictionary<string, string> StepOutputs { get; set; } = new();
+}
+
+/// <summary>
+/// 工作流统计 DTO
+/// </summary>
+public class WorkflowStatsDto
+{
+    /// <summary>Total workflow definitions</summary>
+    public int TotalWorkflows { get; set; }
+
+    /// <summary>Enabled workflows</summary>
+    public int EnabledWorkflows { get; set; }
+
+    /// <summary>Disabled workflows</summary>
+    public int DisabledWorkflows { get; set; }
+
+    /// <summary>Count by execution mode</summary>
+    public Dictionary<string, int> ByExecutionMode { get; set; } = new();
+
+    /// <summary>Total executions</summary>
+    public int TotalExecutions { get; set; }
+
+    /// <summary>Running executions</summary>
+    public int RunningExecutions { get; set; }
+
+    /// <summary>Completed executions</summary>
+    public int CompletedExecutions { get; set; }
+
+    /// <summary>Failed executions</summary>
+    public int FailedExecutions { get; set; }
+}
+
+/// <summary>
+/// 工作流验证结果 DTO
+/// </summary>
+public class WorkflowValidationResultDto
+{
+    /// <summary>Whether the workflow is valid</summary>
+    public bool IsValid { get; set; }
+
+    /// <summary>Validation errors</summary>
+    public List<string> Errors { get; set; } = [];
+
+    /// <summary>Validation warnings</summary>
+    public List<string> Warnings { get; set; } = [];
+}
+
+/// <summary>
 /// 工作流流式事件 DTO
 /// </summary>
 public class WorkflowStreamEventDto
@@ -247,4 +363,115 @@ public class WorkflowStreamEventDto
 
     /// <summary>错误消息（仅错误事件时提供）</summary>
     public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// 工作流定义版本 DTO
+/// </summary>
+public class WorkflowDefinitionVersionDto
+{
+    /// <summary>Version entity ID</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Associated workflow definition ID</summary>
+    public Guid WorkflowDefinitionId { get; set; }
+
+    /// <summary>Version number</summary>
+    public int VersionNumber { get; set; }
+
+    /// <summary>Change description</summary>
+    public string? ChangeDescription { get; set; }
+
+    /// <summary>Full definition snapshot (JSON)</summary>
+    public string? Definition { get; set; }
+
+    /// <summary>Creation time</summary>
+    public DateTime CreationTime { get; set; }
+}
+
+/// <summary>
+/// 工作流执行统计 DTO
+/// </summary>
+public class WorkflowExecutionStatsDto
+{
+    /// <summary>Workflow definition ID</summary>
+    public Guid WorkflowId { get; set; }
+
+    /// <summary>Total execution count</summary>
+    public int TotalExecutions { get; set; }
+
+    /// <summary>Average duration in milliseconds</summary>
+    public double? AvgDurationMs { get; set; }
+
+    /// <summary>Minimum duration in milliseconds</summary>
+    public long? MinDurationMs { get; set; }
+
+    /// <summary>Maximum duration in milliseconds</summary>
+    public long? MaxDurationMs { get; set; }
+
+    /// <summary>95th percentile duration in milliseconds</summary>
+    public long? P95DurationMs { get; set; }
+
+    /// <summary>Success rate (0.0 to 1.0)</summary>
+    public double SuccessRate { get; set; }
+}
+
+/// <summary>
+/// 更新工作流 DTO（扩展版本说明字段）
+/// </summary>
+public class UpdateWorkflowDefinitionWithVersionDto : UpdateWorkflowDefinitionDto
+{
+    /// <summary>Optional change description for version history</summary>
+    [MaxLength(500)]
+    public string? ChangeDescription { get; set; }
+}
+
+/// <summary>
+/// 恢复工作流版本请求 DTO
+/// </summary>
+public class RestoreWorkflowVersionRequestDto
+{
+    /// <summary>Optional change description for the restore operation</summary>
+    [MaxLength(500)]
+    public string? ChangeDescription { get; set; }
+}
+
+/// <summary>
+/// 工作流中断信息 DTO — 描述等待中的中断
+/// </summary>
+[ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+public class WorkflowInterruptDto
+{
+    /// <summary>中断发生的步骤 ID</summary>
+    public string StepId { get; set; } = string.Empty;
+
+    /// <summary>中断原因</summary>
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>中断类型（Approval, HumanInput, ExternalEvent）</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>请求的输入字段定义</summary>
+    public Dictionary<string, object>? RequestedInput { get; set; }
+
+    /// <summary>中断超时时间（秒）</summary>
+    public double? TimeoutSeconds { get; set; }
+
+    /// <summary>执行 ID</summary>
+    public string ExecutionId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 恢复中断的工作流输入 DTO
+/// </summary>
+[ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+public class ResumeWorkflowInputDto
+{
+    /// <summary>中断步骤 ID（用于验证匹配）</summary>
+    [Required]
+    public string StepId { get; set; } = null!;
+
+    /// <summary>外部提供的输入数据</summary>
+    [Required]
+    public Dictionary<string, object> Input { get; set; } = null!;
 }

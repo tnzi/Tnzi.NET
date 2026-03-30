@@ -24,6 +24,11 @@ public class FileRecordConfiguration : EntityTypeConfigurationBase<FileRecord, G
         builder.Property(e => e.IsTemporary).HasDefaultFalse();
         builder.Property(e => e.Tags).HasMaxLength(1024);
 
+        builder.Property(e => e.Metadata).HasMaxLength(4096);
+
+        // FileFolder relationship
+        builder.HasIndex(e => e.FolderId);
+
         // 创建索引
         if (multiTenancyEnabled)
         {

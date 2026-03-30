@@ -92,6 +92,16 @@ export class SortController {
       this.sortFields = this.sortBy
         ? [{ field: this.sortBy, direction: this.sortDirection }]
         : [];
+    } else {
+      // Multiple mode: update or add entry in sortFields
+      const existingIndex = this.sortFields.findIndex(f => f.field === field);
+      if (existingIndex >= 0) {
+        this.sortFields = this.sortFields.map((f, i) =>
+          i === existingIndex ? { field, direction: this.sortDirection } : f
+        );
+      } else {
+        this.sortFields = [...this.sortFields, { field, direction: this.sortDirection }];
+      }
     }
   }
 

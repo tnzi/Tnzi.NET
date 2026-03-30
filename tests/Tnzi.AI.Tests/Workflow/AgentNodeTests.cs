@@ -9,20 +9,20 @@ public class AgentNodeTests
     private readonly Mock<IChatClient> _mockChatClient = new();
 
     /// <summary>
-    /// 构建一个 IServiceProvider，CreateScope 后能解析 IAgentFactory
+    /// 构建 IWorkflowNodeServiceContext，包含 AgentFactory
     /// </summary>
-    private IServiceProvider BuildScopedServiceProvider()
+    private IWorkflowNodeServiceContext BuildNodeServiceContext()
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(_mockAgentFactory.Object);
-        return services.BuildServiceProvider();
+        var mock = new Mock<IWorkflowNodeServiceContext>();
+        mock.Setup(c => c.AgentFactory).Returns(_mockAgentFactory.Object);
+        mock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
+        return mock.Object;
     }
 
     private AgentNode CreateNode()
     {
         return new AgentNode(
-            BuildScopedServiceProvider(),
+            BuildNodeServiceContext(),
             Mock.Of<ILogger<AgentNode>>());
     }
 
@@ -76,7 +76,7 @@ public class AgentNodeTests
             },
             State = new WorkflowState("Test input"),
             DependencyOutputs = new Dictionary<string, WorkflowStepOutput>(),
-            ServiceProvider = BuildScopedServiceProvider()
+            ServiceProvider = new Mock<IServiceProvider>().Object
         };
 
         // Act
@@ -126,7 +126,7 @@ public class AgentNodeTests
             },
             State = new WorkflowState("Test input"),
             DependencyOutputs = new Dictionary<string, WorkflowStepOutput>(),
-            ServiceProvider = BuildScopedServiceProvider()
+            ServiceProvider = new Mock<IServiceProvider>().Object
         };
 
         // Act
@@ -181,7 +181,7 @@ public class AgentNodeTests
             },
             State = new WorkflowState("Test input"),
             DependencyOutputs = new Dictionary<string, WorkflowStepOutput>(),
-            ServiceProvider = BuildScopedServiceProvider()
+            ServiceProvider = new Mock<IServiceProvider>().Object
         };
 
         // Act

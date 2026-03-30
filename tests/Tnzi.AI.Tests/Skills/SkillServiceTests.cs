@@ -477,4 +477,211 @@ public class SkillServiceTests : IDisposable
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(404);
     }
+
+    // -------------------------------------------------------------------------
+    // ActivateAsync — Requirements Validation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ActivateAsync_RequirementsNotMet_Returns400()
+    {
+        var skill = MakeSkill("requires-bins");
+        skill.Requirements = new SkillRequirements { Bins = ["nonexistent-binary-abc"] };
+
+        _mockRegistry.Setup(r => r.GetBySlugAsync("requires-bins", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(skill);
+
+        var mockValidator = new Mock<ISkillRequirementsValidator>();
+        mockValidator.Setup(v => v.ValidateRequirements(skill))
+            .Returns(new SkillValidationResult { IsValid = false, MissingBins = ["nonexistent-binary-abc"] });
+
+        var service = new SkillService(
+            _serviceProvider,
+            _mockRepository.Object,
+            _mockRegistry.Object,
+            _mockTemplateEngine.Object,
+            _fileStore,
+            mockValidator.Object);
+
+        var result = await service.ActivateAsync("requires-bins");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message.ShouldContain("requirements not met");
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateAsync — System Skill Conflict
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateAsync_ConflictsWithSystemSkill_Returns409()
+    {
+        // Write a SKILL.md in the temp dir so FileSystemSkillStore finds it
+        var skillDir = Path.Combine(_tempDir, "system-skill");
+        Directory.CreateDirectory(skillDir);
+        File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), "---\nname: System Skill\ndescription: A system skill.\n---");
+
+        // Force reload
+        _fileStore.InvalidateCache();
+
+        var input = new CreateSkillDto
+        {
+            Slug = "system-skill",
+            Name = "System Skill",
+            Content = "Content",
+            Scope = SkillScope.Tenant
+        };
+
+        var service = CreateService();
+        var result = await service.CreateAsync(input);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(409);
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateAsync — User Scope Without Auth
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateAsync_UserScopeWithoutAuth_Returns401()
+    {
+        var input = new CreateSkillDto
+        {
+            Slug = "user-skill",
+            Name = "User Skill",
+            Content = "Content",
+            Scope = SkillScope.User
+        };
+
+        // No CurrentUser configured in service provider
+        var service = CreateService();
+        var result = await service.CreateAsync(input);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(401);
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateAsync — With Constraints
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateAsync_WithConstraints_StoresConstraintsJson()
+    {
+        var input = new CreateSkillDto
+        {
+            Slug = "constrained",
+            Name = "Constrained Skill",
+            Content = "Content",
+            Scope = SkillScope.Tenant,
+            AllowedToolGroups = ["code", "search"],
+            RequiredModel = "gpt-4",
+            RequiredProvider = "openai"
+        };
+
+        SkillEntity? capturedEntity = null;
+        _mockRepository.Setup(r => r.AnyAsync(It.IsAny<Expression<Func<SkillEntity, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockRepository.Setup(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<SkillEntity, CancellationToken>((e, _) => capturedEntity = e)
+            .Returns(Task.CompletedTask);
+
+        var service = CreateService();
+        var result = await service.CreateAsync(input);
+
+        result.Succeeded.ShouldBeTrue();
+        capturedEntity.ShouldNotBeNull();
+        capturedEntity!.ConstraintsJson.ShouldNotBeNullOrWhiteSpace();
+        capturedEntity.ConstraintsJson.ShouldContain("allowedToolGroups");
+        capturedEntity.ConstraintsJson.ShouldContain("requiredModel");
+        capturedEntity.ConstraintsJson.ShouldContain("gpt-4");
+    }
+
+    // -------------------------------------------------------------------------
+    // UpdateAsync — Ownership Check
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task UpdateAsync_UserScope_WrongOwner_Returns403()
+    {
+        var id = Guid.NewGuid();
+        var entity = new SkillEntity
+        {
+            Id = id,
+            Slug = "user-skill",
+            Name = "User Skill",
+            Content = "Content",
+            Scope = SkillScope.User,
+            OwnerUserId = Guid.NewGuid() // Different from CurrentUser
+        };
+
+        _mockRepository.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(entity);
+
+        var service = CreateService();
+        var result = await service.UpdateAsync(id, new UpdateSkillDto { Name = "Hacked" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+    }
+
+    // -------------------------------------------------------------------------
+    // UpdateAsync — Constraint Merge
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task UpdateAsync_PartialConstraints_MergesWithExisting()
+    {
+        var id = Guid.NewGuid();
+        var entity = new SkillEntity
+        {
+            Id = id,
+            Slug = "merge-test",
+            Name = "Merge Test",
+            Content = "Content",
+            Scope = SkillScope.Tenant,
+            ConstraintsJson = JsonSerializer.Serialize(new { allowedToolGroups = new[] { "code" }, requiredModel = "gpt-3.5" }, TnziJsonDefaults.Options)
+        };
+
+        _mockRepository.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(entity);
+        _mockRepository.Setup(r => r.UpdateAsync(entity, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = CreateService();
+        var result = await service.UpdateAsync(id, new UpdateSkillDto { RequiredModel = "gpt-4" });
+
+        result.Succeeded.ShouldBeTrue();
+        // Existing allowedToolGroups should be preserved, model updated
+        entity.ConstraintsJson.ShouldContain("code");
+        entity.ConstraintsJson.ShouldContain("gpt-4");
+        entity.ConstraintsJson.ShouldNotContain("gpt-3.5");
+    }
+
+    // -------------------------------------------------------------------------
+    // DeleteAsync — Ownership Check
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task DeleteAsync_UserScope_WrongOwner_Returns403()
+    {
+        var id = Guid.NewGuid();
+        var entity = new SkillEntity
+        {
+            Id = id,
+            Slug = "user-skill",
+            Name = "User Skill",
+            Content = "Content",
+            Scope = SkillScope.User,
+            OwnerUserId = Guid.NewGuid()
+        };
+
+        _mockRepository.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(entity);
+
+        var service = CreateService();
+        var result = await service.DeleteAsync(id);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+    }
 }

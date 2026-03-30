@@ -84,35 +84,34 @@ public class RagModule : TnziApplicationModule
         // Users can register additional ISearchPostProcessor implementations
         services.AddScoped<ISearchPostProcessor, DeduplicationPostProcessor>();
         services.AddScoped<ISearchPostProcessor, ScoreNormalizationPostProcessor>();
+        services.AddScoped<ISearchPostProcessor, WeightedDiminishingReranker>();
 
         // 核心业务服务
         services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 
+        // RAG 检索器 + 查询引擎 + 聊天引擎（Query/Chat split）
+        services.AddScoped<IRagRetriever, RagRetriever>();
+        services.AddScoped<IRagQueryEngine, RagQueryEngine>();
+        services.AddScoped<IRagChatEngine, RagChatEngine>();
+
         // 后台摄取任务（需配合 Hangfire 模块使用，无 Hangfire 时 KnowledgeBaseService 自动回退同步模式）
         services.AddScoped<IBackgroundJob<DocumentIngestionJobArgs>, DocumentIngestionBackgroundJob>();
 
         // Embedding 缓存装饰器（条件启用）
+        // 使用 keyed services 实现装饰器模式，避免 new 手动构造带来的耦合
         var embeddingCacheEnabled = context.Configuration
             .GetSection("AI:Rag:EmbeddingCache")
             .GetValue<bool>("Enabled");
 
         if (embeddingCacheEnabled)
         {
-            // 包装 IEmbeddingService 为 CachingEmbeddingDecorator
-            // 通过 RemoveAll + AddScoped 替换原始实现
-            services.RemoveAll<IEmbeddingService>();
-            services.AddScoped<IEmbeddingService>(sp =>
-            {
-                // 手动构造原始 EmbeddingService 避免循环依赖
-                var factory = sp.GetRequiredService<IChatClientFactory>();
-                var inner = new AI.Services.EmbeddingService(factory, sp);
+            // 将原始 EmbeddingService 注册为 keyed service，避免循环依赖
+            services.AddKeyedScoped<IEmbeddingService, AI.Services.EmbeddingService>(CachingEmbeddingDecorator.InnerServiceKey);
 
-                var decoratorLogger = sp.GetRequiredService<ILogger<CachingEmbeddingDecorator>>();
-                var ragOptions = sp.GetRequiredService<IOptions<AIRagOptions>>();
-                var cache = sp.GetService<Tnzi.Caching.ICache>();
-                return new CachingEmbeddingDecorator(inner, decoratorLogger, ragOptions, cache);
-            });
+            // 替换 IEmbeddingService 为 CachingEmbeddingDecorator
+            services.RemoveAll<IEmbeddingService>();
+            services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();
         }
 
         // 替换 NoOpTextSearchService 为向量/混合搜索实现

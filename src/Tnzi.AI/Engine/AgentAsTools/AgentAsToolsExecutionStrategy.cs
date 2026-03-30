@@ -2,14 +2,18 @@ namespace Tnzi.AI.Engine.AgentAsTools;
 
 /// <summary>
 /// AgentAsTools 执行策略 — 将子 Agent 作为工具注入父 Agent，由 LLM 决定调用
+/// 支持 SemaphoreSlim 并发限制 + 单子 Agent 超时 + SSE progress events
 /// </summary>
-public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
+public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDisposable
 {
     private readonly AgentAsToolsConfiguration _config;
+    private readonly SemaphoreSlim _concurrencyLimiter;
 
     public AgentAsToolsExecutionStrategy(AgentAsToolsConfiguration config)
     {
         _config = Check.NotNull(config);
+        var maxConcurrent = Math.Clamp(config.MaxConcurrentSubAgents, 2, 4);
+        _concurrencyLimiter = new SemaphoreSlim(maxConcurrent, maxConcurrent);
         ValidateNoDuplicateToolNames();
     }
 
@@ -37,7 +41,6 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
             yield return chunk;
         }
 
-        // 发射子 Agent 聚合用量的最终元数据 chunk
         if (!childInvocations.IsEmpty)
         {
             int totalInput = 0, totalOutput = 0;
@@ -57,7 +60,6 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
 
     private List<AITool> CreateChildAgentTools(ExecutionStrategyContext context, ConcurrentQueue<(string, int, int)> invocations, CancellationToken ct)
     {
-        // 仅当配置启用时解析 forwarder，避免不必要的 DI 解析
         var forwarder = _config.EnableChildStreaming
             ? context.ServiceProvider.GetService<IAgentStreamForwarder>()
             : null;
@@ -71,39 +73,21 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
         return tools;
     }
 
-    private static AITool CreateChildAgentTool(string childName, Guid childAgentId, ExecutionStrategyContext context, ConcurrentQueue<(string, int, int)> invocations, IAgentStreamForwarder? forwarder, CancellationToken ct)
+    private AITool CreateChildAgentTool(string childName, Guid childAgentId, ExecutionStrategyContext context, ConcurrentQueue<(string, int, int)> invocations, IAgentStreamForwarder? forwarder, CancellationToken ct)
     {
         return AIFunctionFactory.Create(
             async (string task) =>
             {
+                // Acquire concurrency slot
+                await _concurrencyLimiter.WaitAsync(ct);
                 try
                 {
-                    var childAgent = await ExecutionStrategyAgentLoader.ResolveAgentAsync(childAgentId, context, ct);
-                    if (childAgent == null)
-                        return $"Agent '{childName}' is not available.";
-
-                    var childMessages = new List<ChatMessage> { new(ChatRole.User, task) };
-
-                    // 注册了流式转发器时使用流式执行，实时转发子 Agent 输出
-                    if (forwarder != null)
-                    {
-                        return await ExecuteChildStreamingAsync(childAgent, childName, childMessages, forwarder, invocations, ct);
-                    }
-
-                    // 未注册时使用非流式执行（原有行为）
-                    var response = await childAgent.ExecuteAsync(childMessages, ct);
-
-                    if (response.Usage != null)
-                    {
-                        invocations.Enqueue((childName, response.Usage.InputTokens, response.Usage.OutputTokens));
-                    }
-
-                    return response.Text ?? string.Empty;
+                    return await ExecuteChildWithTimeoutAsync(
+                        childName, childAgentId, task, context, invocations, forwarder, ct);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                finally
                 {
-                    context.Logger.LogWarning(ex, "Child agent '{ChildName}' execution failed", childName);
-                    return $"Agent '{childName}' encountered an error: {ex.Message}";
+                    _concurrencyLimiter.Release();
                 }
             },
             new AIFunctionFactoryOptions
@@ -113,16 +97,96 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
             });
     }
 
+    private async Task<string> ExecuteChildWithTimeoutAsync(
+        string childName, Guid childAgentId, string task,
+        ExecutionStrategyContext context, ConcurrentQueue<(string, int, int)> invocations,
+        IAgentStreamForwarder? forwarder, CancellationToken ct)
+    {
+        // Emit started event
+        context.EmitEvent?.Invoke(new AgentStreamChunk
+        {
+            EventType = SubAgentEventTypes.Started,
+            EventData = new() { ["agent"] = childName, ["task"] = Truncate(task, 200) },
+            Mode = StreamMode.Steps
+        });
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(_config.SubAgentTimeout);
+
+        try
+        {
+            var childAgent = await ExecutionStrategyAgentLoader.ResolveAgentAsync(childAgentId, context, timeoutCts.Token);
+            if (childAgent == null)
+            {
+                EmitFailedEvent(context, childName, "Agent not available");
+                return $"Agent '{childName}' is not available.";
+            }
+
+            var childMessages = new List<ChatMessage> { new(ChatRole.User, task) };
+
+            string result;
+            if (forwarder != null)
+            {
+                result = await ExecuteChildStreamingAsync(childAgent, childName, childMessages, forwarder, invocations, timeoutCts.Token);
+            }
+            else
+            {
+                var response = await childAgent.ExecuteAsync(childMessages, timeoutCts.Token);
+                if (response.Usage != null)
+                    invocations.Enqueue((childName, response.Usage.InputTokens, response.Usage.OutputTokens));
+                result = response.Text ?? string.Empty;
+            }
+
+            // Emit completed event
+            context.EmitEvent?.Invoke(new AgentStreamChunk
+            {
+                EventType = SubAgentEventTypes.Completed,
+                EventData = new() { ["agent"] = childName, ["result_length"] = result.Length },
+                Mode = StreamMode.Steps
+            });
+
+            return result;
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // Sub-agent timeout (not parent cancellation)
+            context.Logger.LogWarning("Child agent '{ChildName}' timed out after {Timeout}", childName, _config.SubAgentTimeout);
+            context.EmitEvent?.Invoke(new AgentStreamChunk
+            {
+                EventType = SubAgentEventTypes.TimedOut,
+                EventData = new() { ["agent"] = childName, ["timeout_seconds"] = _config.SubAgentTimeout.TotalSeconds },
+                Mode = StreamMode.Steps
+            });
+            return $"Agent '{childName}' timed out after {_config.SubAgentTimeout.TotalSeconds}s.";
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // Parent cancellation — propagate
+        }
+        catch (Exception ex)
+        {
+            context.Logger.LogWarning(ex, "Child agent '{ChildName}' execution failed", childName);
+            EmitFailedEvent(context, childName, ex.Message);
+            return $"Agent '{childName}' encountered an error: {ex.Message}";
+        }
+    }
+
+    private static void EmitFailedEvent(ExecutionStrategyContext context, string childName, string error)
+    {
+        context.EmitEvent?.Invoke(new AgentStreamChunk
+        {
+            EventType = SubAgentEventTypes.Failed,
+            EventData = new() { ["agent"] = childName, ["error"] = Truncate(error, 200) },
+            Mode = StreamMode.Steps
+        });
+    }
+
     /// <summary>
     /// Execute child agent with streaming, forwarding each delta chunk through the forwarder.
     /// </summary>
     private static async Task<string> ExecuteChildStreamingAsync(
-        AgentExecutor childAgent,
-        string childName,
-        List<ChatMessage> childMessages,
-        IAgentStreamForwarder forwarder,
-        ConcurrentQueue<(string, int, int)> invocations,
-        CancellationToken ct)
+        AgentExecutor childAgent, string childName, List<ChatMessage> childMessages,
+        IAgentStreamForwarder forwarder, ConcurrentQueue<(string, int, int)> invocations, CancellationToken ct)
     {
         var sb = new StringBuilder();
         int promptTokens = 0, completionTokens = 0;
@@ -143,9 +207,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
         }
 
         if (promptTokens > 0 || completionTokens > 0)
-        {
             invocations.Enqueue((childName, promptTokens, completionTokens));
-        }
 
         return sb.ToString();
     }
@@ -192,6 +254,14 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
             AggregatedUsage = ExecutionStrategyAgentLoader.BuildUsage(totalInput, totalOutput)
         };
     }
+
+    public void Dispose()
+    {
+        _concurrencyLimiter.Dispose();
+    }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length > maxLength ? value[..maxLength] + "..." : value;
 
     [GeneratedRegex(@"[^a-z0-9]")]
     private static partial Regex NonAlphanumericLowerRegex();

@@ -280,12 +280,13 @@ export class AppStateManager {
   }
 
   markNotificationRead(id: string): void {
-    const notification = this.ui.toasts.find(n => n.id === id);
-    if (notification) notification.read = true;
+    this.ui.toasts = this.ui.toasts.map(n =>
+      n.id === id ? { ...n, read: true } : n
+    );
   }
 
   markAllNotificationsRead(): void {
-    this.ui.toasts.forEach(n => { n.read = true; });
+    this.ui.toasts = this.ui.toasts.map(n => ({ ...n, read: true }));
   }
 
   clearNotifications(): void {

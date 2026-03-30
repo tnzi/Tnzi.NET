@@ -63,4 +63,12 @@ public class AgentExecutorOptions
     /// 可选 Logger（由 AgentFactory 注入，用于记录工具执行异常）
     /// </summary>
     public ILogger? Logger { get; set; }
+
+    /// <summary>
+    /// When true, strip TextContent from assistant messages that contain tool calls
+    /// before sending the continuation request. Some models (e.g. DeepSeek) produce
+    /// token fracturing (\n\n between every token) when receiving both content and
+    /// tool_calls in the same assistant message. Default: false.
+    /// </summary>
+    public bool StripTextFromToolCallMessages { get; set; }
 }

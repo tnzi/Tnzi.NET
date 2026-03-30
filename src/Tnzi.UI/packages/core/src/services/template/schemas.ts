@@ -21,7 +21,6 @@ const templateVariableTypes: [TemplateVariableType, ...TemplateVariableType[]] =
 export const templateQuerySchema = sortedPagedQuerySchema.extend({
   module: z.string().optional(),
   category: z.string().optional(),
-  templateName: z.string().optional(),
   isActive: z.boolean().optional(),
   keyword: z.string().optional(),
 });
@@ -40,22 +39,35 @@ export const templateVariableSchema = z.object({
 
 /**
  * Template Create/Update Schema
+ * Aligned with backend TemplateRequestBase
  */
 export const templateUpsertSchema = z.object({
   templateName: z.string().min(1).max(200),
   module: z.string().min(1).max(100),
   category: z.string().min(1).max(100),
-  subjectTemplate: z.string().min(1),
+  subjectTemplate: z.string().default(''),
   contentTemplate: z.string().min(1),
   defaultLayoutName: z.string().max(200).optional(),
   isActive: z.boolean().optional(),
   description: z.string().max(500).optional(),
   metadata: z.string().max(4000).optional(),
-  variables: z.array(templateVariableSchema).optional(),
+});
+
+/**
+ * Layout Query Schema
+ * Aligned with backend QueryLayoutRequest
+ */
+export const layoutQuerySchema = sortedPagedQuerySchema.extend({
+  module: z.string().optional(),
+  category: z.string().optional(),
+  isActive: z.boolean().optional(),
+  isDefault: z.boolean().optional(),
+  keyword: z.string().optional(),
 });
 
 /**
  * Layout Create/Update Schema
+ * Aligned with backend LayoutRequestBase
  */
 export const layoutUpsertSchema = z.object({
   layoutName: z.string().min(1).max(200),
@@ -69,6 +81,51 @@ export const layoutUpsertSchema = z.object({
 });
 
 /**
+ * Validate template schema
+ * Aligned with backend ValidateTemplateRequest
+ */
+export const validateTemplateSchema = z.object({
+  content: z.string().min(1),
+});
+
+/**
+ * Preview template schema
+ * Aligned with backend PreviewTemplateRequest
+ */
+export const previewTemplateSchema = z.object({
+  content: z.string().min(1),
+  layoutContent: z.string().optional(),
+  model: z.record(z.unknown()).optional(),
+});
+
+/**
+ * Template import schema
+ * Aligned with backend TemplateImportRequest
+ */
+export const templateImportSchema = z.object({
+  json: z.string().min(1),
+  overwriteExisting: z.boolean().optional(),
+});
+
+/**
+ * Layout import schema
+ * Aligned with backend LayoutImportRequest
+ */
+export const layoutImportSchema = z.object({
+  json: z.string().min(1),
+  overwriteExisting: z.boolean().optional(),
+});
+
+/**
+ * Batch activate schema
+ * Aligned with backend BatchActivateRequest
+ */
+export const batchActivateSchema = z.object({
+  ids: z.array(z.string()).min(1),
+  isActive: z.boolean(),
+});
+
+/**
  * Template entity schema
  */
 export const templateEntitySchema = z.object({
@@ -76,7 +133,7 @@ export const templateEntitySchema = z.object({
   templateName: z.string().min(1),
   module: z.string().min(1),
   category: z.string().min(1),
-  subjectTemplate: z.string().min(1),
+  subjectTemplate: z.string(),
   contentTemplate: z.string().min(1),
   defaultLayoutName: z.string().nullable().optional(),
   isActive: z.boolean(),

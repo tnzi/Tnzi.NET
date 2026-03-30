@@ -17,6 +17,14 @@ import type { UserDto, UpdateUserDto } from '@tnzi/core/services/identity';
 import { useProfileApi } from '@tnzi/core/services/identity';
 import { createStore, getStoreHttpClient } from '../factory';
 
+/**
+ * Internal type for actions that call other actions on the store.
+ */
+interface UserStoreThis {
+  applyTheme(theme: UserTheme): void;
+  applyLanguage(language: string): void;
+}
+
 // ============================================
 // Constants
 // ============================================
@@ -74,7 +82,7 @@ export const useUserStore = createStore<UserState>({
 
   actions: {
     // Profile actions
-    async fetchCurrentUser(): Promise<void> {
+    async fetchCurrentUser(this: { $state: UserState }): Promise<void> {
       this.$state.isLoading = true;
       this.$state.error = null;
 
@@ -93,7 +101,7 @@ export const useUserStore = createStore<UserState>({
       }
     },
 
-    async updateProfile(data: UpdateUserDto): Promise<UserDto> {
+    async updateProfile(this: { $state: UserState }, data: UpdateUserDto): Promise<UserDto> {
       this.$state.isLoading = true;
       this.$state.error = null;
 
@@ -115,7 +123,7 @@ export const useUserStore = createStore<UserState>({
     },
 
     // Preferences actions
-    async updatePreferences(preferences: Partial<UserPreferences>): Promise<void> {
+    async updatePreferences(this: { $state: UserState } & UserStoreThis, preferences: Partial<UserPreferences>): Promise<void> {
       this.$state.preferences = { ...this.$state.preferences, ...preferences };
 
       if (preferences.theme !== undefined) {
@@ -126,73 +134,58 @@ export const useUserStore = createStore<UserState>({
       }
     },
 
-    resetPreferences(): void {
+    resetPreferences(this: { $state: UserState } & UserStoreThis): void {
       this.$state.preferences = { ...defaultUserPreferences };
       this.applyTheme(this.$state.preferences.theme);
       this.applyLanguage(this.$state.preferences.language);
     },
 
-    setTheme(theme: UserTheme): void {
-      this.$state.preferences.theme = theme;
+    setTheme(this: { $state: UserState } & UserStoreThis, theme: UserTheme): void {
+      this.$state.preferences = { ...this.$state.preferences, theme };
       this.applyTheme(theme);
     },
 
-    setLanguage(language: string): void {
-      this.$state.preferences.language = language as UserPreferences['language'];
+    setLanguage(this: { $state: UserState } & UserStoreThis, language: string): void {
+      this.$state.preferences = { ...this.$state.preferences, language: language as UserPreferences['language'] };
       this.applyLanguage(language);
     },
 
     // Recent items actions
-    addRecentItem(item: Omit<RecentItem, 'accessedAt'>): void {
-      const newItem: RecentItem = {
-        ...item,
-        accessedAt: new Date(),
-      };
-
-      this.$state.recentItems = this.$state.recentItems.filter((i: RecentItem) => i.id !== item.id);
-      this.$state.recentItems = [newItem, ...this.$state.recentItems];
-
-      if (this.$state.recentItems.length > MAX_RECENT_ITEMS) {
-        this.$state.recentItems = this.$state.recentItems.slice(0, MAX_RECENT_ITEMS);
-      }
+    addRecentItem(this: { $state: UserState }, item: Omit<RecentItem, 'accessedAt'>): void {
+      const newItem: RecentItem = { ...item, accessedAt: new Date() };
+      const filtered = this.$state.recentItems.filter((i: RecentItem) => i.id !== item.id);
+      const merged = [newItem, ...filtered];
+      this.$state.recentItems = merged.length > MAX_RECENT_ITEMS ? merged.slice(0, MAX_RECENT_ITEMS) : merged;
     },
 
-    removeRecentItem(id: string): void {
+    removeRecentItem(this: { $state: UserState }, id: string): void {
       this.$state.recentItems = this.$state.recentItems.filter((i: RecentItem) => i.id !== id);
     },
 
-    clearRecentItems(): void {
+    clearRecentItems(this: { $state: UserState }): void {
       this.$state.recentItems = [];
     },
 
     // Favorites actions
-    addFavorite(item: Omit<RecentItem, 'accessedAt'>): void {
+    addFavorite(this: { $state: UserState }, item: Omit<RecentItem, 'accessedAt'>): void {
       if (this.$state.favorites.some((f: RecentItem) => f.id === item.id)) {
         return;
       }
-
-      const newItem: RecentItem = {
-        ...item,
-        accessedAt: new Date(),
-      };
-
-      this.$state.favorites = [newItem, ...this.$state.favorites];
-
-      if (this.$state.favorites.length > MAX_FAVORITES) {
-        this.$state.favorites = this.$state.favorites.slice(0, MAX_FAVORITES);
-      }
+      const newItem: RecentItem = { ...item, accessedAt: new Date() };
+      const merged = [newItem, ...this.$state.favorites];
+      this.$state.favorites = merged.length > MAX_FAVORITES ? merged.slice(0, MAX_FAVORITES) : merged;
     },
 
-    removeFavorite(id: string): void {
+    removeFavorite(this: { $state: UserState }, id: string): void {
       this.$state.favorites = this.$state.favorites.filter((i: RecentItem) => i.id !== id);
     },
 
-    isFavorite(id: string): boolean {
+    isFavorite(this: { $state: UserState }, id: string): boolean {
       return this.$state.favorites.some((f: RecentItem) => f.id === id);
     },
 
     // Persistence actions (handled by factory's persist plugin)
-    async loadPersistedData(): Promise<void> {
+    async loadPersistedData(this: { $state: UserState } & UserStoreThis): Promise<void> {
       if (this.$state.preferences) {
         this.applyTheme(this.$state.preferences.theme);
         this.applyLanguage(this.$state.preferences.language);

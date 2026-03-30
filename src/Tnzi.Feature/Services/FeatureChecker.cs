@@ -9,18 +9,21 @@ public class FeatureChecker : IFeatureChecker
 {
     private readonly IFeatureManager _featureManager;
     private readonly IReadOnlyList<IFeatureValueProvider> _sortedProviders;
+    private readonly IFeatureUsageService? _featureUsageService;
 
     /// <summary>
     /// Initialize FeatureChecker
     /// </summary>
     public FeatureChecker(
         IFeatureManager featureManager,
-        IEnumerable<IFeatureValueProvider> providers)
+        IEnumerable<IFeatureValueProvider> providers,
+        IFeatureUsageService? featureUsageService = null)
     {
         _featureManager = Check.NotNull(featureManager);
         Check.NotNull(providers);
         // Cache sorted providers to avoid re-sorting on every call
         _sortedProviders = providers.OrderByDescending(p => p.Priority).ToList().AsReadOnly();
+        _featureUsageService = featureUsageService;
     }
 
     /// <inheritdoc />
@@ -29,14 +32,29 @@ public class FeatureChecker : IFeatureChecker
         Check.NotNullOrWhiteSpace(featureName);
 
         var value = await GetValueAsync(featureName);
+        bool isEnabled;
+
         if (value == null)
-            return false;
+        {
+            isEnabled = false;
+        }
+        else if (bool.TryParse(value, out var boolValue))
+        {
+            isEnabled = boolValue;
+        }
+        else
+        {
+            // For non-Boolean features, having any value means "enabled"
+            isEnabled = !string.IsNullOrWhiteSpace(value);
+        }
 
-        if (bool.TryParse(value, out var boolValue))
-            return boolValue;
+        // Fire-and-forget usage recording (errors are silently caught in RecordUsageAsync)
+        if (_featureUsageService != null)
+        {
+            _ = Task.Run(() => _featureUsageService.RecordUsageAsync(featureName, isEnabled, "FeatureChecker"));
+        }
 
-        // For non-Boolean features, having any value means "enabled"
-        return !string.IsNullOrWhiteSpace(value);
+        return isEnabled;
     }
 
     /// <inheritdoc />

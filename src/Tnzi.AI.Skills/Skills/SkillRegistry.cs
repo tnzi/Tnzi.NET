@@ -14,6 +14,8 @@ public class SkillRegistry : ISkillRegistry
     private readonly ISkillSearchService _searchService;
     private readonly ILogger<SkillRegistry> _logger;
     private readonly DatabaseSkillStore? _dbStore;
+    private readonly ICurrentUser? _currentUser;
+    private readonly ICurrentTenant? _currentTenant;
 
     // Scoped 生命周期内缓存 merged 结果，避免同一请求重复 merge
     private IReadOnlyList<SkillDefinition>? _mergedCache;
@@ -22,12 +24,16 @@ public class SkillRegistry : ISkillRegistry
         FileSystemSkillStore fileStore,
         ISkillSearchService searchService,
         ILogger<SkillRegistry> logger,
-        DatabaseSkillStore? dbStore = null)
+        DatabaseSkillStore? dbStore = null,
+        ICurrentUser? currentUser = null,
+        ICurrentTenant? currentTenant = null)
     {
         _fileStore = Check.NotNull(fileStore);
         _searchService = Check.NotNull(searchService);
         _logger = Check.NotNull(logger);
         _dbStore = dbStore;
+        _currentUser = currentUser;
+        _currentTenant = currentTenant;
     }
 
     /// <inheritdoc/>
@@ -39,7 +45,14 @@ public class SkillRegistry : ISkillRegistry
         var fileSkills = await _fileStore.GetAllAsync(ct);
         var dbSkills = _dbStore != null ? await _dbStore.GetAllAsync(ct) : [];
 
-        var merged = MergeByPriority(fileSkills.Concat(dbSkills));
+        // FileSystemSkillStore 返回所有技能（包括 DataPath 中其他租户/用户的）
+        // 按当前上下文过滤：System scope 全量返回，Tenant/User scope 按 ID 匹配
+        var tenantId = _currentTenant?.Id;
+        var userId = _currentUser?.Id;
+        var filteredFileSkills = fileSkills.Where(s => IsAccessible(s, tenantId, userId));
+
+        // DatabaseSkillStore 已内部按 tenant/user 过滤，无需额外处理
+        var merged = MergeByPriority(filteredFileSkills.Concat(dbSkills));
         _mergedCache = merged;
         return merged;
     }
@@ -57,11 +70,15 @@ public class SkillRegistry : ISkillRegistry
         SkillDefinition? fileResult = null;
         SkillDefinition? dbResult = null;
 
-        // FileSystem store is always System scope
-        if (scopeFilter is null or SkillScope.System)
-            fileResult = await _fileStore.GetBySlugAsync(bareSlug, ct);
+        // FileSystem store: System scope + DataPath scoped skills
+        fileResult = await _fileStore.GetBySlugAsync(bareSlug, ct);
+        // 过滤：确保当前用户有权访问此技能
+        if (fileResult != null && !IsAccessible(fileResult, _currentTenant?.Id, _currentUser?.Id))
+            fileResult = null;
+        if (fileResult != null && scopeFilter.HasValue && fileResult.Scope != scopeFilter.Value)
+            fileResult = null;
 
-        // Database store has Tenant/User scope
+        // Database store: Tenant/User scope (already filtered internally)
         if (scopeFilter is null or SkillScope.Tenant or SkillScope.User)
             dbResult = _dbStore != null ? await _dbStore.GetBySlugAsync(bareSlug, ct) : null;
 
@@ -121,6 +138,32 @@ public class SkillRegistry : ISkillRegistry
         }
 
         return [.. result.Values];
+    }
+
+    /// <summary>
+    /// 检查技能是否对当前租户/用户可访问。
+    /// System scope 始终可访问；Tenant scope 需匹配 tenantId（无租户模块时不可见）；
+    /// User scope 匹配 userId（租户可选：有租户则额外匹配 tenantId）。
+    /// </summary>
+    private static bool IsAccessible(SkillDefinition skill, Guid? currentTenantId, Guid? currentUserId)
+    {
+        return skill.Scope switch
+        {
+            SkillScope.System => true,
+
+            // Tenant scope: 需要租户模块启用且 ID 匹配
+            SkillScope.Tenant => currentTenantId.HasValue
+                                 && skill.TenantId.HasValue
+                                 && skill.TenantId == currentTenantId,
+
+            // User scope: 匹配 userId；如果技能关联了 tenantId 则还需匹配租户
+            SkillScope.User => currentUserId.HasValue
+                               && skill.OwnerUserId.HasValue
+                               && skill.OwnerUserId == currentUserId
+                               && (!skill.TenantId.HasValue || skill.TenantId == currentTenantId),
+
+            _ => true
+        };
     }
 
     /// <summary>

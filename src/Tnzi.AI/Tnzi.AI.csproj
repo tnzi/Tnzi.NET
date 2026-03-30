@@ -17,6 +17,14 @@
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.3.0" />
     <!-- MCP (Model Context Protocol) - official C# SDK for connecting to MCP servers -->
     <PackageReference Include="ModelContextProtocol" Version="1.0.0" />
+    <!-- YAML parsing for agent definition files -->
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <!-- Document conversion: Office formats -->
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
+    <!-- Document conversion: PDF text extraction -->
+    <PackageReference Include="PdfPig" Version="0.1.14" />
+    <!-- Readability: HTML article extraction -->
+    <PackageReference Include="SmartReader" Version="0.9.*" />
   </ItemGroup>
 
   <ItemGroup>

@@ -54,6 +54,7 @@ public class MessageService : ApplicationService, IMessageService
             var msg = input.MapTo<Message>();
             msg.SenderId = senderId;
             msg.IsSent = false;
+            msg.IsDraft = false;
 
             await _messageRepository.InsertAsync(msg);
 
@@ -139,7 +140,7 @@ public class MessageService : ApplicationService, IMessageService
     public async Task<Result<IPagedList<MessageListItemDto>>> GetUserInboxAsync(Guid userId, MessageQueryDto query)
     {
         var queryable = _messageRepository.AsQueryable()
-            .Where(m => m.IsSent);
+            .Where(m => m.IsSent && !m.IsDraft);
 
         if (query.MessageType.HasValue)
             queryable = queryable.Where(m => m.MessageType == query.MessageType.Value);
@@ -261,7 +262,11 @@ public class MessageService : ApplicationService, IMessageService
         if (message.SenderId != userId)
             return Fail("You can only delete your own messages", 403, ErrorCodes.FORBIDDEN);
 
-        await _messageRepository.DeleteAsync(messageId);
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await DeleteAssociatedRecordsAsync(messageId);
+            await _messageRepository.DeleteAsync(messageId);
+        });
         LogInformation("Message deleted: {MessageId}, UserId: {UserId}", messageId, userId);
         return Ok("Message deleted successfully");
     }
@@ -355,6 +360,10 @@ public class MessageService : ApplicationService, IMessageService
             queryable = queryable.Where(m => m.MessageType == query.MessageType.Value);
         if (query.IsSent.HasValue)
             queryable = queryable.Where(m => m.IsSent == query.IsSent.Value);
+        if (query.IsDraft.HasValue)
+            queryable = queryable.Where(m => m.IsDraft == query.IsDraft.Value);
+        else
+            queryable = queryable.Where(m => !m.IsDraft);
         if (query.SenderId.HasValue)
             queryable = queryable.Where(m => m.SenderId == query.SenderId.Value);
         if (query.StartDate.HasValue)
@@ -388,7 +397,11 @@ public class MessageService : ApplicationService, IMessageService
         if (message == null)
             return Fail("Message not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
-        await _messageRepository.DeleteAsync(messageId);
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await DeleteAssociatedRecordsAsync(messageId);
+            await _messageRepository.DeleteAsync(messageId);
+        });
         LogInformation("Message admin deleted: {MessageId}", messageId);
         return Ok("Message deleted successfully");
     }
@@ -407,7 +420,12 @@ public class MessageService : ApplicationService, IMessageService
         if (messages.Count == 0)
             return Ok(0, "No messages found");
 
-        await _messageRepository.DeleteManyAsync(messages, cancellationToken);
+        var messageIds = messages.Select(m => m.Id).ToList();
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await BatchDeleteAssociatedRecordsAsync(messageIds, ct);
+            await _messageRepository.DeleteManyAsync(messages, ct);
+        });
         LogInformation("Admin batch deleted {Count} messages", messages.Count);
         return Ok(messages.Count, $"{messages.Count} messages deleted");
     }
@@ -578,6 +596,66 @@ public class MessageService : ApplicationService, IMessageService
             if (replyCountDict.TryGetValue(item.Id, out var count))
                 item.ReplyCount = count;
         }
+    }
+
+    /// <summary>
+    /// 删除单条消息的关联记录（MessageReceive, MessageRecipient, MessageRole, MessageReply）
+    /// </summary>
+    private async Task DeleteAssociatedRecordsAsync(Guid messageId)
+    {
+        var receives = await _receiveRepository
+            .Where(r => r.MessageId == messageId)
+            .ToListAsync();
+        if (receives.Count > 0)
+            await _receiveRepository.DeleteManyAsync(receives);
+
+        var recipients = await _recipientRepository
+            .Where(r => r.MessageId == messageId)
+            .ToListAsync();
+        if (recipients.Count > 0)
+            await _recipientRepository.DeleteManyAsync(recipients);
+
+        var roles = await _roleRepository
+            .Where(r => r.MessageId == messageId)
+            .ToListAsync();
+        if (roles.Count > 0)
+            await _roleRepository.DeleteManyAsync(roles);
+
+        var replies = await _replyRepository
+            .Where(r => r.BelongMessageId == messageId)
+            .ToListAsync();
+        if (replies.Count > 0)
+            await _replyRepository.DeleteManyAsync(replies);
+    }
+
+    /// <summary>
+    /// 批量删除多条消息的关联记录
+    /// </summary>
+    private async Task BatchDeleteAssociatedRecordsAsync(List<Guid> messageIds, CancellationToken cancellationToken = default)
+    {
+        var receives = await _receiveRepository
+            .Where(r => messageIds.Contains(r.MessageId))
+            .ToListAsync(cancellationToken);
+        if (receives.Count > 0)
+            await _receiveRepository.DeleteManyAsync(receives, cancellationToken);
+
+        var recipients = await _recipientRepository
+            .Where(r => messageIds.Contains(r.MessageId))
+            .ToListAsync(cancellationToken);
+        if (recipients.Count > 0)
+            await _recipientRepository.DeleteManyAsync(recipients, cancellationToken);
+
+        var roles = await _roleRepository
+            .Where(r => messageIds.Contains(r.MessageId))
+            .ToListAsync(cancellationToken);
+        if (roles.Count > 0)
+            await _roleRepository.DeleteManyAsync(roles, cancellationToken);
+
+        var replies = await _replyRepository
+            .Where(r => messageIds.Contains(r.BelongMessageId))
+            .ToListAsync(cancellationToken);
+        if (replies.Count > 0)
+            await _replyRepository.DeleteManyAsync(replies, cancellationToken);
     }
 
     /// <summary>

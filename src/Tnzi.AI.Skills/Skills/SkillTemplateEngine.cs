@@ -3,9 +3,10 @@ namespace Tnzi.AI.Skills;
 /// <summary>
 /// 技能模板引擎实现 — 解析 {{param}} 占位符、验证参数值、渲染最终提示词
 /// </summary>
-public class SkillTemplateEngine : ISkillTemplateEngine
+public partial class SkillTemplateEngine : ISkillTemplateEngine
 {
-    private static readonly Regex ParamRegex = new(@"\{\{(\w+)\}\}", RegexOptions.Compiled);
+    [GeneratedRegex(@"\{\{(\w+)\}\}")]
+    private static partial Regex ParamRegex();
 
     /// <inheritdoc />
     public SkillRenderResult Render(SkillDefinition skill, Dictionary<string, string>? parameters = null)
@@ -76,7 +77,7 @@ public class SkillTemplateEngine : ISkillTemplateEngine
         }
 
         // 7. Replace {{param}} placeholders with resolved values
-        var rendered = ParamRegex.Replace(skill.Content, match =>
+        var rendered = ParamRegex().Replace(skill.Content, match =>
         {
             var name = match.Groups[1].Value;
             return effectiveValues.TryGetValue(name, out var value) ? value : match.Value;
@@ -95,7 +96,7 @@ public class SkillTemplateEngine : ISkillTemplateEngine
         if (string.IsNullOrEmpty(template))
             return [];
 
-        return ParamRegex.Matches(template)
+        return ParamRegex().Matches(template)
             .Select(m => m.Groups[1].Value)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

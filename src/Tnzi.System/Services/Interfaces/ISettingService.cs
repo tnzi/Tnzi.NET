@@ -82,6 +82,16 @@ public interface ISettingService
     Task<Result> SetSettingAsync(string key, string value, SettingScope scope, string? scopeId = null);
 
     /// <summary>
+    /// Set an encrypted setting value (encrypts before saving, sets IsEncrypted=true)
+    /// </summary>
+    Task<Result> SetEncryptedAsync(string group, string key, string value, string? description = null);
+
+    /// <summary>
+    /// Get decrypted setting value (decrypts if IsEncrypted=true)
+    /// </summary>
+    Task<Result<string?>> GetDecryptedAsync(string group, string key);
+
+    /// <summary>
     /// Get system information (version, loaded modules, uptime, environment)
     /// </summary>
     Task<Result<SystemInfoDto>> GetSystemInfoAsync()

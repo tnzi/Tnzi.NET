@@ -7,13 +7,9 @@ internal static class ExecutionStrategyAgentLoader
         var entity = await context.AgentRepository.GetAsync(agentId, ct);
         if (entity == null || !entity.IsEnabled) return null;
 
-        var toolGroups = string.IsNullOrWhiteSpace(entity.ToolGroups)
-            ? null
-            : JsonSerializer.Deserialize<List<string>>(entity.ToolGroups);
-
         return await context.AgentFactory.CreateAgentAsync(
             entity.Provider, entity.Model, entity.Instructions, entity.Name,
-            toolGroups, entity.Temperature, entity.MaxTokens, agentId: entity.Id, ct: ct);
+            entity.ToolGroups, entity.Temperature, entity.MaxTokens, agentId: entity.Id, ct: ct);
     }
 
     public static string GetLatestUserQuestion(List<ChatMessage> messages)

@@ -10,7 +10,6 @@ public class ApprovalNodeTests
     public ApprovalNodeTests()
     {
         _node = new ApprovalNode(
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<ApprovalNode>>());
     }
 

@@ -258,7 +258,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// Set tags for a file
     /// </summary>
     [HttpPut("{id:guid}/tags")]
-    public virtual async Task<ApiResult<FileRecord>> SetFileTags(Guid id, [FromBody] SetFileTagsRequest request)
+    public virtual async Task<ApiResult<FileInfoDto>> SetFileTags(Guid id, [FromBody] SetFileTagsRequest request)
     {
         var result = await FileStorageService.SetFileTagsAsync(id, request.Tags);
         return result.ToApiResult();
@@ -271,6 +271,28 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult<IPagedList<FileRecord>>> GetFilesByTag(string tag, [FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20)
     {
         var result = await FileStorageService.GetFilesByTagAsync(tag, pageIndex, pageSize);
+        return result.ToApiResult();
+    }
+
+    // File metadata
+
+    /// <summary>
+    /// Set metadata for a file (replaces existing metadata)
+    /// </summary>
+    [HttpPut("{id:guid}/metadata")]
+    public virtual async Task<ApiResult<FileInfoDto>> SetMetadata(Guid id, [FromBody] SetFileMetadataRequest request)
+    {
+        var result = await FileStorageService.SetMetadataAsync(id, request.Metadata);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Get metadata for a file
+    /// </summary>
+    [HttpGet("{id:guid}/metadata")]
+    public virtual async Task<ApiResult<Dictionary<string, string>>> GetMetadata(Guid id)
+    {
+        var result = await FileStorageService.GetMetadataAsync(id);
         return result.ToApiResult();
     }
 }

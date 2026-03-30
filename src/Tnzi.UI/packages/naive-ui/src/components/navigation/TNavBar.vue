@@ -3,16 +3,7 @@ import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import type { INavBarProps } from '@tnzi/core'
 
-interface Props {
-  title?: string
-  showBack?: boolean
-  showClose?: boolean
-  fixed?: boolean
-  backgroundColor?: string
-  textColor?: string
-}
-
-const props = withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<INavBarProps>(), {
   showBack: false,
   showClose: false,
   fixed: false,

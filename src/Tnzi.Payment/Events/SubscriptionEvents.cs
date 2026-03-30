@@ -165,6 +165,57 @@ public class SubscriptionExpiredEvent : EventBase
 }
 
 /// <summary>
+/// 订阅计划变更事件
+/// </summary>
+public class SubscriptionPlanChangedEvent : EventBase
+{
+    /// <summary>
+    /// 订阅ID
+    /// </summary>
+    public Guid SubscriptionId { get; set; }
+
+    /// <summary>
+    /// 订阅流水号
+    /// </summary>
+    public string SubscriptionNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 用户ID
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 原计划ID
+    /// </summary>
+    public Guid FromPlanId { get; set; }
+
+    /// <summary>
+    /// 新计划ID
+    /// </summary>
+    public Guid ToPlanId { get; set; }
+
+    /// <summary>
+    /// 变更类型
+    /// </summary>
+    public SubscriptionChangeType ChangeType { get; set; }
+
+    /// <summary>
+    /// 按比例计算的金额
+    /// </summary>
+    public decimal ProratedAmount { get; set; }
+
+    /// <summary>
+    /// 生效日期
+    /// </summary>
+    public DateTime EffectiveDate { get; set; }
+
+    /// <summary>
+    /// 是否立即生效
+    /// </summary>
+    public bool Immediate { get; set; }
+}
+
+/// <summary>
 /// 试用转正事件
 /// </summary>
 public class SubscriptionTrialConvertedEvent : EventBase

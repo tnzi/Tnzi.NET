@@ -19,4 +19,16 @@ public class WorkflowNodeContext
 
     /// <summary>关联的运行实例（可选，用于 Trace 记录）</summary>
     public AgentRun? Run { get; init; }
+
+    /// <summary>
+    /// 恢复数据（由外部通过 ResumeWithInputAsync 提供，用于中断后恢复执行）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public Dictionary<string, object>? ResumeData { get; set; }
+
+    /// <summary>
+    /// 是否处于恢复状态（ResumeData 不为 null 时为 true）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public bool IsResuming => ResumeData != null;
 }

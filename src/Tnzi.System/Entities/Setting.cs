@@ -68,6 +68,11 @@ public class Setting : FullAuditedEntity<Guid>
     public SettingValueType ValueType { get; set; }
 
     /// <summary>
+    /// 获取或设置 是否加密存储
+    /// </summary>
+    public bool IsEncrypted { get; set; }
+
+    /// <summary>
     /// 获取或设置 配置作用域
     /// </summary>
     public SettingScope Scope { get; set; } = SettingScope.Global;

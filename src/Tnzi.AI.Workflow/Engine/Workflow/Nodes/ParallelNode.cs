@@ -10,14 +10,14 @@ namespace Tnzi.AI.Engine.Workflow.Nodes;
 /// </remarks>
 public class ParallelNode : IWorkflowNode
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowNodeServiceContext _nodeContext;
     private readonly ILogger<ParallelNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Parallel;
 
-    public ParallelNode(IServiceProvider serviceProvider, ILogger<ParallelNode> logger)
+    public ParallelNode(IWorkflowNodeServiceContext nodeContext, ILogger<ParallelNode> logger)
     {
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _nodeContext = Check.NotNull(nodeContext);
         _logger = Check.NotNull(logger);
     }
 
@@ -40,7 +40,7 @@ public class ParallelNode : IWorkflowNode
         }
 
         // 收集输入
-        var inputText = CollectInput(context);
+        var inputText = WorkflowNodeHelper.CollectInput(context);
         inputText = state.ResolveTemplate(inputText);
 
         // 并行执行所有 worker，每个 worker 独立创建作用域避免共享 Scoped 服务（如 DbContext）
@@ -48,30 +48,38 @@ public class ParallelNode : IWorkflowNode
         {
             try
             {
-                using var workerScope = _serviceProvider.CreateScope();
-                var workerAgentFactory = workerScope.ServiceProvider.GetRequiredService<IAgentFactory>();
-                var workerAgentRepo = workerScope.ServiceProvider.GetService<IRepository<Agent, Guid>>();
+                using var workerScope = _nodeContext.CreateScope();
 
-                string? provider = step.Provider;
-                string? model = step.Model;
-                string? instructions = step.Instructions;
-
-                // 如果 worker 指定了 agentId，加载 Agent 定义
-                if (worker.AgentId.HasValue && workerAgentRepo != null)
+                var workerConfig = new WorkflowNodeHelper.RefHolder
                 {
-                    var agent = await workerAgentRepo.GetAsync(worker.AgentId.Value, cancellationToken);
-                    if (agent != null)
+                    Provider = step.Provider,
+                    Model = step.Model,
+                    Instructions = step.Instructions
+                };
+
+                // 如果 worker 指定了 agentId，从 worker scope 获取 AgentRepository 加载 Agent 定义
+                // 注意：不能使用 _nodeContext.AgentRepository，因为并行线程共享外层 DbContext 不安全
+                if (worker.AgentId.HasValue)
+                {
+                    var workerAgentRepo = workerScope.ServiceProvider.GetService<IRepository<Agent, Guid>>();
+                    if (workerAgentRepo != null)
                     {
-                        provider ??= agent.Provider;
-                        model ??= agent.Model;
-                        instructions ??= agent.Instructions;
+                        var agent = await workerAgentRepo.GetAsync(worker.AgentId.Value, cancellationToken);
+                        if (agent != null)
+                        {
+                            workerConfig.Provider ??= agent.Provider;
+                            workerConfig.Model ??= agent.Model;
+                            workerConfig.Instructions ??= agent.Instructions;
+                        }
                     }
                 }
 
+                // 从 worker scope 获取 AgentFactory 以隔离 Scoped 依赖（如 DbContext）
+                var workerAgentFactory = workerScope.ServiceProvider.GetRequiredService<IAgentFactory>();
                 var executor = await workerAgentFactory.CreateAgentAsync(
-                    providerName: provider,
-                    model: model,
-                    instructions: instructions,
+                    providerName: workerConfig.Provider,
+                    model: workerConfig.Model,
+                    instructions: workerConfig.Instructions,
                     name: worker.StepId,
                     agentId: worker.AgentId,
                     ct: cancellationToken);
@@ -145,28 +153,6 @@ public class ParallelNode : IWorkflowNode
         {
             return [];
         }
-    }
-
-    /// <summary>
-    /// 收集输入
-    /// </summary>
-    private static string CollectInput(WorkflowNodeContext context)
-    {
-        if (context.DependencyOutputs.Count == 0)
-            return context.State.InitialInput;
-
-        if (context.DependencyOutputs.Count == 1)
-            return context.DependencyOutputs.Values.First().Text;
-
-        var sb = new StringBuilder();
-        foreach (var (depId, output) in context.DependencyOutputs)
-        {
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"[{depId}]");
-            sb.AppendLine(output.Text);
-        }
-
-        return sb.ToString().TrimEnd();
     }
 
     /// <summary>

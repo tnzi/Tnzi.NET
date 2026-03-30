@@ -211,6 +211,13 @@ public class WorkflowServiceStreamingTests
             .Returns(Task.CompletedTask);
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddScoped<IWorkflowNodeServiceContext>(sp =>
+        {
+            var mock = new Mock<IWorkflowNodeServiceContext>();
+            mock.Setup(c => c.AgentFactory).Returns(new Mock<IAgentFactory>().Object);
+            mock.Setup(c => c.CreateScope()).Returns(sp.CreateScope());
+            return mock.Object;
+        });
         services.AddScoped<IWorkflowNode, AgentNode>();
         services.AddScoped<IWorkflowNode, FixedResultNode>();
         services.AddScoped<IWorkflowNode, FailingResultNode>();
@@ -218,9 +225,12 @@ public class WorkflowServiceStreamingTests
         services.AddScoped<WorkflowEngine>();
         var serviceProvider = services.BuildServiceProvider();
 
+        var versionRepository = new Mock<IRepository<WorkflowDefinitionVersion, Guid>>();
+
         return new WorkflowService(
             repository.Object,
             executionRepository.Object,
+            versionRepository.Object,
             runRepository.Object,
             usageLog.Object,
             quota.Object,

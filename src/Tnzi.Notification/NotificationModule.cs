@@ -32,11 +32,12 @@ public class NotificationModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 注册通知服务（拆分后的 4 个服务）
+        // 注册通知服务（拆分后的 5 个服务）
         context.Services.AddScoped<INotificationService, NotificationService>();
         context.Services.AddScoped<INotificationQueryService, NotificationQueryService>();
         context.Services.AddScoped<INotificationRetryService, NotificationRetryService>();
         context.Services.AddScoped<IUserNotificationService, UserNotificationService>();
+        context.Services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
 
         // 注册邮件发送服务（使用工厂模式延迟解析配置）
         context.Services.TryAddScoped<IEmailSender>(sp =>

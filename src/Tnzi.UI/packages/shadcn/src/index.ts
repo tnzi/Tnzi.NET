@@ -8,7 +8,7 @@
 import './styles/globals.css';
 
 // Plugin
-export { default, createTnziUi } from './plugin';
+export { createTnziUi } from './plugin';
 export type { TnziUiOptions } from './plugin';
 
 // Components (semantic T* components)

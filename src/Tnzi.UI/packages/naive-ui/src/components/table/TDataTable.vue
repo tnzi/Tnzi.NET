@@ -155,7 +155,7 @@ const naiveColumns = computed<DataTableColumn[]>(() => {
       width: Math.max(props.actions.buttons.length * 80, 120),
       render(row: object, index: number) {
         const buttons = props.actions!.buttons!
-          .filter((btn) => !btn.visible || btn.visible(row))
+          .filter((btn) => !btn.visible || btn.visible(row as Record<string, unknown>))
           .map((btn) =>
             h(
               NButton,
@@ -163,10 +163,10 @@ const naiveColumns = computed<DataTableColumn[]>(() => {
                 size: 'small',
                 type: mapButtonType(btn.type),
                 quaternary: true,
-                disabled: btn.disabled ? btn.disabled(row) : false,
+                disabled: btn.disabled ? btn.disabled(row as Record<string, unknown>) : false,
                 onClick: (e: Event) => {
                   e.stopPropagation()
-                  emit('action', btn.key, row, index)
+                  emit('action', btn.key, row as Record<string, unknown>, index)
                 },
               },
               { default: () => btn.label },
@@ -202,10 +202,10 @@ const naivePagination = computed<PaginationProps | false>(() => {
 })
 
 // 当前分页状态用于 pageSize 变化时使用
-let currentPage = computed(() =>
+const currentPage = computed(() =>
   props.pagination !== false ? props.pagination.pageIndex : 1,
 )
-let currentPageSize = computed(() =>
+const currentPageSize = computed(() =>
   props.pagination !== false ? props.pagination.pageSize : 10,
 )
 

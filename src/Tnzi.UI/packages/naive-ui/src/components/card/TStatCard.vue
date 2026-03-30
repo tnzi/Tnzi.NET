@@ -2,7 +2,7 @@
   <n-card
     size="small"
     class="t-stat-card"
-    :class="[`t-stat-card--${size}`, `t-stat-card--${resolvedColor}`]"
+    :class="[`t-stat-card--${size}`, `t-stat-card--${color}`]"
     :style="{ '--t-stat-border-color': borderColorValue }"
   >
     <template v-if="loading">
@@ -66,8 +66,6 @@ const props = withDefaults(defineProps<Props>(), {
   color: 'blue',
   loading: false,
 })
-
-const resolvedColor = computed(() => props.color)
 
 const colorMap: Record<string, string> = {
   blue: '#2080f0',

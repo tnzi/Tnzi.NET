@@ -320,7 +320,12 @@ public class HostingLiteEndToEndTests
             ["Database:AutoDiscoverDbContexts"] = "false",
             ["AspNetCore:EnableForwardedHeaders"] = "false",
             ["Swagger:Enabled"] = "true",
-            ["Swagger:EnableXmlComments"] = "false"
+            ["Swagger:EnableXmlComments"] = "false",
+            ["AI:DefaultProvider"] = "Test",
+            ["AI:Providers:Test:Enabled"] = "true",
+            ["AI:Providers:Test:ApiKey"] = "test-key",
+            ["AI:Providers:Test:DefaultModel"] = "test-model",
+            ["AI:Providers:DeepSeek:Enabled"] = "false"
         };
 
         foreach (var (key, value) in additionalSettings)

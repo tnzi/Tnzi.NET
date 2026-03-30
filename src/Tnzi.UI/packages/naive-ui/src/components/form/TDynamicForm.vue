@@ -3,14 +3,6 @@ import { computed } from 'vue'
 import {
   NForm,
   NFormItem,
-  NInput,
-  NInputNumber,
-  NSelect,
-  NCheckbox,
-  NRadioGroup,
-  NRadio,
-  NDatePicker,
-  NSwitch,
   NSpace,
   NButton,
   NGrid,
@@ -18,6 +10,7 @@ import {
 } from 'naive-ui'
 import type { FormRules, FormItemRule } from 'naive-ui'
 import type { IDynamicFormField, IFormRule } from '@tnzi/core'
+import DynamicField from './DynamicField.vue'
 
 interface Props {
   model: Record<string, unknown>
@@ -34,6 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
+  'update:model': [model: Record<string, unknown>]
   submit: [data: Record<string, unknown>]
   reset: []
   fieldChange: [key: string, value: unknown]
@@ -102,10 +96,11 @@ const naiveRules = computed<FormRules>(() => {
 })
 
 /**
- * 处理字段值变更
+ * 处理字段值变更 — 不直接修改 props，通过 emit 通知父组件
  */
 function handleFieldChange(key: string, value: unknown): void {
-  props.model[key] = value
+  const newModel = { ...props.model, [key]: value }
+  emit('update:model', newModel)
   emit('fieldChange', key, value)
 }
 
@@ -114,16 +109,11 @@ function handleSubmit(): void {
 }
 
 function handleReset(): void {
-  // 重置所有字段为初始值
-  for (const field of props.fields) {
-    if (field.type === 'checkbox' || field.type === 'switch') {
-      props.model[field.key] = false
-    } else if (field.type === 'number') {
-      props.model[field.key] = null
-    } else {
-      props.model[field.key] = null
-    }
-  }
+  const resetModel: Record<string, unknown> = {}
+  props.fields.forEach(field => {
+    resetModel[field.key] = field.type === 'switch' || field.type === 'checkbox' ? false : null
+  })
+  emit('update:model', resetModel)
   emit('reset')
 }
 
@@ -148,132 +138,10 @@ function getFieldSpan(field: IDynamicFormField): number {
     <NGrid v-if="!inline" :cols="24" :x-gap="16">
       <NGi v-for="field in fields" :key="field.key" :span="getFieldSpan(field)">
         <NFormItem :label="field.label" :path="field.key">
-          <!-- text / email -->
-          <NInput
-            v-if="field.type === 'text' || field.type === 'email'"
+          <DynamicField
+            :field="field"
             :value="model[field.key]"
-            :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- password -->
-          <NInput
-            v-else-if="field.type === 'password'"
-            :value="model[field.key]"
-            type="password"
-            show-password-on="click"
-            :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- number -->
-          <NInputNumber
-            v-else-if="field.type === 'number'"
-            :value="model[field.key]"
-            :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-            :disabled="field.disabled"
-            :min="field.min"
-            :max="field.max"
-            style="width: 100%"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- textarea -->
-          <NInput
-            v-else-if="field.type === 'textarea'"
-            :value="model[field.key]"
-            type="textarea"
-            :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- select -->
-          <NSelect
-            v-else-if="field.type === 'select'"
-            :value="model[field.key]"
-            :options="field.options"
-            :placeholder="field.placeholder || `Select ${field.label || field.key}`"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- radio -->
-          <NRadioGroup
-            v-else-if="field.type === 'radio'"
-            :value="model[field.key]"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          >
-            <NSpace>
-              <NRadio
-                v-for="option in field.options"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </NRadio>
-            </NSpace>
-          </NRadioGroup>
-
-          <!-- checkbox -->
-          <NCheckbox
-            v-else-if="field.type === 'checkbox'"
-            :checked="model[field.key]"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:checked="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- switch -->
-          <NSwitch
-            v-else-if="field.type === 'switch'"
-            :value="model[field.key]"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- date -->
-          <NDatePicker
-            v-else-if="field.type === 'date'"
-            :value="model[field.key]"
-            type="date"
-            :placeholder="field.placeholder || `Select date`"
-            :disabled="field.disabled"
-            style="width: 100%"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- datetime -->
-          <NDatePicker
-            v-else-if="field.type === 'datetime'"
-            :value="model[field.key]"
-            type="datetime"
-            :placeholder="field.placeholder || `Select date and time`"
-            :disabled="field.disabled"
-            style="width: 100%"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
-          />
-
-          <!-- file (use NInput as fallback) -->
-          <NInput
-            v-else-if="field.type === 'file'"
-            :value="model[field.key]"
-            :placeholder="field.placeholder || `Select file`"
-            :disabled="field.disabled"
-            v-bind="field.props"
-            @update:value="handleFieldChange(field.key, $event)"
+            @change="handleFieldChange(field.key, $event)"
           />
         </NFormItem>
       </NGi>
@@ -287,129 +155,10 @@ function getFieldSpan(field: IDynamicFormField): number {
         :label="field.label"
         :path="field.key"
       >
-        <!-- text / email -->
-        <NInput
-          v-if="field.type === 'text' || field.type === 'email'"
+        <DynamicField
+          :field="field"
           :value="model[field.key]"
-          :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- password -->
-        <NInput
-          v-else-if="field.type === 'password'"
-          :value="model[field.key]"
-          type="password"
-          show-password-on="click"
-          :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- number -->
-        <NInputNumber
-          v-else-if="field.type === 'number'"
-          :value="model[field.key]"
-          :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-          :disabled="field.disabled"
-          :min="field.min"
-          :max="field.max"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- textarea -->
-        <NInput
-          v-else-if="field.type === 'textarea'"
-          :value="model[field.key]"
-          type="textarea"
-          :placeholder="field.placeholder || `Enter ${field.label || field.key}`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- select -->
-        <NSelect
-          v-else-if="field.type === 'select'"
-          :value="model[field.key]"
-          :options="field.options"
-          :placeholder="field.placeholder || `Select ${field.label || field.key}`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- radio -->
-        <NRadioGroup
-          v-else-if="field.type === 'radio'"
-          :value="model[field.key]"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        >
-          <NSpace>
-            <NRadio
-              v-for="option in field.options"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </NRadio>
-          </NSpace>
-        </NRadioGroup>
-
-        <!-- checkbox -->
-        <NCheckbox
-          v-else-if="field.type === 'checkbox'"
-          :checked="model[field.key]"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:checked="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- switch -->
-        <NSwitch
-          v-else-if="field.type === 'switch'"
-          :value="model[field.key]"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- date -->
-        <NDatePicker
-          v-else-if="field.type === 'date'"
-          :value="model[field.key]"
-          type="date"
-          :placeholder="field.placeholder || `Select date`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- datetime -->
-        <NDatePicker
-          v-else-if="field.type === 'datetime'"
-          :value="model[field.key]"
-          type="datetime"
-          :placeholder="field.placeholder || `Select date and time`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
-        />
-
-        <!-- file -->
-        <NInput
-          v-else-if="field.type === 'file'"
-          :value="model[field.key]"
-          :placeholder="field.placeholder || `Select file`"
-          :disabled="field.disabled"
-          v-bind="field.props"
-          @update:value="handleFieldChange(field.key, $event)"
+          @change="handleFieldChange(field.key, $event)"
         />
       </NFormItem>
     </template>

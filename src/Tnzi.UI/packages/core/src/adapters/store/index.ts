@@ -290,3 +290,10 @@ export function defineStore<
 export function removeStore(id: string): void {
   activeStoreRuntime.factory.removeStore(id);
 }
+
+/**
+ * Reset store runtime to default. For tests and SSR isolation.
+ */
+export function resetStoreRuntime(): void {
+  activeStoreRuntime = defaultStoreRuntime;
+}

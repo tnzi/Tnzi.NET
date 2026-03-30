@@ -26,14 +26,10 @@ public class OutputGuardrailMiddlewareTests
             Microsoft.Extensions.Options.Options.Create(opts),
             Mock.Of<ILogger<GuardrailRunner>>());
 
-        var sp = new Mock<IServiceProvider>();
-        sp.Setup(x => x.GetService(typeof(IEventBus))).Returns((IEventBus?)null);
-
         return new OutputGuardrailMiddleware(
             actualRunner,
             guardrails,
             Microsoft.Extensions.Options.Options.Create(opts),
-            sp.Object,
             Mock.Of<ILogger<OutputGuardrailMiddleware>>());
     }
 

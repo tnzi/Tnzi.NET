@@ -195,6 +195,7 @@ public class AuditOperationDto
     public string? Message { get; set; }
     public string? Exception { get; set; }
     public string? RequestParameters { get; set; }
+    public string? RequestBody { get; set; }
     public string? ResponseResult { get; set; }
     public DateTime CreationTime { get; set; }
     public List<AuditEntityEntryDto> EntityEntries { get; set; } = new();

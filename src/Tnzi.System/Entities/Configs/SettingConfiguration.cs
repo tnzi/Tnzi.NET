@@ -22,6 +22,9 @@ public class SettingConfiguration : EntityTypeConfigurationBase<Setting, Guid>
         builder.Property(s => s.Group)
             .HasMaxLength(50);
 
+        builder.Property(s => s.IsEncrypted)
+            .HasDefaultValue(false);
+
         builder.Property(s => s.ValueType)
             .HasDefaultValue(SettingValueType.String);
 

@@ -81,33 +81,3 @@ public interface IVectorStore
     /// <param name="ct">取消令牌</param>
     Task DeleteByKnowledgeBaseAsync(Guid knowledgeBaseId, CancellationToken ct = default);
 }
-
-/// <summary>
-/// 向量搜索结果
-/// </summary>
-public class VectorSearchResult
-{
-    /// <summary>块 ID</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>块文本内容</summary>
-    public string Content { get; set; } = string.Empty;
-
-    /// <summary>所属文档 ID</summary>
-    public Guid DocumentId { get; set; }
-
-    /// <summary>所属知识库 ID</summary>
-    public Guid KnowledgeBaseId { get; set; }
-
-    /// <summary>块在文档中的索引</summary>
-    public int ChunkIndex { get; set; }
-
-    /// <summary>额外元数据（JSON 格式）</summary>
-    public string? Metadata { get; set; }
-
-    /// <summary>父块 ID（层级切块时的父子关系）</summary>
-    public Guid? ParentChunkId { get; set; }
-
-    /// <summary>相似度得分（0-1，越高越相似）</summary>
-    public double Score { get; set; }
-}

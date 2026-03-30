@@ -1,5 +1,5 @@
 /**
- * System Module Types - System configuration, menus, access logs
+ * System Module Types - System settings, menus, access logs
  * Aligned with Tnzi.NET backend System module
  */
 
@@ -10,6 +10,56 @@ import type { MenuBadgeType, FeatureRequirementType } from './metadata';
 
 export { HealthStatus };
 export type { MenuBadgeType, FeatureRequirementType };
+
+// ============================================
+// Enums
+// ============================================
+
+/**
+ * Menu type
+ */
+export enum MenuType {
+  Directory = 0,
+  Menu = 1,
+  Button = 2,
+}
+
+/**
+ * Setting value type
+ */
+export enum SettingValueType {
+  String = 0,
+  Integer = 1,
+  Boolean = 2,
+  Json = 3,
+}
+
+/**
+ * Setting scope
+ */
+export enum SettingScope {
+  Global = 0,
+  Tenant = 1,
+  User = 2,
+}
+
+/**
+ * Access log trend interval
+ */
+export enum AccessLogTrendInterval {
+  Daily = 'Daily',
+  Weekly = 'Weekly',
+  Monthly = 'Monthly',
+}
+
+/**
+ * Top endpoint sort criteria
+ */
+export enum TopEndpointSortBy {
+  Hits = 'Hits',
+  AverageResponseTime = 'AverageResponseTime',
+  Errors = 'Errors',
+}
 
 // ============================================
 // Menu Types
@@ -29,12 +79,14 @@ export interface MenuInfoDto extends OrderedEntity<string> {
   isHidden: boolean;
   isExternal: boolean;
   permission?: string | null;
+  type: MenuType;
   badge?: string | null;
   badgeType?: MenuBadgeType | null;
   query?: Record<string, string> | null;
   meta?: MenuMetaDto | null;
   children: MenuInfoDto[];
   creationTime: Date | string;
+  lastModificationTime?: Date | string | null;
 }
 
 /**
@@ -54,12 +106,29 @@ export interface MenuMetaDto {
 }
 
 /**
+ * Menu tree node (backend MenuTreeNode)
+ */
+export interface MenuTreeNode {
+  id: string;
+  parentId?: string | null;
+  name: string;
+  icon?: string | null;
+  path?: string | null;
+  component?: string | null;
+  sortOrder: number;
+  isHidden: boolean;
+  permission?: string | null;
+  type: MenuType;
+  children: MenuTreeNode[];
+}
+
+/**
  * Create menu request
  */
 export interface CreateMenuDto {
   parentId?: string;
   name: string;
-  displayName: string;
+  displayName?: string;
   icon?: string;
   path?: string;
   component?: string;
@@ -68,6 +137,7 @@ export interface CreateMenuDto {
   isHidden?: boolean;
   isExternal?: boolean;
   permission?: string;
+  type?: MenuType;
   badge?: string;
   badgeType?: MenuBadgeType;
   query?: Record<string, string>;
@@ -89,10 +159,19 @@ export interface UpdateMenuDto {
   isHidden?: boolean;
   isExternal?: boolean;
   permission?: string;
+  type?: MenuType;
   badge?: string;
   badgeType?: MenuBadgeType;
   query?: Record<string, string>;
   meta?: MenuMetaDto;
+}
+
+/**
+ * Menu order update DTO
+ */
+export interface MenuOrderDto {
+  id: string;
+  sortOrder: number;
 }
 
 /**
@@ -160,6 +239,43 @@ export interface AccessLogStatisticsDto {
 }
 
 /**
+ * Access log trend data point
+ */
+export interface AccessLogTrendDataPoint {
+  label: string;
+  startTime: Date | string;
+  totalRequests: number;
+  successRequests: number;
+  errorRequests: number;
+  uniqueUsers: number;
+  averageResponseTime: number;
+}
+
+/**
+ * Access log trend DTO
+ */
+export interface AccessLogTrendDto {
+  interval: AccessLogTrendInterval;
+  startDate: Date | string;
+  endDate: Date | string;
+  dataPoints: AccessLogTrendDataPoint[];
+}
+
+/**
+ * Top endpoint statistics DTO
+ */
+export interface TopEndpointDto {
+  path: string;
+  method: string;
+  totalHits: number;
+  successHits: number;
+  errorHits: number;
+  averageResponseTime: number;
+  maxResponseTime: number;
+  errorRate: number;
+}
+
+/**
  * Access log query parameters
  */
 export interface AccessLogQueryDto extends SortedPagedQueryDto {
@@ -169,12 +285,13 @@ export interface AccessLogQueryDto extends SortedPagedQueryDto {
   method?: string;
   ipAddress?: string;
   statusCode?: number;
+  minStatusCode?: number;
+  maxStatusCode?: number;
   minResponseTime?: number;
   maxResponseTime?: number;
-  startDate?: Date | string;
-  endDate?: Date | string;
   startTime?: Date | string;
   endTime?: Date | string;
+  keyword?: string;
   isMobile?: boolean;
   isBot?: boolean;
   country?: string;
@@ -186,16 +303,34 @@ export interface AccessLogQueryDto extends SortedPagedQueryDto {
 // ============================================
 
 /**
- * System setting DTO
+ * Setting DTO (backend SettingDto)
  */
-export interface SystemSettingDto {
+export interface SettingDto {
+  id: string;
   key: string;
   value: string;
   description?: string | null;
-  category: string;
-  isPublic: boolean;
-  lastModifiedAt: Date | string;
-  lastModifiedBy?: string | null;
+  group?: string | null;
+  isSystem: boolean;
+  sortOrder: number;
+  valueType: SettingValueType;
+  scope: SettingScope;
+  scopeId?: string | null;
+  creationTime: Date | string;
+}
+
+/**
+ * Create setting request
+ */
+export interface CreateSettingDto {
+  key: string;
+  value: string;
+  description?: string;
+  group?: string;
+  sortOrder?: number;
+  valueType?: SettingValueType;
+  scope?: SettingScope;
+  scopeId?: string;
 }
 
 /**
@@ -203,22 +338,18 @@ export interface SystemSettingDto {
  */
 export interface UpdateSettingDto {
   value: string;
+  description?: string;
+  group?: string;
+  sortOrder?: number;
+  valueType?: SettingValueType;
 }
 
 /**
- * Batch update settings request
+ * Setting group info DTO
  */
-export interface BatchUpdateSettingsDto {
-  settings: Record<string, string>;
-}
-
-/**
- * Setting query parameters
- */
-export interface SettingQueryDto {
-  category?: string;
-  isPublic?: boolean;
-  keyword?: string;
+export interface SettingGroupDto {
+  groupName: string;
+  settingCount: number;
 }
 
 // ============================================
@@ -226,17 +357,27 @@ export interface SettingQueryDto {
 // ============================================
 
 /**
- * System information
+ * System module info
+ */
+export interface SystemModuleInfoDto {
+  name: string;
+  assembly: string;
+  isEnabled: boolean;
+  loadOrder: number;
+}
+
+/**
+ * System information (backend SystemInfoDto)
  */
 export interface SystemInfoDto {
-  version: string;
-  environment: string;
-  machineName: string;
-  osDescription: string;
+  appName: string;
+  frameworkVersion: string;
   runtimeVersion: string;
+  operatingSystem: string;
   startTime: Date | string;
   uptime: string;
-  uptimeSeconds: number;
+  environment: string;
+  loadedModules: SystemModuleInfoDto[];
 }
 
 /**

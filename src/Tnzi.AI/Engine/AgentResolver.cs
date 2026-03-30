@@ -49,9 +49,7 @@ public class AgentResolver : IAgentResolver
                 return AgentResolution.Failure(defaultProvider, model, agentId, ErrorCodes.AgentDisabled);
             }
 
-            var entityToolGroups = string.IsNullOrWhiteSpace(entity.ToolGroups)
-                ? null
-                : JsonSerializer.Deserialize<List<string>>(entity.ToolGroups);
+            var entityToolGroups = entity.ToolGroups;
 
             var userPermissions = await ResolveUserPermissionsAsync(entityToolGroups, ct);
 

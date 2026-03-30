@@ -182,6 +182,11 @@ public class MemoryOptions
         ["preference", "fact", "decision", "pattern", "instruction"];
 
     /// <summary>
+    /// 搜索评分公式配置（CrewAI 风格复合权重）
+    /// </summary>
+    public MemoryScoringOptions Scoring { get; set; } = new();
+
+    /// <summary>
     /// 是否启用 PII 防护（save_memory 时检测个人信息模式）
     /// </summary>
     public bool EnablePiiProtection { get; set; } = true;
@@ -199,6 +204,16 @@ public class MemoryOptions
     /// 记忆嵌入向量使用的模型（null=使用 Provider 的 DefaultModel）
     /// </summary>
     public string? EmbeddingModel { get; set; }
+
+    /// <summary>
+    /// 最大记忆事实数（超过时按置信度降序裁剪）
+    /// </summary>
+    public int MaxFacts { get; set; } = 100;
+
+    /// <summary>
+    /// 置信度裁剪阈值（低于此值的记忆条目在注入时被跳过，默认 0.0 不裁剪）
+    /// </summary>
+    public double ConfidencePruningThreshold { get; set; }
 }
 
 /// <summary>
@@ -313,6 +328,27 @@ public class SkillsOptions
     public SkillInjectionMode InjectionMode { get; set; } = SkillInjectionMode.OnDemandTools;
 
     /// <summary>
+    /// 已安装技能的数据目录根路径（支持租户/用户隔离）
+    /// </summary>
+    /// <remarks>
+    /// <para>目录结构（多租户可选）：</para>
+    /// <para>  {DataPath}/skills/skill-slug/ — System scope</para>
+    /// <para>  {DataPath}/skills/tenants/{tenantId}/skill-slug/ — Tenant scope</para>
+    /// <para>  {DataPath}/skills/users/{userId}/skill-slug/ — User scope（单租户/无租户）</para>
+    /// <para>  {DataPath}/skills/tenants/{tenantId}/users/{userId}/skill-slug/ — User scope（多租户隔离）</para>
+    /// <para>支持相对路径（相对于 ContentRoot）和绝对路径。默认为 "App_Data/AI"。</para>
+    /// </remarks>
+    public string DataPath { get; set; } = "App_Data/AI";
+
+    /// <summary>
+    /// 是否加载内置技能（嵌入资源中的 BuiltIn skills）
+    /// </summary>
+    /// <remarks>
+    /// 默认启用。测试场景下可设为 false 以隔离内置技能对测试的影响。
+    /// </remarks>
+    public bool LoadBuiltIn { get; set; } = true;
+
+    /// <summary>
     /// 技能缓存 TTL（默认 15 分钟）
     /// </summary>
     public TimeSpan CacheTtl { get; set; } = TimeSpan.FromMinutes(15);
@@ -352,4 +388,43 @@ public enum ContextSearchTime
     /// 作为工具暴露给模型，按需调用
     /// </summary>
     OnDemandFunctionCalling = 1
+}
+
+/// <summary>
+/// 记忆搜索评分配置（CrewAI 风格复合权重）
+/// </summary>
+/// <remarks>
+/// 最终评分公式：finalScore = SemanticWeight * vectorSimilarity + RecencyWeight * recencyDecay + ImportanceBoostWeight * (BaseScore + importance * importanceWeight)
+/// 其中 recencyDecay = exp(-ln2/RecencyHalfLifeDays * daysSince)
+/// </remarks>
+public class MemoryScoringOptions
+{
+    /// <summary>
+    /// 重要性基础分（默认 0.5）
+    /// </summary>
+    public double BaseScore { get; set; } = 0.5;
+
+    /// <summary>
+    /// 语义相似度权重（默认 0.7）
+    /// </summary>
+    public double SemanticWeight { get; set; } = 0.7;
+
+    /// <summary>
+    /// 时间衰减权重（默认 0.2）
+    /// </summary>
+    public double RecencyWeight { get; set; } = 0.2;
+
+    /// <summary>
+    /// 重要性提升权重（默认 0.1）
+    /// </summary>
+    public double ImportanceBoostWeight { get; set; } = 0.1;
+
+    /// <summary>
+    /// 时间衰减半衰期（天数，null 时使用 MemoryOptions.RecencyDecayRate 旧配置向后兼容）
+    /// </summary>
+    /// <remarks>
+    /// 设置后将使用 exp(-ln2/halfLifeDays * days) 公式替代旧的 RecencyDecayRate。
+    /// 例如 70 天表示 70 天后记忆权重衰减到 50%。
+    /// </remarks>
+    public double? RecencyHalfLifeDays { get; set; }
 }

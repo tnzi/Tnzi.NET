@@ -47,6 +47,7 @@ public class DatabaseSkillStore : ISkillStore
             _cachedResults = entities.Select(MapToDefinition).ToList();
             return _cachedResults;
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load skills from database.");
@@ -69,13 +70,14 @@ public class DatabaseSkillStore : ISkillStore
             var userId = _currentUser?.Id;
 
             var entity = await _repository
-                .Where(e => e.Enabled && e.Slug == slug &&
+                .Where(e => e.Enabled && e.Slug.ToLower() == slug.ToLower() &&
                     ((e.Scope == SkillScope.Tenant && e.TenantId == tenantId) ||
                      (e.Scope == SkillScope.User && e.OwnerUserId == userId)))
                 .FirstOrDefaultAsync(ct);
 
             return entity == null ? null : MapToDefinition(entity);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load skill '{Slug}' from database.", slug);
@@ -104,6 +106,8 @@ public class DatabaseSkillStore : ISkillStore
         {
             Slug = entity.Slug,
             Scope = entity.Scope,
+            TenantId = entity.TenantId,
+            OwnerUserId = entity.OwnerUserId,
             Name = entity.Name,
             Description = entity.Description,
             Content = entity.Content,

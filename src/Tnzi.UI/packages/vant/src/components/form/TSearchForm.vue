@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 
 interface Props {
-  modelValue?: Record<string, any>;
+  modelValue?: Record<string, unknown>;
   placeholder?: string;
   loading?: boolean;
   disabled?: boolean;
@@ -21,8 +21,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  'update:modelValue': [value: Record<string, any>];
-  search: [value: Record<string, any>];
+  'update:modelValue': [value: Record<string, unknown>];
+  search: [value: Record<string, unknown>];
   reset: [];
 }>();
 
@@ -58,4 +58,3 @@ const handleReset = () => {
     </template>
   </van-search>
 </template>
-

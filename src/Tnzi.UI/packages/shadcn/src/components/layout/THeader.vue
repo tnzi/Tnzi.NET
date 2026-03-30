@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import type { IHeaderEmits, IHeaderProps } from '@tnzi/core/components';
 import { Button } from '../primitive/ui';
+import { useShadcnTheme } from '../../composables/useShadcnTheme';
 
 const props = defineProps<IHeaderProps>();
 const emit = defineEmits<IHeaderEmits>();
 
-const isDark = ref(false);
+const { isDark, toggleTheme } = useShadcnTheme();
 
 const handleThemeToggle = () => {
-  isDark.value = !isDark.value;
-  document.documentElement.classList.toggle('dark', isDark.value);
+  toggleTheme();
   emit('themeToggle', isDark.value);
 };
 </script>

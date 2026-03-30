@@ -21,6 +21,9 @@ public class MemoryCacheService : ICache, IDisposable
     // 计数器同步锁
     private readonly object _incrementLock = new();
 
+    // 编译后的正则表达式缓存（避免每次 RemoveByPattern 重编译）
+    private static readonly ConcurrentDictionary<string, Regex> _regexCache = new();
+
     private readonly IPerformanceMonitorService? _monitor;
 
     public MemoryCacheService(
@@ -88,11 +91,15 @@ public class MemoryCacheService : ICache, IDisposable
 
     public Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
     {
-        var regexPattern = "^" + Regex.Escape(pattern)
-            .Replace(@"\*", ".*")
-            .Replace(@"\?", ".") + "$";
+        var regex = _regexCache.GetOrAdd(pattern, static p =>
+        {
+            var regexPattern = "^" + Regex.Escape(p)
+                .Replace(@"\*", ".*")
+                .Replace(@"\?", ".") + "$";
+            return new Regex(regexPattern, RegexOptions.Compiled);
+        });
 
-        var keysToRemove = _trackedKeys.Keys.Where(k => Regex.IsMatch(k, regexPattern)).ToList();
+        var keysToRemove = _trackedKeys.Keys.Where(k => regex.IsMatch(k)).ToList();
 
         foreach (var key in keysToRemove)
         {

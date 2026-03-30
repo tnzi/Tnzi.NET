@@ -27,7 +27,7 @@ public class DefaultEvaluationAdminController : ApiAdminControllerBase
     /// <summary>
     /// 分页查询评估运行列表
     /// </summary>
-    [HttpPost("list")]
+    [HttpPost("query")]
     public virtual async Task<ApiResult<IPagedList<EvaluationRunDto>>> GetList([FromBody] EvaluationRunQueryDto query)
     {
         var result = await EvaluationService.GetListAsync(query);

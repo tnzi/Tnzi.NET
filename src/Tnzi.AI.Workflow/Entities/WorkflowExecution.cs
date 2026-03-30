@@ -38,9 +38,19 @@ public class WorkflowExecution : CreationAuditedEntity<Guid>, IMultiTenant
     public WorkflowExecutionStatus Status { get; set; } = WorkflowExecutionStatus.Running;
 
     /// <summary>
+    /// 开始执行时间
+    /// </summary>
+    public DateTime? StartedAt { get; set; }
+
+    /// <summary>
     /// 完成时间
     /// </summary>
     public DateTime? CompletedTime { get; set; }
+
+    /// <summary>
+    /// 执行耗时（毫秒）
+    /// </summary>
+    public long? DurationMs { get; set; }
 
     /// <summary>
     /// 最后更新时间

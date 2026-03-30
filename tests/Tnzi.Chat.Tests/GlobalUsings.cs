@@ -17,6 +17,7 @@ global using Tnzi.Chat.Dtos;
 global using Tnzi.Chat.Entities;
 global using Tnzi.Chat.Services;
 global using Tnzi.Data;
+global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.Extensions;

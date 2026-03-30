@@ -18,9 +18,7 @@ const emit = defineEmits<{
 }>()
 
 function getBadge(tab: ITabItem): number {
-  if (tab.badge) return tab.badge
-  if (props.badge && props.badge[tab.key]) return props.badge[tab.key]!
-  return 0
+  return props.badge?.[tab.key] ?? tab.badge ?? 0
 }
 
 function handleClick(tab: ITabItem) {

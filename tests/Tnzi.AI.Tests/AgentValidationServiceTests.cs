@@ -42,7 +42,7 @@ public class AgentValidationServiceTests
             Name = "Test Agent",
             Provider = "OpenAI",
             Model = "gpt-4",
-            ToolGroups = """["web_search", "code_tools"]""",
+            ToolGroups = new List<string> { "web_search", "code_tools" },
             ExecutionMode = AgentExecutionMode.Single
         };
 
@@ -94,7 +94,7 @@ public class AgentValidationServiceTests
             Name = "Test Agent",
             Provider = "OpenAI",
             Model = "gpt-4",
-            ToolGroups = """["web_search", "nonexistent_tools"]""",
+            ToolGroups = new List<string> { "web_search", "nonexistent_tools" },
             ExecutionMode = AgentExecutionMode.Single
         };
 
@@ -174,7 +174,7 @@ public class AgentValidationServiceTests
     }
 
     [Fact]
-    public async Task ValidateAsync_MalformedToolGroupJson_FailsCheck()
+    public async Task ValidateAsync_NullToolGroups_PassesCheck()
     {
         var agentId = Guid.NewGuid();
         var agent = new Agent
@@ -182,7 +182,7 @@ public class AgentValidationServiceTests
             Id = agentId,
             Name = "Test Agent",
             Provider = "OpenAI",
-            ToolGroups = "not valid json",
+            ToolGroups = null,
             ExecutionMode = AgentExecutionMode.Single
         };
 
@@ -194,8 +194,7 @@ public class AgentValidationServiceTests
 
         result.Succeeded.ShouldBeTrue();
         var toolCheck = result.Data!.Checks.First(c => c.Name == "tool_groups");
-        toolCheck.Passed.ShouldBeFalse();
-        toolCheck.Details.ShouldContain("malformed");
+        toolCheck.Passed.ShouldBeTrue();
     }
 
     [Fact]

@@ -279,7 +279,9 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                     && frc.Result is string resultText
                     && resultText.StartsWith("HANDOFF:", StringComparison.OrdinalIgnoreCase))
                 {
-                    return resultText["HANDOFF:".Length..].Trim();
+                    var target = resultText["HANDOFF:".Length..].Trim();
+                    if (!string.IsNullOrWhiteSpace(target))
+                        return target;
                 }
             }
         }

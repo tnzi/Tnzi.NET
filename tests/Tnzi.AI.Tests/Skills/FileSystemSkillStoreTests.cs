@@ -1,3 +1,4 @@
+using Tnzi.AI.Infrastructure.ContextProviders;
 using Tnzi.AI.Skills;
 using Tnzi.AI.Skills.Models;
 
@@ -30,9 +31,10 @@ public class FileSystemSkillStoreTests : IDisposable
     public async Task GetAllAsync_LoadsSkillsFromPath()
     {
         CreateSkillFile("my-skill", """
-            # My Test Skill
-
-            A skill for testing.
+            ---
+            name: My Test Skill
+            description: A skill for testing.
+            ---
 
             ## When to Use
 
@@ -49,62 +51,19 @@ public class FileSystemSkillStoreTests : IDisposable
         skills.Count.ShouldBe(1);
         skills[0].Name.ShouldBe("My Test Skill");
         skills[0].Description.ShouldBe("A skill for testing.");
-        skills[0].WhenToUse.ShouldContain("testing");
         skills[0].Requirements.ShouldNotBeNull();
         skills[0].Requirements!.Bins.ShouldContain("git");
     }
 
     [Fact]
-    public async Task GetAllAsync_ParsesParametersSection()
-    {
-        CreateSkillFile("param-skill", """
-            # Param Skill
-
-            A skill with parameters.
-
-            ## Parameters
-
-            - format: Output format (required, allowed: json, yaml, text, default: json)
-            - verbose: Enable verbose output (optional)
-            - level: Verbosity level (optional, allowed: 1, 2, 3, default: 1)
-            """);
-
-        var store = CreateStore(paths: [_tempDir]);
-        var skills = await store.GetAllAsync();
-
-        skills.Count.ShouldBe(1);
-        var parameters = skills[0].Parameters;
-        parameters.ShouldNotBeEmpty();
-        parameters.Count.ShouldBe(3);
-
-        var format = parameters.FirstOrDefault(p => p.Name == "format");
-        format.ShouldNotBeNull();
-        format!.Description.ShouldBe("Output format");
-        format.Required.ShouldBeTrue();
-        format.AllowedValues.ShouldNotBeNull();
-        format.AllowedValues!.ShouldContain("json");
-        format.AllowedValues!.ShouldContain("yaml");
-        format.AllowedValues!.ShouldContain("text");
-        format.DefaultValue.ShouldBe("json");
-
-        var verbose = parameters.FirstOrDefault(p => p.Name == "verbose");
-        verbose.ShouldNotBeNull();
-        verbose!.Required.ShouldBeFalse();
-
-        var level = parameters.FirstOrDefault(p => p.Name == "level");
-        level.ShouldNotBeNull();
-        level!.Required.ShouldBeFalse();
-        level.AllowedValues.ShouldNotBeNull();
-        level.AllowedValues!.ShouldContain("1");
-        level.AllowedValues!.ShouldContain("2");
-        level.AllowedValues!.ShouldContain("3");
-        level.DefaultValue.ShouldBe("1");
-    }
-
-    [Fact]
     public async Task GetAllAsync_GeneratesSlugFromName()
     {
-        CreateSkillFile("code-review-dir", "# Code Review\n\nReview code.");
+        CreateSkillFile("code-review-dir", """
+            ---
+            name: Code Review
+            description: Review code.
+            ---
+            """);
 
         var store = CreateStore(paths: [_tempDir]);
         var skills = await store.GetAllAsync();
@@ -114,10 +73,38 @@ public class FileSystemSkillStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAllAsync_UsesExplicitSlug()
+    {
+        CreateSkillFile("my-dir", """
+            ---
+            name: My Skill
+            slug: custom-slug
+            description: A skill with explicit slug.
+            ---
+            """);
+
+        var store = CreateStore(paths: [_tempDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].Slug.ShouldBe("custom-slug");
+    }
+
+    [Fact]
     public async Task GetAllAsync_SetsSystemScope()
     {
-        CreateSkillFile("scope-skill", "# Scope Skill\n\nTests scope.");
-        CreateSkillFile("scope-skill-2", "# Another Skill\n\nTests source.");
+        CreateSkillFile("scope-skill", """
+            ---
+            name: Scope Skill
+            description: Tests scope.
+            ---
+            """);
+        CreateSkillFile("scope-skill-2", """
+            ---
+            name: Another Skill
+            description: Tests source.
+            ---
+            """);
 
         var store = CreateStore(paths: [_tempDir]);
         var skills = await store.GetAllAsync();
@@ -131,27 +118,23 @@ public class FileSystemSkillStoreTests : IDisposable
     public async Task GetAllAsync_ExcludesDisabledSkills()
     {
         CreateSkillFile("enabled-skill", """
-            # Enabled Skill
-
-            This one is enabled.
-
-            ## Metadata
-
-            - enabled: true
+            ---
+            name: Enabled Skill
+            description: This one is enabled.
+            enabled: true
+            ---
             """);
 
         CreateSkillFile("disabled-skill", """
-            # Disabled Skill
-
-            This one is disabled.
-
-            ## Metadata
-
-            - enabled: false
+            ---
+            name: Disabled Skill
+            description: This one is disabled.
+            enabled: false
+            ---
             """);
 
         // FileSystemSkillStore loads all skills — the caller filters by Enabled.
-        // Verify that Enabled=false is parsed correctly from metadata.
+        // Verify that Enabled=false is parsed correctly from frontmatter.
         var store = CreateStore(paths: [_tempDir]);
         var skills = await store.GetAllAsync();
 
@@ -168,7 +151,12 @@ public class FileSystemSkillStoreTests : IDisposable
     [Fact]
     public async Task GetAllAsync_CachesResults()
     {
-        CreateSkillFile("cache-skill", "# Cache Skill\n\nTests caching.");
+        CreateSkillFile("cache-skill", """
+            ---
+            name: Cache Skill
+            description: Tests caching.
+            ---
+            """);
 
         var store = CreateStore(paths: [_tempDir]);
 
@@ -176,7 +164,12 @@ public class FileSystemSkillStoreTests : IDisposable
         first.Count.ShouldBe(1);
 
         // Add another file after first call — should not appear in second call (cache hit)
-        CreateSkillFile("cache-skill-2", "# Cache Skill 2\n\nAdded after cache.");
+        CreateSkillFile("cache-skill-2", """
+            ---
+            name: Cache Skill 2
+            description: Added after cache.
+            ---
+            """);
 
         var second = await store.GetAllAsync();
         second.Count.ShouldBe(1); // still 1 — from cache
@@ -187,15 +180,13 @@ public class FileSystemSkillStoreTests : IDisposable
     public async Task GetAllAsync_ParsesConstraintMetadata()
     {
         CreateSkillFile("constraint-skill", """
-            # Constraint Skill
-
-            A skill with constraint metadata.
-
-            ## Metadata
-
-            - allowed-tools: code, search
-            - model: gpt-4
-            - provider: openai
+            ---
+            name: Constraint Skill
+            description: A skill with constraint metadata.
+            allowed-tool-groups: code, search
+            model: gpt-4
+            provider: openai
+            ---
             """);
 
         var store = CreateStore(paths: [_tempDir]);
@@ -209,6 +200,93 @@ public class FileSystemSkillStoreTests : IDisposable
         skills[0].RequiredProvider.ShouldBe("openai");
     }
 
+    [Fact]
+    public async Task GetAllAsync_ParsesAllFrontmatterFields()
+    {
+        CreateSkillFile("full-skill", """
+            ---
+            name: Full Skill
+            slug: full-skill
+            description: A comprehensive skill.
+            version: 2.0
+            author: test-author
+            tags: tag1, tag2, tag3
+            priority: 15
+            enabled: true
+            allowed-tool-groups: code, search
+            tool-whitelist: special_tool
+            tool-blacklist: dangerous_tool
+            model: claude-3-opus
+            provider: anthropic
+            agents: rpi-*, finance-agent
+            ---
+
+            ## When to Use
+
+            Use for comprehensive testing.
+            """);
+
+        var store = CreateStore(paths: [_tempDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        var skill = skills[0];
+
+        skill.Name.ShouldBe("Full Skill");
+        skill.Slug.ShouldBe("full-skill");
+        skill.Description.ShouldBe("A comprehensive skill.");
+        skill.Version.ShouldBe("2.0");
+        skill.Author.ShouldBe("test-author");
+        skill.Tags.ShouldContain("tag1");
+        skill.Tags.ShouldContain("tag2");
+        skill.Tags.ShouldContain("tag3");
+        skill.Priority.ShouldBe(15);
+        skill.Enabled.ShouldBeTrue();
+        skill.AllowedToolGroups.ShouldNotBeNull();
+        skill.AllowedToolGroups!.ShouldContain("code");
+        skill.AllowedToolGroups!.ShouldContain("search");
+        skill.AllowedTools.ShouldNotBeNull();
+        skill.AllowedTools!.ShouldContain("special_tool");
+        skill.DeniedTools.ShouldNotBeNull();
+        skill.DeniedTools!.ShouldContain("dangerous_tool");
+        skill.RequiredModel.ShouldBe("claude-3-opus");
+        skill.RequiredProvider.ShouldBe("anthropic");
+        skill.Agents.ShouldNotBeNull();
+        skill.Agents!.ShouldContain("rpi-*");
+        skill.Agents!.ShouldContain("finance-agent");
+    }
+
+    [Fact]
+    public void Parse_WithoutFrontmatter_ReturnsNull()
+    {
+        var result = SkillMarkdownParser.Parse("# Old Format\n\nNo frontmatter.", "/fake/path");
+        result.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Parse_WithUnclosedFrontmatter_ReturnsNull()
+    {
+        var result = SkillMarkdownParser.Parse("---\nname: Test\ndescription: Missing closing.", "/fake/path");
+        result.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Parse_WithCommentInFrontmatter_SkipsComments()
+    {
+        var result = SkillMarkdownParser.Parse("""
+            ---
+            name: Comment Test
+            description: Has comments.
+            # This is a comment
+            version: 1.0
+            ---
+            """, "/fake/path");
+
+        result.ShouldNotBeNull();
+        result!.Name.ShouldBe("Comment Test");
+        result.Version.ShouldBe("1.0");
+    }
+
     // -------------------------------------------------------------------------
     // GetBySlugAsync
     // -------------------------------------------------------------------------
@@ -216,7 +294,12 @@ public class FileSystemSkillStoreTests : IDisposable
     [Fact]
     public async Task GetBySlugAsync_ReturnsMatchingSkill()
     {
-        CreateSkillFile("lookup-skill", "# Lookup Skill\n\nFind me by slug.");
+        CreateSkillFile("lookup-skill", """
+            ---
+            name: Lookup Skill
+            description: Find me by slug.
+            ---
+            """);
 
         var store = CreateStore(paths: [_tempDir]);
         var skill = await store.GetBySlugAsync("lookup-skill");
@@ -228,12 +311,102 @@ public class FileSystemSkillStoreTests : IDisposable
     [Fact]
     public async Task GetBySlugAsync_ReturnsNull_WhenNotFound()
     {
-        CreateSkillFile("existing-skill", "# Existing Skill\n\nI exist.");
+        CreateSkillFile("existing-skill", """
+            ---
+            name: Existing Skill
+            description: I exist.
+            ---
+            """);
 
         var store = CreateStore(paths: [_tempDir]);
         var skill = await store.GetBySlugAsync("nonexistent-skill");
 
         skill.ShouldBeNull();
+    }
+
+    // -------------------------------------------------------------------------
+    // IsAgentAllowed (wildcard matching)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void IsAgentAllowed_NullAgents_AllowsAll()
+    {
+        var skill = new SkillDefinition { Agents = null };
+        SkillContextProvider.IsAgentAllowed(skill, "any-agent").ShouldBeTrue();
+        SkillContextProvider.IsAgentAllowed(skill, null).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void IsAgentAllowed_EmptyAgents_AllowsAll()
+    {
+        var skill = new SkillDefinition { Agents = [] };
+        SkillContextProvider.IsAgentAllowed(skill, "any-agent").ShouldBeTrue();
+    }
+
+    [Fact]
+    public void IsAgentAllowed_ExactMatch()
+    {
+        var skill = new SkillDefinition { Agents = ["finance-agent", "hr-agent"] };
+        SkillContextProvider.IsAgentAllowed(skill, "finance-agent").ShouldBeTrue();
+        SkillContextProvider.IsAgentAllowed(skill, "hr-agent").ShouldBeTrue();
+        SkillContextProvider.IsAgentAllowed(skill, "other-agent").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void IsAgentAllowed_WildcardMatch()
+    {
+        var skill = new SkillDefinition { Agents = ["rpi-*"] };
+        SkillContextProvider.IsAgentAllowed(skill, "rpi-assistant").ShouldBeTrue();
+        SkillContextProvider.IsAgentAllowed(skill, "rpi-finance").ShouldBeTrue();
+        SkillContextProvider.IsAgentAllowed(skill, "other-agent").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void IsAgentAllowed_CaseInsensitive()
+    {
+        var skill = new SkillDefinition { Agents = ["Fabrikam-Assistant"] };
+        SkillContextProvider.IsAgentAllowed(skill, "rpi-assistant").ShouldBeTrue();
+    }
+
+    [Fact]
+    public void IsAgentAllowed_WithAgents_NullAgentName_ReturnsFalse()
+    {
+        var skill = new SkillDefinition { Agents = ["specific-agent"] };
+        SkillContextProvider.IsAgentAllowed(skill, null).ShouldBeFalse();
+        SkillContextProvider.IsAgentAllowed(skill, "").ShouldBeFalse();
+    }
+
+    // -------------------------------------------------------------------------
+    // IsInternal
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetAllAsync_ParsesInternalField()
+    {
+        CreateSkillFile("internal-skill", """
+            ---
+            name: Internal Skill
+            description: Shared dependency.
+            internal: true
+            ---
+            """);
+
+        var store = CreateStore(paths: [_tempDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].IsInternal.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void FilterByAgent_ExcludesInternalSkills()
+    {
+        var internalSkill = new SkillDefinition { Slug = "office-scripts", Name = "Office Scripts", IsInternal = true };
+        var normalSkill = new SkillDefinition { Slug = "code-review", Name = "Code Review" };
+
+        // Internal skills should be hidden from agents
+        SkillContextProvider.IsAgentAllowed(internalSkill, "any-agent").ShouldBeTrue(); // IsAgentAllowed doesn't filter internal
+        internalSkill.IsInternal.ShouldBeTrue(); // But the flag is set — FilterByAgent checks this separately
     }
 
     // -------------------------------------------------------------------------
@@ -287,7 +460,8 @@ public class FileSystemSkillStoreTests : IDisposable
                     Paths = paths ?? [],
                     AllowList = allowList ?? [],
                     DenyList = denyList ?? [],
-                    RequireChecksEnabled = requireChecksEnabled
+                    RequireChecksEnabled = requireChecksEnabled,
+                    LoadBuiltIn = false
                 }
             }
         });

@@ -13,6 +13,11 @@ namespace Tnzi.AI.Rag.Services;
 /// </summary>
 public class CachingEmbeddingDecorator : IEmbeddingService
 {
+    /// <summary>
+    /// Keyed service key for the inner (non-cached) embedding service
+    /// </summary>
+    public const string InnerServiceKey = "tnzi:embedding:inner";
+
     private readonly IEmbeddingService _inner;
     private readonly Tnzi.Caching.ICache? _cache;
     private readonly AIRagOptions _options;
@@ -25,7 +30,7 @@ public class CachingEmbeddingDecorator : IEmbeddingService
     private const string CacheKeyPrefix = "tnzi:embedding:";
 
     public CachingEmbeddingDecorator(
-        IEmbeddingService inner,
+        [FromKeyedServices(InnerServiceKey)] IEmbeddingService inner,
         ILogger<CachingEmbeddingDecorator> logger,
         IOptions<AIRagOptions> options,
         Tnzi.Caching.ICache? cache = null,

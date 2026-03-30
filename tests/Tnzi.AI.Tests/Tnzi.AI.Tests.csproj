@@ -37,6 +37,8 @@
     <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Coder\Tnzi.AI.Coder.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" />
   </ItemGroup>
 
 </Project>

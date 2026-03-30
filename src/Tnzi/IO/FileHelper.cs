@@ -141,12 +141,12 @@ public static class FileHelper
     /// <param name="fileName">文件名</param>
     /// <param name="encoding">编码（默认UTF8）</param>
     /// <returns>文件内容</returns>
-    public static string ReadAllText(string fileName, System.Text.Encoding? encoding = null)
+    public static string ReadAllText(string fileName, Encoding? encoding = null)
     {
         if (string.IsNullOrEmpty(fileName) || !File.Exists(fileName))
             return string.Empty;
 
-        encoding ??= System.Text.Encoding.UTF8;
+        encoding ??= Encoding.UTF8;
         return File.ReadAllText(fileName, encoding);
     }
 
@@ -156,12 +156,12 @@ public static class FileHelper
     /// <param name="fileName">文件名</param>
     /// <param name="content">内容</param>
     /// <param name="encoding">编码（默认UTF8）</param>
-    public static void WriteAllText(string fileName, string content, System.Text.Encoding? encoding = null)
+    public static void WriteAllText(string fileName, string content, Encoding? encoding = null)
     {
         Check.NotNullOrEmpty(fileName);
 
         CreateDirectoryIfNotExists(fileName);
-        encoding ??= System.Text.Encoding.UTF8;
+        encoding ??= Encoding.UTF8;
         File.WriteAllText(fileName, content, encoding);
     }
 

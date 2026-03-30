@@ -130,6 +130,10 @@ public class UsageLoggingMiddleware : IAiMiddleware
         var agentId = context.Agent.AgentId;
         var threadId = context.Request.ThreadId;
 
+        _logger.LogInformation(
+            "AI usage: provider={Provider} model={Model} input={Input} output={Output} cached={Cached} creation={Creation} duration={Duration}ms success={Success}",
+            provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens, durationMs, isSuccess);
+
         try
         {
             await _usageLogService.LogUsageAsync(

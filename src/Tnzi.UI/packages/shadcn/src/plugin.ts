@@ -69,5 +69,3 @@ export function createTnziUi(options: TnziUiOptions = {}) {
   };
 }
 
-/** Default plugin instance */
-export default createTnziUi();

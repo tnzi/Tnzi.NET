@@ -34,6 +34,21 @@ public class AIModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI:Thread"))
             .ValidateWith<ThreadOptions, ThreadOptionsValidator>();
 
+        context.Services.AddOptions<LoopDetectionOptions>()
+            .Bind(context.Configuration.GetSection("AI:LoopDetection"))
+            .ValidateWith<LoopDetectionOptions, LoopDetectionOptionsValidator>();
+        context.Services.AddOptions<SubAgentOptions>()
+            .Bind(context.Configuration.GetSection("AI:SubAgent"))
+            .ValidateWith<SubAgentOptions, SubAgentOptionsValidator>();
+
+        context.Services.AddOptions<SuggestionOptions>()
+            .Bind(context.Configuration.GetSection("AI:Suggestions"))
+            .ValidateWith<SuggestionOptions, SuggestionOptionsValidator>();
+
+        context.Services.AddOptions<TodoOptions>()
+            .Bind(context.Configuration.GetSection("AI:Todo"))
+            .ValidateWith<TodoOptions, TodoOptionsValidator>();
+
         // 从环境变量补充 API Key（移自 Validator 的副作用）
         context.Services.PostConfigure<AIOptions>(options =>
         {
@@ -84,6 +99,13 @@ public class AIModule : TnziApplicationModule
         services.AddSingleton<IChatClientProvider, OpenAIChatClientProvider>();
         services.AddSingleton<IChatClientProvider, AnthropicChatClientProvider>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
+
+        // Multi-model provider message processors — 扩展点，用于处理特定提供商的消息格式差异。
+        // 当前由 MiniMax 实现 <think> 标签提取，DeepSeek/Gemini 为预留直通。
+        // 应用代码可通过 IEnumerable<IChatMessageProcessor> 注入并按 ProviderName 匹配使用。
+        services.AddSingleton<IChatMessageProcessor, DeepSeekChatMessageProcessor>();
+        services.AddSingleton<IChatMessageProcessor, GeminiChatMessageProcessor>();
+        services.AddSingleton<IChatMessageProcessor, MiniMaxChatMessageProcessor>();
         services.AddSingleton<IAgentExecutionContextAccessor, AgentExecutionContextAccessor>();
         // Scoped: AgentFactory/ToolResolver/OptionsBuilder must be Scoped so that
         // ToolAdapter captures the request-scoped IServiceProvider, enabling resolution of
@@ -155,23 +177,48 @@ public class AIModule : TnziApplicationModule
         services.TryAddScoped<WebSearchTools>();
         services.TryAddScoped<MemoryTools>();
 
+        // A2A 工具（调用远程 Agent）
+        services.TryAddScoped<A2ATools>();
+
         // 注册 OpenAPI 工具生成器（运行时通过 OpenApiToolsOptions.Enabled 控制是否生效）
         services.AddSingleton<OpenApiToolGenerator>();
 
         // 注册 Guardrails（运行时通过 GuardrailsOptions.Enabled 控制是否生效）
         services.AddScoped<GuardrailRunner>();
-        services.AddScoped<IInputGuardrail, MaxLengthGuardrail>();
-        services.AddScoped<IInputGuardrail, PromptInjectionGuardrail>();
-        services.AddScoped<IInputGuardrail, PiiDetectionGuardrail>();
-        services.AddScoped<IOutputGuardrail, ContentFilterGuardrail>();
 
-        // LLM-as-Judge guardrail（同时作为输入和输出 guardrail）
+        // 输入 guardrails（同时注册为 IGuardrailProvider）
+        services.AddScoped<MaxLengthGuardrail>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<MaxLengthGuardrail>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<MaxLengthGuardrail>());
+
+        services.AddScoped<PromptInjectionGuardrail>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<PromptInjectionGuardrail>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<PromptInjectionGuardrail>());
+
+        services.AddScoped<PiiDetectionGuardrail>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<PiiDetectionGuardrail>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<PiiDetectionGuardrail>());
+
+        // 输出 guardrails（同时注册为 IGuardrailProvider）
+        services.AddScoped<ContentFilterGuardrail>();
+        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<ContentFilterGuardrail>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<ContentFilterGuardrail>());
+
+        // LLM-as-Judge guardrail（同时作为输入、输出和统一 guardrail provider）
         services.AddScoped<LlmJudgeGuardrail>();
         services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
         services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
+
+        // 工具白名单/黑名单 guardrail provider
+        services.AddScoped<AllowlistGuardrailProvider>();
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<AllowlistGuardrailProvider>());
 
         // 注册中间件管道组件（手动注册，框架程序集不使用自动注册）
         // 每个中间件同时注册具体类型和 IAiMiddleware 接口转发，支持用户通过接口扩展
+        services.AddSingleton<RetryMiddleware>();
+        services.AddSingleton<IAiMiddleware>(sp => sp.GetRequiredService<RetryMiddleware>());
+
         services.AddScoped<ThinkingMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ThinkingMiddleware>());
 
@@ -198,6 +245,37 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<OutputGuardrailMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<OutputGuardrailMiddleware>());
 
+        // Phase 5: Tool guardrail middleware
+        services.AddScoped<ToolGuardrailMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ToolGuardrailMiddleware>());
+
+        // Phase 1 middlewares
+        // Singleton: tracks tool call patterns across requests via LRU dictionary
+        services.AddSingleton<LoopDetectionMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<LoopDetectionMiddleware>());
+
+        services.AddScoped<ToolErrorRecoveryMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ToolErrorRecoveryMiddleware>());
+
+        services.AddScoped<SubAgentLimitMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SubAgentLimitMiddleware>());
+
+        services.AddScoped<DeferredToolFilterMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<DeferredToolFilterMiddleware>());
+
+        // Phase 2: Context Intelligence middlewares
+        services.AddScoped<SummarizationMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SummarizationMiddleware>());
+
+        services.AddScoped<FileUploadMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<FileUploadMiddleware>());
+
+        services.AddScoped<ViewImageMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ViewImageMiddleware>());
+
+        // Document converter (default: native .NET, can be overridden with CliDocumentConverter)
+        services.TryAddSingleton<IDocumentConverter, NativeDocumentConverter>();
+
         // 注册 Runtime（统一 AI 执行入口 + Run/Trace 持久化）
         services.AddScoped<IRunStore, RunStore>();
         services.AddScoped<ITraceStore, TraceStore>();
@@ -211,17 +289,60 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<IAgentValidationService, AgentValidationService>();
         services.AddScoped<IEvaluationService, EvaluationService>();
 
+        // 注册 AgentPersona、UserProfile 和 AgentArtifact 服务
+        services.AddScoped<IAgentPersonaService, AgentPersonaService>();
+        services.AddScoped<IUserProfileService, UserProfileService>();
+        services.AddScoped<IAgentArtifactService, AgentArtifactService>();
+
+        // Phase 3: 后续建议生成服务
+        services.TryAddScoped<ISuggestionService, SuggestionService>();
+
+        // Phase 3: Todo 和 Clarification 中间件
+        services.AddScoped<TodoMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<TodoMiddleware>());
+
+        services.AddScoped<ClarificationMiddleware>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ClarificationMiddleware>());
+
+        // Phase 3: AI 工具（Clarification / Todo / Artifact）
+        services.TryAddScoped<ClarificationTools>();
+        services.TryAddScoped<TodoTools>();
+        services.TryAddScoped<ArtifactTools>();
+
         // IAiUtility — 轻量级系统级 AI 调用
         services.TryAddScoped<IAiUtility, AiUtilityService>();
 
+        // YAML Agent 定义文件加载与数据库同步
+        services.AddSingleton<IAgentDefinitionProvider, YamlAgentDefinitionProvider>();
+        services.AddHostedService<AgentDefinitionSyncService>();
+
         // Thread title generation event handler
         services.AddEventHandler<ThreadFirstReplyCompletedEvent, ThreadTitleGenerationHandler>();
+        services.AddEventHandler<ThreadDeletedEvent, ThreadCleanupHandler>();
+
+        // 嵌入式 AI 客户端（直接调用 IAgentRuntime，绕过 HTTP）
+        services.TryAddScoped<ITnziAiClient, TnziAiClient>();
+
+        // 配置变更检测器
+        services.TryAddSingleton<IConfigChangeDetector, FileConfigChangeDetector>();
 
         // 注册 A2A 客户端（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IA2AClient, HttpA2AClient>();
 
         // 注册 Agent 评估器（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IAgentEvaluator, DefaultAgentEvaluator>();
+
+        // Phase 6: 子 Agent 注册表（全局单例，3 内置类型 + 运行时扩展）
+        services.AddSingleton<ISubAgentRegistry, SubAgentRegistry>();
+
+        // Phase 6: HTML 可读性提取（SmartReader + 标签剥离降级）
+        services.AddSingleton<IReadabilityExtractor, SmartReaderExtractor>();
+
+        // Phase 6: 端口分配器（线程安全，socket 绑定验证）
+        services.AddOptions<PortAllocatorOptions>()
+            .Bind(context.Configuration.GetSection("AI:PortAllocator"))
+            .ValidateWith<PortAllocatorOptions, PortAllocatorOptionsValidator>();
+        services.AddSingleton<IPortAllocator, PortAllocator>();
 
         return Task.CompletedTask;
     }

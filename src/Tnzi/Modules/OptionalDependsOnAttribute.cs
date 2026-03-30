@@ -5,7 +5,7 @@ namespace Tnzi.Modules;
 /// 如果目标模块存在，则确保其先于当前模块加载
 /// 如果目标模块不存在，则静默忽略（不报错）
 /// </summary>
-[ExperimentalApi(Reason = "可选依赖机制为新增特性，API 可能在后续版本中调整")]
+[StableApi(Since = "0.1.0")]
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public class OptionalDependsOnAttribute : Attribute
 {

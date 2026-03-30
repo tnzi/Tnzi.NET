@@ -380,9 +380,12 @@ public class WorkflowServiceCheckpointIntegrationTests
             .Returns(Task.CompletedTask);
         var serviceProvider = services.BuildServiceProvider();
 
+        var versionRepository = new Mock<IRepository<WorkflowDefinitionVersion, Guid>>();
+
         return new WorkflowService(
             workflowRepository.Object,
             executionRepository.Object,
+            versionRepository.Object,
             runRepository.Object,
             usageLogService.Object,
             Mock.Of<IQuotaService>(),

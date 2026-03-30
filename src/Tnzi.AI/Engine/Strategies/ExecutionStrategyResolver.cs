@@ -45,6 +45,10 @@ public static class ExecutionStrategyResolver
         if (dto != null)
         {
             config.Agents = dto.Agents;
+            if (dto.MaxConcurrentSubAgents.HasValue)
+                config.MaxConcurrentSubAgents = dto.MaxConcurrentSubAgents.Value;
+            if (dto.SubAgentTimeoutSeconds.HasValue)
+                config.SubAgentTimeout = TimeSpan.FromSeconds(dto.SubAgentTimeoutSeconds.Value);
         }
 
         return new AgentAsTools.AgentAsToolsExecutionStrategy(config);

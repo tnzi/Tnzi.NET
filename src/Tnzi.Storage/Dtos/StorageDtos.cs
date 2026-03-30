@@ -96,6 +96,18 @@ public class FileQueryRequest : PagedQueryDto
     public string? Tag { get; set; }
 
     /// <summary>
+    /// Filter by metadata key (requires MetadataValue to also be set for exact match)
+    /// </summary>
+    [MaxLength(128)]
+    public string? MetadataKey { get; set; }
+
+    /// <summary>
+    /// Filter by metadata value (used with MetadataKey for exact key-value match)
+    /// </summary>
+    [MaxLength(256)]
+    public string? MetadataValue { get; set; }
+
+    /// <summary>
     /// 排序字段，如 CreationTime, Size, OriginalName
     /// </summary>
     [MaxLength(64)]
@@ -602,4 +614,15 @@ public class SetFileTagsRequest
     /// Tags to set (replaces existing tags)
     /// </summary>
     public List<string> Tags { get; set; } = null!;
+}
+
+/// <summary>
+/// Set file metadata request
+/// </summary>
+public class SetFileMetadataRequest
+{
+    /// <summary>
+    /// Metadata key-value pairs to set (replaces existing metadata)
+    /// </summary>
+    public Dictionary<string, string> Metadata { get; set; } = null!;
 }

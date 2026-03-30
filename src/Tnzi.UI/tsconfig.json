@@ -24,6 +24,7 @@
   },
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/ai" },
     { "path": "./packages/shadcn" },
     { "path": "./packages/vant" },
     { "path": "./packages/naive-ui" }

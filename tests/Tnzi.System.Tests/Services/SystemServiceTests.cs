@@ -258,10 +258,13 @@ public class SettingServiceTests
         loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
 
+        var encryptionOptions = Microsoft.Extensions.Options.Options.Create(new SettingEncryptionOptions());
+
         _service = new SettingService(
             _serviceProviderMock.Object,
             _settingRepositoryMock.Object,
             _applicationOptionsMock.Object,
+            encryptionOptions,
             _cacheMock.Object,
             Enumerable.Empty<ISettingProvider>());
     }

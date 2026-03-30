@@ -75,6 +75,7 @@ public partial class WorkflowEngine
         var failed = false;
         var awaitingApproval = false;
         string? awaitingApprovalStepId = null;
+        WorkflowInterrupt? awaitingInterrupt = null;
         DateTime? checkpointCreatedAt = null;
 
         var nodeOrderIndex = graph.Nodes
@@ -123,7 +124,16 @@ public partial class WorkflowEngine
                     await runStore!.UpdateNodeAsync(nodeRecord, cancellationToken);
                 }
 
-                var result = await _nodeExecutor.ExecuteAsync(step, state, run, cancellationToken);
+                // 传递恢复数据（如果此步骤是中断恢复的目标）
+                Dictionary<string, object>? resumeData = null;
+                if (options?.ResumeStepId != null
+                    && string.Equals(options.ResumeStepId, stepId, StringComparison.OrdinalIgnoreCase)
+                    && options.ResumeData != null)
+                {
+                    resumeData = options.ResumeData;
+                }
+
+                var result = await _nodeExecutor.ExecuteAsync(step, state, run, resumeData, cancellationToken);
                 return (stepId, nodeRecord, result, skipped: false);
             }).ToList();
 
@@ -158,25 +168,20 @@ public partial class WorkflowEngine
                  {
                      var nodeStatus = result.AwaitingApproval
                          ? AgentRunNodeStatus.AwaitingApproval
-                         : result.IsSuccess
-                             ? AgentRunNodeStatus.Completed
-                             : AgentRunNodeStatus.Failed;
+                         : result.AwaitingInterrupt != null
+                             ? AgentRunNodeStatus.AwaitingApproval // 通用中断也使用 AwaitingApproval 状态
+                             : result.IsSuccess
+                                 ? AgentRunNodeStatus.Completed
+                                 : AgentRunNodeStatus.Failed;
 
                      await UpdateRunNodeAsync(runStore, nodeRecord, nodeStatus, result, result.Error, cancellationToken);
                  }
 
-                // 处理节点级审批暂停（ApprovalNode 返回 AwaitingApproval=true）
-                if (result.AwaitingApproval && !failed)
-                {
-                    awaitingApproval = true;
-                    awaitingApprovalStepId = stepId;
-                    if (checkpointStore != null)
-                    {
-                        checkpointCreatedAt ??= DateTime.UtcNow;
-                        await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                            WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
-                    }
-                }
+                // 处理节点级审批暂停和通用中断
+                (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt, checkpointCreatedAt) =
+                    await HandleApprovalInterruptAsync(
+                        result, stepId, failed, awaitingApproval, awaitingApprovalStepId, awaitingInterrupt,
+                        checkpointStore, executionId, state, completed, checkpointCreatedAt, cancellationToken);
 
                 // 处理条件边路由
                 if (!skipped && !failed)
@@ -191,8 +196,8 @@ public partial class WorkflowEngine
                 }
             }
 
-            // 如果有节点请求审批暂停，跳出主循环
-            if (awaitingApproval) break;
+            // 如果有节点请求审批暂停或通用中断，跳出主循环
+            if (awaitingApproval || awaitingInterrupt != null) break;
 
             // 默认失败策略：Fail Fast。
             // 当前 DTO/配置尚未公开 ContinueOnError 等策略，因此只要本层有节点失败，
@@ -261,7 +266,7 @@ public partial class WorkflowEngine
             }
 
             // 每层完成后保存检查点
-            if (checkpointStore != null && !awaitingApproval)
+            if (checkpointStore != null && !awaitingApproval && awaitingInterrupt == null)
             {
                 var status = failed ? WorkflowExecutionStatus.Failed : (completed.Count >= graph.Nodes.Count ? WorkflowExecutionStatus.Completed : WorkflowExecutionStatus.Running);
                 checkpointCreatedAt ??= DateTime.UtcNow;
@@ -269,51 +274,10 @@ public partial class WorkflowEngine
             }
         }
 
-        // 最终检查点
-        if (checkpointStore != null && !awaitingApproval)
-        {
-            checkpointCreatedAt ??= DateTime.UtcNow;
-            var finalStatus = failed ? WorkflowExecutionStatus.Failed : WorkflowExecutionStatus.Completed;
-            await SaveCheckpointAsync(checkpointStore, executionId, state, completed, finalStatus, null, checkpointCreatedAt, cancellationToken);
-        }
-
-        // 更新 Run 状态
-        if (run != null)
-        {
-            runStore ??= serviceProvider.GetService<IRunStore>();
-            if (runStore != null)
-            {
-                run.Status = failed ? AgentRunStatus.Failed : (awaitingApproval ? AgentRunStatus.AwaitingApproval : AgentRunStatus.Completed);
-                run.TotalInputTokens = totalInputTokens;
-                run.TotalOutputTokens = totalOutputTokens;
-                run.OutputSummary = stepResults.LastOrDefault(r => !r.Skipped)?.Output;
-                await runStore.UpdateAsync(run, cancellationToken);
-            }
-        }
-
-        var finalOutput = stepResults
-            .Where(r => !r.Skipped)
-            .LastOrDefault()?.Output ?? initialInput;
-
-        return new WorkflowEngineResult
-        {
-            ExecutionId = executionId,
-            FinalOutput = finalOutput,
-            StepResults = stepResults,
-            State = state,
-            Usage = totalInputTokens > 0 || totalOutputTokens > 0
-                ? new TokenUsageDto
-                {
-                    InputTokens = totalInputTokens,
-                    OutputTokens = totalOutputTokens,
-                    TotalTokens = totalInputTokens + totalOutputTokens
-                }
-                : null,
-            HasFailure = failed,
-            AwaitingApproval = awaitingApproval,
-            AwaitingApprovalStepId = awaitingApprovalStepId,
-            RunId = run?.Id
-        };
+        return await BuildFinalResultAsync(
+            executionId, initialInput, serviceProvider, state, completed, stepResults,
+            totalInputTokens, totalOutputTokens, failed, awaitingApproval, awaitingApprovalStepId,
+            awaitingInterrupt, checkpointStore, checkpointCreatedAt, run, runStore, cancellationToken);
     }
 
 }
@@ -351,11 +315,19 @@ public class WorkflowEngineResult
     public Guid? RunId { get; init; }
 
     /// <summary>
+    /// 当前等待中的通用中断（如人工输入、外部事件等）
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public WorkflowInterrupt? AwaitingInterrupt { get; init; }
+
+    /// <summary>
     /// 根据执行结果推导状态文本（用于 DTO 层）
     /// </summary>
-    public string StatusText => AwaitingApproval
-        ? nameof(WorkflowExecutionStatus.AwaitingApproval)
-        : HasFailure
-            ? nameof(WorkflowExecutionStatus.Failed)
-            : nameof(WorkflowExecutionStatus.Completed);
+    public string StatusText => AwaitingInterrupt != null
+        ? nameof(WorkflowExecutionStatus.AwaitingInput)
+        : AwaitingApproval
+            ? nameof(WorkflowExecutionStatus.AwaitingApproval)
+            : HasFailure
+                ? nameof(WorkflowExecutionStatus.Failed)
+                : nameof(WorkflowExecutionStatus.Completed);
 }

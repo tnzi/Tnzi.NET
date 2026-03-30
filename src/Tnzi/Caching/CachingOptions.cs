@@ -40,5 +40,11 @@ public class CachingOptions
     /// 获取或设置 模式过期时间映射（当ExpirationStrategy为Pattern时使用）
     /// </summary>
     public Dictionary<string, int>? PatternExpirations { get; set; }
+
+    /// <summary>
+    /// 获取或设置 内存缓存最大条目数（仅 Type=Memory 时生效）
+    /// 为 0 或 null 表示不限制。超出限制后按 LRU 策略驱逐条目。
+    /// </summary>
+    public long? MemorySizeLimit { get; set; }
 }
 

@@ -9,6 +9,11 @@ public class ImagingOptions
     /// 验证码图片配置
     /// </summary>
     public CaptchaOptions Captcha { get; set; } = new();
+
+    /// <summary>
+    /// 滑动验证码配置
+    /// </summary>
+    public SlidingCaptchaOptions SlidingCaptcha { get; set; } = new();
 }
 
 /// <summary>

@@ -201,166 +201,29 @@ public class ShellTools : IAIToolProvider
     {
         try
         {
-            // 1. 硬拒绝检查
-            var sanitizeResult = _commandSanitizer.Sanitize(command);
-            if (!sanitizeResult.IsAllowed)
-            {
-                return new { error = $"Command denied: {sanitizeResult.Reason}" };
-            }
+            // 1. 硬拒绝检查 + 审批流
+            var (sanitizeError, approvedCommand) = await SanitizeAndApproveAsync(command, "bash_streaming", "Execute a command and return initial output", workingDirectory);
+            if (sanitizeError != null) return sanitizeError;
+            command = approvedCommand;
 
-            // 2. 审批流
-            if (sanitizeResult.RequiresApproval && _approvalHandler != null)
-            {
-                var approvalRequest = new ToolApprovalRequest
-                {
-                    ToolName = "bash_streaming",
-                    ToolGroup = "shell",
-                    ToolDescription = "Execute a command and return initial output",
-                    Arguments = new Dictionary<string, object?>
-                    {
-                        ["command"] = command,
-                        ["working_directory"] = workingDirectory
-                    },
-                    Reason = sanitizeResult.Reason
-                };
+            // 2. 验证工作目录
+            var (dirError, resolvedWorkDir) = await ValidateWorkingDirectoryAsync(workingDirectory);
+            if (dirError != null) return dirError;
 
-                var approvalResult = await _approvalHandler.RequestApprovalAsync(approvalRequest);
-                if (!approvalResult.Approved)
-                {
-                    _logger.LogDebug("Command '{Command}' rejected by approval handler: {Reason}",
-                        command, approvalResult.RejectionReason);
-                    return new
-                    {
-                        error = $"Command rejected: {approvalResult.RejectionReason ?? "Not approved"}",
-                        status = approvalResult.Status.ToString()
-                    };
-                }
-
-                if (approvalResult.ModifiedArguments?.TryGetValue("command", out var modified) == true
-                    && modified is string modifiedCommand)
-                {
-                    command = modifiedCommand;
-                }
-            }
-
-            // 3. 验证工作目录
-            var workDir = workingDirectory ?? _options.ProjectRoot;
-            var dirValidation = await _pathValidator.ValidateAsync(workDir);
-            if (!dirValidation.IsValid)
-            {
-                return new { error = $"Invalid working directory: {dirValidation.Error}" };
-            }
-
-            var resolvedWorkDir = dirValidation.ResolvedPath!;
-            if (!Directory.Exists(resolvedWorkDir))
-            {
-                return new { error = $"Working directory not found: {workDir}" };
-            }
-
-            // 检查后台进程数限制
+            // 3. 检查后台进程数限制
             ProcessRegistry.CleanupExited();
             if (ProcessRegistry.RunningCount >= _options.Sandbox.MaxBackgroundProcesses)
             {
                 return new { error = $"Maximum background processes ({_options.Sandbox.MaxBackgroundProcesses}) reached" };
             }
 
-            var waitMs = initialWaitMs ?? 5000;
-            waitMs = Math.Clamp(waitMs, 100, 30_000);
+            var waitMs = Math.Clamp(initialWaitMs ?? 5000, 100, 30_000);
 
             _logger.LogDebug("Executing streaming command: {Command} in {WorkDir} (initial wait: {Wait}ms)",
                 command, resolvedWorkDir, waitMs);
 
-            var shellPath = OperatingSystem.IsWindows() ? "bash" : "/bin/bash";
-            var psi = new ProcessStartInfo
-            {
-                FileName = shellPath,
-                WorkingDirectory = resolvedWorkDir,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(command);
-
-            // 应用环境变量过滤
-            EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
-
-            ManagedProcess? managed = null;
-            try
-            {
-                managed = ProcessRegistry.CreateManagedProcess(command, psi, _options.Sandbox.MaxOutputSize);
-                managed.Process.Start();
-                managed.Process.BeginOutputReadLine();
-                managed.Process.BeginErrorReadLine();
-
-                // 等待初始输出
-                using var cts = new CancellationTokenSource(waitMs);
-                try
-                {
-                    await managed.Process.WaitForExitAsync(cts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    // 进程仍在运行，这是正常的
-                }
-
-                // 读取当前已收集的输出
-                string stdout, stderr;
-                lock (managed.Stdout) { stdout = managed.Stdout.ToString(); }
-                lock (managed.Stderr) { stderr = managed.Stderr.ToString(); }
-
-                var hasExited = false;
-                int? exitCode = null;
-                try
-                {
-                    hasExited = managed.Process.HasExited;
-                    if (hasExited) exitCode = managed.Process.ExitCode;
-                }
-                catch
-                {
-                    hasExited = true;
-                }
-
-                if (hasExited)
-                {
-                    // 进程已完成，清理资源
-                    managed.Process.Dispose();
-
-                    _logger.LogDebug("Streaming command completed with exit code {ExitCode}", exitCode);
-
-                    return new
-                    {
-                        stdout = TruncateOutput(stdout),
-                        stderr = TruncateOutput(stderr),
-                        running = false,
-                        exit_code = exitCode
-                    };
-                }
-
-                // 进程仍在运行，注册到 ProcessRegistry 以便后续通过 process_output 读取
-                var processId = ProcessRegistry.Register(managed);
-                managed = null; // 已注册，不在 catch 中清理
-
-                _logger.LogDebug("Streaming command still running, registered as {ProcessId}", processId);
-
-                return new
-                {
-                    stdout = TruncateOutput(stdout),
-                    stderr = TruncateOutput(stderr),
-                    running = true,
-                    process_id = processId
-                };
-            }
-            catch (Exception ex)
-            {
-                // 进程已启动但未注册时，需要清理
-                try { if (managed?.Process != null && !managed.Process.HasExited) managed.Process.Kill(entireProcessTree: true); }
-                catch { /* best effort */ }
-                try { managed?.Process?.Dispose(); }
-                catch { /* best effort */ }
-                return new { error = $"Failed to execute command: {ex.Message}" };
-            }
+            // 4. 启动进程并收集初始输出
+            return await LaunchAndCollectInitialOutputAsync(command, resolvedWorkDir!, waitMs);
         }
         catch (Exception ex)
         {
@@ -370,16 +233,174 @@ public class ShellTools : IAIToolProvider
     }
 
     /// <summary>
-    /// 截断输出到最大大小
+    /// 命令消毒 + 审批流（共享逻辑）
     /// </summary>
-    private string TruncateOutput(string output)
+    /// <returns>如果被拒绝返回 (errorObject, command)，否则返回 (null, approvedCommand)</returns>
+    private async Task<(object? error, string command)> SanitizeAndApproveAsync(
+        string command, string toolName, string toolDescription, string? workingDirectory)
     {
-        if (output.Length <= _options.Sandbox.MaxOutputSize)
+        var sanitizeResult = _commandSanitizer.Sanitize(command);
+        if (!sanitizeResult.IsAllowed)
         {
-            return output;
+            return (new { error = $"Command denied: {sanitizeResult.Reason}" }, command);
         }
 
-        var truncated = output[..(int)_options.Sandbox.MaxOutputSize];
-        return truncated + $"\n... (truncated, {output.Length} total chars)";
+        if (sanitizeResult.RequiresApproval && _approvalHandler != null)
+        {
+            var approvalRequest = new ToolApprovalRequest
+            {
+                ToolName = toolName,
+                ToolGroup = "shell",
+                ToolDescription = toolDescription,
+                Arguments = new Dictionary<string, object?>
+                {
+                    ["command"] = command,
+                    ["working_directory"] = workingDirectory
+                },
+                Reason = sanitizeResult.Reason
+            };
+
+            var approvalResult = await _approvalHandler.RequestApprovalAsync(approvalRequest);
+            if (!approvalResult.Approved)
+            {
+                _logger.LogDebug("Command '{Command}' rejected by approval handler: {Reason}",
+                    command, approvalResult.RejectionReason);
+                return (new
+                {
+                    error = $"Command rejected: {approvalResult.RejectionReason ?? "Not approved"}",
+                    status = approvalResult.Status.ToString()
+                }, command);
+            }
+
+            if (approvalResult.ModifiedArguments?.TryGetValue("command", out var modified) == true
+                && modified is string modifiedCommand)
+            {
+                command = modifiedCommand;
+            }
+        }
+
+        return (null, command);
     }
+
+    /// <summary>
+    /// 验证工作目录
+    /// </summary>
+    /// <returns>如果无效返回 (errorObject, null)，否则返回 (null, resolvedPath)</returns>
+    private async Task<(object? error, string? resolvedPath)> ValidateWorkingDirectoryAsync(string? workingDirectory)
+    {
+        var workDir = workingDirectory ?? _options.ProjectRoot;
+        var dirValidation = await _pathValidator.ValidateAsync(workDir);
+        if (!dirValidation.IsValid)
+        {
+            return (new { error = $"Invalid working directory: {dirValidation.Error}" }, null);
+        }
+
+        var resolvedWorkDir = dirValidation.ResolvedPath!;
+        if (!Directory.Exists(resolvedWorkDir))
+        {
+            return (new { error = $"Working directory not found: {workDir}" }, null);
+        }
+
+        return (null, resolvedWorkDir);
+    }
+
+    /// <summary>
+    /// 启动进程并收集初始输出，未完成则注册到 ProcessRegistry
+    /// </summary>
+    private async Task<object> LaunchAndCollectInitialOutputAsync(string command, string resolvedWorkDir, int waitMs)
+    {
+        var shellPath = OperatingSystem.IsWindows() ? "bash" : "/bin/bash";
+        var psi = new ProcessStartInfo
+        {
+            FileName = shellPath,
+            WorkingDirectory = resolvedWorkDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add(command);
+
+        // 应用环境变量过滤
+        EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
+
+        ManagedProcess? managed = null;
+        try
+        {
+            managed = ProcessRegistry.CreateManagedProcess(command, psi, _options.Sandbox.MaxOutputSize);
+            managed.Process.Start();
+            managed.Process.BeginOutputReadLine();
+            managed.Process.BeginErrorReadLine();
+
+            // 等待初始输出
+            using var cts = new CancellationTokenSource(waitMs);
+            try
+            {
+                await managed.Process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // 进程仍在运行，这是正常的
+            }
+
+            // 读取当前已收集的输出
+            string stdout, stderr;
+            lock (managed.Stdout) { stdout = managed.Stdout.ToString(); }
+            lock (managed.Stderr) { stderr = managed.Stderr.ToString(); }
+
+            var hasExited = false;
+            int? exitCode = null;
+            try
+            {
+                hasExited = managed.Process.HasExited;
+                if (hasExited) exitCode = managed.Process.ExitCode;
+            }
+            catch
+            {
+                hasExited = true;
+            }
+
+            if (hasExited)
+            {
+                // 进程已完成，清理资源
+                managed.Process.Dispose();
+
+                _logger.LogDebug("Streaming command completed with exit code {ExitCode}", exitCode);
+
+                return new
+                {
+                    stdout = TruncateOutput(stdout),
+                    stderr = TruncateOutput(stderr),
+                    running = false,
+                    exit_code = exitCode
+                };
+            }
+
+            // 进程仍在运行，注册到 ProcessRegistry 以便后续通过 process_output 读取
+            var processId = ProcessRegistry.Register(managed);
+            managed = null; // 已注册，不在 catch 中清理
+
+            _logger.LogDebug("Streaming command still running, registered as {ProcessId}", processId);
+
+            return new
+            {
+                stdout = TruncateOutput(stdout),
+                stderr = TruncateOutput(stderr),
+                running = true,
+                process_id = processId
+            };
+        }
+        catch (Exception ex)
+        {
+            // 进程已启动但未注册时，需要清理
+            try { if (managed?.Process != null && !managed.Process.HasExited) managed.Process.Kill(entireProcessTree: true); }
+            catch { /* best effort */ }
+            try { managed?.Process?.Dispose(); }
+            catch { /* best effort */ }
+            return new { error = $"Failed to execute command: {ex.Message}" };
+        }
+    }
+
+    private string TruncateOutput(string output) => OutputHelper.Truncate(output, _options.Sandbox.MaxOutputSize);
 }

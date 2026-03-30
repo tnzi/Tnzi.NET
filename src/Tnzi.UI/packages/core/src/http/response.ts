@@ -17,7 +17,7 @@ import { HttpError, getApiResultErrorMessage } from '../errors/api-error';
  */
 export function normalizeApiResult<T>(raw: Record<string, unknown>): ApiResult<T> {
   const code = (raw.Code ?? raw.code ?? 200) as number;
-  const succeeded = raw.succeeded ?? raw.Success ?? (code >= 200 && code < 300);
+  const succeeded = raw.succeeded ?? raw.success ?? raw.Success ?? (code >= 200 && code < 300);
   return {
     succeeded: Boolean(succeeded),
     Success: Boolean(succeeded),
@@ -63,10 +63,16 @@ export function getErrorCode<T>(result: ApiResult<T>): string | undefined {
 
 /**
  * Unwrap data from a successful result.
- * Throws HttpError if the result represents a failure.
+ * Throws HttpError if the result represents a failure or if data is null/undefined.
+ *
+ * Note: The `as T` cast in normalizeApiResult is intentional — callers should validate
+ * via schema middleware or use this function which guards against null data.
  */
 export function unwrapData<T>(result: ApiResult<T>): T {
   if (isSuccess(result)) {
+    if (result.data === undefined || result.data === null) {
+      throw new HttpError(result);
+    }
     return result.data;
   }
   throw new HttpError(result);

@@ -290,7 +290,11 @@ public partial class AgentRuntime : IAgentRuntime
                         lastFinishReason = chunk.FinishReason;
                     }
 
-                    yield return chunk;
+                    // StreamMode 过滤：仅输出客户端请求的粒度级别
+                    if (request.StreamMode.HasFlag(chunk.Mode))
+                    {
+                        yield return chunk;
+                    }
                 }
                 completedNormally = true;
             }
@@ -298,69 +302,77 @@ public partial class AgentRuntime : IAgentRuntime
             {
                 // 6. 更新 Run 状态（无论成功或失败都确保更新）
                 // 使用 CancellationToken.None，因为原始 token 可能已取消
-                if (run != null)
+                // 整个 finally 块 try/catch 包裹，防止 DB 异常传播到调用方覆盖原始异常
+                try
                 {
-                    sw.Stop();
-                    run.DurationMs = sw.ElapsedMilliseconds;
-                    run.TotalInputTokens = totalInputTokens;
-                    run.TotalOutputTokens = totalOutputTokens;
-
-                    if (completedNormally)
+                    if (run != null)
                     {
-                        if (lastFinishReason == "max_tool_iterations")
+                        sw.Stop();
+                        run.DurationMs = sw.ElapsedMilliseconds;
+                        run.TotalInputTokens = totalInputTokens;
+                        run.TotalOutputTokens = totalOutputTokens;
+
+                        if (completedNormally)
                         {
-                            _logger.LogWarning(
-                                "Agent run {RunId} reached MaxToolIterations limit — response may be incomplete",
-                                run.Id);
+                            if (lastFinishReason == "max_tool_iterations")
+                            {
+                                _logger.LogWarning(
+                                    "Agent run {RunId} reached MaxToolIterations limit — response may be incomplete",
+                                    run.Id);
+                            }
+
+                            run.Status = AgentRunStatus.Completed;
+                            await _runStore.UpdateAsync(run, CancellationToken.None);
+
+                            await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.StreamCompleted,
+                                new { finishReason = lastFinishReason, inputTokens = totalInputTokens, outputTokens = totalOutputTokens },
+                                sw.ElapsedMilliseconds, CancellationToken.None);
+
+                            // 发布流式运行完成事件
+                            var streamResult = new AgentRunResult
+                            {
+                                Response = string.Empty,
+                                Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
+                                FinishReason = lastFinishReason
+                            };
+                            await PublishRunCompletedEventAsync(request, streamResult, run, sw.ElapsedMilliseconds, true);
                         }
+                        else if (cancellationToken.IsCancellationRequested)
+                        {
+                            run.Status = AgentRunStatus.Cancelled;
+                            run.Error = "Streaming was cancelled by the caller";
+                            await _runStore.UpdateAsync(run, CancellationToken.None);
 
-                        run.Status = AgentRunStatus.Completed;
-                        await _runStore.UpdateAsync(run, CancellationToken.None);
+                            await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.StreamCancelled,
+                                new { finishReason = lastFinishReason },
+                                sw.ElapsedMilliseconds, CancellationToken.None);
+                        }
+                        else
+                        {
+                            run.Status = AgentRunStatus.Failed;
+                            run.Error = "Streaming execution failed";
+                            await _runStore.UpdateAsync(run, CancellationToken.None);
 
-                        await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.StreamCompleted,
-                            new { finishReason = lastFinishReason, inputTokens = totalInputTokens, outputTokens = totalOutputTokens },
-                            sw.ElapsedMilliseconds, CancellationToken.None);
+                            await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.Error,
+                                new { error = run.Error, finishReason = lastFinishReason },
+                                sw.ElapsedMilliseconds, CancellationToken.None);
+                        }
+                    }
 
-                        // 发布流式运行完成事件
-                        var streamResult = new AgentRunResult
+                    // 标题生成独立于 Run 追踪 — 即使 EnableRunTracking=false 也应执行
+                    if (completedNormally && context.IsNewThread && request.ThreadId.HasValue && !string.IsNullOrWhiteSpace(request.UserMessage))
+                    {
+                        await HandleNewThreadTitleAsync(request, new AgentRunResult
                         {
                             Response = string.Empty,
                             Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
                             FinishReason = lastFinishReason
-                        };
-                        await PublishRunCompletedEventAsync(request, streamResult, run, sw.ElapsedMilliseconds, true);
-                    }
-                    else if (cancellationToken.IsCancellationRequested)
-                    {
-                        run.Status = AgentRunStatus.Cancelled;
-                        run.Error = "Streaming was cancelled by the caller";
-                        await _runStore.UpdateAsync(run, CancellationToken.None);
-
-                        await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.StreamCancelled,
-                            new { finishReason = lastFinishReason },
-                            sw.ElapsedMilliseconds, CancellationToken.None);
-                    }
-                    else
-                    {
-                        run.Status = AgentRunStatus.Failed;
-                        run.Error = "Streaming execution failed";
-                        await _runStore.UpdateAsync(run, CancellationToken.None);
-
-                        await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.Error,
-                            new { error = run.Error, finishReason = lastFinishReason },
-                            sw.ElapsedMilliseconds, CancellationToken.None);
+                        });
                     }
                 }
-
-                // 标题生成独立于 Run 追踪 — 即使 EnableRunTracking=false 也应执行
-                if (completedNormally && context.IsNewThread && request.ThreadId.HasValue && !string.IsNullOrWhiteSpace(request.UserMessage))
+                catch (Exception ex)
                 {
-                    await HandleNewThreadTitleAsync(request, new AgentRunResult
-                    {
-                        Response = string.Empty,
-                        Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
-                        FinishReason = lastFinishReason
-                    });
+                    _logger.LogWarning(ex, "Failed to update streaming run status for RunId={RunId}", run?.Id);
                 }
             }
         }

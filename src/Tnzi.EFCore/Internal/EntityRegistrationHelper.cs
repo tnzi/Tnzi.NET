@@ -356,7 +356,7 @@ internal static class EntityRegistrationHelper
 
                 // 设计时：从 bin 目录加载所有应用程序集（含 Hosting 的传递依赖）
                 // 与 DesignTimeDbContextFactoryBase 一致，确保 Authorization/Notification/System 等模块被扫描
-                var assemblyDir = System.IO.Path.GetDirectoryName(contextAssembly.Location);
+                var assemblyDir = Path.GetDirectoryName(contextAssembly.Location);
                 if (!string.IsNullOrEmpty(assemblyDir))
                 {
                     AssemblyScanner.LoadAllAssembliesFromProjectBinDirectory(assemblyDir, logger);
@@ -374,7 +374,7 @@ internal static class EntityRegistrationHelper
 
     private static ILogger? GetLoggerForAssemblyLoading()
     {
-        return Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        return NullLogger.Instance;
     }
 
     /// <summary>
@@ -388,7 +388,7 @@ internal static class EntityRegistrationHelper
             AssemblyScanner.LoadEntryAssemblyReferences();
             var contextAssembly = dbContext.GetType().Assembly;
             AssemblyScanner.LoadAssemblyReferences(contextAssembly);
-            var assemblyDir = System.IO.Path.GetDirectoryName(contextAssembly.Location);
+            var assemblyDir = Path.GetDirectoryName(contextAssembly.Location);
             if (!string.IsNullOrEmpty(assemblyDir))
             {
                 AssemblyScanner.LoadAllAssembliesFromProjectBinDirectory(assemblyDir);

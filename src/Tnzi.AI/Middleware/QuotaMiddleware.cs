@@ -7,7 +7,7 @@ public class QuotaMiddleware : IAiMiddleware
 {
     private readonly IQuotaService _quotaService;
     private readonly ITokenEstimator _tokenEstimator;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IEventBus? _eventBus;
     private readonly ILogger<QuotaMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.Quota;
@@ -15,13 +15,13 @@ public class QuotaMiddleware : IAiMiddleware
     public QuotaMiddleware(
         IQuotaService quotaService,
         ITokenEstimator tokenEstimator,
-        IServiceProvider serviceProvider,
-        ILogger<QuotaMiddleware> logger)
+        ILogger<QuotaMiddleware> logger,
+        IEventBus? eventBus = null)
     {
         _quotaService = Check.NotNull(quotaService);
         _tokenEstimator = Check.NotNull(tokenEstimator);
-        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
+        _eventBus = eventBus;
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
@@ -123,18 +123,25 @@ public class QuotaMiddleware : IAiMiddleware
         finally
         {
             // After: 无论成功或失败都结算配额；用 CancellationToken.None 避免 token 已取消导致结算失败
-            if (completedNormally)
+            try
             {
-                var actualTokens = (lastUsage?.InputTokens ?? 0) + (lastUsage?.OutputTokens ?? 0);
-                await _quotaService.SettleQuotaAsync(userId, reservation, actualTokens, CancellationToken.None);
+                if (completedNormally)
+                {
+                    var actualTokens = (lastUsage?.InputTokens ?? 0) + (lastUsage?.OutputTokens ?? 0);
+                    await _quotaService.SettleQuotaAsync(userId, reservation, actualTokens, CancellationToken.None);
+                }
+                else
+                {
+                    // 异常/取消时优先使用实际用量，若无则回退到预估值
+                    var tokensToSettle = lastUsage != null
+                        ? (lastUsage.InputTokens + lastUsage.OutputTokens)
+                        : estimatedTokens;
+                    await _quotaService.SettleQuotaAsync(userId, reservation, tokensToSettle, CancellationToken.None);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                // 异常/取消时优先使用实际用量，若无则回退到预估值
-                var tokensToSettle = lastUsage != null
-                    ? (lastUsage.InputTokens + lastUsage.OutputTokens)
-                    : estimatedTokens;
-                await _quotaService.SettleQuotaAsync(userId, reservation, tokensToSettle, CancellationToken.None);
+                _logger.LogWarning(ex, "Failed to settle streaming quota for user {UserId}", userId);
             }
         }
     }
@@ -144,10 +151,9 @@ public class QuotaMiddleware : IAiMiddleware
     {
         try
         {
-            var eventBus = _serviceProvider.GetService<IEventBus>();
-            if (eventBus == null) return;
+            if (_eventBus == null) return;
 
-            await eventBus.PublishAsync(new QuotaExceededEvent
+            await _eventBus.PublishAsync(new QuotaExceededEvent
             {
                 UserId = userId,
                 EstimatedTokens = estimatedTokens,

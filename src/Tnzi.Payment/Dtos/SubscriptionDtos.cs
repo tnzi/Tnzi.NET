@@ -291,3 +291,81 @@ public class UpdateAutoRenewDto
     /// </summary>
     public bool AutoRenew { get; set; }
 }
+
+/// <summary>
+/// 变更订阅计划 DTO
+/// </summary>
+public class ChangeSubscriptionPlanDto
+{
+    /// <summary>
+    /// 新计划ID
+    /// </summary>
+    [Required]
+    public Guid NewPlanId { get; set; }
+
+    /// <summary>
+    /// 是否立即生效（默认 true，升级立即，降级到期生效）
+    /// </summary>
+    public bool EffectiveImmediately { get; set; } = true;
+}
+
+/// <summary>
+/// 订阅变更记录 DTO
+/// </summary>
+public class SubscriptionChangeDto
+{
+    /// <summary>
+    /// 变更ID
+    /// </summary>
+    public Guid Id { get; set; }
+
+    /// <summary>
+    /// 订阅ID
+    /// </summary>
+    public Guid SubscriptionId { get; set; }
+
+    /// <summary>
+    /// 原计划ID
+    /// </summary>
+    public Guid FromPlanId { get; set; }
+
+    /// <summary>
+    /// 原计划名称
+    /// </summary>
+    public string? FromPlanName { get; set; }
+
+    /// <summary>
+    /// 新计划ID
+    /// </summary>
+    public Guid ToPlanId { get; set; }
+
+    /// <summary>
+    /// 新计划名称
+    /// </summary>
+    public string? ToPlanName { get; set; }
+
+    /// <summary>
+    /// 变更类型
+    /// </summary>
+    public SubscriptionChangeType ChangeType { get; set; }
+
+    /// <summary>
+    /// 按比例计算的金额
+    /// </summary>
+    public decimal ProratedAmount { get; set; }
+
+    /// <summary>
+    /// 生效日期
+    /// </summary>
+    public DateTime EffectiveDate { get; set; }
+
+    /// <summary>
+    /// 变更状态
+    /// </summary>
+    public SubscriptionChangeStatus Status { get; set; }
+
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public DateTime CreationTime { get; set; }
+}

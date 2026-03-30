@@ -11,6 +11,7 @@ public class SettingDto
     public string? Description { get; set; }
     public string? Group { get; set; }
     public bool IsSystem { get; set; }
+    public bool IsEncrypted { get; set; }
     public int SortOrder { get; set; }
     public SettingValueType ValueType { get; set; }
     public SettingScope Scope { get; set; }
@@ -52,6 +53,24 @@ public class UpdateSettingDto
     public string? Group { get; set; }
     public int SortOrder { get; set; }
     public SettingValueType ValueType { get; set; }
+}
+
+/// <summary>
+/// 设置加密配置值 DTO
+/// </summary>
+public class SetEncryptedSettingDto
+{
+    /// <summary>
+    /// The plain text value to encrypt and store
+    /// </summary>
+    [Required]
+    [MaxLength(2000)]
+    public string Value { get; set; } = null!;
+
+    /// <summary>
+    /// Optional description
+    /// </summary>
+    public string? Description { get; set; }
 }
 
 /// <summary>

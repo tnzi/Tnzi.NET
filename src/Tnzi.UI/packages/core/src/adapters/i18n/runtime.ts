@@ -67,3 +67,10 @@ export function resetI18n(locale: Locale = DEFAULT_LOCALE): I18nContext {
   return activeI18nRuntime.reset(locale);
 }
 
+/**
+ * Reset i18n runtime to default. For tests and SSR isolation.
+ */
+export function resetI18nRuntime(): void {
+  activeI18nRuntime = defaultI18nRuntime;
+}
+

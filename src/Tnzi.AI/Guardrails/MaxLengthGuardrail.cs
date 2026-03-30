@@ -4,9 +4,11 @@ namespace Tnzi.AI.Guardrails;
 /// <summary>
 /// 输入长度限制 Guardrail — 拒绝超过最大长度的输入
 /// </summary>
-public class MaxLengthGuardrail : IInputGuardrail
+public class MaxLengthGuardrail : IInputGuardrail, IGuardrailProvider
 {
     private readonly GuardrailsOptions _guardrailOptions;
+
+    public string Name => nameof(MaxLengthGuardrail);
 
     public MaxLengthGuardrail(IOptions<AIOptions> options)
     {
@@ -29,4 +31,7 @@ public class MaxLengthGuardrail : IInputGuardrail
 
         return Task.FromResult(GuardrailResult.Allowed());
     }
+
+    public Task<GuardrailDecision> EvaluateAsync(GuardrailRequest request, CancellationToken ct = default)
+        => IGuardrailProvider.BridgeValidateAsync(request, ValidateAsync, GuardrailReasonCodes.MaxLengthExceeded, "Input exceeds maximum length", ct);
 }

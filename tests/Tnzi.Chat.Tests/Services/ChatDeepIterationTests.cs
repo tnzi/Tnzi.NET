@@ -89,6 +89,34 @@ public class AdminBatchDeleteTests
             .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
     }
 
+    private void SetupRecipientQueryable(List<MessageRecipient> recipients)
+    {
+        var mockQueryable = recipients.BuildMock();
+        _recipientRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(mockQueryable);
+        _recipientRepoMock.As<IQueryable<MessageRecipient>>()
+            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
+        _recipientRepoMock.As<IQueryable<MessageRecipient>>()
+            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
+        _recipientRepoMock.As<IQueryable<MessageRecipient>>()
+            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
+        _recipientRepoMock.As<IQueryable<MessageRecipient>>()
+            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
+    }
+
+    private void SetupRoleQueryable(List<MessageRole> roles)
+    {
+        var mockQueryable = roles.BuildMock();
+        _roleRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(mockQueryable);
+        _roleRepoMock.As<IQueryable<MessageRole>>()
+            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
+        _roleRepoMock.As<IQueryable<MessageRole>>()
+            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
+        _roleRepoMock.As<IQueryable<MessageRole>>()
+            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
+        _roleRepoMock.As<IQueryable<MessageRole>>()
+            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
+    }
+
     private static Message CreateMessage(Guid? id = null, MessageType type = MessageType.Private, bool isSent = true, bool isImportant = false, Guid? senderId = null, DateTime? creationTime = null)
     {
         return new Message
@@ -126,6 +154,10 @@ public class AdminBatchDeleteTests
         var messages = new List<Message> { CreateMessage(id1), CreateMessage(id2) };
 
         SetupMessageQueryable(messages);
+        SetupReceiveQueryable(new List<MessageReceive>());
+        SetupRecipientQueryable(new List<MessageRecipient>());
+        SetupRoleQueryable(new List<MessageRole>());
+        SetupReplyQueryable(new List<MessageReply>());
         _messageRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<Message>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -160,6 +192,10 @@ public class AdminBatchDeleteTests
         var id1 = Guid.NewGuid();
         var messages = new List<Message> { CreateMessage(id1) };
         SetupMessageQueryable(messages);
+        SetupReceiveQueryable(new List<MessageReceive>());
+        SetupRecipientQueryable(new List<MessageRecipient>());
+        SetupRoleQueryable(new List<MessageRole>());
+        SetupReplyQueryable(new List<MessageReply>());
         _messageRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<Message>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -698,4 +734,316 @@ public class MessageTypeEnumTests
         var values = Enum.GetValues<MessageType>();
         values.Length.ShouldBe(2);
     }
+}
+
+/// <summary>
+/// 消息删除级联清理测试
+/// 验证 DeleteAsync / AdminDeleteAsync / AdminBatchDeleteAsync 正确清理关联记录
+/// </summary>
+public class MessageDeleteCascadeTests
+{
+    private readonly Mock<IRepository<Message, Guid>> _messageRepoMock;
+    private readonly Mock<IRepository<MessageReceive, Guid>> _receiveRepoMock;
+    private readonly Mock<IRepository<MessageRecipient, Guid>> _recipientRepoMock;
+    private readonly Mock<IRepository<MessageReply, Guid>> _replyRepoMock;
+    private readonly Mock<IRepository<MessageRole, Guid>> _roleRepoMock;
+    private readonly Mock<IRepository<User, Guid>> _userRepoMock;
+    private readonly MessageService _service;
+
+    public MessageDeleteCascadeTests()
+    {
+        var config = new TypeAdapterConfig();
+        var mapper = new Mapper(config);
+        MapperExtensions.SetMapper(mapper);
+
+        _messageRepoMock = new Mock<IRepository<Message, Guid>>();
+        _receiveRepoMock = new Mock<IRepository<MessageReceive, Guid>>();
+        _recipientRepoMock = new Mock<IRepository<MessageRecipient, Guid>>();
+        _replyRepoMock = new Mock<IRepository<MessageReply, Guid>>();
+        _roleRepoMock = new Mock<IRepository<MessageRole, Guid>>();
+        _userRepoMock = new Mock<IRepository<User, Guid>>();
+        var serviceProviderMock = new Mock<IServiceProvider>();
+
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
+        serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
+
+        _service = new MessageService(
+            _messageRepoMock.Object,
+            _receiveRepoMock.Object,
+            _recipientRepoMock.Object,
+            _replyRepoMock.Object,
+            _roleRepoMock.Object,
+            _userRepoMock.Object,
+            serviceProviderMock.Object);
+    }
+
+    private void SetupQueryable<TEntity>(Mock<IRepository<TEntity, Guid>> repoMock, List<TEntity> data) where TEntity : class, IEntity<Guid>
+    {
+        var mockQueryable = data.BuildMock();
+        repoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(mockQueryable);
+        repoMock.As<IQueryable<TEntity>>()
+            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
+        repoMock.As<IQueryable<TEntity>>()
+            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
+        repoMock.As<IQueryable<TEntity>>()
+            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
+        repoMock.As<IQueryable<TEntity>>()
+            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
+    }
+
+    private void SetupDeleteMocks()
+    {
+        _messageRepoMock.Setup(r => r.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _messageRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<Message>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _receiveRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReceive>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _recipientRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageRecipient>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _replyRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReply>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _roleRepoMock.Setup(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageRole>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+    }
+
+    #region DeleteAsync — 级联清理
+
+    [Fact]
+    public async Task DeleteAsync_Should_Delete_Associated_Receives()
+    {
+        // Arrange
+        var senderId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var message = new Message { Id = messageId, SenderId = senderId, Title = "T", Content = "C" };
+
+        _messageRepoMock.Setup(r => r.GetAsync(messageId, It.IsAny<CancellationToken>())).ReturnsAsync(message);
+        SetupDeleteMocks();
+
+        var receives = new List<MessageReceive>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = messageId, UserId = Guid.NewGuid() },
+            new() { Id = Guid.NewGuid(), MessageId = messageId, UserId = Guid.NewGuid() }
+        };
+        SetupQueryable(_receiveRepoMock, receives);
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>());
+        SetupQueryable(_roleRepoMock, new List<MessageRole>());
+        SetupQueryable(_replyRepoMock, new List<MessageReply>());
+
+        // Act
+        var result = await _service.DeleteAsync(messageId, senderId);
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        _receiveRepoMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<MessageReceive>>(items => items.Count() == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_Should_Delete_Associated_Recipients_And_Roles()
+    {
+        // Arrange
+        var senderId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var message = new Message { Id = messageId, SenderId = senderId, Title = "T", Content = "C" };
+
+        _messageRepoMock.Setup(r => r.GetAsync(messageId, It.IsAny<CancellationToken>())).ReturnsAsync(message);
+        SetupDeleteMocks();
+
+        SetupQueryable(_receiveRepoMock, new List<MessageReceive>());
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = messageId, UserId = Guid.NewGuid() }
+        });
+        SetupQueryable(_roleRepoMock, new List<MessageRole>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = messageId, RoleId = Guid.NewGuid() }
+        });
+        SetupQueryable(_replyRepoMock, new List<MessageReply>());
+
+        // Act
+        var result = await _service.DeleteAsync(messageId, senderId);
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        _recipientRepoMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<MessageRecipient>>(items => items.Count() == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _roleRepoMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<MessageRole>>(items => items.Count() == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_Should_Delete_Associated_Replies()
+    {
+        // Arrange
+        var senderId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var message = new Message { Id = messageId, SenderId = senderId, Title = "T", Content = "C" };
+
+        _messageRepoMock.Setup(r => r.GetAsync(messageId, It.IsAny<CancellationToken>())).ReturnsAsync(message);
+        SetupDeleteMocks();
+
+        SetupQueryable(_receiveRepoMock, new List<MessageReceive>());
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>());
+        SetupQueryable(_roleRepoMock, new List<MessageRole>());
+        SetupQueryable(_replyRepoMock, new List<MessageReply>
+        {
+            new() { Id = Guid.NewGuid(), BelongMessageId = messageId, Content = "Reply 1", UserId = Guid.NewGuid() },
+            new() { Id = Guid.NewGuid(), BelongMessageId = messageId, Content = "Reply 2", UserId = Guid.NewGuid() }
+        });
+
+        // Act
+        var result = await _service.DeleteAsync(messageId, senderId);
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        _replyRepoMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<MessageReply>>(items => items.Count() == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_NoAssociatedRecords_Should_Not_Call_DeleteMany()
+    {
+        // Arrange
+        var senderId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var message = new Message { Id = messageId, SenderId = senderId, Title = "T", Content = "C" };
+
+        _messageRepoMock.Setup(r => r.GetAsync(messageId, It.IsAny<CancellationToken>())).ReturnsAsync(message);
+        SetupDeleteMocks();
+
+        SetupQueryable(_receiveRepoMock, new List<MessageReceive>());
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>());
+        SetupQueryable(_roleRepoMock, new List<MessageRole>());
+        SetupQueryable(_replyRepoMock, new List<MessageReply>());
+
+        // Act
+        var result = await _service.DeleteAsync(messageId, senderId);
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        _receiveRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReceive>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _recipientRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageRecipient>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _roleRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageRole>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _replyRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReply>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
+
+    #region AdminDeleteAsync — 级联清理
+
+    [Fact]
+    public async Task AdminDeleteAsync_Should_Delete_All_Associated_Records()
+    {
+        // Arrange
+        var messageId = Guid.NewGuid();
+        var message = new Message { Id = messageId, SenderId = Guid.NewGuid(), Title = "T", Content = "C" };
+
+        _messageRepoMock.Setup(r => r.GetAsync(messageId, It.IsAny<CancellationToken>())).ReturnsAsync(message);
+        SetupDeleteMocks();
+
+        SetupQueryable(_receiveRepoMock, new List<MessageReceive>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = messageId, UserId = Guid.NewGuid() }
+        });
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = messageId, UserId = Guid.NewGuid() }
+        });
+        SetupQueryable(_roleRepoMock, new List<MessageRole>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = messageId, RoleId = Guid.NewGuid() }
+        });
+        SetupQueryable(_replyRepoMock, new List<MessageReply>
+        {
+            new() { Id = Guid.NewGuid(), BelongMessageId = messageId, Content = "R", UserId = Guid.NewGuid() }
+        });
+
+        // Act
+        var result = await _service.AdminDeleteAsync(messageId);
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        _receiveRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReceive>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _recipientRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageRecipient>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _roleRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageRole>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _replyRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReply>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
+    #region AdminBatchDeleteAsync — 级联清理
+
+    [Fact]
+    public async Task AdminBatchDeleteAsync_Should_Delete_Associated_Records_For_All_Messages()
+    {
+        // Arrange
+        var id1 = Guid.NewGuid();
+        var id2 = Guid.NewGuid();
+        var messages = new List<Message>
+        {
+            new() { Id = id1, SenderId = Guid.NewGuid(), Title = "T1", Content = "C1" },
+            new() { Id = id2, SenderId = Guid.NewGuid(), Title = "T2", Content = "C2" }
+        };
+
+        SetupQueryable(_messageRepoMock, messages);
+        SetupDeleteMocks();
+
+        var receives = new List<MessageReceive>
+        {
+            new() { Id = Guid.NewGuid(), MessageId = id1, UserId = Guid.NewGuid() },
+            new() { Id = Guid.NewGuid(), MessageId = id2, UserId = Guid.NewGuid() },
+            new() { Id = Guid.NewGuid(), MessageId = id2, UserId = Guid.NewGuid() }
+        };
+        SetupQueryable(_receiveRepoMock, receives);
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>());
+        SetupQueryable(_roleRepoMock, new List<MessageRole>());
+        SetupQueryable(_replyRepoMock, new List<MessageReply>
+        {
+            new() { Id = Guid.NewGuid(), BelongMessageId = id1, Content = "R1", UserId = Guid.NewGuid() }
+        });
+
+        // Act
+        var result = await _service.AdminBatchDeleteAsync(new List<Guid> { id1, id2 });
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe(2);
+        _receiveRepoMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<MessageReceive>>(items => items.Count() == 3),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _replyRepoMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<MessageReply>>(items => items.Count() == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AdminBatchDeleteAsync_NoAssociatedRecords_Should_Still_Delete_Messages()
+    {
+        // Arrange
+        var id1 = Guid.NewGuid();
+        var messages = new List<Message>
+        {
+            new() { Id = id1, SenderId = Guid.NewGuid(), Title = "T1", Content = "C1" }
+        };
+
+        SetupQueryable(_messageRepoMock, messages);
+        SetupDeleteMocks();
+
+        SetupQueryable(_receiveRepoMock, new List<MessageReceive>());
+        SetupQueryable(_recipientRepoMock, new List<MessageRecipient>());
+        SetupQueryable(_roleRepoMock, new List<MessageRole>());
+        SetupQueryable(_replyRepoMock, new List<MessageReply>());
+
+        // Act
+        var result = await _service.AdminBatchDeleteAsync(new List<Guid> { id1 });
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe(1);
+        _messageRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<Message>>(), It.IsAny<CancellationToken>()), Times.Once);
+        // No associated record deletes should be called
+        _receiveRepoMock.Verify(r => r.DeleteManyAsync(It.IsAny<IEnumerable<MessageReceive>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
 }

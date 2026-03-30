@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { ILayoutProps, IMenuItem } from '@tnzi/core/components';
+import TSidebar from './TSidebar.vue';
 
 interface AdminLayoutProps extends ILayoutProps {
   sidebarItems?: IMenuItem[];

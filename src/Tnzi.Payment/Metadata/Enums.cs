@@ -186,6 +186,48 @@ public enum BillingCycleType
     OneTime = 5
 }
 
+/// <summary>
+/// 订阅变更类型
+/// </summary>
+public enum SubscriptionChangeType
+{
+    /// <summary>
+    /// 升级
+    /// </summary>
+    Upgrade = 1,
+
+    /// <summary>
+    /// 降级
+    /// </summary>
+    Downgrade = 2,
+
+    /// <summary>
+    /// 平级变更
+    /// </summary>
+    CrossGrade = 3
+}
+
+/// <summary>
+/// 订阅变更状态
+/// </summary>
+public enum SubscriptionChangeStatus
+{
+    /// <summary>
+    /// 待生效
+    /// </summary>
+    Pending = 0,
+
+    /// <summary>
+    /// 已生效
+    /// </summary>
+    Applied = 1,
+
+    /// <summary>
+    /// 已取消
+    /// </summary>
+    Cancelled = 2
+}
+
 #endregion
 
 #region Refund Enums

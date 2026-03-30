@@ -154,9 +154,9 @@ export class DataQueryController<TItem, TFilter extends Record<string, unknown> 
       // Check if this request was superseded
       if (abortController.signal.aborted) return;
 
-      if (result.succeeded && result.data) {
-        this.items = result.data.items;
-        this.pagination.updateFromResponse(result.data.totalCount);
+      if (result.succeeded) {
+        this.items = result.data?.items ?? [];
+        this.pagination.updateFromResponse(result.data?.totalCount ?? 0);
         const keyExtractor = this._rowKey ?? ((item: TItem) => String((item as Record<string, unknown>)['id'] ?? ''));
         this.selection.setAllKeys(this.items.map(keyExtractor));
         this.status = 'success';

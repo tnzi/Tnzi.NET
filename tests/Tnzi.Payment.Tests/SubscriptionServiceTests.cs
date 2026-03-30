@@ -22,6 +22,7 @@ public class SubscriptionServiceTests
 {
     private readonly Mock<IRepository<Subscription, Guid>> _subscriptionRepositoryMock;
     private readonly Mock<IRepository<SubscriptionPlan, Guid>> _planRepositoryMock;
+    private readonly Mock<IRepository<SubscriptionChange, Guid>> _changeRepositoryMock;
     private readonly Mock<IPaymentService> _paymentServiceMock;
     private readonly Mock<IPaymentProviderFactory> _providerFactoryMock;
     private readonly SubscriptionService _service;
@@ -35,6 +36,7 @@ public class SubscriptionServiceTests
 
         _subscriptionRepositoryMock = new Mock<IRepository<Subscription, Guid>>();
         _planRepositoryMock = new Mock<IRepository<SubscriptionPlan, Guid>>();
+        _changeRepositoryMock = new Mock<IRepository<SubscriptionChange, Guid>>();
         _paymentServiceMock = new Mock<IPaymentService>();
         _providerFactoryMock = new Mock<IPaymentProviderFactory>();
 
@@ -47,6 +49,7 @@ public class SubscriptionServiceTests
         _service = new SubscriptionService(
             _subscriptionRepositoryMock.Object,
             _planRepositoryMock.Object,
+            _changeRepositoryMock.Object,
             _paymentServiceMock.Object,
             _providerFactoryMock.Object,
             serviceProviderMock.Object

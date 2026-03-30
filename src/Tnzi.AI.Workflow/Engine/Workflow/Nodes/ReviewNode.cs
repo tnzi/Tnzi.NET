@@ -10,14 +10,14 @@ namespace Tnzi.AI.Engine.Workflow.Nodes;
 /// </remarks>
 public class ReviewNode : IWorkflowNode
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowNodeServiceContext _nodeContext;
     private readonly ILogger<ReviewNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Review;
 
-    public ReviewNode(IServiceProvider serviceProvider, ILogger<ReviewNode> logger)
+    public ReviewNode(IWorkflowNodeServiceContext nodeContext, ILogger<ReviewNode> logger)
     {
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _nodeContext = Check.NotNull(nodeContext);
         _logger = Check.NotNull(logger);
     }
 
@@ -33,20 +33,17 @@ public class ReviewNode : IWorkflowNode
             : new[] { "accept", "rework", "reject" };
 
         // 收集上游输出
-        var upstreamText = CollectUpstreamOutputs(context);
+        var upstreamText = WorkflowNodeHelper.CollectInput(context);
 
         // 构建审查提示
         var reviewPrompt = BuildReviewPrompt(step.Instructions, upstreamText, verdictOptions);
         reviewPrompt = state.ResolveTemplate(reviewPrompt);
 
-        // 创建作用域以避免使用根 ServiceProvider 解析 Scoped 服务
-        using var scope = _serviceProvider.CreateScope();
-
         var reviewerAgentId = WorkflowNodeHelper.ParseAgentIdFromConfig(config, "reviewerAgentId");
 
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: reviewerAgentId,
-            scope: scope,
+            serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
             instructions: "You are a reviewer. Always respond with a JSON object containing 'verdict' and 'feedback' fields.",
@@ -76,28 +73,6 @@ public class ReviewNode : IWorkflowNode
             IsSuccess = true,
             RouteTo = verdict // 用于条件边路由
         };
-    }
-
-    /// <summary>
-    /// 收集上游依赖的输出文本
-    /// </summary>
-    private static string CollectUpstreamOutputs(WorkflowNodeContext context)
-    {
-        if (context.DependencyOutputs.Count == 0)
-            return context.State.InitialInput;
-
-        if (context.DependencyOutputs.Count == 1)
-            return context.DependencyOutputs.Values.First().Text;
-
-        var sb = new StringBuilder();
-        foreach (var (depId, output) in context.DependencyOutputs)
-        {
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"[{depId}]");
-            sb.AppendLine(output.Text);
-        }
-
-        return sb.ToString().TrimEnd();
     }
 
     /// <summary>

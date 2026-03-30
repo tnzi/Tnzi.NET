@@ -15,11 +15,10 @@ public class QuotaMiddlewareTests
     private static QuotaMiddleware CreateMiddleware(
         Mock<IQuotaService>? quotaService = null,
         Mock<ITokenEstimator>? tokenEstimator = null,
-        Mock<IServiceProvider>? serviceProvider = null)
+        Mock<IEventBus>? eventBus = null)
     {
         var qs = quotaService ?? new Mock<IQuotaService>();
         var te = tokenEstimator ?? new Mock<ITokenEstimator>();
-        var sp = serviceProvider ?? new Mock<IServiceProvider>();
 
         // 默认 token 估算返回 100
         if (tokenEstimator == null)
@@ -30,8 +29,8 @@ public class QuotaMiddlewareTests
         return new QuotaMiddleware(
             qs.Object,
             te.Object,
-            sp.Object,
-            Mock.Of<ILogger<QuotaMiddleware>>());
+            Mock.Of<ILogger<QuotaMiddleware>>(),
+            eventBus?.Object);
     }
 
     private static AiMiddlewareContext CreateContext(Guid? userId = null, string? userMessage = "Hello")
@@ -99,10 +98,7 @@ public class QuotaMiddlewareTests
         quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Failure<QuotaReservation>("Daily quota exceeded"));
 
-        var sp = new Mock<IServiceProvider>();
-        sp.Setup(x => x.GetService(typeof(IEventBus))).Returns((IEventBus?)null);
-
-        var middleware = CreateMiddleware(quotaService: quotaService, serviceProvider: sp);
+        var middleware = CreateMiddleware(quotaService: quotaService);
         var context = CreateContext(userId);
         var nextCalled = false;
 
@@ -178,10 +174,7 @@ public class QuotaMiddlewareTests
         quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Failure<QuotaReservation>("Monthly quota exceeded"));
 
-        var sp = new Mock<IServiceProvider>();
-        sp.Setup(x => x.GetService(typeof(IEventBus))).Returns((IEventBus?)null);
-
-        var middleware = CreateMiddleware(quotaService: quotaService, serviceProvider: sp);
+        var middleware = CreateMiddleware(quotaService: quotaService);
         var context = CreateContext(userId);
 
         // Act

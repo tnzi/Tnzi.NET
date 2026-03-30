@@ -34,4 +34,47 @@ public class AgentRunResult
 
     /// <summary>推理/思考过程内容（非流式时填充）</summary>
     public string? Reasoning { get; init; }
+
+    /// <summary>是否需要用户澄清（从 Status 派生）</summary>
+    public bool RequiresClarification => Status == AgentRunStatus.RequiresClarification;
+
+    /// <summary>后续建议问题（由 ISuggestionService 生成）</summary>
+    public List<string>? Suggestions { get; init; }
+
+    /// <summary>当前 Todo 列表（Plan Mode 下由 TodoMiddleware 填充）</summary>
+    public List<TodoItemDto>? Todos { get; init; }
+
+    /// <summary>本次运行产出的文件产物</summary>
+    public List<AgentArtifactDto>? Artifacts { get; init; }
+
+    /// <summary>澄清问题（Status=RequiresClarification 时非 null）</summary>
+    public string? ClarificationQuestion { get; init; }
+
+    /// <summary>
+    /// 创建副本并覆盖指定字段。用于中间件修改结果时保留所有原始字段。
+    /// </summary>
+    public AgentRunResult CloneWith(
+        string? response = null,
+        Guid? threadId = null,
+        string? finishReason = null,
+        AgentRunStatus? status = null)
+    {
+        return new AgentRunResult
+        {
+            Response = response ?? Response,
+            RunId = RunId,
+            ThreadId = threadId ?? ThreadId,
+            Usage = Usage,
+            Citations = Citations,
+            FinishReason = finishReason ?? FinishReason,
+            HandoffPath = HandoffPath,
+            FinalAgentName = FinalAgentName,
+            Status = status ?? Status,
+            Reasoning = Reasoning,
+            Suggestions = Suggestions,
+            Todos = Todos,
+            Artifacts = Artifacts,
+            ClarificationQuestion = ClarificationQuestion
+        };
+    }
 }

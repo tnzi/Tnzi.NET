@@ -179,6 +179,31 @@ public static class ErrorCodes
     /// </summary>
     public const string SubscriptionPlanHasActiveSubscriptions = "SUBSCRIPTION_PLAN_HAS_ACTIVE_SUBSCRIPTIONS";
 
+    /// <summary>
+    /// 新旧计划相同
+    /// </summary>
+    public const string SubscriptionSamePlan = "SUBSCRIPTION_SAME_PLAN";
+
+    /// <summary>
+    /// 订阅变更记录不存在
+    /// </summary>
+    public const string SubscriptionChangeNotFound = "SUBSCRIPTION_CHANGE_NOT_FOUND";
+
+    /// <summary>
+    /// 只有待生效的变更才能取消
+    /// </summary>
+    public const string SubscriptionChangeCannotCancel = "SUBSCRIPTION_CHANGE_CANNOT_CANCEL";
+
+    /// <summary>
+    /// 存在待生效的变更
+    /// </summary>
+    public const string SubscriptionChangePending = "SUBSCRIPTION_CHANGE_PENDING";
+
+    /// <summary>
+    /// 新旧计划币种不一致
+    /// </summary>
+    public const string SubscriptionCurrencyMismatch = "SUBSCRIPTION_CURRENCY_MISMATCH";
+
     #endregion
 
     #region Refund 错误码

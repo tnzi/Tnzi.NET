@@ -28,4 +28,25 @@ public class AuditOptions
 
     /// <summary>是否记录响应结果</summary>
     public bool EnableResponseResult { get; set; } = false;
+
+    /// <summary>是否启用请求体记录</summary>
+    public bool EnableRequestBodyCapture { get; set; } = false;
+
+    /// <summary>请求体最大记录大小（字节），超出部分截断</summary>
+    public int MaxRequestBodySize { get; set; } = 4096;
+
+    /// <summary>需要脱敏的敏感字段名（不区分大小写）</summary>
+    public HashSet<string> SensitiveFields { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "password",
+        "token",
+        "secret",
+        "credential",
+        "authorization",
+        "accessToken",
+        "refreshToken",
+        "apiKey",
+        "connectionString",
+        "creditCard"
+    };
 }

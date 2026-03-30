@@ -38,7 +38,9 @@ export enum NotificationStatus {
   Sending = 1,
   Sent = 2,
   Failed = 3,
-  Cancelled = 4,
+  PartiallySent = 4,
+  Cancelled = 5,
+  Scheduled = 6,
 }
 
 /**
@@ -54,8 +56,12 @@ export function getNotificationStatusLabel(status: NotificationStatus): string {
       return 'Sent';
     case NotificationStatus.Failed:
       return 'Failed';
+    case NotificationStatus.PartiallySent:
+      return 'Partially Sent';
     case NotificationStatus.Cancelled:
       return 'Cancelled';
+    case NotificationStatus.Scheduled:
+      return 'Scheduled';
     default:
       return 'Unknown';
   }
@@ -99,6 +105,32 @@ export enum RecipientType {
   Role = 4,
   Organization = 5,
   All = 6,
+}
+
+/**
+ * Trend interval for statistics
+ * Backend: TrendInterval
+ */
+export enum TrendInterval {
+  Daily = 0,
+  Weekly = 1,
+  Monthly = 2,
+}
+
+/**
+ * Get trend interval label
+ */
+export function getTrendIntervalLabel(interval: TrendInterval): string {
+  switch (interval) {
+    case TrendInterval.Daily:
+      return 'Daily';
+    case TrendInterval.Weekly:
+      return 'Weekly';
+    case TrendInterval.Monthly:
+      return 'Monthly';
+    default:
+      return 'Unknown';
+  }
 }
 
 /**

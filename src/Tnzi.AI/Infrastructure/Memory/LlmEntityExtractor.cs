@@ -61,7 +61,11 @@ public partial class LlmEntityExtractor
                 new(ChatRole.User, text)
             };
 
-            var response = await chatClient.GetResponseAsync(messages, cancellationToken: ct);
+            // 超时保护：LLM 无响应时降级为空列表，避免阻塞上下文持久化流程
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            var response = await chatClient.GetResponseAsync(messages, cancellationToken: timeoutCts.Token);
             var responseText = response.Text?.Trim();
 
             if (string.IsNullOrWhiteSpace(responseText))

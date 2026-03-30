@@ -4,15 +4,13 @@ namespace Tnzi.AI.Skills;
 /// SKILL.md 文件解析器 — 将 Markdown 内容解析为 <see cref="SkillDefinition"/>。
 /// </summary>
 /// <remarks>
-/// 纯静态无状态类，从 FileSystemSkillStore 提取。
-/// 支持的 SKILL.md 格式：标题、描述、When to Use、Parameters、Requirements、Metadata。
+/// 支持 YAML frontmatter 格式（--- 分隔的 key: value 块），后跟 Markdown 正文。
+/// 正文中仅解析 ## Requirements 章节（用于运行时依赖验证）。
+/// 其余章节（When to Use、Knowledge 等）作为 Content 整体返回，不单独解析为字段。
 /// </remarks>
 public static partial class SkillMarkdownParser
 {
     // 正则表达式 — all use [GeneratedRegex] for source-generated performance
-
-    [GeneratedRegex(@"^#\s+(.+)$", RegexOptions.Multiline)]
-    private static partial Regex TitleRegex();
 
     [GeneratedRegex(@"^##\s+(.+)$", RegexOptions.Multiline)]
     private static partial Regex SectionRegex();
@@ -20,28 +18,50 @@ public static partial class SkillMarkdownParser
     [GeneratedRegex(@"^\s*-\s*(bins|envs|configs|os|toolGroups):\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex RequirementRegex();
 
-    [GeneratedRegex(@"^\s*-\s*(?<name>\w[\w\-]*)\s*:\s*(?<desc>[^(]+?)(?:\s*\((?<opts>[^)]*)\))?\s*$")]
-    private static partial Regex ParameterLineRegex();
-
     [GeneratedRegex(@"[^a-z0-9\-]")]
     private static partial Regex SlugInvalidCharsRegex();
 
     [GeneratedRegex(@"-{2,}")]
     private static partial Regex SlugCollapseHyphensRegex();
 
-    [GeneratedRegex(@"allowed:\s*([^,)]+(?:,\s*[^,)]+)*?)(?:\s*,\s*default:|$|\))", RegexOptions.IgnoreCase)]
-    private static partial Regex AllowedValuesRegex();
-
-    [GeneratedRegex(@"default:\s*(.+?)(?:\s*,|\s*$|\))", RegexOptions.IgnoreCase)]
-    private static partial Regex DefaultValueRegex();
-
     /// <summary>
     /// Parse SKILL.md content into a <see cref="SkillDefinition"/>.
+    /// Requires YAML frontmatter (--- delimited key-value block) at the start.
     /// </summary>
     public static SkillDefinition? Parse(string content, string filePath)
     {
         if (string.IsNullOrWhiteSpace(content))
             return null;
+
+        // 解析 frontmatter
+        var frontmatter = ParseFrontmatter(content, out var bodyStartIndex);
+        if (frontmatter == null)
+            return null;
+
+        // 安全验证: frontmatter 键白名单
+        var fmValidation = SkillInstallationValidator.ValidateFrontmatter(frontmatter);
+        if (!fmValidation.IsValid)
+            return null;
+
+        // 安全验证: name 格式（如果存在 slug 字段，验证其格式）
+        if (frontmatter.TryGetValue("slug", out var slugValue) && !string.IsNullOrWhiteSpace(slugValue))
+        {
+            var nameValidation = SkillInstallationValidator.ValidateName(slugValue);
+            if (!nameValidation.IsValid)
+                return null;
+        }
+
+        // 安全验证: description 安全性（拒绝 HTML/XML 注入）
+        if (frontmatter.TryGetValue("description", out var descValue) && !string.IsNullOrWhiteSpace(descValue))
+        {
+            var descValidation = SkillInstallationValidator.ValidateDescription(descValue);
+            if (!descValidation.IsValid)
+                return null;
+        }
+
+        var body = bodyStartIndex < content.Length
+            ? content[bodyStartIndex..].TrimStart('\r', '\n')
+            : string.Empty;
 
         var skill = new SkillDefinition
         {
@@ -51,39 +71,22 @@ public static partial class SkillMarkdownParser
             Source = SkillSource.FileSystem
         };
 
-        // 解析标题
-        var titleMatch = TitleRegex().Match(content);
-        skill.Name = titleMatch.Success
-            ? titleMatch.Groups[1].Value.Trim()
-            : Path.GetFileName(Path.GetDirectoryName(filePath)) ?? "Unknown";
+        // 从 frontmatter 填充字段
+        ApplyFrontmatter(skill, frontmatter);
 
-        // 生成 slug
-        skill.Slug = GenerateSlug(skill.Name);
+        // Name 回退到目录名
+        if (string.IsNullOrWhiteSpace(skill.Name))
+            skill.Name = Path.GetFileName(Path.GetDirectoryName(filePath)) ?? "Unknown";
 
-        // 解析各章节
-        var sections = ParseSections(content);
+        // Slug 回退到自动生成
+        if (string.IsNullOrWhiteSpace(skill.Slug))
+            skill.Slug = GenerateSlug(skill.Name);
 
-        // 描述
-        skill.Description = ExtractDescription(content, titleMatch);
+        // 从正文解析 Requirements 章节（框架特有的依赖验证）
+        var sections = ParseSections(body);
 
-        // 使用场景
-        if (sections.TryGetValue("when to use", out var whenToUse))
-            skill.WhenToUse = whenToUse.Trim();
-
-        // 参数
-        if (sections.TryGetValue("parameters", out var parametersSection))
-            skill.Parameters = ParseParameters(parametersSection);
-
-        // 依赖要求
         if (sections.TryGetValue("requirements", out var requirements))
             skill.Requirements = ParseRequirements(requirements);
-
-        // 元数据
-        if (sections.TryGetValue("metadata", out var metadata))
-            skill.Metadata = ParseMetadata(metadata);
-
-        // 从元数据提取标准字段
-        ApplyMetadataToSkill(skill);
 
         return skill;
     }
@@ -111,6 +114,120 @@ public static partial class SkillMarkdownParser
     }
 
     // -------------------------------------------------------------------------
+    // Frontmatter parsing
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 解析 YAML frontmatter（--- 分隔的 key: value 块）。
+    /// </summary>
+    /// <param name="content">完整文件内容</param>
+    /// <param name="bodyStartIndex">正文起始位置（closing --- 之后）</param>
+    /// <returns>解析的 key-value 字典，若无有效 frontmatter 则返回 null</returns>
+    internal static Dictionary<string, string>? ParseFrontmatter(string content, out int bodyStartIndex)
+    {
+        bodyStartIndex = 0;
+
+        // 第一行必须是 ---（兼容 \n 和 \r\n）
+        var firstNewline = content.IndexOf('\n');
+        if (firstNewline < 0)
+            return null;
+
+        var firstLine = content[..firstNewline].Trim();
+        if (firstLine != "---")
+            return null;
+
+        var frontmatter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 从第一行之后逐行扫描，使用 IndexOf 定位避免 CRLF 偏移问题
+        var pos = firstNewline + 1;
+        while (pos < content.Length)
+        {
+            var lineEnd = content.IndexOf('\n', pos);
+            // 最后一行可能没有换行符
+            if (lineEnd < 0)
+                lineEnd = content.Length;
+
+            var line = content[pos..lineEnd].TrimEnd('\r');
+            var trimmed = line.Trim();
+
+            // 找到 closing ---
+            if (trimmed == "---")
+            {
+                bodyStartIndex = Math.Min(lineEnd + 1, content.Length);
+                return frontmatter;
+            }
+
+            pos = Math.Min(lineEnd + 1, content.Length);
+
+            // 跳过空行和注释行
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#'))
+                continue;
+
+            // 解析 key: value
+            var colonIndex = trimmed.IndexOf(':');
+            if (colonIndex > 0)
+            {
+                var key = trimmed[..colonIndex].Trim();
+                var value = trimmed[(colonIndex + 1)..].Trim();
+                frontmatter[key] = value;
+            }
+        }
+
+        return null; // 未找到 closing ---
+    }
+
+    /// <summary>
+    /// 将 frontmatter key-value 映射到 SkillDefinition 字段。
+    /// </summary>
+    private static void ApplyFrontmatter(SkillDefinition skill, Dictionary<string, string> frontmatter)
+    {
+        if (frontmatter.TryGetValue("name", out var name))
+            skill.Name = name;
+
+        if (frontmatter.TryGetValue("slug", out var slug) && slug.Length <= 64 && !SlugInvalidCharsRegex().IsMatch(slug))
+            skill.Slug = slug;
+
+        if (frontmatter.TryGetValue("description", out var description))
+            skill.Description = description;
+
+        if (frontmatter.TryGetValue("version", out var version))
+            skill.Version = version;
+
+        if (frontmatter.TryGetValue("author", out var author))
+            skill.Author = author;
+
+        if (frontmatter.TryGetValue("tags", out var tags))
+            skill.Tags = tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        if (frontmatter.TryGetValue("priority", out var priority) && int.TryParse(priority, out var priorityValue))
+            skill.Priority = priorityValue;
+
+        if (frontmatter.TryGetValue("enabled", out var enabledStr) && bool.TryParse(enabledStr, out var enabledValue))
+            skill.Enabled = enabledValue;
+
+        if (frontmatter.TryGetValue("allowed-tool-groups", out var toolGroups))
+            skill.AllowedToolGroups = toolGroups.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        if (frontmatter.TryGetValue("tool-whitelist", out var toolWhitelist))
+            skill.AllowedTools = toolWhitelist.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        if (frontmatter.TryGetValue("tool-blacklist", out var toolBlacklist))
+            skill.DeniedTools = toolBlacklist.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        if (frontmatter.TryGetValue("model", out var model))
+            skill.RequiredModel = model;
+
+        if (frontmatter.TryGetValue("provider", out var provider))
+            skill.RequiredProvider = provider;
+
+        if (frontmatter.TryGetValue("internal", out var internalStr) && bool.TryParse(internalStr, out var internalValue))
+            skill.IsInternal = internalValue;
+
+        if (frontmatter.TryGetValue("agents", out var agents))
+            skill.Agents = agents.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    // -------------------------------------------------------------------------
     // Section parsing
     // -------------------------------------------------------------------------
 
@@ -130,63 +247,6 @@ public static partial class SkillMarkdownParser
         }
 
         return sections;
-    }
-
-    private static string? ExtractDescription(string content, Match titleMatch)
-    {
-        if (!titleMatch.Success)
-            return null;
-
-        var startIndex = titleMatch.Index + titleMatch.Length;
-        var firstSectionMatch = SectionRegex().Match(content, startIndex);
-        var endIndex = firstSectionMatch.Success ? firstSectionMatch.Index : content.Length;
-        var description = content.Substring(startIndex, endIndex - startIndex).Trim();
-        return string.IsNullOrWhiteSpace(description) ? null : description;
-    }
-
-    /// <summary>
-    /// 解析 ## Parameters 章节。
-    /// </summary>
-    internal static List<SkillParameter> ParseParameters(string section)
-    {
-        var parameters = new List<SkillParameter>();
-        var lines = section.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (var line in lines)
-        {
-            var match = ParameterLineRegex().Match(line);
-            if (!match.Success)
-                continue;
-
-            var param = new SkillParameter
-            {
-                Name = match.Groups["name"].Value.Trim(),
-                Description = match.Groups["desc"].Value.Trim()
-            };
-
-            var opts = match.Groups["opts"].Value;
-            if (!string.IsNullOrWhiteSpace(opts))
-            {
-                param.Required = opts.Contains("required", StringComparison.OrdinalIgnoreCase)
-                    && !opts.Contains("optional", StringComparison.OrdinalIgnoreCase);
-
-                var allowedMatch = AllowedValuesRegex().Match(opts);
-                if (allowedMatch.Success)
-                {
-                    param.AllowedValues = allowedMatch.Groups[1].Value
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                        .ToList();
-                }
-
-                var defaultMatch = DefaultValueRegex().Match(opts);
-                if (defaultMatch.Success)
-                    param.DefaultValue = defaultMatch.Groups[1].Value.Trim();
-            }
-
-            parameters.Add(param);
-        }
-
-        return parameters;
     }
 
     internal static SkillRequirements ParseRequirements(string requirementsSection)
@@ -212,102 +272,5 @@ public static partial class SkillMarkdownParser
         }
 
         return requirements;
-    }
-
-    internal static Dictionary<string, string> ParseMetadata(string metadataSection)
-    {
-        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var lines = metadataSection.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (var line in lines)
-        {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith('-'))
-                trimmed = trimmed[1..].Trim();
-
-            var colonIndex = trimmed.IndexOf(':');
-            if (colonIndex > 0)
-            {
-                var key = trimmed[..colonIndex].Trim();
-                var value = trimmed[(colonIndex + 1)..].Trim();
-                metadata[key] = value;
-            }
-        }
-
-        return metadata;
-    }
-
-    // -------------------------------------------------------------------------
-    // Metadata → SkillDefinition fields
-    // -------------------------------------------------------------------------
-
-    private static void ApplyMetadataToSkill(SkillDefinition skill)
-    {
-        if (skill.Metadata.TryGetValue("version", out var version))
-            skill.Version = version;
-
-        if (skill.Metadata.TryGetValue("author", out var author))
-            skill.Author = author;
-
-        if (skill.Metadata.TryGetValue("tags", out var tags))
-            skill.Tags = tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-
-        if (skill.Metadata.TryGetValue("priority", out var priority) && int.TryParse(priority, out var priorityValue))
-            skill.Priority = priorityValue;
-
-        if (skill.Metadata.TryGetValue("enabled", out var enabledStr) && bool.TryParse(enabledStr, out var enabledValue))
-            skill.Enabled = enabledValue;
-
-        // Constraint: tool groups
-        if (skill.Metadata.TryGetValue("allowed-tool-groups", out var toolGroups))
-        {
-            skill.AllowedToolGroups = toolGroups
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-        }
-        else if (skill.Metadata.TryGetValue("allowed-tools", out var legacyToolGroups))
-        {
-            // Backward compatibility: allowed-tools as tool group alias when allowed-tool-groups absent
-            skill.AllowedToolGroups = legacyToolGroups
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-        }
-
-        // Constraint: individual tool whitelist
-        // Priority: tool-whitelist > allowed-tools (when allowed-tool-groups exists)
-        if (skill.Metadata.TryGetValue("tool-whitelist", out var toolWhitelist))
-        {
-            skill.AllowedTools = toolWhitelist
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-        }
-        else if (skill.Metadata.ContainsKey("allowed-tool-groups") && skill.Metadata.TryGetValue("allowed-tools", out var individualTools))
-        {
-            // Backward compat: allowed-tools as individual whitelist when allowed-tool-groups exists
-            skill.AllowedTools = individualTools
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-        }
-
-        // Constraint: individual tool blacklist
-        // Priority: tool-blacklist > denied-tools
-        if (skill.Metadata.TryGetValue("tool-blacklist", out var toolBlacklist))
-        {
-            skill.DeniedTools = toolBlacklist
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-        }
-        else if (skill.Metadata.TryGetValue("denied-tools", out var deniedTools))
-        {
-            skill.DeniedTools = deniedTools
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
-        }
-
-        if (skill.Metadata.TryGetValue("model", out var model))
-            skill.RequiredModel = model;
-
-        if (skill.Metadata.TryGetValue("provider", out var provider))
-            skill.RequiredProvider = provider;
     }
 }

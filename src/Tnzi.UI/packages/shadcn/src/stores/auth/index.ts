@@ -84,6 +84,14 @@ export function useAuthStore() {
   };
 }
 
+/**
+ * Reset auth store module-level singleton.
+ * Useful for testing or SSR to avoid shared state between requests.
+ */
+export function resetAuthRuntime(): void {
+  _manager = null;
+}
+
 // ============================================
 // Composable Wrapper
 // ============================================

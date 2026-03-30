@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
+
 namespace Tnzi.AI.Rag.Entities.Configs;
 
 /// <summary>
@@ -11,11 +13,24 @@ public class DocumentChunkConfiguration : EntityTypeConfigurationBase<DocumentCh
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
+        // 从 DI 获取嵌入维度配置，默认 1536（OpenAI text-embedding-ada-002）
+        var dimensions = 1536;
+        try
+        {
+            var serviceProvider = (GetDbContext() as IInfrastructure<IServiceProvider>)?.Instance;
+            var options = serviceProvider?.GetService<IOptions<AIRagOptions>>();
+            if (options?.Value.DefaultEmbeddingDimensions > 0)
+            {
+                dimensions = options.Value.DefaultEmbeddingDimensions;
+            }
+        }
+        catch { /* 设计时迁移等场景下 DI 不可用，使用默认值 */ }
+
         builder.Property(e => e.Content)
             .IsRequired();
 
         builder.Property(e => e.Embedding)
-            .HasColumnType("vector(1536)")
+            .HasColumnType($"vector({dimensions})")
             .IsRequired();
 
         builder.Property(e => e.Metadata)

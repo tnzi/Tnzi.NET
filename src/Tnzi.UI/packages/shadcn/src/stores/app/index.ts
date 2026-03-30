@@ -16,6 +16,19 @@ import type { Locale } from '@tnzi/core/adapters/i18n';
 import type { ThemeMode } from '@tnzi/core/types/theme';
 import { createStore } from '../factory';
 
+/**
+ * Internal type for actions that call other actions on the store.
+ * The store proxy exposes all actions as direct methods.
+ */
+interface AppStoreThis {
+  setTheme(theme: ThemeMode): void;
+  applyTheme(theme: ThemeMode): void;
+  applyLanguage(language: Locale): void;
+  addNotification(notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>): string;
+  removeNotification(id: string): void;
+  closeModal(id: string): void;
+}
+
 // ============================================
 // Helper Functions
 // ============================================
@@ -25,6 +38,7 @@ const generateId = (): string => {
 };
 
 let _fullscreenListenerActive = false;
+const _notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // ============================================
 // Default State
@@ -112,12 +126,12 @@ export const useAppStore = createStore<AppState>({
 
   actions: {
     // Theme actions
-    setTheme(theme: ThemeMode): void {
+    setTheme(this: { $state: AppState } & AppStoreThis, theme: ThemeMode): void {
       this.$state.theme = theme;
       this.applyTheme(theme);
     },
 
-    toggleTheme(): void {
+    toggleTheme(this: { $state: AppState } & AppStoreThis): void {
       const themes: ThemeMode[] = ['light', 'dark', 'system'];
       const currentIndex = themes.indexOf(this.$state.theme);
       const nextIndex = (currentIndex + 1) % themes.length;
@@ -125,26 +139,26 @@ export const useAppStore = createStore<AppState>({
     },
 
     // Language actions
-    setLanguage(language: Locale): void {
+    setLanguage(this: { $state: AppState } & AppStoreThis, language: Locale): void {
       this.$state.language = language;
       this.applyLanguage(language);
     },
 
     // Sidebar actions
-    toggleSidebar(): void {
+    toggleSidebar(this: { $state: AppState }): void {
       this.$state.ui.sidebarCollapsed = !this.$state.ui.sidebarCollapsed;
     },
 
-    setSidebarCollapsed(collapsed: boolean): void {
+    setSidebarCollapsed(this: { $state: AppState }, collapsed: boolean): void {
       this.$state.ui.sidebarCollapsed = collapsed;
     },
 
-    setSidebarMode(mode: AppState['ui']['sidebarMode']): void {
+    setSidebarMode(this: { $state: AppState }, mode: AppState['ui']['sidebarMode']): void {
       this.$state.ui.sidebarMode = mode;
     },
 
     // Fullscreen actions
-    toggleFullscreen(): void {
+    toggleFullscreen(this: { $state: AppState }): void {
       if (typeof document === 'undefined') return;
 
       if (!this.$state.ui.fullscreen) {
@@ -159,33 +173,33 @@ export const useAppStore = createStore<AppState>({
      * Initialize fullscreenchange event listener to sync state with browser.
      * Called automatically from useApp(). Idempotent — safe to call multiple times.
      */
-    _initFullscreenListener(): void {
+    _initFullscreenListener(this: { $state: AppState }): void {
       if (_fullscreenListenerActive || typeof document === 'undefined') return;
       _fullscreenListenerActive = true;
-      const store = this;
+      const self = this;
       document.addEventListener('fullscreenchange', () => {
-        store.$state.ui.fullscreen = !!document.fullscreenElement;
+        self.$state.ui.fullscreen = !!document.fullscreenElement;
       });
     },
 
     // Loading actions
-    showLoading(message?: string): void {
+    showLoading(this: { $state: AppState }, message?: string): void {
       this.$state.ui.loading = true;
       this.$state.ui.loadingMessage = message ?? null;
     },
 
-    hideLoading(): void {
+    hideLoading(this: { $state: AppState }): void {
       this.$state.ui.loading = false;
       this.$state.ui.loadingMessage = null;
     },
 
-    setLoading(loading: boolean, message?: string | null): void {
+    setLoading(this: { $state: AppState }, loading: boolean, message?: string | null): void {
       this.$state.ui.loading = loading;
       this.$state.ui.loadingMessage = message ?? null;
     },
 
     // Notification actions
-    addNotification(notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>): string {
+    addNotification(this: { $state: AppState } & AppStoreThis, notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>): string {
       const id = generateId();
       const newNotification: AppNotification = {
         ...notification,
@@ -197,15 +211,16 @@ export const useAppStore = createStore<AppState>({
       this.$state.ui.toasts = [newNotification, ...this.$state.ui.toasts];
 
       if (notification.duration > 0) {
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
           this.removeNotification(id);
         }, notification.duration);
+        _notificationTimers.set(id, timeoutId);
       }
 
       return id;
     },
 
-    showSuccess(message: string, title?: string): string {
+    showSuccess(this: { $state: AppState } & AppStoreThis, message: string, title?: string): string {
       return this.addNotification({
         type: 'success',
         severity: 'low',
@@ -215,7 +230,7 @@ export const useAppStore = createStore<AppState>({
       });
     },
 
-    showError(message: string, title?: string): string {
+    showError(this: { $state: AppState } & AppStoreThis, message: string, title?: string): string {
       return this.addNotification({
         type: 'error',
         severity: 'high',
@@ -225,7 +240,7 @@ export const useAppStore = createStore<AppState>({
       });
     },
 
-    showWarning(message: string, title?: string): string {
+    showWarning(this: { $state: AppState } & AppStoreThis, message: string, title?: string): string {
       return this.addNotification({
         type: 'warning',
         severity: 'medium',
@@ -235,7 +250,7 @@ export const useAppStore = createStore<AppState>({
       });
     },
 
-    showInfo(message: string, title?: string): string {
+    showInfo(this: { $state: AppState } & AppStoreThis, message: string, title?: string): string {
       return this.addNotification({
         type: 'info',
         severity: 'low',
@@ -245,93 +260,91 @@ export const useAppStore = createStore<AppState>({
       });
     },
 
-    removeNotification(id: string): void {
+    removeNotification(this: { $state: AppState }, id: string): void {
+      const timer = _notificationTimers.get(id);
+      if (timer) { clearTimeout(timer); _notificationTimers.delete(id); }
+
       const index = this.$state.ui.toasts.findIndex((n: AppNotification) => n.id === id);
       if (index !== -1) {
         const notification = this.$state.ui.toasts[index];
-        notification.onDismiss?.();
+        if (notification) notification.onDismiss?.();
         this.$state.ui.toasts = this.$state.ui.toasts.filter((n: AppNotification) => n.id !== id);
       }
     },
 
-    markNotificationRead(id: string): void {
-      const notification = this.$state.ui.toasts.find((n: AppNotification) => n.id === id);
-      if (notification) {
-        notification.read = true;
+    // HIGH-8: Immutable notification update
+    markNotificationRead(this: { $state: AppState }, id: string): void {
+      this.$state.ui.toasts = this.$state.ui.toasts.map((n: AppNotification) =>
+        n.id === id ? { ...n, read: true } : n
+      );
+    },
+
+    markAllNotificationsRead(this: { $state: AppState }): void {
+      this.$state.ui.toasts = this.$state.ui.toasts.map((n: AppNotification) => ({ ...n, read: true }));
+    },
+
+    clearNotifications(this: { $state: AppState }): void {
+      for (const timer of _notificationTimers.values()) {
+        clearTimeout(timer);
       }
-    },
-
-    markAllNotificationsRead(): void {
-      this.$state.ui.toasts.forEach((n: AppNotification) => {
-        n.read = true;
-      });
-    },
-
-    clearNotifications(): void {
+      _notificationTimers.clear();
       this.$state.ui.toasts = [];
     },
 
-    // Modal actions
-    openModal(modal: Omit<AppModalState, 'id'>): string {
+    // Modal actions (immutable patterns)
+    openModal(this: { $state: AppState }, modal: Omit<AppModalState, 'id'>): string {
       const id = generateId();
-      const newModal: AppModalState = {
-        ...modal,
-        id,
-      };
-
-      this.$state.ui.modalStack.push(newModal);
+      const newModal: AppModalState = { ...modal, id };
+      this.$state.ui.modalStack = [...this.$state.ui.modalStack, newModal];
       return id;
     },
 
-    closeModal(id: string): void {
-      const index = this.$state.ui.modalStack.findIndex((m: AppModalState) => m.id === id);
-      if (index !== -1) {
-        this.$state.ui.modalStack.splice(index, 1);
-      }
+    closeModal(this: { $state: AppState }, id: string): void {
+      this.$state.ui.modalStack = this.$state.ui.modalStack.filter((m: AppModalState) => m.id !== id);
     },
 
-    closeTopModal(): void {
+    closeTopModal(this: { $state: AppState } & AppStoreThis): void {
       if (this.$state.ui.modalStack.length > 0) {
         const topModal = this.$state.ui.modalStack[this.$state.ui.modalStack.length - 1];
-        this.closeModal(topModal.id);
+        if (topModal) this.closeModal(topModal.id);
       }
     },
 
-    closeAllModals(): void {
+    closeAllModals(this: { $state: AppState }): void {
       this.$state.ui.modalStack = [];
     },
 
     // Online status actions
-    setOnlineStatus(status: OnlineStatus): void {
+    setOnlineStatus(this: { $state: AppState }, status: OnlineStatus): void {
       this.$state.onlineStatus = status;
     },
 
     // Connection actions
-    updateConnection(state: Partial<AppState['connection']>): void {
-      this.$state.connection = { ...this.$state.connection, ...state };
+    updateConnection(this: { $state: AppState }, connState: Partial<AppState['connection']>): void {
+      this.$state.connection = { ...this.$state.connection, ...connState };
     },
 
-    setConnected(connected: boolean): void {
-      this.$state.connection.isConnected = connected;
-      if (connected) {
-        this.$state.connection.lastConnectedAt = new Date();
-        this.$state.connection.error = null;
-      }
+    setConnected(this: { $state: AppState }, connected: boolean): void {
+      this.$state.connection = {
+        ...this.$state.connection,
+        isConnected: connected,
+        ...(connected ? { lastConnectedAt: new Date(), error: null } : {}),
+      };
     },
 
     // Initialization actions
-    setInitialized(): void {
+    setInitialized(this: { $state: AppState }): void {
       this.$state.initialized = true;
       this.$state.initError = null;
     },
 
-    setInitError(error: string | null): void {
+    setInitError(this: { $state: AppState }, error: string | null): void {
       this.$state.initError = error;
       this.$state.initialized = !error;
     },
 
     // Persistence actions (handled by factory's persist plugin)
-    async loadPersistedState(): Promise<void> {
+    async loadPersistedState(this: { $state: AppState } & AppStoreThis): Promise<void> {
       if (this.$state.theme) {
         this.applyTheme(this.$state.theme);
       }

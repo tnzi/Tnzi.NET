@@ -67,9 +67,9 @@ function warnStorageError(operation: string, key: string, error: unknown): void 
     (error.code === 22 || error.code === 1014 || error.name === 'QuotaExceededError');
 
   if (isQuotaError) {
-    console.warn(`[Storage] Quota exceeded on ${operation}("${key}"). Consider clearing unused data.`);
+    console.warn(`[Storage] Quota exceeded on ${operation}("${key}"). Consider clearing unused data.`); // TODO: Replace with logger injection
   } else {
-    console.warn(`[Storage] ${operation}("${key}") failed:`, error);
+    console.warn(`[Storage] ${operation}("${key}") failed:`, error); // TODO: Replace with logger injection
   }
 }
 
@@ -370,6 +370,13 @@ export function setStorageAdapter(adapter: StorageAdapter): void {
  */
 export function resetStorageAdapter(): void {
   activeStorageRuntime.reset();
+}
+
+/**
+ * Reset storage runtime to default. For tests and SSR isolation.
+ */
+export function resetStorageRuntime(): void {
+  activeStorageRuntime = defaultStorageRuntime;
 }
 
 // ============================================

@@ -311,10 +311,10 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             Metadata = t.Metadata
         }).ToList();
 
-        var json = System.Text.Json.JsonSerializer.Serialize(entries, new System.Text.Json.JsonSerializerOptions
+        var json = JsonSerializer.Serialize(entries, new JsonSerializerOptions
         {
             WriteIndented = true,
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
 
         LogInformation("Exported {Count} templates (module: {Module}, category: {Category})", entries.Count, module ?? "all", category ?? "all");
@@ -328,13 +328,13 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         List<TemplateExportEntry>? entries;
         try
         {
-            entries = System.Text.Json.JsonSerializer.Deserialize<List<TemplateExportEntry>>(json, new System.Text.Json.JsonSerializerOptions
+            entries = JsonSerializer.Deserialize<List<TemplateExportEntry>>(json, new JsonSerializerOptions
             {
-                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 PropertyNameCaseInsensitive = true
             });
         }
-        catch (System.Text.Json.JsonException ex)
+        catch (JsonException ex)
         {
             return Fail<TemplateImportResultDto>($"Invalid JSON format: {ex.Message}", 400, ErrorCodes.VALIDATION_ERROR);
         }
@@ -506,12 +506,12 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         var variables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Match @Model.PropertyName patterns (including nested like @Model.User.Name)
-        var regex = new System.Text.RegularExpressions.Regex(
+        var regex = new Regex(
             @"@Model\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)",
-            System.Text.RegularExpressions.RegexOptions.None,
+            RegexOptions.None,
             TimeSpan.FromSeconds(5));
 
-        foreach (System.Text.RegularExpressions.Match match in regex.Matches(templateContent))
+        foreach (Match match in regex.Matches(templateContent))
         {
             variables.Add(match.Groups[1].Value);
         }

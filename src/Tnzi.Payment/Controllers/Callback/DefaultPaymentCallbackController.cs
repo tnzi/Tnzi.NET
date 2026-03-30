@@ -60,7 +60,7 @@ public class DefaultPaymentCallbackController : ApiControllerBase
 
         // 保存原始请求体用于签名验证
         request.EnableBuffering();
-        using var reader = new System.IO.StreamReader(request.Body, System.Text.Encoding.UTF8, leaveOpen: true);
+        using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
         var body = await reader.ReadToEndAsync();
         request.Body.Position = 0;
 

@@ -7,16 +7,22 @@ public class TenantSettingProvider : ISettingProvider
 {
     private readonly IRepository<Setting, Guid> _repository;
     private readonly ICurrentTenant? _currentTenant;
+    private readonly ISettingEncryptor? _settingEncryptor;
+    private readonly ILogger<TenantSettingProvider> _logger;
 
     public string Name => "Tenant";
     public int Priority => 200;
 
     public TenantSettingProvider(
         IRepository<Setting, Guid> repository,
-        ICurrentTenant? currentTenant = null)
+        ILogger<TenantSettingProvider> logger,
+        ICurrentTenant? currentTenant = null,
+        ISettingEncryptor? settingEncryptor = null)
     {
         _repository = Check.NotNull(repository);
+        _logger = Check.NotNull(logger);
         _currentTenant = currentTenant;
+        _settingEncryptor = settingEncryptor;
     }
 
     public async Task<string?> GetOrNullAsync(string key, CancellationToken cancellationToken = default)
@@ -30,6 +36,20 @@ public class TenantSettingProvider : ISettingProvider
             .Where(s => s.Key == key && s.Scope == SettingScope.Tenant && s.ScopeId == scopeId)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return setting?.Value;
+        if (setting == null)
+            return null;
+
+        if (setting.IsEncrypted)
+        {
+            if (_settingEncryptor == null)
+            {
+                _logger.LogWarning("Encrypted setting '{Key}' found but encryption is not enabled, returning null for safety", key);
+                return null;
+            }
+
+            return setting.Value != null ? _settingEncryptor.Decrypt(setting.Value) : null;
+        }
+
+        return setting.Value;
     }
 }

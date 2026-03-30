@@ -39,11 +39,23 @@ public class AgentConfiguration : EntityTypeConfigurationBase<Agent, Guid>
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         builder.HasIndex(e => e.IsEnabled);
 
-        // v2.1 能力标签字段
+        // v2.1 能力标签字段（JSON 值转换）
+        builder.Property(e => e.ToolGroups)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
+                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
+            .HasMaxLength(2000);
+
         builder.Property(e => e.Domains)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
+                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
             .HasMaxLength(2000);
 
         builder.Property(e => e.Roles)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
+                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
             .HasMaxLength(2000);
 
         builder.Property(e => e.QualityTier)
@@ -54,5 +66,20 @@ public class AgentConfiguration : EntityTypeConfigurationBase<Agent, Guid>
 
         builder.Property(e => e.CostTier)
             .HasDefaultValue(3);
+
+        // YAML 定义同步字段
+        builder.Property(e => e.Source)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasDefaultValue("database");
+
+        builder.Property(e => e.DefinitionHash)
+            .HasMaxLength(128);
+
+        // 人格关联 FK
+        builder.HasOne(e => e.Persona)
+            .WithMany()
+            .HasForeignKey(e => e.PersonaId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

@@ -186,9 +186,25 @@ export class AuthStateManager {
       if (!result.succeeded || !result.data) {
         throw new Error(result.message ?? 'Login failed');
       }
-      this.setAuth(result.data);
+      const tokenResult = result.data;
+      // Set token first so profile fetch is authenticated
+      this.accessToken = tokenResult.accessToken;
+      this.refreshToken = tokenResult.refreshToken;
+      this.tokenExpiry = new Date(Date.now() + tokenResult.expiresIn * 1000);
+      this.isAuthenticated = true;
+      this.deps.httpClient.setAccessToken(this.accessToken);
+
+      // Fetch profile and permissions in parallel to reduce login latency
+      await Promise.all([this.fetchUserProfile(), this._fetchPermissions()]);
       this.persistTokens();
-      return result.data;
+
+      return {
+        accessToken: tokenResult.accessToken,
+        refreshToken: tokenResult.refreshToken,
+        expiresIn: tokenResult.expiresIn,
+        tokenType: 'Bearer',
+        user: this.user!,
+      };
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Login failed';
       throw error;
@@ -205,7 +221,7 @@ export class AuthStateManager {
     try {
       if (this.accessToken && this.user?.id) {
         const api = useAuthApi(this.deps.httpClient);
-        await api.logout(this.user.id).catch(() => {});
+        await api.logout().catch(() => {});
       }
     } finally {
       this.clearAuth();
@@ -265,6 +281,8 @@ export class AuthStateManager {
       await this._fetchPermissions();
     } catch (error) {
       this.error = 'Session expired, please login again';
+      // Clear mutex BEFORE logout so concurrent callers don't await a failed promise
+      this._refreshPromise = null;
       await this.logout();
       throw error;
     } finally {
@@ -282,7 +300,7 @@ export class AuthStateManager {
         this.user = toUserProfile(result.data, this.permissions);
       }
     } catch (error) {
-      console.error('Failed to fetch user profile:', error);
+      console.error('Failed to fetch user profile:', error); // TODO: Replace with logger injection
     }
   }
 
@@ -312,7 +330,7 @@ export class AuthStateManager {
 
     try {
       const api = useProfileApi(this.deps.httpClient);
-      const result = await api.changePassword({ currentPassword, newPassword, confirmPassword: newPassword });
+      const result = await api.changePassword({ currentPassword, newPassword });
       if (!result.succeeded) {
         throw new Error(result.message ?? 'Password change failed');
       }
@@ -375,12 +393,13 @@ export class AuthStateManager {
       if (!result.succeeded || !result.data) {
         throw new Error('Failed to fetch profile');
       }
-      this.isAuthenticated = true;
       this.user = toUserProfile(result.data);
       this.roles = result.data.roles ?? [];
 
-      // Fetch permissions via custom function or leave empty
+      // Fetch permissions before marking as authenticated,
+      // so permission checks don't run against stale/empty permissions
       await this._fetchPermissions();
+      this.isAuthenticated = true;
     } catch {
       // Token may be expired, try refresh
       try {
@@ -408,7 +427,7 @@ export class AuthStateManager {
         this.permissions = await this.deps.permissionsFetchFn();
       } catch {
         // Non-critical: keep existing permissions
-        console.warn('Failed to fetch permissions');
+        console.warn('Failed to fetch permissions'); // TODO: Replace with logger injection
       }
     }
   }

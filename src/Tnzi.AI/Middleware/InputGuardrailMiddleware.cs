@@ -6,19 +6,19 @@ namespace Tnzi.AI.Middleware;
 public class InputGuardrailMiddleware : IAiMiddleware
 {
     private readonly GuardrailRunner _guardrailRunner;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IEventBus? _eventBus;
     private readonly ILogger<InputGuardrailMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.InputGuardrail;
 
     public InputGuardrailMiddleware(
         GuardrailRunner guardrailRunner,
-        IServiceProvider serviceProvider,
-        ILogger<InputGuardrailMiddleware> logger)
+        ILogger<InputGuardrailMiddleware> logger,
+        IEventBus? eventBus = null)
     {
         _guardrailRunner = Check.NotNull(guardrailRunner);
-        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
+        _eventBus = eventBus;
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
@@ -35,7 +35,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
                 _logger.LogWarning("Input rejected by guardrail {GuardrailName}: {Reason}",
                     rejection.GuardrailName, rejection.Reason);
 
-                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Input rejected", "input");
+                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Input rejected", GuardrailDirections.Input);
 
                 return new AgentRunResult
                 {
@@ -56,7 +56,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
             _logger.LogWarning("Input tripwire triggered by {GuardrailName}: {Reason}",
                 ex.GuardrailName, ex.Message);
 
-            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, "input");
+            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, GuardrailDirections.Input);
 
             return new AgentRunResult
             {
@@ -89,7 +89,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
                 _logger.LogWarning("Input rejected by guardrail {GuardrailName}: {Reason}",
                     rejection.GuardrailName, rejection.Reason);
 
-                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Input rejected", "input");
+                await PublishGuardrailRejectionEventAsync(context, rejection.GuardrailName ?? "unknown", rejection.Reason ?? "Input rejected", GuardrailDirections.Input);
 
                 rejectionChunk = new AgentStreamChunk
                 {
@@ -107,7 +107,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
             _logger.LogWarning("Input tripwire triggered by {GuardrailName}: {Reason}",
                 ex.GuardrailName, ex.Message);
 
-            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, "input");
+            await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, GuardrailDirections.Input);
 
             rejectionChunk = new AgentStreamChunk
             {
@@ -134,10 +134,9 @@ public class InputGuardrailMiddleware : IAiMiddleware
     {
         try
         {
-            var eventBus = _serviceProvider.GetService<IEventBus>();
-            if (eventBus == null) return;
+            if (_eventBus == null) return;
 
-            await eventBus.PublishAsync(new GuardrailRejectionEvent
+            await _eventBus.PublishAsync(new GuardrailRejectionEvent
             {
                 UserId = context.Request.UserId,
                 ThreadId = context.Request.ThreadId,

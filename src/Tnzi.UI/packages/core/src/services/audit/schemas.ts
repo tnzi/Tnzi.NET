@@ -1,53 +1,42 @@
 /**
  * Audit Module Schemas - Zod validation schemas
+ * Aligned with backend Tnzi.Audit DTOs
  */
 
 import { z } from 'zod';
-import { AuditResultType } from './metadata';
-import { sortedPagedQuerySchema } from '../../schemas/common';
+import { AuditResultType, AuditTrendGroupBy } from './metadata';
+import { pagedQuerySchema } from '../../schemas/common';
 
 /**
- * Audit Log Query Schema
+ * Audit Operation Query Schema (maps to backend AuditOperationQueryDto)
  */
-export const auditLogQuerySchema = sortedPagedQuerySchema.extend({
-  functionName: z.string().optional(),
-  permissionName: z.string().optional(),
+export const auditOperationQuerySchema = pagedQuerySchema.extend({
+  functionName: z.string().max(200).optional(),
+  permissionName: z.string().max(200).optional(),
   userId: z.string().optional(),
-  userName: z.string().optional(),
   resultType: z.nativeEnum(AuditResultType).optional(),
   startDate: z.union([z.date(), z.string()]).optional(),
   endDate: z.union([z.date(), z.string()]).optional(),
-  ipAddress: z.string().optional(),
-  httpMethod: z.string().optional(),
-  httpPath: z.string().optional(),
-  minDuration: z.number().optional(),
-  maxDuration: z.number().optional(),
-  httpStatusCode: z.number().optional(),
-  correlationId: z.string().optional(),
+  ip: z.string().max(50).optional(),
 });
 
 /**
- * Audit Config Schema
+ * Audit Trend Query Schema
  */
-export const auditConfigSchema = z.object({
-  isEnabled: z.boolean(),
-  logAllOperations: z.boolean(),
-  logParameters: z.boolean(),
-  logReturnValue: z.boolean(),
-  logEntityChanges: z.boolean(),
-  maxParameterLength: z.number().min(0),
-  maxReturnValueLength: z.number().min(0),
-  ignoredFunctions: z.array(z.string()),
-  ignoredEntities: z.array(z.string()),
-  retentionDays: z.number().min(0),
+export const auditTrendQuerySchema = z.object({
+  startDate: z.union([z.date(), z.string()]),
+  endDate: z.union([z.date(), z.string()]),
+  groupBy: z.nativeEnum(AuditTrendGroupBy).optional(),
 });
 
 /**
- * Export Audit Logs Schema
+ * Top N Query Schema (shared by top-functions and top-users)
  */
-export const exportAuditLogsSchema = z.object({
-  query: auditLogQuerySchema,
-  format: z.enum(['csv', 'excel', 'json']),
-  includeEntityChanges: z.boolean(),
-  includeStackTrace: z.boolean(),
+export const auditTopNQuerySchema = z.object({
+  topN: z.number().min(1).max(100).optional(),
+  startDate: z.union([z.date(), z.string()]).optional(),
+  endDate: z.union([z.date(), z.string()]).optional(),
 });
+
+/** @deprecated Use auditOperationQuerySchema instead */
+export const auditLogQuerySchema = auditOperationQuerySchema;

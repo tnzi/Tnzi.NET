@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tnzi.Caching;
 
 namespace Tnzi.AI.Tests;
@@ -147,5 +148,96 @@ public class CachingEmbeddingDecoratorTests
         result.Succeeded.ShouldBeTrue();
         result.Data!.Count.ShouldBe(2);
         _innerMock.Verify(s => s.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<EmbeddingOptions>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void DI_Registration_ResolvesDecoratorWithKeyedInner()
+    {
+        // Arrange — simulate RagModule's keyed service registration
+        var innerMock = new Mock<IEmbeddingService>();
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddOptions<AIRagOptions>().Configure(o =>
+        {
+            o.EmbeddingCache = new EmbeddingCacheOptions { Enabled = true, TtlHours = 24 };
+        });
+
+        // Register inner as keyed service (same as RagModule does)
+        services.AddKeyedScoped<IEmbeddingService>(CachingEmbeddingDecorator.InnerServiceKey, (_, _) => innerMock.Object);
+        services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();
+
+        using var sp = services.BuildServiceProvider();
+        using var scope = sp.CreateScope();
+
+        // Act
+        var resolved = scope.ServiceProvider.GetRequiredService<IEmbeddingService>();
+
+        // Assert
+        resolved.ShouldBeOfType<CachingEmbeddingDecorator>();
+    }
+
+    [Fact]
+    public async Task DI_Registration_DecoratorDelegatesToKeyedInner()
+    {
+        // Arrange — full DI wiring with mock inner
+        var innerMock = new Mock<IEmbeddingService>();
+        var embedding = new float[] { 0.1f, 0.2f };
+        innerMock.Setup(s => s.GenerateEmbeddingAsync("hello", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(embedding));
+
+        var cacheMock = new Mock<ICache>();
+        cacheMock.Setup(c => c.GetAsync<float[]>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((float[]?)null);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions<AIRagOptions>().Configure(o =>
+        {
+            o.EmbeddingCache = new EmbeddingCacheOptions { Enabled = true, TtlHours = 12 };
+        });
+        services.AddKeyedScoped<IEmbeddingService>(CachingEmbeddingDecorator.InnerServiceKey, (_, _) => innerMock.Object);
+        services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();
+        services.AddSingleton<ICache>(cacheMock.Object);
+
+        using var sp = services.BuildServiceProvider();
+        using var scope = sp.CreateScope();
+
+        var resolved = scope.ServiceProvider.GetRequiredService<IEmbeddingService>();
+
+        // Act
+        var result = await resolved.GenerateEmbeddingAsync("hello");
+
+        // Assert — decorator delegates to keyed inner, caches the result
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe(embedding);
+        innerMock.Verify(s => s.GenerateEmbeddingAsync("hello", null, It.IsAny<CancellationToken>()), Times.Once);
+        cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), embedding, TimeSpan.FromHours(12), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void DI_KeyedInner_IsNotResolvableAsUnkeyed()
+    {
+        // Verify that keyed inner doesn't "leak" as a regular IEmbeddingService
+        var innerMock = new Mock<IEmbeddingService>();
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddOptions<AIRagOptions>().Configure(o =>
+        {
+            o.EmbeddingCache = new EmbeddingCacheOptions { Enabled = true, TtlHours = 24 };
+        });
+
+        // Only register keyed — no unkeyed fallback
+        services.AddKeyedScoped<IEmbeddingService>(CachingEmbeddingDecorator.InnerServiceKey, (_, _) => innerMock.Object);
+        // Register decorator as the unkeyed IEmbeddingService
+        services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();
+
+        using var sp = services.BuildServiceProvider();
+        using var scope = sp.CreateScope();
+
+        // The only unkeyed IEmbeddingService should be the decorator
+        var resolved = scope.ServiceProvider.GetRequiredService<IEmbeddingService>();
+        resolved.ShouldBeOfType<CachingEmbeddingDecorator>();
     }
 }

@@ -7,10 +7,12 @@ namespace Tnzi.AI.Guardrails;
 /// <remarks>
 /// 支持通过配置自定义关键词列表。默认包含基本的安全检查。
 /// </remarks>
-public class ContentFilterGuardrail : IOutputGuardrail
+public class ContentFilterGuardrail : IOutputGuardrail, IGuardrailProvider
 {
     private readonly bool _enabled;
     private readonly List<string> _blockedKeywords;
+
+    public string Name => nameof(ContentFilterGuardrail);
 
     public ContentFilterGuardrail(IOptions<AIOptions> options)
     {
@@ -38,4 +40,7 @@ public class ContentFilterGuardrail : IOutputGuardrail
 
         return Task.FromResult(GuardrailResult.Allowed());
     }
+
+    public Task<GuardrailDecision> EvaluateAsync(GuardrailRequest request, CancellationToken ct = default)
+        => IGuardrailProvider.BridgeValidateAsync(request, ValidateAsync, GuardrailReasonCodes.BlockedContent, "Blocked content detected", ct);
 }

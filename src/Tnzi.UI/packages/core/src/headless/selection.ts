@@ -37,14 +37,11 @@ export class SelectionController<TKey = string> {
   /** Selected keys as array (for Vue reactivity) */
   selectedKeys: TKey[];
   private _allKeys: TKey[] = [];
-  private _selectedSet: Set<TKey>;
   readonly mode: SelectionMode;
 
   constructor(options: SelectionOptions<TKey> = {}) {
     this.mode = options.mode ?? 'multiple';
-    const initial = options.initialKeys ? [...options.initialKeys] : [];
-    this.selectedKeys = initial;
-    this._selectedSet = new Set(initial);
+    this.selectedKeys = options.initialKeys ? [...options.initialKeys] : [];
     return reactive(this) as this;
   }
 
@@ -77,19 +74,16 @@ export class SelectionController<TKey = string> {
   select(key: TKey): void {
     if (this.mode === 'single') {
       this.selectedKeys = [key];
-      this._selectedSet = new Set([key]);
       return;
     }
-    if (!this._selectedSet.has(key)) {
-      this.selectedKeys.push(key);
-      this._selectedSet.add(key);
+    if (!this.selectedKeys.includes(key)) {
+      this.selectedKeys = [...this.selectedKeys, key];
     }
   }
 
   /** Deselect a key */
   deselect(key: TKey): void {
     this.selectedKeys = this.selectedKeys.filter(k => k !== key);
-    this._selectedSet.delete(key);
   }
 
   /** Toggle selection state of a key */
@@ -107,24 +101,21 @@ export class SelectionController<TKey = string> {
       this.clear();
     } else {
       this.selectedKeys = [...this._allKeys];
-      this._selectedSet = new Set(this._allKeys);
     }
   }
 
-  /** Check if a key is selected (O(1) lookup) */
+  /** Check if a key is selected */
   isSelected(key: TKey): boolean {
-    return this._selectedSet.has(key);
+    return this.selectedKeys.includes(key);
   }
 
   /** Clear all selections */
   clear(): void {
     this.selectedKeys = [];
-    this._selectedSet = new Set();
   }
 
   /** Replace selected keys */
   setSelectedKeys(keys: TKey[]): void {
     this.selectedKeys = [...keys];
-    this._selectedSet = new Set(keys);
   }
 }

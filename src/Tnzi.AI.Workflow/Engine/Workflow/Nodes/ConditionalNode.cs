@@ -17,7 +17,7 @@ public class ConditionalNode : IWorkflowNode
 
     public string NodeType => WorkflowNodeTypes.Conditional;
 
-    public ConditionalNode(IServiceProvider serviceProvider, ILogger<ConditionalNode> logger)
+    public ConditionalNode(ILogger<ConditionalNode> logger)
     {
         _logger = Check.NotNull(logger);
     }

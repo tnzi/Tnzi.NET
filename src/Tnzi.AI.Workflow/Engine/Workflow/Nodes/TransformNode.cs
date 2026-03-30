@@ -24,7 +24,7 @@ public class TransformNode : IWorkflowNode
 
     public string NodeType => WorkflowNodeTypes.Transform;
 
-    public TransformNode(IServiceProvider serviceProvider, ILogger<TransformNode> logger)
+    public TransformNode(ILogger<TransformNode> logger)
     {
         _logger = Check.NotNull(logger);
     }
@@ -36,7 +36,7 @@ public class TransformNode : IWorkflowNode
         var config = step.Configuration ?? new Dictionary<string, string>();
 
         var transformType = config.TryGetValue("transformType", out var tt) ? tt : "merge";
-        var inputText = CollectInput(context);
+        var inputText = WorkflowNodeHelper.CollectInput(context);
 
         try
         {
@@ -154,25 +154,4 @@ public class TransformNode : IWorkflowNode
         return match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
     }
 
-    /// <summary>
-    /// 收集输入
-    /// </summary>
-    private static string CollectInput(WorkflowNodeContext context)
-    {
-        if (context.DependencyOutputs.Count == 0)
-            return context.State.InitialInput;
-
-        if (context.DependencyOutputs.Count == 1)
-            return context.DependencyOutputs.Values.First().Text;
-
-        var sb = new StringBuilder();
-        foreach (var (depId, output) in context.DependencyOutputs)
-        {
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"[{depId}]");
-            sb.AppendLine(output.Text);
-        }
-
-        return sb.ToString().TrimEnd();
-    }
 }

@@ -25,6 +25,15 @@ public interface IMcpServerHost
 
     /// <summary>启动 MCP Server</summary>
     Task StartAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>移除已暴露的 Agent</summary>
+    bool RemoveAgent(Guid agentId) => false;
+
+    /// <summary>获取已暴露的 Agent ID 列表</summary>
+    IReadOnlyList<Guid> GetExposedAgentIds() => [];
+
+    /// <summary>获取已注册的自定义工具名称列表</summary>
+    IReadOnlyList<string> GetCustomToolNames() => [];
 }
 
 /// <summary>

@@ -113,7 +113,7 @@ public class ToolRegistryPermissionTests
                 Name = "agent",
                 Provider = "OpenAI",
                 Model = "gpt-4o",
-                ToolGroups = JsonSerializer.Serialize(new List<string> { "group-a" }),
+                ToolGroups = new List<string> { "group-a" },
                 IsEnabled = true
             });
 

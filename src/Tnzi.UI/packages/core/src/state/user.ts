@@ -40,15 +40,16 @@ const MAX_RECENT_ITEMS = 50;
 // Debounce utility
 // ============================================
 
-function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): (...args: Parameters<T>) => void {
   let timerId: ReturnType<typeof setTimeout> | null = null;
-  return ((...args: unknown[]) => {
+  return (...args: Parameters<T>) => {
     if (timerId !== null) clearTimeout(timerId);
     timerId = setTimeout(() => {
       timerId = null;
       fn(...args);
     }, delay);
-  }) as T;
+  };
 }
 
 // ============================================

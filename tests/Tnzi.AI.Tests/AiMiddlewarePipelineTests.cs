@@ -194,7 +194,6 @@ public class AiMiddlewarePipelineTests
         var middleware = new QuotaMiddleware(
             quotaService.Object,
             new HeuristicTokenEstimator(),
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
         var context = CreateContext(userId: null);
@@ -217,7 +216,6 @@ public class AiMiddlewarePipelineTests
         var middleware = new QuotaMiddleware(
             quotaService.Object,
             new HeuristicTokenEstimator(),
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
         var context = CreateContext(userId: userId);
@@ -240,7 +238,6 @@ public class AiMiddlewarePipelineTests
         var middleware = new QuotaMiddleware(
             quotaService.Object,
             new HeuristicTokenEstimator(),
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
         var context = CreateContext(userId: userId);
@@ -260,7 +257,7 @@ public class AiMiddlewarePipelineTests
     public async Task InputGuardrail_Allowed_PassesThrough()
     {
         var runner = CreateGuardrailRunner(guardrailsEnabled: true);
-        var middleware = new InputGuardrailMiddleware(runner, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<InputGuardrailMiddleware>>());
+        var middleware = new InputGuardrailMiddleware(runner, Mock.Of<ILogger<InputGuardrailMiddleware>>());
 
         var expected = CreateSuccessResult();
         var result = await middleware.InvokeAsync(CreateContext("Hello"),
@@ -286,7 +283,7 @@ public class AiMiddlewarePipelineTests
             options,
             Mock.Of<ILogger<GuardrailRunner>>());
 
-        var middleware = new InputGuardrailMiddleware(runner, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<InputGuardrailMiddleware>>());
+        var middleware = new InputGuardrailMiddleware(runner, Mock.Of<ILogger<InputGuardrailMiddleware>>());
 
         var result = await middleware.InvokeAsync(CreateContext("This is a very long input"),
             (ctx, ct) => Task.FromResult(CreateSuccessResult()));
@@ -299,7 +296,7 @@ public class AiMiddlewarePipelineTests
     public async Task InputGuardrail_GuardrailsDisabled_PassesThrough()
     {
         var runner = CreateGuardrailRunner(guardrailsEnabled: false);
-        var middleware = new InputGuardrailMiddleware(runner, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<InputGuardrailMiddleware>>());
+        var middleware = new InputGuardrailMiddleware(runner, Mock.Of<ILogger<InputGuardrailMiddleware>>());
 
         var expected = CreateSuccessResult();
         var result = await middleware.InvokeAsync(CreateContext("Any input"),
@@ -423,6 +420,7 @@ public class AiMiddlewarePipelineTests
 
         // 添加一个返回 context 的 mock provider
         var mockProvider = new Mock<IContextProvider>();
+        mockProvider.Setup(p => p.IsEnabled(It.IsAny<AiMiddlewareContext?>())).Returns(true);
         mockProvider.Setup(p => p.GetContextAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ContextInjection
             {
@@ -540,7 +538,6 @@ public class AiMiddlewarePipelineTests
         var middleware = new OutputGuardrailMiddleware(
             runner, Enumerable.Empty<IOutputGuardrail>(),
             CreateOptions(o => o.Guardrails.Enabled = true),
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<OutputGuardrailMiddleware>>());
 
         var expected = CreateSuccessResult("Safe output");
@@ -557,7 +554,6 @@ public class AiMiddlewarePipelineTests
         var middleware = new OutputGuardrailMiddleware(
             runner, Enumerable.Empty<IOutputGuardrail>(),
             CreateOptions(o => o.Guardrails.Enabled = true),
-            Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<OutputGuardrailMiddleware>>());
 
         var expected = new AgentRunResult { Response = "" };

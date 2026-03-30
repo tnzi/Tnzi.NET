@@ -9,22 +9,19 @@ internal static class WorkflowNodeHelper
     /// 从数据库加载 Agent 定义，将其 Provider/Model/Instructions 作为缺省值回填到步骤级配置
     /// </summary>
     /// <param name="agentId">Agent ID（为空则跳过）</param>
-    /// <param name="scope">服务作用域</param>
-    /// <param name="provider">步骤级 Provider（ref，仅在为空时回填）</param>
-    /// <param name="model">步骤级 Model（ref，仅在为空时回填）</param>
-    /// <param name="instructions">步骤级 Instructions（ref，仅在为空时回填）</param>
-    /// <param name="agentName">Agent 名称输出（仅当从 DB 加载成功时赋值）</param>
+    /// <param name="serviceContext">节点服务上下文</param>
+    /// <param name="config">步骤级配置持有者（仅在字段为空时回填）</param>
     /// <param name="cancellationToken">取消令牌</param>
     internal static async Task ResolveAgentConfigAsync(
         Guid? agentId,
-        IServiceScope scope,
+        IWorkflowNodeServiceContext serviceContext,
         RefHolder config,
         CancellationToken cancellationToken = default)
     {
         if (!agentId.HasValue)
             return;
 
-        var agentRepo = scope.ServiceProvider.GetService<IRepository<Agent, Guid>>();
+        var agentRepo = serviceContext.AgentRepository;
         if (agentRepo == null)
             return;
 
@@ -39,18 +36,11 @@ internal static class WorkflowNodeHelper
     }
 
     /// <summary>
-    /// 解析 Agent 配置并创建 AgentExecutor（封装完整的 scope → resolve → create 流程）
+    /// 解析 Agent 配置并创建 AgentExecutor（封装完整的 resolve → create 流程）
     /// </summary>
-    /// <param name="agentId">Agent ID（可选）</param>
-    /// <param name="scope">服务作用域</param>
-    /// <param name="provider">步骤级 Provider</param>
-    /// <param name="model">步骤级 Model</param>
-    /// <param name="instructions">系统指令（步骤级优先，Agent 定义作为缺省）</param>
-    /// <param name="name">Agent 名称</param>
-    /// <param name="cancellationToken">取消令牌</param>
     internal static async Task<AgentExecutor> CreateAgentExecutorAsync(
         Guid? agentId,
-        IServiceScope scope,
+        IWorkflowNodeServiceContext serviceContext,
         string? provider,
         string? model,
         string? instructions,
@@ -64,11 +54,9 @@ internal static class WorkflowNodeHelper
             Instructions = instructions
         };
 
-        await ResolveAgentConfigAsync(agentId, scope, config, cancellationToken);
+        await ResolveAgentConfigAsync(agentId, serviceContext, config, cancellationToken);
 
-        var agentFactory = scope.ServiceProvider.GetRequiredService<IAgentFactory>();
-
-        return await agentFactory.CreateAgentAsync(
+        return await serviceContext.AgentFactory.CreateAgentAsync(
             providerName: config.Provider,
             model: config.Model,
             instructions: config.Instructions,
@@ -86,6 +74,47 @@ internal static class WorkflowNodeHelper
             return id;
 
         return null;
+    }
+
+    /// <summary>
+    /// 收集上游输入 — 无依赖返回初始输入，单依赖直接返回文本，多依赖以 [depId] 分段拼接
+    /// </summary>
+    internal static string CollectInput(WorkflowNodeContext context)
+    {
+        if (context.DependencyOutputs.Count == 0)
+            return context.State.InitialInput;
+
+        if (context.DependencyOutputs.Count == 1)
+            return context.DependencyOutputs.Values.First().Text;
+
+        return FormatDependencyOutputs(context.DependencyOutputs);
+    }
+
+    /// <summary>
+    /// 收集所有上游输出 — 无依赖返回初始输入，有依赖时始终以 [depId] 分段拼接（不做单依赖短路）
+    /// </summary>
+    internal static string CollectAllUpstreamOutputs(WorkflowNodeContext context)
+    {
+        if (context.DependencyOutputs.Count == 0)
+            return context.State.InitialInput;
+
+        return FormatDependencyOutputs(context.DependencyOutputs);
+    }
+
+    /// <summary>
+    /// 将依赖输出格式化为 [depId] 分段文本
+    /// </summary>
+    private static string FormatDependencyOutputs(IReadOnlyDictionary<string, WorkflowStepOutput> outputs)
+    {
+        var sb = new StringBuilder();
+        foreach (var (depId, output) in outputs)
+        {
+            if (sb.Length > 0) sb.AppendLine();
+            sb.AppendLine($"[{depId}]");
+            sb.AppendLine(output.Text);
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>

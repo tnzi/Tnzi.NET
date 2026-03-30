@@ -47,6 +47,11 @@ public class Message : MultiTenantAuditedEntity<Guid>
     public bool IsSent { get; set; }
 
     /// <summary>
+    /// 获取或设置 是否为草稿
+    /// </summary>
+    public bool IsDraft { get; set; }
+
+    /// <summary>
     /// 获取或设置 是否允许回复
     /// </summary>
     public bool CanReply { get; set; } = true;

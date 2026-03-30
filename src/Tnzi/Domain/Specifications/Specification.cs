@@ -144,26 +144,21 @@ internal class AndSpecification<TEntity> : Specification<TEntity>
 
     public AndSpecification(ISpecification<TEntity> left, ISpecification<TEntity> right)
     {
-        _left = left;
-        _right = right;
+        _left = Check.NotNull(left);
+        _right = Check.NotNull(right);
     }
 
     public override Expression<Func<TEntity, bool>> ToExpression()
     {
         var leftExpression = _left.ToExpression();
         var rightExpression = _right.ToExpression();
-        
+
         var parameter = Expression.Parameter(typeof(TEntity), "x");
-        var leftBody = ReplaceParameter(leftExpression.Body, leftExpression.Parameters[0], parameter);
-        var rightBody = ReplaceParameter(rightExpression.Body, rightExpression.Parameters[0], parameter);
-        
+        var leftBody = ParameterReplacer.Replace(leftExpression.Body, leftExpression.Parameters[0], parameter);
+        var rightBody = ParameterReplacer.Replace(rightExpression.Body, rightExpression.Parameters[0], parameter);
+
         var andExpression = Expression.AndAlso(leftBody, rightBody);
         return Expression.Lambda<Func<TEntity, bool>>(andExpression, parameter);
-    }
-
-    private static Expression ReplaceParameter(Expression expression, ParameterExpression oldParameter, ParameterExpression newParameter)
-    {
-        return new ParameterReplacer(oldParameter, newParameter).Visit(expression);
     }
 }
 
@@ -177,26 +172,21 @@ internal class OrSpecification<TEntity> : Specification<TEntity>
 
     public OrSpecification(ISpecification<TEntity> left, ISpecification<TEntity> right)
     {
-        _left = left;
-        _right = right;
+        _left = Check.NotNull(left);
+        _right = Check.NotNull(right);
     }
 
     public override Expression<Func<TEntity, bool>> ToExpression()
     {
         var leftExpression = _left.ToExpression();
         var rightExpression = _right.ToExpression();
-        
+
         var parameter = Expression.Parameter(typeof(TEntity), "x");
-        var leftBody = ReplaceParameter(leftExpression.Body, leftExpression.Parameters[0], parameter);
-        var rightBody = ReplaceParameter(rightExpression.Body, rightExpression.Parameters[0], parameter);
-        
+        var leftBody = ParameterReplacer.Replace(leftExpression.Body, leftExpression.Parameters[0], parameter);
+        var rightBody = ParameterReplacer.Replace(rightExpression.Body, rightExpression.Parameters[0], parameter);
+
         var orExpression = Expression.OrElse(leftBody, rightBody);
         return Expression.Lambda<Func<TEntity, bool>>(orExpression, parameter);
-    }
-
-    private static Expression ReplaceParameter(Expression expression, ParameterExpression oldParameter, ParameterExpression newParameter)
-    {
-        return new ParameterReplacer(oldParameter, newParameter).Visit(expression);
     }
 }
 
@@ -209,7 +199,7 @@ internal class NotSpecification<TEntity> : Specification<TEntity>
 
     public NotSpecification(ISpecification<TEntity> specification)
     {
-        _specification = specification;
+        _specification = Check.NotNull(specification);
     }
 
     public override Expression<Func<TEntity, bool>> ToExpression()
@@ -233,6 +223,14 @@ internal class ParameterReplacer : ExpressionVisitor
     {
         _oldParameter = oldParameter;
         _newParameter = newParameter;
+    }
+
+    /// <summary>
+    /// 替换表达式中的参数引用
+    /// </summary>
+    public static Expression Replace(Expression expression, ParameterExpression oldParameter, ParameterExpression newParameter)
+    {
+        return new ParameterReplacer(oldParameter, newParameter).Visit(expression);
     }
 
     protected override Expression VisitParameter(ParameterExpression node)

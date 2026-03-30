@@ -243,6 +243,6 @@ public class ControllerFilterOptions
     /// 在 DisabledControllers / DisabledAssemblies 之后执行
     /// 仅支持代码配置，不可序列化
     /// </summary>
-    [System.Text.Json.Serialization.JsonIgnore]
+    [JsonIgnore]
     public Func<Type, bool>? ControllerPredicate { get; set; }
 }

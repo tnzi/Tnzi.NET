@@ -87,7 +87,49 @@ public enum AgentRunStatus
     Failed,
 
     /// <summary>已取消</summary>
-    Cancelled
+    Cancelled,
+
+    /// <summary>等待用户澄清</summary>
+    RequiresClarification
+}
+
+/// <summary>
+/// 澄清请求类型
+/// </summary>
+public enum ClarificationType
+{
+    /// <summary>缺少必要信息</summary>
+    MissingInfo,
+
+    /// <summary>需求描述模糊</summary>
+    AmbiguousRequirement,
+
+    /// <summary>方案选择</summary>
+    ApproachChoice,
+
+    /// <summary>风险确认</summary>
+    RiskConfirmation,
+
+    /// <summary>建议确认</summary>
+    Suggestion
+}
+
+/// <summary>
+/// Todo 项状态
+/// </summary>
+public enum TodoStatus
+{
+    /// <summary>待处理</summary>
+    Pending,
+
+    /// <summary>进行中</summary>
+    InProgress,
+
+    /// <summary>已完成</summary>
+    Completed,
+
+    /// <summary>已跳过</summary>
+    Skipped
 }
 
 /// <summary>
@@ -198,6 +240,18 @@ public static class FinishReasons
     public const string MaxToolIterations = "max_tool_iterations";
     public const string MaxHandoffs = "max_handoffs";
     public const string AgentAsToolsComplete = "agent_as_tools_complete";
+    public const string RequiresClarification = "requires_clarification";
+}
+
+/// <summary>
+/// 子 Agent 流式事件类型常量 (AgentAsTools 模式)
+/// </summary>
+public static class SubAgentEventTypes
+{
+    public const string Started = "sub_agent_started";
+    public const string Completed = "sub_agent_completed";
+    public const string Failed = "sub_agent_failed";
+    public const string TimedOut = "sub_agent_timed_out";
 }
 
 /// <summary>
