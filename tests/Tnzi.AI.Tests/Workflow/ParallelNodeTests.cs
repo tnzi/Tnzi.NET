@@ -28,8 +28,10 @@ public class ParallelNodeTests
         result.Output.Text.ShouldContain("Result from worker 1");
         result.Output.Text.ShouldContain("[w2]");
         result.Output.Text.ShouldContain("Result from worker 2");
-        result.Output.Metadata.ShouldContainKeyAndValue("worker_w1", "success");
-        result.Output.Metadata.ShouldContainKeyAndValue("worker_w2", "success");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("worker_w1", "success");
+        metadata.ShouldContainKeyAndValue("worker_w2", "success");
     }
 
     [Fact]

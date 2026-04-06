@@ -3,18 +3,43 @@ namespace Tnzi.AI.Middleware;
 /// <summary>
 /// Prompt Caching 中间件 — 为支持缓存的提供商注入缓存控制标记
 /// <para>
-/// Anthropic: 在 system message 和最后一条工具定义上注入 cache_control: {"type": "ephemeral"}
+/// Anthropic: 在 system message 上注入 cache_control: {"type": "ephemeral"} 断点。
+/// 启用 CacheStaticDynamicBoundary 后，注入两个断点：
+///   1. 静态内容（Agent Instructions）— 跨请求缓存命中率高
+///   2. 动态内容（Memory + Context + Skills 注入的最后一条系统消息）— 会话内缓存命中率高
+/// </para>
+/// <para>
+/// 启用 SnapshotToolSchemas 后，首次调用快照工具列表，后续复用以保持 prompt 稳定。
+/// </para>
+/// <para>
 /// OpenAI: 服务端自动缓存，此中间件仅标记 context.Properties 用于指标追踪
 /// Gemini: 在 ChatOptions.AdditionalProperties 中注入 google.cached_content 配置
 /// </para>
 /// </summary>
 public class PromptCachingMiddleware : IAiMiddleware
 {
+    /// <summary>
+    /// 已知的动态内容 XML 标签前缀 — 由 ContextInjectionMiddleware 注入的系统消息
+    /// </summary>
+    private static readonly string[] DynamicContentPrefixes =
+    [
+        "<soul>", "<user_profile>", "<memory>", "<context>",
+        "<skill_system>", "<available-deferred-tools>",
+        "<clarification_system>", "<sub_agent_orchestration>",
+        "<citations>", "[Conversation summary:"
+    ];
+
     private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<PromptCachingMiddleware> _logger;
 
     /// <summary>
-    /// Order 75: 在 Quota(100) 之前，Thinking(50) 之后
+    /// 工具 schema 快照缓存 — 首次调用时快照，后续复用以防止配置变更导致缓存失效
+    /// </summary>
+    private volatile IList<AITool>? _cachedToolSchemas;
+    private readonly object _snapshotLock = new();
+
+    /// <summary>
+    /// Order 460: 在 SkillConstraint(450) 之后，可见全部消息和工具；在 UsageLogging(500) 之前
     /// </summary>
     public int Order => AiMiddlewareOrders.PromptCaching;
 
@@ -62,6 +87,12 @@ public class PromptCachingMiddleware : IAiMiddleware
             return;
         }
 
+        // 工具 schema 快照缓存
+        if (cachingOptions.SnapshotToolSchemas)
+        {
+            ApplyToolSchemaSnapshot(context);
+        }
+
         // 标记上下文：启用了 prompt caching（供 UsageLoggingMiddleware 追踪指标）
         context.Properties["PromptCachingEnabled"] = true;
 
@@ -75,12 +106,136 @@ public class PromptCachingMiddleware : IAiMiddleware
     }
 
     /// <summary>
+    /// 首次调用时快照工具列表，后续复用以保持 prompt 中工具 schema 稳定
+    /// </summary>
+    private void ApplyToolSchemaSnapshot(AiMiddlewareContext context)
+    {
+        if (_cachedToolSchemas != null)
+        {
+            // 使用快照替换当前工具列表
+            context.AdditionalTools = new List<AITool>(_cachedToolSchemas);
+            _logger.LogDebug("Applied cached tool schema snapshot ({Count} tools)", _cachedToolSchemas.Count);
+            return;
+        }
+
+        lock (_snapshotLock)
+        {
+            // double-check
+            if (_cachedToolSchemas != null)
+            {
+                context.AdditionalTools = new List<AITool>(_cachedToolSchemas);
+                return;
+            }
+
+            // 快照当前工具列表（创建副本，防止后续修改影响缓存）
+            _cachedToolSchemas = context.AdditionalTools.ToList();
+            _logger.LogDebug("Created tool schema snapshot ({Count} tools)", _cachedToolSchemas.Count);
+        }
+    }
+
+    /// <summary>
     /// 为 Anthropic provider 注入 cache_control 断点到消息的 AdditionalProperties
     /// </summary>
     private void ApplyAnthropicCacheBreakpoints(AiMiddlewareContext context, PromptCachingOptions options)
     {
         var messages = context.Messages;
         if (messages.Count == 0) return;
+
+        // 优先使用 static/dynamic 双断点策略
+        if (options.CacheStaticDynamicBoundary)
+        {
+            ApplyStaticDynamicBreakpoints(context, options);
+            return;
+        }
+
+        // 兼容旧逻辑：单层 system prompt 缓存
+        ApplyLegacyBreakpoints(context, options);
+    }
+
+    /// <summary>
+    /// Static/Dynamic 双断点策略：
+    /// 第一断点 — 静态内容（Agent Instructions 系统消息），跨请求稳定
+    /// 第二断点 — 动态内容（最后一条上下文注入的系统消息），会话内稳定
+    /// </summary>
+    private void ApplyStaticDynamicBreakpoints(AiMiddlewareContext context, PromptCachingOptions options)
+    {
+        var messages = context.Messages;
+        var systemMessages = messages.Where(m => m.Role == ChatRole.System).ToList();
+        if (systemMessages.Count == 0) return;
+
+        ChatMessage? staticMessage = null;
+        ChatMessage? lastDynamicMessage = null;
+
+        foreach (var msg in systemMessages)
+        {
+            if (IsDynamicContent(msg))
+            {
+                lastDynamicMessage = msg;
+            }
+            else
+            {
+                // 非动态内容的系统消息视为静态（Instructions、response_style 等）
+                staticMessage = msg;
+            }
+        }
+
+        var breakpointCount = 0;
+
+        // Breakpoint 1: 静态内容（Instructions）
+        if (staticMessage != null)
+        {
+            SetCacheBreakpoint(staticMessage);
+            breakpointCount++;
+            _logger.LogDebug("Applied static cache breakpoint on Instructions system message");
+        }
+
+        // Breakpoint 2: 动态内容（最后一条上下文注入的系统消息）
+        if (lastDynamicMessage != null)
+        {
+            SetCacheBreakpoint(lastDynamicMessage);
+            breakpointCount++;
+            _logger.LogDebug("Applied dynamic cache breakpoint on context-injected system message");
+        }
+
+        // 如果没有动态消息但有静态消息，且启用了 CacheFirstNMessages，回退到历史消息缓存
+        if (lastDynamicMessage == null && options.CacheFirstNMessages > 0)
+        {
+            ApplyHistoryMessageBreakpoints(messages, options);
+        }
+
+        // Tier 3: 标记最后一个工具定义用于缓存
+        if (options.CacheToolDefinitions && context.AdditionalTools.Count > 0)
+        {
+            context.Properties["CacheLastToolDefinition"] = true;
+            _logger.LogDebug("Marked last tool definition for Anthropic cache_control");
+        }
+
+        context.Properties["PromptCachingBreakpoints"] = breakpointCount;
+    }
+
+    /// <summary>
+    /// 判断系统消息是否为动态注入的内容（Memory/Context/Skills/Soul/UserProfile 等）
+    /// </summary>
+    private static bool IsDynamicContent(ChatMessage message)
+    {
+        var text = message.Text;
+        if (string.IsNullOrEmpty(text)) return false;
+
+        foreach (var prefix in DynamicContentPrefixes)
+        {
+            if (text.StartsWith(prefix, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 兼容旧逻辑的单层缓存策略
+    /// </summary>
+    private void ApplyLegacyBreakpoints(AiMiddlewareContext context, PromptCachingOptions options)
+    {
+        var messages = context.Messages;
 
         // Tier 1: 缓存系统提示
         if (options.CacheSystemPrompt)
@@ -93,6 +248,22 @@ public class PromptCachingMiddleware : IAiMiddleware
             }
         }
 
+        // Tier 2: 历史消息缓存
+        ApplyHistoryMessageBreakpoints(messages, options);
+
+        // Tier 3: 标记最后一个工具定义用于缓存
+        if (options.CacheToolDefinitions && context.AdditionalTools.Count > 0)
+        {
+            context.Properties["CacheLastToolDefinition"] = true;
+            _logger.LogDebug("Marked last tool definition for Anthropic cache_control");
+        }
+    }
+
+    /// <summary>
+    /// 历史消息缓存：CacheFirstNMessages + CacheRecentUserMessages
+    /// </summary>
+    private void ApplyHistoryMessageBreakpoints(List<ChatMessage> messages, PromptCachingOptions options)
+    {
         // Tier 2a: 缓存前 N 条历史消息（在最后一条上设置断点）
         if (options.CacheFirstNMessages > 0)
         {
@@ -120,13 +291,6 @@ public class PromptCachingMiddleware : IAiMiddleware
                 _logger.LogDebug("Applied Anthropic cache_control to {Count} recent user messages",
                     Math.Min(options.CacheRecentUserMessages, userMessages.Count));
             }
-        }
-
-        // Tier 3: 标记最后一个工具定义用于缓存
-        if (options.CacheToolDefinitions && context.AdditionalTools.Count > 0)
-        {
-            context.Properties["CacheLastToolDefinition"] = true;
-            _logger.LogDebug("Marked last tool definition for Anthropic cache_control");
         }
     }
 

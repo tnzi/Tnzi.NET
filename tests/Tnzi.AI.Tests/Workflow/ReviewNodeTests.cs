@@ -13,8 +13,10 @@ public class ReviewNodeTests
 
         result.IsSuccess.ShouldBeTrue();
         result.RouteTo.ShouldBe("accept");
-        result.Output.Metadata.ShouldContainKeyAndValue("verdict", "accept");
-        result.Output.Metadata.ShouldContainKeyAndValue("feedback", "Looks great!");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("verdict", "accept");
+        metadata.ShouldContainKeyAndValue("feedback", "Looks great!");
         result.Output.Text.ShouldBe("Looks great!");
     }
 
@@ -29,7 +31,9 @@ public class ReviewNodeTests
 
         result.IsSuccess.ShouldBeTrue();
         result.RouteTo.ShouldBe("rework");
-        result.Output.Metadata.ShouldContainKeyAndValue("verdict", "rework");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("verdict", "rework");
     }
 
     [Fact]

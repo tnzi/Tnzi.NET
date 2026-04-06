@@ -8,19 +8,25 @@ using Tnzi.Utilities;
 namespace Tnzi.AI.Mcp.Services;
 
 /// <summary>
-/// OAuth Token 管理器 — per-server SemaphoreSlim + 双重检查锁定 + proactive refresh。
+/// OAuth Token 管理器 — per-server SemaphoreSlim + 双重检查锁定 + proactive refresh + metadata discovery。
 /// </summary>
 public class McpOAuthTokenManager : IMcpOAuthTokenManager
 {
+    private const string HttpClientName = "Tnzi.AI.MCP.OAuth";
+    private const string WellKnownSuffix = "/.well-known/openid-configuration";
+
     private readonly ILogger<McpOAuthTokenManager> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly McpOAuthOptions _options;
 
     // Per-server 缓存和锁
     private readonly ConcurrentDictionary<string, CachedToken> _tokenCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DiscoveredMetadata> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly KeyedAsyncLock _serverLock = new();
+    private readonly KeyedAsyncLock _metadataLock = new();
 
     private record CachedToken(string AccessToken, string TokenType, DateTimeOffset ExpiresAt);
+    private record DiscoveredMetadata(string? TokenEndpoint, string? RevocationEndpoint);
 
     public McpOAuthTokenManager(
         ILogger<McpOAuthTokenManager> logger,
@@ -66,6 +72,67 @@ public class McpOAuthTokenManager : IMcpOAuthTokenManager
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<bool> RevokeAsync(string serverName, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(serverName);
+
+        // 无缓存 token，直接返回成功
+        if (!_tokenCache.TryRemove(serverName, out var cached))
+        {
+            return true;
+        }
+
+        if (!_options.Servers.TryGetValue(serverName, out var config))
+        {
+            return true;
+        }
+
+        // 解析 revocation endpoint：显式配置 > metadata discovery
+        var revocationEndpoint = config.RevocationEndpoint;
+        if (string.IsNullOrWhiteSpace(revocationEndpoint))
+        {
+            var metadata = await ResolveMetadataAsync(serverName, config, ct);
+            revocationEndpoint = metadata?.RevocationEndpoint;
+        }
+
+        // 无 revocation endpoint，本地缓存已清除，返回成功
+        if (string.IsNullOrWhiteSpace(revocationEndpoint))
+        {
+            _logger.LogDebug("No revocation endpoint configured for MCP server {ServerName}, local token cleared", serverName);
+            return true;
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient(HttpClientName);
+            var parameters = new List<KeyValuePair<string, string>>
+            {
+                new("token", cached.AccessToken),
+                new("client_id", config.ClientId),
+                new("client_secret", config.ClientSecret)
+            };
+
+            using var content = new FormUrlEncodedContent(parameters);
+            using var response = await client.PostAsync(revocationEndpoint, content, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Successfully revoked OAuth token for MCP server {ServerName}", serverName);
+                return true;
+            }
+
+            _logger.LogWarning("OAuth token revocation returned HTTP {StatusCode} for MCP server {ServerName}",
+                (int)response.StatusCode, serverName);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to revoke OAuth token for MCP server {ServerName}", serverName);
+            return false;
+        }
+    }
+
     private static bool IsExpiredOrNearExpiry(CachedToken token, int skewSeconds)
     {
         return DateTimeOffset.UtcNow >= token.ExpiresAt.AddSeconds(-skewSeconds);
@@ -75,7 +142,22 @@ public class McpOAuthTokenManager : IMcpOAuthTokenManager
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("Tnzi.AI.MCP.OAuth");
+            var client = _httpClientFactory.CreateClient(HttpClientName);
+
+            // 解析 token endpoint：显式配置 > metadata discovery
+            var tokenEndpoint = config.TokenEndpoint;
+            if (string.IsNullOrWhiteSpace(tokenEndpoint))
+            {
+                var metadata = await ResolveMetadataAsync(serverName, config, ct);
+                tokenEndpoint = metadata?.TokenEndpoint;
+            }
+
+            if (string.IsNullOrWhiteSpace(tokenEndpoint))
+            {
+                _logger.LogError("No token endpoint available for MCP server {ServerName}", serverName);
+                return null;
+            }
+
             var parameters = new Dictionary<string, string>
             {
                 ["grant_type"] = config.GrantType,
@@ -92,7 +174,7 @@ public class McpOAuthTokenManager : IMcpOAuthTokenManager
                 parameters["refresh_token"] = config.RefreshToken;
             }
 
-            var response = await client.PostAsync(config.TokenEndpoint, new FormUrlEncodedContent(parameters), ct);
+            var response = await client.PostAsync(tokenEndpoint, new FormUrlEncodedContent(parameters), ct);
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync(ct);
@@ -103,6 +185,76 @@ public class McpOAuthTokenManager : IMcpOAuthTokenManager
             _logger.LogError(ex, "Failed to fetch OAuth token for MCP server {ServerName}", serverName);
             return null;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // OAuth Metadata Discovery (RFC 8414)
+    // -------------------------------------------------------------------------
+
+    private async Task<DiscoveredMetadata?> ResolveMetadataAsync(
+        string serverName, McpOAuthServerConfig config, CancellationToken ct)
+    {
+        if (!config.EnableMetadataDiscovery)
+            return null;
+
+        // 快速路径：缓存命中
+        if (_metadataCache.TryGetValue(serverName, out var cached))
+            return cached;
+
+        await using (await _metadataLock.LockAsync(serverName, ct))
+        {
+            // 双重检查
+            if (_metadataCache.TryGetValue(serverName, out cached))
+                return cached;
+
+            var metadataUrl = BuildMetadataUrl(config);
+            if (string.IsNullOrWhiteSpace(metadataUrl))
+                return null;
+
+            try
+            {
+                var client = _httpClientFactory.CreateClient(HttpClientName);
+                using var response = await client.GetAsync(metadataUrl, ct);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("OAuth metadata discovery returned HTTP {StatusCode} for MCP server {ServerName}",
+                        (int)response.StatusCode, serverName);
+                    return null;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+
+                var tokenEndpoint = root.TryGetProperty("token_endpoint", out var tep) ? tep.GetString() : null;
+                var revocationEndpoint = root.TryGetProperty("revocation_endpoint", out var rep) ? rep.GetString() : null;
+
+                var metadata = new DiscoveredMetadata(tokenEndpoint, revocationEndpoint);
+                _metadataCache[serverName] = metadata;
+
+                _logger.LogDebug("Discovered OAuth metadata for MCP server {ServerName}: token_endpoint={TokenEndpoint}, revocation_endpoint={RevocationEndpoint}",
+                    serverName, tokenEndpoint, revocationEndpoint);
+
+                return metadata;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "OAuth metadata discovery failed for MCP server {ServerName}", serverName);
+                return null;
+            }
+        }
+    }
+
+    private static string? BuildMetadataUrl(McpOAuthServerConfig config)
+    {
+        if (!string.IsNullOrWhiteSpace(config.MetadataUrl))
+            return config.MetadataUrl;
+
+        if (!string.IsNullOrWhiteSpace(config.AuthorizationServer))
+            return config.AuthorizationServer.TrimEnd('/') + WellKnownSuffix;
+
+        return null;
     }
 
     private static readonly JsonSerializerOptions OAuthJsonOptions = new()

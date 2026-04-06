@@ -11,6 +11,8 @@ global using Microsoft.Extensions.Options;
 global using Tnzi.AI.Channels.Abstractions;
 global using Tnzi.AI.Channels.Bus;
 global using Tnzi.AI.Channels.Entities;
+global using Tnzi.AI.Channels.Gateway;
+global using Tnzi.AI.Channels.Gateway.Models;
 global using Tnzi.AI.Channels.Models;
 global using Tnzi.AI.Channels.Options;
 global using Tnzi.AI.Channels.Manager;

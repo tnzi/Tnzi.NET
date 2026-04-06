@@ -25,7 +25,7 @@ public class WebTools : IAIToolProvider
     /// <summary>
     /// 获取 URL 内容
     /// </summary>
-    [AIFunction("web_fetch", "Fetch content from a URL")]
+    [AIFunction("web_fetch", "Fetch content from a URL", IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "fetch download url web")]
     public async Task<object> WebFetchAsync(
         [AIParameter("url", "The URL to fetch")] string url)
     {
@@ -84,7 +84,7 @@ public class WebTools : IAIToolProvider
     /// <summary>
     /// 发送 HTTP POST 请求
     /// </summary>
-    [AIFunction("web_post", "Send an HTTP POST request with a body")]
+    [AIFunction("web_post", "Send an HTTP POST request with a body", SearchHint = "post http request")]
     public async Task<object> WebPostAsync(
         [AIParameter("url", "The URL to send the POST request to")] string url,
         [AIParameter("body", "The request body (JSON string)")] string body,
@@ -173,7 +173,7 @@ public class WebTools : IAIToolProvider
     /// <summary>
     /// Web 搜索 — 委托给 IWebSearchProvider
     /// </summary>
-    [AIFunction("web_search", "Search the web and return results with title, URL and snippet")]
+    [AIFunction("web_search", "Search the web and return results with title, URL and snippet", IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "search web internet")]
     public async Task<object> WebSearchAsync(
         [AIParameter("query", "Search query")] string query,
         [AIParameter("max_results", "Maximum number of results (1-10)", false)] int? maxResults = null)

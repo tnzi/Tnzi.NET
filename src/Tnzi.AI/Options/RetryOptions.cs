@@ -39,4 +39,14 @@ public class RetryOptions
     /// 熔断器开启持续时间（默认 1 分钟）
     /// </summary>
     public TimeSpan CircuitBreakerDuration { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// 429/529 响应中 Retry-After 的最大等待时间（秒）。超过则进入 cooldown 而非重试。默认 20。
+    /// </summary>
+    public int MaxRetryAfterSeconds { get; set; } = 20;
+
+    /// <summary>
+    /// 后台/辅助任务遇到 429 时是否立即放弃（防雪崩）。默认 true。
+    /// </summary>
+    public bool AbortBackgroundOn429 { get; set; } = true;
 }

@@ -4,7 +4,7 @@ namespace Tnzi.AI.Skills;
 /// AI 技能管理模块 — 提供技能注册、搜索、模板引擎、约束执行等功能
 /// </summary>
 [DependsOn(typeof(AIModule))]
-public class AISkillsModule : TnziCustomModule
+public class AISkillsModule : TnziApplicationModule
 {
     /// <summary>
     /// 加载顺序（在 AIModule(50) 之后）

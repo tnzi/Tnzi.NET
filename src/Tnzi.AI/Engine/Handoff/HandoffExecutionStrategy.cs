@@ -92,7 +92,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
 
         context.Logger.LogWarning("Max handoffs ({MaxHandoffs}) reached", _config.MaxHandoffs);
         return BuildResult(
-            new AgentResponse { Text = "Max handoff limit reached" },
+            new AgentResponse { Text = "Max handoff limit reached", FinishReason = FinishReasons.MaxHandoffs },
             handoffPath, currentAgent.Name, totalInputTokens, totalOutputTokens);
     }
 

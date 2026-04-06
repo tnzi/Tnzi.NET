@@ -76,4 +76,19 @@ public class StreamEvent
 
     /// <summary>Tool call details (name + duration, for client-side benchmarking)</summary>
     public List<ToolCallDetail>? ToolCalls { get; set; }
+
+    /// <summary>结构化事件类型（如 clarification、todos_updated、sub_agent_started）</summary>
+    public string? EventType { get; set; }
+
+    /// <summary>结构化事件附加数据</summary>
+    public Dictionary<string, object>? EventData { get; set; }
+
+    /// <summary>后续建议问题</summary>
+    public List<string>? Suggestions { get; set; }
+
+    /// <summary>Todo 列表快照</summary>
+    public List<TodoItemDto>? Todos { get; set; }
+
+    /// <summary>运行期间产出的文件产物</summary>
+    public List<AgentArtifactDto>? Artifacts { get; set; }
 }

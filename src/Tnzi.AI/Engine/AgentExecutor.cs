@@ -12,6 +12,11 @@ namespace Tnzi.AI.Engine;
 /// </remarks>
 public class AgentExecutor
 {
+    /// <summary>
+    /// GracefulShutdown 模式下，外部取消后给工具的宽限时间
+    /// </summary>
+    public static readonly TimeSpan GracefulShutdownGracePeriod = TimeSpan.FromSeconds(5);
+
     private readonly IChatClient _chatClient;
     private readonly AgentExecutorOptions _options;
 
@@ -51,7 +56,8 @@ public class AgentExecutor
             ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
             HistoryReducer = _options.HistoryReducer,
             ContextProvider = _options.ContextProvider,
-            Middlewares = _options.Middlewares
+            Middlewares = _options.Middlewares,
+            ToolDefinitions = _options.ToolDefinitions
         };
 
         return new AgentExecutor(_chatClient, newOptions);
@@ -73,7 +79,8 @@ public class AgentExecutor
             ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
             HistoryReducer = _options.HistoryReducer,
             ContextProvider = _options.ContextProvider,
-            Middlewares = _options.Middlewares
+            Middlewares = _options.Middlewares,
+            ToolDefinitions = _options.ToolDefinitions
         };
 
         return new AgentExecutor(_chatClient, newOptions);
@@ -483,103 +490,166 @@ public class AgentExecutor
         => ExecuteToolCallsCoreAsync(toolCalls, allTools, ct);
 
     /// <summary>
-    /// 并行执行工具调用核心实现（支持中间件管道、增强追踪、工具详情采集）
+    /// 执行工具调用核心实现（条件并行/串行 + 中间件管道 + 增强追踪 + 空结果标记）
     /// </summary>
+    /// <remarks>
+    /// 安全规则（借鉴 Claude Code StreamingToolExecutor）：
+    /// 仅当所有工具都是 IsConcurrencySafe 且无 IsDestructive 时才并行执行，否则降级为顺序执行。
+    /// </remarks>
     private async Task<(List<FunctionResultContent> Results, List<ToolCallDetail> Details)> ExecuteToolCallsCoreAsync(
         List<FunctionCallContent> toolCalls, IList<AITool> allTools, CancellationToken ct)
     {
-        var tasks = toolCalls.Select(async toolCall =>
+        // 安全守卫：检查是否可以并发执行
+        var toolNames = toolCalls.Select(tc => tc.Name).ToList();
+        if (toolCalls.Count > 1 && !CanExecuteConcurrently(toolNames, _options.ToolDefinitions))
         {
-            // 从合并后的完整工具列表中查找（包含 ContextProvider 注入的工具）
-            var tool = FindTool(toolCall.Name, allTools);
-            if (tool == null)
+            // 降级为顺序执行
+            var seqResults = new List<FunctionResultContent>();
+            var seqDetails = new List<ToolCallDetail>();
+            foreach (var toolCall in toolCalls)
             {
-                var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = "Tool not found" };
-                return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found"), detail);
+                var (result, detail) = await ExecuteSingleToolCallAsync(toolCall, allTools, ct);
+                seqResults.Add(result);
+                seqDetails.Add(detail);
             }
+            return (seqResults, seqDetails);
+        }
 
-            // 构建参数摘要（用于追踪，截取前 200 字符避免大参数污染 trace）
-            var argSummary = toolCall.Arguments is { Count: > 0 }
-                ? string.Join(", ", toolCall.Arguments.Select(kv => $"{kv.Key}={Truncate(kv.Value?.ToString(), 50)}"))
-                : null;
-            if (argSummary?.Length > 200) argSummary = argSummary[..200] + "...";
-
-            try
-            {
-                using var activity = AIActivitySource.StartToolActivity(toolCall.Name, argumentSummary: argSummary);
-                var sw = Stopwatch.StartNew();
-
-                // 构建核心执行委托
-                Func<Task<object?>> coreExecution = async () =>
-                {
-                    if (tool is not AIFunction aiFunction)
-                    {
-                        throw new InvalidOperationException($"Tool '{toolCall.Name}' is not invocable");
-                    }
-
-                    var args = toolCall.Arguments is null ? null : new AIFunctionArguments(toolCall.Arguments);
-                    return await aiFunction.InvokeAsync(args, ct).AsTask()
-                        .WaitAsync(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds), ct);
-                };
-
-                // 通过中间件管道执行
-                var result = await ExecuteWithMiddlewareAsync(toolCall, coreExecution, ct);
-
-                sw.Stop();
-                var resultSummary = Truncate(result?.ToString(), 200);
-                AIActivitySource.RecordToolCallDetailed(toolCall.Name, sw.Elapsed.TotalSeconds, resultSummary: resultSummary);
-                AIActivitySource.CompleteToolActivity(activity, sw.Elapsed.TotalSeconds, resultSummary);
-
-                var detail = new ToolCallDetail { Name = toolCall.Name, DurationMs = sw.Elapsed.TotalMilliseconds, IsSuccess = true };
-                return (new FunctionResultContent(toolCall.CallId, result), detail);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // 传播取消信号，不吞掉
-            }
-            catch (TimeoutException)
-            {
-                var detail = new ToolCallDetail
-                {
-                    Name = toolCall.Name,
-                    DurationMs = _options.ToolTimeoutSeconds * 1000,
-                    IsSuccess = false,
-                    Error = $"Timed out after {_options.ToolTimeoutSeconds}s"
-                };
-                return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' timed out after {_options.ToolTimeoutSeconds} seconds"), detail);
-            }
-            catch (Exception ex)
-            {
-                AIActivitySource.RecordToolCallDetailed(toolCall.Name, 0, isSuccess: false);
-                _options.Logger?.LogError(ex, "Tool '{ToolName}' execution failed", toolCall.Name);
-                var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = ex.Message };
-                return (new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}"), detail);
-            }
-        });
-
+        // 并行路径（所有工具都安全时保持不变）
+        var tasks = toolCalls.Select(tc => ExecuteSingleToolCallAsync(tc, allTools, ct));
         var pairs = await Task.WhenAll(tasks);
         return ([.. pairs.Select(p => p.Item1)], [.. pairs.Select(p => p.Item2)]);
     }
 
     /// <summary>
+    /// 执行单个工具调用（从 ExecuteToolCallsCoreAsync lambda 提取，供串行/并行路径复用）
+    /// </summary>
+    private async Task<(FunctionResultContent Result, ToolCallDetail Detail)> ExecuteSingleToolCallAsync(
+        FunctionCallContent toolCall, IList<AITool> allTools, CancellationToken ct)
+    {
+        // 从合并后的完整工具列表中查找（包含 ContextProvider 注入的工具）
+        var tool = FindTool(toolCall.Name, allTools);
+        if (tool == null)
+        {
+            var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = "Tool not found" };
+            return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found"), detail);
+        }
+
+        // 构建参数摘要（用于追踪，截取前 200 字符避免大参数污染 trace）
+        var argSummary = toolCall.Arguments is { Count: > 0 }
+            ? string.Join(", ", toolCall.Arguments.Select(kv => $"{kv.Key}={Truncate(kv.Value?.ToString(), 50)}"))
+            : null;
+        if (argSummary?.Length > 200) argSummary = argSummary[..200] + "...";
+
+        ToolDefinition? toolDef = null;
+        var interruptBehavior = ToolInterruptBehavior.Cancel;
+        if (_options.ToolDefinitions?.TryGetValue(toolCall.Name, out toolDef) == true)
+        {
+            interruptBehavior = toolDef.InterruptBehavior;
+        }
+
+        var toolContext = new ToolExecutionContext
+        {
+            ToolName = toolCall.Name,
+            ToolGroup = toolDef?.GroupName,
+            CallId = toolCall.CallId,
+            Arguments = toolCall.Arguments,
+            CancellationToken = ct
+        };
+
+        try
+        {
+            using var activity = AIActivitySource.StartToolActivity(toolCall.Name, argumentSummary: argSummary);
+            var sw = Stopwatch.StartNew();
+
+            // 构建核心执行委托（根据 ToolInterruptBehavior 决定取消策略）
+            Func<Task<object?>> coreExecution = async () =>
+            {
+                if (tool is not AIFunction aiFunction)
+                {
+                    throw new InvalidOperationException($"Tool '{toolCall.Name}' is not invocable");
+                }
+
+                var args = toolCall.Arguments is null ? null : new AIFunctionArguments(toolCall.Arguments);
+
+                if (interruptBehavior == ToolInterruptBehavior.GracefulShutdown)
+                {
+                    // GracefulShutdown: 不直接链接外部 CT（链接会立即传播取消），
+                    // 而是用独立 CTS + 回调延迟取消，给工具宽限期完成清理。
+                    using var graceCts = new CancellationTokenSource();
+                    using var registration = ct.Register(() => graceCts.CancelAfter(GracefulShutdownGracePeriod));
+
+                    if (ct.IsCancellationRequested)
+                    {
+                        // 外部已取消 → 启动宽限倒计时
+                        graceCts.CancelAfter(GracefulShutdownGracePeriod);
+                    }
+
+                    return await aiFunction.InvokeAsync(args, graceCts.Token).AsTask()
+                        .WaitAsync(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds), graceCts.Token);
+                }
+
+                // Cancel (默认): 直接传播取消信号
+                return await aiFunction.InvokeAsync(args, ct).AsTask()
+                    .WaitAsync(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds), ct);
+            };
+
+            // 通过中间件管道执行
+            var result = await ExecuteWithMiddlewareAsync(toolContext, coreExecution);
+
+            // 空结果标记注入（防止 LLM 误以为调用失败）
+            var normalizedResult = NormalizeToolResult(toolCall.Name, result);
+            var toolFailure = ResolveToolFailure(toolContext);
+            var isSuccess = string.IsNullOrWhiteSpace(toolFailure);
+
+            sw.Stop();
+            var resultSummary = Truncate(normalizedResult?.ToString(), 200);
+            AIActivitySource.RecordToolCallDetailed(toolCall.Name, sw.Elapsed.TotalSeconds, resultSummary: resultSummary, isSuccess: isSuccess);
+            AIActivitySource.CompleteToolActivity(activity, sw.Elapsed.TotalSeconds, resultSummary, isSuccess);
+
+            var detail = new ToolCallDetail
+            {
+                Name = toolCall.Name,
+                DurationMs = sw.Elapsed.TotalMilliseconds,
+                IsSuccess = isSuccess,
+                Error = toolFailure
+            };
+            return (new FunctionResultContent(toolCall.CallId, normalizedResult), detail);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // 传播取消信号，不吞掉
+        }
+        catch (TimeoutException)
+        {
+            var detail = new ToolCallDetail
+            {
+                Name = toolCall.Name,
+                DurationMs = _options.ToolTimeoutSeconds * 1000,
+                IsSuccess = false,
+                Error = $"Timed out after {_options.ToolTimeoutSeconds}s"
+            };
+            return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' timed out after {_options.ToolTimeoutSeconds} seconds"), detail);
+        }
+        catch (Exception ex)
+        {
+            AIActivitySource.RecordToolCallDetailed(toolCall.Name, 0, isSuccess: false);
+            _options.Logger?.LogError(ex, "Tool '{ToolName}' execution failed", toolCall.Name);
+            var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = ex.Message };
+            return (new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}"), detail);
+        }
+    }
+
+    /// <summary>
     /// 通过中间件管道执行工具调用
     /// </summary>
-    private async Task<object?> ExecuteWithMiddlewareAsync(FunctionCallContent toolCall, Func<Task<object?>> coreExecution, CancellationToken ct)
+    private async Task<object?> ExecuteWithMiddlewareAsync(ToolExecutionContext context, Func<Task<object?>> coreExecution)
     {
         var middlewares = _options.Middlewares;
         if (middlewares == null || middlewares.Count == 0)
         {
             return await coreExecution();
         }
-
-        // 构建中间件上下文
-        var context = new ToolExecutionContext
-        {
-            ToolName = toolCall.Name,
-            CallId = toolCall.CallId,
-            Arguments = toolCall.Arguments,
-            CancellationToken = ct
-        };
 
         // 构建洋葱模型调用链（从最后一个中间件向第一个包装）
         var pipeline = coreExecution;
@@ -591,6 +661,13 @@ public class AgentExecutor
         }
 
         return await pipeline();
+    }
+
+    private static string? ResolveToolFailure(ToolExecutionContext context)
+    {
+        return ToolErrorRecoveryMiddleware.GetRecoveredError(context)
+            ?? ToolGuardrailMiddleware.GetDenialReason(context)
+            ?? RequiresSkillToolMiddleware.GetShortCircuitReason(context);
     }
 
     /// <summary>
@@ -610,6 +687,43 @@ public class AgentExecutor
             }
         }
         return reasoningParts.Count > 0 ? string.Join("", reasoningParts) : null;
+    }
+
+    /// <summary>
+    /// 判断一组工具是否可以安全并发执行。
+    /// 仅当所有工具都是 IsConcurrencySafe 且无 IsDestructive 时才并行。
+    /// 单个工具始终返回 true（无需并发判断）。
+    /// 未知工具 → fail-closed → 返回 false。
+    /// </summary>
+    public static bool CanExecuteConcurrently(
+        IReadOnlyList<string> toolNames,
+        IReadOnlyDictionary<string, ToolDefinition>? toolDefinitions)
+    {
+        if (toolNames.Count <= 1) return true;
+        if (toolDefinitions == null || toolDefinitions.Count == 0) return false;
+
+        foreach (var name in toolNames)
+        {
+            if (!toolDefinitions.TryGetValue(name, out var toolDef))
+                return false; // 未知工具 → fail-closed
+            if (!toolDef.IsConcurrencySafe)
+                return false;
+            if (toolDef.IsDestructive)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 标准化工具结果 — 空结果添加标记，防止 LLM 误以为调用失败。
+    /// </summary>
+    public static object NormalizeToolResult(string toolName, object? result)
+    {
+        if (result is null or "" or " ")
+            return $"({toolName} completed with no output)";
+        if (result is string s && string.IsNullOrWhiteSpace(s))
+            return $"({toolName} completed with no output)";
+        return result;
     }
 
     /// <summary>

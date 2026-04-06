@@ -173,4 +173,62 @@ public class AgentExecutorTests
         response.Text.ShouldBe("Hello!");
         response.FinishReason.ShouldNotBe("max_tool_iterations");
     }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_WithToolRecoveryMiddleware_ReportsFailedToolCall()
+    {
+        var brokenTool = AIFunctionFactory.Create(() =>
+        {
+            throw new InvalidOperationException("boom");
+#pragma warning disable CS0162
+            return "unreachable";
+#pragma warning restore CS0162
+        }, "broken_tool", "Broken");
+
+        var firstUpdate = new ChatResponseUpdate
+        {
+            Contents = [new FunctionCallContent("call_1", "broken_tool", new Dictionary<string, object?>())]
+        };
+        var secondUpdate = new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            FinishReason = ChatFinishReason.Stop,
+            Contents = [new TextContent("handled")]
+        };
+
+        var mockClient = new Mock<IChatClient>();
+        mockClient.Setup(c => c.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(CreateStreamingResponse(firstUpdate, secondUpdate));
+
+        var executor = new AgentExecutor(mockClient.Object, new AgentExecutorOptions
+        {
+            Name = "TestAgent",
+            Tools = [brokenTool],
+            Middlewares = [new ToolErrorRecoveryMiddleware(NullLogger<ToolErrorRecoveryMiddleware>.Instance)]
+        });
+
+        var chunks = new List<AgentStreamChunk>();
+        await foreach (var chunk in executor.ExecuteStreamingAsync([new ChatMessage(ChatRole.User, "run tool")]))
+        {
+            chunks.Add(chunk);
+        }
+
+        var toolDetails = chunks.Last(c => c.ToolCalls is { Count: > 0 }).ToolCalls!;
+        toolDetails.Count.ShouldBe(1);
+        toolDetails[0].Name.ShouldBe("broken_tool");
+        toolDetails[0].IsSuccess.ShouldBeFalse();
+        toolDetails[0].Error.ShouldContain("InvalidOperationException");
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> CreateStreamingResponse(params ChatResponseUpdate[] updates)
+    {
+        foreach (var update in updates)
+        {
+            yield return update;
+            await Task.Yield();
+        }
+    }
 }

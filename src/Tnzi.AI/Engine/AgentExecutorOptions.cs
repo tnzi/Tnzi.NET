@@ -65,6 +65,12 @@ public class AgentExecutorOptions
     public ILogger? Logger { get; set; }
 
     /// <summary>
+    /// 工具定义字典（按名称索引），用于安全元数据查询。
+    /// 由 AgentFactory/AgentRuntime 从 IToolRegistry 填充。
+    /// </summary>
+    public IReadOnlyDictionary<string, ToolDefinition>? ToolDefinitions { get; set; }
+
+    /// <summary>
     /// When true, strip TextContent from assistant messages that contain tool calls
     /// before sending the continuation request. Some models (e.g. DeepSeek) produce
     /// token fracturing (\n\n between every token) when receiving both content and

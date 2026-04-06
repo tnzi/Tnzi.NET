@@ -38,6 +38,11 @@ public class EvaluationRun : CreationAuditedEntity<Guid>, IMultiTenant
     public string ResultsJson { get; set; } = string.Empty;
 
     /// <summary>
+    /// Agent 版本号（关联 AgentVersion.Version，可选）
+    /// </summary>
+    public int? AgentVersionNumber { get; set; }
+
+    /// <summary>
     /// 评估耗时
     /// </summary>
     public TimeSpan Duration { get; set; }

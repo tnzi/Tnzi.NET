@@ -21,6 +21,9 @@ public class FileSystemSkillStore : ISkillStore
     private DateTime _cacheExpiresAt = DateTime.MinValue;
     private readonly SemaphoreSlim _cacheLock = new(1, 1);
 
+    // 项目目录路径（来自 ContentRoot/Skills 等），用于标记 SkillSource.Project
+    private readonly HashSet<string> _projectPaths = new(StringComparer.OrdinalIgnoreCase);
+
     public FileSystemSkillStore(
         ILogger<FileSystemSkillStore> logger,
         IOptions<AIOptions> options,
@@ -82,6 +85,7 @@ public class FileSystemSkillStore : ISkillStore
     {
         var skills = new List<SkillDefinition>();
         var scannedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var scannedSkillFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 0. Load built-in skills from EmbeddedResource (lowest priority, overridden by file system)
         var builtInCount = _options.LoadBuiltIn ? LoadBuiltInSkills(skills) : 0;
@@ -93,15 +97,16 @@ public class FileSystemSkillStore : ISkillStore
         var autoDiscovered = DiscoverModuleSkillPaths();
         foreach (var path in autoDiscovered)
         {
-            if (!scannedPaths.Add(path)) continue;
+            var normalized = NormalizeDirectoryPath(path);
+            if (normalized == null || !scannedPaths.Add(normalized)) continue;
             try
             {
-                var loaded = await LoadSkillsFromPathAsync(path, ct);
+                var loaded = await LoadSkillsFromPathAsync(normalized, scannedSkillFiles, ct);
                 skills.AddRange(loaded);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load skills from auto-discovered path: {Path}", path);
+                _logger.LogWarning(ex, "Failed to load skills from auto-discovered path: {Path}", normalized);
             }
         }
 
@@ -109,27 +114,78 @@ public class FileSystemSkillStore : ISkillStore
         foreach (var path in _options.Paths)
         {
             var resolved = ResolvePath(path);
-            if (resolved == null || !scannedPaths.Add(resolved)) continue;
+            var normalized = NormalizeDirectoryPath(resolved);
+            if (normalized == null || !scannedPaths.Add(normalized)) continue;
             try
             {
-                var loaded = await LoadSkillsFromPathAsync(resolved, ct);
+                var loaded = await LoadSkillsFromPathAsync(normalized, scannedSkillFiles, ct);
                 skills.AddRange(loaded);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load skills from path: {Path} (resolved: {Resolved})", path, resolved);
+                _logger.LogWarning(ex, "Failed to load skills from path: {Path} (resolved: {Resolved})", path, normalized);
             }
         }
 
+        // 4. Plugin paths — third-party plugin skills (SkillSource.Plugin)
+        var pluginCount = await LoadSourcedPathsAsync(
+            _options.PluginPaths, SkillSource.Plugin, skills, scannedPaths, scannedSkillFiles, ct);
+
+        // 5. Managed paths — platform-managed skills (SkillSource.Managed)
+        var managedCount = await LoadSourcedPathsAsync(
+            _options.ManagedPaths, SkillSource.Managed, skills, scannedPaths, scannedSkillFiles, ct);
+
         skills = FilterSkills(skills);
 
-        _logger.LogInformation("Loaded {Count} skills (built-in: {BuiltIn}, file-system: {FileSystem})",
-            skills.Count, builtInCount, skills.Count - builtInCount);
+        _logger.LogInformation(
+            "Loaded {Count} skills (built-in: {BuiltIn}, plugin: {Plugin}, managed: {Managed}, file-system: {FileSystem})",
+            skills.Count, builtInCount, pluginCount, managedCount,
+            skills.Count - builtInCount - pluginCount - managedCount);
 
         return skills;
     }
 
-    private async Task<List<SkillDefinition>> LoadSkillsFromPathAsync(string resolvedPath, CancellationToken ct)
+    /// <summary>
+    /// Loads skills from a list of paths and assigns the specified <see cref="SkillSource"/>.
+    /// </summary>
+    private async Task<int> LoadSourcedPathsAsync(
+        List<string> paths, SkillSource source,
+        List<SkillDefinition> skills, HashSet<string> scannedPaths, HashSet<string> scannedSkillFiles,
+        CancellationToken ct)
+    {
+        if (paths.Count == 0) return 0;
+
+        var count = 0;
+        foreach (var path in paths)
+        {
+            var resolved = ResolvePath(path);
+            var normalized = NormalizeDirectoryPath(resolved);
+            if (normalized == null || !scannedPaths.Add(normalized)) continue;
+            try
+            {
+                var loaded = await LoadSkillsFromPathAsync(normalized, scannedSkillFiles, ct);
+                foreach (var skill in loaded)
+                {
+                    skill.Source = source;
+                }
+
+                skills.AddRange(loaded);
+                count += loaded.Count;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load {Source} skills from path: {Path} (resolved: {Resolved})",
+                    source, path, normalized);
+            }
+        }
+
+        if (count > 0)
+            _logger.LogDebug("Loaded {Count} {Source} skills", count, source);
+
+        return count;
+    }
+
+    private async Task<List<SkillDefinition>> LoadSkillsFromPathAsync(string resolvedPath, HashSet<string> scannedSkillFiles, CancellationToken ct)
     {
         var skills = new List<SkillDefinition>();
 
@@ -139,27 +195,46 @@ public class FileSystemSkillStore : ISkillStore
             return skills;
         }
 
-        var skillFiles = Directory.GetFiles(resolvedPath, "SKILL.md", SearchOption.AllDirectories);
+        var ignoreMatcher = GitIgnoreRuleSet.Load(resolvedPath);
+        var skillFiles = Directory.EnumerateFiles(resolvedPath, "SKILL.md", SearchOption.AllDirectories);
 
         foreach (var file in skillFiles)
         {
             ct.ThrowIfCancellationRequested();
 
+            var normalizedFile = NormalizeFilePath(file);
+            if (normalizedFile == null || !scannedSkillFiles.Add(normalizedFile))
+            {
+                continue;
+            }
+
+            if (ignoreMatcher.IsIgnored(normalizedFile))
+            {
+                _logger.LogDebug("Skipped gitignored skill file: {FilePath}", normalizedFile);
+                continue;
+            }
+
             try
             {
-                var content = await File.ReadAllTextAsync(file, ct);
-                var skill = SkillMarkdownParser.Parse(content, file);
+                var content = await File.ReadAllTextAsync(normalizedFile, ct);
+                var skill = SkillMarkdownParser.Parse(content, normalizedFile);
                 if (skill != null)
                 {
-                    var skillDir = Path.GetDirectoryName(file)!;
+                    // 标记来自项目目录的技能为 Project 来源
+                    if (IsProjectPath(resolvedPath))
+                    {
+                        skill.Source = SkillSource.Project;
+                    }
+
+                    var skillDir = Path.GetDirectoryName(normalizedFile)!;
                     await LoadResourcesFromDirectoryAsync(skill, skillDir, ct);
                     skills.Add(skill);
-                    _logger.LogDebug("Loaded skill: {SkillName} from {FilePath}", skill.Name, file);
+                    _logger.LogDebug("Loaded skill: {SkillName} from {FilePath}", skill.Name, normalizedFile);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load skill from file: {FilePath}", file);
+                _logger.LogWarning(ex, "Failed to load skill from file: {FilePath}", normalizedFile);
             }
         }
 
@@ -185,7 +260,12 @@ public class FileSystemSkillStore : ISkillStore
         if (!Path.IsPathRooted(dataPath) && _contentRootPath != null)
             dataPath = Path.Combine(_contentRootPath, dataPath);
 
-        var skillsRoot = Path.Combine(dataPath, "skills");
+        var skillsRoot = NormalizeDirectoryPath(Path.Combine(dataPath, "skills"));
+        if (skillsRoot == null)
+        {
+            return 0;
+        }
+
         if (!Directory.Exists(skillsRoot)) return 0;
         if (!scannedPaths.Add(skillsRoot)) return 0;
 
@@ -271,7 +351,12 @@ public class FileSystemSkillStore : ISkillStore
     {
         try
         {
-            var skillMdPath = Path.Combine(skillDir, "SKILL.md");
+            var skillMdPath = NormalizeFilePath(Path.Combine(skillDir, "SKILL.md"));
+            if (skillMdPath == null)
+            {
+                return 0;
+            }
+
             var content = await File.ReadAllTextAsync(skillMdPath, ct);
             var skill = SkillMarkdownParser.Parse(content, skillMdPath);
             if (skill == null) return 0;
@@ -318,6 +403,7 @@ public class FileSystemSkillStore : ISkillStore
             if (Directory.Exists(appSkillsDir))
             {
                 paths.Add(appSkillsDir);
+                _projectPaths.Add(NormalizeDirectoryPath(appSkillsDir) ?? appSkillsDir);
                 _logger.LogDebug("Auto-discovered skill path from ContentRoot: {Path}", appSkillsDir);
             }
         }
@@ -348,13 +434,13 @@ public class FileSystemSkillStore : ISkillStore
             }
 
             var assemblyDir = Path.GetDirectoryName(assembly.Location)!;
-            return Path.Combine(assemblyDir, subPath);
+            return NormalizeDirectoryPath(Path.Combine(assemblyDir, subPath));
         }
 
         if (Path.IsPathRooted(path))
-            return path;
+            return NormalizeDirectoryPath(path);
 
-        return _contentRootPath != null ? Path.Combine(_contentRootPath, path) : path;
+        return NormalizeDirectoryPath(_contentRootPath != null ? Path.Combine(_contentRootPath, path) : path);
     }
 
     // -------------------------------------------------------------------------
@@ -498,5 +584,196 @@ public class FileSystemSkillStore : ISkillStore
         }
 
         return skills;
+    }
+
+    private static string? NormalizeDirectoryPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private bool IsProjectPath(string resolvedPath)
+    {
+        return _projectPaths.Any(pp =>
+            resolvedPath.StartsWith(pp, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? NormalizeFilePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class GitIgnoreRuleSet
+    {
+        private readonly string _rootPath;
+        private readonly List<GitIgnoreRule> _rules;
+
+        private GitIgnoreRuleSet(string rootPath, List<GitIgnoreRule> rules)
+        {
+            _rootPath = rootPath;
+            _rules = rules;
+        }
+
+        public static GitIgnoreRuleSet Load(string rootPath)
+        {
+            var normalizedRoot = NormalizeDirectoryPath(rootPath) ?? rootPath;
+            var rules = new List<GitIgnoreRule>();
+            foreach (var gitIgnorePath in Directory.EnumerateFiles(normalizedRoot, ".gitignore", SearchOption.AllDirectories)
+                         .OrderBy(x => x.Length))
+            {
+                var baseDirectory = Path.GetDirectoryName(gitIgnorePath);
+                if (string.IsNullOrWhiteSpace(baseDirectory))
+                {
+                    continue;
+                }
+
+                foreach (var rawLine in File.ReadLines(gitIgnorePath))
+                {
+                    var rule = GitIgnoreRule.TryParse(baseDirectory, rawLine);
+                    if (rule != null)
+                    {
+                        rules.Add(rule);
+                    }
+                }
+            }
+
+            return new GitIgnoreRuleSet(normalizedRoot, rules);
+        }
+
+        public bool IsIgnored(string filePath)
+        {
+            var normalizedFile = NormalizeFilePath(filePath);
+            if (normalizedFile == null || !normalizedFile.StartsWith(_rootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var ignored = false;
+            foreach (var rule in _rules)
+            {
+                if (rule.IsMatch(normalizedFile))
+                {
+                    ignored = !rule.IsNegated;
+                }
+            }
+
+            return ignored;
+        }
+    }
+
+    private sealed class GitIgnoreRule
+    {
+        private GitIgnoreRule(string baseDirectory, string pattern, bool isNegated, bool directoryOnly)
+        {
+            BaseDirectory = baseDirectory;
+            Pattern = pattern;
+            IsNegated = isNegated;
+            DirectoryOnly = directoryOnly;
+            BasenameOnly = !pattern.Contains('/');
+            Regex = BuildRegex(pattern, directoryOnly, BasenameOnly);
+        }
+
+        public string BaseDirectory { get; }
+
+        public string Pattern { get; }
+
+        public bool IsNegated { get; }
+
+        public bool DirectoryOnly { get; }
+
+        public bool BasenameOnly { get; }
+
+        public Regex Regex { get; }
+
+        public static GitIgnoreRule? TryParse(string baseDirectory, string rawLine)
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+                return null;
+
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+                return null;
+
+            var isNegated = line.StartsWith('!');
+            if (isNegated)
+            {
+                line = line[1..];
+            }
+
+            if (line.Length == 0)
+                return null;
+
+            var directoryOnly = line.EndsWith('/');
+            line = line.TrimStart('/').TrimEnd('/');
+            if (line.Length == 0)
+                return null;
+
+            var normalizedBase = NormalizeDirectoryPath(baseDirectory) ?? baseDirectory;
+            return new GitIgnoreRule(normalizedBase, line.Replace('\\', '/'), isNegated, directoryOnly);
+        }
+
+        public bool IsMatch(string filePath)
+        {
+            if (!filePath.StartsWith(BaseDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var relative = Path.GetRelativePath(BaseDirectory, filePath).Replace('\\', '/');
+            if (relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (BasenameOnly)
+            {
+                var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                return segments.Any(segment => Regex.IsMatch(segment));
+            }
+
+            return Regex.IsMatch(relative);
+        }
+
+        private static Regex BuildRegex(string pattern, bool directoryOnly, bool basenameOnly)
+        {
+            var escaped = Regex.Escape(pattern)
+                .Replace(@"\*\*", "__DOUBLE_STAR__")
+                .Replace(@"\*", "[^/]*")
+                .Replace(@"\?", "[^/]");
+
+            escaped = escaped.Replace("__DOUBLE_STAR__", ".*");
+
+            string finalPattern;
+            if (basenameOnly)
+            {
+                finalPattern = "^" + escaped + (directoryOnly ? "$" : "$");
+            }
+            else
+            {
+                finalPattern = "^" + escaped + (directoryOnly ? "($|/.*)" : "$");
+            }
+
+            return new Regex(finalPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
     }
 }

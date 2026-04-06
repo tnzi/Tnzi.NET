@@ -13,6 +13,9 @@ public class RagRetrievalOptions
 
     /// <summary>最低相关性得分阈值（0-1）</summary>
     public double MinRelevance { get; set; } = 0.3;
+
+    /// <summary>是否启用 Parent Document Retrieval（null 则使用全局配置）</summary>
+    public bool? EnableParentRetrieval { get; set; }
 }
 
 /// <summary>

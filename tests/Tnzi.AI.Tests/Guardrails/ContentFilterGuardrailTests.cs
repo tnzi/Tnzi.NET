@@ -46,7 +46,9 @@ public class ContentFilterGuardrailTests
         // Assert
         result.IsAllowed.ShouldBeFalse();
         result.GuardrailName.ShouldBe(nameof(ContentFilterGuardrail));
-        result.Reason.ShouldContain("blocked content");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("blocked content");
     }
 
     [Fact]

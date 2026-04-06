@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using Tnzi.AI.Services.Interfaces;
+
 namespace Tnzi.AI.Engine.Workflow;
 
 /// <summary>
@@ -77,6 +80,7 @@ public partial class WorkflowEngine
         int totalInputTokens,
         int totalOutputTokens,
         bool failed,
+        bool cancelled,
         bool awaitingApproval,
         string? awaitingApprovalStepId,
         WorkflowInterrupt? awaitingInterrupt,
@@ -90,7 +94,11 @@ public partial class WorkflowEngine
         if (checkpointStore != null && !awaitingApproval && awaitingInterrupt == null)
         {
             checkpointCreatedAt ??= DateTime.UtcNow;
-            var finalStatus = failed ? WorkflowExecutionStatus.Failed : WorkflowExecutionStatus.Completed;
+            var finalStatus = cancelled
+                ? WorkflowExecutionStatus.Cancelled
+                : failed
+                    ? WorkflowExecutionStatus.Failed
+                    : WorkflowExecutionStatus.Completed;
             await SaveCheckpointAsync(checkpointStore, executionId, state, completed, finalStatus, null, checkpointCreatedAt, cancellationToken);
         }
 
@@ -102,12 +110,15 @@ public partial class WorkflowEngine
             {
                 run.Status = failed
                     ? AgentRunStatus.Failed
-                    : awaitingApproval || awaitingInterrupt != null
-                        ? AgentRunStatus.AwaitingApproval
-                        : AgentRunStatus.Completed;
+                    : cancelled
+                        ? AgentRunStatus.Cancelled
+                        : awaitingApproval || awaitingInterrupt != null
+                            ? AgentRunStatus.AwaitingApproval
+                            : AgentRunStatus.Completed;
                 run.TotalInputTokens = totalInputTokens;
                 run.TotalOutputTokens = totalOutputTokens;
                 run.OutputSummary = stepResults.LastOrDefault(r => !r.Skipped)?.Output;
+                run.LastHeartbeatAt = DateTime.UtcNow;
                 await runStore.UpdateAsync(run, cancellationToken);
             }
         }
@@ -131,6 +142,7 @@ public partial class WorkflowEngine
                 }
                 : null,
             HasFailure = failed,
+            Cancelled = cancelled,
             AwaitingApproval = awaitingApproval,
             AwaitingApprovalStepId = awaitingApprovalStepId,
             AwaitingInterrupt = awaitingInterrupt,
@@ -456,6 +468,7 @@ public partial class WorkflowEngine
             RunId = run.Id,
             NodeType = GetNodeType(step),
             NodeName = step.StepId,
+            NodeKey = step.StepId,
             AgentId = step.AgentId,
             Status = AgentRunNodeStatus.Pending,
             InputSummary = inputSummary,
@@ -481,6 +494,13 @@ public partial class WorkflowEngine
         node.Output = result.Output.Text;
         node.DurationMs = result.DurationMs;
         node.Error = error;
+        node.AwaitingInputKind = result.AwaitingInterrupt?.Type switch
+        {
+            InterruptType.Approval => "approval",
+            InterruptType.HumanInput => "human_input",
+            InterruptType.ExternalEvent => "external_event",
+            _ => result.AwaitingApproval ? "approval" : null
+        };
         if (result.Usage != null)
         {
             node.InputTokens = result.Usage.InputTokens;
@@ -577,6 +597,84 @@ public partial class WorkflowEngine
         await store.SaveCheckpointAsync(checkpoint, ct);
     }
 
+    [ExperimentalApi(Reason = "Workflow mailbox and signals are in preview")]
+    private static async Task<WorkflowSignalProcessingResult> ApplyPendingSignalsAsync(
+        string executionId,
+        IServiceProvider serviceProvider,
+        IWorkflowCheckpointStore? checkpointStore,
+        WorkflowState state,
+        HashSet<string> completed,
+        DateTime? checkpointCreatedAt,
+        AgentRun? run,
+        IRunStore? runStore,
+        CancellationToken ct)
+    {
+        var mailbox = serviceProvider.GetService<IWorkflowExecutionMailbox>();
+        if (mailbox == null)
+        {
+            return WorkflowSignalProcessingResult.None;
+        }
+
+        var signals = await mailbox.GetPendingSignalsAsync(executionId, ct);
+        if (signals.Count == 0)
+        {
+            return WorkflowSignalProcessingResult.None;
+        }
+
+        var consumedIds = new List<string>();
+        var cancelled = false;
+        foreach (var signal in signals)
+        {
+            switch (signal.Type)
+            {
+                case WorkflowExecutionSignalTypes.Cancel:
+                    cancelled = true;
+                    consumedIds.Add(signal.SignalId);
+                    break;
+                case WorkflowExecutionSignalTypes.ResumeInput:
+                    consumedIds.Add(signal.SignalId);
+                    break;
+            }
+        }
+
+        if (consumedIds.Count > 0)
+        {
+            await mailbox.AcknowledgeSignalsAsync(executionId, consumedIds, ct);
+        }
+
+        if (!cancelled)
+        {
+            return WorkflowSignalProcessingResult.None;
+        }
+
+        if (checkpointStore != null)
+        {
+            checkpointCreatedAt ??= DateTime.UtcNow;
+            await SaveCheckpointAsync(
+                checkpointStore,
+                executionId,
+                state,
+                completed,
+                WorkflowExecutionStatus.Cancelled,
+                null,
+                checkpointCreatedAt,
+                ct);
+        }
+
+        if (run != null && runStore != null)
+        {
+            run.Status = AgentRunStatus.Cancelled;
+            run.LastHeartbeatAt = DateTime.UtcNow;
+            await runStore.UpdateAsync(run, ct);
+        }
+
+        return new WorkflowSignalProcessingResult
+        {
+            Cancelled = true,
+            CheckpointCreatedAt = checkpointCreatedAt
+        };
+    }
+
     /// <summary>
     /// 更新 stepResults 中指定步骤的输出
     /// </summary>
@@ -587,5 +685,15 @@ public partial class WorkflowEngine
         {
             existing.Output = output;
         }
+    }
+
+    [ExperimentalApi(Reason = "Workflow mailbox and signals are in preview")]
+    private sealed class WorkflowSignalProcessingResult
+    {
+        public static WorkflowSignalProcessingResult None { get; } = new();
+
+        public bool Cancelled { get; init; }
+
+        public DateTime? CheckpointCreatedAt { get; init; }
     }
 }

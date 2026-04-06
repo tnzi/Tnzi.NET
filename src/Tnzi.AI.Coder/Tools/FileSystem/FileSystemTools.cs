@@ -20,7 +20,8 @@ public partial class FileSystemTools : IAIToolProvider
     /// <summary>
     /// 读取文件内容
     /// </summary>
-    [AIFunction("read_file", "Read the contents of a file")]
+    [AIFunction("read_file", "Read the contents of a file",
+        IsReadOnly = true, IsConcurrencySafe = true, Aliases = "cat,read", SearchHint = "read file content")]
     public async Task<object> ReadFileAsync(
         [AIParameter("path", "Absolute or relative file path")] string path,
         [AIParameter("offset", "Line offset (1-based)", false)] int? offset = null,
@@ -85,7 +86,8 @@ public partial class FileSystemTools : IAIToolProvider
     /// <summary>
     /// 创建或覆盖文件
     /// </summary>
-    [AIFunction("write_file", "Create or overwrite a file")]
+    [AIFunction("write_file", "Create or overwrite a file",
+        SearchHint = "write create file")]
     public async Task<object> WriteFileAsync(
         [AIParameter("path", "File path")] string path,
         [AIParameter("content", "Content to write")] string content)
@@ -130,7 +132,8 @@ public partial class FileSystemTools : IAIToolProvider
     /// <summary>
     /// 搜索并替换文件内容
     /// </summary>
-    [AIFunction("edit_file", "Search and replace in a file")]
+    [AIFunction("edit_file", "Search and replace in a file",
+        Aliases = "edit,sed", SearchHint = "edit replace modify file")]
     public async Task<object> EditFileAsync(
         [AIParameter("path", "File path")] string path,
         [AIParameter("old_string", "Text to find")] string oldString,
@@ -208,7 +211,8 @@ public partial class FileSystemTools : IAIToolProvider
     /// 受 OpenHands llm_based_edit 启发。当 AI 无法精确匹配 old_string 时，
     /// 基于行号的编辑更可靠（尤其是大文件、缩进敏感代码）。
     /// </remarks>
-    [AIFunction("edit_file_range", "Replace a range of lines in a file — more robust than exact string matching")]
+    [AIFunction("edit_file_range", "Replace a range of lines in a file — more robust than exact string matching",
+        SearchHint = "edit replace lines range")]
     public async Task<object> EditFileRangeAsync(
         [AIParameter("path", "File path")] string path,
         [AIParameter("start_line", "Start line number (1-based, inclusive)")] int startLine,
@@ -304,7 +308,8 @@ public partial class FileSystemTools : IAIToolProvider
     /// <summary>
     /// 删除一个或多个文件
     /// </summary>
-    [AIFunction("delete_files", "Delete one or more files")]
+    [AIFunction("delete_files", "Delete one or more files",
+        IsDestructive = true, SearchHint = "delete remove file")]
     public async Task<object> DeleteFilesAsync(
         [AIParameter("paths", "File paths to delete (comma-separated)")] string paths)
     {

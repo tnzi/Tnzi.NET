@@ -19,7 +19,9 @@ public class RouterNodeTests
         // Assert
         result.IsSuccess.ShouldBeTrue();
         result.RouteTo.ShouldBe("technical");
-        result.Output.Metadata.ShouldContainKeyAndValue("route", "technical");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("route", "technical");
     }
 
     [Fact]

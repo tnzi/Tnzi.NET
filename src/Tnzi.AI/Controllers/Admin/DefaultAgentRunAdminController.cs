@@ -10,14 +10,19 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentRunService RunService;
     protected readonly IAgentTraceService TraceService;
+    protected readonly IAgentRuntimeControlService RuntimeControlService;
 
     /// <summary>
     /// 初始化 Agent 运行管理控制器
     /// </summary>
-    public DefaultAgentRunAdminController(IAgentRunService runService, IAgentTraceService traceService)
+    public DefaultAgentRunAdminController(
+        IAgentRunService runService,
+        IAgentTraceService traceService,
+        IAgentRuntimeControlService runtimeControlService)
     {
         RunService = Check.NotNull(runService);
         TraceService = Check.NotNull(traceService);
+        RuntimeControlService = Check.NotNull(runtimeControlService);
     }
 
     /// <summary>
@@ -47,6 +52,26 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult<AgentRunDto>> Get(Guid runId)
     {
         var result = await RunService.GetByIdAsync(runId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 启动后台 AgentRun
+    /// </summary>
+    [HttpPost("spawn")]
+    public virtual async Task<ApiResult<AgentRunControlStateDto>> Spawn([FromBody] SpawnAgentRunInput input)
+    {
+        var result = await RuntimeControlService.SpawnAsync(input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取运行时控制状态
+    /// </summary>
+    [HttpGet("{runId:guid}/state")]
+    public virtual async Task<ApiResult<AgentRunControlStateDto>> GetState(Guid runId)
+    {
+        var result = await RuntimeControlService.GetStateAsync(runId);
         return result.ToApiResult();
     }
 
@@ -101,6 +126,36 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 等待运行进入可观察稳定状态
+    /// </summary>
+    [HttpPost("{runId:guid}/wait")]
+    public virtual async Task<ApiResult<AgentRunWaitResultDto>> Wait(Guid runId, [FromBody] WaitAgentRunInput? input)
+    {
+        var result = await RuntimeControlService.WaitAsync(runId, input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 恢复运行（失败重试 / 澄清输入）
+    /// </summary>
+    [HttpPost("{runId:guid}/resume")]
+    public virtual async Task<ApiResult<AgentResponseDto>> Resume(Guid runId, [FromBody] ResumeRunInput? input)
+    {
+        var result = await RunService.ResumeAsync(runId, input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 发送额外输入并恢复运行
+    /// </summary>
+    [HttpPost("{runId:guid}/send-input")]
+    public virtual async Task<ApiResult<AgentRunControlStateDto>> SendInput(Guid runId, [FromBody] SendAgentRunInput input)
+    {
+        var result = await RuntimeControlService.SendInputAsync(runId, input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 审批通过（HITL）
     /// </summary>
     [HttpPost("{runId:guid}/approve")]
@@ -127,6 +182,16 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult> RetryNode(Guid runId, Guid nodeId)
     {
         var result = await RunService.RetryNodeAsync(runId, nodeId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取可用的子 Agent 类型模板
+    /// </summary>
+    [HttpGet("sub-agent-types")]
+    public virtual async Task<ApiResult<List<SubAgentTypeDto>>> GetSubAgentTypes()
+    {
+        var result = await RuntimeControlService.ListSubAgentTypesAsync();
         return result.ToApiResult();
     }
 

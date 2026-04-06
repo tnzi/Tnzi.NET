@@ -26,7 +26,7 @@ public class MemoryTools : IAIToolProvider
     /// <summary>
     /// 读取记忆
     /// </summary>
-    [AIFunction("memory_read", "Read memory content for a scope")]
+    [AIFunction("memory_read", "Read memory content for a scope", IsReadOnly = true, IsConcurrencySafe = true)]
     public async Task<object> ReadMemoryAsync(
         [AIParameter("scope", "Memory scope (e.g. 'default', 'project-notes')", false)] string scope = "default")
     {
@@ -61,7 +61,7 @@ public class MemoryTools : IAIToolProvider
     /// <summary>
     /// 写入记忆（覆盖）
     /// </summary>
-    [AIFunction("memory_write", "Write (overwrite) memory content for a scope")]
+    [AIFunction("memory_write", "Write (overwrite) memory content for a scope", SearchHint = "write memory persist")]
     public async Task<object> WriteMemoryAsync(
         [AIParameter("content", "Content to write")] string content,
         [AIParameter("scope", "Memory scope", false)] string scope = "default")
@@ -90,7 +90,7 @@ public class MemoryTools : IAIToolProvider
     /// <summary>
     /// 追加记忆条目
     /// </summary>
-    [AIFunction("memory_append", "Append an entry to memory")]
+    [AIFunction("memory_append", "Append an entry to memory", SearchHint = "append memory add")]
     public async Task<object> AppendMemoryAsync(
         [AIParameter("entry", "Entry to append")] string entry,
         [AIParameter("scope", "Memory scope", false)] string scope = "default")
@@ -123,7 +123,7 @@ public class MemoryTools : IAIToolProvider
     /// 受 OpenHands 启发。显式推理步骤可显著提升多步任务规划质量。
     /// Agent 使用此工具在行动前进行结构化思考（分析 bug、评估方案、规划步骤）。
     /// </remarks>
-    [AIFunction("think", "Log reasoning without taking action — use for planning, debugging analysis, tradeoff evaluation before acting")]
+    [AIFunction("think", "Log reasoning without taking action — use for planning, debugging analysis, tradeoff evaluation before acting", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> ThinkAsync(
         [AIParameter("thought", "The reasoning to record (analysis, plan, evaluation)")] string thought)
     {
@@ -144,7 +144,7 @@ public class MemoryTools : IAIToolProvider
     /// <summary>
     /// 搜索记忆
     /// </summary>
-    [AIFunction("memory_search", "Search memory by keyword")]
+    [AIFunction("memory_search", "Search memory by keyword", IsReadOnly = true, IsConcurrencySafe = true)]
     public async Task<object> SearchMemoryAsync(
         [AIParameter("query", "Search query")] string query,
         [AIParameter("scope", "Memory scope to search", false)] string scope = "default",

@@ -22,10 +22,43 @@ public class LocalSandboxOptions
 
 public class DockerSandboxOptions
 {
+    /// <summary>
+    /// Docker daemon host URI. Defaults to platform-appropriate socket.
+    /// Linux: unix:///var/run/docker.sock, Windows: npipe:////./pipe/docker_engine
+    /// </summary>
+    public string DockerHost { get; set; } = OperatingSystem.IsWindows()
+        ? "npipe:////./pipe/docker_engine"
+        : "unix:///var/run/docker.sock";
+
+    /// <summary>
+    /// Default container image for sandbox execution
+    /// </summary>
     public string Image { get; set; } = "mcr.microsoft.com/dotnet/sdk:10.0";
+
+    /// <summary>
+    /// Maximum number of concurrent containers
+    /// </summary>
+    public int MaxContainers { get; set; } = 5;
+
+    /// <summary>
+    /// Container idle timeout in seconds before auto-cleanup
+    /// </summary>
     public int IdleTimeoutSeconds { get; set; } = 300;
-    public string? CpuLimit { get; set; }
-    public string? MemoryLimit { get; set; }
+
+    /// <summary>
+    /// Container memory limit in MB
+    /// </summary>
+    public int MemoryLimitMb { get; set; } = 512;
+
+    /// <summary>
+    /// Container CPU limit (1.0 = one full CPU core)
+    /// </summary>
+    public double CpuLimit { get; set; } = 1.0;
+
+    /// <summary>
+    /// Enable automatic container cleanup on disposal
+    /// </summary>
+    public bool AutoRemove { get; set; } = true;
 }
 
 public class KubernetesSandboxOptions

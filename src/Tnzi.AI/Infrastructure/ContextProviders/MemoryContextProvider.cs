@@ -11,7 +11,10 @@ public sealed class MemoryContextProvider : IContextProvider
     private readonly IChatClientFactory? _chatClientFactory;
     private readonly MemoryOptions? _memoryOptions;
     private readonly IMemoryConsolidator? _memoryConsolidator;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<MemoryContextProvider> _logger;
+    private int _lastAutoExtractTurn;
+
     /// <summary>
     /// 初始化（兼容旧签名）
     /// </summary>
@@ -29,7 +32,8 @@ public sealed class MemoryContextProvider : IContextProvider
         ILogger<MemoryContextProvider> logger,
         IChatClientFactory? chatClientFactory = null,
         MemoryOptions? memoryOptions = null,
-        IMemoryConsolidator? memoryConsolidator = null)
+        IMemoryConsolidator? memoryConsolidator = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _scope = Check.NotNull(scope);
@@ -37,6 +41,7 @@ public sealed class MemoryContextProvider : IContextProvider
         _chatClientFactory = chatClientFactory;
         _memoryOptions = memoryOptions;
         _memoryConsolidator = memoryConsolidator;
+        _executionContextAccessor = executionContextAccessor;
     }
 
     /// <inheritdoc />
@@ -44,36 +49,30 @@ public sealed class MemoryContextProvider : IContextProvider
     {
         try
         {
-            var parts = new List<string>(2);
-
-            // 1. 读取用户级记忆（带 UserId 隔离的 scope）
-            var userMemory = await _memoryStore.ReadAsync(_scope, ct);
-            if (!string.IsNullOrWhiteSpace(userMemory))
-            {
-                parts.Add(userMemory);
-                _logger.LogDebug("Loaded user memory for scope {Scope}, length: {Length}", _scope.Name, userMemory.Length);
-            }
-
-            // 2. 读取全局共享记忆（不带 UserId，所有用户可见）
-            var sharedScope = _memoryOptions?.SharedScope;
-            if (!string.IsNullOrEmpty(sharedScope))
-            {
-                var sharedMemory = await _memoryStore.ReadAsync(sharedScope, ct);
-                if (!string.IsNullOrWhiteSpace(sharedMemory))
-                {
-                    parts.Add(sharedMemory);
-                    _logger.LogDebug("Loaded shared memory for scope {SharedScope}, length: {Length}", sharedScope, sharedMemory.Length);
-                }
-            }
-
-            if (parts.Count == 0)
+            var segments = await LoadMemorySegmentsAsync(ct);
+            if (segments.Count == 0)
             {
                 return ContextInjection.Empty;
             }
 
-            var combined = string.Join("\n", parts);
+            // 两阶段注入：少量记忆全量注入，大量记忆切换为检索式注入
+            var threshold = _memoryOptions?.RetrievalModeThreshold ?? 20;
+            var entryCount = segments.Sum(segment => CountMemoryEntries(segment.Content));
+
+            string contextText;
+            if (entryCount <= threshold)
+            {
+                // 全量注入（原有行为）
+                contextText = BuildFullContextText(segments);
+            }
+            else
+            {
+                // 检索式注入：索引 + SearchAsync top-K
+                contextText = await BuildRetrievalContextAsync(segments, messages, entryCount, ct);
+            }
+
             var contextMessage = new ChatMessage(ChatRole.System,
-                $"## Persistent Memory\nThe following is your persistent memory for scope '{_scope.Name}':\n\n{combined}");
+                $"## Persistent Memory\nThe following is your persistent memory for scope '{_scope.Name}':\n\n{contextText}");
 
             return new ContextInjection
             {
@@ -87,6 +86,210 @@ public sealed class MemoryContextProvider : IContextProvider
         }
     }
 
+    /// <summary>
+    /// 统计记忆条目数（按非空行计数）
+    /// </summary>
+    public static int CountMemoryEntries(string memoryContent)
+    {
+        if (string.IsNullOrWhiteSpace(memoryContent)) return 0;
+        return memoryContent.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
+    }
+
+    /// <summary>
+    /// 构建检索式上下文（精简索引 + SearchAsync top-K 全文）
+    /// </summary>
+    private async Task<string> BuildRetrievalContextAsync(
+        IReadOnlyList<ScopedMemorySegment> segments, List<ChatMessage> messages, int entryCount, CancellationToken ct)
+    {
+        var topK = _memoryOptions?.RetrievalTopK ?? 8;
+        var fullMemory = BuildFullContextText(segments);
+
+        // 1. 构建精简索引（每条记忆的前 80 字符，带编号）
+        var index = BuildMemoryIndex(fullMemory);
+
+        // 2. 提取用户最新消息作为查询
+        var userQuery = messages.LastOrDefault(m => m.Role == ChatRole.User)?.Text;
+        if (string.IsNullOrWhiteSpace(userQuery))
+        {
+            // 没有用户消息时退回全量注入
+            return fullMemory;
+        }
+
+        // 3. 在本地/项目/共享记忆上分别检索并合并最相关条目
+        var searchResults = await SearchAcrossScopesAsync(segments, userQuery, topK, ct);
+
+        if (searchResults.Count == 0)
+        {
+            // 搜索无结果时注入索引（让 Agent 知道有哪些记忆可用）
+            _logger.LogDebug("Retrieval mode: no search results, injecting index only ({Count} entries)", entryCount);
+            return $"[Memory index ({entryCount} entries — use search_memory for full content)]\n{index}";
+        }
+
+        // 4. 组合：索引 + 相关记忆全文
+        var includeLabels = segments.Count > 1;
+        var relevant = string.Join("\n", searchResults.Select(r =>
+            includeLabels && !string.IsNullOrWhiteSpace(r.Source)
+                ? $"[{r.Source}] {r.Content}"
+                : r.Content));
+        _logger.LogDebug("Retrieval mode: injecting index + {TopK} relevant entries (of {Total} total)",
+            searchResults.Count, entryCount);
+
+        return $"[Memory index ({entryCount} entries)]\n{index}\n\n[Most relevant memories for current context]\n{relevant}";
+    }
+
+    /// <summary>
+    /// 格式化单条记忆条目，附加元数据注解和新鲜度警告
+    /// </summary>
+    /// <remarks>
+    /// 格式: [category, N days ago, importance: X.X] content
+    /// 超过 1 天的条目追加新鲜度警告提示
+    /// </remarks>
+    public static string FormatMemoryEntry(MemoryEntry entry)
+    {
+        Check.NotNull(entry);
+
+        var category = string.IsNullOrWhiteSpace(entry.Category) ? "general" : entry.Category;
+        var daysAgo = (int)(DateTime.UtcNow - entry.CreationTime).TotalDays;
+        var importance = entry.Importance.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+
+        var formatted = $"[{category}, {daysAgo} days ago, importance: {importance}] {entry.Content}";
+
+        if (daysAgo > 0)
+        {
+            formatted += $" (Note: this memory is {daysAgo} days old — verify against current state before relying on it)";
+        }
+
+        return formatted;
+    }
+
+    /// <summary>
+    /// 构建精简记忆索引（每行取前 80 字符，带序号）
+    /// </summary>
+    public static string BuildMemoryIndex(string memoryContent)
+    {
+        var lines = memoryContent.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var sb = new StringBuilder();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var preview = lines[i].Length > 80 ? lines[i][..80] + "..." : lines[i];
+            sb.AppendLine($"  {i + 1}. {preview}");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<List<ScopedMemorySegment>> LoadMemorySegmentsAsync(CancellationToken ct)
+    {
+        // 并行读取三段记忆（本地、项目快照、共享）
+        var localTask = _memoryStore.ReadAsync(_scope, ct);
+
+        var projectScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
+            _memoryOptions?.EnableProjectSnapshot == true,
+            _memoryOptions?.ProjectSnapshotScopePrefix,
+            _executionContextAccessor?.CurrentRequest?.Metadata);
+
+        var sharedScope = _memoryOptions?.SharedScope;
+        var shouldLoadShared = !string.IsNullOrWhiteSpace(sharedScope)
+            && !string.Equals(sharedScope, projectScope, StringComparison.OrdinalIgnoreCase);
+
+        var projectTask = !string.IsNullOrWhiteSpace(projectScope)
+            ? _memoryStore.ReadAsync(projectScope, ct)
+            : Task.FromResult<string?>(null);
+
+        var sharedTask = shouldLoadShared
+            ? _memoryStore.ReadAsync(sharedScope!, ct)
+            : Task.FromResult<string?>(null);
+
+        await Task.WhenAll(localTask, projectTask, sharedTask);
+
+        var segments = new List<ScopedMemorySegment>(3);
+
+        var localMemory = localTask.Result;
+        if (!string.IsNullOrWhiteSpace(localMemory))
+        {
+            segments.Add(new ScopedMemorySegment("Local Memory", _scope.ToScopeKey(), _scope, localMemory));
+            _logger.LogDebug("Loaded local memory for scope {Scope}, length: {Length}", _scope.Name, localMemory.Length);
+        }
+
+        var projectMemory = projectTask.Result;
+        if (!string.IsNullOrWhiteSpace(projectMemory))
+        {
+            segments.Add(new ScopedMemorySegment("Project Snapshot", projectScope!, null, projectMemory));
+            _logger.LogDebug("Loaded project snapshot memory for scope {Scope}, length: {Length}", projectScope, projectMemory.Length);
+        }
+
+        var sharedMemory = sharedTask.Result;
+        if (!string.IsNullOrWhiteSpace(sharedMemory))
+        {
+            segments.Add(new ScopedMemorySegment("Shared Memory", sharedScope!, null, sharedMemory));
+            _logger.LogDebug("Loaded shared memory for scope {Scope}, length: {Length}", sharedScope, sharedMemory.Length);
+        }
+
+        return segments;
+    }
+
+    private static string BuildFullContextText(IReadOnlyList<ScopedMemorySegment> segments)
+    {
+        if (segments.Count == 1)
+        {
+            return segments[0].Content;
+        }
+
+        var builder = new StringBuilder();
+        for (var index = 0; index < segments.Count; index++)
+        {
+            var segment = segments[index];
+            builder.AppendLine($"### {segment.Label}");
+            builder.AppendLine(segment.Content);
+
+            if (index < segments.Count - 1)
+            {
+                builder.AppendLine();
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private async Task<IReadOnlyList<MemorySearchResult>> SearchAcrossScopesAsync(
+        IReadOnlyList<ScopedMemorySegment> segments,
+        string query,
+        int topK,
+        CancellationToken ct)
+    {
+        var allResults = new List<MemorySearchResult>();
+
+        foreach (var segment in segments)
+        {
+            IReadOnlyList<MemorySearchResult> scopeResults = segment.LocalScope != null
+                ? await _memoryStore.SearchAsync(segment.LocalScope, query, topK, ct)
+                : await _memoryStore.SearchAsync(segment.ScopeKey, query, topK, ct);
+
+            foreach (var result in scopeResults)
+            {
+                result.Source ??= segment.Label;
+            }
+
+            allResults.AddRange(scopeResults);
+        }
+
+        return allResults
+            .GroupBy(GetSearchResultKey)
+            .Select(group => group.OrderByDescending(result => result.Score).First())
+            .OrderByDescending(result => result.Score)
+            .Take(topK)
+            .ToList();
+    }
+
+    private static string GetSearchResultKey(MemorySearchResult result)
+    {
+        if (result.Id.HasValue)
+        {
+            return result.Id.Value.ToString("N");
+        }
+
+        return $"{result.Source ?? "memory"}::{result.Category ?? "general"}::{result.Content}";
+    }
+
     /// <inheritdoc />
     public async Task OnCompletedAsync(List<ChatMessage> messages, CancellationToken ct = default)
     {
@@ -95,15 +298,60 @@ public sealed class MemoryContextProvider : IContextProvider
             return;
         }
 
+        // 互斥：如果对话中已手动调用 save_memory，跳过自动沉淀
+        if (HasSaveMemoryToolCall(messages))
+        {
+            _logger.LogDebug("Skipping auto-persist for scope {Scope}: save_memory was called in conversation", _scope.Name);
+            return;
+        }
+
+        // 节流：检查自上次自动提取以来的用户消息轮数
+        var userTurnCount = CountUserMessages(messages);
+        var minTurns = _memoryOptions.MinTurnsBetweenExtractions;
+        var turnsSinceLastExtract = userTurnCount - Volatile.Read(ref _lastAutoExtractTurn);
+        if (turnsSinceLastExtract < minTurns)
+        {
+            _logger.LogDebug("Skipping auto-persist for scope {Scope}: only {Turns} turns since last extraction (min: {Min})",
+                _scope.Name, turnsSinceLastExtract, minTurns);
+            return;
+        }
+
         try
         {
             await AutoPersistAsync(messages, ct);
+            Volatile.Write(ref _lastAutoExtractTurn, userTurnCount);
         }
         catch (Exception ex)
         {
             // 自动沉淀失败不影响主流程
             _logger.LogWarning(ex, "Auto-persist failed for scope {Scope}", _scope.Name);
         }
+    }
+
+    /// <summary>
+    /// 检查对话消息中是否包含 save_memory 工具调用
+    /// </summary>
+    private static bool HasSaveMemoryToolCall(List<ChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            foreach (var content in message.Contents)
+            {
+                if (content is FunctionCallContent fc && fc.Name == "save_memory")
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 统计用户消息轮数
+    /// </summary>
+    private static int CountUserMessages(List<ChatMessage> messages)
+    {
+        return messages.Count(m => m.Role == ChatRole.User);
     }
 
     /// <summary>
@@ -130,6 +378,10 @@ public sealed class MemoryContextProvider : IContextProvider
 
         try
         {
+            // Auxiliary sub-run: uses IChatClientFactory.GetChatClient() which returns the default
+            // provider/model. This is intentional — AutoPersist is a lightweight utility call that
+            // does not need the parent agent's model. Prompt cache sharing is achieved through
+            // IChatClientFactory reuse (same provider pipeline and connection pooling).
             var chatClient = _chatClientFactory!.GetChatClient();
             var extractMessages = new List<ChatMessage>
             {
@@ -300,6 +552,8 @@ public sealed class MemoryContextProvider : IContextProvider
         Extract any durable, actionable information from the following conversation that should be remembered across sessions.
         Focus on: user preferences, confirmed facts, key decisions, recurring patterns.
         Exclude: one-time requests, transient information, sensitive data.
+        ONLY save information that cannot be derived from the code, git history, or project files.
+        DO NOT save: code patterns, file paths, project structure, debugging solutions, git history summaries.
         Return each memory as a concise bullet point, one per line.
         If nothing is worth remembering, return "NONE".
         """;
@@ -308,6 +562,8 @@ public sealed class MemoryContextProvider : IContextProvider
         Extract any durable, actionable information from the following conversation that should be remembered across sessions.
         Focus on: user preferences, confirmed facts, key decisions, recurring patterns.
         Exclude: one-time requests, transient information, sensitive data.
+        ONLY save information that cannot be derived from the code, git history, or project files.
+        DO NOT save: code patterns, file paths, project structure, debugging solutions, git history summaries.
         Return each memory on its own line in this exact format:
         [category=<type> importance=<0.0-1.0>] <content>
 
@@ -330,4 +586,10 @@ public sealed class MemoryContextProvider : IContextProvider
         4. Keeping entries concise and actionable
         Return the consolidated memory as bullet points, one per line.
         """;
+
+    private sealed record ScopedMemorySegment(
+        string Label,
+        string ScopeKey,
+        MemoryScope? LocalScope,
+        string Content);
 }

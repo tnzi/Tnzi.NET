@@ -128,9 +128,10 @@ public class VectorTextSearchServiceTests
         results[0].Text.ShouldBe("Chunk content");
         results[0].SourceName.ShouldBe("test.pdf");
         results[0].Score.ShouldBe(0.95);
-        results[0].Metadata.ShouldNotBeNull();
-        results[0].Metadata!["documentId"].ShouldBe(docId);
-        results[0].Metadata["knowledgeBaseId"].ShouldBe(kbId);
+        var metadata = results[0].Metadata;
+        metadata.ShouldNotBeNull();
+        metadata["documentId"].ShouldBe(docId);
+        metadata["knowledgeBaseId"].ShouldBe(kbId);
     }
 
     [Fact]

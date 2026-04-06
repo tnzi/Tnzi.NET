@@ -23,6 +23,7 @@ public class AgentRunServiceStatsTests
                 return Task.FromResult(compiled(new AgentRun { Status = AgentRunStatus.Pending }) ? 1 :
                     compiled(new AgentRun { Status = AgentRunStatus.Running }) ? 2 :
                     compiled(new AgentRun { Status = AgentRunStatus.AwaitingApproval }) ? 1 :
+                    compiled(new AgentRun { Status = AgentRunStatus.RequiresClarification }) ? 1 :
                     compiled(new AgentRun { Status = AgentRunStatus.Completed }) ? 4 :
                     compiled(new AgentRun { Status = AgentRunStatus.Failed }) ? 1 :
                     compiled(new AgentRun { Status = AgentRunStatus.Cancelled }) ? 1 : 0);
@@ -66,12 +67,13 @@ public class AgentRunServiceStatsTests
         result.Data.PendingRuns.ShouldBe(1);
         result.Data.RunningRuns.ShouldBe(2);
         result.Data.AwaitingApprovalRuns.ShouldBe(1);
+        result.Data.RequiresClarificationRuns.ShouldBe(1);
         result.Data.CompletedRuns.ShouldBe(4);
         result.Data.FailedRuns.ShouldBe(1);
         result.Data.CancelledRuns.ShouldBe(1);
         result.Data.TotalInputTokens.ShouldBe(1234);
         result.Data.TotalOutputTokens.ShouldBe(567);
         result.Data.AverageDurationMs.ShouldBe(250);
-        result.Data.SuccessRate.ShouldBe(0.6667m);
+        result.Data.SuccessRate.ShouldBe(0.5714m);
     }
 }

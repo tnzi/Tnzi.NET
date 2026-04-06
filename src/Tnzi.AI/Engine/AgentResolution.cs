@@ -26,8 +26,11 @@ public class AgentResolution
     /// <summary>错误码（仅失败时非 null）</summary>
     public string? ErrorCode { get; init; }
 
+    /// <summary>标记为无需 Executor 但仍成功的解析结果（用于后台启动等不需要 ChatClient 的场景）</summary>
+    public bool IsResolvedWithoutExecutor { get; init; }
+
     /// <summary>是否解析成功</summary>
-    public bool IsSuccess => Agent != null || ExecutionMode == AgentExecutionMode.ExternalCli;
+    public bool IsSuccess => Agent != null || ExecutionMode == AgentExecutionMode.ExternalCli || IsResolvedWithoutExecutor;
 
     /// <summary>
     /// 创建 AgentExecutor 时使用的原始参数 — 供 SkillConstraintMiddleware 触发模型/Provider 覆盖时重建 Executor 使用
@@ -53,7 +56,8 @@ public class AgentResolution
         {
             Agent = null, Provider = provider, Model = model,
             AgentId = agentId, AgentConfiguration = agentConfiguration,
-            ExecutionMode = executionMode
+            ExecutionMode = executionMode,
+            IsResolvedWithoutExecutor = true
         };
     }
 

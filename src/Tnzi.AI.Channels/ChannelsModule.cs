@@ -1,5 +1,9 @@
+using Microsoft.AspNetCore.Builder;
 using Tnzi.AI;
+using Tnzi.AI.Channels.Adapters.Dingtalk;
+using Tnzi.AI.Channels.Adapters.Discord;
 using Tnzi.AI.Channels.Adapters.Feishu;
+using Tnzi.AI.Channels.Adapters.Slack;
 using Tnzi.AI.Channels.Adapters.Telegram;
 
 namespace Tnzi.AI.Channels;
@@ -18,6 +22,11 @@ public class ChannelsModule : TnziApplicationModule
         context.Services.AddOptions<ChannelsModuleOptions>()
             .Bind(context.Configuration.GetSection("AI:Channels"))
             .ValidateWith<ChannelsModuleOptions, ChannelsModuleOptionsValidator>();
+
+        context.Services.AddOptions<GatewayOptions>()
+            .Bind(context.Configuration.GetSection("AI:Channels:Gateway"))
+            .ValidateWith<GatewayOptions, GatewayOptionsValidator>();
+
         return Task.CompletedTask;
     }
 
@@ -57,8 +66,65 @@ public class ChannelsModule : TnziApplicationModule
             services.AddSingleton<IChannelAdapter, FeishuChannelAdapter>();
         }
 
+        // Slack 适配器
+        if (options.Slack.Enabled)
+        {
+            services.AddHttpClient("Tnzi.AI.Slack");
+            services.AddSingleton<IChannelAdapter, SlackChannelAdapter>();
+        }
+
+        // Discord 适配器
+        if (options.Discord.Enabled)
+        {
+            services.AddHttpClient("Tnzi.AI.Discord");
+            services.AddSingleton<IChannelAdapter, DiscordChannelAdapter>();
+        }
+
+        // 钉钉适配器
+        if (options.Dingtalk.Enabled)
+        {
+            services.AddHttpClient("Tnzi.AI.Dingtalk");
+            services.AddSingleton<IChannelAdapter, DingtalkChannelAdapter>();
+        }
+
         // HostedService — 绑定 Manager + Adapters 生命周期
         services.AddHostedService<ChannelManagerHostedService>();
+
+        // --- Gateway 服务注册 ---
+        var gatewayOptions = context.Configuration.GetSection("AI:Channels:Gateway").Get<GatewayOptions>() ?? new();
+        if (gatewayOptions.Enabled)
+        {
+            // 从配置构建绑定规则
+            var bindingRules = gatewayOptions.BindingRules?.Select(r => new SessionBindingRule
+            {
+                Channel = r.Channel,
+                PeerKind = r.PeerKind,
+                PeerId = r.PeerId,
+                AgentId = r.AgentId,
+                Scope = r.Scope,
+                Priority = r.Priority,
+                IsEnabled = true
+            }).ToList() ?? [];
+
+            services.AddSingleton<IReadOnlyList<SessionBindingRule>>(bindingRules.AsReadOnly());
+            services.AddSingleton<ISessionBinder, DefaultSessionBinder>();
+            services.AddSingleton<IPresenceTracker, DefaultPresenceTracker>();
+            services.AddScoped<IGateway, DefaultGateway>();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        var app = context.App;
+        if (app == null) return Task.CompletedTask;
+
+        var options = context.ServiceProvider.GetRequiredService<IOptions<ChannelsModuleOptions>>().Value;
+        if (options.Gateway.Enabled)
+        {
+            app.UseGatewayWebSocket(options.Gateway.Path);
+        }
 
         return Task.CompletedTask;
     }

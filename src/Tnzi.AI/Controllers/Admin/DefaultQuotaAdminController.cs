@@ -8,10 +8,12 @@ namespace Tnzi.AI.Controllers.Admin;
 public class DefaultQuotaAdminController : ApiAdminControllerBase
 {
     protected readonly IQuotaService QuotaService;
+    protected readonly IBudgetService BudgetService;
 
-    public DefaultQuotaAdminController(IQuotaService quotaService)
+    public DefaultQuotaAdminController(IQuotaService quotaService, IBudgetService budgetService)
     {
         QuotaService = Check.NotNull(quotaService);
+        BudgetService = Check.NotNull(budgetService);
     }
 
     /// <summary>
@@ -63,5 +65,28 @@ public class DefaultQuotaAdminController : ApiAdminControllerBase
             ct);
 
         return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取当前周期 USD 预算摘要
+    /// </summary>
+    /// <param name="tenantId">租户 ID（可选，为空则查看全局）</param>
+    /// <param name="startTime">开始时间（可选，默认当月1日）</param>
+    /// <param name="endTime">结束时间（可选，默认下月1日）</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>预算摘要</returns>
+    [HttpGet("budget/summary")]
+    public virtual async Task<ApiResult<BudgetSummaryDto>> GetBudgetSummary(
+        [FromQuery] Guid? tenantId = null,
+        [FromQuery] DateTime? startTime = null,
+        [FromQuery] DateTime? endTime = null,
+        CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var start = startTime ?? new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = endTime ?? start.AddMonths(1);
+
+        var summary = await BudgetService.GetSummaryAsync(tenantId, start, end, ct);
+        return Result<BudgetSummaryDto>.Success(summary).ToApiResult();
     }
 }

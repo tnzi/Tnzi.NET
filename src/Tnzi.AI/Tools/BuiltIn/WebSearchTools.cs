@@ -22,7 +22,8 @@ public class WebSearchTools : IAIToolProvider
     /// <summary>
     /// Search the web
     /// </summary>
-    [AIFunction("web_search", "Search the web and return results with title, URL, and snippet")]
+    [AIFunction("web_search", "Search the web and return results with title, URL, and snippet",
+        IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "search web internet")]
     public async Task<object> SearchAsync(
         [AIParameter("query", "The search query")] string query,
         [AIParameter("max_results", "Maximum number of results to return (1-10)", false)] int? maxResults = null)

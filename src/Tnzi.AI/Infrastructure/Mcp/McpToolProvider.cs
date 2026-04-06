@@ -11,22 +11,35 @@ public class McpToolProvider : IMcpToolProvider
     private readonly IMcpClientFactory _clientFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IToolApprovalHandler? _approvalHandler;
+    private readonly IToolPermissionEvaluator? _permissionEvaluator;
+    private readonly IShellCommandAnalyzer? _shellCommandAnalyzer;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
+    private readonly McpOAuthClientHandler? _oauthHandler;
     private readonly ILogger<McpToolProvider> _logger;
     private readonly ConcurrentDictionary<string, ToolCacheEntry> _toolCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _toolLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, List<string>> _serverToolNames = new(StringComparer.OrdinalIgnoreCase);
 
     public McpToolProvider(
         IOptions<AIOptions> options,
         IMcpClientFactory clientFactory,
         ILoggerFactory loggerFactory,
         ILogger<McpToolProvider> logger,
-        IToolApprovalHandler? approvalHandler = null)
+        IToolApprovalHandler? approvalHandler = null,
+        IToolPermissionEvaluator? permissionEvaluator = null,
+        IShellCommandAnalyzer? shellCommandAnalyzer = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null,
+        McpOAuthClientHandler? oauthHandler = null)
     {
         _options = Check.NotNull(options);
         _clientFactory = Check.NotNull(clientFactory);
         _loggerFactory = Check.NotNull(loggerFactory);
         _logger = Check.NotNull(logger);
         _approvalHandler = approvalHandler;
+        _permissionEvaluator = permissionEvaluator;
+        _shellCommandAnalyzer = shellCommandAnalyzer;
+        _executionContextAccessor = executionContextAccessor;
+        _oauthHandler = oauthHandler;
     }
 
     /// <inheritdoc />
@@ -58,12 +71,19 @@ public class McpToolProvider : IMcpToolProvider
                     ? tools
                     : tools.Where(t => IsAllowedTool(t, allowedSet)).ToList();
 
+                // Wrap with auth recovery for servers with OAuth configured (retry once on 401/403)
+                IList<AITool> toAdd = filtered is IList<AITool> list ? list : filtered.ToList();
+                if (server.OAuth != null && _oauthHandler != null)
+                {
+                    var authRecoveryLogger = _loggerFactory.CreateLogger<McpAuthRecoveryToolWrapper>();
+                    toAdd = McpAuthRecoveryToolWrapper.Wrap(toAdd, server.Name, _oauthHandler, _clientFactory, this, authRecoveryLogger);
+                }
+
                 // Build per-server approval options from McpServerConfig. Approval only wraps tools that are AIFunction; non-AIFunction AITool are passed through without approval.
                 var approvalOptions = BuildApprovalOptions(server);
-                IList<AITool> toAdd = filtered is IList<AITool> list ? list : filtered.ToList();
-                if (approvalOptions.Enabled)
+                if (approvalOptions.Enabled || _permissionEvaluator != null)
                 {
-                    if (_approvalHandler != null)
+                    if (_approvalHandler != null || _permissionEvaluator != null)
                     {
                         var approvalLogger = _loggerFactory.CreateLogger<ApprovalToolWrapper>();
                         var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -79,7 +99,7 @@ public class McpToolProvider : IMcpToolProvider
                                 toolNameToGroup[originalName] = "mcp:" + server.Name;
                             }
                         }
-                        toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, approvalLogger, toolNameToGroup);
+                        toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, approvalLogger, toolNameToGroup);
                     }
                 }
 
@@ -90,18 +110,23 @@ public class McpToolProvider : IMcpToolProvider
                     toAdd = McpAuditToolWrapper.Wrap(toAdd, server.Name, auditLogger);
                 }
 
+                var serverTools = new List<string>();
                 foreach (var tool in toAdd)
                 {
                     var name = tool.Name ?? string.Empty;
                     if (seenNames.Add(name))
                     {
                         allTools.Add(tool);
+                        serverTools.Add(name);
                     }
                     else
                     {
                         _logger.LogDebug("MCP tool '{ToolName}' from server '{ServerName}' skipped (duplicate name)", name, server.Name);
                     }
                 }
+
+                // 记录该服务器提供的工具名称
+                _serverToolNames[server.Name] = serverTools;
             }
             catch (Exception ex)
             {
@@ -110,6 +135,43 @@ public class McpToolProvider : IMcpToolProvider
         }
 
         return allTools;
+    }
+
+    /// <summary>
+    /// 失效指定服务器或全部服务器的工具缓存，下次 GetToolsAsync 调用将重新从 MCP 服务器拉取。
+    /// </summary>
+    /// <param name="serverName">服务器名称；null 表示失效所有缓存</param>
+    public void InvalidateCache(string? serverName)
+    {
+        if (serverName != null)
+        {
+            _toolCache.TryRemove(serverName, out _);
+            _serverToolNames.TryRemove(serverName, out _);
+            _logger.LogDebug("Invalidated MCP tool cache for server '{ServerName}'", serverName);
+        }
+        else
+        {
+            _toolCache.Clear();
+            _serverToolNames.Clear();
+            _logger.LogDebug("Invalidated all MCP tool caches");
+        }
+    }
+
+    /// <summary>
+    /// 获取指定服务器缓存的工具名称列表。
+    /// </summary>
+    /// <param name="serverName">服务器名称</param>
+    /// <returns>工具名称列表（只读）；服务器不存在或尚未缓存时返回空列表</returns>
+    public IReadOnlyList<string> GetServerToolNames(string serverName)
+    {
+        Check.NotNullOrWhiteSpace(serverName);
+
+        if (_serverToolNames.TryGetValue(serverName, out var names))
+        {
+            return names;
+        }
+
+        return Array.Empty<string>();
     }
 
     /// <summary>

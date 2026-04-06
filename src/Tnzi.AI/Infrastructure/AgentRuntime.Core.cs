@@ -43,6 +43,7 @@ public partial class AgentRuntime
             AgentFactory = _agentFactory,
             AgentRepository = _agentRepository,
             ServiceProvider = _serviceProvider,
+            ExecutionContextAccessor = _executionContextAccessor,
             Logger = _logger,
             StartingAgentId = resolution.AgentId
         };
@@ -51,6 +52,8 @@ public partial class AgentRuntime
         {
             var executionResult = await strategy.ExecuteAsync(agent, messages, strategyContext, ct);
             var response = executionResult.Response;
+            var actualModel = context.EffectiveModel ?? resolution.Model;
+            var actualProvider = context.EffectiveProvider ?? resolution.Provider;
 
             return new AgentRunResult
             {
@@ -59,6 +62,8 @@ public partial class AgentRuntime
                 Usage = executionResult.AggregatedUsage ?? response.Usage,
                 Citations = context.Citations.Count > 0 ? context.Citations : null,
                 FinishReason = response.FinishReason,
+                Model = actualModel,
+                Provider = actualProvider,
                 HandoffPath = executionResult.HandoffPath,
                 FinalAgentName = executionResult.FinalAgentName,
                 Reasoning = response.Reasoning
@@ -111,6 +116,7 @@ public partial class AgentRuntime
             AgentFactory = _agentFactory,
             AgentRepository = _agentRepository,
             ServiceProvider = _serviceProvider,
+            ExecutionContextAccessor = _executionContextAccessor,
             Logger = _logger,
             StartingAgentId = resolution.AgentId,
             EmitEvent = chunk => pendingEvents.Enqueue(chunk)
@@ -193,6 +199,7 @@ public partial class AgentRuntime
     /// <summary>创建 Run 记录</summary>
     private async Task<AgentRun> CreateRunAsync(AgentRunRequest request, AgentResolution resolution, CancellationToken ct)
     {
+        var now = DateTime.UtcNow;
         var run = new AgentRun
         {
             AgentId = request.AgentId ?? resolution.AgentId,
@@ -200,10 +207,39 @@ public partial class AgentRuntime
             WorkflowDefinitionId = request.WorkflowId,
             Status = AgentRunStatus.Running,
             ExecutionMode = resolution.ExecutionMode,
-            InputSummary = Truncate(request.UserMessage, 500)
+            InputSummary = Truncate(request.UserMessage, 500),
+            ParentRunId = request.ParentRunId,
+            RootRunId = request.RootRunId ?? request.ParentRunId,
+            LastHeartbeatAt = now
         };
 
         return await _runStore.CreateAsync(run, ct);
+    }
+
+    /// <summary>复用现有 Run 或创建新 Run 记录</summary>
+    private async Task<AgentRun> GetOrCreateRunAsync(AgentRunRequest request, AgentResolution resolution, CancellationToken ct)
+    {
+        if (!request.ExistingRunId.HasValue)
+        {
+            return await CreateRunAsync(request, resolution, ct);
+        }
+
+        var run = await _runStore.GetAsync(request.ExistingRunId.Value, ct)
+            ?? throw new BusinessException("Tracked run not found", ErrorCodes.RunNotFound, 404);
+
+        run.AgentId ??= request.AgentId ?? resolution.AgentId;
+        run.ThreadId ??= request.ThreadId;
+        run.WorkflowDefinitionId ??= request.WorkflowId;
+        run.ExecutionMode = resolution.ExecutionMode;
+        run.InputSummary = string.IsNullOrWhiteSpace(run.InputSummary)
+            ? Truncate(request.UserMessage, 500)
+            : run.InputSummary;
+        run.ParentRunId ??= request.ParentRunId;
+        run.RootRunId ??= request.RootRunId ?? request.ParentRunId ?? run.Id;
+        run.Status = AgentRunStatus.Running;
+        run.LastHeartbeatAt = DateTime.UtcNow;
+        await _runStore.UpdateAsync(run, ct);
+        return run;
     }
 
     /// <summary>记录 Trace 条目</summary>
@@ -269,7 +305,7 @@ public partial class AgentRuntime
     }
 
     /// <summary>发布运行完成事件（静默失败，不影响主流程）</summary>
-    private async Task PublishRunCompletedEventAsync(AgentRunRequest request, AgentRunResult result, AgentRun? run, long durationMs, bool isStreaming)
+    private async Task PublishRunCompletedEventAsync(AgentRunRequest request, AgentRunResult result, AgentRun? run, long durationMs, bool isStreaming, string? actualProvider = null)
     {
         try
         {
@@ -277,15 +313,15 @@ public partial class AgentRuntime
 
             await _eventBus.PublishAsync(new AgentRunCompletedEvent
             {
-                RunId = run?.Id,
-                ThreadId = request.ThreadId,
+                RunId = run?.Id ?? result.RunId,
+                ThreadId = result.ThreadId ?? request.ThreadId,
                 AgentId = request.AgentId,
                 UserId = request.UserId,
-                Provider = request.Provider,
-                Model = request.Model,
+                Provider = actualProvider ?? result.Provider ?? request.Provider,
+                Model = result.Model ?? request.Model,
                 TotalTokens = (result.Usage?.InputTokens ?? 0) + (result.Usage?.OutputTokens ?? 0),
                 DurationMs = durationMs,
-                Status = (run?.Status ?? AgentRunStatus.Completed).ToString(),
+                Status = (run?.Status ?? result.Status ?? ResolveRunStatus(result.FinishReason)).ToString(),
                 FinishReason = result.FinishReason,
                 IsStreaming = isStreaming
             });
@@ -293,6 +329,58 @@ public partial class AgentRuntime
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to publish AgentRunCompletedEvent");
+        }
+    }
+
+    /// <summary>发布运行开始事件（静默失败，不影响主流程）</summary>
+    private async Task PublishRunStartedEventAsync(
+        AgentRunRequest request, AgentRun? run, bool isStreaming, string? provider, string? model, AgentExecutionMode executionMode)
+    {
+        try
+        {
+            if (_eventBus == null) return;
+
+            await _eventBus.PublishAsync(new AgentRunStartedEvent
+            {
+                RunId = run?.Id,
+                AgentId = request.AgentId,
+                UserId = request.UserId,
+                ThreadId = request.ThreadId,
+                Provider = provider,
+                Model = model,
+                IsStreaming = isStreaming,
+                ExecutionMode = executionMode.ToString()
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish AgentRunStartedEvent");
+        }
+    }
+
+    /// <summary>发布运行失败事件（静默失败，不影响主流程）</summary>
+    private async Task PublishRunFailedEventAsync(
+        AgentRunRequest request, AgentRun? run, Exception exception, long durationMs, bool isStreaming)
+    {
+        try
+        {
+            if (_eventBus == null) return;
+
+            await _eventBus.PublishAsync(new AgentRunFailedEvent
+            {
+                RunId = run?.Id,
+                AgentId = request.AgentId,
+                UserId = request.UserId,
+                ThreadId = request.ThreadId,
+                ErrorMessage = exception.Message,
+                ExceptionType = exception.GetType().Name,
+                DurationMs = durationMs,
+                IsStreaming = isStreaming
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish AgentRunFailedEvent");
         }
     }
 

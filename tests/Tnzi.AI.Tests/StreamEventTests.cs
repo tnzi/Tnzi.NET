@@ -107,4 +107,56 @@ public class StreamEventTests
         evt.ErrorCode.ShouldBeNull();
         evt.IsToolCall.ShouldBeFalse();
     }
+
+    [Fact]
+    public void StructuredEvent_SerializesEventDataSuggestionsTodosAndArtifacts()
+    {
+        var runId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var evt = new StreamEvent
+        {
+            EventType = "clarification",
+            EventData = new Dictionary<string, object>
+            {
+                ["type"] = "ApproachChoice"
+            },
+            Suggestions = ["Pick option A"],
+            Todos =
+            [
+                new TodoItemDto
+                {
+                    Content = "Review design",
+                    Status = TodoStatus.InProgress,
+                    Order = 1
+                }
+            ],
+            Artifacts =
+            [
+                new AgentArtifactDto
+                {
+                    RunId = runId,
+                    ThreadId = threadId,
+                    FileName = "plan.md",
+                    VirtualPath = "/artifacts/plan.md"
+                }
+            ]
+        };
+
+        var json = JsonSerializer.Serialize(evt, JsonOptions);
+        var deserialized = JsonSerializer.Deserialize<StreamEvent>(json, JsonOptions);
+
+        json.ShouldContain("\"eventType\":\"clarification\"");
+        json.ShouldContain("\"eventData\"");
+        json.ShouldContain("\"suggestions\"");
+        json.ShouldContain("\"todos\"");
+        json.ShouldContain("\"artifacts\"");
+        deserialized.ShouldNotBeNull();
+        deserialized.EventType.ShouldBe("clarification");
+        deserialized.Suggestions.ShouldNotBeNull();
+        deserialized.Suggestions.ShouldContain("Pick option A");
+        deserialized.Todos.ShouldNotBeNull();
+        deserialized.Todos.Count.ShouldBe(1);
+        deserialized.Artifacts.ShouldNotBeNull();
+        deserialized.Artifacts.Count.ShouldBe(1);
+    }
 }

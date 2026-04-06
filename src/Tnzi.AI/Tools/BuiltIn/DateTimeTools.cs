@@ -16,7 +16,8 @@ public class DateTimeTools : IAIToolProvider
     /// <summary>
     /// Get the current date and time
     /// </summary>
-    [AIFunction("get_current_datetime", "Get the current date and time, optionally in a specific timezone")]
+    [AIFunction("get_current_datetime", "Get the current date and time, optionally in a specific timezone",
+        IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<string> GetCurrentDateTimeAsync(
         [AIParameter("timezone", "IANA timezone name, e.g. 'Asia/Shanghai', 'UTC', 'America/New_York'", false)]
         string? timezone = null,
@@ -47,7 +48,8 @@ public class DateTimeTools : IAIToolProvider
     /// <summary>
     /// Calculate the difference between two dates
     /// </summary>
-    [AIFunction("calculate_date_difference", "Calculate the difference between two dates in days, months, and years")]
+    [AIFunction("calculate_date_difference", "Calculate the difference between two dates in days, months, and years",
+        IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> CalculateDateDifferenceAsync(
         [AIParameter("start_date", "Start date in yyyy-MM-dd format")]
         string startDate,

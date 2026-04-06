@@ -287,7 +287,9 @@ public class SkillServiceTests : IDisposable
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("Missing required parameter: target");
+        var message = result.Message;
+        message.ShouldNotBeNull();
+        message.ShouldContain("Missing required parameter: target");
     }
 
     [Fact]
@@ -507,7 +509,9 @@ public class SkillServiceTests : IDisposable
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("requirements not met");
+        var message = result.Message;
+        message.ShouldNotBeNull();
+        message.ShouldContain("requirements not met");
     }
 
     // -------------------------------------------------------------------------

@@ -8,7 +8,7 @@ namespace Tnzi.AI.Events.Handlers;
 /// 1. AgentThreadMessage（消息记录）
 /// 2. AgentRunTrace + AgentRunNode + AgentRun（运行记录及追踪）
 /// 3. AgentArtifact（产物记录）
-/// 4. MemoryEntry（会话记忆）
+/// 4. UsageLog（使用日志）
 /// 所有清理操作均静默失败，不影响主流程。
 /// </remarks>
 public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
@@ -18,6 +18,7 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
     private readonly IRepository<AgentRunTrace, Guid>? _traceRepository;
     private readonly IRepository<AgentRunNode, Guid>? _nodeRepository;
     private readonly IRepository<AgentArtifact, Guid>? _artifactRepository;
+    private readonly IRepository<UsageLog, Guid>? _usageLogRepository;
     private readonly ILogger<ThreadCleanupHandler> _logger;
 
     public ThreadCleanupHandler(
@@ -26,7 +27,8 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         IRepository<AgentRun, Guid>? runRepository = null,
         IRepository<AgentRunTrace, Guid>? traceRepository = null,
         IRepository<AgentRunNode, Guid>? nodeRepository = null,
-        IRepository<AgentArtifact, Guid>? artifactRepository = null)
+        IRepository<AgentArtifact, Guid>? artifactRepository = null,
+        IRepository<UsageLog, Guid>? usageLogRepository = null)
     {
         _logger = Check.NotNull(logger);
         _messageRepository = messageRepository;
@@ -34,6 +36,7 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         _traceRepository = traceRepository;
         _nodeRepository = nodeRepository;
         _artifactRepository = artifactRepository;
+        _usageLogRepository = usageLogRepository;
     }
 
     public async Task HandleAsync(ThreadDeletedEvent evt, CancellationToken ct = default)
@@ -92,6 +95,15 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
             if (_artifactRepository == null) return;
             await _artifactRepository.AsQueryable()
                 .Where(a => a.ThreadId == threadId)
+                .ExecuteDeleteAsync(ct);
+        });
+
+        // 4. 删除使用日志
+        await SafeDeleteAsync("usage logs", async () =>
+        {
+            if (_usageLogRepository == null) return;
+            await _usageLogRepository.AsQueryable()
+                .Where(log => log.ThreadId == threadId)
                 .ExecuteDeleteAsync(ct);
         });
 

@@ -5,9 +5,58 @@ namespace Tnzi.AI.Infrastructure;
 /// </summary>
 public partial class AgentRuntime
 {
+    private static bool IsWorkflowTerminalStatus(string? status)
+    {
+        return string.Equals(status, nameof(WorkflowExecutionStatus.Completed), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, nameof(WorkflowExecutionStatus.Failed), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, nameof(WorkflowExecutionStatus.Cancelled), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, nameof(WorkflowExecutionStatus.AwaitingInput), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, nameof(WorkflowExecutionStatus.AwaitingApproval), StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(status) && status.StartsWith("PartialFailure", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static AgentRunStatus MapWorkflowStatus(string? status)
+    {
+        if (string.Equals(status, nameof(WorkflowExecutionStatus.AwaitingInput), StringComparison.OrdinalIgnoreCase))
+        {
+            return AgentRunStatus.RequiresClarification;
+        }
+
+        if (string.Equals(status, nameof(WorkflowExecutionStatus.AwaitingApproval), StringComparison.OrdinalIgnoreCase))
+        {
+            return AgentRunStatus.AwaitingApproval;
+        }
+
+        if (string.Equals(status, nameof(WorkflowExecutionStatus.Cancelled), StringComparison.OrdinalIgnoreCase))
+        {
+            return AgentRunStatus.Cancelled;
+        }
+
+        if (string.Equals(status, nameof(WorkflowExecutionStatus.Failed), StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(status) && status.StartsWith("PartialFailure", StringComparison.OrdinalIgnoreCase)))
+        {
+            return AgentRunStatus.Failed;
+        }
+
+        return AgentRunStatus.Completed;
+    }
+
+    private static string MapWorkflowFinishReason(string? status, bool streaming)
+    {
+        return MapWorkflowStatus(status) switch
+        {
+            AgentRunStatus.RequiresClarification => FinishReasons.RequiresClarification,
+            AgentRunStatus.AwaitingApproval => FinishReasons.AwaitingApproval,
+            AgentRunStatus.Cancelled => FinishReasons.Cancelled,
+            AgentRunStatus.Failed => FinishReasons.Failed,
+            _ => streaming ? FinishReasons.Stop : FinishReasons.Completed
+        };
+    }
+
     private async Task<AgentRunResult> ResumeWorkflowRunAsync(AgentRun run, ResumeRunInput? input, CancellationToken cancellationToken)
     {
         var executionId = run.WorkflowExecutionId!;
+        var requiresClarification = run.Status == AgentRunStatus.RequiresClarification;
         var awaitingNodes = run.Nodes
             .Where(n => n.Status == AgentRunNodeStatus.AwaitingApproval)
             .ToList();
@@ -98,7 +147,43 @@ public partial class AgentRuntime
         run.Status = AgentRunStatus.Running;
         await _runStore.UpdateAsync(run, cancellationToken);
 
-        var resumeResult = await _workflowService.ResumeAsync(executionId, cancellationToken);
+        Result<WorkflowExecutionResultDto> resumeResult;
+        if (requiresClarification)
+        {
+            if (input?.WorkflowInput == null || input.WorkflowInput.Count == 0)
+            {
+                throw new BusinessException(
+                    "Workflow run requires structured input to resume",
+                    ErrorCodes.RunInvalidState,
+                    400);
+            }
+
+            var stepId = input.WorkflowStepId;
+            if (string.IsNullOrWhiteSpace(stepId))
+            {
+                var interruptResult = await _workflowService.GetPendingInterruptAsync(executionId, cancellationToken);
+                if (!interruptResult.Succeeded || interruptResult.Data == null || string.IsNullOrWhiteSpace(interruptResult.Data.StepId))
+                {
+                    throw new BusinessException(
+                        interruptResult.Message ?? "Failed to resolve pending workflow interrupt",
+                        interruptResult.ErrorCode ?? ErrorCodes.WorkflowExecutionInvalidState,
+                        interruptResult.Code ?? 400);
+                }
+
+                stepId = interruptResult.Data.StepId;
+            }
+
+            resumeResult = await _workflowService.ResumeWithInputAsync(
+                executionId,
+                stepId,
+                input.WorkflowInput,
+                cancellationToken);
+        }
+        else
+        {
+            resumeResult = await _workflowService.ResumeAsync(executionId, cancellationToken);
+        }
+
         if (!resumeResult.Succeeded || resumeResult.Data == null)
         {
             run.Status = AgentRunStatus.Failed;
@@ -111,11 +196,9 @@ public partial class AgentRuntime
                 resumeResult.Code ?? 500);
         }
 
-        run.Status = string.Equals(resumeResult.Data.Status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase)
-            ? AgentRunStatus.AwaitingApproval
-            : AgentRunStatus.Completed;
+        run.Status = MapWorkflowStatus(resumeResult.Data.Status);
         run.OutputSummary = Truncate(resumeResult.Data.Output, 500);
-        run.Error = null;
+        run.Error = run.Status == AgentRunStatus.Failed ? resumeResult.Data.Output : null;
         await _runStore.UpdateAsync(run, cancellationToken);
 
         await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.RunResumed,
@@ -127,7 +210,7 @@ public partial class AgentRuntime
             Response = resumeResult.Data.Output,
             RunId = run.Id,
             ThreadId = run.ThreadId,
-            FinishReason = run.Status == AgentRunStatus.AwaitingApproval ? "awaiting_approval" : "completed",
+            FinishReason = MapWorkflowFinishReason(resumeResult.Data.Status, streaming: false),
             Status = run.Status
         };
     }
@@ -153,16 +236,8 @@ public partial class AgentRuntime
         {
             Response = result.Data.Output,
             RunId = result.Data.RunId,
-            FinishReason = string.Equals(result.Data.Status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase)
-                ? "awaiting_approval"
-                : string.Equals(result.Data.Status, "Failed", StringComparison.OrdinalIgnoreCase)
-                    ? "failed"
-                    : "completed",
-            Status = string.Equals(result.Data.Status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase)
-                ? AgentRunStatus.AwaitingApproval
-                : string.Equals(result.Data.Status, "Failed", StringComparison.OrdinalIgnoreCase)
-                    ? AgentRunStatus.Failed
-                    : AgentRunStatus.Completed
+            FinishReason = MapWorkflowFinishReason(result.Data.Status, streaming: false),
+            Status = MapWorkflowStatus(result.Data.Status)
         };
     }
 
@@ -180,20 +255,13 @@ public partial class AgentRuntime
         {
             if (!string.IsNullOrWhiteSpace(evt.Output))
             {
-                var isCompleted = string.Equals(evt.Status, "Completed", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(evt.Status, "Failed", StringComparison.OrdinalIgnoreCase)
-                    || evt.Status.StartsWith("PartialFailure", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(evt.Status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
+                var isCompleted = IsWorkflowTerminalStatus(evt.Status);
 
                 yield return new AgentStreamChunk
                 {
                     Text = evt.Output,
                     FinishReason = isCompleted
-                        ? (string.Equals(evt.Status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase)
-                            ? "awaiting_approval"
-                            : string.Equals(evt.Status, "Failed", StringComparison.OrdinalIgnoreCase)
-                                ? "failed"
-                            : "stop")
+                        ? MapWorkflowFinishReason(evt.Status, streaming: true)
                         : null
                 };
             }

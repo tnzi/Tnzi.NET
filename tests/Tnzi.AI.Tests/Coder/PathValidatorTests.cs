@@ -42,7 +42,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("empty");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("empty");
     }
 
     [Fact]
@@ -53,7 +55,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("   ");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("empty");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("empty");
     }
 
     [Fact]
@@ -107,7 +111,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("../../../etc/passwd");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("outside");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("outside");
     }
 
     [Fact]
@@ -120,7 +126,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync(outsidePath);
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("outside");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("outside");
     }
 
     [Fact]
@@ -146,7 +154,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync(".env");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -157,7 +167,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync(".env.local");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -168,7 +180,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync(".env.production");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -179,7 +193,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("server.key");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -190,7 +206,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("cert.pem");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -201,7 +219,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("credentials.json");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -225,7 +245,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("database.secret");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("denied pattern");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("denied pattern");
     }
 
     [Fact]
@@ -281,7 +303,9 @@ public class PathValidatorTests : IDisposable
         var result = await validator.ValidateAsync("outside.txt");
 
         result.IsValid.ShouldBeFalse();
-        result.Error.ShouldContain("outside");
+        var error = result.Error;
+        error.ShouldNotBeNull();
+        error.ShouldContain("outside");
     }
 
     #endregion
@@ -299,7 +323,9 @@ public class PathValidatorTests : IDisposable
         result.IsValid.ShouldBeTrue();
         // 解析后的路径应该使用正斜杠
         result.ResolvedPath.ShouldNotBeNull();
-        result.ResolvedPath.ShouldContain("/");
+        var resolvedPath = result.ResolvedPath;
+        resolvedPath.ShouldNotBeNull();
+        resolvedPath.ShouldContain("/");
     }
 
     [Fact]

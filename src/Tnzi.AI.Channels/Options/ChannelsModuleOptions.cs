@@ -1,4 +1,7 @@
+using Tnzi.AI.Channels.Adapters.Dingtalk;
+using Tnzi.AI.Channels.Adapters.Discord;
 using Tnzi.AI.Channels.Adapters.Feishu;
+using Tnzi.AI.Channels.Adapters.Slack;
 
 namespace Tnzi.AI.Channels.Options;
 
@@ -30,4 +33,16 @@ public class ChannelsModuleOptions
 
     /// <summary>飞书配置</summary>
     public FeishuAdapterOptions Feishu { get; set; } = new();
+
+    /// <summary>Slack 配置</summary>
+    public SlackAdapterOptions Slack { get; set; } = new();
+
+    /// <summary>Discord 配置</summary>
+    public DiscordAdapterOptions Discord { get; set; } = new();
+
+    /// <summary>钉钉配置</summary>
+    public DingtalkAdapterOptions Dingtalk { get; set; } = new();
+
+    /// <summary>Gateway 配置</summary>
+    public GatewayOptions Gateway { get; set; } = new();
 }

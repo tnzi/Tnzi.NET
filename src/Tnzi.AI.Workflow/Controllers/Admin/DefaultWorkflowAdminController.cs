@@ -128,12 +128,32 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 获取工作流执行邮箱中的待处理信号
+    /// </summary>
+    [HttpGet("executions/{executionId}/signals")]
+    public virtual async Task<ApiResult<List<WorkflowExecutionSignal>>> GetPendingSignals(string executionId, CancellationToken cancellationToken = default)
+    {
+        var result = await WorkflowService.GetPendingSignalsAsync(executionId, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 恢复暂停的工作流执行
     /// </summary>
     [HttpPost("executions/{executionId}/resume")]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> ResumeExecution(string executionId, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.ResumeAsync(executionId, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 取消工作流执行
+    /// </summary>
+    [HttpPost("executions/{executionId}/cancel")]
+    public virtual async Task<ApiResult> CancelExecution(string executionId, [FromBody] WorkflowStepApprovalDto? input = null, CancellationToken cancellationToken = default)
+    {
+        var result = await WorkflowService.CancelAsync(executionId, input?.Feedback, cancellationToken);
         return result.ToApiResult();
     }
 
@@ -289,10 +309,11 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
 
     private static WorkflowStreamEventDto ToWorkflowStreamEvent(WorkflowExecutionResultDto result)
     {
-        var isCompleted = result.Status == "Completed"
-            || result.Status == "Failed"
-            || result.Status == "AwaitingApproval"
-            || result.Status == "AwaitingInput"
+        var isCompleted = result.Status == nameof(WorkflowExecutionStatus.Completed)
+            || result.Status == nameof(WorkflowExecutionStatus.Failed)
+            || result.Status == nameof(WorkflowExecutionStatus.Cancelled)
+            || result.Status == nameof(WorkflowExecutionStatus.AwaitingApproval)
+            || result.Status == nameof(WorkflowExecutionStatus.AwaitingInput)
             || result.Status.StartsWith("PartialFailure", StringComparison.Ordinal);
         var stepId = result.StepResults is { Count: 1 } ? result.StepResults[0].StepId : null;
 

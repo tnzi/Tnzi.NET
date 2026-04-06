@@ -5,12 +5,12 @@ namespace Tnzi.AI.Services.Interfaces;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 默认实现为 DatabaseConversationStore（桥接 IAgentThreadInternalService）。
-/// Tnzi.AI.Coder 模块提供 FileConversationStore 替代实现（CLI 场景不需要数据库）。
+/// 内置两种实现：DatabaseConversationStore（桥接 AgentThread 实体，默认）
+/// 和 FileConversationStore（文件系统存储，适用于 CLI 场景无需数据库）。
 /// </para>
 /// <para>
-/// conversationId 是不透明标识符，具体格式取决于实现：
-/// DatabaseConversationStore 要求 GUID 格式字符串，FileConversationStore 接受任意合法文件名字符串。
+/// conversationId 是不透明字符串标识符，调用方不应假设其格式。
+/// 各实现内部自行处理标识符的格式转换和验证。
 /// </para>
 /// </remarks>
 public interface IConversationStore
@@ -18,8 +18,7 @@ public interface IConversationStore
     /// <summary>
     /// 获取或创建对话上下文
     /// </summary>
-    /// <param name="conversationId">对话 ID。数据库实现（DatabaseConversationStore）要求 GUID 格式字符串；
-    /// 文件实现（FileConversationStore）接受任意合法文件名字符串。</param>
+    /// <param name="conversationId">对话 ID（不透明字符串标识符）</param>
     /// <param name="agentId">关联的 Agent ID（可选）</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>对话上下文</returns>

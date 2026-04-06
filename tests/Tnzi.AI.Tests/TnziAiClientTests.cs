@@ -1,5 +1,6 @@
 using Tnzi.AI.Constants;
 using Tnzi.AI.Models;
+using Tnzi.Exceptions;
 
 namespace Tnzi.AI.Tests;
 
@@ -57,7 +58,9 @@ public class TnziAiClientTests
     {
         var agentId = Guid.NewGuid();
         var runtime = new Mock<IAgentRuntime>();
-        runtime.Setup(r => r.RunAsync(It.Is<AgentRunRequest>(req => req.AgentId == agentId), It.IsAny<CancellationToken>()))
+        runtime.Setup(r => r.RunAsync(
+                It.Is<AgentRunRequest>(req => req.AgentId == agentId && req.OperationType == AIOperationType.AgentRun),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentRunResult { Response = "OK", FinishReason = FinishReasons.Stop });
 
         var client = new TnziAiClient(runtime.Object, null);
@@ -65,8 +68,100 @@ public class TnziAiClientTests
         await client.ChatAsync("Hi", options: new AiClientOptions { AgentId = agentId });
 
         runtime.Verify(r => r.RunAsync(
-            It.Is<AgentRunRequest>(req => req.AgentId == agentId),
+            It.Is<AgentRunRequest>(req => req.AgentId == agentId && req.OperationType == AIOperationType.AgentRun),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ChatAsync_PropagatesStructuredNonStreamingFields()
+    {
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(r => r.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult
+            {
+                Response = "Need one more detail",
+                FinishReason = FinishReasons.RequiresClarification,
+                Status = AgentRunStatus.RequiresClarification,
+                Model = "gpt-5",
+                Provider = "openai",
+                Reasoning = "thinking",
+                HandoffPath = ["planner", "writer"],
+                FinalAgentName = "writer",
+                Suggestions = ["Tell me more about X"],
+                Artifacts = [new AgentArtifactDto { FileName = "draft.md", VirtualPath = "/artifacts/draft.md" }],
+                ClarificationQuestion = "Which region should I use?"
+            });
+
+        var client = new TnziAiClient(runtime.Object, null);
+
+        var response = await client.ChatAsync("Hello");
+
+        response.Status.ShouldBe(AgentRunStatus.RequiresClarification);
+        response.Model.ShouldBe("gpt-5");
+        response.Provider.ShouldBe("openai");
+        response.Reasoning.ShouldBe("thinking");
+        response.HandoffPath.ShouldNotBeNull();
+        response.FinalAgentName.ShouldBe("writer");
+        response.Suggestions.ShouldContain("Tell me more about X");
+        response.Artifacts.ShouldNotBeNull();
+        response.ClarificationQuestion.ShouldBe("Which region should I use?");
+    }
+
+    [Fact]
+    public async Task ChatAsync_WhenQuotaExceeded_ThrowsBusinessException()
+    {
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(r => r.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult
+            {
+                Response = "Quota exceeded",
+                FinishReason = FinishReasons.QuotaExceeded
+            });
+
+        var client = new TnziAiClient(runtime.Object, null);
+
+        var ex = await Should.ThrowAsync<BusinessException>(() => client.ChatAsync("Hello"));
+
+        ex.Code.ShouldBe(ErrorCodes.QuotaExceeded);
+        ex.HttpStatusCode.ShouldBe(429);
+    }
+
+    [Fact]
+    public async Task ChatAsync_WhenGuardrailRejected_ThrowsBusinessException()
+    {
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(r => r.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult
+            {
+                Response = "Rejected by guardrail",
+                FinishReason = FinishReasons.GuardrailRejected
+            });
+
+        var client = new TnziAiClient(runtime.Object, null);
+
+        var ex = await Should.ThrowAsync<BusinessException>(() => client.ChatAsync("Hello"));
+
+        ex.Code.ShouldBe(ErrorCodes.GuardrailRejected);
+        ex.HttpStatusCode.ShouldBe(400);
+    }
+
+    [Fact]
+    public async Task ChatAsync_WhenMaxHandoffsReached_ThrowsBusinessException()
+    {
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(r => r.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult
+            {
+                Response = "Max handoff limit reached",
+                FinishReason = FinishReasons.MaxHandoffs
+            });
+
+        var client = new TnziAiClient(runtime.Object, null);
+
+        var ex = await Should.ThrowAsync<BusinessException>(() => client.ChatAsync("Hello"));
+
+        ex.Code.ShouldBe(ErrorCodes.AgentRunFailed);
+        ex.HttpStatusCode.ShouldBe(500);
     }
 
     [Fact]
@@ -127,6 +222,60 @@ public class TnziAiClientTests
         Assert.Equal("Hello ", events[0].Text);
         Assert.Equal("world", events[1].Text);
         Assert.NotNull(events[2].FinishReason);
+    }
+
+    [Fact]
+    public async Task ChatStreamingAsync_PropagatesStructuredFields()
+    {
+        var runtime = new Mock<IAgentRuntime>();
+        var chunks = new List<AgentStreamChunk>
+        {
+            new()
+            {
+                Text = "step",
+                Model = "gpt-5-think",
+                ReasoningText = "reasoning",
+                AgentName = "planner",
+                EventType = MiddlewareEventTypes.Clarification,
+                EventData = new Dictionary<string, object> { ["type"] = "ApproachChoice" },
+                Suggestions = ["Choose A"],
+                Todos =
+                [
+                    new TodoItemDto { Content = "task", Order = 1 }
+                ],
+                Artifacts =
+                [
+                    new AgentArtifactDto { FileName = "plan.md", VirtualPath = "/artifacts/plan.md" }
+                ],
+                ToolCallNames = ["write_todos"]
+            }
+        };
+
+        runtime.Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(chunks));
+
+        var client = new TnziAiClient(runtime.Object, null);
+        var events = new List<AiClientStreamEvent>();
+
+        await foreach (var e in client.ChatStreamingAsync("Hi"))
+        {
+            events.Add(e);
+        }
+
+        events.Count.ShouldBe(1);
+        events[0].Model.ShouldBe("gpt-5-think");
+        events[0].ReasoningText.ShouldBe("reasoning");
+        events[0].AgentName.ShouldBe("planner");
+        events[0].EventType.ShouldBe(MiddlewareEventTypes.Clarification);
+        events[0].EventData.ShouldNotBeNull();
+        var suggestions = events[0].Suggestions;
+        suggestions.ShouldNotBeNull();
+        suggestions.ShouldContain("Choose A");
+        events[0].Todos.ShouldNotBeNull();
+        events[0].Artifacts.ShouldNotBeNull();
+        var toolCallNames = events[0].ToolCallNames;
+        toolCallNames.ShouldNotBeNull();
+        toolCallNames.ShouldContain("write_todos");
     }
 
     [Fact]

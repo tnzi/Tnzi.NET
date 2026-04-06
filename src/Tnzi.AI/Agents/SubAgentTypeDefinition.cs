@@ -9,10 +9,16 @@ namespace Tnzi.AI.Agents;
 /// <param name="ExcludedToolGroups">排除的工具组列表</param>
 /// <param name="MaxTurns">最大对话轮次</param>
 /// <param name="Instructions">默认系统指令（可选）</param>
+/// <param name="DefaultModel">默认模型（可选）</param>
+/// <param name="DefaultApprovalMode">默认工具审批模式（可选）</param>
+/// <param name="CapabilityTags">能力标签（可选）</param>
 public record SubAgentTypeDefinition(
     string Name,
     string Description,
     IReadOnlyList<string> ToolGroups,
     IReadOnlyList<string> ExcludedToolGroups,
     int MaxTurns,
-    string? Instructions = null);
+    string? Instructions = null,
+    string? DefaultModel = null,
+    ToolApprovalMode? DefaultApprovalMode = null,
+    IReadOnlyList<string>? CapabilityTags = null);

@@ -58,7 +58,9 @@ public class BuiltInMemoryToolsTests
 {
     private static Tnzi.AI.Tools.BuiltIn.MemoryTools CreateTools(
         Mock<IMemoryStore>? store = null,
-        MemoryOptions? options = null)
+        MemoryOptions? options = null,
+        ICurrentUser? currentUser = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         store ??= new Mock<IMemoryStore>();
         var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions
@@ -71,7 +73,9 @@ public class BuiltInMemoryToolsTests
         return new Tnzi.AI.Tools.BuiltIn.MemoryTools(
             store.Object,
             Mock.Of<ILogger<Tnzi.AI.Tools.BuiltIn.MemoryTools>>(),
-            aiOptions);
+            aiOptions,
+            currentUser,
+            executionContextAccessor);
     }
 
     // ── save_memory ──────────────────────────────────────────────────────────
@@ -217,6 +221,36 @@ public class BuiltInMemoryToolsTests
             It.IsAny<MemoryScope>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task SaveMemoryAsync_AgentIsolationEnabled_UsesAgentScopedMemory()
+    {
+        var store = new Mock<IMemoryStore>();
+        var agentId = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor
+        {
+            CurrentRequest = new AgentRunRequest
+            {
+                AgentId = agentId
+            }
+        };
+        var options = new MemoryOptions
+        {
+            EnableUserIsolation = false,
+            EnableAgentIsolation = true,
+            EnablePiiProtection = false
+        };
+        var tools = CreateTools(store, options, executionContextAccessor: accessor);
+
+        await tools.SaveMemoryAsync("remember me");
+
+        store.Verify(s => s.AppendAsync(
+            It.Is<MemoryScope>(scope => scope.Name == "default" && scope.AgentId == agentId && scope.UserId == null),
+            "remember me",
+            0.7,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ── search_memory ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -272,6 +306,68 @@ public class BuiltInMemoryToolsTests
         json.ShouldContain("dark theme");
         store.Verify(s => s.SearchByCategoryAsync(
             It.IsAny<string>(), "theme", "preference", 5, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchMemoryAsync_ProjectSnapshotAndSharedScope_AreIncluded()
+    {
+        var store = new Mock<IMemoryStore>();
+        var accessor = new AgentExecutionContextAccessor
+        {
+            CurrentRequest = new AgentRunRequest
+            {
+                Metadata = new Dictionary<string, object>
+                {
+                    ["working_directory"] = @"D:\Repo\Tnzi.NET"
+                }
+            }
+        };
+        var options = new MemoryOptions
+        {
+            EnableUserIsolation = false,
+            EnableProjectSnapshot = true,
+            ProjectSnapshotScopePrefix = "project",
+            SharedScope = "shared"
+        };
+        var projectScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
+            options.EnableProjectSnapshot,
+            options.ProjectSnapshotScopePrefix,
+            accessor.CurrentRequest.Metadata);
+        projectScope.ShouldNotBeNull();
+
+        store.Setup(s => s.SearchAsync(
+                It.IsAny<MemoryScope>(),
+                "theme",
+                5,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<MemorySearchResult>)[]);
+        store.Setup(s => s.SearchAsync(
+                projectScope!,
+                "theme",
+                5,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MemorySearchResult>
+            {
+                new() { Content = "Project uses dark theme", Source = projectScope, Score = 0.9 }
+            });
+        store.Setup(s => s.SearchAsync(
+                "shared",
+                "theme",
+                5,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MemorySearchResult>
+            {
+                new() { Content = "Shared prefers contrast-safe colors", Source = "shared", Score = 0.7 }
+            });
+
+        var tools = CreateTools(store, options, executionContextAccessor: accessor);
+
+        var result = await tools.SearchMemoryAsync("theme");
+
+        var json = JsonSerializer.Serialize(result);
+        json.ShouldContain("Project uses dark theme");
+        json.ShouldContain("Shared prefers contrast-safe colors");
+        json.ShouldContain("\"source\"");
     }
 
     // ── update_memory ─────────────────────────────────────────────────────────

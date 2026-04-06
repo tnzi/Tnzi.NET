@@ -23,6 +23,12 @@ public class AgentRunResult
     /// <summary>完成原因</summary>
     public string? FinishReason { get; init; }
 
+    /// <summary>实际执行使用的模型</summary>
+    public string? Model { get; init; }
+
+    /// <summary>实际执行使用的提供商</summary>
+    public string? Provider { get; init; }
+
     /// <summary>执行路径（Handoff/Router 等多 Agent 模式）</summary>
     public List<string>? HandoffPath { get; init; }
 
@@ -55,26 +61,40 @@ public class AgentRunResult
     /// </summary>
     public AgentRunResult CloneWith(
         string? response = null,
+        Guid? runId = null,
         Guid? threadId = null,
+        TokenUsageDto? usage = null,
+        List<CitationDto>? citations = null,
         string? finishReason = null,
-        AgentRunStatus? status = null)
+        string? model = null,
+        string? provider = null,
+        List<string>? handoffPath = null,
+        string? finalAgentName = null,
+        AgentRunStatus? status = null,
+        string? reasoning = null,
+        List<string>? suggestions = null,
+        List<TodoItemDto>? todos = null,
+        List<AgentArtifactDto>? artifacts = null,
+        string? clarificationQuestion = null)
     {
         return new AgentRunResult
         {
             Response = response ?? Response,
-            RunId = RunId,
+            RunId = runId ?? RunId,
             ThreadId = threadId ?? ThreadId,
-            Usage = Usage,
-            Citations = Citations,
+            Usage = usage ?? Usage,
+            Citations = citations ?? Citations,
             FinishReason = finishReason ?? FinishReason,
-            HandoffPath = HandoffPath,
-            FinalAgentName = FinalAgentName,
+            Model = model ?? Model,
+            Provider = provider ?? Provider,
+            HandoffPath = handoffPath ?? HandoffPath,
+            FinalAgentName = finalAgentName ?? FinalAgentName,
             Status = status ?? Status,
-            Reasoning = Reasoning,
-            Suggestions = Suggestions,
-            Todos = Todos,
-            Artifacts = Artifacts,
-            ClarificationQuestion = ClarificationQuestion
+            Reasoning = reasoning ?? Reasoning,
+            Suggestions = suggestions ?? Suggestions,
+            Todos = todos ?? Todos,
+            Artifacts = artifacts ?? Artifacts,
+            ClarificationQuestion = clarificationQuestion ?? ClarificationQuestion
         };
     }
 }

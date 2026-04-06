@@ -7,6 +7,14 @@ public class AiMiddlewarePipelineTests
 {
     #region Helper Methods
 
+    private static IBudgetService CreatePassthroughBudgetService()
+    {
+        var mock = new Mock<IBudgetService>();
+        mock.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BudgetCheckResult { IsAllowed = true, Status = BudgetStatus.WithinBudget });
+        return mock.Object;
+    }
+
     private static AiMiddlewareContext CreateContext(string userMessage = "Hello", Guid? userId = null, Guid? threadId = null)
     {
         return new AiMiddlewareContext
@@ -193,6 +201,7 @@ public class AiMiddlewarePipelineTests
         var quotaService = new Mock<IQuotaService>();
         var middleware = new QuotaMiddleware(
             quotaService.Object,
+            CreatePassthroughBudgetService(),
             new HeuristicTokenEstimator(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
@@ -215,6 +224,7 @@ public class AiMiddlewarePipelineTests
 
         var middleware = new QuotaMiddleware(
             quotaService.Object,
+            CreatePassthroughBudgetService(),
             new HeuristicTokenEstimator(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
@@ -237,6 +247,7 @@ public class AiMiddlewarePipelineTests
 
         var middleware = new QuotaMiddleware(
             quotaService.Object,
+            CreatePassthroughBudgetService(),
             new HeuristicTokenEstimator(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 

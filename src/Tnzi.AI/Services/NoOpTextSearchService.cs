@@ -9,7 +9,7 @@ namespace Tnzi.AI.Services;
 /// 当用户需要启用 RAG 功能时，应注册自己的 ITextSearchService 实现。
 /// </para>
 /// </remarks>
-public class NoOpTextSearchService : ITextSearchService
+public class NoOpTextSearchService : ITextSearchService, INoOpService
 {
     private readonly ILogger<NoOpTextSearchService>? _logger;
 

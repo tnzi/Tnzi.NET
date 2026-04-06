@@ -33,6 +33,7 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(AICliModule))]
 [OptionalDependsOn(typeof(Tnzi.AI.Sandbox.SandboxModule))]
 [OptionalDependsOn(typeof(ChannelsModule))]
+[OptionalDependsOn(typeof(Tnzi.AI.Device.DeviceModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：

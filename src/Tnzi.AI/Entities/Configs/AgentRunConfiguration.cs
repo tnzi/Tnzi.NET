@@ -19,6 +19,10 @@ public class AgentRunConfiguration : EntityTypeConfigurationBase<AgentRun, Guid>
         builder.Property(e => e.WorkflowExecutionId)
             .HasMaxLength(64);
 
+        builder.Property(e => e.ParentRunId);
+
+        builder.Property(e => e.RootRunId);
+
         builder.Property(e => e.Error)
             .HasMaxLength(4000);
 
@@ -38,6 +42,12 @@ public class AgentRunConfiguration : EntityTypeConfigurationBase<AgentRun, Guid>
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
 
         builder.HasIndex(e => e.WorkflowExecutionId)
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+
+        builder.HasIndex(e => e.ParentRunId)
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+
+        builder.HasIndex(e => e.RootRunId)
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
 
         builder.HasIndex(e => e.Status)

@@ -258,8 +258,20 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
             TimeSpan.FromSeconds(10), 4096);
         var tools = new SandboxTools(translator, NullLogger<SandboxTools>.Instance);
 
-        await tools.WriteFileAsync(sandbox, _threadId, "/mnt/workspace/test.sh", "#!/bin/bash\necho 'skill-pipeline-ok'");
-        var result = await tools.BashAsync(sandbox, _threadId, "bash /mnt/workspace/test.sh");
+        if (OperatingSystem.IsWindows())
+        {
+            await tools.WriteFileAsync(sandbox, _threadId, "/mnt/workspace/test.cmd", "@echo off\r\necho skill-pipeline-ok\r\n");
+        }
+        else
+        {
+            await tools.WriteFileAsync(sandbox, _threadId, "/mnt/workspace/test.sh", "#!/bin/bash\necho 'skill-pipeline-ok'");
+        }
+
+        var command = OperatingSystem.IsWindows()
+            ? "call /mnt/workspace/test.cmd"
+            : "bash /mnt/workspace/test.sh";
+
+        var result = await tools.BashAsync(sandbox, _threadId, command);
         var json = JsonSerializer.Serialize(result);
         json.ShouldContain("skill-pipeline-ok");
     }

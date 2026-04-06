@@ -38,4 +38,22 @@ public class PromptCachingOptions
     /// 当检测到 OAuth token 时自动禁用缓存（Anthropic 4-block cache limit）
     /// </summary>
     public bool DisableOnOAuthToken { get; set; } = true;
+
+    /// <summary>
+    /// 启用 static/dynamic 双断点边界优化（默认启用）
+    /// <para>
+    /// 第一断点：静态内容（Agent Instructions + Tool schemas）— 跨请求缓存命中率高
+    /// 第二断点：动态内容（Memory + Context + Skills）— 会话内缓存命中率高
+    /// </para>
+    /// </summary>
+    public bool CacheStaticDynamicBoundary { get; set; } = true;
+
+    /// <summary>
+    /// 是否缓存工具 schema 快照（默认启用）
+    /// <para>
+    /// 首次调用时快照工具列表，后续调用复用快照，避免配置变更导致缓存失效。
+    /// 对话级别稳定性优化。
+    /// </para>
+    /// </summary>
+    public bool SnapshotToolSchemas { get; set; } = true;
 }

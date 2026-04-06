@@ -132,6 +132,9 @@ export function getSkillSourceLabel(source: SkillSource): string {
   switch (source) {
     case SkillSource.FileSystem: return 'File System';
     case SkillSource.Database: return 'Database';
+    case SkillSource.Plugin: return 'Plugin';
+    case SkillSource.Managed: return 'Managed';
+    case SkillSource.Project: return 'Project';
     default: return 'Unknown';
   }
 }

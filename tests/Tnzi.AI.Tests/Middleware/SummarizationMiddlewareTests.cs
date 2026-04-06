@@ -7,17 +7,22 @@ public class SummarizationMiddlewareTests
 {
     #region Helper
 
-    private static SummarizationMiddleware CreateMiddleware(Action<AIOptions>? configure = null)
+    private static SummarizationMiddleware CreateMiddleware(
+        Action<AIOptions>? configure = null,
+        IChatClientFactory? chatClientFactory = null)
     {
         var options = new AIOptions();
         configure?.Invoke(options);
         var optionsMonitor = new SummarizationTestOptionsMonitor<AIOptions>(options);
-        return new SummarizationMiddleware(optionsMonitor, new HeuristicTokenEstimator(), Mock.Of<ILogger<SummarizationMiddleware>>());
+        return new SummarizationMiddleware(
+            optionsMonitor,
+            chatClientFactory ?? Mock.Of<IChatClientFactory>(),
+            new HeuristicTokenEstimator(),
+            Mock.Of<ILogger<SummarizationMiddleware>>());
     }
 
     private static AiMiddlewareContext CreateContext(
         List<ChatMessage>? messages = null,
-        IServiceProvider? serviceProvider = null,
         AgentExecutionMode executionMode = AgentExecutionMode.Single)
     {
         return new AiMiddlewareContext
@@ -30,7 +35,7 @@ public class SummarizationMiddlewareTests
                 agentId: null,
                 executionMode: executionMode),
             Messages = messages ?? [],
-            ServiceProvider = serviceProvider ?? new Mock<IServiceProvider>().Object
+            ServiceProvider = new Mock<IServiceProvider>().Object
         };
     }
 
@@ -136,9 +141,9 @@ public class SummarizationMiddlewareTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Summary of conversation")));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(mockChatClient.Object);
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", "test-model"))
+            .Returns(mockChatClient.Object);
 
         var middleware = CreateMiddleware(o =>
         {
@@ -147,11 +152,11 @@ public class SummarizationMiddlewareTests
             o.Summarization.Trigger.MessageThreshold = 10;
             o.Summarization.Keep.KeepLastMessages = 4;
             o.Summarization.TrimTokensToSummarize = 10; // 低阈值，确保触发
-        });
+        }, mockFactory.Object);
 
         // 1 系统消息 + 20 非系统消息
         var messages = CreateMessages(20, includeSystem: true);
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         List<ChatMessage>? capturedMessages = null;
 
@@ -180,6 +185,7 @@ public class SummarizationMiddlewareTests
             It.IsAny<IList<ChatMessage>>(),
             It.IsAny<ChatOptions>(),
             It.IsAny<CancellationToken>()), Times.Once);
+        mockFactory.Verify(x => x.GetChatClient("test", "test-model"), Times.Once);
     }
 
     [Fact]
@@ -192,9 +198,9 @@ public class SummarizationMiddlewareTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Summary")));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(mockChatClient.Object);
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", "test-model"))
+            .Returns(mockChatClient.Object);
 
         var middleware = CreateMiddleware(o =>
         {
@@ -203,12 +209,12 @@ public class SummarizationMiddlewareTests
             o.Summarization.Trigger.MessageThreshold = 5;
             o.Summarization.Keep.KeepLastMessages = 2;
             o.Summarization.TrimTokensToSummarize = 10;
-        });
+        }, mockFactory.Object);
 
         var messages = CreateMessages(10); // 无系统消息
         // 记住最后两条消息的文本
         var lastTwoTexts = messages.TakeLast(2).Select(m => m.Text).ToList();
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
@@ -268,9 +274,9 @@ public class SummarizationMiddlewareTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM unavailable"));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(mockChatClient.Object);
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", "test-model"))
+            .Returns(mockChatClient.Object);
 
         var middleware = CreateMiddleware(o =>
         {
@@ -278,11 +284,11 @@ public class SummarizationMiddlewareTests
             o.Summarization.Trigger.Type = SummarizationTriggerType.Messages;
             o.Summarization.Trigger.MessageThreshold = 5;
             o.Summarization.TrimTokensToSummarize = 10;
-        });
+        }, mockFactory.Object);
 
         var messages = CreateMessages(20);
         var originalCount = messages.Count;
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
@@ -297,11 +303,11 @@ public class SummarizationMiddlewareTests
     #region No IChatClient available
 
     [Fact]
-    public async Task NoChatClient_KeepsOriginalMessages()
+    public async Task ChatClientFactoryFailure_KeepsOriginalMessages()
     {
-        var services = new ServiceCollection();
-        // 不注册 IChatClient
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
+            .Throws(new InvalidOperationException("Factory unavailable"));
 
         var middleware = CreateMiddleware(o =>
         {
@@ -309,11 +315,11 @@ public class SummarizationMiddlewareTests
             o.Summarization.Trigger.Type = SummarizationTriggerType.Messages;
             o.Summarization.Trigger.MessageThreshold = 5;
             o.Summarization.TrimTokensToSummarize = 10;
-        });
+        }, mockFactory.Object);
 
         var messages = CreateMessages(20);
         var originalCount = messages.Count;
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
@@ -336,9 +342,9 @@ public class SummarizationMiddlewareTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Token summary")));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(mockChatClient.Object);
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", "test-model"))
+            .Returns(mockChatClient.Object);
 
         var middleware = CreateMiddleware(o =>
         {
@@ -347,10 +353,10 @@ public class SummarizationMiddlewareTests
             o.Summarization.Trigger.TokenThreshold = 50; // 低阈值
             o.Summarization.Keep.KeepLastMessages = 2;
             o.Summarization.TrimTokensToSummarize = 10;
-        });
+        }, mockFactory.Object);
 
         var messages = CreateMessages(20); // ~500 tokens，超过阈值
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
@@ -375,9 +381,9 @@ public class SummarizationMiddlewareTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Fraction summary")));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(mockChatClient.Object);
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", "test-model"))
+            .Returns(mockChatClient.Object);
 
         var middleware = CreateMiddleware(o =>
         {
@@ -387,10 +393,10 @@ public class SummarizationMiddlewareTests
             o.Summarization.ModelContextWindow = 200; // 小窗口
             o.Summarization.Keep.KeepLastMessages = 2;
             o.Summarization.TrimTokensToSummarize = 10;
-        });
+        }, mockFactory.Object);
 
         var messages = CreateMessages(10); // ~250 tokens > 200 * 0.1 = 20
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
@@ -416,9 +422,9 @@ public class SummarizationMiddlewareTests
             .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Summary")));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(mockChatClient.Object);
-        var sp = services.BuildServiceProvider();
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", "gpt-4o-mini"))
+            .Returns(mockChatClient.Object);
 
         var middleware = CreateMiddleware(o =>
         {
@@ -428,16 +434,17 @@ public class SummarizationMiddlewareTests
             o.Summarization.Keep.KeepLastMessages = 2;
             o.Summarization.TrimTokensToSummarize = 10;
             o.Summarization.ModelName = "gpt-4o-mini";
-        });
+        }, mockFactory.Object);
 
         var messages = CreateMessages(20);
-        var context = CreateContext(messages: messages, serviceProvider: sp);
+        var context = CreateContext(messages: messages);
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
             Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         capturedOptions.ShouldNotBeNull();
         capturedOptions!.ModelId.ShouldBe("gpt-4o-mini");
+        mockFactory.Verify(x => x.GetChatClient("test", "gpt-4o-mini"), Times.Once);
     }
 
     #endregion

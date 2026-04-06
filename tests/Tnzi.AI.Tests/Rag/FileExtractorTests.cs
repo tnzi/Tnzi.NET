@@ -11,7 +11,7 @@ public class FileExtractorTests
 
     [Theory]
     [InlineData("test.txt", true)]
-    [InlineData("data.csv", true)]
+    [InlineData("data.csv", false)]
     [InlineData("app.log", true)]
     [InlineData("config.json", true)]
     [InlineData("data.xml", true)]
@@ -35,7 +35,6 @@ public class FileExtractorTests
         var extractor = new PlainTextFileExtractor();
 
         extractor.Supports("data.TXT").ShouldBeTrue();
-        extractor.Supports("data.Csv").ShouldBeTrue();
         extractor.Supports("data.JSON").ShouldBeTrue();
     }
 

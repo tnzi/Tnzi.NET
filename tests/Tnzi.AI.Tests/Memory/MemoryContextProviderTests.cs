@@ -28,6 +28,55 @@ public class MemoryContextProviderTests
     }
 
     [Fact]
+    public async Task GetContextAsync_ProjectSnapshotAndSharedMemory_AreInjectedAlongsideLocalMemory()
+    {
+        var projectRoot = @"D:\Repo\Tnzi.NET";
+        var options = new MemoryOptions
+        {
+            EnableProjectSnapshot = true,
+            ProjectSnapshotScopePrefix = "project",
+            SharedScope = "shared"
+        };
+        var projectScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
+            options.EnableProjectSnapshot,
+            options.ProjectSnapshotScopePrefix,
+            projectRoot);
+        projectScope.ShouldNotBeNull();
+
+        var mockStore = new Mock<IMemoryStore>();
+        mockStore.Setup(s => s.ReadAsync(It.Is<MemoryScope>(scope => scope.Name == "default"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Local override");
+        mockStore.Setup(s => s.ReadAsync(projectScope!, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Project snapshot");
+        mockStore.Setup(s => s.ReadAsync("shared", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Shared rule");
+
+        var accessor = new AgentExecutionContextAccessor
+        {
+            CurrentRequest = new AgentRunRequest
+            {
+                Metadata = new Dictionary<string, object>
+                {
+                    ["working_directory"] = projectRoot
+                }
+            }
+        };
+
+        var provider = CreateProvider(mockStore.Object, memoryOptions: options, executionContextAccessor: accessor);
+
+        var injection = await provider.GetContextAsync([]);
+
+        injection.HasContent.ShouldBeTrue();
+        injection.Messages.ShouldNotBeNull();
+        injection.Messages![0].Text!.ShouldContain("### Local Memory");
+        injection.Messages[0].Text!.ShouldContain("### Project Snapshot");
+        injection.Messages[0].Text!.ShouldContain("### Shared Memory");
+        injection.Messages[0].Text!.ShouldContain("Local override");
+        injection.Messages[0].Text!.ShouldContain("Project snapshot");
+        injection.Messages[0].Text!.ShouldContain("Shared rule");
+    }
+
+    [Fact]
     public async Task GetContextAsync_NoMemory_ReturnsEmpty()
     {
         var mockStore = new Mock<IMemoryStore>();
@@ -113,7 +162,8 @@ public class MemoryContextProviderTests
         {
             AutoPersist = true,
             AutoConsolidate = false, // 不测合并
-            ConsolidateThreshold = 100
+            ConsolidateThreshold = 100,
+            MinTurnsBetweenExtractions = 0
         };
 
         var provider = CreateProvider(mockStore.Object, memoryOptions: memoryOptions, chatClientFactory: mockFactory.Object);
@@ -151,7 +201,7 @@ public class MemoryContextProviderTests
 
         var provider = CreateProvider(
             mockStore.Object,
-            memoryOptions: new MemoryOptions { AutoPersist = true, AutoConsolidate = false },
+            memoryOptions: new MemoryOptions { AutoPersist = true, AutoConsolidate = false, MinTurnsBetweenExtractions = 0 },
             chatClientFactory: mockFactory.Object);
 
         var messages = new List<ChatMessage>
@@ -179,7 +229,8 @@ public class MemoryContextProviderTests
         var memoryOptions = new MemoryOptions
         {
             AutoPersist = true,
-            AutoConsolidate = false
+            AutoConsolidate = false,
+            MinTurnsBetweenExtractions = 0
         };
 
         var provider = CreateProvider(mockStore.Object, memoryOptions: memoryOptions, chatClientFactory: mockFactory.Object);
@@ -267,7 +318,8 @@ public class MemoryContextProviderTests
         {
             AutoPersist = true,
             AutoConsolidate = true,
-            ConsolidateThreshold = 5 // 低阈值触发合并
+            ConsolidateThreshold = 5, // 低阈值触发合并
+            MinTurnsBetweenExtractions = 0
         };
 
         var provider = CreateProvider(mockStore.Object, memoryOptions: memoryOptions, chatClientFactory: mockFactory.Object);
@@ -339,7 +391,8 @@ public class MemoryContextProviderTests
             AutoConsolidate = false,
             IncrementalConsolidate = true,
             ConsolidateSearchTopK = 3,
-            MaxConsolidationCallsPerPersist = 5
+            MaxConsolidationCallsPerPersist = 5,
+            MinTurnsBetweenExtractions = 0
         };
 
         var provider = CreateProvider(mockStore.Object, memoryOptions: memoryOptions,
@@ -384,7 +437,8 @@ public class MemoryContextProviderTests
             AutoConsolidate = false,
             IncrementalConsolidate = true,
             ConsolidateSearchTopK = 3,
-            MaxConsolidationCallsPerPersist = 5
+            MaxConsolidationCallsPerPersist = 5,
+            MinTurnsBetweenExtractions = 0
         };
 
         var provider = CreateProvider(mockStore.Object, memoryOptions: memoryOptions,
@@ -431,7 +485,8 @@ public class MemoryContextProviderTests
             AutoPersist = true,
             AutoConsolidate = false,
             IncrementalConsolidate = true,
-            MaxConsolidationCallsPerPersist = 5
+            MaxConsolidationCallsPerPersist = 5,
+            MinTurnsBetweenExtractions = 0
         };
 
         var provider = CreateProvider(mockStore.Object, memoryOptions: memoryOptions,
@@ -506,14 +561,22 @@ public class MemoryContextProviderTests
         bool autoPersist = false,
         MemoryOptions? memoryOptions = null,
         IChatClientFactory? chatClientFactory = null,
-        IMemoryConsolidator? memoryConsolidator = null)
+        IMemoryConsolidator? memoryConsolidator = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         var scope = new MemoryScope("default");
         var logger = Mock.Of<ILogger<MemoryContextProvider>>();
 
         memoryOptions ??= new MemoryOptions { AutoPersist = autoPersist };
 
-        return new MemoryContextProvider(store, scope, logger, chatClientFactory, memoryOptions, memoryConsolidator);
+        return new MemoryContextProvider(
+            store,
+            scope,
+            logger,
+            chatClientFactory,
+            memoryOptions,
+            memoryConsolidator,
+            executionContextAccessor);
     }
 
     private static IChatClient CreateMockChatClient(string responseText)

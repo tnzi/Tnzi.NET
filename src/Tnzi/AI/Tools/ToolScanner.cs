@@ -89,7 +89,21 @@ public class ToolScanner : IToolScanner
                     ? funcAttr.RequiredPermissions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     : [],
                 Category = funcAttr.Category,
-                RequiresSkillSlugs = allSlugs
+                RequiresSkillSlugs = allSlugs,
+                // 安全元数据（fail-closed: 默认最严格）
+                IsReadOnly = funcAttr.IsReadOnly,
+                IsConcurrencySafe = funcAttr.IsConcurrencySafe,
+                IsDestructive = funcAttr.IsDestructive,
+                MaxResultSizeChars = funcAttr.MaxResultSizeChars,
+                SearchHint = funcAttr.SearchHint,
+                Aliases = funcAttr.Aliases != null
+                    ? funcAttr.Aliases.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    : [],
+                ShouldDefer = funcAttr.ShouldDefer,
+                AlwaysLoad = funcAttr.AlwaysLoad,
+                Priority = funcAttr.Priority,
+                ServerHint = funcAttr.ServerHint,
+                InterruptBehavior = funcAttr.InterruptBehavior
             };
 
             tools.Add(tool);

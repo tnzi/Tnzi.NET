@@ -23,7 +23,7 @@ public class ContextTools : IAIToolProvider
     /// <summary>
     /// Analyze current conversation length and recommend condensation
     /// </summary>
-    [AIFunction("context_stats", "Analyze conversation context size and provide recommendations")]
+    [AIFunction("context_stats", "Analyze conversation context size and provide recommendations", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> ContextStatsAsync(
         [AIParameter("conversation_text", "Full conversation text to analyze")] string conversationText)
     {
@@ -61,7 +61,7 @@ public class ContextTools : IAIToolProvider
     /// It does not call an LLM — it performs heuristic extraction of key facts, decisions, and tasks.
     /// For LLM-based summarization, use the SummarizeChatReducer in the Agent pipeline.
     /// </remarks>
-    [AIFunction("condense_context", "Extract key information from a conversation to create a condensed summary")]
+    [AIFunction("condense_context", "Extract key information from a conversation to create a condensed summary", SearchHint = "condense compress context summary")]
     public async Task<object> CondenseContextAsync(
         [AIParameter("conversation_text", "Full conversation text to condense")] string conversationText,
         [AIParameter("scope", "Memory scope to store the condensed summary", false)] string scope = "context-summary",

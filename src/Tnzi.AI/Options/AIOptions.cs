@@ -52,6 +52,11 @@ public class AIOptions
     public ToolApprovalOptions ToolApproval { get; set; } = new();
 
     /// <summary>
+    /// 工具权限规则配置
+    /// </summary>
+    public ToolPermissionOptions Permissions { get; set; } = new();
+
+    /// <summary>
     /// MCP (Model Context Protocol) 配置
     /// </summary>
     /// <remarks>
@@ -98,6 +103,15 @@ public class AIOptions
     public CostTrackingOptions CostTracking { get; set; } = new();
 
     /// <summary>
+    /// USD 成本预算管控配置
+    /// </summary>
+    /// <remarks>
+    /// 启用后在 QuotaMiddleware 中检查月度 USD 预算上限，支持按 Agent 覆盖预算。
+    /// 需同时启用 CostTracking 以确保 UsageLog 有成本数据。
+    /// </remarks>
+    public BudgetOptions Budget { get; set; } = new();
+
+    /// <summary>
     /// 重试与熔断配置
     /// </summary>
     /// <remarks>
@@ -116,6 +130,11 @@ public class AIOptions
     public AgentDefinitionOptions AgentDefinitions { get; set; } = new();
 
     /// <summary>
+    /// Workspace-based agent discovery configuration
+    /// </summary>
+    public WorkspaceOptions Workspace { get; set; } = new();
+
+    /// <summary>
     /// 工具调用循环检测配置
     /// </summary>
     public LoopDetectionOptions LoopDetection { get; set; } = new();
@@ -124,6 +143,16 @@ public class AIOptions
     /// 子 Agent 并发限制配置
     /// </summary>
     public SubAgentOptions SubAgent { get; set; } = new();
+
+    /// <summary>
+    /// 工具结果预算配置
+    /// </summary>
+    public ToolResultBudgetOptions ToolResultBudget { get; set; } = new();
+
+    /// <summary>
+    /// 执行效率监控配置（diminishing returns 检测）
+    /// </summary>
+    public ExecutionBudgetOptions ExecutionBudget { get; set; } = new();
 
     /// <summary>
     /// 对话摘要配置

@@ -38,6 +38,13 @@ public interface IToolRegistry
     void UnregisterGroup(string groupName) { }
 
     /// <summary>
+    /// 移除单个工具（线程安全）
+    /// </summary>
+    /// <param name="toolName">工具名称</param>
+    /// <returns>如果工具存在并已移除返回 true，否则返回 false</returns>
+    bool UnregisterTool(string toolName) => false;
+
+    /// <summary>
     /// 移除指定提供者类型注册的所有工具（线程安全，精确匹配 ProviderType）
     /// </summary>
     /// <param name="providerType">工具提供者类型（如 typeof(DateTimeTools)）</param>

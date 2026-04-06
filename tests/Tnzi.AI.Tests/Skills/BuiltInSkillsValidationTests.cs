@@ -104,6 +104,7 @@ public class BuiltInSkillsValidationTests
     [MemberData(nameof(SkillsWithScripts))]
     public void SkillWithScripts_ResourcePathsAreRelative(string slug, SkillDefinition skill)
     {
+        slug.ShouldNotBeNullOrWhiteSpace();
         foreach (var relPath in skill.Resources.Keys)
         {
             relPath.ShouldNotStartWith("/");

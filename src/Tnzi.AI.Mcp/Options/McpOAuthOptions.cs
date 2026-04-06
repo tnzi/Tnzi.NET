@@ -34,4 +34,20 @@ public class McpOAuthServerConfig
 
     /// <summary>提前刷新偏移量（秒），默认 60s</summary>
     public int RefreshSkewSeconds { get; set; } = 60;
+
+    /// <summary>Revocation Endpoint URL（可选，RFC 7009）</summary>
+    public string? RevocationEndpoint { get; set; }
+
+    /// <summary>
+    /// 是否启用 OAuth metadata discovery。
+    /// 启用后从 <see cref="MetadataUrl"/> 或 <see cref="AuthorizationServer"/> 派生的 well-known 地址
+    /// 发现 token/revocation endpoint（未显式配置时）。
+    /// </summary>
+    public bool EnableMetadataDiscovery { get; set; }
+
+    /// <summary>OAuth/OIDC metadata 文档地址（如 /.well-known/openid-configuration）</summary>
+    public string? MetadataUrl { get; set; }
+
+    /// <summary>授权服务器基地址。未显式提供 MetadataUrl 时，将自动拼接 well-known metadata 地址</summary>
+    public string? AuthorizationServer { get; set; }
 }

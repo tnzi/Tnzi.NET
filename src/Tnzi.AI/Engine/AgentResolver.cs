@@ -10,7 +10,9 @@ public class AgentResolver : IAgentResolver
     private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IToolRegistry _toolRegistry;
     private readonly IPromptTemplateEngine _templateEngine;
+    private readonly IAgentVersionRouter _versionRouter;
     private readonly IPermissionChecker? _permissionChecker;
+    private readonly IWorkspaceAgentProvider? _workspaceAgentProvider;
     private readonly ILogger<AgentResolver> _logger;
 
     public AgentResolver(
@@ -19,16 +21,20 @@ public class AgentResolver : IAgentResolver
         IRepository<Agent, Guid> agentRepository,
         IToolRegistry toolRegistry,
         IPromptTemplateEngine templateEngine,
+        IAgentVersionRouter versionRouter,
         ILogger<AgentResolver> logger,
-        IPermissionChecker? permissionChecker = null)
+        IPermissionChecker? permissionChecker = null,
+        IWorkspaceAgentProvider? workspaceAgentProvider = null)
     {
         _agentFactory = Check.NotNull(agentFactory);
         _options = Check.NotNull(options);
         _agentRepository = Check.NotNull(agentRepository);
         _toolRegistry = Check.NotNull(toolRegistry);
         _templateEngine = Check.NotNull(templateEngine);
+        _versionRouter = Check.NotNull(versionRouter);
         _logger = Check.NotNull(logger);
         _permissionChecker = permissionChecker;
+        _workspaceAgentProvider = workspaceAgentProvider;
     }
 
     /// <inheritdoc />
@@ -42,12 +48,34 @@ public class AgentResolver : IAgentResolver
             var entity = await _agentRepository.GetAsync(agentId.Value, ct);
             if (entity == null)
             {
+                // Try workspace fallback before returning failure
+                if (_workspaceAgentProvider != null && _options.Value.Workspace.Enabled)
+                {
+                    var wsAgent = await _workspaceAgentProvider.LoadAsync(
+                        _options.Value.Workspace.GlobalPath, agentId.Value.ToString(), ct);
+                    if (wsAgent != null)
+                    {
+                        var wsProvider = wsAgent.Provider ?? defaultProvider;
+                        var wsModel = model ?? wsAgent.Model;
+                        var wsInstructions = wsAgent.Instructions ?? string.Empty;
+                        var wsExecutor = await _agentFactory.CreateAgentAsync(
+                            wsProvider, wsModel, wsInstructions, wsAgent.Name,
+                            wsAgent.ToolGroups, wsAgent.Temperature, wsAgent.MaxTokens,
+                            options: null, ct: ct);
+                        return AgentResolution.Success(wsExecutor, wsProvider, wsModel, agentId);
+                    }
+                }
+
                 return AgentResolution.Failure(defaultProvider, model, agentId, ErrorCodes.AgentNotFound);
             }
             if (!entity.IsEnabled)
             {
                 return AgentResolution.Failure(defaultProvider, model, agentId, ErrorCodes.AgentDisabled);
             }
+
+            // A/B 测试路由：可能替换为不同版本的配置
+            var routeResult = await _versionRouter.RouteAsync(entity, ct);
+            entity = routeResult.Agent;
 
             var entityToolGroups = entity.ToolGroups;
 

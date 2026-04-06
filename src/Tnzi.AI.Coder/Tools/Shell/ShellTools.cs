@@ -13,6 +13,7 @@ public class ShellTools : IAIToolProvider
     private readonly ICommandSanitizer _commandSanitizer;
     private readonly IPathValidator _pathValidator;
     private readonly IToolApprovalHandler? _approvalHandler;
+    private readonly IShellAdapter _shellAdapter;
     private readonly CoderOptions _options;
     private readonly ILogger<ShellTools> _logger;
 
@@ -21,11 +22,13 @@ public class ShellTools : IAIToolProvider
         IPathValidator pathValidator,
         IOptions<CoderOptions> options,
         ILogger<ShellTools> logger,
-        IToolApprovalHandler? approvalHandler = null)
+        IToolApprovalHandler? approvalHandler = null,
+        IShellAdapter? shellAdapter = null)
     {
         _commandSanitizer = Check.NotNull(commandSanitizer);
         _pathValidator = Check.NotNull(pathValidator);
         _approvalHandler = approvalHandler;
+        _shellAdapter = shellAdapter ?? CreateDefaultShellAdapter();
         _options = Check.NotNull(options).Value;
         _logger = Check.NotNull(logger);
     }
@@ -33,7 +36,9 @@ public class ShellTools : IAIToolProvider
     /// <summary>
     /// 执行 shell 命令
     /// </summary>
-    [AIFunction("bash", "Execute a shell command")]
+    [AIFunction("bash", "Execute a shell command",
+        Aliases = "shell,exec", SearchHint = "execute run command shell bash",
+        InterruptBehavior = ToolInterruptBehavior.GracefulShutdown)]
     public async Task<object> ExecuteAsync(
         [AIParameter("command", "Shell command to execute")] string command,
         [AIParameter("working_directory", "Working directory", false)] string? workingDirectory = null,
@@ -104,21 +109,7 @@ public class ShellTools : IAIToolProvider
             _logger.LogDebug("Executing command: {Command} in {WorkDir} (timeout: {Timeout}ms)",
                 command, resolvedWorkDir, timeout);
 
-            // 检测平台选择 shell，使用 ArgumentList 避免命令注入
-            var shellPath = OperatingSystem.IsWindows() ? "bash" : "/bin/bash";
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = shellPath,
-                WorkingDirectory = resolvedWorkDir,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            // ArgumentList 会正确转义参数，避免 shell 注入
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(command);
+            var psi = _shellAdapter.CreateProcessStartInfo(command, resolvedWorkDir);
 
             // 应用环境变量过滤
             EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
@@ -309,18 +300,7 @@ public class ShellTools : IAIToolProvider
     /// </summary>
     private async Task<object> LaunchAndCollectInitialOutputAsync(string command, string resolvedWorkDir, int waitMs)
     {
-        var shellPath = OperatingSystem.IsWindows() ? "bash" : "/bin/bash";
-        var psi = new ProcessStartInfo
-        {
-            FileName = shellPath,
-            WorkingDirectory = resolvedWorkDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add(command);
+        var psi = _shellAdapter.CreateProcessStartInfo(command, resolvedWorkDir);
 
         // 应用环境变量过滤
         EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
@@ -400,6 +380,20 @@ public class ShellTools : IAIToolProvider
             catch { /* best effort */ }
             return new { error = $"Failed to execute command: {ex.Message}" };
         }
+    }
+
+    public static string GetShellPath()
+    {
+        return OperatingSystem.IsWindows()
+            ? PowerShellShellAdapter.DefaultExecutablePath
+            : BashShellAdapter.DefaultExecutablePath;
+    }
+
+    internal static IShellAdapter CreateDefaultShellAdapter()
+    {
+        return OperatingSystem.IsWindows()
+            ? new PowerShellShellAdapter()
+            : new BashShellAdapter();
     }
 
     private string TruncateOutput(string output) => OutputHelper.Truncate(output, _options.Sandbox.MaxOutputSize);

@@ -17,6 +17,9 @@ public class AgentRunNodeConfiguration : EntityTypeConfigurationBase<AgentRunNod
             .IsRequired()
             .HasMaxLength(200);
 
+        builder.Property(e => e.NodeKey)
+            .HasMaxLength(200);
+
         builder.Property(e => e.InputSummary)
             .HasMaxLength(2000);
 
@@ -26,10 +29,15 @@ public class AgentRunNodeConfiguration : EntityTypeConfigurationBase<AgentRunNod
         builder.Property(e => e.Error)
             .HasMaxLength(4000);
 
+        builder.Property(e => e.AwaitingInputKind)
+            .HasMaxLength(100);
+
         builder.Property(e => e.Status)
             .HasDefaultValue(AgentRunNodeStatus.Pending);
 
         builder.HasIndex(e => new { e.RunId, e.Status });
+        builder.HasIndex(e => new { e.RunId, e.NodeKey });
+        builder.HasIndex(e => new { e.RunId, e.ParentNodeId });
 
         if (multiTenancyEnabled)
         {

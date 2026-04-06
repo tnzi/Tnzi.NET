@@ -1,12 +1,12 @@
 namespace Tnzi.AI.Rag.FileExtractors;
 
 /// <summary>
-/// 纯文本文件提取器，支持 .txt, .csv, .log, .json, .xml, .yaml, .yml
+/// 纯文本文件提取器，支持 .txt, .log, .json, .xml, .yaml, .yml
 /// </summary>
 public class PlainTextFileExtractor : IFileExtractorService
 {
     private static readonly HashSet<string> SupportedExtensions =
-        [".txt", ".csv", ".log", ".json", ".xml", ".yaml", ".yml"];
+        [".txt", ".log", ".json", ".xml", ".yaml", ".yml"];
 
     /// <inheritdoc />
     public bool Supports(string fileName)

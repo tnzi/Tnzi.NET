@@ -73,6 +73,7 @@ public partial class WorkflowEngine
 
         int totalInputTokens = 0, totalOutputTokens = 0;
         var failed = false;
+        var cancelled = false;
         var awaitingApproval = false;
         string? awaitingApprovalStepId = null;
         WorkflowInterrupt? awaitingInterrupt = null;
@@ -85,6 +86,24 @@ public partial class WorkflowEngine
 
         while (completed.Count < graph.Nodes.Count)
         {
+            var signalResult = await ApplyPendingSignalsAsync(
+                executionId,
+                serviceProvider,
+                checkpointStore,
+                state,
+                completed,
+                checkpointCreatedAt,
+                run,
+                runStore,
+                cancellationToken);
+
+            checkpointCreatedAt = signalResult.CheckpointCreatedAt ?? checkpointCreatedAt;
+            if (signalResult.Cancelled)
+            {
+                cancelled = true;
+                break;
+            }
+
             // 获取就绪节点
             var readyNodes = graph.GetReadyNodes(completed);
             if (readyNodes.Count == 0) break;
@@ -276,7 +295,7 @@ public partial class WorkflowEngine
 
         return await BuildFinalResultAsync(
             executionId, initialInput, serviceProvider, state, completed, stepResults,
-            totalInputTokens, totalOutputTokens, failed, awaitingApproval, awaitingApprovalStepId,
+            totalInputTokens, totalOutputTokens, failed, cancelled, awaitingApproval, awaitingApprovalStepId,
             awaitingInterrupt, checkpointStore, checkpointCreatedAt, run, runStore, cancellationToken);
     }
 
@@ -305,6 +324,9 @@ public class WorkflowEngineResult
     /// <summary>是否存在失败节点</summary>
     public bool HasFailure { get; init; }
 
+    /// <summary>是否已取消</summary>
+    public bool Cancelled { get; init; }
+
     /// <summary>是否因等待审批而暂停</summary>
     public bool AwaitingApproval { get; init; }
 
@@ -327,6 +349,8 @@ public class WorkflowEngineResult
         ? nameof(WorkflowExecutionStatus.AwaitingInput)
         : AwaitingApproval
             ? nameof(WorkflowExecutionStatus.AwaitingApproval)
+            : Cancelled
+                ? nameof(WorkflowExecutionStatus.Cancelled)
             : HasFailure
                 ? nameof(WorkflowExecutionStatus.Failed)
                 : nameof(WorkflowExecutionStatus.Completed);

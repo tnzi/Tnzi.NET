@@ -41,6 +41,10 @@ public class AIModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI:SubAgent"))
             .ValidateWith<SubAgentOptions, SubAgentOptionsValidator>();
 
+        context.Services.AddOptions<BudgetOptions>()
+            .Bind(context.Configuration.GetSection("AI:Budget"))
+            .ValidateWith<BudgetOptions, BudgetOptionsValidator>();
+
         context.Services.AddOptions<SuggestionOptions>()
             .Bind(context.Configuration.GetSection("AI:Suggestions"))
             .ValidateWith<SuggestionOptions, SuggestionOptionsValidator>();
@@ -95,6 +99,9 @@ public class AIModule : TnziApplicationModule
                 options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
             });
 
+        // OAuth 令牌请求专用 HttpClient（无重试/熔断，令牌端点自行处理错误）
+        services.AddHttpClient("Tnzi.AI.OAuth");
+
         // 注册基础设施
         services.AddSingleton<IChatClientProvider, OpenAIChatClientProvider>();
         services.AddSingleton<IChatClientProvider, AnthropicChatClientProvider>();
@@ -120,8 +127,11 @@ public class AIModule : TnziApplicationModule
         services.TryAddSingleton<IToolRegistry, ToolRegistry>();
 
         // MCP：连接工厂与工具提供者（启用 AI:Mcp:Enabled 时生效）。IMcpToolProvider/McpClientFactory 为 Singleton（无请求级状态），Scoped ToolResolver 可安全注入它们。
+        services.TryAddSingleton<McpOAuthClientHandler>();
         services.AddSingleton<IMcpClientFactory, McpClientFactory>();
         services.AddSingleton<IMcpToolProvider, McpToolProvider>();
+        services.TryAddSingleton<IMcpResourceProvider, McpResourceProvider>();
+        services.TryAddSingleton<IMcpPromptProvider, McpPromptProvider>();
 
         // Token 估算器（TryAdd：允许用户注册 tiktoken 等精确实现）
         services.TryAddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
@@ -129,10 +139,15 @@ public class AIModule : TnziApplicationModule
         // 注册 Agent 解析器
         services.AddScoped<IAgentResolver, AgentResolver>();
 
+        // 可选子模块回退实现：允许只加载 AIModule 时仍能解析核心服务
+        services.TryAddScoped<IWorkflowService, NoOpWorkflowService>();
+        services.TryAddScoped<ISkillLoadTracker, NoOpSkillLoadTracker>();
+
         // 注册对话存储和记忆存储（使用 TryAdd，允许 Agent 模块替换）
         services.TryAddScoped<IConversationStore, DatabaseConversationStore>();
         services.TryAddScoped<IMemoryStore, DatabaseMemoryStore>();
         services.TryAddScoped<IMemoryConsolidator, LlmMemoryConsolidator>();
+        services.TryAddScoped<IMemorySideQuery, MemorySideQuery>();
 
         // 注册实体记忆存储和 LLM 实体抽取器
         services.TryAddScoped<IEntityMemoryStore, DatabaseEntityMemoryStore>();
@@ -140,6 +155,15 @@ public class AIModule : TnziApplicationModule
 
         // 注册项目上下文提供器（从 DI 获取 IProjectContextLoader）
         services.AddScoped<ProjectContextProvider>();
+
+        // 注册上下文提供器贡献者（DI 驱动，取代 AgentExecutorOptionsBuilder 中硬编码 new）
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.TextSearchContributor>();
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.ChatHistoryMemoryContributor>();
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.MemoryContributor>();
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.EntityMemoryContributor>();
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.SkillContributor>();
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.ProjectContextContributor>();
+        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.DeferredToolContributor>();
 
         // 注册 Prompt 模板引擎（TryAdd：允许用户注册自定义模板引擎）
         services.TryAddScoped<IPromptTemplateEngine, SimplePromptTemplateEngine>();
@@ -151,7 +175,9 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<QuotaService>();
         services.AddScoped<IQuotaService>(sp => sp.GetRequiredService<QuotaService>());
         services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
+        services.AddScoped<IBudgetService, BudgetService>();
         services.AddScoped<IAgentService, AgentService>();
+        services.AddScoped<IAgentVersionRouter, AgentVersionRouter>();
         services.AddScoped<AgentThreadService>();
         services.AddScoped<IAgentThreadService>(sp => sp.GetRequiredService<AgentThreadService>());
         services.AddScoped<IAgentThreadInternalService>(sp => sp.GetRequiredService<AgentThreadService>());
@@ -167,6 +193,8 @@ public class AIModule : TnziApplicationModule
         // 注册工具审批处理器（使用 TryAdd 允许用户覆盖）
         // 用户可以注册自己的 IToolApprovalHandler 实现来实现自定义审批逻辑
         services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
+        services.TryAddSingleton<IToolPermissionEvaluator, ConfiguredToolPermissionEvaluator>();
+        services.TryAddSingleton<IShellCommandAnalyzer, ShellCommandAnalyzer>();
 
         // [RequiresSkill] 兜底中间件 — 工具调用前检查 Skill 是否已加载
         services.AddScoped<IToolExecutionMiddleware, RequiresSkillToolMiddleware>();
@@ -248,6 +276,7 @@ public class AIModule : TnziApplicationModule
         // Phase 5: Tool guardrail middleware
         services.AddScoped<ToolGuardrailMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ToolGuardrailMiddleware>());
+        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<ToolGuardrailMiddleware>());
 
         // Phase 1 middlewares
         // Singleton: tracks tool call patterns across requests via LRU dictionary
@@ -256,6 +285,7 @@ public class AIModule : TnziApplicationModule
 
         services.AddScoped<ToolErrorRecoveryMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ToolErrorRecoveryMiddleware>());
+        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<ToolErrorRecoveryMiddleware>());
 
         services.AddScoped<SubAgentLimitMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SubAgentLimitMiddleware>());
@@ -282,12 +312,16 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<IAgentRuntime, AgentRuntime>();
 
         // 注册 Run 管理服务（查询、取消、审批、重试、反馈）
+        services.AddScoped<ISubAgentExecutionService, SubAgentExecutionService>();
         services.AddScoped<IAgentRunService, AgentRunService>();
         services.AddScoped<IAgentTraceService, AgentTraceService>();
+        services.AddScoped<IAgentRunSignalDispatcher, AgentRunSignalDispatcher>();
+        services.AddScoped<IAgentRuntimeControlService, AgentRuntimeControlService>();
 
         // 注册 Agent 验证服务（配置有效性检查）
         services.AddScoped<IAgentValidationService, AgentValidationService>();
         services.AddScoped<IEvaluationService, EvaluationService>();
+        services.AddScoped<IEvaluationMetricsService, EvaluationMetricsService>();
 
         // 注册 AgentPersona、UserProfile 和 AgentArtifact 服务
         services.AddScoped<IAgentPersonaService, AgentPersonaService>();
@@ -308,9 +342,13 @@ public class AIModule : TnziApplicationModule
         services.TryAddScoped<ClarificationTools>();
         services.TryAddScoped<TodoTools>();
         services.TryAddScoped<ArtifactTools>();
+        services.TryAddScoped<AgentRunControlTools>();
 
         // IAiUtility — 轻量级系统级 AI 调用
         services.TryAddScoped<IAiUtility, AiUtilityService>();
+
+        // Workspace agent provider (file-based AGENT.md discovery)
+        services.AddSingleton<IWorkspaceAgentProvider, WorkspaceAgentProvider>();
 
         // YAML Agent 定义文件加载与数据库同步
         services.AddSingleton<IAgentDefinitionProvider, YamlAgentDefinitionProvider>();
@@ -470,14 +508,29 @@ public class AIModule : TnziApplicationModule
         {
             using var scope = serviceProvider.CreateScope();
             var textSearchService = scope.ServiceProvider.GetRequiredService<ITextSearchService>();
-            if (textSearchService is NoOpTextSearchService
+            if (textSearchService is INoOpService
                 && (options.ContextProviders.TextSearch.Enabled || options.ContextProviders.ChatHistoryMemory.Enabled))
             {
                 throw new InvalidOperationException(
-                    "AI text search or chat history memory is enabled, but ITextSearchService is still the default NoOpTextSearchService. Register a real ITextSearchService implementation.");
+                    "AI text search or chat history memory is enabled, but ITextSearchService is still a no-op fallback. Register a real ITextSearchService implementation.");
             }
 
-            // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
+            // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（��描模块程序集目录的 Skills/ 文件夹）
+        }
+
+        var workflowService = serviceProvider.GetRequiredService<IWorkflowService>();
+        if (workflowService is INoOpService)
+        {
+            logger.LogInformation(
+                "IWorkflowService is a no-op fallback; workflow APIs will return 501 until a workflow module is loaded.");
+        }
+
+        if (options.ContextProviders.Enabled
+            && options.ContextProviders.Skills.Enabled
+            && serviceProvider.GetService<ISkillRegistry>() == null)
+        {
+            logger.LogWarning(
+                "AI skills context provider is enabled but no ISkillRegistry is registered. Skill context injection will be unavailable.");
         }
 
         logger.LogDebug("AI runtime configuration validation passed.");

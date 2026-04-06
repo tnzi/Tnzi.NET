@@ -28,8 +28,10 @@ public static partial class SkillInstallationValidator
     {
         "name", "slug", "description", "version", "author", "tags",
         "priority", "enabled", "agents", "allowed-tool-groups",
-        "tool-whitelist", "tool-blacklist", "model", "provider",
-        "internal", "license", "homepage", "keywords", "category"
+        "tool-whitelist", "tool-blacklist", "allowed-tools", "denied-tools",
+        "model", "provider", "reasoning-effort", "execution-context",
+        "internal", "license", "homepage", "keywords", "category",
+        "paths"
     };
 
     [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*$")]

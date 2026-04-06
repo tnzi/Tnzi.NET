@@ -1,11 +1,15 @@
+using Tnzi.AI.Tools;
+
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// Catches exceptions during tool execution and converts them to error messages,
-/// allowing the agent to continue rather than crash. Preserves OperationCanceledException.
+/// 工具错误恢复中间件。
+/// 真正的恢复逻辑发生在 <see cref="IToolExecutionMiddleware"/> 路径，
+/// 避免将整个 AI 管道的异常误判为“工具错误”。
 /// </summary>
-public class ToolErrorRecoveryMiddleware : IAiMiddleware
+public class ToolErrorRecoveryMiddleware : IAiMiddleware, IToolExecutionMiddleware
 {
+    internal const string RecoveredErrorPropertyName = "ToolErrorRecovery.Error";
     private readonly ILogger<ToolErrorRecoveryMiddleware> _logger;
     private const int MaxErrorDetailLength = 500;
 
@@ -19,12 +23,24 @@ public class ToolErrorRecoveryMiddleware : IAiMiddleware
     public async Task<AgentRunResult> InvokeAsync(
         AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-            return await next(context, cancellationToken);
+        return await next(context, cancellationToken);
+    }
 
+    public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(
+        AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var chunk in next(context, cancellationToken))
+        {
+            yield return chunk;
+        }
+    }
+
+    public async Task<object?> InvokeAsync(ToolExecutionContext context, Func<Task<object?>> next)
+    {
         try
         {
-            return await next(context, cancellationToken);
+            return await next();
         }
         catch (OperationCanceledException)
         {
@@ -32,73 +48,22 @@ public class ToolErrorRecoveryMiddleware : IAiMiddleware
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Tool execution failed, injecting error result to continue agent execution");
-
             var errorDetail = ex.Message.Length > MaxErrorDetailLength
                 ? ex.Message[..MaxErrorDetailLength] + "..."
                 : ex.Message;
+            var recoveredError = $"{ex.GetType().Name}: {errorDetail}";
 
-            context.Messages.Add(new ChatMessage(ChatRole.User,
-                $"[TOOL ERROR] A tool execution failed with {ex.GetType().Name}: {errorDetail}. " +
-                "Please try a different approach or respond to the user directly."));
+            _logger.LogError(ex, "Tool '{ToolName}' execution failed, injecting recoverable tool result", context.ToolName);
+            context.Properties[RecoveredErrorPropertyName] = recoveredError;
 
-            return new AgentRunResult
-            {
-                Response = $"An internal tool error occurred: {errorDetail}",
-                FinishReason = FinishReasons.Error,
-                ThreadId = context.Request.ThreadId,
-                Status = AgentRunStatus.Failed
-            };
+            return $"Tool execution failed: {recoveredError}";
         }
     }
 
-    public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(
-        AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public static string? GetRecoveredError(ToolExecutionContext context)
     {
-        if (context.ShouldSkipMiddleware)
-        {
-            await foreach (var chunk in next(context, cancellationToken))
-                yield return chunk;
-            yield break;
-        }
-
-        AgentStreamChunk? errorChunk = null;
-        await using var enumerator = next(context, cancellationToken).GetAsyncEnumerator(cancellationToken);
-
-        while (errorChunk is null)
-        {
-            AgentStreamChunk? chunk;
-            try
-            {
-                if (!await enumerator.MoveNextAsync())
-                    break;
-                chunk = enumerator.Current;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Streaming tool execution failed, emitting error chunk");
-                var errorDetail = ex.Message.Length > MaxErrorDetailLength
-                    ? ex.Message[..MaxErrorDetailLength] + "..."
-                    : ex.Message;
-                errorChunk = new AgentStreamChunk
-                {
-                    Error = $"Tool error: {ex.GetType().Name}: {errorDetail}",
-                    FinishReason = FinishReasons.Error
-                };
-                break;
-            }
-
-            yield return chunk;
-        }
-
-        if (errorChunk is not null)
-        {
-            yield return errorChunk;
-        }
+        return context.Properties.TryGetValue(RecoveredErrorPropertyName, out var value)
+            ? value as string
+            : null;
     }
 }

@@ -1,3 +1,8 @@
+using Microsoft.Extensions.DependencyInjection;
+using Tnzi.AI.Services.Interfaces;
+
+using Tnzi.AI.Infrastructure;
+
 namespace Tnzi.AI.Services;
 
 /// <summary>
@@ -8,6 +13,8 @@ public partial class WorkflowService
     public async Task<Result<WorkflowExecutionResultDto>> RunAsync(Guid workflowId, string input, Guid? userId = null, CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
+        const string provider = "Workflow";
+        const string fallbackErrorType = "workflow_unsuccessful";
         var workflowDef = await _repository.GetAsync(workflowId, ct);
         if (workflowDef == null) return Fail<WorkflowExecutionResultDto>("Workflow not found", 404, ErrorCodes.WorkflowNotFound);
         if (!workflowDef.IsEnabled) return Fail<WorkflowExecutionResultDto>("Workflow is disabled", 400, ErrorCodes.WorkflowDisabled);
@@ -72,20 +79,26 @@ public partial class WorkflowService
             };
 
             // 更新执行状态（包括耗时计算）
+            var executionStatus = MapExecutionStatus(engineResult.StatusText);
             if (!string.IsNullOrWhiteSpace(executionId))
             {
-                var completedStatus = engineResult.StatusText switch
-                {
-                    "Completed" => WorkflowExecutionStatus.Completed,
-                    "AwaitingInput" => WorkflowExecutionStatus.AwaitingInput,
-                    "AwaitingApproval" => WorkflowExecutionStatus.AwaitingApproval,
-                    _ => WorkflowExecutionStatus.Running
-                };
-                await TryUpdateWorkflowExecutionStatusAsync(executionId, completedStatus, CancellationToken.None);
+                await TryUpdateWorkflowExecutionStatusAsync(executionId, executionStatus, CancellationToken.None);
             }
 
             var actualTotalTokens = actualInputTokens + actualOutputTokens;
-            await _usageLogService.LogUsageAsync(AIOperationType.WorkflowRun, "Workflow", workflowDef.Name, actualInputTokens, actualOutputTokens, stopwatch.ElapsedMilliseconds, true, ct: ct);
+            var isSuccess = IsSuccessfulWorkflowStatus(executionStatus);
+            var errorMessage = isSuccess ? null : BuildWorkflowFailureMessage(engineResult.StatusText, engineResult.FinalOutput);
+            await _usageLogService.LogUsageAsync(
+                AIOperationType.WorkflowRun,
+                provider,
+                workflowDef.Name,
+                actualInputTokens,
+                actualOutputTokens,
+                stopwatch.ElapsedMilliseconds,
+                isSuccess,
+                errorMessage,
+                ct: ct);
+            RecordWorkflowTelemetry(AIOperationType.WorkflowRun, workflowDef.Name, actualInputTokens, actualOutputTokens, stopwatch.Elapsed, isSuccess, isSuccess ? null : engineResult.StatusText ?? fallbackErrorType);
 
             // 结算配额（使用实际 token 用量）
             if (userId.HasValue && reservation != null)
@@ -104,7 +117,8 @@ public partial class WorkflowService
             }
 
             Logger.LogError(ex, "Workflow execution failed: {WorkflowId}", workflowId);
-            await _usageLogService.LogUsageAsync(AIOperationType.WorkflowRun, "Workflow", workflowDef.Name, 0, 0, stopwatch.ElapsedMilliseconds, false, ex.Message, ct: ct);
+            await _usageLogService.LogUsageAsync(AIOperationType.WorkflowRun, provider, workflowDef.Name, 0, 0, stopwatch.ElapsedMilliseconds, false, ex.Message, ct: ct);
+            RecordWorkflowTelemetry(AIOperationType.WorkflowRun, workflowDef.Name, 0, 0, stopwatch.Elapsed, false, ex.GetType().Name);
 
             // 释放预留配额（错误时按 0 结算，退回预留）
             if (userId.HasValue && reservation != null)
@@ -125,6 +139,7 @@ public partial class WorkflowService
     public async IAsyncEnumerable<WorkflowExecutionResultDto> RunStreamingAsync(Guid workflowId, string input, Guid? userId = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
+        const string provider = "Workflow";
         var workflowDef = await _repository.GetAsync(workflowId, ct);
         if (workflowDef == null)
             throw new BusinessException("Workflow not found", ErrorCodes.WorkflowNotFound, 404);
@@ -207,7 +222,7 @@ public partial class WorkflowService
             // 更新执行状态（包括耗时计算）
             if (!string.IsNullOrWhiteSpace(executionId))
             {
-                await TryUpdateWorkflowExecutionStatusAsync(executionId, WorkflowExecutionStatus.Completed, CancellationToken.None);
+                await TryUpdateWorkflowExecutionStatusAsync(executionId, MapExecutionStatus(finalStatusOverride), CancellationToken.None);
             }
 
             streamCompleted = true;
@@ -219,12 +234,29 @@ public partial class WorkflowService
 
             try
             {
+                var executionStatus = MapExecutionStatus(finalStatusOverride);
+                var isSuccess = streamCompleted && IsSuccessfulWorkflowStatus(executionStatus);
+                var errorMessage = isSuccess
+                    ? null
+                    : streamCompleted
+                        ? BuildWorkflowFailureMessage(finalStatusOverride, finalOutput)
+                        : "Workflow stream interrupted by exception";
+
                 await _usageLogService.LogUsageAsync(
-                    AIOperationType.WorkflowRun, "Workflow", workflowDef.Name,
+                    AIOperationType.WorkflowRunStreaming, provider, workflowDef.Name,
                     actualInputTokens, actualOutputTokens, stopwatch.ElapsedMilliseconds,
-                    streamCompleted,
-                    errorMessage: streamCompleted ? null : "Workflow stream interrupted by exception",
+                    isSuccess,
+                    errorMessage: errorMessage,
                     ct: CancellationToken.None);
+
+                RecordWorkflowTelemetry(
+                    AIOperationType.WorkflowRunStreaming,
+                    workflowDef.Name,
+                    actualInputTokens,
+                    actualOutputTokens,
+                    stopwatch.Elapsed,
+                    isSuccess,
+                    isSuccess ? null : streamCompleted ? finalStatusOverride ?? "workflow_unsuccessful" : "workflow_stream_interrupted");
             }
             catch (Exception ex)
             {
@@ -396,6 +428,11 @@ public partial class WorkflowService
     {
         Check.NotNullOrWhiteSpace(executionId);
 
+        var entity = await _executionRepository
+            .FirstOrDefaultAsync(e => e.ExecutionId == executionId, ct);
+        if (entity == null)
+            return Fail<WorkflowExecutionStatusDto>("Workflow execution not found", 404, ErrorCodes.WorkflowExecutionNotFound);
+
         var checkpoint = await _checkpointStore.GetCheckpointAsync(executionId, ct);
         if (checkpoint == null)
             return Fail<WorkflowExecutionStatusDto>("Workflow execution not found", 404, ErrorCodes.WorkflowExecutionNotFound);
@@ -407,8 +444,26 @@ public partial class WorkflowService
             CompletedStepIds = checkpoint.CompletedStepIds.ToList(),
             StepsAwaitingApproval = checkpoint.StepsAwaitingApproval.ToList(),
             CreatedAt = checkpoint.CreatedAt,
-            UpdatedAt = checkpoint.UpdatedAt
+            UpdatedAt = checkpoint.UpdatedAt,
+            PendingSignalCount = entity.PendingSignalCount,
+            CurrentWaitReason = entity.CurrentWaitReason
         });
+    }
+
+    [ExperimentalApi(Reason = "Workflow mailbox and signals are in preview")]
+    public async Task<Result<List<WorkflowExecutionSignal>>> GetPendingSignalsAsync(string executionId, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(executionId);
+
+        var mailbox = ServiceProvider?.GetService<IWorkflowExecutionMailbox>();
+        if (mailbox == null)
+            return Fail<List<WorkflowExecutionSignal>>("Workflow mailbox is not available", 501, ErrorCodes.WorkflowFailed);
+
+        var entity = await _executionRepository.FirstOrDefaultAsync(e => e.ExecutionId == executionId, ct);
+        if (entity == null)
+            return Fail<List<WorkflowExecutionSignal>>("Workflow execution not found", 404, ErrorCodes.WorkflowExecutionNotFound);
+
+        return Ok(await mailbox.GetPendingSignalsAsync(executionId, ct));
     }
 
     public async Task<Result<WorkflowExecutionDetailDto>> GetExecutionDetailAsync(string executionId)
@@ -424,6 +479,11 @@ public partial class WorkflowService
         var completedStepIds = DeserializeJsonList(entity.CompletedSteps);
         var stepsAwaiting = DeserializeJsonList(entity.StepsAwaitingApproval);
         var stepOutputs = DeserializeJsonDict(entity.StepOutputs);
+
+        // 终态（Completed/Failed/Cancelled）时不加载 pending signals，必然为空
+        var isTerminal = entity.Status is WorkflowExecutionStatus.Completed
+            or WorkflowExecutionStatus.Failed
+            or WorkflowExecutionStatus.Cancelled;
 
         return Ok(new WorkflowExecutionDetailDto
         {
@@ -441,7 +501,10 @@ public partial class WorkflowService
             DurationMs = entity.DurationMs,
             CreationTime = entity.CreationTime,
             CompletedTime = entity.CompletedTime,
-            UpdatedTime = entity.UpdatedTime
+            UpdatedTime = entity.UpdatedTime,
+            PendingSignalCount = entity.PendingSignalCount,
+            CurrentWaitReason = entity.CurrentWaitReason,
+            PendingSignals = isTerminal ? [] : await LoadPendingSignalsAsync(entity.ExecutionId)
         });
     }
 
@@ -465,7 +528,9 @@ public partial class WorkflowService
                 DurationMs = e.DurationMs,
                 CreationTime = e.CreationTime,
                 CompletedTime = e.CompletedTime,
-                UpdatedTime = e.UpdatedTime
+                UpdatedTime = e.UpdatedTime,
+                PendingSignalCount = e.PendingSignalCount,
+                CurrentWaitReason = e.CurrentWaitReason
             })
             .CreateAsync(query);
 
@@ -568,6 +633,51 @@ public partial class WorkflowService
         }
     }
 
+    [ExperimentalApi(Reason = "Workflow execution control is in preview")]
+    public async Task<Result> CancelAsync(string executionId, string? reason = null, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(executionId);
+
+        var entity = await _executionRepository.FirstOrDefaultAsync(e => e.ExecutionId == executionId, ct);
+        if (entity == null)
+            return Fail("Workflow execution not found", 404, ErrorCodes.WorkflowExecutionNotFound);
+
+        if (entity.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
+            return Fail("Workflow execution is already in a terminal state", 400, ErrorCodes.WorkflowExecutionInvalidState);
+
+        var mailbox = ServiceProvider?.GetService<IWorkflowExecutionMailbox>();
+        if (mailbox == null)
+            return Fail("Workflow mailbox is not available", 501, ErrorCodes.WorkflowFailed);
+
+        if (entity.Status is WorkflowExecutionStatus.AwaitingApproval or WorkflowExecutionStatus.AwaitingInput or WorkflowExecutionStatus.Paused)
+        {
+            var checkpoint = await _checkpointStore.GetCheckpointAsync(executionId, ct);
+            if (checkpoint != null)
+            {
+                checkpoint.Status = WorkflowExecutionStatus.Cancelled;
+                checkpoint.PendingInterruptJson = null;
+                checkpoint.StepsAwaitingApproval.Clear();
+                checkpoint.UpdatedAt = DateTime.UtcNow;
+                await _checkpointStore.SaveCheckpointAsync(checkpoint, ct);
+            }
+
+            await mailbox.ClearSignalsAsync(executionId, ct);
+            await TryUpdateWorkflowExecutionStatusAsync(executionId, WorkflowExecutionStatus.Cancelled, CancellationToken.None, "cancelled");
+            return Ok();
+        }
+
+        await mailbox.EnqueueSignalAsync(executionId, new WorkflowExecutionSignal
+        {
+            Type = WorkflowExecutionSignalTypes.Cancel,
+            Reason = reason ?? "Cancelled by operator"
+        }, ct);
+
+        entity.CurrentWaitReason = "cancel_requested";
+        entity.UpdatedTime = DateTime.UtcNow;
+        await _executionRepository.UpdateAsync(entity, ct);
+        return Ok();
+    }
+
     public async Task<Result<WorkflowInterruptDto>> GetPendingInterruptAsync(string executionId, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(executionId);
@@ -610,6 +720,66 @@ public partial class WorkflowService
         actualOutputTokens += usage.OutputTokens;
     }
 
+    private static WorkflowExecutionStatus MapExecutionStatus(string? statusText)
+    {
+        if (string.IsNullOrWhiteSpace(statusText))
+        {
+            return WorkflowExecutionStatus.Running;
+        }
+
+        if (statusText.StartsWith("PartialFailure", StringComparison.OrdinalIgnoreCase))
+        {
+            return WorkflowExecutionStatus.Failed;
+        }
+
+        return statusText switch
+        {
+            nameof(WorkflowExecutionStatus.Completed) => WorkflowExecutionStatus.Completed,
+            nameof(WorkflowExecutionStatus.Failed) => WorkflowExecutionStatus.Failed,
+            nameof(WorkflowExecutionStatus.Cancelled) => WorkflowExecutionStatus.Cancelled,
+            nameof(WorkflowExecutionStatus.Paused) => WorkflowExecutionStatus.Paused,
+            nameof(WorkflowExecutionStatus.AwaitingApproval) => WorkflowExecutionStatus.AwaitingApproval,
+            nameof(WorkflowExecutionStatus.AwaitingInput) => WorkflowExecutionStatus.AwaitingInput,
+            _ => WorkflowExecutionStatus.Running
+        };
+    }
+
+    private static bool IsSuccessfulWorkflowStatus(WorkflowExecutionStatus status)
+    {
+        return status == WorkflowExecutionStatus.Completed;
+    }
+
+    private static string BuildWorkflowFailureMessage(string? statusText, string? output)
+    {
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            return output;
+        }
+
+        return string.IsNullOrWhiteSpace(statusText)
+            ? "Workflow execution finished unsuccessfully."
+            : $"Workflow execution finished unsuccessfully: {statusText}";
+    }
+
+    private static void RecordWorkflowTelemetry(
+        string operationType,
+        string workflowName,
+        int inputTokens,
+        int outputTokens,
+        TimeSpan elapsed,
+        bool isSuccess,
+        string? errorType)
+    {
+        AIActivitySource.RecordChatRequest("Workflow", workflowName, operationType);
+        AIActivitySource.RecordTokenUsage("Workflow", workflowName, inputTokens, outputTokens, operationType);
+        AIActivitySource.RecordChatLatency("Workflow", workflowName, elapsed.TotalSeconds, operationType);
+
+        if (!isSuccess && !string.IsNullOrWhiteSpace(errorType))
+        {
+            AIActivitySource.RecordError("Workflow", workflowName, errorType);
+        }
+    }
+
     private async Task<string> EnsureWorkflowExecutionAsync(Guid workflowDefinitionId, string input, CancellationToken ct)
     {
         var executionId = Guid.NewGuid().ToString("N");
@@ -628,7 +798,7 @@ public partial class WorkflowService
         return executionId;
     }
 
-    private async Task TryUpdateWorkflowExecutionStatusAsync(string executionId, WorkflowExecutionStatus status, CancellationToken ct)
+    private async Task TryUpdateWorkflowExecutionStatusAsync(string executionId, WorkflowExecutionStatus status, CancellationToken ct, string? currentWaitReason = null)
     {
         try
         {
@@ -639,9 +809,10 @@ public partial class WorkflowService
             }
 
             entity.Status = status;
+            entity.CurrentWaitReason = currentWaitReason;
             var now = DateTime.UtcNow;
             entity.UpdatedTime = now;
-            if (status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed)
+            if (status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
             {
                 entity.CompletedTime ??= now;
                 // 计算执行耗时
@@ -657,6 +828,17 @@ public partial class WorkflowService
         {
             Logger.LogWarning(ex, "Failed to update workflow execution status: {ExecutionId} -> {Status}", executionId, status);
         }
+    }
+
+    private async Task<List<WorkflowExecutionSignal>> LoadPendingSignalsAsync(string executionId)
+    {
+        var mailbox = ServiceProvider?.GetService<IWorkflowExecutionMailbox>();
+        if (mailbox == null)
+        {
+            return [];
+        }
+
+        return await mailbox.GetPendingSignalsAsync(executionId, CancellationToken.None);
     }
 
     private static int EstimateWorkflowTokens(string? steps, string input)

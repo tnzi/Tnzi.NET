@@ -133,6 +133,9 @@ public class AgentRunStatsDto
     /// <summary>等待审批数</summary>
     public int AwaitingApprovalRuns { get; set; }
 
+    /// <summary>等待用户澄清数</summary>
+    public int RequiresClarificationRuns { get; set; }
+
     /// <summary>执行完成数</summary>
     public int CompletedRuns { get; set; }
 

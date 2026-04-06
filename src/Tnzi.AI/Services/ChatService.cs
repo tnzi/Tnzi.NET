@@ -28,6 +28,7 @@ public class ChatService : ApplicationService, IChatService
             // 构建 AgentRunRequest 并委托给 Runtime
             var runRequest = new AgentRunRequest
             {
+                OperationType = AIOperationType.Chat,
                 AgentId = request.AgentId,
                 Provider = request.Provider,
                 Model = request.Model,
@@ -40,11 +41,16 @@ public class ChatService : ApplicationService, IChatService
             };
 
             var result = await _runtime.RunAsync(runRequest, ct);
+            if (TryMapFailure(result, out var statusCode, out var errorCode))
+            {
+                return Fail<ChatResponseDto>(result.Response, statusCode, errorCode);
+            }
 
             return Ok(new ChatResponseDto
             {
                 Content = result.Response,
-                Model = request.Model,
+                FinishReason = result.FinishReason,
+                Model = result.Model ?? request.Model,
                 Usage = result.Usage,
                 ThreadId = result.ThreadId,
                 Citations = result.Citations,
@@ -76,6 +82,35 @@ public class ChatService : ApplicationService, IChatService
         }
     }
 
+    private static bool TryMapFailure(AgentRunResult result, out int statusCode, out string errorCode)
+    {
+        switch (result.FinishReason)
+        {
+            case FinishReasons.QuotaExceeded:
+                statusCode = 429;
+                errorCode = ErrorCodes.QuotaExceeded;
+                return true;
+            case FinishReasons.GuardrailRejected:
+                statusCode = 400;
+                errorCode = ErrorCodes.GuardrailRejected;
+                return true;
+            case FinishReasons.Rejected:
+                statusCode = 400;
+                errorCode = ErrorCodes.ChatFailed;
+                return true;
+            case FinishReasons.MaxHandoffs:
+            case FinishReasons.Error:
+            case FinishReasons.Failed:
+                statusCode = 500;
+                errorCode = ErrorCodes.ChatFailed;
+                return true;
+            default:
+                statusCode = 0;
+                errorCode = string.Empty;
+                return false;
+        }
+    }
+
     public async IAsyncEnumerable<StreamEvent> ChatStreamingAsync(ChatRequestDto request, [EnumeratorCancellation] CancellationToken ct = default)
     {
         int inputTokens = 0;
@@ -84,6 +119,7 @@ public class ChatService : ApplicationService, IChatService
         // 构建 AgentRunRequest 并委托给 Runtime
         var runRequest = new AgentRunRequest
         {
+            OperationType = AIOperationType.Chat,
             AgentId = request.AgentId,
             Provider = request.Provider,
             Model = request.Model,
@@ -98,6 +134,7 @@ public class ChatService : ApplicationService, IChatService
         AgentStreamChunk? lastChunk = null;
         string? streamErrorMessage = null;
         string? streamFinishReason = null;
+        string? streamModel = request.Model;
         List<CitationDto>? citations = null;
         bool earlyDoneSent = false;
 
@@ -118,67 +155,22 @@ public class ChatService : ApplicationService, IChatService
             {
                 citations = chunk.Citations;
             }
+            if (!string.IsNullOrWhiteSpace(chunk.Model))
+            {
+                streamModel = chunk.Model;
+            }
 
             // 发送 delta 事件、工具调用状态事件或错误事件（guardrail 拦截等）
             if (chunk.Error != null)
             {
                 streamErrorMessage = chunk.Error;
                 streamFinishReason = chunk.FinishReason;
-                yield return new StreamEvent
-                {
-                    IsError = true,
-                    ErrorMessage = chunk.Error,
-                    ErrorCode = chunk.FinishReason == "guardrail_rejected" ? ErrorCodes.GuardrailRejected : ErrorCodes.ChatFailed,
-                    FinishReason = chunk.FinishReason,
-                    Model = request.Model,
-                    ThreadId = currentThreadId
-                };
             }
-            else if (chunk.AgentName != null)
+
+            var streamEvent = CreateStreamEvent(chunk, currentThreadId, ErrorCodes.ChatFailed);
+            if (streamEvent != null)
             {
-                yield return new StreamEvent
-                {
-                    AgentName = chunk.AgentName,
-                    Model = request.Model,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.ReasoningText != null)
-            {
-                yield return new StreamEvent
-                {
-                    ReasoningDelta = chunk.ReasoningText,
-                    Model = request.Model,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.Text != null)
-            {
-                yield return new StreamEvent
-                {
-                    Delta = chunk.Text,
-                    Model = request.Model,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.ToolCalls != null)
-            {
-                yield return new StreamEvent
-                {
-                    ToolCalls = chunk.ToolCalls,
-                    Model = request.Model,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.IsToolCall)
-            {
-                yield return new StreamEvent
-                {
-                    IsToolCall = true,
-                    ToolCallNames = chunk.ToolCallNames,
-                    Model = request.Model,
-                    ThreadId = currentThreadId
-                };
+                yield return streamEvent;
             }
 
             // Yield isDone early when ANY terminal FinishReason is detected, so the client
@@ -194,7 +186,7 @@ public class ChatService : ApplicationService, IChatService
                     FinishReason = chunk.FinishReason,
                     IsError = hasError,
                     ErrorMessage = hasError ? streamErrorMessage : null,
-                    Model = request.Model,
+                    Model = streamModel,
                     ThreadId = currentThreadId,
                     Usage = new TokenUsageDto
                     {
@@ -222,7 +214,7 @@ public class ChatService : ApplicationService, IChatService
             {
                 IsDone = true,
                 FinishReason = hasStreamError ? (streamFinishReason ?? "error") : "stop",
-                Model = request.Model,
+                Model = streamModel,
                 ThreadId = runRequest.ThreadId,
                 IsError = hasStreamError,
                 ErrorMessage = hasStreamError ? streamErrorMessage : null,
@@ -235,5 +227,52 @@ public class ChatService : ApplicationService, IChatService
                 Citations = citations
             };
         }
+    }
+
+    private static StreamEvent? CreateStreamEvent(AgentStreamChunk chunk, Guid? threadId, string defaultErrorCode)
+    {
+        var hasPayload =
+            chunk.Error != null ||
+            chunk.AgentName != null ||
+            chunk.ReasoningText != null ||
+            chunk.Text != null ||
+            chunk.ToolCalls != null ||
+            chunk.IsToolCall ||
+            chunk.ToolCallNames != null ||
+            chunk.EventType != null ||
+            chunk.EventData != null ||
+            chunk.Suggestions != null ||
+            chunk.Todos != null ||
+            chunk.Artifacts != null;
+
+        if (!hasPayload)
+        {
+            return null;
+        }
+
+        return new StreamEvent
+        {
+            Delta = chunk.Text,
+            FinishReason = chunk.FinishReason,
+            Model = chunk.Model,
+            ThreadId = threadId,
+            IsError = chunk.Error != null,
+            ErrorMessage = chunk.Error,
+            ErrorCode = chunk.Error != null && chunk.FinishReason == FinishReasons.GuardrailRejected
+                ? ErrorCodes.GuardrailRejected
+                : chunk.Error != null
+                    ? defaultErrorCode
+                    : null,
+            IsToolCall = chunk.IsToolCall,
+            ToolCallNames = chunk.ToolCallNames,
+            ReasoningDelta = chunk.ReasoningText,
+            AgentName = chunk.AgentName,
+            ToolCalls = chunk.ToolCalls,
+            EventType = chunk.EventType,
+            EventData = chunk.EventData,
+            Suggestions = chunk.Suggestions,
+            Todos = chunk.Todos,
+            Artifacts = chunk.Artifacts
+        };
     }
 }

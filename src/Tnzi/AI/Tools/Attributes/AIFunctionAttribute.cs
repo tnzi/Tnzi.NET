@@ -37,6 +37,61 @@ public class AIFunctionAttribute : Attribute
     public string? Category { get; set; }
 
     /// <summary>
+    /// 是否为只读操作（不会修改任何状态）。默认 false（fail-closed）。
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>
+    /// 是否可安全并发执行（多个实例同时运行不会产生竞态条件）。默认 false（fail-closed）。
+    /// </summary>
+    public bool IsConcurrencySafe { get; set; }
+
+    /// <summary>
+    /// 是否为破坏性操作（删除文件、清除数据等不可逆操作）。默认 false。
+    /// </summary>
+    public bool IsDestructive { get; set; }
+
+    /// <summary>
+    /// 工具结果最大字符数限制。0 = 不限制（默认）。
+    /// </summary>
+    public int MaxResultSizeChars { get; set; }
+
+    /// <summary>
+    /// 搜索提示 — 用于 ToolSearch 评分时提供额外匹配关键词
+    /// </summary>
+    public string? SearchHint { get; set; }
+
+    /// <summary>
+    /// 工具别名（逗号分隔），用于 ToolSearch 名称匹配
+    /// </summary>
+    public string? Aliases { get; set; }
+
+    /// <summary>
+    /// 是否默认延迟加载。默认 false。
+    /// </summary>
+    public bool ShouldDefer { get; set; }
+
+    /// <summary>
+    /// 是否始终预加载。默认 false。
+    /// </summary>
+    public bool AlwaysLoad { get; set; }
+
+    /// <summary>
+    /// 搜索优先级。值越高越靠前。默认 0。
+    /// </summary>
+    public int Priority { get; set; }
+
+    /// <summary>
+    /// 关联的服务端提示（如 MCP server 名称）。
+    /// </summary>
+    public string? ServerHint { get; set; }
+
+    /// <summary>
+    /// 工具中断行为 — 当 Agent 取消时工具如何响应。默认 Cancel（立即取消）。
+    /// </summary>
+    public ToolInterruptBehavior InterruptBehavior { get; set; } = ToolInterruptBehavior.Cancel;
+
+    /// <summary>
     /// 初始化函数特性
     /// </summary>
     public AIFunctionAttribute()

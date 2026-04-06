@@ -276,8 +276,10 @@ public class AgentThreadServiceTests
         var result = await service.ExportAsMarkdownAsync(threadId);
 
         result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldContain("# Empty Thread");
-        result.Data.ShouldContain("**Messages**: 0");
+        var markdown = result.Data;
+        markdown.ShouldNotBeNull();
+        markdown.ShouldContain("# Empty Thread");
+        markdown.ShouldContain("**Messages**: 0");
     }
 
     // -------------------------------------------------------------------------

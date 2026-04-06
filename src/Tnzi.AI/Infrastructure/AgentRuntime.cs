@@ -56,13 +56,29 @@ public partial class AgentRuntime : IAgentRuntime
         Check.NotNull(request);
 
         var previousRequest = _executionContextAccessor.CurrentRequest;
+        var previousProperties = previousRequest != null
+            ? _executionContextAccessor.CaptureProperties()
+            : null;
         _executionContextAccessor.CurrentRequest = request;
+        _executionContextAccessor.ClearProperties();
 
         try
         {
             if (request.WorkflowId.HasValue)
             {
-                return await ExecuteWorkflowAsync(request, cancellationToken);
+                var workflowStopwatch = Stopwatch.StartNew();
+                var workflowResult = EnsureResultStatus(await ExecuteWorkflowAsync(request, cancellationToken));
+                workflowStopwatch.Stop();
+
+                await PublishRunCompletedEventAsync(
+                    request,
+                    workflowResult,
+                    null,
+                    workflowStopwatch.ElapsedMilliseconds,
+                    false,
+                    "Workflow");
+
+                return workflowResult;
             }
 
             var sw = Stopwatch.StartNew();
@@ -76,19 +92,19 @@ public partial class AgentRuntime : IAgentRuntime
 
             if (!resolution.IsSuccess)
             {
-                return new AgentRunResult
-                {
-                    Response = $"Agent resolution failed: {resolution.ErrorCode}",
-                    FinishReason = FinishReasons.Error
-                };
+                throw CreateAgentResolutionException(resolution);
             }
 
             // 2. 创建 Run（如果启用追踪）
             AgentRun? run = null;
             if (request.EnableRunTracking)
             {
-                run = await CreateRunAsync(request, resolution, cancellationToken);
+                run = await GetOrCreateRunAsync(request, resolution, cancellationToken);
+                _executionContextAccessor.Properties[ContextPropertyKeys.CurrentRunId] = run.Id;
             }
+
+            // 发布运行开始事件
+            await PublishRunStartedEventAsync(request, run, false, resolution.Provider, resolution.Model, resolution.ExecutionMode);
 
             // 3. 构建中间件上下文
             var context = new AiMiddlewareContext
@@ -119,14 +135,20 @@ public partial class AgentRuntime : IAgentRuntime
             {
                 var pipelineDelegate = pipeline.Build(coreExecutor);
                 result = await pipelineDelegate(context, cancellationToken);
+                if (run != null)
+                {
+                    result = EnsureResultStatus(result);
+                }
 
                 // 7. 更新 Run 状态为完成
                 if (run != null)
                 {
                     sw.Stop();
-                    run.Status = AgentRunStatus.Completed;
+                    run.Status = result.Status!.Value;
+                    run.Error = run.Status == AgentRunStatus.Failed ? result.Response : null;
                     run.OutputSummary = Truncate(result.Response, 500);
                     run.DurationMs = sw.ElapsedMilliseconds;
+                    run.LastHeartbeatAt = DateTime.UtcNow;
                     if (result.Usage != null)
                     {
                         run.TotalInputTokens = result.Usage.InputTokens;
@@ -146,10 +168,19 @@ public partial class AgentRuntime : IAgentRuntime
                 }
 
                 // 发布运行完成事件
-                await PublishRunCompletedEventAsync(request, result, run, sw.ElapsedMilliseconds, false);
+                await PublishRunCompletedEventAsync(
+                    request,
+                    result,
+                    run,
+                    sw.ElapsedMilliseconds,
+                    false,
+                    context.EffectiveProvider ?? resolution.Provider);
 
                 // 仅新线程首轮对话：应用 fallback 标题 + 发布标题生成事件
-                if (context.IsNewThread && request.ThreadId.HasValue && !string.IsNullOrWhiteSpace(request.UserMessage))
+                if (context.IsNewThread
+                    && request.ThreadId.HasValue
+                    && !string.IsNullOrWhiteSpace(request.UserMessage)
+                    && ShouldGenerateThreadTitle(result.FinishReason))
                 {
                     await HandleNewThreadTitleAsync(request, result);
                 }
@@ -158,6 +189,9 @@ public partial class AgentRuntime : IAgentRuntime
             {
                 _logger.LogError(ex, "AgentRuntime execution failed for request AgentId={AgentId}", request.AgentId);
 
+                // 发布运行失败事件
+                await PublishRunFailedEventAsync(request, run, ex, sw.ElapsedMilliseconds, false);
+
                 // 更新 Run 状态为失败
                 if (run != null)
                 {
@@ -165,6 +199,7 @@ public partial class AgentRuntime : IAgentRuntime
                     run.Status = AgentRunStatus.Failed;
                     run.Error = ex.Message;
                     run.DurationMs = sw.ElapsedMilliseconds;
+                    run.LastHeartbeatAt = DateTime.UtcNow;
                     await _runStore.UpdateAsync(run, CancellationToken.None);
 
                     await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.Error,
@@ -178,25 +213,78 @@ public partial class AgentRuntime : IAgentRuntime
             // 如果启用了 Run 追踪，创建包含 RunId 和 Status 的新结果
             if (run != null)
             {
-                return new AgentRunResult
-                {
-                    Response = result.Response,
-                    RunId = run.Id,
-                    ThreadId = result.ThreadId,
-                    Usage = result.Usage,
-                    Citations = result.Citations,
-                    FinishReason = result.FinishReason,
-                    Status = run.Status,
-                    Reasoning = result.Reasoning
-                };
+                return result.CloneWith(runId: run.Id, status: run.Status);
             }
 
             return result;
         }
         finally
         {
+            if (previousRequest != null)
+            {
+                _executionContextAccessor.RestoreProperties(previousProperties);
+            }
+            else
+            {
+                _executionContextAccessor.ClearProperties();
+            }
             _executionContextAccessor.CurrentRequest = previousRequest;
         }
+    }
+
+    private static BusinessException CreateAgentResolutionException(AgentResolution resolution)
+    {
+        return resolution.ErrorCode switch
+        {
+            ErrorCodes.AgentNotFound => new BusinessException("Agent not found", ErrorCodes.AgentNotFound, 404),
+            ErrorCodes.AgentDisabled => new BusinessException("Agent is disabled", ErrorCodes.AgentDisabled, 400),
+            _ => new BusinessException(
+                $"Agent resolution failed: {resolution.ErrorCode ?? ErrorCodes.AgentRunFailed}",
+                resolution.ErrorCode ?? ErrorCodes.AgentRunFailed,
+                500)
+        };
+    }
+
+    private static AgentRunResult EnsureResultStatus(
+        AgentRunResult result,
+        AgentRunStatus defaultStatus = AgentRunStatus.Completed)
+    {
+        return result.Status.HasValue
+            ? result
+            : result.CloneWith(status: ResolveRunStatus(result.FinishReason, defaultStatus));
+    }
+
+    private static AgentRunStatus ResolveRunStatus(
+        string? finishReason,
+        AgentRunStatus defaultStatus = AgentRunStatus.Completed)
+    {
+        return finishReason switch
+        {
+            FinishReasons.AwaitingApproval => AgentRunStatus.AwaitingApproval,
+            FinishReasons.RequiresClarification => AgentRunStatus.RequiresClarification,
+            FinishReasons.Error or
+            FinishReasons.Failed or
+            FinishReasons.GuardrailRejected or
+            FinishReasons.QuotaExceeded or
+            FinishReasons.Rejected or
+            FinishReasons.MaxHandoffs => AgentRunStatus.Failed,
+            _ => defaultStatus
+        };
+    }
+
+    private static bool ShouldGenerateThreadTitle(string? finishReason)
+    {
+        return finishReason switch
+        {
+            FinishReasons.GuardrailRejected or
+            FinishReasons.QuotaExceeded or
+            FinishReasons.Error or
+            FinishReasons.Failed or
+            FinishReasons.Rejected or
+            FinishReasons.MaxHandoffs or
+            FinishReasons.MaxToolIterations => false,
+            _ => true
+        };
     }
 
     /// <summary>执行一次 AI 运行（流式）</summary>
@@ -207,16 +295,57 @@ public partial class AgentRuntime : IAgentRuntime
         Check.NotNull(request);
 
         var previousRequest = _executionContextAccessor.CurrentRequest;
+        var previousProperties = previousRequest != null
+            ? _executionContextAccessor.CaptureProperties()
+            : null;
         _executionContextAccessor.CurrentRequest = request;
+        _executionContextAccessor.ClearProperties();
 
         try
         {
             if (request.WorkflowId.HasValue)
             {
-                await foreach (var chunk in ExecuteWorkflowStreamingAsync(request, cancellationToken).WithCancellation(cancellationToken))
+                var workflowStopwatch = Stopwatch.StartNew();
+                WorkflowExecutionResultDto? lastWorkflowEvent = null;
+
+                await foreach (var workflowEvent in _workflowService.RunStreamingAsync(
+                    request.WorkflowId.Value,
+                    request.UserMessage ?? string.Empty,
+                    request.UserId,
+                    cancellationToken).WithCancellation(cancellationToken))
                 {
-                    yield return chunk;
+                    lastWorkflowEvent = workflowEvent;
+                    if (!string.IsNullOrWhiteSpace(workflowEvent.Output))
+                    {
+                        var isCompleted = IsWorkflowTerminalStatus(workflowEvent.Status);
+                        yield return new AgentStreamChunk
+                        {
+                            Text = workflowEvent.Output,
+                            FinishReason = isCompleted
+                                ? MapWorkflowFinishReason(workflowEvent.Status, streaming: true)
+                                : null
+                        };
+                    }
                 }
+
+                workflowStopwatch.Stop();
+                if (lastWorkflowEvent != null)
+                {
+                    await PublishRunCompletedEventAsync(
+                        request,
+                        new AgentRunResult
+                        {
+                            Response = lastWorkflowEvent.Output,
+                            RunId = lastWorkflowEvent.RunId,
+                            FinishReason = MapWorkflowFinishReason(lastWorkflowEvent.Status, streaming: true),
+                            Status = MapWorkflowStatus(lastWorkflowEvent.Status)
+                        },
+                        null,
+                        workflowStopwatch.ElapsedMilliseconds,
+                        true,
+                        "Workflow");
+                }
+
                 yield break;
             }
 
@@ -243,8 +372,12 @@ public partial class AgentRuntime : IAgentRuntime
             AgentRun? run = null;
             if (request.EnableRunTracking)
             {
-                run = await CreateRunAsync(request, resolution, cancellationToken);
+                run = await GetOrCreateRunAsync(request, resolution, cancellationToken);
+                _executionContextAccessor.Properties[ContextPropertyKeys.CurrentRunId] = run.Id;
             }
+
+            // 发布运行开始事件
+            await PublishRunStartedEventAsync(request, run, true, resolution.Provider, resolution.Model, resolution.ExecutionMode);
 
             // 3. 构建中间件上下文
             var context = new AiMiddlewareContext
@@ -274,12 +407,17 @@ public partial class AgentRuntime : IAgentRuntime
             var totalInputTokens = 0;
             var totalOutputTokens = 0;
             string? lastFinishReason = null;
+            string? lastModel = null;
             var completedNormally = false;
+            var responseBuilder = new StringBuilder();
 
             try
             {
                 await foreach (var chunk in streamDelegate(context, cancellationToken).WithCancellation(cancellationToken))
                 {
+                    chunk.Model ??= context.EffectiveModel ?? resolution.Model;
+                    lastModel = chunk.Model ?? lastModel;
+
                     if (chunk.Usage != null)
                     {
                         totalInputTokens += chunk.Usage.InputTokens;
@@ -288,6 +426,10 @@ public partial class AgentRuntime : IAgentRuntime
                     if (chunk.FinishReason != null)
                     {
                         lastFinishReason = chunk.FinishReason;
+                    }
+                    if (!string.IsNullOrEmpty(chunk.Text))
+                    {
+                        responseBuilder.Append(chunk.Text);
                     }
 
                     // StreamMode 过滤：仅输出客户端请求的粒度级别
@@ -311,9 +453,19 @@ public partial class AgentRuntime : IAgentRuntime
                         run.DurationMs = sw.ElapsedMilliseconds;
                         run.TotalInputTokens = totalInputTokens;
                         run.TotalOutputTokens = totalOutputTokens;
+                        run.LastHeartbeatAt = DateTime.UtcNow;
 
                         if (completedNormally)
                         {
+                            var streamResult = EnsureResultStatus(new AgentRunResult
+                            {
+                                Response = responseBuilder.ToString(),
+                                Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
+                                FinishReason = lastFinishReason,
+                                Model = lastModel,
+                                Provider = context.EffectiveProvider ?? resolution.Provider
+                            });
+
                             if (lastFinishReason == "max_tool_iterations")
                             {
                                 _logger.LogWarning(
@@ -321,7 +473,9 @@ public partial class AgentRuntime : IAgentRuntime
                                     run.Id);
                             }
 
-                            run.Status = AgentRunStatus.Completed;
+                            run.Status = streamResult.Status!.Value;
+                            run.Error = run.Status == AgentRunStatus.Failed ? streamResult.Response : null;
+                            run.OutputSummary = Truncate(streamResult.Response, 500);
                             await _runStore.UpdateAsync(run, CancellationToken.None);
 
                             await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.StreamCompleted,
@@ -329,13 +483,13 @@ public partial class AgentRuntime : IAgentRuntime
                                 sw.ElapsedMilliseconds, CancellationToken.None);
 
                             // 发布流式运行完成事件
-                            var streamResult = new AgentRunResult
-                            {
-                                Response = string.Empty,
-                                Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
-                                FinishReason = lastFinishReason
-                            };
-                            await PublishRunCompletedEventAsync(request, streamResult, run, sw.ElapsedMilliseconds, true);
+                            await PublishRunCompletedEventAsync(
+                                request,
+                                streamResult,
+                                run,
+                                sw.ElapsedMilliseconds,
+                                true,
+                                context.EffectiveProvider ?? resolution.Provider);
                         }
                         else if (cancellationToken.IsCancellationRequested)
                         {
@@ -356,17 +510,29 @@ public partial class AgentRuntime : IAgentRuntime
                             await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.Error,
                                 new { error = run.Error, finishReason = lastFinishReason },
                                 sw.ElapsedMilliseconds, CancellationToken.None);
+
+                            // 发布流式运行失败事件
+                            await PublishRunFailedEventAsync(
+                                request, run,
+                                new InvalidOperationException("Streaming execution failed"),
+                                sw.ElapsedMilliseconds, true);
                         }
                     }
 
                     // 标题生成独立于 Run 追踪 — 即使 EnableRunTracking=false 也应执行
-                    if (completedNormally && context.IsNewThread && request.ThreadId.HasValue && !string.IsNullOrWhiteSpace(request.UserMessage))
+                    if (completedNormally
+                        && context.IsNewThread
+                        && request.ThreadId.HasValue
+                        && !string.IsNullOrWhiteSpace(request.UserMessage)
+                        && ShouldGenerateThreadTitle(lastFinishReason))
                     {
                         await HandleNewThreadTitleAsync(request, new AgentRunResult
                         {
-                            Response = string.Empty,
+                            Response = responseBuilder.ToString(),
                             Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
-                            FinishReason = lastFinishReason
+                            FinishReason = lastFinishReason,
+                            Model = lastModel,
+                            Provider = context.EffectiveProvider ?? resolution.Provider
                         });
                     }
                 }
@@ -378,6 +544,14 @@ public partial class AgentRuntime : IAgentRuntime
         }
         finally
         {
+            if (previousRequest != null)
+            {
+                _executionContextAccessor.RestoreProperties(previousProperties);
+            }
+            else
+            {
+                _executionContextAccessor.ClearProperties();
+            }
             _executionContextAccessor.CurrentRequest = previousRequest;
         }
     }
@@ -391,7 +565,9 @@ public partial class AgentRuntime : IAgentRuntime
             throw new BusinessException($"Run {runId} not found", ErrorCodes.RunNotFound, 404);
         }
 
-        if (run.Status != AgentRunStatus.AwaitingApproval && run.Status != AgentRunStatus.Failed)
+        if (run.Status != AgentRunStatus.AwaitingApproval
+            && run.Status != AgentRunStatus.Failed
+            && run.Status != AgentRunStatus.RequiresClarification)
         {
             throw new BusinessException(
                 $"Run {runId} is in {run.Status} state and cannot be resumed",
@@ -439,6 +615,7 @@ public partial class AgentRuntime : IAgentRuntime
 
         var resumeRequest = new AgentRunRequest
         {
+            OperationType = AIOperationType.AgentRun,
             AgentId = run.AgentId,
             ThreadId = run.ThreadId,
             UserMessage = input?.UserMessage ?? run.InputSummary,
@@ -449,11 +626,12 @@ public partial class AgentRuntime : IAgentRuntime
         AgentRunResult result;
         try
         {
-            result = await RunAsync(resumeRequest, cancellationToken);
+            result = EnsureResultStatus(await RunAsync(resumeRequest, cancellationToken));
             sw.Stop();
 
             // 更新原始 Run 为完成状态
-            run.Status = AgentRunStatus.Completed;
+            run.Status = result.Status!.Value;
+            run.Error = run.Status == AgentRunStatus.Failed ? result.Response : null;
             run.OutputSummary = Truncate(result.Response, 500);
             run.DurationMs = sw.ElapsedMilliseconds;
             if (result.Usage != null)
@@ -479,17 +657,7 @@ public partial class AgentRuntime : IAgentRuntime
             throw;
         }
 
-        return new AgentRunResult
-        {
-            Response = result.Response,
-            RunId = run.Id,
-            ThreadId = result.ThreadId,
-            Usage = result.Usage,
-            Citations = result.Citations,
-            FinishReason = result.FinishReason,
-            Status = run.Status,
-            Reasoning = result.Reasoning
-        };
+        return result.CloneWith(runId: run.Id, status: run.Status);
     }
 
 }

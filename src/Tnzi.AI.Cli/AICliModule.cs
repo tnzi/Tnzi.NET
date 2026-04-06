@@ -4,7 +4,7 @@ namespace Tnzi.AI.Cli;
 /// AI CLI 模块 — 提供 ExternalCli 执行模式，将 Agent 请求委托给外部 CLI 工具（Claude Code, Codex 等）
 /// </summary>
 [DependsOn(typeof(AIModule))]
-public class AICliModule : TnziCustomModule
+public class AICliModule : TnziApplicationModule
 {
     public override int LoadOrder => 56;
 

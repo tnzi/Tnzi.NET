@@ -18,7 +18,7 @@ public class TaskTrackerTools : IAIToolProvider
     /// <summary>
     /// 创建新任务
     /// </summary>
-    [AIFunction("create_task", "Create a new task with title, description, and priority")]
+    [AIFunction("create_task", "Create a new task with title, description, and priority", IsConcurrencySafe = true)]
     public Task<object> CreateTaskAsync(
         [AIParameter("title", "Task title")] string title,
         [AIParameter("description", "Task description", false)] string? description = null,
@@ -65,7 +65,7 @@ public class TaskTrackerTools : IAIToolProvider
     /// <summary>
     /// 更新任务状态或追加备注
     /// </summary>
-    [AIFunction("update_task", "Update task status or add notes")]
+    [AIFunction("update_task", "Update task status or add notes", IsConcurrencySafe = true)]
     public Task<object> UpdateTaskAsync(
         [AIParameter("id", "Task ID (e.g. T1)")] string id,
         [AIParameter("status", "New status: pending, in_progress, completed, blocked", false)] string? status = null,
@@ -127,7 +127,7 @@ public class TaskTrackerTools : IAIToolProvider
     /// <summary>
     /// 列出所有任务，可按状态筛选
     /// </summary>
-    [AIFunction("list_tasks", "List all tasks, optionally filtered by status")]
+    [AIFunction("list_tasks", "List all tasks, optionally filtered by status", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> ListTasksAsync(
         [AIParameter("status", "Filter by status: pending, in_progress, completed, blocked", false)] string? status = null)
     {
@@ -159,7 +159,7 @@ public class TaskTrackerTools : IAIToolProvider
     /// <summary>
     /// 获取单个任务详情
     /// </summary>
-    [AIFunction("get_task", "Get task details by ID")]
+    [AIFunction("get_task", "Get task details by ID", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> GetTaskAsync(
         [AIParameter("id", "Task ID (e.g. T1)")] string id)
     {
@@ -182,7 +182,7 @@ public class TaskTrackerTools : IAIToolProvider
     /// <summary>
     /// 删除任务
     /// </summary>
-    [AIFunction("delete_task", "Remove a task by ID")]
+    [AIFunction("delete_task", "Remove a task by ID", IsConcurrencySafe = true)]
     public Task<object> DeleteTaskAsync(
         [AIParameter("id", "Task ID (e.g. T1)")] string id)
     {

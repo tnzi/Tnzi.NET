@@ -17,6 +17,7 @@ public class RetryMiddleware : IAiMiddleware
     private readonly IOptions<AIOptions> _options;
     private readonly ILogger<RetryMiddleware> _logger;
     private readonly ResiliencePipeline _pipeline;
+    private readonly ResiliencePipeline _backgroundPipeline;
 
     public int Order => AiMiddlewareOrders.Retry;
 
@@ -26,7 +27,8 @@ public class RetryMiddleware : IAiMiddleware
         _logger = Check.NotNull(logger);
 
         var retryOptions = options.Value.Retry;
-        _pipeline = BuildPipeline(retryOptions);
+        _pipeline = BuildPipeline(retryOptions, excludeRateLimitRetry: false);
+        _backgroundPipeline = BuildPipeline(retryOptions, excludeRateLimitRetry: retryOptions.AbortBackgroundOn429);
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
@@ -37,7 +39,8 @@ public class RetryMiddleware : IAiMiddleware
         if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
             return await next(context, cancellationToken);
 
-        return await _pipeline.ExecuteAsync(async ct => await next(context, ct), cancellationToken);
+        var pipeline = IsBackgroundTask(context) ? _backgroundPipeline : _pipeline;
+        return await pipeline.ExecuteAsync(async ct => await next(context, ct), cancellationToken);
     }
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -96,7 +99,7 @@ public class RetryMiddleware : IAiMiddleware
                 var remaining = ConsumeRemainingAsync(enumerator, cancellationToken);
                 return (firstChunk, remaining);
             }
-            catch (Exception ex) when (attempt < maxRetries && ShouldRetry(ex))
+            catch (Exception ex) when (attempt < maxRetries && ShouldRetry(ex) && !ShouldAbortBackground(context, ex))
             {
                 attempt++;
                 _logger.LogWarning(ex,
@@ -133,8 +136,11 @@ public class RetryMiddleware : IAiMiddleware
     /// <summary>
     /// 构建 Polly ResiliencePipeline（重试 + 熔断）
     /// </summary>
-    private ResiliencePipeline BuildPipeline(RetryOptions retryOptions)
+    /// <param name="retryOptions">重试配置</param>
+    /// <param name="excludeRateLimitRetry">是否排除 429 Rate Limit 的重试（后台任务防雪崩）</param>
+    private ResiliencePipeline BuildPipeline(RetryOptions retryOptions, bool excludeRateLimitRetry)
     {
+        var predicate = CreateShouldRetryPredicate(excludeRateLimitRetry);
         return new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
             {
@@ -143,13 +149,23 @@ public class RetryMiddleware : IAiMiddleware
                 MaxDelay = retryOptions.MaxDelay,
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
-                ShouldHandle = new PredicateBuilder().Handle<Exception>(ShouldRetry),
+                ShouldHandle = new PredicateBuilder().Handle<Exception>(predicate),
                 OnRetry = args =>
                 {
                     _logger.LogWarning(args.Outcome.Exception,
                         "AI request failed (attempt {Attempt}/{MaxRetries}), retrying after {Delay}ms",
                         args.AttemptNumber + 1, retryOptions.MaxRetries,
                         args.RetryDelay.TotalMilliseconds);
+
+                    // 检查 Retry-After 是否超过最大等待阈值
+                    var retryAfterSeconds = ParseRetryAfterSeconds(args.Outcome.Exception);
+                    if (retryAfterSeconds > retryOptions.MaxRetryAfterSeconds)
+                    {
+                        _logger.LogWarning(
+                            "Retry-After header value ({RetryAfterSeconds}s) exceeds MaxRetryAfterSeconds ({MaxRetryAfterSeconds}s), entering cooldown",
+                            retryAfterSeconds, retryOptions.MaxRetryAfterSeconds);
+                    }
+
                     return ValueTask.CompletedTask;
                 }
             })
@@ -160,9 +176,20 @@ public class RetryMiddleware : IAiMiddleware
                     retryOptions.CircuitBreakerDuration.TotalSeconds * 2, 30)),
                 MinimumThroughput = retryOptions.CircuitBreakerFailureThreshold,
                 BreakDuration = retryOptions.CircuitBreakerDuration,
-                ShouldHandle = new PredicateBuilder().Handle<Exception>(ShouldRetry)
+                ShouldHandle = new PredicateBuilder().Handle<Exception>(predicate)
             })
             .Build();
+    }
+
+    /// <summary>
+    /// 构建共享的 ShouldHandle 谓词（Retry + CircuitBreaker 复用）
+    /// </summary>
+    /// <summary>
+    /// 构建共享的异常过滤谓词（Retry + CircuitBreaker 复用）
+    /// </summary>
+    private static Func<Exception, bool> CreateShouldRetryPredicate(bool excludeRateLimitRetry)
+    {
+        return ex => ShouldRetry(ex) && !(excludeRateLimitRetry && Is429RateLimit(ex));
     }
 
     /// <summary>
@@ -193,5 +220,47 @@ public class RetryMiddleware : IAiMiddleware
 
         // 未知异常默认重试（网络中断等）
         return true;
+    }
+
+    /// <summary>
+    /// 判断异常是否为 429 Rate Limit
+    /// </summary>
+    private static bool Is429RateLimit(Exception ex)
+    {
+        return ex is HttpRequestException httpEx && (int?)httpEx.StatusCode == 429;
+    }
+
+    /// <summary>
+    /// 判断当前上下文是否为后台/辅助任务
+    /// </summary>
+    private static bool IsBackgroundTask(AiMiddlewareContext context)
+    {
+        return context.Properties.TryGetValue("is_background_task", out var value) && value is true;
+    }
+
+    /// <summary>
+    /// 后台任务遇到 429 时是否应中止重试（防雪崩）
+    /// </summary>
+    private bool ShouldAbortBackground(AiMiddlewareContext context, Exception ex)
+    {
+        return _options.Value.Retry.AbortBackgroundOn429
+               && IsBackgroundTask(context)
+               && ex is HttpRequestException httpEx
+               && (int?)httpEx.StatusCode == 429;
+    }
+
+    /// <summary>
+    /// 解析 Retry-After 头部值（秒）。支持从异常 Data 字典中获取。
+    /// </summary>
+    private static int? ParseRetryAfterSeconds(Exception? ex)
+    {
+        if (ex is HttpRequestException httpEx && httpEx.Data.Contains("Retry-After"))
+        {
+            var raw = httpEx.Data["Retry-After"]?.ToString();
+            if (int.TryParse(raw, out var seconds))
+                return seconds;
+        }
+
+        return null;
     }
 }

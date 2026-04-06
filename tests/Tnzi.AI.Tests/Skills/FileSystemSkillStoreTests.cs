@@ -1,6 +1,7 @@
 using Tnzi.AI.Infrastructure.ContextProviders;
 using Tnzi.AI.Skills;
 using Tnzi.AI.Skills.Models;
+using Microsoft.Extensions.Hosting;
 
 namespace Tnzi.AI.Tests.Skills;
 
@@ -13,14 +14,31 @@ public class FileSystemSkillStoreTests : IDisposable
 
     public FileSystemSkillStoreTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"tnzi-fsstore-test-{Guid.NewGuid():N}");
+        var baseTempDir = Path.Combine(AppContext.BaseDirectory, ".tmp", "fsstore");
+        Directory.CreateDirectory(baseTempDir);
+        _tempDir = Path.Combine(baseTempDir, $"tnzi-fsstore-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
     }
 
     public void Dispose()
     {
-        if (Directory.Exists(_tempDir))
+        if (!Directory.Exists(_tempDir))
+        {
+            return;
+        }
+
+        try
+        {
             Directory.Delete(_tempDir, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup only. Test assertions should not fail because the host keeps a temp file handle.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup only. Test assertions should not fail because the host keeps a temp file handle.
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -198,6 +216,53 @@ public class FileSystemSkillStoreTests : IDisposable
         skills[0].AllowedToolGroups!.ShouldContain("search");
         skills[0].RequiredModel.ShouldBe("gpt-4");
         skills[0].RequiredProvider.ShouldBe("openai");
+    }
+
+    [Fact]
+    public async Task GetAllAsync_SkipsGitIgnoredSkillFiles()
+    {
+        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "ignored-skill/");
+        CreateSkillFile("included-skill", """
+            ---
+            name: Included Skill
+            description: Should load.
+            ---
+            """);
+        CreateSkillFile("ignored-skill", """
+            ---
+            name: Ignored Skill
+            description: Should be skipped.
+            ---
+            """);
+
+        var store = CreateStore(paths: [_tempDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].Name.ShouldBe("Included Skill");
+    }
+
+    [Fact]
+    public async Task GetAllAsync_LoadsInstalledSkillsFromRelativeDataPath()
+    {
+        var contentRoot = Path.Combine(_tempDir, "content-root");
+        var dataRoot = Path.Combine(contentRoot, "app-data");
+        var skillDir = Path.Combine(dataRoot, "skills", "tenant-skill");
+        Directory.CreateDirectory(skillDir);
+        File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), """
+            ---
+            name: Installed Skill
+            description: Loaded from DataPath.
+            ---
+            """);
+
+        var store = CreateStore(dataPath: "app-data", contentRootPath: contentRoot);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].Name.ShouldBe("Installed Skill");
+        skills[0].FilePath.ShouldNotBeNull();
+        Path.GetFullPath(skills[0].FilePath!).Contains(Path.GetFullPath(dataRoot), StringComparison.OrdinalIgnoreCase).ShouldBeTrue();
     }
 
     [Fact]
@@ -435,6 +500,119 @@ public class FileSystemSkillStoreTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // Plugin / Managed paths
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetAllAsync_LoadsPluginSkills_WithPluginSource()
+    {
+        var pluginDir = Path.Combine(_tempDir, "plugins");
+        Directory.CreateDirectory(pluginDir);
+        var skillDir = Path.Combine(pluginDir, "my-plugin-skill");
+        Directory.CreateDirectory(skillDir);
+        File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), """
+            ---
+            name: Plugin Skill
+            description: From plugin path.
+            ---
+            """);
+
+        var store = CreateStore(pluginPaths: [pluginDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].Name.ShouldBe("Plugin Skill");
+        skills[0].Source.ShouldBe(SkillSource.Plugin);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_LoadsManagedSkills_WithManagedSource()
+    {
+        var managedDir = Path.Combine(_tempDir, "managed");
+        Directory.CreateDirectory(managedDir);
+        var skillDir = Path.Combine(managedDir, "platform-skill");
+        Directory.CreateDirectory(skillDir);
+        File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), """
+            ---
+            name: Managed Skill
+            description: Platform managed.
+            ---
+            """);
+
+        var store = CreateStore(managedPaths: [managedDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].Name.ShouldBe("Managed Skill");
+        skills[0].Source.ShouldBe(SkillSource.Managed);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_MixedSources_AssignsCorrectSource()
+    {
+        // Use separate sibling directories to avoid scannedSkillFiles dedup
+        var regularDir = Path.Combine(_tempDir, "regular");
+        Directory.CreateDirectory(regularDir);
+        var regularSkillDir = Path.Combine(regularDir, "regular-skill");
+        Directory.CreateDirectory(regularSkillDir);
+        File.WriteAllText(Path.Combine(regularSkillDir, "SKILL.md"), """
+            ---
+            name: Regular Skill
+            description: From regular path.
+            ---
+            """);
+
+        // Plugin path (separate sibling directory)
+        var pluginDir = Path.Combine(_tempDir, "plugins");
+        Directory.CreateDirectory(pluginDir);
+        var pluginSkillDir = Path.Combine(pluginDir, "plugin-skill");
+        Directory.CreateDirectory(pluginSkillDir);
+        File.WriteAllText(Path.Combine(pluginSkillDir, "SKILL.md"), """
+            ---
+            name: Plugin Skill
+            description: From plugin.
+            ---
+            """);
+
+        // Managed path (separate sibling directory)
+        var managedDir = Path.Combine(_tempDir, "managed");
+        Directory.CreateDirectory(managedDir);
+        var managedSkillDir = Path.Combine(managedDir, "managed-skill");
+        Directory.CreateDirectory(managedSkillDir);
+        File.WriteAllText(Path.Combine(managedSkillDir, "SKILL.md"), """
+            ---
+            name: Managed Skill
+            description: From managed.
+            ---
+            """);
+
+        var store = CreateStore(paths: [regularDir], pluginPaths: [pluginDir], managedPaths: [managedDir]);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(3);
+        skills.Single(s => s.Name == "Regular Skill").Source.ShouldBe(SkillSource.FileSystem);
+        skills.Single(s => s.Name == "Plugin Skill").Source.ShouldBe(SkillSource.Plugin);
+        skills.Single(s => s.Name == "Managed Skill").Source.ShouldBe(SkillSource.Managed);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_EmptyPluginAndManagedPaths_LoadsNone()
+    {
+        CreateSkillFile("only-regular", """
+            ---
+            name: Only Regular
+            description: No plugin or managed.
+            ---
+            """);
+
+        var store = CreateStore(paths: [_tempDir], pluginPaths: [], managedPaths: []);
+        var skills = await store.GetAllAsync();
+
+        skills.Count.ShouldBe(1);
+        skills[0].Source.ShouldBe(SkillSource.FileSystem);
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -449,7 +627,11 @@ public class FileSystemSkillStoreTests : IDisposable
         List<string>? paths = null,
         List<string>? allowList = null,
         List<string>? denyList = null,
-        bool requireChecksEnabled = true)
+        bool requireChecksEnabled = true,
+        string? dataPath = null,
+        string? contentRootPath = null,
+        List<string>? pluginPaths = null,
+        List<string>? managedPaths = null)
     {
         var options = Microsoft.Extensions.Options.Options.Create(new AIOptions
         {
@@ -460,13 +642,24 @@ public class FileSystemSkillStoreTests : IDisposable
                     Paths = paths ?? [],
                     AllowList = allowList ?? [],
                     DenyList = denyList ?? [],
+                    DataPath = dataPath,
                     RequireChecksEnabled = requireChecksEnabled,
-                    LoadBuiltIn = false
+                    LoadBuiltIn = false,
+                    PluginPaths = pluginPaths ?? [],
+                    ManagedPaths = managedPaths ?? []
                 }
             }
         });
 
         var logger = Mock.Of<ILogger<FileSystemSkillStore>>();
-        return new FileSystemSkillStore(logger, options);
+        IHostEnvironment? hostEnvironment = null;
+        if (!string.IsNullOrWhiteSpace(contentRootPath))
+        {
+            var mockHostEnvironment = new Mock<IHostEnvironment>();
+            mockHostEnvironment.SetupGet(x => x.ContentRootPath).Returns(contentRootPath);
+            hostEnvironment = mockHostEnvironment.Object;
+        }
+
+        return new FileSystemSkillStore(logger, options, hostEnvironment);
     }
 }

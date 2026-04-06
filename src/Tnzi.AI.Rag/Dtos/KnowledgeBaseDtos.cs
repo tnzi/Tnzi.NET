@@ -108,6 +108,7 @@ public class KnowledgeDocumentDto
     public DocumentStatus Status { get; set; }
     public string? ErrorMessage { get; set; }
     public string? ContentHash { get; set; }
+    public int Version { get; set; }
     public DateTime CreationTime { get; set; }
 }
 

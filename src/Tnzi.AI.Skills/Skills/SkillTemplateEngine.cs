@@ -8,8 +8,23 @@ public partial class SkillTemplateEngine : ISkillTemplateEngine
     [GeneratedRegex(@"\{\{(\w+)\}\}")]
     private static partial Regex ParamRegex();
 
+    /// <summary>
+    /// Built-in variable names that are automatically resolved from context (not from user parameters).
+    /// </summary>
+    public static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SESSION_ID",
+        "AGENT_NAME"
+    };
+
     /// <inheritdoc />
     public SkillRenderResult Render(SkillDefinition skill, Dictionary<string, string>? parameters = null)
+    {
+        return Render(skill, parameters, context: null);
+    }
+
+    /// <inheritdoc />
+    public SkillRenderResult Render(SkillDefinition skill, Dictionary<string, string>? parameters, SkillRenderContext? context)
     {
         Check.NotNull(skill);
 
@@ -24,6 +39,15 @@ public partial class SkillTemplateEngine : ISkillTemplateEngine
 
         // 3. Resolve effective values: provided > default; validate required + allowed values
         var effectiveValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 3a. Inject built-in variables from context
+        if (context != null)
+        {
+            if (context.SessionId != null)
+                effectiveValues["SESSION_ID"] = context.SessionId;
+            if (context.AgentName != null)
+                effectiveValues["AGENT_NAME"] = context.AgentName;
+        }
 
         foreach (var paramDef in skill.Parameters)
         {
@@ -52,9 +76,10 @@ public partial class SkillTemplateEngine : ISkillTemplateEngine
         }
 
         // 4. Check for placeholders with no matching parameter definition (unresolved)
+        //    Built-in variables are exempt from this check
         foreach (var placeholder in placeholderNames)
         {
-            if (!schema.ContainsKey(placeholder))
+            if (!schema.ContainsKey(placeholder) && !BuiltInVariables.Contains(placeholder))
             {
                 result.Errors.Add($"Unresolved placeholder '{placeholder}': no matching parameter definition found.");
             }

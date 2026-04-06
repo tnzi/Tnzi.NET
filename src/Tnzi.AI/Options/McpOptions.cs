@@ -105,6 +105,60 @@ public class McpServerConfig
     /// 启动参数（Stdio 时）
     /// </summary>
     public List<string> Arguments { get; set; } = [];
+
+    /// <summary>
+    /// OAuth 客户端认证配置（用于连接需要 OAuth 的 MCP 服务器，如 GitHub MCP、Slack MCP）。
+    /// 配置后自动通过 client_credentials 流获取访问令牌并注入 Authorization 头。
+    /// </summary>
+    public McpOAuthConfig? OAuth { get; set; }
+}
+
+/// <summary>
+/// MCP 客户端 OAuth 配置（client_credentials 流）
+/// </summary>
+public class McpOAuthConfig
+{
+    /// <summary>
+    /// OAuth Client ID
+    /// </summary>
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// OAuth Client Secret（可选，公开客户端可省略）
+    /// </summary>
+    public string? ClientSecret { get; set; }
+
+    /// <summary>
+    /// Token Endpoint URL
+    /// </summary>
+    public string TokenEndpoint { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 是否启用 OIDC/OAuth metadata discovery。
+    /// 启用后会优先从 MetadataUrl 或 AuthorizationServer 派生的 well-known 地址发现 token/revocation endpoint。
+    /// </summary>
+    public bool EnableMetadataDiscovery { get; set; }
+
+    /// <summary>
+    /// OAuth/OIDC metadata 文档地址（如 /.well-known/openid-configuration）。
+    /// </summary>
+    public string? MetadataUrl { get; set; }
+
+    /// <summary>
+    /// 授权服务器基地址。未显式提供 MetadataUrl 时，将自动拼接 well-known metadata 地址。
+    /// </summary>
+    public string? AuthorizationServer { get; set; }
+
+    /// <summary>
+    /// Revocation Endpoint URL。
+    /// 未配置时 metadata discovery 成功后可自动填充。
+    /// </summary>
+    public string? RevocationEndpoint { get; set; }
+
+    /// <summary>
+    /// 请求的 OAuth Scopes
+    /// </summary>
+    public string[]? Scopes { get; set; }
 }
 
 /// <summary>

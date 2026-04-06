@@ -14,6 +14,9 @@ public enum WorkflowExecutionStatus
     /// <summary>执行失败</summary>
     Failed,
 
+    /// <summary>执行已取消</summary>
+    Cancelled,
+
     /// <summary>已暂停</summary>
     Paused,
 

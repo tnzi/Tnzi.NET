@@ -7,6 +7,11 @@ namespace Tnzi.AI.Tests;
 /// </summary>
 public class ToolResolverTests
 {
+    private sealed class DummyToolProvider
+    {
+        public string Echo() => "ok";
+    }
+
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
@@ -27,7 +32,8 @@ public class ToolResolverTests
         OpenApiToolGenerator? openApiToolGenerator = null,
         IOptions<AIOptions>? options = null,
         IServiceProvider? serviceProvider = null,
-        IToolApprovalHandler? approvalHandler = null)
+        IToolApprovalHandler? approvalHandler = null,
+        IToolPermissionEvaluator? permissionEvaluator = null)
     {
         toolRegistry ??= CreateEmptyRegistry();
         mcpToolProvider ??= CreateEmptyMcpProvider();
@@ -46,7 +52,8 @@ public class ToolResolverTests
             serviceProvider,
             loggerFactory,
             logger,
-            approvalHandler);
+            approvalHandler,
+            permissionEvaluator);
     }
 
     private static IToolRegistry CreateEmptyRegistry()
@@ -293,6 +300,36 @@ public class ToolResolverTests
         result!.Count.ShouldBe(1);
     }
 
+    [Fact]
+    public async Task ResolveToolsAsync_PermissionEvaluatorWithoutCurrentRules_StillWrapsCSharpTools()
+    {
+        var registry = new Mock<IToolRegistry>();
+        registry.Setup(r => r.GetToolsByGroupsWithPermissions(
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<IEnumerable<string>>()))
+            .Returns(
+            [
+                new ToolDefinition
+                {
+                    Name = "echo",
+                    GroupName = "utility",
+                    ProviderType = typeof(DummyToolProvider),
+                    MethodInfo = typeof(DummyToolProvider).GetMethod(nameof(DummyToolProvider.Echo))!,
+                    RequiredPermissions = []
+                }
+            ]);
+
+        var resolver = CreateResolver(
+            toolRegistry: registry.Object,
+            permissionEvaluator: new ToolPermissionEvaluator([]));
+
+        var result = await resolver.ResolveToolsAsync(["utility"]);
+
+        result.ShouldNotBeNull();
+        result!.Count.ShouldBe(1);
+        result[0].ShouldBeOfType<ApprovalToolWrapper>();
+    }
+
     // ------------------------------------------------------------------
     // Null name tools are excluded
     // ------------------------------------------------------------------
@@ -302,7 +339,7 @@ public class ToolResolverTests
     {
         var validTool = CreateNamedTool("valid_tool");
         var nullNameTool = new Mock<AITool>();
-        nullNameTool.Setup(t => t.Name).Returns((string?)null);
+        nullNameTool.Setup(t => t.Name).Returns((string)null!);
 
         var mcpProvider = new Mock<IMcpToolProvider>();
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))

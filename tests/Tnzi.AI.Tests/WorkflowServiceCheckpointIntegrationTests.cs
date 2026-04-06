@@ -236,6 +236,7 @@ public class WorkflowServiceCheckpointIntegrationTests
     public async Task RunAsync_DagMode_WhenNodeFails_ReturnsFailedStatus()
     {
         var workflowId = Guid.NewGuid();
+        WorkflowExecution? insertedExecution = null;
 
         var workflowRepository = new Mock<IRepository<WorkflowDefinition, Guid>>();
         workflowRepository.Setup(x => x.GetAsync(workflowId, It.IsAny<CancellationToken>()))
@@ -268,9 +269,10 @@ public class WorkflowServiceCheckpointIntegrationTests
 
         var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
         executionRepository.Setup(x => x.InsertAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowExecution, CancellationToken>((execution, _) => insertedExecution = execution)
             .Returns(Task.CompletedTask);
         executionRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new WorkflowExecution { ExecutionId = "wf-failed", Status = WorkflowExecutionStatus.Failed });
+            .ReturnsAsync(() => insertedExecution);
         executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -289,6 +291,8 @@ public class WorkflowServiceCheckpointIntegrationTests
         data.StepResults.ShouldNotBeNull();
         data.StepResults!.ShouldContain(x => x.StepId == "step-a");
         data.StepResults.ShouldNotContain(x => x.StepId == "step-b");
+        insertedExecution.ShouldNotBeNull();
+        insertedExecution!.Status.ShouldBe(WorkflowExecutionStatus.Failed);
     }
 
     [Fact]
@@ -359,6 +363,7 @@ public class WorkflowServiceCheckpointIntegrationTests
         }
         services.AddScoped<IWorkflowNode, FixedResultNode>();
         services.AddScoped<IWorkflowNode, FailingResultNode>();
+        services.AddScoped<IWorkflowNode, ApprovalNode>();
         services.AddScoped<WorkflowNodeExecutor>();
         services.AddScoped<WorkflowEngine>();
         var runRepository = new Mock<IRepository<AgentRun, Guid>>();

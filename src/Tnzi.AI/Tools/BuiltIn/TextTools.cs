@@ -16,7 +16,8 @@ public class TextTools : IAIToolProvider
     /// <summary>
     /// Get text statistics
     /// </summary>
-    [AIFunction("text_statistics", "Count characters, words, and lines in the given text")]
+    [AIFunction("text_statistics", "Count characters, words, and lines in the given text",
+        IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "count words lines characters")]
     public Task<object> GetTextStatisticsAsync(
         [AIParameter("text", "The text to analyze")]
         string text)
@@ -37,7 +38,8 @@ public class TextTools : IAIToolProvider
     /// <summary>
     /// Convert text case
     /// </summary>
-    [AIFunction("convert_case", "Convert text to uppercase, lowercase, or title case")]
+    [AIFunction("convert_case", "Convert text to uppercase, lowercase, or title case",
+        IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<string> ConvertCaseAsync(
         [AIParameter("text", "The text to convert")]
         string text,

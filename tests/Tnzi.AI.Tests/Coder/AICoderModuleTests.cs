@@ -39,6 +39,16 @@ public class AICoderModuleTests
     }
 
     [Fact]
+    public void ConfigureServicesAsync_RegistersShellAdapterAbstraction()
+    {
+        var services = CreateServiceCollection();
+
+        services.Any(d => d.ServiceType == typeof(IShellAdapter)).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(BashShellAdapter)).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(PowerShellShellAdapter)).ShouldBeTrue();
+    }
+
+    [Fact]
     public void ConfigureServicesAsync_RegistersProjectContextLoader()
     {
         var services = CreateServiceCollection();
@@ -83,40 +93,36 @@ public class AICoderModuleTests
     }
 
     [Fact]
-    public void ConfigureServicesAsync_TryAdd_MemoryStore_NotOverridden()
+    public void ConfigureServicesAsync_DoesNotRegisterMemoryStore()
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
+        // AICoderModule 依赖 AIModule 提供 IMemoryStore，自身不再注册
+        var services = CreateServiceCollection();
 
-        // 模拟 AIModule 已注册数据库记忆存储
-        var mockStore = Mock.Of<IMemoryStore>();
-        services.AddSingleton(mockStore);
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IMemoryStore));
 
-        ConfigureModule(services);
-
-        // FileMemoryStore 不应覆盖已注册的 IMemoryStore
-        var descriptor = services.First(d => d.ServiceType == typeof(IMemoryStore));
-        descriptor.ImplementationInstance.ShouldBe(mockStore);
+        descriptor.ShouldBeNull();
     }
 
     [Fact]
-    public void ConfigureServicesAsync_TryAdd_ToolRegistry_FallbackRegistered()
+    public void ConfigureServicesAsync_DoesNotRegisterToolRegistry()
     {
+        // AICoderModule 依赖 AIModule 提供 IToolRegistry，自身不再注册
         var services = CreateServiceCollection();
 
         var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IToolRegistry));
 
-        descriptor.ShouldNotBeNull();
+        descriptor.ShouldBeNull();
     }
 
     [Fact]
-    public void ConfigureServicesAsync_TryAdd_ToolScanner_FallbackRegistered()
+    public void ConfigureServicesAsync_DoesNotRegisterToolScanner()
     {
+        // AICoderModule 依赖 AIModule 提供 IToolScanner，自身不再注册
         var services = CreateServiceCollection();
 
         var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IToolScanner));
 
-        descriptor.ShouldNotBeNull();
+        descriptor.ShouldBeNull();
     }
 
     #endregion
@@ -140,9 +146,11 @@ public class AICoderModuleTests
     {
         var services = CreateServiceCollection();
 
-        // 验证所有 11 个工具类都被注册
+        // 验证所有工具类都被注册
         services.Any(d => d.ServiceType == typeof(FileSystemTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ShellTools)).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(BashTools)).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(PowerShellTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(CodeSearchTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(GitTools)).ShouldBeTrue();
     }

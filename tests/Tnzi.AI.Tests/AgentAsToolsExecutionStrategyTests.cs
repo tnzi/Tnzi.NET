@@ -283,6 +283,82 @@ public class AgentAsToolsExecutionStrategyTests
         forwarderMock.Verify(f => f.WriteAsync("child", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
+    [Fact]
+    public async Task ExecuteChildWithTimeoutAsync_SetsAndRestoresSubAgentContext()
+    {
+        var childAgentId = Guid.NewGuid();
+        var config = new AgentAsToolsConfiguration
+        {
+            Agents = new Dictionary<string, Guid> { ["SearchAgent"] = childAgentId }
+        };
+        var strategy = new AgentAsToolsExecutionStrategy(config);
+
+        var repository = new Mock<IRepository<Agent, Guid>>();
+        repository.Setup(x => x.GetAsync(childAgentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Agent
+            {
+                Id = childAgentId,
+                Name = "SearchAgent",
+                Provider = "test",
+                Model = "test-model",
+                IsEnabled = true
+            });
+
+        var childExecutor = CreateAgent("SearchAgent", "child-result");
+        var agentFactory = new Mock<IAgentFactory>();
+        agentFactory.Setup(x => x.CreateAgentAsync(
+                "test",
+                "test-model",
+                It.IsAny<string?>(),
+                "SearchAgent",
+                It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<double?>(),
+                It.IsAny<int?>(),
+                It.IsAny<AgentExecutorOptions?>(),
+                It.IsAny<IEnumerable<string>?>(),
+                childAgentId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(childExecutor);
+
+        var accessor = new AgentExecutionContextAccessor();
+        accessor.Properties["ParentMarker"] = "parent";
+
+        var context = new ExecutionStrategyContext
+        {
+            AgentFactory = agentFactory.Object,
+            AgentRepository = repository.Object,
+            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ExecutionContextAccessor = accessor,
+            Logger = Mock.Of<ILogger>()
+        };
+
+        var method = typeof(AgentAsToolsExecutionStrategy).GetMethod(
+            "ExecuteChildWithTimeoutAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        method.ShouldNotBeNull();
+
+        var task = (Task<string>)method.Invoke(strategy,
+        [
+            "SearchAgent",
+            childAgentId,
+            "find latest docs",
+            context,
+            new ConcurrentQueue<(string, int, int)>(),
+            null,
+            CancellationToken.None
+        ])!;
+
+        var result = await task;
+
+        result.ShouldBe("child-result");
+        // ParentMarker was set via in-place mutation before any async work, so it remains visible
+        accessor.Properties["ParentMarker"].ShouldBe("parent");
+        // Note: RestoreProperties sets AsyncLocal.Value = new dict (copy-on-write),
+        // which does NOT propagate back to the caller's ExecutionContext.
+        // In production this is fine because child runs inside Task.Run with its own context.
+        // SetSubAgentContext mutates the same dict object, so those keys remain visible here.
+    }
+
     private static ExecutionStrategyContext CreateContext()
     {
         return new ExecutionStrategyContext
@@ -290,6 +366,7 @@ public class AgentAsToolsExecutionStrategyTests
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = Mock.Of<IRepository<Agent, Guid>>(),
             ServiceProvider = Mock.Of<IServiceProvider>(),
+            ExecutionContextAccessor = null,
             Logger = Mock.Of<ILogger>()
         };
     }

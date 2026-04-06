@@ -17,7 +17,8 @@ public class SandboxTools
         Check.NotNullOrWhiteSpace(command);
         var translatedCommand = TranslatePathsInCommand(command, threadId);
         var result = await sandbox.ExecuteCommandAsync(translatedCommand);
-        return new { stdout = result.Output, stderr = result.Error, exit_code = result.ExitCode };
+        var semanticNote = CommandSemantics.InterpretExitCode(command, result.ExitCode);
+        return new { stdout = result.Output, stderr = result.Error, exit_code = result.ExitCode, note = semanticNote };
     }
 
     [Description("List contents of a directory in the sandbox")]

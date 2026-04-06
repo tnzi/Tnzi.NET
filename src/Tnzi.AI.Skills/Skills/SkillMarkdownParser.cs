@@ -210,9 +210,13 @@ public static partial class SkillMarkdownParser
 
         if (frontmatter.TryGetValue("tool-whitelist", out var toolWhitelist))
             skill.AllowedTools = toolWhitelist.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        else if (frontmatter.TryGetValue("allowed-tools", out var allowedTools))
+            skill.AllowedTools = allowedTools.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
         if (frontmatter.TryGetValue("tool-blacklist", out var toolBlacklist))
             skill.DeniedTools = toolBlacklist.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        else if (frontmatter.TryGetValue("denied-tools", out var deniedTools))
+            skill.DeniedTools = deniedTools.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
         if (frontmatter.TryGetValue("model", out var model))
             skill.RequiredModel = model;
@@ -220,11 +224,21 @@ public static partial class SkillMarkdownParser
         if (frontmatter.TryGetValue("provider", out var provider))
             skill.RequiredProvider = provider;
 
+        if (frontmatter.TryGetValue("reasoning-effort", out var reasoningEffort))
+            skill.RequiredReasoningEffort = reasoningEffort;
+
+        if (frontmatter.TryGetValue("execution-context", out var executionContext)
+            && Enum.TryParse<SkillExecutionContext>(executionContext, ignoreCase: true, out var parsedContext))
+            skill.ExecutionContext = parsedContext;
+
         if (frontmatter.TryGetValue("internal", out var internalStr) && bool.TryParse(internalStr, out var internalValue))
             skill.IsInternal = internalValue;
 
         if (frontmatter.TryGetValue("agents", out var agents))
             skill.Agents = agents.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        if (frontmatter.TryGetValue("paths", out var paths))
+            skill.Paths = paths.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
     }
 
     // -------------------------------------------------------------------------

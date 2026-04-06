@@ -35,10 +35,12 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                 StepOutputs = JsonSerializer.Serialize(checkpoint.StepOutputs),
                 Status = checkpoint.Status,
                 UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt,
-                StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval)
+                StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval),
+                PendingInterruptJson = checkpoint.PendingInterruptJson,
+                CurrentWaitReason = ResolveWaitReason(checkpoint)
             };
 
-            if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed)
+            if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
             {
                 entity.CompletedTime = DateTime.UtcNow;
             }
@@ -54,8 +56,10 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
             entity.Status = checkpoint.Status;
             entity.UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt;
             entity.StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval);
+            entity.PendingInterruptJson = checkpoint.PendingInterruptJson;
+            entity.CurrentWaitReason = ResolveWaitReason(checkpoint);
 
-            if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed)
+            if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
             {
                 entity.CompletedTime = DateTime.UtcNow;
             }
@@ -87,7 +91,8 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
             CreatedAt = entity.CreationTime,
             UpdatedAt = entity.UpdatedTime,
             Status = entity.Status,
-            StepsAwaitingApproval = DeserializeHashSet(entity.StepsAwaitingApproval)
+            StepsAwaitingApproval = DeserializeHashSet(entity.StepsAwaitingApproval),
+            PendingInterruptJson = entity.PendingInterruptJson
         };
     }
 
@@ -159,5 +164,25 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
         {
             return new(StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    private static string? ResolveWaitReason(WorkflowCheckpoint checkpoint)
+    {
+        if (checkpoint.Status == WorkflowExecutionStatus.AwaitingApproval)
+        {
+            return "approval";
+        }
+
+        if (checkpoint.Status == WorkflowExecutionStatus.AwaitingInput)
+        {
+            return "input";
+        }
+
+        if (checkpoint.Status == WorkflowExecutionStatus.Cancelled)
+        {
+            return "cancelled";
+        }
+
+        return null;
     }
 }

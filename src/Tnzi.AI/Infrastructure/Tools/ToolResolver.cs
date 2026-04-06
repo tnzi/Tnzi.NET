@@ -27,6 +27,9 @@ public class ToolResolver : IToolResolver
     private readonly IOptions<AIOptions> _options;
     private readonly IServiceProvider _serviceProvider;
     private readonly IToolApprovalHandler? _approvalHandler;
+    private readonly IToolPermissionEvaluator? _permissionEvaluator;
+    private readonly IShellCommandAnalyzer? _shellCommandAnalyzer;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<ApprovalToolWrapper>? _approvalLogger;
     private readonly ILogger _toolAdapterLogger;
     private readonly ILogger<ToolResolver> _logger;
@@ -45,7 +48,10 @@ public class ToolResolver : IToolResolver
         IServiceProvider serviceProvider,
         ILoggerFactory loggerFactory,
         ILogger<ToolResolver> logger,
-        IToolApprovalHandler? approvalHandler = null)
+        IToolApprovalHandler? approvalHandler = null,
+        IToolPermissionEvaluator? permissionEvaluator = null,
+        IShellCommandAnalyzer? shellCommandAnalyzer = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _toolRegistry = Check.NotNull(toolRegistry);
         _mcpToolProvider = Check.NotNull(mcpToolProvider);
@@ -54,6 +60,9 @@ public class ToolResolver : IToolResolver
         _serviceProvider = Check.NotNull(serviceProvider);
         var lf = Check.NotNull(loggerFactory);
         _approvalHandler = approvalHandler;
+        _permissionEvaluator = permissionEvaluator;
+        _shellCommandAnalyzer = shellCommandAnalyzer;
+        _executionContextAccessor = executionContextAccessor;
         _approvalLogger = lf.CreateLogger<ApprovalToolWrapper>();
         _toolAdapterLogger = lf.CreateLogger(typeof(ToolAdapter).FullName!);
         _logger = Check.NotNull(logger);
@@ -69,7 +78,7 @@ public class ToolResolver : IToolResolver
             var toolDefinitions = _toolRegistry.GetToolsByGroupsWithPermissions(toolGroups, userPermissions);
             csharpTools = ToolAdapter.ConvertToAITools(toolDefinitions, _serviceProvider, _toolAdapterLogger);
 
-            if (csharpTools.Count > 0 && _options.Value.ToolApproval.Enabled)
+            if (csharpTools.Count > 0 && ShouldWrapWithApproval())
             {
                 csharpTools = WrapWithApproval(csharpTools, toolDefinitions);
             }
@@ -116,7 +125,7 @@ public class ToolResolver : IToolResolver
     /// </summary>
     private IList<AITool> WrapWithApproval(IList<AITool> tools, IReadOnlyList<ToolDefinition> toolDefinitions)
     {
-        if (_approvalHandler == null) return tools;
+        if (_approvalHandler == null && _permissionEvaluator == null) return tools;
 
         var approvalOptions = _options.Value.ToolApproval;
         var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -128,8 +137,11 @@ public class ToolResolver : IToolResolver
             }
         }
 
-        return ApprovalToolWrapper.Wrap(tools, _approvalHandler, approvalOptions, _approvalLogger, toolNameToGroup);
+        return ApprovalToolWrapper.Wrap(tools, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, _approvalLogger, toolNameToGroup);
     }
+
+    private bool ShouldWrapWithApproval()
+        => _options.Value.ToolApproval.Enabled || _permissionEvaluator != null;
 
     /// <summary>
     /// 获取 OpenAPI 生成的工具（线程安全的延迟初始化缓存，避免重复拉取规范）

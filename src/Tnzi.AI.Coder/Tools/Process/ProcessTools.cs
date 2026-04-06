@@ -9,6 +9,7 @@ public class ProcessTools : IAIToolProvider
     private readonly ICommandSanitizer _commandSanitizer;
     private readonly IPathValidator _pathValidator;
     private readonly IToolApprovalHandler? _approvalHandler;
+    private readonly IShellAdapter _shellAdapter;
     private readonly CoderOptions _options;
     private readonly ILogger<ProcessTools> _logger;
 
@@ -17,11 +18,13 @@ public class ProcessTools : IAIToolProvider
         IPathValidator pathValidator,
         IOptions<CoderOptions> options,
         ILogger<ProcessTools> logger,
-        IToolApprovalHandler? approvalHandler = null)
+        IToolApprovalHandler? approvalHandler = null,
+        IShellAdapter? shellAdapter = null)
     {
         _commandSanitizer = Check.NotNull(commandSanitizer);
         _pathValidator = Check.NotNull(pathValidator);
         _approvalHandler = approvalHandler;
+        _shellAdapter = shellAdapter ?? ShellTools.CreateDefaultShellAdapter();
         _options = Check.NotNull(options).Value;
         _logger = Check.NotNull(logger);
     }
@@ -29,7 +32,7 @@ public class ProcessTools : IAIToolProvider
     /// <summary>
     /// 启动后台进程
     /// </summary>
-    [AIFunction("process_start", "Start a command in background")]
+    [AIFunction("process_start", "Start a command in background", InterruptBehavior = ToolInterruptBehavior.GracefulShutdown, SearchHint = "start background process")]
     public async Task<object> StartAsync(
         [AIParameter("command", "Shell command to execute")] string command,
         [AIParameter("working_directory", "Working directory", false)] string? workingDirectory = null)
@@ -102,18 +105,7 @@ public class ProcessTools : IAIToolProvider
             }
 
             // 4. 启动进程
-            var shellPath = OperatingSystem.IsWindows() ? "bash" : "/bin/bash";
-            var psi = new ProcessStartInfo
-            {
-                FileName = shellPath,
-                WorkingDirectory = resolvedWorkDir,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(command);
+            var psi = _shellAdapter.CreateProcessStartInfo(command, resolvedWorkDir);
 
             // 应用环境变量过滤
             EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
@@ -145,7 +137,7 @@ public class ProcessTools : IAIToolProvider
     /// <summary>
     /// 列出所有管理的后台进程
     /// </summary>
-    [AIFunction("process_list", "List all managed background processes")]
+    [AIFunction("process_list", "List all managed background processes", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> ListAsync()
     {
         ProcessRegistry.CleanupExited();
@@ -188,7 +180,7 @@ public class ProcessTools : IAIToolProvider
     /// <summary>
     /// 读取后台进程的输出
     /// </summary>
-    [AIFunction("process_output", "Read stdout/stderr of a background process")]
+    [AIFunction("process_output", "Read stdout/stderr of a background process", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> OutputAsync(
         [AIParameter("process_id", "Process ID (e.g., proc-1)")] string processId,
         [AIParameter("tail", "Only return last N lines", false)] int? tail = null)
@@ -246,7 +238,7 @@ public class ProcessTools : IAIToolProvider
     /// <summary>
     /// 终止后台进程
     /// </summary>
-    [AIFunction("process_kill", "Kill a background process")]
+    [AIFunction("process_kill", "Kill a background process", IsDestructive = true, InterruptBehavior = ToolInterruptBehavior.GracefulShutdown)]
     public Task<object> KillAsync(
         [AIParameter("process_id", "Process ID (e.g., proc-1)")] string processId)
     {

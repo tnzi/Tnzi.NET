@@ -46,4 +46,9 @@ public class KnowledgeDocument : AuditedEntity<Guid>, IMultiTenant
     /// 文件内容 SHA256 哈希（用于去重检测）
     /// </summary>
     public string? ContentHash { get; set; }
+
+    /// <summary>
+    /// 文档版本号（每次内容更新时递增）
+    /// </summary>
+    public int Version { get; set; } = 1;
 }

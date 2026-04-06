@@ -42,7 +42,9 @@ public class PiiDetectionGuardrailTests
         // Assert
         result.IsAllowed.ShouldBeFalse();
         result.GuardrailName.ShouldBe(nameof(PiiDetectionGuardrail));
-        result.Reason.ShouldContain("email");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("email");
     }
 
     [Fact]
@@ -57,7 +59,9 @@ public class PiiDetectionGuardrailTests
         // Assert
         result.IsAllowed.ShouldBeFalse();
         result.GuardrailName.ShouldBe(nameof(PiiDetectionGuardrail));
-        result.Reason.ShouldContain("phone");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("phone");
     }
 
     [Fact]
@@ -72,7 +76,9 @@ public class PiiDetectionGuardrailTests
         // Assert
         result.IsAllowed.ShouldBeFalse();
         result.GuardrailName.ShouldBe(nameof(PiiDetectionGuardrail));
-        result.Reason.ShouldContain("credit_card");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("credit_card");
     }
 
     [Fact]
@@ -89,6 +95,8 @@ public class PiiDetectionGuardrailTests
         result.IsAllowed.ShouldBeFalse();
         result.GuardrailName.ShouldBe(nameof(PiiDetectionGuardrail));
         // 第一个匹配的是 email
-        result.Reason.ShouldContain("email");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("email");
     }
 }

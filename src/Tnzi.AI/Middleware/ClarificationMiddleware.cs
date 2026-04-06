@@ -33,16 +33,11 @@ public class ClarificationMiddleware : IAiMiddleware
             _logger.LogInformation("Clarification requested: type={Type}, question={Question}",
                 request.Type, request.Question);
 
-            return new AgentRunResult
-            {
-                Response = formattedQuestion,
-                RunId = result.RunId,
-                ThreadId = result.ThreadId,
-                Usage = result.Usage,
-                Status = AgentRunStatus.RequiresClarification,
-                ClarificationQuestion = formattedQuestion,
-                FinishReason = FinishReasons.RequiresClarification
-            };
+            return result.CloneWith(
+                response: formattedQuestion,
+                finishReason: FinishReasons.RequiresClarification,
+                status: AgentRunStatus.RequiresClarification,
+                clarificationQuestion: formattedQuestion);
         }
 
         return result;

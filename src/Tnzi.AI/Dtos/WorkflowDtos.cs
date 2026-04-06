@@ -170,7 +170,7 @@ public class WorkflowExecutionStatusDto
 {
     /// <summary>Execution ID</summary>
     public string ExecutionId { get; set; } = string.Empty;
-    /// <summary>Status (running, completed, failed, paused, awaiting_approval)</summary>
+    /// <summary>Status (running, completed, failed, cancelled, paused, awaiting_approval)</summary>
     public string Status { get; set; } = string.Empty;
     /// <summary>Completed step IDs</summary>
     public List<string> CompletedStepIds { get; set; } = [];
@@ -180,6 +180,12 @@ public class WorkflowExecutionStatusDto
     public DateTime CreatedAt { get; set; }
     /// <summary>Last updated time</summary>
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>待处理信号数量</summary>
+    public int PendingSignalCount { get; set; }
+
+    /// <summary>当前等待原因</summary>
+    public string? CurrentWaitReason { get; set; }
 }
 
 /// <summary>
@@ -270,6 +276,12 @@ public class WorkflowExecutionSummaryDto
 
     /// <summary>Last updated time</summary>
     public DateTime UpdatedTime { get; set; }
+
+    /// <summary>待处理信号数量</summary>
+    public int PendingSignalCount { get; set; }
+
+    /// <summary>当前等待原因</summary>
+    public string? CurrentWaitReason { get; set; }
 }
 
 /// <summary>
@@ -288,6 +300,10 @@ public class WorkflowExecutionDetailDto : WorkflowExecutionSummaryDto
 
     /// <summary>Step outputs (stepId → output text)</summary>
     public Dictionary<string, string> StepOutputs { get; set; } = new();
+
+    /// <summary>待处理执行信号</summary>
+    [ExperimentalApi(Reason = "Workflow mailbox and signals are in preview")]
+    public List<WorkflowExecutionSignal> PendingSignals { get; set; } = [];
 }
 
 /// <summary>

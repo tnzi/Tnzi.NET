@@ -40,7 +40,7 @@ public class DeferredToolFilterMiddleware : IAiMiddleware
         if (registry is null || registry.Count == 0) return;
 
         var deferredNames = new HashSet<string>(
-            registry.Entries.Select(e => e.Name), StringComparer.OrdinalIgnoreCase);
+            registry.GetDeferredEntries().Select(e => e.Name), StringComparer.OrdinalIgnoreCase);
 
         var before = context.AdditionalTools.Count;
         context.AdditionalTools.RemoveAll(t =>

@@ -123,6 +123,16 @@ public class SkillDefinition
     public List<string>? DeniedTools { get; set; }
 
     /// <summary>
+    /// 条件激活路径 glob 模式列表（匹配 resource_paths 时自动激活）
+    /// </summary>
+    public IReadOnlyList<string> Paths { get; set; } = [];
+
+    /// <summary>
+    /// 技能执行上下文模式。Inline = 在当前 Agent 上下文中执行（默认），Fork = 创建子 Run 执行。
+    /// </summary>
+    public SkillExecutionContext ExecutionContext { get; set; } = SkillExecutionContext.Inline;
+
+    /// <summary>
     /// Skill 激活时要求使用的模型
     /// </summary>
     public string? RequiredModel { get; set; }
@@ -131,6 +141,11 @@ public class SkillDefinition
     /// Skill 激活时要求使用的 provider
     /// </summary>
     public string? RequiredProvider { get; set; }
+
+    /// <summary>
+    /// Skill 执行时要求的 reasoning effort（如 low / medium / high）
+    /// </summary>
+    public string? RequiredReasoningEffort { get; set; }
 
     /// <summary>
     /// 技能文件路径（来源为 FileSystem 时有值）
@@ -185,4 +200,29 @@ public class SkillRequirements
 public enum SkillScope { System = 0, Tenant = 1, User = 2 }
 
 /// <summary>技能来源</summary>
-public enum SkillSource { FileSystem, Database }
+public enum SkillSource
+{
+    /// <summary>文件系统加载（SKILL.md）</summary>
+    FileSystem = 0,
+
+    /// <summary>数据库存储（AI_Skill 表）</summary>
+    Database = 1,
+
+    /// <summary>外部插件加载</summary>
+    Plugin = 2,
+
+    /// <summary>平台托管（由平台统一管理和分发）</summary>
+    Managed = 3,
+
+    /// <summary>项目局部（来自项目目录的技能文件）</summary>
+    Project = 4
+}
+
+/// <summary>技能执行上下文模式</summary>
+public enum SkillExecutionContext
+{
+    /// <summary>在当前 Agent 上下文中执行（注入到 system prompt）</summary>
+    Inline = 0,
+    /// <summary>创建子 Run 执行（通过 IAgentRuntime.RunAsync 隔离上下文）</summary>
+    Fork = 1
+}

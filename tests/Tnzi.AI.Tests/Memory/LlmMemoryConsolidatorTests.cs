@@ -45,7 +45,9 @@ public class LlmMemoryConsolidatorTests
         var result = await consolidator.ConsolidateAsync("User now prefers light theme", existing);
 
         result.Action.ShouldBe(MemoryAction.Update);
-        result.UpdatedContent.ShouldContain("light theme");
+        var updatedContent = result.UpdatedContent;
+        updatedContent.ShouldNotBeNull();
+        updatedContent.ShouldContain("light theme");
         result.TargetEntryId.ShouldBe(targetId);
     }
 

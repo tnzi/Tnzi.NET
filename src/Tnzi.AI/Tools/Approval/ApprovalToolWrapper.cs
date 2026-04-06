@@ -9,8 +9,11 @@ namespace Tnzi.AI.Tools.Approval;
 /// </remarks>
 public sealed class ApprovalToolWrapper : DelegatingAIFunction
 {
-    private readonly IToolApprovalHandler _approvalHandler;
+    private readonly IToolApprovalHandler? _approvalHandler;
     private readonly ToolApprovalOptions _options;
+    private readonly IToolPermissionEvaluator? _permissionEvaluator;
+    private readonly IShellCommandAnalyzer? _shellCommandAnalyzer;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<ApprovalToolWrapper>? _logger;
     private readonly string? _toolGroup;
 
@@ -20,14 +23,20 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
     /// <param name="toolGroup">工具所属组名（用于 AlwaysRequireApprovalGroups 判断及审批请求）</param>
     public ApprovalToolWrapper(
         AIFunction innerFunction,
-        IToolApprovalHandler approvalHandler,
+        IToolApprovalHandler? approvalHandler,
         ToolApprovalOptions options,
+        IToolPermissionEvaluator? permissionEvaluator = null,
+        IShellCommandAnalyzer? shellCommandAnalyzer = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null,
         ILogger<ApprovalToolWrapper>? logger = null,
         string? toolGroup = null)
         : base(innerFunction)
     {
-        _approvalHandler = Check.NotNull(approvalHandler);
+        _approvalHandler = approvalHandler;
         _options = Check.NotNull(options);
+        _permissionEvaluator = permissionEvaluator;
+        _shellCommandAnalyzer = shellCommandAnalyzer;
+        _executionContextAccessor = executionContextAccessor;
         _logger = logger;
         _toolGroup = toolGroup;
     }
@@ -43,8 +52,11 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
     /// <returns>包装后的工具列表（未启用审批或非 AIFunction 的保持原样）</returns>
     public static IList<AITool> Wrap(
         IList<AITool> tools,
-        IToolApprovalHandler approvalHandler,
+        IToolApprovalHandler? approvalHandler,
         ToolApprovalOptions options,
+        IToolPermissionEvaluator? permissionEvaluator = null,
+        IShellCommandAnalyzer? shellCommandAnalyzer = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null,
         ILogger<ApprovalToolWrapper>? logger = null,
         IReadOnlyDictionary<string, string>? toolNameToGroup = null)
     {
@@ -53,7 +65,7 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
             return tools ?? (IList<AITool>)new List<AITool>();
         }
 
-        if (!options.Enabled)
+        if (!options.Enabled && permissionEvaluator == null)
         {
             return tools;
         }
@@ -69,9 +81,9 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
                     group = g;
                 }
 
-                if (RequiresApproval(aiFunction.Name, group, options))
+                if (permissionEvaluator != null || RequiresApproval(aiFunction.Name, group, options))
                 {
-                    result.Add(new ApprovalToolWrapper(aiFunction, approvalHandler, options, logger, group));
+                    result.Add(new ApprovalToolWrapper(aiFunction, approvalHandler, options, permissionEvaluator, shellCommandAnalyzer, executionContextAccessor, logger, group));
                 }
                 else
                 {
@@ -92,8 +104,22 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        if (RequiresApproval(InnerFunction.Name, _toolGroup, _options))
+        var decision = EvaluateDecision(arguments);
+
+        if (decision.Behavior == PermissionBehavior.Deny)
         {
+            _logger?.LogInformation("Tool call rejected by permission rule: {ToolName}, Reason: {Reason}", decision.ToolName, decision.Reason);
+            return $"Tool call rejected: {decision.Reason ?? "Not approved"}";
+        }
+
+        if (decision.Behavior == PermissionBehavior.Ask)
+        {
+            if (_approvalHandler == null)
+            {
+                _logger?.LogWarning("Tool call requires approval but no approval handler is configured: {ToolName}", decision.ToolName);
+                return "Tool call rejected: approval handler is not configured.";
+            }
+
             var request = BuildRequest(InnerFunction, arguments, _options);
             _logger?.LogDebug("Requesting approval for tool: {ToolName}", request.ToolName);
 
@@ -140,6 +166,31 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         return await base.InvokeCoreAsync(arguments, cancellationToken);
     }
 
+    private ToolPermissionDecision EvaluateDecision(AIFunctionArguments arguments)
+    {
+        if (_permissionEvaluator != null)
+        {
+            var context = BuildPermissionContext(InnerFunction, arguments, _toolGroup, _shellCommandAnalyzer);
+            EnrichPermissionContextFromRuntime(context, InnerFunction, _executionContextAccessor);
+            var compatibilityRules = ToolApprovalOptionsRuleAdapter.ToRules(_options);
+
+            // Merge parent session rules when running inside a sub-agent
+            var parentRules = GetParentSessionRules(_executionContextAccessor);
+            if (parentRules != null)
+            {
+                compatibilityRules = compatibilityRules.Count > 0
+                    ? [.. compatibilityRules, .. parentRules]
+                    : parentRules;
+            }
+
+            return _permissionEvaluator.Evaluate(context, compatibilityRules);
+        }
+
+        return RequiresApproval(InnerFunction.Name, _toolGroup, _options)
+            ? new ToolPermissionDecision(InnerFunction.Name, PermissionBehavior.Ask, "Approval required by configuration")
+            : new ToolPermissionDecision(InnerFunction.Name, PermissionBehavior.Allow);
+    }
+
     private static bool RequiresApproval(string toolName, string? toolGroup, ToolApprovalOptions options)
     {
         if (!options.Enabled)
@@ -176,6 +227,312 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         }
 
         return false;
+    }
+
+    private static ToolPermissionContext BuildPermissionContext(
+        AIFunction function,
+        AIFunctionArguments arguments,
+        string? toolGroup,
+        IShellCommandAnalyzer? shellCommandAnalyzer)
+    {
+        var argsDict = new Dictionary<string, object?>();
+        foreach (var kv in arguments)
+        {
+            argsDict[kv.Key] = kv.Value;
+        }
+
+        var context = new ToolPermissionContext
+        {
+            ToolName = function.Name,
+            ToolGroup = toolGroup,
+            Arguments = argsDict
+        };
+
+        context.WorkingDirectory = GetStringArgument(argsDict, "working_directory");
+        context.CandidatePaths = ExtractCandidatePaths(argsDict, context.WorkingDirectory);
+
+        var shellCommand = GetStringArgument(argsDict, "command")
+            ?? GetStringArgument(argsDict, "script")
+            ?? GetStringArgument(argsDict, "cmd");
+
+        if (!string.IsNullOrWhiteSpace(shellCommand))
+        {
+            context.ShellCommand = shellCommand;
+            if (shellCommandAnalyzer != null)
+            {
+                var analysis = shellCommandAnalyzer.Analyze(shellCommand);
+                context.ShellSegments = analysis.Segments.Select(x => x.CommandText).ToList();
+                context.IsDestructive = analysis.IsDestructiveCandidate;
+            }
+        }
+
+        return context;
+    }
+
+    private static void EnrichPermissionContextFromRuntime(
+        ToolPermissionContext context,
+        AIFunction function,
+        IAgentExecutionContextAccessor? executionContextAccessor)
+    {
+        context.ServerName = GetAdditionalPropertyString(function, "mcp.server");
+
+        if (string.IsNullOrWhiteSpace(context.ServerName)
+            && context.ToolGroup != null
+            && context.ToolGroup.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
+        {
+            context.ServerName = context.ToolGroup["mcp:".Length..];
+        }
+
+        if (executionContextAccessor?.Properties.TryGetValue(ContextPropertyKeys.IsSubAgent, out var isSubAgent) == true)
+        {
+            context.IsSubAgent = TryConvertToBool(isSubAgent);
+        }
+
+        if (executionContextAccessor?.Properties.TryGetValue(ContextPropertyKeys.SubAgentName, out var subAgentName) == true)
+        {
+            context.SubAgentName = ConvertToString(subAgentName);
+        }
+
+        var currentRequest = executionContextAccessor?.CurrentRequest;
+        context.WorkflowId = currentRequest?.WorkflowId;
+        context.IsWorkflowRun = currentRequest?.WorkflowId.HasValue == true;
+        context.WorkflowExecutionId = GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowExecutionId);
+        context.WorkflowNodeName = GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowNodeName);
+
+        if (currentRequest?.Metadata != null)
+        {
+            context.WorkflowExecutionId ??=
+                GetMetadataString(currentRequest.Metadata, "workflow_execution_id")
+                ?? GetMetadataString(currentRequest.Metadata, "workflowExecutionId");
+            context.WorkflowNodeName ??=
+                GetMetadataString(currentRequest.Metadata, "node_name")
+                ?? GetMetadataString(currentRequest.Metadata, "nodeName");
+        }
+
+        if (currentRequest?.Metadata?.TryGetValue("working_directory", out var workingDirectory) == true
+            && string.IsNullOrWhiteSpace(context.WorkingDirectory))
+        {
+            context.WorkingDirectory = ConvertToString(workingDirectory);
+        }
+
+        if (context.CandidatePaths.Count > 0)
+        {
+            context.CandidatePaths = NormalizeCandidatePaths(context.CandidatePaths, context.WorkingDirectory);
+        }
+
+        if (context.CandidatePaths.Count == 0 && !string.IsNullOrWhiteSpace(context.WorkingDirectory))
+        {
+            context.CandidatePaths = [context.WorkingDirectory];
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractCandidatePaths(
+        IReadOnlyDictionary<string, object?> arguments,
+        string? workingDirectory)
+    {
+        var paths = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddPath(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            var normalized = ResolveCandidatePath(value, workingDirectory);
+            if (seen.Add(normalized))
+            {
+                paths.Add(normalized);
+            }
+        }
+
+        AddPath(workingDirectory);
+
+        foreach (var (key, value) in arguments)
+        {
+            if (!LooksLikePathArgument(key))
+            {
+                continue;
+            }
+
+            switch (value)
+            {
+                case string text:
+                    AddPath(text);
+                    break;
+                case JsonElement json when json.ValueKind == JsonValueKind.String:
+                    AddPath(json.GetString());
+                    break;
+                case IEnumerable<string> texts:
+                    foreach (var text in texts)
+                    {
+                        AddPath(text);
+                    }
+                    break;
+                case JsonElement json when json.ValueKind == JsonValueKind.Array:
+                    foreach (var item in json.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.String)
+                        {
+                            AddPath(item.GetString());
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return paths;
+    }
+
+    private static IReadOnlyList<string> NormalizeCandidatePaths(
+        IReadOnlyList<string> candidatePaths,
+        string? workingDirectory)
+    {
+        if (candidatePaths.Count == 0)
+        {
+            return candidatePaths;
+        }
+
+        var normalized = new List<string>(candidatePaths.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidatePath in candidatePaths)
+        {
+            var resolved = ResolveCandidatePath(candidatePath, workingDirectory);
+            if (seen.Add(resolved))
+            {
+                normalized.Add(resolved);
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string ResolveCandidatePath(string value, string? workingDirectory)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Contains("://", StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(workingDirectory) && !Path.IsPathRooted(trimmed))
+            {
+                return Path.GetFullPath(trimmed, workingDirectory);
+            }
+
+            if (Path.IsPathRooted(trimmed))
+            {
+                return Path.GetFullPath(trimmed);
+            }
+        }
+        catch
+        {
+            // Best-effort normalization only. If resolution fails, keep the original value
+            // so the permission evaluator still sees the caller-provided path.
+        }
+
+        return trimmed;
+    }
+
+    private static bool LooksLikePathArgument(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        return key.Contains("path", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("file", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("directory", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("folder", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("cwd", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("workspace", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("root", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("source", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("target", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("destination", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("output", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<ToolPermissionRule>? GetParentSessionRules(
+        IAgentExecutionContextAccessor? executionContextAccessor)
+    {
+        if (executionContextAccessor?.Properties.TryGetValue(
+                ContextPropertyKeys.ParentSessionRules, out var value) != true)
+        {
+            return null;
+        }
+
+        return value as IReadOnlyList<ToolPermissionRule>;
+    }
+
+    private static string? GetStringArgument(IReadOnlyDictionary<string, object?> arguments, string key)
+    {
+        if (!arguments.TryGetValue(key, out var value) || value == null)
+        {
+            return null;
+        }
+
+        return ConvertToString(value);
+    }
+
+    private static string? GetAdditionalPropertyString(AIFunction function, string key)
+    {
+        if (function.AdditionalProperties == null
+            || !function.AdditionalProperties.TryGetValue(key, out var value)
+            || value == null)
+        {
+            return null;
+        }
+
+        return ConvertToString(value);
+    }
+
+    private static string? GetContextPropertyString(
+        IAgentExecutionContextAccessor? executionContextAccessor,
+        string key)
+    {
+        if (executionContextAccessor?.Properties.TryGetValue(key, out var value) != true)
+        {
+            return null;
+        }
+
+        return ConvertToString(value);
+    }
+
+    private static string? GetMetadataString(
+        IReadOnlyDictionary<string, object> metadata,
+        string key)
+    {
+        return metadata.TryGetValue(key, out var value)
+            ? ConvertToString(value)
+            : null;
+    }
+
+    private static string? ConvertToString(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            string text => text,
+            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+            _ => value.ToString()
+        };
+    }
+
+    private static bool TryConvertToBool(object? value)
+    {
+        return value switch
+        {
+            bool flag => flag,
+            JsonElement { ValueKind: JsonValueKind.True } => true,
+            JsonElement { ValueKind: JsonValueKind.False } => false,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            _ => false
+        };
     }
 
     private ToolApprovalRequest BuildRequest(AIFunction function, AIFunctionArguments arguments, ToolApprovalOptions options)

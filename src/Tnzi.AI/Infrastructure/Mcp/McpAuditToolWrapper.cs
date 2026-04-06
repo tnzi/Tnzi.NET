@@ -3,7 +3,7 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// <summary>
 /// 包装 MCP 来源的 AIFunction，在执行时记录审计日志（ServerName、ToolName、参数数量），便于安全与审计链路。
 /// </summary>
-internal sealed class McpAuditToolWrapper : DelegatingAIFunction
+public sealed class McpAuditToolWrapper : DelegatingAIFunction
 {
     private readonly string _serverName;
     private readonly ILogger<McpAuditToolWrapper>? _logger;

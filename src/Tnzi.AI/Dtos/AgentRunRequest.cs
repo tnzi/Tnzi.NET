@@ -5,6 +5,9 @@ namespace Tnzi.AI.Dtos;
 /// </summary>
 public class AgentRunRequest
 {
+    /// <summary>请求操作类型（用于 usage analytics 分类）</summary>
+    public string? OperationType { get; init; }
+
     /// <summary>Agent ID（与 Provider/Model 二选一）</summary>
     public Guid? AgentId { get; init; }
 
@@ -34,6 +37,15 @@ public class AgentRunRequest
 
     /// <summary>是否创建 Run 记录（用于追踪复杂运行）</summary>
     public bool EnableRunTracking { get; init; }
+
+    /// <summary>复用已有 Run 记录（后台启动场景）</summary>
+    public Guid? ExistingRunId { get; init; }
+
+    /// <summary>父级 Run ID（子 Agent / workflow 子调用）</summary>
+    public Guid? ParentRunId { get; init; }
+
+    /// <summary>根 Run ID（整条调用链共享）</summary>
+    public Guid? RootRunId { get; init; }
 
     /// <summary>当前用户 ID（用于配额检查等）</summary>
     public Guid? UserId { get; init; }

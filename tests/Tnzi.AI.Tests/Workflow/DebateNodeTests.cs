@@ -24,8 +24,10 @@ public class DebateNodeTests
         // Assert
         result.IsSuccess.ShouldBeTrue();
         result.Output.Text.ShouldNotBeNullOrEmpty();
-        result.Output.Metadata.ShouldContainKey("total_rounds");
-        result.Output.Metadata.ShouldContainKeyAndValue("agent_count", "2");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKey("total_rounds");
+        metadata.ShouldContainKeyAndValue("agent_count", "2");
     }
 
     [Fact]
@@ -136,7 +138,9 @@ public class DebateNodeTests
         var result = await node.ExecuteAsync(context);
 
         result.IsSuccess.ShouldBeTrue();
-        result.Output.Metadata.ShouldContainKeyAndValue("agent_count", "3");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("agent_count", "3");
     }
 
     /// <summary>

@@ -22,7 +22,8 @@ public class ClarificationTools
     /// - Operations with significant risk that need explicit confirmation
     /// </summary>
     [AIFunction("ask_clarification",
-        Description = "Ask the user a clarification question when you need more information to proceed correctly. This will pause execution and wait for the user's response.")]
+        Description = "Ask the user a clarification question when you need more information to proceed correctly. This will pause execution and wait for the user's response.",
+        InterruptBehavior = ToolInterruptBehavior.GracefulShutdown)]
     public string AskClarification(
         [Description("The clarification question to ask the user")] string question,
         [Description("Type of clarification: MissingInfo, AmbiguousRequirement, ApproachChoice, RiskConfirmation, Suggestion")] ClarificationType type,

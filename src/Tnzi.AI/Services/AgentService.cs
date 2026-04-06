@@ -233,6 +233,7 @@ public class AgentService : ApplicationService, IAgentService
         {
             var runRequest = new AgentRunRequest
             {
+                OperationType = AIOperationType.AgentRun,
                 AgentId = agentId,
                 UserMessage = message,
                 ContentParts = content,
@@ -241,14 +242,26 @@ public class AgentService : ApplicationService, IAgentService
             };
 
             var result = await _runtime.RunAsync(runRequest, ct);
+            if (TryMapFailure(result, out var statusCode, out var errorCode))
+            {
+                return Fail<AgentResponseDto>(result.Response, statusCode, errorCode);
+            }
 
             return Ok(new AgentResponseDto
             {
                 Content = result.Response,
+                FinishReason = result.FinishReason,
+                Model = result.Model,
+                Provider = result.Provider,
+                Status = result.Status,
                 Usage = result.Usage,
                 Citations = result.Citations,
                 HandoffPath = result.HandoffPath,
-                FinalAgentName = result.FinalAgentName
+                FinalAgentName = result.FinalAgentName,
+                Reasoning = result.Reasoning,
+                Suggestions = result.Suggestions,
+                Artifacts = result.Artifacts,
+                ClarificationQuestion = result.ClarificationQuestion
             });
         }
         catch (BusinessException ex)
@@ -264,10 +277,40 @@ public class AgentService : ApplicationService, IAgentService
         }
     }
 
+    private static bool TryMapFailure(AgentRunResult result, out int statusCode, out string errorCode)
+    {
+        switch (result.FinishReason)
+        {
+            case FinishReasons.QuotaExceeded:
+                statusCode = 429;
+                errorCode = ErrorCodes.QuotaExceeded;
+                return true;
+            case FinishReasons.GuardrailRejected:
+                statusCode = 400;
+                errorCode = ErrorCodes.GuardrailRejected;
+                return true;
+            case FinishReasons.Rejected:
+                statusCode = 400;
+                errorCode = ErrorCodes.AgentRunFailed;
+                return true;
+            case FinishReasons.MaxHandoffs:
+            case FinishReasons.Error:
+            case FinishReasons.Failed:
+                statusCode = 500;
+                errorCode = ErrorCodes.AgentRunFailed;
+                return true;
+            default:
+                statusCode = 0;
+                errorCode = string.Empty;
+                return false;
+        }
+    }
+
     public async IAsyncEnumerable<StreamEvent> RunStreamingAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var runRequest = new AgentRunRequest
         {
+            OperationType = AIOperationType.AgentRun,
             AgentId = agentId,
             UserMessage = message,
             ContentParts = content,
@@ -279,6 +322,7 @@ public class AgentService : ApplicationService, IAgentService
         AgentStreamChunk? lastChunk = null;
         string? streamErrorMessage = null;
         string? streamFinishReason = null;
+        string? streamModel = null;
         List<CitationDto>? citations = null;
 
         await foreach (var chunk in _runtime.RunStreamingAsync(runRequest, ct).WithCancellation(ct))
@@ -297,53 +341,25 @@ public class AgentService : ApplicationService, IAgentService
             {
                 citations = chunk.Citations;
             }
+            if (chunk.FinishReason != null)
+            {
+                streamFinishReason = chunk.FinishReason;
+            }
+            if (!string.IsNullOrWhiteSpace(chunk.Model))
+            {
+                streamModel = chunk.Model;
+            }
 
             // 发送 delta 事件、工具调用状态事件或错误事件（guardrail 拦截等）
             if (chunk.Error != null)
             {
                 streamErrorMessage = chunk.Error;
-                streamFinishReason = chunk.FinishReason;
-                yield return new StreamEvent
-                {
-                    IsError = true,
-                    ErrorMessage = chunk.Error,
-                    ErrorCode = chunk.FinishReason == "guardrail_rejected" ? ErrorCodes.GuardrailRejected : ErrorCodes.AgentRunFailed,
-                    FinishReason = chunk.FinishReason,
-                    ThreadId = currentThreadId
-                };
             }
-            else if (chunk.ReasoningText != null)
+
+            var streamEvent = CreateStreamEvent(chunk, currentThreadId, ErrorCodes.AgentRunFailed);
+            if (streamEvent != null)
             {
-                yield return new StreamEvent
-                {
-                    ReasoningDelta = chunk.ReasoningText,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.Text != null)
-            {
-                yield return new StreamEvent
-                {
-                    Delta = chunk.Text,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.ToolCalls != null)
-            {
-                yield return new StreamEvent
-                {
-                    ToolCalls = chunk.ToolCalls,
-                    ThreadId = currentThreadId
-                };
-            }
-            else if (chunk.IsToolCall)
-            {
-                yield return new StreamEvent
-                {
-                    IsToolCall = true,
-                    ToolCallNames = chunk.ToolCallNames,
-                    ThreadId = currentThreadId
-                };
+                yield return streamEvent;
             }
         }
 
@@ -359,7 +375,8 @@ public class AgentService : ApplicationService, IAgentService
         yield return new StreamEvent
         {
             IsDone = true,
-            FinishReason = hasStreamError ? (streamFinishReason ?? "error") : "stop",
+            FinishReason = hasStreamError ? (streamFinishReason ?? "error") : (streamFinishReason ?? "stop"),
+            Model = streamModel,
             ThreadId = runRequest.ThreadId,
             IsError = hasStreamError,
             ErrorMessage = hasStreamError ? streamErrorMessage : null,
@@ -371,6 +388,110 @@ public class AgentService : ApplicationService, IAgentService
             },
             Citations = citations
         };
+    }
+
+    private static StreamEvent? CreateStreamEvent(AgentStreamChunk chunk, Guid? threadId, string defaultErrorCode)
+    {
+        var hasPayload =
+            chunk.Error != null ||
+            chunk.AgentName != null ||
+            chunk.ReasoningText != null ||
+            chunk.Text != null ||
+            chunk.ToolCalls != null ||
+            chunk.IsToolCall ||
+            chunk.ToolCallNames != null ||
+            chunk.EventType != null ||
+            chunk.EventData != null ||
+            chunk.Suggestions != null ||
+            chunk.Todos != null ||
+            chunk.Artifacts != null;
+
+        if (!hasPayload)
+        {
+            return null;
+        }
+
+        return new StreamEvent
+        {
+            Delta = chunk.Text,
+            FinishReason = chunk.FinishReason,
+            Model = chunk.Model,
+            ThreadId = threadId,
+            IsError = chunk.Error != null,
+            ErrorMessage = chunk.Error,
+            ErrorCode = chunk.Error != null && chunk.FinishReason == FinishReasons.GuardrailRejected
+                ? ErrorCodes.GuardrailRejected
+                : chunk.Error != null
+                    ? defaultErrorCode
+                    : null,
+            IsToolCall = chunk.IsToolCall,
+            ToolCallNames = chunk.ToolCallNames,
+            ReasoningDelta = chunk.ReasoningText,
+            AgentName = chunk.AgentName,
+            ToolCalls = chunk.ToolCalls,
+            EventType = chunk.EventType,
+            EventData = chunk.EventData,
+            Suggestions = chunk.Suggestions,
+            Todos = chunk.Todos,
+            Artifacts = chunk.Artifacts
+        };
+    }
+
+    public async Task<Result<AgentDto>> ConfigureAbTestAsync(Guid agentId, ConfigureAbTestDto input)
+    {
+        Check.NotNull(input);
+
+        var agent = await _repository.GetAsync(agentId);
+        if (agent == null)
+            return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+
+        if (input.VersionA == input.VersionB)
+            return Fail<AgentDto>("Version A and B must be different", 400, ErrorCodes.InvalidContent);
+
+        // 验证两个版本都存在
+        var versionAExists = await _versionRepository.AnyAsync(v => v.AgentId == agentId && v.Version == input.VersionA);
+        if (!versionAExists)
+            return Fail<AgentDto>($"Version {input.VersionA} not found", 404, ErrorCodes.AgentVersionNotFound);
+
+        var versionBExists = await _versionRepository.AnyAsync(v => v.AgentId == agentId && v.Version == input.VersionB);
+        if (!versionBExists)
+            return Fail<AgentDto>($"Version {input.VersionB} not found", 404, ErrorCodes.AgentVersionNotFound);
+
+        // 将 A/B 测试配置合并到 Agent.Configuration JSON
+        var abTestConfig = new AbTestConfig
+        {
+            Enabled = true,
+            VersionA = input.VersionA,
+            VersionB = input.VersionB,
+            TrafficPercentB = input.TrafficPercentB
+        };
+        agent.Configuration = AgentVersionRouter.MergeAbTestConfig(agent.Configuration, abTestConfig);
+        await _repository.UpdateAsync(agent);
+
+        Logger.LogInformation(
+            "A/B test configured for Agent {AgentId}: VersionA={VersionA}, VersionB={VersionB}, TrafficPercentB={TrafficPercentB}",
+            agentId, input.VersionA, input.VersionB, input.TrafficPercentB);
+
+        return Ok(MapToDto(agent));
+    }
+
+    public async Task<Result<AgentDto>> StopAbTestAsync(Guid agentId)
+    {
+        var agent = await _repository.GetAsync(agentId);
+        if (agent == null)
+            return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+
+        // 移除 A/B 测试配置
+        agent.Configuration = AgentVersionRouter.MergeAbTestConfig(agent.Configuration, null);
+
+        // 如果 Configuration 变为空对象 "{}" 且没有其他配置，设为 null
+        if (agent.Configuration == "{}")
+            agent.Configuration = null;
+
+        await _repository.UpdateAsync(agent);
+
+        Logger.LogInformation("A/B test stopped for Agent {AgentId}", agentId);
+        return Ok(MapToDto(agent));
     }
 
     private async Task CreateVersionSnapshotAsync(Agent entity, string? changeNote)

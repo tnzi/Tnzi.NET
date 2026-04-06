@@ -4,18 +4,11 @@ namespace Tnzi.AI.Coder;
 /// AI Coder 模块 — 提供文件系统、Shell、代码搜索、记忆、项目上下文等本地编码工具
 /// </summary>
 /// <remarks>
-/// <para>
 /// 此模块为 CLI AI 编码助手场景（类似 Claude Code）提供本地操作能力。
-/// 仅依赖 Tnzi 核心项目（工具框架、记忆存储、项目上下文接口）。
-/// </para>
-/// <para>
-/// 与 Tnzi.AI 模块（AIModule）互不依赖，可独立使用或协作：
-/// - TnziCustomModule (ModuleType=400) 天然晚于 TnziApplicationModule (ModuleType=300) 加载
-/// - 共享服务（ToolScanner, ToolRegistry, IToolApprovalHandler）通过 TryAdd 避免重复注册
-/// - IMemoryStore 通过 TryAdd 注册文件存储（AIModule 先加载时使用数据库存储）
-/// </para>
+/// 依赖 AIModule 提供的工具基础设施（IToolScanner, IToolRegistry）和记忆存储（IMemoryStore）。
 /// </remarks>
-public class AICoderModule : TnziCustomModule
+[DependsOn(typeof(AIModule))]
+public class AICoderModule : TnziApplicationModule
 {
     /// <summary>
     /// 加载顺序（在 AIModule 之后）
@@ -52,6 +45,11 @@ public class AICoderModule : TnziCustomModule
         // 安全组件
         services.AddSingleton<IPathValidator, PathValidator>();
         services.AddSingleton<ICommandSanitizer, CommandSanitizer>();
+        services.TryAddSingleton<BashShellAdapter>();
+        services.TryAddSingleton<PowerShellShellAdapter>();
+        services.TryAddSingleton<IShellAdapter>(sp => OperatingSystem.IsWindows()
+            ? sp.GetRequiredService<PowerShellShellAdapter>()
+            : sp.GetRequiredService<BashShellAdapter>());
 
         // 项目上下文加载器
         services.AddSingleton<IProjectContextLoader, DefaultProjectContextLoader>();
@@ -59,19 +57,13 @@ public class AICoderModule : TnziCustomModule
         // Web 搜索提供者（DuckDuckGo 默认实现，TryAdd: 用户可替换为商业 API）
         services.TryAddSingleton<IWebSearchProvider, DuckDuckGoSearchProvider>();
 
-        // 工具基础设施（TryAdd: 如果 AIModule 已注册则跳过）
-        services.TryAddSingleton<IToolScanner, ToolScanner>();
-        services.TryAddSingleton<IToolRegistry, ToolRegistry>();
-        services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
-
-        // 文件记忆存储（TryAdd: AIModule 已注册 DatabaseMemoryStore 时跳过）
-        services.TryAddSingleton<IMemoryStore, FileMemoryStore>();
-
         // 手动注册所有工具提供者（框架程序集 MUST 手动注册）
         // 工具类是无状态函数容器，其依赖均为 Singleton，必须注册为 Singleton
         // （因为 ToolAdapter 从 Singleton ServiceProvider 解析工具实例）
         services.AddSingleton<FileSystemTools>();
         services.AddSingleton<ShellTools>();
+        services.AddSingleton<BashTools>();
+        services.AddSingleton<PowerShellTools>();
         services.AddSingleton<CodeSearchTools>();
         services.AddSingleton<WebTools>();
         services.AddSingleton<MemoryTools>();

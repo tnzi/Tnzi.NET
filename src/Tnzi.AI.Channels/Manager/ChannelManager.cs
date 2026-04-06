@@ -222,7 +222,13 @@ public class ChannelManager : IChannelManager
         IAgentRuntime runtime,
         CancellationToken ct)
     {
-        // 解析或创建线程（AgentRuntime 会自动创建线程如果 ThreadId 为空）
+        // 优先尝试通过 Gateway 处理（统一路由 + 会话绑定）
+        if (await TryHandleChatViaGatewayAsync(message, ct))
+        {
+            return;
+        }
+
+        // 回退到直接 IAgentRuntime 调用
         var threadId = await threadStore.GetThreadIdAsync(message.ChannelName, message.ChatId, message.TopicId);
 
         var request = new AgentRunRequest
@@ -246,6 +252,52 @@ public class ChannelManager : IChannelManager
             message.ChannelName, message.ChatId, actualThreadId,
             result.Response,
             IsFinal: true));
+    }
+
+    /// <summary>
+    /// 尝试通过 Gateway 处理聊天消息，成功返回 true，失败或不可用返回 false（回退到直接 Runtime）
+    /// </summary>
+    private async Task<bool> TryHandleChatViaGatewayAsync(InboundMessage message, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var gateway = scope.ServiceProvider.GetService<IGateway>();
+            if (gateway == null) return false;
+
+            var request = new GatewayRequest
+            {
+                Channel = message.ChannelName,
+                ChatId = message.ChatId,
+                UserId = message.UserId ?? "unknown",
+                TopicId = message.TopicId,
+                UserMessage = message.Text,
+                AgentId = _options.DefaultAgentId
+            };
+
+            var response = await gateway.ProcessAsync(request, ct);
+
+            if (!response.Success)
+            {
+                _logger.LogWarning("Gateway returned error for {Channel}:{ChatId}: {Error}, falling back to direct runtime",
+                    message.ChannelName, message.ChatId, response.Error);
+                return false;
+            }
+
+            var threadId = response.ThreadId ?? Guid.Empty;
+            await _bus.PublishOutboundAsync(new OutboundMessage(
+                message.ChannelName, message.ChatId, threadId,
+                response.Response ?? string.Empty,
+                IsFinal: true));
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gateway processing failed for {Channel}:{ChatId}, falling back to direct runtime",
+                message.ChannelName, message.ChatId);
+            return false;
+        }
     }
 
     private async Task PublishErrorReplyAsync(InboundMessage message, string errorText)

@@ -19,4 +19,14 @@ public interface IEvaluationService
     /// 删除评估运行记录
     /// </summary>
     Task<Result> DeleteAsync(Guid id);
+
+    /// <summary>
+    /// 创建并执行评估运行
+    /// </summary>
+    Task<Result<EvaluationRunDetailDto>> CreateAndRunAsync(CreateEvaluationRunDto dto, CancellationToken ct = default);
+
+    /// <summary>
+    /// 批量评估多个 Agent/版本（并行执行）
+    /// </summary>
+    Task<Result<BatchEvaluationResultDto>> RunBatchAsync(BatchEvaluationDto dto, CancellationToken ct = default);
 }

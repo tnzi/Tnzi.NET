@@ -13,7 +13,19 @@ public class CoderOptions
     /// <summary>
     /// 指令文件路径列表（后面的文件覆盖前面的）
     /// </summary>
-    public List<string> InstructionFiles { get; set; } = ["TNZI.md", ".tnzi/TNZI.md"];
+    public List<string> InstructionFiles { get; set; } =
+    [
+        "TNZI.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".tnzi/TNZI.md",
+        ".claude/CLAUDE.md"
+    ];
+
+    /// <summary>
+    /// 是否加载用户主目录下的全局指令文件（如 ~/.tnzi/TNZI.md、~/.claude/CLAUDE.md）
+    /// </summary>
+    public bool IncludeGlobalInstructionFiles { get; set; } = true;
 
     /// <summary>
     /// 记忆存储目录（相对于 ProjectRoot）

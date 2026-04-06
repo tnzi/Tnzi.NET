@@ -21,12 +21,13 @@ public class UsageLoggingMiddlewareTests
             Mock.Of<ILogger<UsageLoggingMiddleware>>());
     }
 
-    private static AiMiddlewareContext CreateContext(string provider = TestProvider, string model = TestModel, Guid? agentId = null, Guid? threadId = null)
+    private static AiMiddlewareContext CreateContext(string provider = TestProvider, string model = TestModel, Guid? agentId = null, Guid? threadId = null, string? operationType = null)
     {
         return new AiMiddlewareContext
         {
             Request = new AgentRunRequest
             {
+                OperationType = operationType,
                 UserMessage = "Hello",
                 ThreadId = threadId
             },
@@ -129,6 +130,92 @@ public class UsageLoggingMiddlewareTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task InvokeAsync_FailureFinishReason_LogsUsageAsFailure()
+    {
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var context = CreateContext();
+        var result = new AgentRunResult
+        {
+            Response = "Blocked by guardrail",
+            FinishReason = FinishReasons.GuardrailRejected,
+            Usage = new TokenUsageDto { InputTokens = 12, OutputTokens = 3 }
+        };
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
+
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.Chat,
+            TestProvider,
+            TestModel,
+            12, 3,
+            It.IsAny<long>(),
+            false,
+            "Blocked by guardrail",
+            null, null,
+            0, 0,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UsesActualProviderAndModelFromExecutionContext()
+    {
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var context = CreateContext();
+        context.EffectiveProvider = "Anthropic";
+        context.EffectiveModel = "claude-3-7-sonnet";
+
+        var result = new AgentRunResult
+        {
+            Response = "ok",
+            Model = "claude-3-7-sonnet",
+            Usage = new TokenUsageDto { InputTokens = 10, OutputTokens = 4 }
+        };
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
+
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.Chat,
+            "Anthropic",
+            "claude-3-7-sonnet",
+            10, 4,
+            It.IsAny<long>(),
+            true,
+            null,
+            null, null,
+            0, 0,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AgentRunRequest_LogsAgentRunOperationType()
+    {
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var context = CreateContext(agentId: Guid.NewGuid(), operationType: AIOperationType.AgentRun);
+        var result = new AgentRunResult
+        {
+            Response = "ok",
+            Usage = new TokenUsageDto { InputTokens = 5, OutputTokens = 2 }
+        };
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
+
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.AgentRun,
+            TestProvider,
+            TestModel,
+            5, 2,
+            It.IsAny<long>(),
+            true,
+            null,
+            context.Agent.AgentId, null,
+            0, 0,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     #endregion
 
     #region InvokeStreamingAsync
@@ -158,7 +245,7 @@ public class UsageLoggingMiddlewareTests
         chunks.Count.ShouldBe(2);
         // 流式完成后记录最后一个 Usage 的值
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.Chat,
+            AIOperationType.ChatStreaming,
             TestProvider,
             TestModel,
             80, 40,
@@ -166,6 +253,118 @@ public class UsageLoggingMiddlewareTests
             true,
             null,
             null, null,
+            0, 0,
+            CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_FailureFinishReason_LogsUsageAsFailure()
+    {
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var context = CreateContext();
+
+        var streamChunks = new[]
+        {
+            new AgentStreamChunk { Text = "partial" },
+            new AgentStreamChunk
+            {
+                FinishReason = FinishReasons.MaxHandoffs,
+                Usage = new TokenUsageDto { InputTokens = 21, OutputTokens = 8 }
+            }
+        };
+
+        var chunks = new List<AgentStreamChunk>();
+        await foreach (var chunk in middleware.InvokeStreamingAsync(context, (ctx, ct) => streamChunks.ToAsyncEnumerable()))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks.Count.ShouldBe(2);
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.ChatStreaming,
+            TestProvider,
+            TestModel,
+            21, 8,
+            It.IsAny<long>(),
+            false,
+            $"AI request finished unsuccessfully: {FinishReasons.MaxHandoffs}",
+            null, null,
+            0, 0,
+            CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_UsesActualProviderAndChunkModel()
+    {
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var context = CreateContext();
+        context.EffectiveProvider = "Anthropic";
+
+        var streamChunks = new[]
+        {
+            new AgentStreamChunk
+            {
+                Text = "partial",
+                Model = "claude-3-7-sonnet"
+            },
+            new AgentStreamChunk
+            {
+                FinishReason = FinishReasons.Stop,
+                Model = "claude-3-7-sonnet",
+                Usage = new TokenUsageDto { InputTokens = 33, OutputTokens = 12 }
+            }
+        };
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(context, (ctx, ct) => streamChunks.ToAsyncEnumerable()))
+        {
+        }
+
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.ChatStreaming,
+            "Anthropic",
+            "claude-3-7-sonnet",
+            33, 12,
+            It.IsAny<long>(),
+            true,
+            null,
+            null, null,
+            0, 0,
+            CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_AgentRunRequest_LogsAgentRunStreamingOperationType()
+    {
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var agentId = Guid.NewGuid();
+        var context = CreateContext(agentId: agentId, operationType: AIOperationType.AgentRun);
+
+        var streamChunks = new[]
+        {
+            new AgentStreamChunk { Text = "partial" },
+            new AgentStreamChunk
+            {
+                FinishReason = FinishReasons.Stop,
+                Usage = new TokenUsageDto { InputTokens = 17, OutputTokens = 9 }
+            }
+        };
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(context, (ctx, ct) => streamChunks.ToAsyncEnumerable()))
+        {
+        }
+
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.AgentRunStreaming,
+            TestProvider,
+            TestModel,
+            17, 9,
+            It.IsAny<long>(),
+            true,
+            null,
+            agentId, null,
             0, 0,
             CancellationToken.None), Times.Once);
     }

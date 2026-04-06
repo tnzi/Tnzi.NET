@@ -5,6 +5,9 @@
 build/output/
 build/output-cli/
 build/tmp/
+.tmp/
+.artifacts/
+.artifacts-run-*/
 
 # Visual Studio / Rider
 .vs/
@@ -108,4 +111,6 @@ CLAUDE.md
 .codeium
 .continue
 .playwright/
+.github/
+.superpowers/
 # <<< Cloud Sync (managed by cloud-sync)

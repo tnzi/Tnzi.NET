@@ -233,6 +233,7 @@ public static class FinishReasons
     public const string Error = "error";
     public const string Completed = "completed";
     public const string Rejected = "rejected";
+    public const string Cancelled = "cancelled";
     public const string AwaitingApproval = "awaiting_approval";
     public const string Failed = "failed";
     public const string GuardrailRejected = "guardrail_rejected";

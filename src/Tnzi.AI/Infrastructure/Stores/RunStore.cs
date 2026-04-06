@@ -59,4 +59,20 @@ public class RunStore : IRunStore
         Check.NotNull(node);
         await _nodeRepository.UpdateAsync(node, cancellationToken);
     }
+
+    /// <summary>按条件分页查询 Run 列表</summary>
+    public async Task<List<AgentRun>> ListAsync(AgentRunStatus? status, int maxResults, CancellationToken cancellationToken = default)
+    {
+        var query = _runRepository.AsQueryable();
+
+        if (status.HasValue)
+        {
+            query = query.Where(r => r.Status == status.Value);
+        }
+
+        return await query
+            .OrderByDescending(r => r.CreationTime)
+            .Take(maxResults)
+            .ToListAsync(cancellationToken);
+    }
 }

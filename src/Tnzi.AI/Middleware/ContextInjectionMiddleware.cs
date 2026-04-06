@@ -214,8 +214,6 @@ public class ContextInjectionMiddleware : IAiMiddleware
             catch { /* ignore parse errors */ }
             return null;
         });
-
-        return null;
     }
 
     /// <summary>

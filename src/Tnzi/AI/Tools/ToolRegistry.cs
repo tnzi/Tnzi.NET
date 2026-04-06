@@ -52,7 +52,8 @@ public class ToolRegistry : IToolRegistry
     {
         if (_toolsByGroup.TryGetValue(groupName, out var tools))
         {
-            return tools;
+            // 返回副本，防止调用方遍历时被并发修改
+            return tools.ToList();
         }
 
         return Array.Empty<ToolDefinition>();
@@ -114,6 +115,36 @@ public class ToolRegistry : IToolRegistry
                 }
                 _logger.LogDebug("Unregistered tool group '{GroupName}' ({Count} tools)", groupName, removedTools.Count);
             }
+        }
+    }
+
+    /// <summary>
+    /// 移除单个工具（线程安全）
+    /// </summary>
+    public bool UnregisterTool(string toolName)
+    {
+        Check.NotNullOrWhiteSpace(toolName);
+
+        lock (_lock)
+        {
+            if (!_toolsByName.TryRemove(toolName, out var removed))
+            {
+                return false;
+            }
+
+            if (_toolsByGroup.TryGetValue(removed.GroupName, out var groupTools))
+            {
+                groupTools.RemoveAll(t => t.Name == toolName);
+
+                // 如果组内已无工具，移除空组
+                if (groupTools.Count == 0)
+                {
+                    _toolsByGroup.TryRemove(removed.GroupName, out _);
+                }
+            }
+
+            _logger.LogDebug("Unregistered tool '{ToolName}' from group '{GroupName}'", toolName, removed.GroupName);
+            return true;
         }
     }
 

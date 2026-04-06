@@ -65,7 +65,9 @@ public class DocumentIngestionServiceTests
         var result = await service.IngestAsync(Guid.NewGuid(), Guid.NewGuid(), Stream.Null, "unknown.xyz");
 
         result.Succeeded.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("Unsupported file type");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("Unsupported file type");
     }
 
     [Fact]
@@ -80,7 +82,9 @@ public class DocumentIngestionServiceTests
         var result = await service.IngestAsync(Guid.NewGuid(), Guid.NewGuid(), Stream.Null, "test.txt");
 
         result.Succeeded.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("Knowledge base not found");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("Knowledge base not found");
     }
 
     [Fact]
@@ -97,7 +101,9 @@ public class DocumentIngestionServiceTests
         var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
 
         result.Succeeded.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("No text content");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("No text content");
     }
 
     [Fact]
@@ -118,7 +124,9 @@ public class DocumentIngestionServiceTests
         var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
 
         result.Succeeded.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("no chunks");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("no chunks");
     }
 
     [Fact]
@@ -143,7 +151,9 @@ public class DocumentIngestionServiceTests
         var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
 
         result.Succeeded.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("Embedding generation failed");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("Embedding generation failed");
     }
 
     [Fact]
@@ -262,7 +272,9 @@ public class DocumentIngestionServiceTests
         var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
 
         result.Succeeded.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("internal error");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("internal error");
     }
 
     [Fact]

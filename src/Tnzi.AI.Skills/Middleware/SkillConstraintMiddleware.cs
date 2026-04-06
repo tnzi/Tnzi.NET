@@ -134,9 +134,65 @@ public class SkillConstraintMiddleware : IAiMiddleware
                 _logger.LogInformation("Skill constraints denied {Count} individual tools", deniedCount);
         }
 
+        // Inject per-skill AllowedTools: ensure individually whitelisted tools are present in AdditionalTools
+        if (accumulatedAllowedTools.Count > 0)
+        {
+            var existingToolNames = new HashSet<string>(
+                context.AdditionalTools.Where(t => t.Name != null).Select(t => t.Name!),
+                StringComparer.OrdinalIgnoreCase);
+
+            var allToolDefs = _toolRegistry.GetAllTools();
+            var injectedCount = 0;
+
+            foreach (var toolName in accumulatedAllowedTools)
+            {
+                if (existingToolNames.Contains(toolName))
+                    continue;
+
+                var toolDef = allToolDefs.FirstOrDefault(d =>
+                    string.Equals(d.Name, toolName, StringComparison.OrdinalIgnoreCase));
+
+                if (toolDef == null)
+                    continue;
+
+                // Create AIFunction from the tool definition's method info and provider type
+                var toolInstance = toolDef.ProviderType != null
+                    ? CreateToolFromDefinition(toolDef, context.ServiceProvider)
+                    : null;
+
+                if (toolInstance != null)
+                {
+                    context.AdditionalTools.Add(toolInstance);
+                    injectedCount++;
+                }
+            }
+
+            if (injectedCount > 0)
+                _logger.LogInformation("Injected {Count} per-skill allowed tools into context", injectedCount);
+        }
+
         context.EffectiveModel = constraintCtx.CurrentModel;
         context.EffectiveProvider = constraintCtx.CurrentProvider;
 
         _logger.LogDebug("Applied constraints from {Count} active skills", activeSkills.Count);
+    }
+
+    /// <summary>
+    /// Creates an AITool from a ToolDefinition by resolving the provider instance from DI and wrapping the method.
+    /// </summary>
+    private static AITool? CreateToolFromDefinition(ToolDefinition toolDef, IServiceProvider serviceProvider)
+    {
+        try
+        {
+            var providerInstance = serviceProvider.GetService(toolDef.ProviderType);
+            if (providerInstance == null)
+                return null;
+
+            return AIFunctionFactory.Create(toolDef.MethodInfo, providerInstance);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

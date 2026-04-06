@@ -23,6 +23,9 @@ public interface IAgentRunService
     /// <summary>取消运行</summary>
     Task<Result> CancelAsync(Guid runId);
 
+    /// <summary>恢复运行</summary>
+    Task<Result<AgentResponseDto>> ResumeAsync(Guid runId, ResumeRunInput? input = null);
+
     /// <summary>审批通过（HITL）</summary>
     Task<Result> ApproveAsync(Guid runId, string? comment);
 

@@ -75,15 +75,10 @@ public class OutputGuardrailMiddleware : IAiMiddleware
 
             await PublishGuardrailRejectionEventAsync(context, ex.GuardrailName, ex.Message, GuardrailDirections.Output);
 
-            return new AgentRunResult
-            {
-                Response = ex.Message,
-                RunId = result.RunId,
-                ThreadId = result.ThreadId,
-                Usage = result.Usage,
-                FinishReason = FinishReasons.GuardrailRejected,
-                Status = AgentRunStatus.Failed
-            };
+            return result.CloneWith(
+                response: ex.Message,
+                finishReason: FinishReasons.GuardrailRejected,
+                status: AgentRunStatus.Failed);
         }
 
         return result;

@@ -1,5 +1,3 @@
-using Tnzi.EventBus;
-
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>

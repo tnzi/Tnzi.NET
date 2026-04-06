@@ -22,6 +22,11 @@ public class AgentStreamChunk
     public string? FinishReason { get; set; }
 
     /// <summary>
+    /// 当前 chunk 对应的实际执行模型
+    /// </summary>
+    public string? Model { get; set; }
+
+    /// <summary>
     /// 是否为工具调用中间状态（此时 Text 可能为 null）
     /// </summary>
     public bool IsToolCall { get; set; }

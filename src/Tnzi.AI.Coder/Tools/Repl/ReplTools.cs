@@ -8,6 +8,7 @@ public class ReplTools : IAIToolProvider
 {
     private readonly ICommandSanitizer _commandSanitizer;
     private readonly IToolApprovalHandler? _approvalHandler;
+    private readonly IShellAdapter _shellAdapter;
     private readonly CoderOptions _options;
     private readonly ILogger<ReplTools> _logger;
 
@@ -26,18 +27,20 @@ public class ReplTools : IAIToolProvider
         ICommandSanitizer commandSanitizer,
         IOptions<CoderOptions> options,
         ILogger<ReplTools> logger,
-        IToolApprovalHandler? approvalHandler = null)
+        IToolApprovalHandler? approvalHandler = null,
+        IShellAdapter? shellAdapter = null)
     {
         _commandSanitizer = Check.NotNull(commandSanitizer);
         _options = Check.NotNull(options).Value;
         _logger = Check.NotNull(logger);
+        _shellAdapter = shellAdapter ?? ShellTools.CreateDefaultShellAdapter();
         _approvalHandler = approvalHandler;
     }
 
     /// <summary>
     /// 执行代码片段
     /// </summary>
-    [AIFunction("execute_code", "Execute a code snippet in a given language")]
+    [AIFunction("execute_code", "Execute a code snippet in a given language", InterruptBehavior = ToolInterruptBehavior.GracefulShutdown, SearchHint = "execute run code repl")]
     public async Task<object> ExecuteCodeAsync(
         [AIParameter("code", "The code to execute")] string code,
         [AIParameter("language", "Programming language: csharp, python, javascript, typescript")] string language,
@@ -210,20 +213,10 @@ public class ReplTools : IAIToolProvider
         var fileName = parts[0];
         var extraArgs = parts.Length > 1 ? parts[1] + " " : "";
 
-        var shellPath = OperatingSystem.IsWindows() ? "bash" : "/bin/bash";
-        var fullCommand = $"{fileName} {extraArgs}\"{filePath}\"";
+        var quotedFilePath = _shellAdapter.QuoteArgument(filePath);
+        var fullCommand = $"{fileName} {extraArgs}{quotedFilePath}".Trim();
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = shellPath,
-            WorkingDirectory = Path.GetTempPath(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add(fullCommand);
+        var psi = _shellAdapter.CreateProcessStartInfo(fullCommand, Path.GetTempPath());
 
         EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
 

@@ -6,11 +6,26 @@ namespace Tnzi.AI.Middleware;
 public class SummarizationMiddleware : IAiMiddleware
 {
     private const string DefaultSummaryPrompt =
-        "You are a conversation summarizer. Summarize the following conversation messages concisely, " +
-        "preserving key facts, decisions, and context that would be needed to continue the conversation. " +
-        "Output only the summary text, no preamble.";
+        """
+        Analyze the conversation and produce a structured summary. Skip sections that don't apply.
+        Do NOT use any tools. Output only the summary.
+
+        1. **Primary Request**: What is the user trying to accomplish?
+        2. **Key Technical Concepts**: Important technical details, patterns, constraints.
+        3. **Files and Code**: Files read/modified, key code changes, current file states.
+        4. **Errors and Fixes**: Errors encountered and how they were resolved.
+        5. **Problem Solving**: Approaches tried, what worked, what didn't.
+        6. **All User Messages**: Chronological list of ALL user messages (preserve intent).
+        7. **Pending Tasks**: Outstanding work items, incomplete tasks.
+        8. **Current Work**: What was being done when the conversation was paused.
+        9. **Next Step**: The immediate next action to take.
+
+        Be factual and specific - include file paths, function names, error messages.
+        IMPORTANT: Do NOT call any tools. Output only the summary text.
+        """;
 
     private readonly IOptionsMonitor<AIOptions> _options;
+    private readonly IChatClientFactory _chatClientFactory;
     private readonly ITokenEstimator _tokenEstimator;
     private readonly ILogger<SummarizationMiddleware> _logger;
 
@@ -18,10 +33,12 @@ public class SummarizationMiddleware : IAiMiddleware
 
     public SummarizationMiddleware(
         IOptionsMonitor<AIOptions> options,
+        IChatClientFactory chatClientFactory,
         ITokenEstimator tokenEstimator,
         ILogger<SummarizationMiddleware> logger)
     {
         _options = Check.NotNull(options);
+        _chatClientFactory = Check.NotNull(chatClientFactory);
         _tokenEstimator = Check.NotNull(tokenEstimator);
         _logger = Check.NotNull(logger);
     }
@@ -34,6 +51,7 @@ public class SummarizationMiddleware : IAiMiddleware
         if (context.ShouldSkipMiddleware)
             return await next(context, cancellationToken);
 
+        ApplyMicroCompact(context);
         await TrySummarizeAsync(context, cancellationToken);
 
         return await next(context, cancellationToken);
@@ -46,6 +64,7 @@ public class SummarizationMiddleware : IAiMiddleware
     {
         if (!context.ShouldSkipMiddleware)
         {
+            ApplyMicroCompact(context);
             await TrySummarizeAsync(context, cancellationToken);
         }
 
@@ -94,16 +113,11 @@ public class SummarizationMiddleware : IAiMiddleware
         if (oldTokens < opts.TrimTokensToSummarize)
             return;
 
-        // 获取 IChatClient 用于生成摘要
-        var chatClient = context.ServiceProvider.GetService<IChatClient>();
-        if (chatClient == null)
-        {
-            _logger.LogWarning("IChatClient not available, skipping summarization");
-            return;
-        }
-
         try
         {
+            // Auxiliary sub-run for compact/summarization: uses the same chat client factory as
+            // the main agent path so provider configuration, pooling, and model aliases stay consistent.
+            var chatClient = _chatClientFactory.GetChatClient(context.Agent.Provider, opts.ModelName ?? context.Agent.Model);
             var summaryText = await GenerateSummaryAsync(chatClient, oldMessages, opts, cancellationToken);
 
             if (string.IsNullOrWhiteSpace(summaryText))
@@ -182,5 +196,61 @@ public class SummarizationMiddleware : IAiMiddleware
 
         var response = await chatClient.GetResponseAsync(summaryRequest, chatOptions, cancellationToken);
         return response.Text?.Trim();
+    }
+
+    /// <summary>
+    /// 应用 MicroCompact — 在每次执行前清理过期工具结果（轻量级上下文压缩）
+    /// </summary>
+    private void ApplyMicroCompact(AiMiddlewareContext context)
+    {
+        var opts = _options.CurrentValue.Summarization;
+        if (!opts.EnableMicroCompact) return;
+
+        var compacted = MicroCompact(context.Messages, opts.KeepRecentToolResults);
+        if (!ReferenceEquals(compacted, context.Messages))
+        {
+            context.Messages.Clear();
+            context.Messages.AddRange(compacted);
+            _logger.LogDebug("MicroCompact: cleared old tool results, keeping {KeepCount} recent", opts.KeepRecentToolResults);
+        }
+    }
+
+    /// <summary>
+    /// MicroCompact — 基于消息列表中的位置距离清理过期工具结果。
+    /// 保留最近 N 个工具结果消息不清理，其余替换为 "[tool result cleared]"。
+    /// 返回新 List（不可变原则）。如果无需修改则返回原引用。
+    /// </summary>
+    public static List<ChatMessage> MicroCompact(List<ChatMessage> messages, int keepRecentToolResults)
+    {
+        if (keepRecentToolResults < 0) return messages;
+
+        // 找出所有包含工具结果的消息索引（从后往前计数）
+        var toolResultIndices = new List<int>();
+        for (var i = messages.Count - 1; i >= 0; i--)
+        {
+            if (messages[i].Contents.OfType<FunctionResultContent>().Any(
+                frc => frc.Result is string s && s != "[tool result cleared]"))
+            {
+                toolResultIndices.Add(i);
+            }
+        }
+
+        // 如果所有工具结果都在保留范围内，不修改
+        if (toolResultIndices.Count <= keepRecentToolResults)
+            return messages;
+
+        // 需要清理的索引（超出保留范围的）
+        var indicesToClear = new HashSet<int>(toolResultIndices.Skip(keepRecentToolResults));
+
+        return messages.Select((msg, idx) =>
+        {
+            if (!indicesToClear.Contains(idx)) return msg;
+
+            var newContents = msg.Contents.Select<AIContent, AIContent>(c =>
+                c is FunctionResultContent frc && frc.Result is string s && s != "[tool result cleared]"
+                    ? new FunctionResultContent(frc.CallId, "[tool result cleared]")
+                    : c).ToList();
+            return new ChatMessage(msg.Role, newContents);
+        }).ToList();
     }
 }

@@ -428,8 +428,10 @@ public class HandoffExecutionStrategyTests
 
         // Target not in allowed list — source agent's response is returned
         result.FinalAgentName.ShouldBe("AgentA");
-        result.HandoffPath.Count.ShouldBe(1);
-        result.HandoffPath[0].ShouldBe("AgentA");
+        var handoffPath = result.HandoffPath;
+        handoffPath.ShouldNotBeNull();
+        handoffPath.Count.ShouldBe(1);
+        handoffPath[0].ShouldBe("AgentA");
     }
 
     [Fact]
@@ -478,6 +480,7 @@ public class HandoffExecutionStrategyTests
 
         // Max handoffs reached
         result.Response.Text.ShouldBe("Max handoff limit reached");
+        result.Response.FinishReason.ShouldBe(FinishReasons.MaxHandoffs);
     }
 
     [Fact]
@@ -599,7 +602,9 @@ public class HandoffExecutionStrategyTests
         var result = await strategy.ExecuteAsync(agentA, messages, context, CancellationToken.None);
 
         // Confirms the handoff_to_agent tool was injected and invoked
-        result.HandoffPath.ShouldContain("AgentB");
+        var handoffPath = result.HandoffPath;
+        handoffPath.ShouldNotBeNull();
+        handoffPath.ShouldContain("AgentB");
         result.FinalAgentName.ShouldBe("AgentB");
     }
 
@@ -622,6 +627,8 @@ public class HandoffExecutionStrategyTests
         var result = await strategy.ExecuteAsync(agentA, messages, context, CancellationToken.None);
 
         result.FinalAgentName.ShouldBe("AgentA");
-        result.HandoffPath.Count.ShouldBe(1);
+        var handoffPath = result.HandoffPath;
+        handoffPath.ShouldNotBeNull();
+        handoffPath.Count.ShouldBe(1);
     }
 }

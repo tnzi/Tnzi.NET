@@ -145,4 +145,16 @@ public class ShellToolsTests
         auto.Approved.ShouldBeTrue();
         auto.Status.ShouldBe(ToolApprovalStatus.AutoApproved);
     }
+
+    [Fact]
+    public void GetShellPath_UsesExpectedDefaultShellForPlatform()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            ShellTools.GetShellPath().ShouldBe("powershell.exe");
+            return;
+        }
+
+        ShellTools.GetShellPath().ShouldBe("/bin/bash");
+    }
 }

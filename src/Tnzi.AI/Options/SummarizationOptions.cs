@@ -23,8 +23,8 @@ public class SummarizationTrigger
     /// <summary>触发方式</summary>
     public SummarizationTriggerType Type { get; set; } = SummarizationTriggerType.Fraction;
 
-    /// <summary>比例阈值（Type=Fraction 时使用，默认 0.8）</summary>
-    public double FractionThreshold { get; set; } = 0.8;
+    /// <summary>比例阈值（Type=Fraction 时使用，默认 0.93，与 Claude Code 一致）</summary>
+    public double FractionThreshold { get; set; } = 0.93;
 
     /// <summary>Token 数阈值（Type=Tokens 时使用）</summary>
     public int TokenThreshold { get; set; } = 100_000;
@@ -70,4 +70,10 @@ public class SummarizationOptions
 
     /// <summary>模型上下文窗口大小（token 数，用于 Fraction 触发计算）</summary>
     public int ModelContextWindow { get; set; } = 128_000;
+
+    /// <summary>是否启用 MicroCompact（每次执行前清理过期工具结果）。默认 true。</summary>
+    public bool EnableMicroCompact { get; set; } = true;
+
+    /// <summary>MicroCompact 保留最近的工具结果消息数。默认 5。</summary>
+    public int KeepRecentToolResults { get; set; } = 5;
 }

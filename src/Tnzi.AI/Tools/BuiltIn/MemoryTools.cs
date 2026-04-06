@@ -8,6 +8,7 @@ public partial class MemoryTools : IAIToolProvider
 {
     private readonly IMemoryStore _memoryStore;
     private readonly ICurrentUser? _currentUser;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly MemoryOptions _memoryOptions;
     private readonly ILogger<MemoryTools> _logger;
 
@@ -15,12 +16,14 @@ public partial class MemoryTools : IAIToolProvider
         IMemoryStore memoryStore,
         ILogger<MemoryTools> logger,
         IOptions<AIOptions> aiOptions,
-        ICurrentUser? currentUser = null)
+        ICurrentUser? currentUser = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _logger = Check.NotNull(logger);
         _memoryOptions = Check.NotNull(aiOptions).Value.ContextProviders.Memory;
         _currentUser = currentUser;
+        _executionContextAccessor = executionContextAccessor;
     }
 
     [AIFunction("save_memory",
@@ -29,7 +32,8 @@ public partial class MemoryTools : IAIToolProvider
         Use this when the user explicitly asks you to remember something, or when you encounter critical facts worth preserving.
         DO NOT SAVE: Personal data (PII), conversation snippets, temporary context, or speculative information.
         Set importance (0-1): 1.0 for critical rules, 0.7 for useful facts, 0.3 for nice-to-know.
-        """)]
+        """,
+        SearchHint = "remember save persist memory")]
     public async Task<object> SaveMemoryAsync(
         [AIParameter("content", "The information to remember", true)]
         string content,
@@ -74,7 +78,8 @@ public partial class MemoryTools : IAIToolProvider
         Search persistent memories by keyword or semantic query.
         Use this to recall information from previous conversations. Check memory BEFORE asking the user about known facts.
         Optional: filter by category for more precise retrieval.
-        """)]
+        """,
+        IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "recall find remember search memory")]
     public async Task<object> SearchMemoryAsync(
         [AIParameter("query", "Search query (keyword or natural language)", true)]
         string query,
@@ -92,28 +97,66 @@ public partial class MemoryTools : IAIToolProvider
             var scope = BuildScope();
             maxResults = Math.Clamp(maxResults, 1, 20);
 
-            // Search both user-scoped and shared-scope memories
-            var allResults = new List<MemorySearchResult>();
+            // Search local, project snapshot, and shared memories in parallel.
+            var localScopeKey = scope.ToScopeKey();
 
-            // 1. User-scoped search
-            if (!string.IsNullOrEmpty(category))
-                allResults.AddRange(await _memoryStore.SearchByCategoryAsync(scope.ToScopeKey(), query, category, maxResults, ct));
-            else
-                allResults.AddRange(await _memoryStore.SearchAsync(scope, query, maxResults, ct));
+            // 1. Local user/agent-scoped search
+            var localTask = !string.IsNullOrEmpty(category)
+                ? _memoryStore.SearchByCategoryAsync(localScopeKey, query, category, maxResults, ct)
+                : _memoryStore.SearchAsync(scope, query, maxResults, ct);
 
-            // 2. Shared-scope search (if configured)
+            // 2. Project snapshot search (shared per project, read-only)
+            var projectSnapshotScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
+                _memoryOptions.EnableProjectSnapshot,
+                _memoryOptions.ProjectSnapshotScopePrefix,
+                _executionContextAccessor?.CurrentRequest?.Metadata);
+            var shouldSearchProject = !string.IsNullOrWhiteSpace(projectSnapshotScope)
+                && !string.Equals(projectSnapshotScope, localScopeKey, StringComparison.OrdinalIgnoreCase);
+
+            var projectTask = shouldSearchProject
+                ? (!string.IsNullOrEmpty(category)
+                    ? _memoryStore.SearchByCategoryAsync(projectSnapshotScope!, query, category, maxResults, ct)
+                    : _memoryStore.SearchAsync(projectSnapshotScope!, query, maxResults, ct))
+                : Task.FromResult<IReadOnlyList<MemorySearchResult>>([]);
+
+            // 3. Shared-scope search (if configured)
             var sharedScope = _memoryOptions.SharedScope;
-            if (!string.IsNullOrEmpty(sharedScope) && sharedScope != scope.ToScopeKey())
+            var shouldSearchShared = !string.IsNullOrEmpty(sharedScope)
+                && !string.Equals(sharedScope, localScopeKey, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(sharedScope, projectSnapshotScope, StringComparison.OrdinalIgnoreCase);
+
+            var sharedTask = shouldSearchShared
+                ? (!string.IsNullOrEmpty(category)
+                    ? _memoryStore.SearchByCategoryAsync(sharedScope!, query, category, maxResults, ct)
+                    : _memoryStore.SearchAsync(sharedScope!, query, maxResults, ct))
+                : Task.FromResult<IReadOnlyList<MemorySearchResult>>([]);
+
+            await Task.WhenAll(localTask, projectTask, sharedTask);
+
+            var allResults = new List<MemorySearchResult>();
+            allResults.AddRange(localTask.Result);
+
+            if (shouldSearchProject)
             {
-                var sharedResults = !string.IsNullOrEmpty(category)
-                    ? await _memoryStore.SearchByCategoryAsync(sharedScope, query, category, maxResults, ct)
-                    : await _memoryStore.SearchAsync(sharedScope, query, maxResults, ct);
-                allResults.AddRange(sharedResults);
+                foreach (var result in projectTask.Result)
+                {
+                    result.Source ??= projectSnapshotScope;
+                }
+                allResults.AddRange(projectTask.Result);
+            }
+
+            if (shouldSearchShared)
+            {
+                foreach (var result in sharedTask.Result)
+                {
+                    result.Source ??= sharedScope;
+                }
+                allResults.AddRange(sharedTask.Result);
             }
 
             // Deduplicate by Id, sort by score, take top maxResults
             var results = allResults
-                .GroupBy(r => r.Id)
+                .GroupBy(GetDeduplicationKey)
                 .Select(g => g.OrderByDescending(r => r.Score).First())
                 .OrderByDescending(r => r.Score)
                 .Take(maxResults)
@@ -129,6 +172,7 @@ public partial class MemoryTools : IAIToolProvider
                     id = r.Id?.ToString("N"),
                     content = r.Content,
                     category = r.Category,
+                    source = r.Source,
                     relevance = Math.Round(r.Score, 2)
                 }),
                 count = results.Count
@@ -141,7 +185,8 @@ public partial class MemoryTools : IAIToolProvider
         }
     }
 
-    [AIFunction("update_memory", "Update the content of an existing memory entry. Use search_memory first to find the ID.")]
+    [AIFunction("update_memory", "Update the content of an existing memory entry. Use search_memory first to find the ID.",
+        SearchHint = "update modify memory")]
     public async Task<object> UpdateMemoryAsync(
         [AIParameter("entry_id", "The memory entry ID (from search_memory results)", true)]
         string entryId,
@@ -173,7 +218,8 @@ public partial class MemoryTools : IAIToolProvider
         }
     }
 
-    [AIFunction("delete_memory", "Delete a specific memory entry by its ID. Use search_memory first to find the ID.")]
+    [AIFunction("delete_memory", "Delete a specific memory entry by its ID. Use search_memory first to find the ID.",
+        IsDestructive = true, SearchHint = "remove delete forget memory")]
     public async Task<object> DeleteMemoryAsync(
         [AIParameter("entry_id", "The memory entry ID (from search_memory results)", true)]
         string entryId,
@@ -199,8 +245,22 @@ public partial class MemoryTools : IAIToolProvider
 
     private MemoryScope BuildScope()
     {
-        var userId = _memoryOptions.EnableUserIsolation ? _currentUser?.Id : null;
-        return new MemoryScope(_memoryOptions.DefaultScope, userId);
+        return MemoryScopeResolver.BuildLocalScope(
+            _memoryOptions.DefaultScope,
+            _memoryOptions.EnableUserIsolation,
+            _memoryOptions.EnableAgentIsolation,
+            _currentUser?.Id,
+            _executionContextAccessor?.CurrentRequest?.AgentId);
+    }
+
+    private static string GetDeduplicationKey(MemorySearchResult result)
+    {
+        if (result.Id.HasValue)
+        {
+            return result.Id.Value.ToString("N");
+        }
+
+        return $"{result.Source ?? "memory"}::{result.Category ?? "general"}::{result.Content}";
     }
 
     /// <summary>

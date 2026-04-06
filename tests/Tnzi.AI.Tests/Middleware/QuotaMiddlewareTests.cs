@@ -1,5 +1,3 @@
-using Tnzi.EventBus;
-
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
@@ -15,10 +13,12 @@ public class QuotaMiddlewareTests
     private static QuotaMiddleware CreateMiddleware(
         Mock<IQuotaService>? quotaService = null,
         Mock<ITokenEstimator>? tokenEstimator = null,
-        Mock<IEventBus>? eventBus = null)
+        Mock<IEventBus>? eventBus = null,
+        Mock<IBudgetService>? budgetService = null)
     {
         var qs = quotaService ?? new Mock<IQuotaService>();
         var te = tokenEstimator ?? new Mock<ITokenEstimator>();
+        var bs = budgetService ?? new Mock<IBudgetService>();
 
         // 默认 token 估算返回 100
         if (tokenEstimator == null)
@@ -26,8 +26,16 @@ public class QuotaMiddlewareTests
             te.Setup(x => x.Estimate(It.IsAny<string>(), It.IsAny<int>())).Returns(100);
         }
 
+        // 默认预算检查通过
+        if (budgetService == null)
+        {
+            bs.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new BudgetCheckResult { IsAllowed = true, Status = BudgetStatus.WithinBudget });
+        }
+
         return new QuotaMiddleware(
             qs.Object,
+            bs.Object,
             te.Object,
             Mock.Of<ILogger<QuotaMiddleware>>(),
             eventBus?.Object);

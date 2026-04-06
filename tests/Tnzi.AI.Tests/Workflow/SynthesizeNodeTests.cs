@@ -19,7 +19,9 @@ public class SynthesizeNodeTests
 
         result.IsSuccess.ShouldBeTrue();
         result.Output.Text.ShouldBe("Combined summary of all inputs.");
-        result.Output.Metadata.ShouldContainKeyAndValue("source_count", "2");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("source_count", "2");
     }
 
     [Fact]
@@ -33,7 +35,9 @@ public class SynthesizeNodeTests
 
         result.IsSuccess.ShouldBeTrue();
         result.Output.Text.ShouldBe("Synthesized initial input.");
-        result.Output.Metadata.ShouldContainKeyAndValue("source_count", "0");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("source_count", "0");
     }
 
     [Fact]
@@ -52,13 +56,17 @@ public class SynthesizeNodeTests
         var result = await node.ExecuteAsync(context);
 
         result.IsSuccess.ShouldBeTrue();
-        result.Output.Metadata.ShouldContainKeyAndValue("source_count", "1");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("source_count", "1");
 
         // 验证 LLM 收到的消息包含上游输出
         capturedMessages.ShouldNotBeEmpty();
         var userMessage = capturedMessages.First(m => m.Role == ChatRole.User);
-        userMessage.Text.ShouldContain("step1");
-        userMessage.Text.ShouldContain("Output from step 1");
+        var userMessageText = userMessage.Text;
+        userMessageText.ShouldNotBeNull();
+        userMessageText.ShouldContain("step1");
+        userMessageText.ShouldContain("Output from step 1");
     }
 
     [Fact]
@@ -92,7 +100,9 @@ public class SynthesizeNodeTests
         // 用户消息应包含自定义指令
         capturedMessages.ShouldNotBeEmpty();
         var userMessage = capturedMessages.First(m => m.Role == ChatRole.User);
-        userMessage.Text.ShouldContain("Focus on key findings only.");
+        var userMessageText = userMessage.Text;
+        userMessageText.ShouldNotBeNull();
+        userMessageText.ShouldContain("Focus on key findings only.");
     }
 
     private static (SynthesizeNode node, Mock<IAgentFactory> factory) CreateNodeWithMockLlm(

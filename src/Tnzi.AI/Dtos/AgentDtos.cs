@@ -356,12 +356,22 @@ public class AgentResponseDto
 {
     /// <summary>Response content</summary>
     public string Content { get; set; } = string.Empty;
+
     /// <summary>Finish reason</summary>
     public string? FinishReason { get; set; }
+
     /// <summary>Model used</summary>
     public string? Model { get; set; }
+
+    /// <summary>Provider used</summary>
+    public string? Provider { get; set; }
+
+    /// <summary>Tracked run status</summary>
+    public AgentRunStatus? Status { get; set; }
+
     /// <summary>Token usage</summary>
     public TokenUsageDto? Usage { get; set; }
+
     /// <summary>RAG citations (source documents used)</summary>
     public List<CitationDto>? Citations { get; set; }
 
@@ -370,8 +380,18 @@ public class AgentResponseDto
 
     /// <summary>Final agent name that produced the answer</summary>
     public string? FinalAgentName { get; set; }
+
     /// <summary>Reasoning/thinking content (populated in non-streaming mode)</summary>
     public string? Reasoning { get; set; }
+
+    /// <summary>Suggested follow-up prompts</summary>
+    public List<string>? Suggestions { get; set; }
+
+    /// <summary>Artifacts produced by this run</summary>
+    public List<AgentArtifactDto>? Artifacts { get; set; }
+
+    /// <summary>Clarification question when the run is paused for more input</summary>
+    public string? ClarificationQuestion { get; set; }
 }
 
 /// <summary>

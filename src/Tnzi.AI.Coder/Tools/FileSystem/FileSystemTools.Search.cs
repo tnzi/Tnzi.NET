@@ -8,7 +8,8 @@ public partial class FileSystemTools
     /// <summary>
     /// 查找匹配 glob 模式的文件
     /// </summary>
-    [AIFunction("glob", "Find files matching a glob pattern")]
+    [AIFunction("glob", "Find files matching a glob pattern",
+        IsReadOnly = true, IsConcurrencySafe = true, Aliases = "find,search", SearchHint = "glob find files pattern")]
     public async Task<object> GlobAsync(
         [AIParameter("pattern", "Glob pattern (e.g. **/*.cs)")] string pattern,
         [AIParameter("path", "Search directory", false)] string? path = null,
@@ -63,7 +64,8 @@ public partial class FileSystemTools
     /// <summary>
     /// 列出目录内容
     /// </summary>
-    [AIFunction("list_directory", "List files and directories")]
+    [AIFunction("list_directory", "List files and directories",
+        IsReadOnly = true, IsConcurrencySafe = true, Aliases = "ls,dir", SearchHint = "list directory files")]
     public async Task<object> ListDirectoryAsync(
         [AIParameter("path", "Directory path")] string path)
     {
@@ -124,7 +126,8 @@ public partial class FileSystemTools
     /// <summary>
     /// 复制文件
     /// </summary>
-    [AIFunction("copy_file", "Copy a file from source to destination")]
+    [AIFunction("copy_file", "Copy a file from source to destination",
+        SearchHint = "copy duplicate file")]
     public async Task<object> CopyFileAsync(
         [AIParameter("source", "Source file path")] string source,
         [AIParameter("destination", "Destination file path")] string destination,
@@ -185,7 +188,8 @@ public partial class FileSystemTools
     /// <summary>
     /// 移动/重命名文件
     /// </summary>
-    [AIFunction("move_file", "Move or rename a file")]
+    [AIFunction("move_file", "Move or rename a file",
+        SearchHint = "move rename file")]
     public async Task<object> MoveFileAsync(
         [AIParameter("source", "Source file path")] string source,
         [AIParameter("destination", "Destination file path")] string destination,

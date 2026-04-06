@@ -28,7 +28,9 @@ public class TransformNodeTests
 
         result.IsSuccess.ShouldBeTrue();
         result.Output.Text.ShouldBe("Result: Hello World");
-        result.Output.Metadata.ShouldContainKeyAndValue("transform_type", "template");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("transform_type", "template");
     }
 
     [Fact]

@@ -30,23 +30,10 @@ public class TodoMiddleware : IAiMiddleware
         var result = await next(context, cancellationToken);
 
         // After: 从 accessor Properties 中提取 Todos 附加到结果
-        var todos = GetTodosFromAccessor();
+        var todos = TakeTodosFromAccessor();
         if (todos != null)
         {
-            return new AgentRunResult
-            {
-                Response = result.Response,
-                RunId = result.RunId,
-                ThreadId = result.ThreadId,
-                Usage = result.Usage,
-                Citations = result.Citations,
-                FinishReason = result.FinishReason,
-                HandoffPath = result.HandoffPath,
-                FinalAgentName = result.FinalAgentName,
-                Status = result.Status,
-                Reasoning = result.Reasoning,
-                Todos = todos
-            };
+            return result.CloneWith(todos: todos);
         }
 
         return result;
@@ -69,7 +56,7 @@ public class TodoMiddleware : IAiMiddleware
         }
 
         // 在流末尾发送 Todos 状态
-        var todos = GetTodosFromAccessor();
+        var todos = TakeTodosFromAccessor();
         if (todos != null)
         {
             yield return new AgentStreamChunk
@@ -125,5 +112,16 @@ public class TodoMiddleware : IAiMiddleware
         if (_contextAccessor.Properties.TryGetValue(ContextPropertyKeys.Todos, out var obj) && obj is List<TodoItemDto> todos)
             return todos;
         return null;
+    }
+
+    private List<TodoItemDto>? TakeTodosFromAccessor()
+    {
+        var todos = GetTodosFromAccessor();
+        if (todos != null)
+        {
+            _contextAccessor.Properties.Remove(ContextPropertyKeys.Todos);
+        }
+
+        return todos;
     }
 }

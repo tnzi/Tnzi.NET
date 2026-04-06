@@ -35,6 +35,8 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(IChatClientFactory), typeof(ChatClientFactory), ServiceLifetime.Singleton)]
     [InlineData(typeof(ICostCalculator), typeof(CostCalculator), ServiceLifetime.Singleton)]
     [InlineData(typeof(ISubAgentRegistry), typeof(SubAgentRegistry), ServiceLifetime.Singleton)]
+    [InlineData(typeof(IToolPermissionEvaluator), null, ServiceLifetime.Singleton)]
+    [InlineData(typeof(IShellCommandAnalyzer), typeof(ShellCommandAnalyzer), ServiceLifetime.Singleton)]
     [InlineData(typeof(IReadabilityExtractor), typeof(SmartReaderExtractor), ServiceLifetime.Singleton)]
     [InlineData(typeof(IPortAllocator), typeof(PortAllocator), ServiceLifetime.Singleton)]
     [InlineData(typeof(IMcpClientFactory), typeof(McpClientFactory), ServiceLifetime.Singleton)]
@@ -57,6 +59,9 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(IStructuredOutputService), typeof(StructuredOutputService))]
     [InlineData(typeof(IAgentService), typeof(AgentService))]
     [InlineData(typeof(IAgentRunService), typeof(AgentRunService))]
+    [InlineData(typeof(IAgentRunSignalDispatcher), typeof(AgentRunSignalDispatcher))]
+    [InlineData(typeof(IAgentRuntimeControlService), typeof(AgentRuntimeControlService))]
+    [InlineData(typeof(ISubAgentExecutionService), typeof(SubAgentExecutionService))]
     [InlineData(typeof(IAgentTraceService), typeof(AgentTraceService))]
     [InlineData(typeof(IAgentRuntime), typeof(AgentRuntime))]
     [InlineData(typeof(IUsageLogService), typeof(UsageLogService))]
@@ -106,6 +111,8 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(IAgentEvaluator))]
     [InlineData(typeof(IToolRegistry))]
     [InlineData(typeof(IToolScanner))]
+    [InlineData(typeof(IWorkflowService))]
+    [InlineData(typeof(ISkillLoadTracker))]
     public void TryAddService_IsRegistered(Type serviceType)
     {
         var services = CreateServiceCollection();
@@ -208,6 +215,28 @@ public class AIModuleRegistrationTests
         middlewareCount.ShouldBeGreaterThanOrEqualTo(19, "Should register at least 19 IAiMiddleware forwards");
     }
 
+    [Fact]
+    public void RegistersToolGuardrail_AsToolExecutionMiddleware()
+    {
+        var services = CreateServiceCollection();
+
+        services.ShouldContain(d =>
+            d.ServiceType == typeof(IToolExecutionMiddleware) &&
+            d.ImplementationFactory != null,
+            "ToolGuardrailMiddleware should also participate in the tool execution pipeline");
+    }
+
+    [Fact]
+    public void RegistersToolErrorRecovery_AsToolExecutionMiddleware()
+    {
+        var services = CreateServiceCollection();
+
+        services.ShouldContain(d =>
+            d.ServiceType == typeof(IToolExecutionMiddleware) &&
+            d.ImplementationFactory != null,
+            "ToolErrorRecoveryMiddleware should also participate in the tool execution pipeline");
+    }
+
     #endregion
 
     #region 内置工具注册
@@ -221,6 +250,7 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(ClarificationTools))]
     [InlineData(typeof(TodoTools))]
     [InlineData(typeof(ArtifactTools))]
+    [InlineData(typeof(AgentRunControlTools))]
     public void RegistersBuiltInTool(Type toolType)
     {
         var services = CreateServiceCollection();
@@ -312,6 +342,33 @@ public class AIModuleRegistrationTests
             .ShouldBeTrue("IQuotaProvider should be registered");
     }
 
+    [Fact]
+    public void ResolvedPermissionEvaluator_UsesConfiguredRules()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        ConfigureModule(services, new Dictionary<string, string?>
+        {
+            ["AI:Providers:openai:ApiKey"] = "test-key",
+            ["AI:Providers:openai:DefaultModel"] = "gpt-4o",
+            ["AI:Permissions:Enabled"] = "true",
+            ["AI:Permissions:SystemRules:0:ToolPattern"] = "bash",
+            ["AI:Permissions:SystemRules:0:Behavior"] = "Deny",
+            ["AI:Permissions:SystemRules:0:Reason"] = "Blocked by config"
+        });
+
+        using var provider = services.BuildServiceProvider();
+        var evaluator = provider.GetRequiredService<IToolPermissionEvaluator>();
+
+        var decision = evaluator.Evaluate(new ToolPermissionContext
+        {
+            ToolName = "bash"
+        });
+
+        decision.Behavior.ShouldBe(PermissionBehavior.Deny);
+        decision.Reason.ShouldBe("Blocked by config");
+    }
+
     #endregion
 
     #region Helpers
@@ -325,14 +382,26 @@ public class AIModuleRegistrationTests
     }
 
     private static void ConfigureModule(IServiceCollection services)
+        => ConfigureModule(services, null);
+
+    private static void ConfigureModule(IServiceCollection services, IDictionary<string, string?>? overrides)
     {
         var module = new AIModule();
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+        var configValues = new Dictionary<string, string?>
+        {
+            ["AI:Providers:openai:ApiKey"] = "test-key",
+            ["AI:Providers:openai:DefaultModel"] = "gpt-4o"
+        };
+        if (overrides != null)
+        {
+            foreach (var (key, value) in overrides)
             {
-                ["AI:Providers:openai:ApiKey"] = "test-key",
-                ["AI:Providers:openai:DefaultModel"] = "gpt-4o"
-            })
+                configValues[key] = value;
+            }
+        }
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
             .Build();
 
         services.AddOptions<AIOptions>()

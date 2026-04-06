@@ -1,5 +1,3 @@
-using Tnzi.EventBus;
-
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
@@ -55,7 +53,22 @@ public class OutputGuardrailMiddlewareTests
     }
 
     private static AgentRunResult CreateResult(string response = "AI response") =>
-        new() { Response = response, RunId = Guid.NewGuid(), ThreadId = Guid.NewGuid() };
+        new()
+        {
+            Response = response,
+            RunId = Guid.NewGuid(),
+            ThreadId = Guid.NewGuid(),
+            Usage = new TokenUsageDto { InputTokens = 10, OutputTokens = 20 },
+            Model = "actual-model",
+            HandoffPath = ["planner", "worker"],
+            FinalAgentName = "worker",
+            Status = AgentRunStatus.Completed,
+            Reasoning = "chain",
+            Suggestions = ["next question"],
+            Todos = [new TodoItemDto { Content = "Ship fix", Status = TodoStatus.Pending, Order = 1 }],
+            Artifacts = [new AgentArtifactDto { Id = Guid.NewGuid(), RunId = Guid.NewGuid(), ThreadId = Guid.NewGuid(), VirtualPath = "/artifacts/report.md", FileName = "report.md" }],
+            ClarificationQuestion = "Need more detail?"
+        };
 
     #endregion
 
@@ -139,6 +152,17 @@ public class OutputGuardrailMiddlewareTests
         // Assert
         result.FinishReason.ShouldBe(FinishReasons.GuardrailRejected);
         result.Status.ShouldBe(AgentRunStatus.Failed);
+        result.RunId.ShouldBe(expected.RunId);
+        result.ThreadId.ShouldBe(expected.ThreadId);
+        result.Usage.ShouldBe(expected.Usage);
+        result.Model.ShouldBe(expected.Model);
+        result.HandoffPath.ShouldBe(expected.HandoffPath);
+        result.FinalAgentName.ShouldBe(expected.FinalAgentName);
+        result.Reasoning.ShouldBe(expected.Reasoning);
+        result.Suggestions.ShouldBe(expected.Suggestions);
+        result.Todos.ShouldBe(expected.Todos);
+        result.Artifacts.ShouldBe(expected.Artifacts);
+        result.ClarificationQuestion.ShouldBe(expected.ClarificationQuestion);
     }
 
     #endregion

@@ -3,7 +3,7 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
 /// MCP 客户端工厂实现 - 按 McpServerConfig 创建 Stdio/HTTP 连接，缓存以 Server Name 为 key。
-/// 配置变更（Endpoint、Command、Arguments）生效需重启应用，不在运行时自动重连。
+/// 支持连接健康检查与断线自动重连（指数退避，最多 3 次重试）。
 /// 实现 IAsyncDisposable，应用关闭时由 Host 调用以释放所有缓存的连接（Stdio 子进程、Http 连接等）。
 /// </summary>
 public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
@@ -12,18 +12,28 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
     private const string ApiKeyHeaderName = "X-Api-Key";
     private const string TenantHeaderName = "X-Tenant-Id";
 
+    // 重连参数
+    private const int MaxRetries = 3;
+    private const int BaseDelayMs = 500;
+    private const int BackoffMultiplier = 2;
+
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<McpClientFactory> _logger;
+    private readonly McpOAuthClientHandler? _oauthHandler;
     private readonly ConcurrentDictionary<string, IMcpClientAdapter> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTime> _lastHealthCheckTime = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan HealthCheckInterval = TimeSpan.FromSeconds(30);
     private readonly SemaphoreSlim _createLock = new(1, 1);
     private volatile bool _disposed;
 
     public McpClientFactory(
         ILoggerFactory loggerFactory,
-        ILogger<McpClientFactory> logger)
+        ILogger<McpClientFactory> logger,
+        McpOAuthClientHandler? oauthHandler = null)
     {
         _loggerFactory = Check.NotNull(loggerFactory);
         _logger = Check.NotNull(logger);
+        _oauthHandler = oauthHandler;
     }
 
     /// <inheritdoc />
@@ -36,9 +46,24 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
             throw new InvalidOperationException("MCP server config Name is required.");
         }
 
+        // 快速路径：缓存命中 + 健康检查节流（30s 内不重复检查）
         if (_cache.TryGetValue(key, out var cached))
         {
-            return cached;
+            if (_lastHealthCheckTime.TryGetValue(key, out var lastCheck)
+                && DateTime.UtcNow - lastCheck < HealthCheckInterval)
+            {
+                return cached;
+            }
+
+            if (await IsClientHealthyAsync(cached, key, ct).ConfigureAwait(false))
+            {
+                _lastHealthCheckTime[key] = DateTime.UtcNow;
+                return cached;
+            }
+
+            // 连接已断开，清除健康检查时间戳，进入锁区域处理重连
+            _lastHealthCheckTime.TryRemove(key, out _);
+            _logger.LogWarning("MCP client for server '{ServerName}' is disconnected, attempting reconnection", key);
         }
 
         if (_disposed)
@@ -54,12 +79,21 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
                 throw new ObjectDisposedException(nameof(McpClientFactory));
             }
 
+            // 双重检查：在锁内再次验证缓存（可能已被其他线程重连）
             if (_cache.TryGetValue(key, out cached))
             {
-                return cached;
+                if (await IsClientHealthyAsync(cached, key, ct).ConfigureAwait(false))
+                {
+                    _lastHealthCheckTime[key] = DateTime.UtcNow;
+                    return cached;
+                }
+
+                // 移除并释放断开的连接
+                await InvalidateCachedClientAsync(key).ConfigureAwait(false);
             }
 
-            var adapter = await CreateAndConnectAsync(config, ct).ConfigureAwait(false);
+            // 使用指数退避重试创建新连接
+            var adapter = await CreateWithRetryAsync(config, ct).ConfigureAwait(false);
             if (!_cache.TryAdd(key, adapter))
             {
                 await adapter.DisposeAsync().ConfigureAwait(false);
@@ -74,8 +108,122 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
         }
     }
 
-    private async Task<IMcpClientAdapter> CreateAndConnectAsync(McpServerConfig config, CancellationToken ct)
+    /// <inheritdoc />
+    public async Task InvalidateClientAsync(string serverName, CancellationToken ct = default)
     {
+        Check.NotNullOrWhiteSpace(serverName);
+
+        await _createLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await InvalidateCachedClientAsync(serverName).ConfigureAwait(false);
+        }
+        finally
+        {
+            _createLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 检查缓存中的客户端是否仍然健康（连接有效）。
+    /// </summary>
+    private async Task<bool> IsClientHealthyAsync(IMcpClientAdapter adapter, string serverName, CancellationToken ct)
+    {
+        try
+        {
+            return await adapter.IsConnectedAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Health check failed for MCP server '{ServerName}', treating as disconnected", serverName);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 从缓存中移除并释放客户端（不持有锁，调用方必须已持有 _createLock）。
+    /// </summary>
+    private async Task InvalidateCachedClientAsync(string serverName)
+    {
+        _lastHealthCheckTime.TryRemove(serverName, out _);
+        if (_cache.TryRemove(serverName, out var adapter))
+        {
+            try
+            {
+                await adapter.DisposeAsync().ConfigureAwait(false);
+                _logger.LogInformation("Invalidated and disposed MCP client for server '{ServerName}'", serverName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing MCP client during invalidation for server '{ServerName}'", serverName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 使用指数退避重试创建新连接（最多 MaxRetries 次）。
+    /// </summary>
+    private async Task<IMcpClientAdapter> CreateWithRetryAsync(McpServerConfig config, CancellationToken ct)
+    {
+        var delayMs = BaseDelayMs;
+        Exception? lastException = null;
+
+        for (var attempt = 1; attempt <= MaxRetries; attempt++)
+        {
+            try
+            {
+                var adapter = await CreateAndConnectInternalAsync(config, ct).ConfigureAwait(false);
+                if (attempt > 1)
+                {
+                    _logger.LogInformation(
+                        "MCP client reconnected to server '{ServerName}' on attempt {Attempt}",
+                        config.Name, attempt);
+                }
+                return adapter;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastException = ex;
+                if (config.OAuth != null && _oauthHandler != null)
+                {
+                    var invalidated = _oauthHandler.InvalidateToken(config.Name);
+                    if (invalidated)
+                    {
+                        _logger.LogDebug("Invalidated OAuth token cache for MCP server '{ServerName}' after failed connection attempt", config.Name);
+                    }
+                }
+                _logger.LogWarning(
+                    ex, "MCP client connection attempt {Attempt}/{MaxRetries} failed for server '{ServerName}'",
+                    attempt, MaxRetries, config.Name);
+
+                if (attempt < MaxRetries)
+                {
+                    await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                    delayMs *= BackoffMultiplier;
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Failed to connect to MCP server '{config.Name}' after {MaxRetries} attempts.",
+            lastException);
+    }
+
+    /// <summary>
+    /// 创建并连接新的 MCP 客户端。子类可覆写以便测试注入。
+    /// </summary>
+    protected internal virtual async Task<IMcpClientAdapter> CreateAndConnectInternalAsync(McpServerConfig config, CancellationToken ct)
+    {
+        // OAuth: 获取令牌并注入 Authorization 头
+        // 复制 Headers dict 避免变异共享的 McpServerConfig.Headers
+        if (config.OAuth != null && _oauthHandler != null)
+        {
+            var accessToken = await _oauthHandler.GetAccessTokenAsync(config.Name, config.OAuth, ct).ConfigureAwait(false);
+            var headers = new Dictionary<string, string>(config.Headers) { ["Authorization"] = $"Bearer {accessToken}" };
+            config.Headers = headers;
+            _logger.LogDebug("OAuth token injected for MCP server '{ServerName}'", config.Name);
+        }
+
         IClientTransport transport = config.ConnectionType switch
         {
             McpConnectionType.Stdio => CreateStdioTransport(config),

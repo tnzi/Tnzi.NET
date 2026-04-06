@@ -1,3 +1,6 @@
+using Tnzi.AI.Infrastructure.Stores;
+using Tnzi.AI.Services.Interfaces;
+
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
@@ -21,10 +24,14 @@ public class AIWorkflowModule : TnziApplicationModule
         var services = context.Services;
 
         // 注册工作流服务
-        services.AddScoped<IWorkflowService, WorkflowService>();
+        services.AddScoped<WorkflowService>();
+        services.AddScoped<IWorkflowService>(sp => sp.GetRequiredService<WorkflowService>());
+        services.AddScoped<IWorkflowExecutionControlService>(sp => sp.GetRequiredService<WorkflowService>());
+        services.AddScoped<IWorkflowExecutionQueryService>(sp => sp.GetRequiredService<WorkflowService>());
 
         // 注册工作流检查点存储（TryAdd：允许用户注册自定义实现）
         services.TryAddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();
+        services.TryAddScoped<IWorkflowExecutionMailbox, WorkflowExecutionMailboxService>();
 
         // 注册工作流引擎组件
         services.AddScoped<IWorkflowNodeServiceContext, WorkflowNodeServiceContext>();

@@ -1,13 +1,17 @@
 namespace Tnzi.AI.Coder.ProjectContext;
 
 /// <summary>
-/// 默认项目上下文加载器 — 从文件系统加载 TNZI.md 指令文件
+/// 默认项目上下文加载器 — 从文件系统加载项目指令文件
 /// </summary>
 /// <remarks>
 /// 加载顺序（后面的优先级更高，内容拼接）：
 /// 1. ~/.tnzi/TNZI.md （全局指令）
-/// 2. {ProjectRoot}/TNZI.md
-/// 3. {ProjectRoot}/.tnzi/TNZI.md
+/// 2. ~/.claude/CLAUDE.md （Claude/Codex 兼容全局指令）
+/// 3. {ProjectRoot}/TNZI.md
+/// 4. {ProjectRoot}/AGENTS.md
+/// 5. {ProjectRoot}/CLAUDE.md
+/// 6. {ProjectRoot}/.tnzi/TNZI.md
+/// 7. {ProjectRoot}/.claude/CLAUDE.md
 /// 内容通过 \n---\n 分隔符合并
 /// </remarks>
 public class DefaultProjectContextLoader : IProjectContextLoader
@@ -31,17 +35,21 @@ public class DefaultProjectContextLoader : IProjectContextLoader
         };
 
         var contentParts = new List<string>();
+        var loadedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // 1. 全局指令文件: ~/.tnzi/TNZI.md
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var globalInstructionPath = Path.Combine(homeDir, ".tnzi", "TNZI.md");
-        await TryLoadFileAsync(globalInstructionPath, contentParts, result, ct);
+        if (_options.IncludeGlobalInstructionFiles)
+        {
+            foreach (var globalInstructionPath in GetGlobalInstructionFiles())
+            {
+                await TryLoadFileAsync(globalInstructionPath, contentParts, result, loadedPaths, ct);
+            }
+        }
 
-        // 2. 项目指令文件（按配置的顺序加载）
+        // 项目指令文件（按配置的顺序加载）
         foreach (var relativePath in _options.InstructionFiles)
         {
             var fullPath = Path.Combine(resolvedRoot, relativePath);
-            await TryLoadFileAsync(fullPath, contentParts, result, ct);
+            await TryLoadFileAsync(fullPath, contentParts, result, loadedPaths, ct);
         }
 
         // 合并所有内容
@@ -60,16 +68,22 @@ public class DefaultProjectContextLoader : IProjectContextLoader
     /// <summary>
     /// 尝试加载单个指令文件
     /// </summary>
-    private async Task TryLoadFileAsync(string filePath, List<string> contentParts, ProjectContextData result, CancellationToken ct)
+    private async Task TryLoadFileAsync(
+        string filePath,
+        List<string> contentParts,
+        ProjectContextData result,
+        HashSet<string> loadedPaths,
+        CancellationToken ct)
     {
-        if (!File.Exists(filePath))
+        var normalizedPath = NormalizePath(filePath);
+        if (normalizedPath == null || !loadedPaths.Add(normalizedPath) || !File.Exists(normalizedPath))
         {
             return;
         }
 
         try
         {
-            var rawContent = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct);
+            var rawContent = await File.ReadAllTextAsync(normalizedPath, Encoding.UTF8, ct);
 
             // 解析 YAML frontmatter
             var (content, metadata) = ParseFrontmatter(rawContent);
@@ -85,12 +99,41 @@ public class DefaultProjectContextLoader : IProjectContextLoader
                 contentParts.Add(content.Trim());
             }
 
-            result.LoadedFiles.Add(filePath);
-            _logger.LogDebug("Loaded instruction file: {Path} ({Length} chars)", filePath, content.Length);
+            result.LoadedFiles.Add(normalizedPath);
+            _logger.LogDebug("Loaded instruction file: {Path} ({Length} chars)", normalizedPath, content.Length);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to load instruction file: {Path}", filePath);
+            _logger.LogDebug(ex, "Failed to load instruction file: {Path}", normalizedPath);
+        }
+    }
+
+    private static IEnumerable<string> GetGlobalInstructionFiles()
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDir))
+        {
+            yield break;
+        }
+
+        yield return Path.Combine(homeDir, ".tnzi", "TNZI.md");
+        yield return Path.Combine(homeDir, ".claude", "CLAUDE.md");
+    }
+
+    private static string? NormalizePath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(filePath);
+        }
+        catch
+        {
+            return null;
         }
     }
 

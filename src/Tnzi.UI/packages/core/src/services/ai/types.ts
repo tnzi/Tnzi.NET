@@ -91,6 +91,9 @@ export enum SkillScope {
 export enum SkillSource {
   FileSystem = 0,
   Database = 1,
+  Plugin = 2,
+  Managed = 3,
+  Project = 4,
 }
 
 /** Reasoning effort */

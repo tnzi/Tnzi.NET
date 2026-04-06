@@ -49,6 +49,9 @@ public class ExecutionStrategyContext
     /// <summary>服务提供者</summary>
     public required IServiceProvider ServiceProvider { get; init; }
 
+    /// <summary>当前执行上下文访问器</summary>
+    public IAgentExecutionContextAccessor? ExecutionContextAccessor { get; init; }
+
     /// <summary>日志记录器</summary>
     public required ILogger Logger { get; init; }
 

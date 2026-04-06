@@ -26,7 +26,9 @@ public class CommandSanitizerTests
         var result = sanitizer.Sanitize("");
 
         result.IsAllowed.ShouldBeFalse();
-        result.Reason.ShouldContain("empty");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("empty");
     }
 
     [Fact]
@@ -37,7 +39,9 @@ public class CommandSanitizerTests
         var result = sanitizer.Sanitize("   ");
 
         result.IsAllowed.ShouldBeFalse();
-        result.Reason.ShouldContain("empty");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("empty");
     }
 
     [Fact]
@@ -62,7 +66,9 @@ public class CommandSanitizerTests
         var result = sanitizer.Sanitize("rm -rf /");
 
         result.IsAllowed.ShouldBeFalse();
-        result.Reason.ShouldContain("denied");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("denied");
     }
 
     [Fact]
@@ -232,7 +238,9 @@ public class CommandSanitizerTests
 
         result.IsAllowed.ShouldBeTrue();
         result.RequiresApproval.ShouldBeTrue();
-        result.Reason.ShouldContain("approval");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("approval");
     }
 
     [Fact]

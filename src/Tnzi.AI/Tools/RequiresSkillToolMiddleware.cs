@@ -7,6 +7,9 @@ namespace Tnzi.AI.Tools;
 /// </summary>
 public class RequiresSkillToolMiddleware : IToolExecutionMiddleware
 {
+    public const string ShortCircuitPropertyName = "RequiresSkillShortCircuited";
+    public const string ReasonPropertyName = "RequiresSkillReason";
+
     private readonly IToolRegistry _toolRegistry;
     private readonly ISkillLoadTracker _skillLoadTracker;
     private readonly ISkillRegistry? _skillRegistry;
@@ -70,7 +73,23 @@ public class RequiresSkillToolMiddleware : IToolExecutionMiddleware
             _skillLoadTracker.MarkLoaded(slug);
         }
 
+        context.Properties[ShortCircuitPropertyName] = true;
+        context.Properties[ReasonPropertyName] = $"Required skills not loaded: {string.Join(", ", missingSlugs)}";
         return $"⚠️ Required guidelines loaded. You may now call this tool again — do NOT call skill_get, just retry the tool directly.\n\n{content}";
+    }
+
+    public static string? GetShortCircuitReason(ToolExecutionContext context)
+    {
+        var shortCircuited = context.Properties.TryGetValue(ShortCircuitPropertyName, out var flag)
+            && flag is true;
+        if (!shortCircuited)
+        {
+            return null;
+        }
+
+        return context.Properties.TryGetValue(ReasonPropertyName, out var reason)
+            ? reason as string ?? "Tool execution was deferred until required skills were loaded"
+            : "Tool execution was deferred until required skills were loaded";
     }
 
     private IReadOnlyList<string>? GetRequiredSlugs(string toolName)

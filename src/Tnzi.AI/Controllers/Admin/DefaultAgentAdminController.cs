@@ -123,6 +123,26 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 配置 A/B 测试
+    /// </summary>
+    [HttpPost("{id:guid}/ab-test")]
+    public virtual async Task<ApiResult<AgentDto>> ConfigureAbTest(Guid id, [FromBody] ConfigureAbTestDto input)
+    {
+        var result = await AgentService.ConfigureAbTestAsync(id, input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 停止 A/B 测试
+    /// </summary>
+    [HttpDelete("{id:guid}/ab-test")]
+    public virtual async Task<ApiResult<AgentDto>> StopAbTest(Guid id)
+    {
+        var result = await AgentService.StopAbTestAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 流式运行 Agent（支持 SSE 和 NDJSON 格式）
     /// </summary>
     [HttpPost("{id:guid}/run/stream")]

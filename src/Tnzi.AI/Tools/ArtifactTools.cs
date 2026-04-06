@@ -51,7 +51,8 @@ public class ArtifactTools
     /// 将文件标记为本次运行的产出物，使用户可以预览和下载
     /// </summary>
     [AIFunction("present_files",
-        Description = "Present files as artifacts to the user. Call this when you have generated output files that the user should see or download. Provide virtual paths (e.g., /mnt/outputs/report.md).")]
+        Description = "Present files as artifacts to the user. Call this when you have generated output files that the user should see or download. Provide virtual paths (e.g., /mnt/outputs/report.md).",
+        IsConcurrencySafe = true)]
     public async Task<string> PresentFilesAsync(
         [Description("List of virtual file paths to present")] List<string> paths,
         CancellationToken ct = default)

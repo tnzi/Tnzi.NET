@@ -24,7 +24,9 @@ public class ConditionalNodeTests
         // Assert
         result.IsSuccess.ShouldBeTrue();
         result.RouteTo.ShouldBe("accept");
-        result.Output.Metadata.ShouldContainKeyAndValue("route", "accept");
+        var metadata = result.Output.Metadata;
+        metadata.ShouldNotBeNull();
+        metadata.ShouldContainKeyAndValue("route", "accept");
     }
 
     [Fact]

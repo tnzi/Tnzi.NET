@@ -42,7 +42,9 @@ public class SkillInstallationValidatorTests
         var longName = string.Join("-", Enumerable.Repeat("a", 33)); // > 64 chars
         var result = SkillInstallationValidator.ValidateName(longName);
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("maximum length");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("maximum length");
     }
 
     // -------------------------------------------------------------------------
@@ -61,7 +63,9 @@ public class SkillInstallationValidatorTests
     {
         var result = SkillInstallationValidator.ValidateDescription("Inject <script>alert(1)</script>");
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("angle brackets");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("angle brackets");
     }
 
     [Fact]
@@ -70,7 +74,9 @@ public class SkillInstallationValidatorTests
         var longDesc = new string('a', 1025);
         var result = SkillInstallationValidator.ValidateDescription(longDesc);
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("maximum length");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("maximum length");
     }
 
     // -------------------------------------------------------------------------
@@ -104,7 +110,9 @@ public class SkillInstallationValidatorTests
 
         var result = SkillInstallationValidator.ValidateFrontmatter(fm);
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("malicious_key");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("malicious_key");
     }
 
     // -------------------------------------------------------------------------
@@ -127,7 +135,9 @@ public class SkillInstallationValidatorTests
     {
         var result = SkillInstallationValidator.ValidatePathSafety(path);
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("traversal");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("traversal");
     }
 
     [Fact]
@@ -135,7 +145,9 @@ public class SkillInstallationValidatorTests
     {
         var result = SkillInstallationValidator.ValidatePathSafety(@"skills\my-skill\SKILL.md");
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("backslash");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("backslash");
     }
 
     [Fact]
@@ -143,7 +155,9 @@ public class SkillInstallationValidatorTests
     {
         var result = SkillInstallationValidator.ValidatePathSafety("/etc/passwd");
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("absolute");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("absolute");
     }
 
     // -------------------------------------------------------------------------
@@ -182,6 +196,8 @@ public class SkillInstallationValidatorTests
         using var readArchive = new ZipArchive(stream, ZipArchiveMode.Read);
         var result = SkillInstallationValidator.ValidateZipContent(readArchive);
         result.IsValid.ShouldBeFalse();
-        result.ErrorMessage.ShouldContain("traversal");
+        var errorMessage = result.ErrorMessage;
+        errorMessage.ShouldNotBeNull();
+        errorMessage.ShouldContain("traversal");
     }
 }

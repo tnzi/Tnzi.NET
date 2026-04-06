@@ -6,6 +6,7 @@ namespace Tnzi.AI.Middleware;
 public class QuotaMiddleware : IAiMiddleware
 {
     private readonly IQuotaService _quotaService;
+    private readonly IBudgetService _budgetService;
     private readonly ITokenEstimator _tokenEstimator;
     private readonly IEventBus? _eventBus;
     private readonly ILogger<QuotaMiddleware> _logger;
@@ -14,11 +15,13 @@ public class QuotaMiddleware : IAiMiddleware
 
     public QuotaMiddleware(
         IQuotaService quotaService,
+        IBudgetService budgetService,
         ITokenEstimator tokenEstimator,
         ILogger<QuotaMiddleware> logger,
         IEventBus? eventBus = null)
     {
         _quotaService = Check.NotNull(quotaService);
+        _budgetService = Check.NotNull(budgetService);
         _tokenEstimator = Check.NotNull(tokenEstimator);
         _logger = Check.NotNull(logger);
         _eventBus = eventBus;
@@ -33,6 +36,13 @@ public class QuotaMiddleware : IAiMiddleware
         if (userId == null)
         {
             return await next(context, cancellationToken);
+        }
+
+        // Budget check: USD 预算管控（在 token 配额之前检查，避免不必要的 token 预留）
+        var budgetResult = await CheckBudgetAsync(context, cancellationToken);
+        if (budgetResult != null)
+        {
+            return budgetResult;
         }
 
         // Before: 预留配额
@@ -87,6 +97,24 @@ public class QuotaMiddleware : IAiMiddleware
     private async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingCoreAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, Guid userId, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var inputText = context.Request.UserMessage ?? string.Empty;
+
+        // Budget check: USD 预算管控
+        var budgetCheck = await _budgetService.CheckBudgetAsync(
+            userId,
+            ResolveTenantId(context),
+            context.Agent.AgentId,
+            cancellationToken);
+
+        if (!budgetCheck.IsAllowed)
+        {
+            _logger.LogWarning("Budget exceeded for user {UserId}: {Reason}", userId, budgetCheck.Reason);
+            yield return new AgentStreamChunk
+            {
+                Text = budgetCheck.Reason ?? "Budget exceeded",
+                FinishReason = FinishReasons.QuotaExceeded
+            };
+            yield break;
+        }
 
         // Before: 预留配额
         var estimatedTokens = _tokenEstimator.Estimate(inputText);
@@ -144,6 +172,31 @@ public class QuotaMiddleware : IAiMiddleware
                 _logger.LogWarning(ex, "Failed to settle streaming quota for user {UserId}", userId);
             }
         }
+    }
+
+    /// <summary>检查 USD 预算，超限时返回拒绝结果，否则返回 null</summary>
+    private async Task<AgentRunResult?> CheckBudgetAsync(AiMiddlewareContext context, CancellationToken ct)
+    {
+        var userId = context.Request.UserId;
+        var tenantId = ResolveTenantId(context);
+        var agentId = context.Agent.AgentId;
+
+        var budgetCheck = await _budgetService.CheckBudgetAsync(userId, tenantId, agentId, ct);
+        if (budgetCheck.IsAllowed) return null;
+
+        _logger.LogWarning("Budget exceeded for user {UserId}: {Reason}", userId, budgetCheck.Reason);
+        return new AgentRunResult
+        {
+            Response = budgetCheck.Reason ?? "Budget exceeded",
+            FinishReason = FinishReasons.QuotaExceeded
+        };
+    }
+
+    /// <summary>从中间件上下文解析租户 ID</summary>
+    private static Guid? ResolveTenantId(AiMiddlewareContext context)
+    {
+        var currentTenant = context.ServiceProvider.GetService<ICurrentTenant>();
+        return currentTenant?.Id;
     }
 
     /// <summary>发布配额超限事件（静默失败）</summary>

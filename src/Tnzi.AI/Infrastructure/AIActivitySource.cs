@@ -84,6 +84,7 @@ public static class AIActivitySource
     /// </summary>
     public static void RecordChatRequest(string provider, string? model, string operationType = "chat")
     {
+        operationType = NormalizeOperationName(operationType);
         _chatRequestCounter.Add(1,
             new KeyValuePair<string, object?>(SemanticTags.ProviderName, provider),
             new KeyValuePair<string, object?>(SemanticTags.ModelId, model),
@@ -97,12 +98,15 @@ public static class AIActivitySource
         string provider,
         string? model,
         int inputTokens,
-        int outputTokens)
+        int outputTokens,
+        string operationType = "chat")
     {
+        operationType = NormalizeOperationName(operationType);
         var tags = new[]
         {
             new KeyValuePair<string, object?>(SemanticTags.ProviderName, provider),
-            new KeyValuePair<string, object?>(SemanticTags.ModelId, model)
+            new KeyValuePair<string, object?>(SemanticTags.ModelId, model),
+            new KeyValuePair<string, object?>(SemanticTags.OperationName, operationType)
         };
 
         // 输入 Token
@@ -117,11 +121,28 @@ public static class AIActivitySource
     /// <summary>
     /// 记录聊天延迟
     /// </summary>
-    public static void RecordChatLatency(string provider, string? model, double durationSeconds)
+    public static void RecordChatLatency(string provider, string? model, double durationSeconds, string operationType = "chat")
     {
+        operationType = NormalizeOperationName(operationType);
         _chatLatencyHistogram.Record(durationSeconds,
             new KeyValuePair<string, object?>(SemanticTags.ProviderName, provider),
-            new KeyValuePair<string, object?>(SemanticTags.ModelId, model));
+            new KeyValuePair<string, object?>(SemanticTags.ModelId, model),
+            new KeyValuePair<string, object?>(SemanticTags.OperationName, operationType));
+    }
+
+    private static string NormalizeOperationName(string? operationType)
+    {
+        return operationType switch
+        {
+            null or "" => "chat",
+            AIOperationType.Chat => "chat",
+            AIOperationType.ChatStreaming => "chat_streaming",
+            AIOperationType.AgentRun => "agent_run",
+            AIOperationType.AgentRunStreaming => "agent_run_streaming",
+            AIOperationType.WorkflowRun => "workflow_run",
+            AIOperationType.WorkflowRunStreaming => "workflow_run_streaming",
+            _ => operationType
+        };
     }
 
     /// <summary>

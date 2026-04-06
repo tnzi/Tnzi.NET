@@ -52,7 +52,9 @@ public class SubAgentRegistry : ISubAgentRegistry
             ToolGroups: ["default", "file", "code", "web-search", "sandbox"],
             ExcludedToolGroups: ["task", "clarification", "present-files"],
             MaxTurns: 50,
-            Instructions: "You are a general-purpose assistant. Complete the delegated task thoroughly."));
+            Instructions: "You are a general-purpose assistant. Complete the delegated task thoroughly.",
+            DefaultApprovalMode: ToolApprovalMode.Specific,
+            CapabilityTags: ["general", "analysis", "implementation"]));
 
         Register(new SubAgentTypeDefinition(
             Name: "bash",
@@ -60,7 +62,9 @@ public class SubAgentRegistry : ISubAgentRegistry
             ToolGroups: ["sandbox"],
             ExcludedToolGroups: [],
             MaxTurns: 30,
-            Instructions: "You are a command-line assistant. Execute commands in the sandbox to complete the task."));
+            Instructions: "You are a command-line assistant. Execute commands in the sandbox to complete the task.",
+            DefaultApprovalMode: ToolApprovalMode.Specific,
+            CapabilityTags: ["shell", "filesystem", "sandbox"]));
 
         Register(new SubAgentTypeDefinition(
             Name: "researcher",
@@ -68,6 +72,8 @@ public class SubAgentRegistry : ISubAgentRegistry
             ToolGroups: ["web-search", "file"],
             ExcludedToolGroups: [],
             MaxTurns: 30,
-            Instructions: "You are a research assistant. Search the web and read files to gather information for the task."));
+            Instructions: "You are a research assistant. Search the web and read files to gather information for the task.",
+            DefaultApprovalMode: ToolApprovalMode.NeverRequire,
+            CapabilityTags: ["research", "web", "files"]));
     }
 }

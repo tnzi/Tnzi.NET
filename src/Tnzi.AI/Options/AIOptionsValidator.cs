@@ -8,23 +8,24 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
 {
     protected override void ValidateOptions(AIOptions options, List<string> errors)
     {
-        // 允许零 provider 配置（AI 功能降级为不可用，但模块正常加载）
-        if (options.Providers == null || options.Providers.Count == 0)
-        {
-            return;
-        }
+        var hasProviders = options.Providers != null && options.Providers.Count > 0;
 
-        if (string.IsNullOrWhiteSpace(options.DefaultProvider))
+        // 允许零 provider 配置（AI 功能降级为不可用，但模块正常加载），
+        // 但仍需继续校验 Permissions / MCP / Guardrails 等其他子模块。
+        if (hasProviders)
         {
-            errors.Add("DefaultProvider cannot be null or empty");
-        }
-        else if (!options.Providers.ContainsKey(options.DefaultProvider))
-        {
-            errors.Add($"DefaultProvider '{options.DefaultProvider}' is not found in Providers");
-        }
-        else if (!options.Providers[options.DefaultProvider].Enabled)
-        {
-            errors.Add($"DefaultProvider '{options.DefaultProvider}' is disabled");
+            if (string.IsNullOrWhiteSpace(options.DefaultProvider))
+            {
+                errors.Add("DefaultProvider cannot be null or empty");
+            }
+            else if (!options.Providers!.ContainsKey(options.DefaultProvider))
+            {
+                errors.Add($"DefaultProvider '{options.DefaultProvider}' is not found in Providers");
+            }
+            else if (!options.Providers[options.DefaultProvider].Enabled)
+            {
+                errors.Add($"DefaultProvider '{options.DefaultProvider}' is disabled");
+            }
         }
 
         // MCP：Enabled 时必须有至少一个 Server；再校验各服务器配置（名称、连接方式与必填字段）
@@ -32,6 +33,9 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
         {
             errors.Add("MCP is enabled but Servers is null or empty. Configure at least one server under AI:Mcp:Servers.");
         }
+
+        ValidatePermissionRules(options.Permissions, errors);
+        ValidateMemoryOptions(options.ContextProviders?.Memory, errors);
 
         if (options.Mcp != null && options.Mcp.Enabled && options.Mcp.Servers != null)
         {
@@ -87,6 +91,22 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
                         errors.Add($"MCP server '{server.Name}': connection type '{server.ConnectionType}' is not supported");
                         break;
                 }
+
+                if (server.OAuth != null)
+                {
+                    if (string.IsNullOrWhiteSpace(server.OAuth.ClientId))
+                    {
+                        errors.Add($"MCP server '{server.Name}': OAuth ClientId cannot be empty");
+                    }
+
+                    var hasTokenEndpoint = !string.IsNullOrWhiteSpace(server.OAuth.TokenEndpoint);
+                    var hasDiscoverySource = !string.IsNullOrWhiteSpace(server.OAuth.MetadataUrl)
+                        || !string.IsNullOrWhiteSpace(server.OAuth.AuthorizationServer);
+                    if (!hasTokenEndpoint && !(server.OAuth.EnableMetadataDiscovery && hasDiscoverySource))
+                    {
+                        errors.Add($"MCP server '{server.Name}': OAuth requires TokenEndpoint or metadata discovery configuration");
+                    }
+                }
             }
         }
 
@@ -112,6 +132,11 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
         }
 
         // 验证每个启用的提供商
+        if (!hasProviders)
+        {
+            return;
+        }
+
         foreach (var (providerName, providerOptions) in options.Providers)
         {
             if (!providerOptions.Enabled)
@@ -209,6 +234,79 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
         if (apiKey.Length < 20)
         {
             errors.Add("OpenAI API Key appears to be too short");
+        }
+    }
+
+    private static void ValidatePermissionRules(ToolPermissionOptions? permissions, List<string> errors)
+    {
+        if (permissions == null || !permissions.Enabled)
+        {
+            return;
+        }
+
+        ValidateRuleGroup(permissions.SystemRules, "SystemRules", errors);
+        ValidateRuleGroup(permissions.ProjectRules, "ProjectRules", errors);
+        ValidateRuleGroup(permissions.UserRules, "UserRules", errors);
+        ValidateRuleGroup(permissions.SessionRules, "SessionRules", errors);
+    }
+
+    private static void ValidateRuleGroup(
+        IEnumerable<ToolPermissionRuleOptions>? rules,
+        string groupName,
+        List<string> errors)
+    {
+        if (rules == null)
+        {
+            return;
+        }
+
+        var index = 0;
+        foreach (var rule in rules)
+        {
+            if (rule == null)
+            {
+                index++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(rule.ToolPattern))
+            {
+                errors.Add($"AI:Permissions:{groupName}[{index}] ToolPattern cannot be empty.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(rule.SubAgentName)
+                && rule.SubAgentName.Length > 200)
+            {
+                errors.Add($"AI:Permissions:{groupName}[{index}] SubAgentName is too long.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(rule.WorkflowNodeName)
+                && rule.WorkflowNodeName.Length > 200)
+            {
+                errors.Add($"AI:Permissions:{groupName}[{index}] WorkflowNodeName is too long.");
+            }
+
+            index++;
+        }
+    }
+
+    private static void ValidateMemoryOptions(MemoryOptions? memory, List<string> errors)
+    {
+        if (memory == null || !memory.Enabled)
+        {
+            return;
+        }
+
+        if (memory.EnableProjectSnapshot
+            && string.IsNullOrWhiteSpace(memory.ProjectSnapshotScopePrefix))
+        {
+            errors.Add("AI:ContextProviders:Memory:ProjectSnapshotScopePrefix cannot be empty when project snapshot is enabled.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(memory.ProjectSnapshotScopePrefix)
+            && memory.ProjectSnapshotScopePrefix.Length > 64)
+        {
+            errors.Add("AI:ContextProviders:Memory:ProjectSnapshotScopePrefix is too long.");
         }
     }
 }

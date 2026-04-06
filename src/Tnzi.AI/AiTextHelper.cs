@@ -30,6 +30,12 @@ public static class ContextPropertyKeys
     public const string ClarificationRequest = "ClarificationRequest";
     public const string Todos = "Todos";
     public const string ActiveSkills = "ActiveSkills";
+    public const string IsSubAgent = "IsSubAgent";
+    public const string SubAgentName = "SubAgentName";
+    public const string CurrentRunId = "CurrentRunId";
+    public const string WorkflowExecutionId = "WorkflowExecutionId";
+    public const string WorkflowNodeName = "WorkflowNodeName";
+    public const string ParentSessionRules = "ParentSessionRules";
 }
 
 /// <summary>

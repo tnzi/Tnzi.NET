@@ -31,6 +31,12 @@ public class WorkflowExecutionConfiguration : EntityTypeConfigurationBase<Workfl
         builder.Property(e => e.UpdatedTime)
             .IsRequired();
 
+        builder.Property(e => e.CurrentWaitReason)
+            .HasMaxLength(100);
+
+        builder.Property(e => e.PendingSignalsJson)
+            .IsRequired();
+
         builder.Property(e => e.StepsAwaitingApproval)
             .IsRequired();
 

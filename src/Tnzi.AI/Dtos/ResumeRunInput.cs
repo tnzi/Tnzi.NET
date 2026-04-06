@@ -16,4 +16,10 @@ public class ResumeRunInput
 
     /// <summary>额外的用户输入</summary>
     public string? UserMessage { get; init; }
+
+    /// <summary>Workflow 中断步骤 ID（恢复 AwaitingInput 时可选，不传则自动解析当前 pending step）</summary>
+    public string? WorkflowStepId { get; init; }
+
+    /// <summary>Workflow 恢复输入（恢复 AwaitingInput 时必填）</summary>
+    public Dictionary<string, object>? WorkflowInput { get; init; }
 }

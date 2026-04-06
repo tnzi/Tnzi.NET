@@ -81,7 +81,9 @@ public class AgentValidationServiceTests
         result.Data!.IsValid.ShouldBeFalse();
         var providerCheck = result.Data.Checks.First(c => c.Name == "provider");
         providerCheck.Passed.ShouldBeFalse();
-        providerCheck.Details.ShouldContain("NonExistent");
+        var details = providerCheck.Details;
+        details.ShouldNotBeNull();
+        details.ShouldContain("NonExistent");
     }
 
     [Fact]
@@ -108,7 +110,9 @@ public class AgentValidationServiceTests
         result.Data!.IsValid.ShouldBeFalse();
         var toolCheck = result.Data.Checks.First(c => c.Name == "tool_groups");
         toolCheck.Passed.ShouldBeFalse();
-        toolCheck.Details.ShouldContain("nonexistent_tools");
+        var details = toolCheck.Details;
+        details.ShouldNotBeNull();
+        details.ShouldContain("nonexistent_tools");
     }
 
     [Fact]
@@ -146,7 +150,9 @@ public class AgentValidationServiceTests
         result.Succeeded.ShouldBeTrue();
         var modelCheck = result.Data!.Checks.First(c => c.Name == "model");
         modelCheck.Passed.ShouldBeTrue();
-        modelCheck.Details.ShouldContain("default");
+        var details = modelCheck.Details;
+        details.ShouldNotBeNull();
+        details.ShouldContain("default");
     }
 
     [Fact]

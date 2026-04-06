@@ -17,5 +17,19 @@ public class ChannelsModuleOptionsValidator : OptionsValidatorBase<ChannelsModul
 
         if (options.Telegram.Enabled && string.IsNullOrWhiteSpace(options.Telegram.BotToken))
             errors.Add("Telegram.BotToken is required when Telegram adapter is enabled");
+
+        if (options.Slack.Enabled && string.IsNullOrWhiteSpace(options.Slack.BotToken))
+            errors.Add("Slack.BotToken is required when Slack adapter is enabled");
+
+        if (options.Discord.Enabled && string.IsNullOrWhiteSpace(options.Discord.BotToken))
+            errors.Add("Discord.BotToken is required when Discord adapter is enabled");
+
+        if (options.Dingtalk.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(options.Dingtalk.AppKey))
+                errors.Add("Dingtalk.AppKey is required when DingTalk adapter is enabled");
+            if (string.IsNullOrWhiteSpace(options.Dingtalk.AppSecret))
+                errors.Add("Dingtalk.AppSecret is required when DingTalk adapter is enabled");
+        }
     }
 }

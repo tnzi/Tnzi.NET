@@ -59,4 +59,14 @@ public interface IAgentService
     /// 回滚到指定版本
     /// </summary>
     Task<Result<AgentDto>> RollbackToVersionAsync(Guid agentId, int version);
+
+    /// <summary>
+    /// 配置 A/B 测试
+    /// </summary>
+    Task<Result<AgentDto>> ConfigureAbTestAsync(Guid agentId, ConfigureAbTestDto input);
+
+    /// <summary>
+    /// 停止 A/B 测试
+    /// </summary>
+    Task<Result<AgentDto>> StopAbTestAsync(Guid agentId);
 }

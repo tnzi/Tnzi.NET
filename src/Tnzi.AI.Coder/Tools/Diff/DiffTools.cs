@@ -20,7 +20,7 @@ public class DiffTools : IAIToolProvider
     /// <summary>
     /// 在内存中生成两段文本的统一 diff
     /// </summary>
-    [AIFunction("generate_diff", "Generate unified diff between two strings")]
+    [AIFunction("generate_diff", "Generate unified diff between two strings", IsReadOnly = true, IsConcurrencySafe = true)]
     public Task<object> GenerateDiffAsync(
         [AIParameter("old_content", "Original content")] string oldContent,
         [AIParameter("new_content", "Modified content")] string newContent,
@@ -63,7 +63,7 @@ public class DiffTools : IAIToolProvider
     /// <summary>
     /// 将统一 diff 补丁应用到文件
     /// </summary>
-    [AIFunction("apply_patch", "Apply a unified diff patch to a file")]
+    [AIFunction("apply_patch", "Apply a unified diff patch to a file", IsDestructive = true, SearchHint = "apply patch diff")]
     public async Task<object> ApplyPatchAsync(
         [AIParameter("path", "File path to patch")] string path,
         [AIParameter("diff", "Unified diff content to apply")] string diff)

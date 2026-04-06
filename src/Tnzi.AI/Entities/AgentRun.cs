@@ -18,6 +18,12 @@ public class AgentRun : MultiTenantAuditedEntity<Guid>
     /// <summary>关联的工作流执行实例 ID（工作流运行时）</summary>
     public string? WorkflowExecutionId { get; set; }
 
+    /// <summary>父级运行实例 ID（子 Agent / workflow 子调用）</summary>
+    public Guid? ParentRunId { get; set; }
+
+    /// <summary>根运行实例 ID（整条调用链共享）</summary>
+    public Guid? RootRunId { get; set; }
+
     /// <summary>运行状态</summary>
     public AgentRunStatus Status { get; set; }
 
@@ -38,6 +44,9 @@ public class AgentRun : MultiTenantAuditedEntity<Guid>
 
     /// <summary>总耗时（毫秒）</summary>
     public long DurationMs { get; set; }
+
+    /// <summary>最近心跳时间（后台运行跟踪）</summary>
+    public DateTime? LastHeartbeatAt { get; set; }
 
     /// <summary>错误信息（失败时）</summary>
     public string? Error { get; set; }

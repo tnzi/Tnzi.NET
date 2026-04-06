@@ -58,6 +58,26 @@ public class WorkflowExecution : CreationAuditedEntity<Guid>, IMultiTenant
     public DateTime UpdatedTime { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// 待处理信号数量（输入/取消/恢复等）
+    /// </summary>
+    public int PendingSignalCount { get; set; }
+
+    /// <summary>
+    /// 当前等待原因（approval / input / external_signal 等）
+    /// </summary>
+    public string? CurrentWaitReason { get; set; }
+
+    /// <summary>
+    /// 当前等待中的通用中断（JSON）
+    /// </summary>
+    public string? PendingInterruptJson { get; set; }
+
+    /// <summary>
+    /// 待处理执行信号（JSON 数组）
+    /// </summary>
+    public string PendingSignalsJson { get; set; } = "[]";
+
+    /// <summary>
     /// 等待审批的步骤 ID 列表（JSON 数组，HITL 场景下使用）
     /// </summary>
     public string StepsAwaitingApproval { get; set; } = "[]";

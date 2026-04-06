@@ -24,6 +24,9 @@ public class KnowledgeDocumentConfiguration : EntityTypeConfigurationBase<Knowle
         builder.Property(e => e.ContentHash)
             .HasMaxLength(64);
 
+        builder.Property(e => e.Version)
+            .HasDefaultValue(1);
+
         if (multiTenancyEnabled)
         {
             builder.HasIndex(e => e.TenantId);

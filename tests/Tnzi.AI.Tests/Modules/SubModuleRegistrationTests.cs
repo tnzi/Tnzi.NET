@@ -94,7 +94,9 @@ public class SubModuleRegistrationTests
         var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IWorkflowService));
 
         descriptor.ShouldNotBeNull();
-        descriptor.ImplementationType.ShouldBe(typeof(WorkflowService));
+        // WorkflowService is registered as factory (sp => sp.GetRequiredService<WorkflowService>())
+        // so ImplementationType is null; verify via ImplementationFactory instead
+        descriptor.ImplementationFactory.ShouldNotBeNull();
         descriptor.Lifetime.ShouldBe(ServiceLifetime.Scoped);
     }
 

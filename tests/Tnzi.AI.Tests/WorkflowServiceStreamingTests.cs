@@ -186,13 +186,89 @@ public class WorkflowServiceStreamingTests
         results[2].Output.ShouldBe("B");
     }
 
+    [Fact]
+    public async Task RunStreamingAsync_DagMode_WhenApprovalRequired_PersistsAwaitingApprovalAndLogsStreamingOperationType()
+    {
+        var workflowId = Guid.NewGuid();
+        WorkflowExecution? insertedExecution = null;
+        var steps = new[]
+        {
+            new WorkflowStepDto
+            {
+                StepId = "step-a",
+                Configuration = new Dictionary<string, string>
+                {
+                    ["nodeType"] = "fixed-result",
+                    ["result"] = "Prepared content"
+                }
+            },
+            new WorkflowStepDto
+            {
+                StepId = "approve-step",
+                DependsOn = ["step-a"],
+                Configuration = new Dictionary<string, string>
+                {
+                    ["nodeType"] = WorkflowNodeTypes.Approval
+                }
+            }
+        };
+        var repository = new Mock<IRepository<WorkflowDefinition, Guid>>();
+        repository.Setup(x => x.GetAsync(workflowId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkflowDefinition
+            {
+                Id = workflowId,
+                Name = "wf",
+                IsEnabled = true,
+                ExecutionMode = WorkflowExecutionMode.Dag,
+                Steps = JsonSerializer.Serialize(steps, TnziJsonDefaults.Options)
+            });
+
+        var usageLog = new Mock<IUsageLogService>();
+        var quota = new Mock<IQuotaService>();
+        var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
+        executionRepository.Setup(x => x.InsertAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowExecution, CancellationToken>((execution, _) => insertedExecution = execution)
+            .Returns(Task.CompletedTask);
+        executionRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => insertedExecution);
+        executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = CreateService(repository, usageLog, quota, executionRepository);
+
+        var results = new List<WorkflowExecutionResultDto>();
+        await foreach (var item in service.RunStreamingAsync(workflowId, "input"))
+        {
+            results.Add(item);
+        }
+
+        results.Count.ShouldBe(3);
+        results[2].Status.ShouldBe(nameof(WorkflowExecutionStatus.AwaitingInput));
+        insertedExecution.ShouldNotBeNull();
+        insertedExecution!.Status.ShouldBe(WorkflowExecutionStatus.AwaitingInput);
+
+        usageLog.Verify(x => x.LogUsageAsync(
+            AIOperationType.WorkflowRunStreaming,
+            "Workflow",
+            "wf",
+            It.IsAny<int>(),
+            It.IsAny<int>(),
+            It.IsAny<long>(),
+            false,
+            It.Is<string>(msg => msg.Contains("Approval required", StringComparison.OrdinalIgnoreCase) || msg.Contains("AwaitingInput", StringComparison.OrdinalIgnoreCase)),
+            null,
+            null,
+            CancellationToken.None), Times.Once);
+    }
+
     private static WorkflowService CreateService(
         Mock<IRepository<WorkflowDefinition, Guid>> repository,
         Mock<IUsageLogService> usageLog,
-        Mock<IQuotaService> quota)
+        Mock<IQuotaService> quota,
+        Mock<IRepository<WorkflowExecution, Guid>>? executionRepository = null)
     {
         var checkpointStore = new Mock<IWorkflowCheckpointStore>();
-        var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
+        executionRepository ??= new Mock<IRepository<WorkflowExecution, Guid>>();
         var runRepository = new Mock<IRepository<AgentRun, Guid>>();
         runRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<AgentRun, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentRun?)null);
@@ -221,6 +297,7 @@ public class WorkflowServiceStreamingTests
         services.AddScoped<IWorkflowNode, AgentNode>();
         services.AddScoped<IWorkflowNode, FixedResultNode>();
         services.AddScoped<IWorkflowNode, FailingResultNode>();
+        services.AddScoped<IWorkflowNode, ApprovalNode>();
         services.AddScoped<WorkflowNodeExecutor>();
         services.AddScoped<WorkflowEngine>();
         var serviceProvider = services.BuildServiceProvider();

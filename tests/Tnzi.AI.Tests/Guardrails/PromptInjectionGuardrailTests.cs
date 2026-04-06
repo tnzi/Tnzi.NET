@@ -38,7 +38,9 @@ public class PromptInjectionGuardrailTests
         // Assert
         result.IsAllowed.ShouldBeFalse();
         result.GuardrailName.ShouldBe(nameof(PromptInjectionGuardrail));
-        result.Reason.ShouldContain("prompt injection");
+        var reason = result.Reason;
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("prompt injection");
     }
 
     [Fact]

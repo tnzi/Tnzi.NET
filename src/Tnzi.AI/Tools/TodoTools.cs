@@ -18,7 +18,8 @@ public class TodoTools
     /// Use this to track progress on multi-step tasks.
     /// </summary>
     [AIFunction("write_todos",
-        Description = "Write or update the todo list for tracking task progress in plan mode. Include ALL items with their current status.")]
+        Description = "Write or update the todo list for tracking task progress in plan mode. Include ALL items with their current status.",
+        IsConcurrencySafe = true)]
     public string WriteTodos(
         [Description("Complete list of todo items with status (Pending/InProgress/Completed/Skipped)")] List<TodoItemDto> items)
     {

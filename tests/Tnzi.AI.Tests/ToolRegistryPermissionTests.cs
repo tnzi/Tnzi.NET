@@ -146,12 +146,17 @@ public class ToolRegistryPermissionTests
             }
         });
 
+        var versionRouter = new Mock<IAgentVersionRouter>();
+        versionRouter.Setup(r => r.RouteAsync(It.IsAny<Agent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Agent a, CancellationToken _) => AgentVersionRouteResult.Passthrough(a));
+
         var resolver = new AgentResolver(
             agentFactory.Object,
             aiOptions,
             agentRepository.Object,
             toolRegistry,
             new SimplePromptTemplateEngine(),
+            versionRouter.Object,
             Mock.Of<ILogger<AgentResolver>>(),
             permissionChecker: permissionChecker.Object);
 

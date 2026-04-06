@@ -51,6 +51,56 @@ public class ClarificationMiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeAsync_WithClarification_PreservesExistingResultFields()
+    {
+        var accessor = new AgentExecutionContextAccessor();
+        var middleware = CreateMiddleware(accessor);
+        var context = TestHelpers.CreateMinimalContext();
+        var threadId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+
+        var result = await middleware.InvokeAsync(context,
+            (ctx, ct) =>
+            {
+                accessor.Properties[ContextPropertyKeys.ClarificationRequest] = new ClarificationRequest
+                {
+                    Question = "Choose one",
+                    Type = ClarificationType.ApproachChoice
+                };
+
+                return Task.FromResult(new AgentRunResult
+                {
+                    Response = "original",
+                    RunId = runId,
+                    ThreadId = threadId,
+                    FinishReason = FinishReasons.Stop,
+                    Model = "gpt-5-think",
+                    Reasoning = "trace",
+                    Suggestions = ["next"],
+                    Todos =
+                    [
+                        new TodoItemDto { Content = "task", Order = 1 }
+                    ],
+                    Artifacts =
+                    [
+                        new AgentArtifactDto { FileName = "plan.md", VirtualPath = "/artifacts/plan.md" }
+                    ]
+                });
+            },
+            CancellationToken.None);
+
+        Assert.Equal(runId, result.RunId);
+        Assert.Equal(threadId, result.ThreadId);
+        Assert.Equal("gpt-5-think", result.Model);
+        Assert.Equal("trace", result.Reasoning);
+        Assert.Single(result.Suggestions!);
+        Assert.Single(result.Todos!);
+        Assert.Single(result.Artifacts!);
+        Assert.Equal(FinishReasons.RequiresClarification, result.FinishReason);
+        Assert.Equal(AgentRunStatus.RequiresClarification, result.Status);
+    }
+
+    [Fact]
     public async Task InvokeAsync_ChineseContent_FormatsWithChineseLabels()
     {
         var accessor = new AgentExecutionContextAccessor();

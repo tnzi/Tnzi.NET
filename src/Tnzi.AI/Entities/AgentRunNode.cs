@@ -18,6 +18,9 @@ public class AgentRunNode : CreationAuditedEntity<Guid>, IMultiTenant
     /// <summary>节点名称（Workflow 步骤名）</summary>
     public string NodeName { get; set; } = string.Empty;
 
+    /// <summary>稳定节点键（跨恢复/重试保持一致）</summary>
+    public string? NodeKey { get; set; }
+
     /// <summary>执行的 Agent ID（如果是 agent 节点）</summary>
     public Guid? AgentId { get; set; }
 
@@ -42,11 +45,17 @@ public class AgentRunNode : CreationAuditedEntity<Guid>, IMultiTenant
     /// <summary>错误信息</summary>
     public string? Error { get; set; }
 
+    /// <summary>等待输入类型（例如 approval / human_input）</summary>
+    public string? AwaitingInputKind { get; set; }
+
     /// <summary>重试次数</summary>
     public int RetryCount { get; set; }
 
     /// <summary>执行顺序</summary>
     public int OrderIndex { get; set; }
+
+    /// <summary>父节点 ID（用于表示节点层级关系）</summary>
+    public Guid? ParentNodeId { get; set; }
 
     /// <summary>关联的 Run</summary>
     public AgentRun Run { get; set; } = null!;

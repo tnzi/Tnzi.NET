@@ -104,6 +104,32 @@ public class MemoryOptions
     public bool EnableUserIsolation { get; set; } = true;
 
     /// <summary>
+    /// 是否启用 Agent 级记忆隔离（按 AgentId 隔离本地记忆）。
+    /// </summary>
+    /// <remarks>
+    /// 启用后，同一用户下的不同 Agent 会拥有独立的本地记忆覆盖层。
+    /// 默认关闭以保持现有 scope 键兼容。
+    /// </remarks>
+    public bool EnableAgentIsolation { get; set; }
+
+    /// <summary>
+    /// 是否启用项目级记忆快照。
+    /// </summary>
+    /// <remarks>
+    /// 启用后，MemoryContextProvider 会根据当前请求的 project_root / working_directory
+    /// 推导只读的项目级共享记忆 scope，并与本地记忆、全局共享记忆一起注入。
+    /// </remarks>
+    public bool EnableProjectSnapshot { get; set; }
+
+    /// <summary>
+    /// 项目记忆快照 scope 前缀。
+    /// </summary>
+    /// <remarks>
+    /// 最终 scope 形如 "{prefix}:{project-slug}:{hash}"，用于避免直接把绝对路径暴露为 scope 名。
+    /// </remarks>
+    public string ProjectSnapshotScopePrefix { get; set; } = "project";
+
+    /// <summary>
     /// 是否启用自动记忆沉淀（对话结束时自动提取并持久化记忆）
     /// </summary>
     /// <remarks>
@@ -190,6 +216,21 @@ public class MemoryOptions
     /// 是否启用 PII 防护（save_memory 时检测个人信息模式）
     /// </summary>
     public bool EnablePiiProtection { get; set; } = true;
+
+    /// <summary>
+    /// 记忆条目数阈值 — 超过此值时切换为检索式注入（索引 + SearchAsync top-K）。默认 20。
+    /// </summary>
+    public int RetrievalModeThreshold { get; set; } = 20;
+
+    /// <summary>
+    /// 检索式注入时返回的 top-K 最相关记忆条目数。默认 8。
+    /// </summary>
+    public int RetrievalTopK { get; set; } = 8;
+
+    /// <summary>
+    /// 两次自动记忆提取之间的最少对话轮数（节流）。默认 3。
+    /// </summary>
+    public int MinTurnsBetweenExtractions { get; set; } = 3;
 
     /// <summary>
     /// 记忆嵌入向量使用的 Provider（null=使用 AI:DefaultProvider）
@@ -347,6 +388,22 @@ public class SkillsOptions
     /// 默认启用。测试场景下可设为 false 以隔离内置技能对测试的影响。
     /// </remarks>
     public bool LoadBuiltIn { get; set; } = true;
+
+    /// <summary>
+    /// 插件技能搜索路径（标记为 SkillSource.Plugin）
+    /// </summary>
+    /// <remarks>
+    /// 从第三方插件目录加载的技能文件。支持绝对路径、相对路径（相对于 ContentRoot）和 @Assembly 语法。
+    /// </remarks>
+    public List<string> PluginPaths { get; set; } = [];
+
+    /// <summary>
+    /// 平台托管技能搜索路径（标记为 SkillSource.Managed）
+    /// </summary>
+    /// <remarks>
+    /// 由平台统一管理和分发的技能目录。支持绝对路径、相对路径（相对于 ContentRoot）和 @Assembly 语法。
+    /// </remarks>
+    public List<string> ManagedPaths { get; set; } = [];
 
     /// <summary>
     /// 技能缓存 TTL（默认 15 分钟）

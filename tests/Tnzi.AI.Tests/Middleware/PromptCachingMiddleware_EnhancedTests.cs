@@ -56,6 +56,7 @@ public class PromptCachingMiddleware_EnhancedTests
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
             Enabled = true,
+            CacheStaticDynamicBoundary = false,
             CacheSystemPrompt = false,
             CacheRecentUserMessages = 2
         });
@@ -88,6 +89,7 @@ public class PromptCachingMiddleware_EnhancedTests
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
             Enabled = true,
+            CacheStaticDynamicBoundary = false,
             CacheSystemPrompt = false,
             CacheRecentUserMessages = 5 // 请求 5 条但只有 2 条
         });
@@ -116,6 +118,7 @@ public class PromptCachingMiddleware_EnhancedTests
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
             Enabled = true,
+            CacheStaticDynamicBoundary = false,
             CacheSystemPrompt = false,
             CacheToolDefinitions = true
         });
@@ -135,6 +138,7 @@ public class PromptCachingMiddleware_EnhancedTests
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
             Enabled = true,
+            CacheStaticDynamicBoundary = false,
             CacheSystemPrompt = false,
             CacheToolDefinitions = true
         });
@@ -153,6 +157,7 @@ public class PromptCachingMiddleware_EnhancedTests
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
             Enabled = true,
+            CacheStaticDynamicBoundary = false,
             CacheSystemPrompt = false,
             CacheToolDefinitions = false
         });
@@ -245,6 +250,7 @@ public class PromptCachingMiddleware_EnhancedTests
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
             Enabled = true,
+            CacheStaticDynamicBoundary = false,
             CacheSystemPrompt = true,
             CacheFirstNMessages = 2,
             CacheRecentUserMessages = 1,

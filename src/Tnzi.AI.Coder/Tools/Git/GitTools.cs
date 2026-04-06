@@ -29,7 +29,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 查看工作树变更（支持 staged、指定文件、分支比较）
     /// </summary>
-    [AIFunction("git_diff", "Show working tree changes")]
+    [AIFunction("git_diff", "Show working tree changes", IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "git diff changes")]
     public async Task<object> GitDiffAsync(
         [AIParameter("path", "Repository path", false)] string? path = null,
         [AIParameter("staged", "Show staged changes only", false)] bool staged = false,
@@ -96,7 +96,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 将文件暂存到索引区
     /// </summary>
-    [AIFunction("git_add", "Stage files for commit")]
+    [AIFunction("git_add", "Stage files for commit", SearchHint = "git add stage")]
     public async Task<object> GitAddAsync(
         [AIParameter("files", "Files to stage (comma-separated), or '.' for all")] string files,
         [AIParameter("path", "Repository path", false)] string? path = null)
@@ -154,7 +154,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 创建提交
     /// </summary>
-    [AIFunction("git_commit", "Create a commit with message")]
+    [AIFunction("git_commit", "Create a commit with message", SearchHint = "git commit")]
     public async Task<object> GitCommitAsync(
         [AIParameter("message", "Commit message")] string message,
         [AIParameter("path", "Repository path", false)] string? path = null)
@@ -204,7 +204,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 切换分支或恢复文件
     /// </summary>
-    [AIFunction("git_checkout", "Switch branches or restore files")]
+    [AIFunction("git_checkout", "Switch branches or restore files", SearchHint = "git checkout switch branch")]
     public async Task<object> GitCheckoutAsync(
         [AIParameter("target", "Branch name or file path to checkout")] string target,
         [AIParameter("create", "Create a new branch (-b)", false)] bool create = false,
@@ -259,7 +259,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 分支操作（列出、创建、删除）
     /// </summary>
-    [AIFunction("git_branch", "List, create, or delete branches")]
+    [AIFunction("git_branch", "List, create, or delete branches", SearchHint = "git branch")]
     public async Task<object> GitBranchAsync(
         [AIParameter("name", "Branch name (for create/delete)", false)] string? name = null,
         [AIParameter("delete", "Delete the branch", false)] bool delete = false,
@@ -348,7 +348,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 暂存/恢复/查看变更
     /// </summary>
-    [AIFunction("git_stash", "Stash, pop, or list changes")]
+    [AIFunction("git_stash", "Stash, pop, or list changes", SearchHint = "git stash")]
     public async Task<object> GitStashAsync(
         [AIParameter("action", "Action: push, pop, list, drop", false)] string action = "push",
         [AIParameter("message", "Stash message (for push)", false)] string? message = null,
@@ -420,7 +420,7 @@ public class GitTools : IAIToolProvider
     /// <summary>
     /// 取消暂存文件或重置到指定提交
     /// </summary>
-    [AIFunction("git_reset", "Unstage files or reset to a commit")]
+    [AIFunction("git_reset", "Unstage files or reset to a commit", IsDestructive = true, SearchHint = "git reset")]
     public async Task<object> GitResetAsync(
         [AIParameter("files", "Files to unstage (comma-separated)", false)] string? files = null,
         [AIParameter("commit", "Commit to reset to (soft reset)", false)] string? commit = null,

@@ -84,6 +84,32 @@ public class AIRagOptions
     /// 加权递减重排序器配置
     /// </summary>
     public RerankerOptions Reranker { get; set; } = new();
+
+    /// <summary>
+    /// Parent Document Retrieval 配置
+    /// </summary>
+    public ParentDocumentRetrievalOptions ParentDocumentRetrieval { get; set; } = new();
+}
+
+/// <summary>
+/// Parent Document Retrieval 配置选项
+/// </summary>
+public class ParentDocumentRetrievalOptions
+{
+    /// <summary>
+    /// 是否启用 Parent Document Retrieval（默认 false）
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// 窗口大小 — 匹配块前后各扩展的块数（默认 2）
+    /// </summary>
+    public int WindowSize { get; set; } = 2;
+
+    /// <summary>
+    /// 每个合并结果的最大 Token 数（默认 4000）
+    /// </summary>
+    public int MaxTokens { get; set; } = 4000;
 }
 
 /// <summary>

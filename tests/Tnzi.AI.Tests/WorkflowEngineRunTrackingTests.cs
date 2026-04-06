@@ -175,6 +175,74 @@ public class WorkflowEngineRunTrackingTests
         createdNodes.ShouldNotContain(n => n.NodeName == "downstream");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_CancelSignal_StopsBeforeNextReadyLayer()
+    {
+        var createdRuns = new List<AgentRun>();
+        var createdNodes = new List<AgentRunNode>();
+        var updatedNodes = new List<AgentRunNode>();
+
+        var runStore = CreateRunStore(createdRuns, createdNodes, updatedNodes);
+        var checkpointStore = new Mock<IWorkflowCheckpointStore>();
+        checkpointStore.Setup(x => x.SaveCheckpointAsync(It.IsAny<WorkflowCheckpoint>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var mailbox = new Mock<IWorkflowExecutionMailbox>();
+        mailbox.SetupSequence(x => x.GetPendingSignalsAsync("workflow-run-cancel", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([])
+            .ReturnsAsync([
+                new WorkflowExecutionSignal
+                {
+                    SignalId = "cancel-1",
+                    Type = WorkflowExecutionSignalTypes.Cancel
+                }
+            ]);
+        mailbox.Setup(x => x.AcknowledgeSignalsAsync("workflow-run-cancel", It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(runStore.Object);
+        services.AddSingleton(mailbox.Object);
+        services.AddScoped<IWorkflowNode, FixedNode>();
+        var serviceProvider = services.BuildServiceProvider();
+
+        var executor = new WorkflowNodeExecutor(serviceProvider, Mock.Of<ILogger<WorkflowNodeExecutor>>());
+        var engine = new WorkflowEngine(executor, Mock.Of<ILogger<WorkflowEngine>>());
+
+        var graph = new WorkflowGraph(
+        [
+            new WorkflowStepDto
+            {
+                StepId = "step-1",
+                Configuration = new Dictionary<string, string> { ["nodeType"] = "fixed-test" }
+            },
+            new WorkflowStepDto
+            {
+                StepId = "step-2",
+                DependsOn = ["step-1"],
+                Configuration = new Dictionary<string, string> { ["nodeType"] = "fixed-test" }
+            }
+        ]);
+
+        var result = await engine.ExecuteAsync(
+            graph,
+            "input",
+            serviceProvider,
+            new WorkflowExecutionOptions
+            {
+                ExecutionId = "workflow-run-cancel",
+                CheckpointStore = checkpointStore.Object
+            });
+
+        result.Cancelled.ShouldBeTrue();
+        result.StatusText.ShouldBe("Cancelled");
+        result.StepResults.ShouldContain(x => x.StepId == "step-1");
+        result.StepResults.ShouldNotContain(x => x.StepId == "step-2");
+        createdRuns.Count.ShouldBe(1);
+        createdRuns[0].Status.ShouldBe(AgentRunStatus.Cancelled);
+    }
+
     private static Mock<IRunStore> CreateRunStore(
         List<AgentRun> createdRuns,
         List<AgentRunNode> createdNodes,
@@ -279,6 +347,19 @@ public class WorkflowEngineRunTrackingTests
         public Task<WorkflowNodeResult> ExecuteAsync(WorkflowNodeContext context, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new WorkflowNodeResult { Output = "should-not-run" });
+        }
+    }
+
+    private sealed class FixedNode : IWorkflowNode
+    {
+        public string NodeType => "fixed-test";
+
+        public Task<WorkflowNodeResult> ExecuteAsync(WorkflowNodeContext context, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new WorkflowNodeResult
+            {
+                Output = $"{context.Step.StepId}-done"
+            });
         }
     }
 }

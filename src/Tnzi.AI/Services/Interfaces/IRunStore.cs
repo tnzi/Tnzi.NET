@@ -22,4 +22,7 @@ public interface IRunStore
 
     /// <summary>更新节点状态</summary>
     Task UpdateNodeAsync(AgentRunNode node, CancellationToken cancellationToken = default);
+
+    /// <summary>按条件分页查询 Run 列表</summary>
+    Task<List<AgentRun>> ListAsync(AgentRunStatus? status, int maxResults, CancellationToken cancellationToken = default);
 }

@@ -8,6 +8,7 @@ public class EvaluationServiceTests
     #region Helpers
 
     private readonly Mock<IRepository<EvaluationRun, Guid>> _repository = new();
+    private readonly Mock<IAgentEvaluator> _evaluator = new();
     private readonly IServiceProvider _serviceProvider;
 
     public EvaluationServiceTests()
@@ -21,7 +22,7 @@ public class EvaluationServiceTests
         _serviceProvider = services.BuildServiceProvider();
     }
 
-    private EvaluationService CreateService() => new(_serviceProvider, _repository.Object);
+    private EvaluationService CreateService() => new(_serviceProvider, _repository.Object, _evaluator.Object);
 
     private static EvaluationRun MakeRun(
         Guid? id = null,

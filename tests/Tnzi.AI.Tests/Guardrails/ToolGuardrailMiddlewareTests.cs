@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
@@ -13,7 +15,16 @@ public class ToolGuardrailMiddlewareTests
         return Microsoft.Extensions.Options.Options.Create(opts);
     }
 
-    private static AiMiddlewareContext CreateContext()
+    private static ToolExecutionContext CreateToolContext(string toolName = "bash")
+        => new()
+        {
+            ToolName = toolName,
+            CallId = "call_1",
+            Arguments = new Dictionary<string, object?> { ["cmd"] = "rm -rf /" },
+            CancellationToken = CancellationToken.None
+        };
+
+    private static AiMiddlewareContext CreateAiContext()
     {
         return new AiMiddlewareContext
         {
@@ -26,207 +37,350 @@ public class ToolGuardrailMiddlewareTests
         };
     }
 
-    /// <summary>
-    /// 创建模拟 next() 委托 — 在执行时将工具调用消息追加到 context.Messages（模拟真实管道行为）
-    /// </summary>
-    private static AiMiddlewareDelegate CreateNextWithToolCalls(AgentRunResult result, params ChatMessage[] toolCallMessages)
-    {
-        return (ctx, _) =>
-        {
-            foreach (var msg in toolCallMessages)
-            {
-                ctx.Messages.Add(msg);
-            }
-            return Task.FromResult(result);
-        };
-    }
+    private static ToolGuardrailMiddleware CreateMiddleware(
+        IEnumerable<IGuardrailProvider>? providers = null,
+        IOptions<AIOptions>? options = null,
+        IEventBus? eventBus = null,
+        IAgentExecutionContextAccessor? accessor = null)
+        => new(
+            providers ?? [],
+            options ?? CreateOptions(),
+            NullLogger<ToolGuardrailMiddleware>.Instance,
+            eventBus,
+            accessor);
 
     [Fact]
     public void Order_Is655()
     {
-        var middleware = new ToolGuardrailMiddleware(
-            [], CreateOptions(), NullLogger<ToolGuardrailMiddleware>.Instance);
+        var middleware = CreateMiddleware();
 
         middleware.Order.ShouldBe(AiMiddlewareOrders.ToolGuardrail);
         middleware.Order.ShouldBe(655);
     }
 
     [Fact]
-    public async Task GuardrailsDisabled_PassesThrough()
+    public async Task AiPipelineInvokeAsync_PassesThroughWithoutEvaluatingProviders()
     {
-        var middleware = new ToolGuardrailMiddleware(
-            [], CreateOptions(enabled: false), NullLogger<ToolGuardrailMiddleware>.Instance);
-
-        var context = CreateContext();
+        var provider = new Mock<IGuardrailProvider>();
+        var middleware = CreateMiddleware([provider.Object]);
+        var context = CreateAiContext();
         var result = new AgentRunResult { Response = "ok" };
 
-        var actual = await middleware.InvokeAsync(
-            context, (_, _) => Task.FromResult(result), CancellationToken.None);
+        var actual = await middleware.InvokeAsync(context, (_, _) => Task.FromResult(result), CancellationToken.None);
 
-        actual.Response.ShouldBe("ok");
+        actual.ShouldBe(result);
+        provider.Verify(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task NoToolCalls_PassesThrough()
+    public async Task ToolInvokeAsync_GuardrailsDisabled_CallsNext()
     {
-        var mockProvider = new Mock<IGuardrailProvider>();
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(), NullLogger<ToolGuardrailMiddleware>.Instance);
+        var middleware = CreateMiddleware(options: CreateOptions(enabled: false));
+        var nextCalled = false;
 
-        var context = CreateContext();
-        var result = new AgentRunResult { Response = "no tools" };
+        var result = await middleware.InvokeAsync(CreateToolContext(), () =>
+        {
+            nextCalled = true;
+            return Task.FromResult<object?>("ok");
+        });
 
-        var actual = await middleware.InvokeAsync(
-            context, (_, _) => Task.FromResult(result), CancellationToken.None);
-
-        actual.Response.ShouldBe("no tools");
-        mockProvider.Verify(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        nextCalled.ShouldBeTrue();
+        result.ShouldBe("ok");
     }
 
     [Fact]
-    public async Task ProviderDeny_ReturnsRejectedResult()
+    public async Task ToolInvokeAsync_ProviderDeny_BlocksBeforeCoreExecution()
     {
-        var mockProvider = new Mock<IGuardrailProvider>();
-        mockProvider.Setup(p => p.Name).Returns("TestProvider");
-        mockProvider.Setup(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.Name).Returns("Allowlist");
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Dangerous tool"));
 
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(), NullLogger<ToolGuardrailMiddleware>.Instance);
+        var middleware = CreateMiddleware([provider.Object]);
+        var nextCalled = false;
 
-        var context = CreateContext();
-        var toolCallMsg = new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent("call_1", "bash", new Dictionary<string, object?> { ["cmd"] = "rm -rf /" })]);
-        var result = new AgentRunResult { Response = "ok" };
+        var result = await middleware.InvokeAsync(CreateToolContext(), () =>
+        {
+            nextCalled = true;
+            return Task.FromResult<object?>("should-not-run");
+        });
 
-        // next() 中添加工具调用消息（模拟 LLM 返回工具调用）
-        var actual = await middleware.InvokeAsync(
-            context, CreateNextWithToolCalls(result, toolCallMsg), CancellationToken.None);
-
-        actual.FinishReason.ShouldBe(FinishReasons.GuardrailRejected);
-        actual.Status.ShouldBe(AgentRunStatus.Failed);
-        actual.Response.ShouldContain("bash");
-        actual.Response.ShouldContain("Dangerous tool");
+        nextCalled.ShouldBeFalse();
+        result.ShouldBeOfType<string>().ShouldContain("Dangerous tool");
+        provider.Verify(x => x.EvaluateAsync(
+            It.Is<GuardrailRequest>(r =>
+                r.ToolName == "bash" &&
+                r.ToolInput != null &&
+                r.ToolInput["cmd"].ToString() == "rm -rf /"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ProviderAllow_PassesThrough()
+    public async Task ToolInvokeAsync_ProviderAllow_CallsNext()
     {
-        var mockProvider = new Mock<IGuardrailProvider>();
-        mockProvider.Setup(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GuardrailDecision.Allow());
 
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(), NullLogger<ToolGuardrailMiddleware>.Instance);
+        var middleware = CreateMiddleware([provider.Object]);
+        var nextCalled = false;
 
-        var context = CreateContext();
-        var toolCallMsg = new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent("call_1", "file_read", new Dictionary<string, object?> { ["path"] = "/tmp/x" })]);
-        var result = new AgentRunResult { Response = "ok" };
-
-        var actual = await middleware.InvokeAsync(
-            context, CreateNextWithToolCalls(result, toolCallMsg), CancellationToken.None);
-
-        actual.Response.ShouldBe("ok");
-    }
-
-    [Fact]
-    public async Task FailClosed_ExceptionTreatedAsDeny()
-    {
-        var mockProvider = new Mock<IGuardrailProvider>();
-        mockProvider.Setup(p => p.Name).Returns("FailingProvider");
-        mockProvider.Setup(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Provider error"));
-
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(failClosed: true), NullLogger<ToolGuardrailMiddleware>.Instance);
-
-        var context = CreateContext();
-        var toolCallMsg = new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent("call_1", "bash")]);
-        var result = new AgentRunResult { Response = "ok" };
-
-        var actual = await middleware.InvokeAsync(
-            context, CreateNextWithToolCalls(result, toolCallMsg), CancellationToken.None);
-
-        actual.FinishReason.ShouldBe(FinishReasons.GuardrailRejected);
-    }
-
-    [Fact]
-    public async Task FailOpen_ExceptionSkipped()
-    {
-        var mockProvider = new Mock<IGuardrailProvider>();
-        mockProvider.Setup(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Provider error"));
-
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(failClosed: false), NullLogger<ToolGuardrailMiddleware>.Instance);
-
-        var context = CreateContext();
-        var toolCallMsg = new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent("call_1", "bash")]);
-        var result = new AgentRunResult { Response = "ok" };
-
-        var actual = await middleware.InvokeAsync(
-            context, CreateNextWithToolCalls(result, toolCallMsg), CancellationToken.None);
-
-        actual.Response.ShouldBe("ok");
-    }
-
-    [Fact]
-    public async Task HistoricalToolCalls_NotEvaluated()
-    {
-        // 历史消息中的工具调用不应被评估
-        var mockProvider = new Mock<IGuardrailProvider>();
-        mockProvider.Setup(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Should not evaluate"));
-
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(), NullLogger<ToolGuardrailMiddleware>.Instance);
-
-        var context = CreateContext();
-        // 添加历史工具调用（在 next() 之前已存在）
-        context.Messages.Add(new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent("call_old", "bash")]));
-
-        var result = new AgentRunResult { Response = "ok" };
-
-        var actual = await middleware.InvokeAsync(
-            context, (_, _) => Task.FromResult(result), CancellationToken.None);
-
-        // 历史消息不应触发评估，结果应直接通过
-        actual.Response.ShouldBe("ok");
-        mockProvider.Verify(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ExternalCliMode_SkipsEvaluation()
-    {
-        var mockProvider = new Mock<IGuardrailProvider>();
-        mockProvider.Setup(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Should not be called"));
-
-        var middleware = new ToolGuardrailMiddleware(
-            [mockProvider.Object], CreateOptions(), NullLogger<ToolGuardrailMiddleware>.Instance);
-
-        // ExternalCli 模式 — ShouldSkipMiddleware 返回 true
-        var context = new AiMiddlewareContext
+        var result = await middleware.InvokeAsync(CreateToolContext("file_read"), () =>
         {
-            Request = new AgentRunRequest { ThreadId = Guid.NewGuid() },
-            Agent = AgentResolution.SuccessWithoutExecutor(
-                "test-provider", "test-model", null, null, AgentExecutionMode.ExternalCli),
-            Messages = [],
-            ServiceProvider = new Mock<IServiceProvider>().Object
+            nextCalled = true;
+            return Task.FromResult<object?>("tool result");
+        });
+
+        nextCalled.ShouldBeTrue();
+        result.ShouldBe("tool result");
+    }
+
+    [Fact]
+    public async Task ToolInvokeAsync_FailClosed_ExceptionBlocks()
+    {
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.Name).Returns("BrokenProvider");
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Provider error"));
+
+        var middleware = CreateMiddleware([provider.Object], CreateOptions(failClosed: true));
+
+        var result = await middleware.InvokeAsync(CreateToolContext(), () => Task.FromResult<object?>("should-not-run"));
+
+        result.ShouldBeOfType<string>().ShouldContain("Guardrail evaluation failed: Provider error");
+    }
+
+    [Fact]
+    public async Task ToolInvokeAsync_FailOpen_ExceptionAllows()
+    {
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Provider error"));
+
+        var middleware = CreateMiddleware([provider.Object], CreateOptions(failClosed: false));
+        var nextCalled = false;
+
+        var result = await middleware.InvokeAsync(CreateToolContext(), () =>
+        {
+            nextCalled = true;
+            return Task.FromResult<object?>("tool result");
+        });
+
+        nextCalled.ShouldBeTrue();
+        result.ShouldBe("tool result");
+    }
+
+    [Fact]
+    public async Task ToolInvokeAsync_PublishesGuardrailEventWithCurrentRequest()
+    {
+        var request = new AgentRunRequest
+        {
+            UserId = Guid.NewGuid(),
+            ThreadId = Guid.NewGuid(),
+            AgentId = Guid.NewGuid()
         };
+        var accessor = new AgentExecutionContextAccessor { CurrentRequest = request };
+        var eventBus = new Mock<IEventBus>();
+        eventBus.Setup(x => x.PublishAsync(It.IsAny<GuardrailRejectionEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
-        var toolCallMsg = new ChatMessage(ChatRole.Assistant,
-            [new FunctionCallContent("call_1", "bash")]);
-        var result = new AgentRunResult { Response = "cli output" };
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.Name).Returns("Allowlist");
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Denied"));
 
-        var actual = await middleware.InvokeAsync(
-            context, CreateNextWithToolCalls(result, toolCallMsg), CancellationToken.None);
+        var middleware = CreateMiddleware([provider.Object], eventBus: eventBus.Object, accessor: accessor);
 
-        actual.Response.ShouldBe("cli output");
-        mockProvider.Verify(p => p.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _ = await middleware.InvokeAsync(CreateToolContext(), () => Task.FromResult<object?>("should-not-run"));
+
+        eventBus.Verify(x => x.PublishAsync(
+            It.Is<GuardrailRejectionEvent>(e =>
+                e.UserId == request.UserId &&
+                e.ThreadId == request.ThreadId &&
+                e.GuardrailName == "ToolGuardrail:bash" &&
+                e.Direction == GuardrailDirections.Tool &&
+                e.Reason == "Denied"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AgentExecutor_ExecuteAsync_BlockedTool_IsNotInvoked()
+    {
+        var toolInvoked = false;
+        var tool = AIFunctionFactory.Create(() =>
+        {
+            toolInvoked = true;
+            return "danger";
+        }, "bash", "Dangerous tool");
+
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.Name).Returns("Allowlist");
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Dangerous tool"));
+
+        var middleware = CreateMiddleware([provider.Object]);
+        var callCount = 0;
+        var client = new Mock<IChatClient>();
+        client.Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<ChatMessage> messages, ChatOptions? _, CancellationToken _) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return new ChatResponse([new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call_1", "bash")])]);
+                }
+
+                var toolResult = messages.Last().Contents.OfType<FunctionResultContent>().Single();
+                toolResult.Result?.ToString().ShouldContain("blocked by guardrail policy");
+                return new ChatResponse([new ChatMessage(ChatRole.Assistant, "guardrail handled")]);
+            });
+
+        var executor = new AgentExecutor(client.Object, new AgentExecutorOptions
+        {
+            Name = "TestAgent",
+            Tools = [tool],
+            Middlewares = [middleware]
+        });
+
+        var response = await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "run bash")], CancellationToken.None);
+
+        toolInvoked.ShouldBeFalse();
+        response.Text.ShouldBe("guardrail handled");
+    }
+
+    [Fact]
+    public async Task AgentExecutor_ExecuteStreamingAsync_BlockedTool_IsNotInvoked()
+    {
+        var toolInvoked = false;
+        var tool = AIFunctionFactory.Create(() =>
+        {
+            toolInvoked = true;
+            return "danger";
+        }, "bash", "Dangerous tool");
+
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.Name).Returns("Allowlist");
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Dangerous tool"));
+
+        var middleware = CreateMiddleware([provider.Object]);
+        var callCount = 0;
+        var client = new Mock<IChatClient>();
+        client.Setup(x => x.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((IEnumerable<ChatMessage> messages, ChatOptions? _, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateToolCallStream(ct);
+                }
+
+                var toolResult = messages.Last().Contents.OfType<FunctionResultContent>().Single();
+                toolResult.Result?.ToString().ShouldContain("blocked by guardrail policy");
+                return CreateTextStream(["guard", "rail", " handled"], ct);
+            });
+
+        var executor = new AgentExecutor(client.Object, new AgentExecutorOptions
+        {
+            Name = "TestAgent",
+            Tools = [tool],
+            Middlewares = [middleware]
+        });
+
+        var chunks = new List<AgentStreamChunk>();
+        await foreach (var chunk in executor.ExecuteStreamingAsync([new ChatMessage(ChatRole.User, "run bash")], CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        toolInvoked.ShouldBeFalse();
+        string.Concat(chunks.Where(x => x.Text != null).Select(x => x.Text)).ShouldContain("guardrail handled");
+    }
+
+    [Fact]
+    public async Task AgentExecutor_ExecuteStreamingAsync_BlockedTool_MarksToolCallAsFailed()
+    {
+        var tool = AIFunctionFactory.Create(() => "danger", "bash", "Dangerous tool");
+
+        var provider = new Mock<IGuardrailProvider>();
+        provider.Setup(x => x.Name).Returns("Allowlist");
+        provider.Setup(x => x.EvaluateAsync(It.IsAny<GuardrailRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GuardrailDecision.Deny("tool_denied", "Dangerous tool"));
+
+        var middleware = CreateMiddleware([provider.Object]);
+        var callCount = 0;
+        var client = new Mock<IChatClient>();
+        client.Setup(x => x.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((IEnumerable<ChatMessage> messages, ChatOptions? _, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateToolCallStream(ct);
+                }
+
+                return CreateTextStream(["guardrail handled"], ct);
+            });
+
+        var executor = new AgentExecutor(client.Object, new AgentExecutorOptions
+        {
+            Name = "TestAgent",
+            Tools = [tool],
+            Middlewares = [middleware]
+        });
+
+        var chunks = new List<AgentStreamChunk>();
+        await foreach (var chunk in executor.ExecuteStreamingAsync([new ChatMessage(ChatRole.User, "run bash")], CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        var toolCall = chunks.Single(x => x.ToolCalls is { Count: > 0 }).ToolCalls!.Single();
+        toolCall.Name.ShouldBe("bash");
+        toolCall.IsSuccess.ShouldBeFalse();
+        toolCall.Error.ShouldContain("Dangerous tool");
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> CreateToolCallStream([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await Task.Yield();
+        cancellationToken.ThrowIfCancellationRequested();
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents = [new FunctionCallContent("call_1", "bash")]
+        };
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> CreateTextStream(
+        IEnumerable<string> chunks,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var chunk in chunks)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [new TextContent(chunk)]
+            };
+        }
+
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            FinishReason = ChatFinishReason.Stop,
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 20 })]
+        };
     }
 }

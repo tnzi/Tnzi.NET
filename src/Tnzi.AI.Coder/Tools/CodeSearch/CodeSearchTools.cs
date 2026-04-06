@@ -20,7 +20,7 @@ public partial class CodeSearchTools : IAIToolProvider
     /// <summary>
     /// 使用正则搜索文件内容
     /// </summary>
-    [AIFunction("grep", "Search file contents using regex")]
+    [AIFunction("grep", "Search file contents using regex", IsReadOnly = true, IsConcurrencySafe = true, Aliases = "rg,search", SearchHint = "grep search regex content")]
     public async Task<object> GrepAsync(
         [AIParameter("pattern", "Regex pattern")] string pattern,
         [AIParameter("path", "Search directory", false)] string? path = null,
@@ -197,7 +197,7 @@ public partial class CodeSearchTools : IAIToolProvider
     /// <summary>
     /// 生成仓库代码大纲 — 提取类/接口/方法签名的层次化结构图
     /// </summary>
-    [AIFunction("repo_outline", "Generate a hierarchical outline of classes, interfaces, and methods in a directory — useful for understanding codebase structure")]
+    [AIFunction("repo_outline", "Generate a hierarchical outline of classes, interfaces, and methods in a directory — useful for understanding codebase structure", IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "outline structure classes methods")]
     public async Task<object> RepoOutlineAsync(
         [AIParameter("path", "Directory to outline", false)] string? path = null,
         [AIParameter("glob", "File glob filter (e.g. *.cs, *.ts)", false)] string? glob = null,

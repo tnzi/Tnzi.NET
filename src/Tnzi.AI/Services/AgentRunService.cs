@@ -27,6 +27,7 @@ public class AgentRunService : ApplicationService, IAgentRunService
         var pendingRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.Pending);
         var runningRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.Running);
         var awaitingApprovalRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.AwaitingApproval);
+        var requiresClarificationRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.RequiresClarification);
         var completedRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.Completed);
         var failedRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.Failed);
         var cancelledRuns = await _repository.CountAsync(r => r.Status == AgentRunStatus.Cancelled);
@@ -34,17 +35,18 @@ public class AgentRunService : ApplicationService, IAgentRunService
         var totalInputTokens = await _repository.SumAsync(r => (decimal)r.TotalInputTokens);
         var totalOutputTokens = await _repository.SumAsync(r => (decimal)r.TotalOutputTokens);
 
-        var completedLikeRuns = completedRuns + failedRuns + cancelledRuns;
-        var averageDuration = completedLikeRuns > 0
+        var terminalRuns = completedRuns + failedRuns + cancelledRuns + requiresClarificationRuns;
+        var averageDuration = terminalRuns > 0
             ? await _repository.AverageAsync(
                 r => (decimal)r.DurationMs,
                 r => r.Status == AgentRunStatus.Completed
                     || r.Status == AgentRunStatus.Failed
-                    || r.Status == AgentRunStatus.Cancelled)
+                    || r.Status == AgentRunStatus.Cancelled
+                    || r.Status == AgentRunStatus.RequiresClarification)
             : 0m;
 
-        var successRate = completedLikeRuns > 0
-            ? decimal.Round((decimal)completedRuns / completedLikeRuns, 4, MidpointRounding.AwayFromZero)
+        var successRate = terminalRuns > 0
+            ? decimal.Round((decimal)completedRuns / terminalRuns, 4, MidpointRounding.AwayFromZero)
             : 0m;
 
         return Ok(new AgentRunStatsDto
@@ -53,6 +55,7 @@ public class AgentRunService : ApplicationService, IAgentRunService
             PendingRuns = pendingRuns,
             RunningRuns = runningRuns,
             AwaitingApprovalRuns = awaitingApprovalRuns,
+            RequiresClarificationRuns = requiresClarificationRuns,
             CompletedRuns = completedRuns,
             FailedRuns = failedRuns,
             CancelledRuns = cancelledRuns,
@@ -124,13 +127,36 @@ public class AgentRunService : ApplicationService, IAgentRunService
         if (entity == null)
             return Fail("Run not found", 404, ErrorCodes.RunNotFound);
 
-        if (entity.Status is not (AgentRunStatus.Pending or AgentRunStatus.Running or AgentRunStatus.AwaitingApproval))
+        if (entity.Status is not (AgentRunStatus.Pending or AgentRunStatus.Running or AgentRunStatus.AwaitingApproval or AgentRunStatus.RequiresClarification))
             return Fail("Run is not in a cancellable state", 400, ErrorCodes.RunInvalidState);
 
         entity.Status = AgentRunStatus.Cancelled;
         await _repository.UpdateAsync(entity);
 
         return Ok();
+    }
+
+    public async Task<Result<AgentResponseDto>> ResumeAsync(Guid runId, ResumeRunInput? input = null)
+    {
+        try
+        {
+            var result = await _runtime.ResumeAsync(runId, input);
+            if (TryMapFailure(result, out var statusCode, out var errorCode))
+            {
+                return Fail<AgentResponseDto>(result.Response, statusCode, errorCode);
+            }
+
+            return Ok(MapResponse(result));
+        }
+        catch (BusinessException ex)
+        {
+            return Fail<AgentResponseDto>(ex.Message, ex.HttpStatusCode, ex.Code);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Run resume failed: RunId={RunId}", runId);
+            return Fail<AgentResponseDto>("Run resume failed.", 500, ErrorCodes.AgentRunFailed);
+        }
     }
 
     public async Task<Result> ApproveAsync(Guid runId, string? comment)
@@ -195,6 +221,55 @@ public class AgentRunService : ApplicationService, IAgentRunService
 
         Logger.LogInformation("Node {NodeId} in Run {RunId} retried via runtime resume", nodeId, runId);
         return Ok();
+    }
+
+    private static AgentResponseDto MapResponse(AgentRunResult result)
+    {
+        return new AgentResponseDto
+        {
+            Content = result.Response,
+            FinishReason = result.FinishReason,
+            Model = result.Model,
+            Provider = result.Provider,
+            Status = result.Status,
+            Usage = result.Usage,
+            Citations = result.Citations,
+            HandoffPath = result.HandoffPath,
+            FinalAgentName = result.FinalAgentName,
+            Reasoning = result.Reasoning,
+            Suggestions = result.Suggestions,
+            Artifacts = result.Artifacts,
+            ClarificationQuestion = result.ClarificationQuestion
+        };
+    }
+
+    private static bool TryMapFailure(AgentRunResult result, out int statusCode, out string errorCode)
+    {
+        switch (result.FinishReason)
+        {
+            case FinishReasons.QuotaExceeded:
+                statusCode = 429;
+                errorCode = ErrorCodes.QuotaExceeded;
+                return true;
+            case FinishReasons.GuardrailRejected:
+                statusCode = 400;
+                errorCode = ErrorCodes.GuardrailRejected;
+                return true;
+            case FinishReasons.Rejected:
+                statusCode = 400;
+                errorCode = ErrorCodes.AgentRunFailed;
+                return true;
+            case FinishReasons.MaxHandoffs:
+            case FinishReasons.Error:
+            case FinishReasons.Failed:
+                statusCode = 500;
+                errorCode = ErrorCodes.AgentRunFailed;
+                return true;
+            default:
+                statusCode = 0;
+                errorCode = string.Empty;
+                return false;
+        }
     }
 
 }

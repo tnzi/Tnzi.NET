@@ -13,21 +13,40 @@ public class DefaultProjectContextLoaderTests : IDisposable
 
     public DefaultProjectContextLoaderTests()
     {
-        _projectRoot = Path.Combine(Path.GetTempPath(), $"tnzi-ctx-{Guid.NewGuid():N}");
+        var baseTempDir = Path.Combine(AppContext.BaseDirectory, ".tmp", "project-context");
+        Directory.CreateDirectory(baseTempDir);
+        _projectRoot = Path.Combine(baseTempDir, $"tnzi-ctx-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_projectRoot);
     }
 
     public void Dispose()
     {
-        if (Directory.Exists(_projectRoot))
+        if (!Directory.Exists(_projectRoot))
+        {
+            return;
+        }
+
+        try
         {
             Directory.Delete(_projectRoot, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup only.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup only.
         }
     }
 
     private DefaultProjectContextLoader CreateLoader(Action<CoderOptions>? configure = null)
     {
-        var options = new CoderOptions { ProjectRoot = _projectRoot };
+        var options = new CoderOptions
+        {
+            ProjectRoot = _projectRoot,
+            IncludeGlobalInstructionFiles = false
+        };
         configure?.Invoke(options);
         return new DefaultProjectContextLoader(
             Microsoft.Extensions.Options.Options.Create(options),
@@ -66,10 +85,11 @@ public class DefaultProjectContextLoaderTests : IDisposable
     public async Task LoadAsync_MultipleInstructionFiles_MergesWithSeparator()
     {
         File.WriteAllText(Path.Combine(_projectRoot, "TNZI.md"), "File 1 content");
+        File.WriteAllText(Path.Combine(_projectRoot, "AGENTS.md"), "File 2 content");
 
-        var tnziDir = Path.Combine(_projectRoot, ".tnzi");
-        Directory.CreateDirectory(tnziDir);
-        File.WriteAllText(Path.Combine(tnziDir, "TNZI.md"), "File 2 content");
+        var claudeDir = Path.Combine(_projectRoot, ".claude");
+        Directory.CreateDirectory(claudeDir);
+        File.WriteAllText(Path.Combine(claudeDir, "CLAUDE.md"), "File 3 content");
 
         var loader = CreateLoader();
         var result = await loader.LoadAsync();
@@ -77,9 +97,10 @@ public class DefaultProjectContextLoaderTests : IDisposable
         result.Instructions.ShouldNotBeNull();
         result.Instructions.ShouldContain("File 1 content");
         result.Instructions.ShouldContain("File 2 content");
+        result.Instructions.ShouldContain("File 3 content");
         // 使用 \n---\n 分隔
         result.Instructions.ShouldContain("---");
-        result.LoadedFiles.Count.ShouldBe(2);
+        result.LoadedFiles.Count.ShouldBe(3);
     }
 
     #endregion
@@ -195,6 +216,37 @@ public class DefaultProjectContextLoaderTests : IDisposable
         result.Instructions.ShouldNotContain("Should not load");
     }
 
+    [Fact]
+    public async Task LoadAsync_DefaultInstructionFiles_LoadsAgentsAndClaudeFiles()
+    {
+        File.WriteAllText(Path.Combine(_projectRoot, "AGENTS.md"), "Agents instructions");
+        File.WriteAllText(Path.Combine(_projectRoot, "CLAUDE.md"), "Claude instructions");
+
+        var loader = CreateLoader();
+        var result = await loader.LoadAsync();
+
+        result.Instructions.ShouldNotBeNull();
+        result.Instructions.ShouldContain("Agents instructions");
+        result.Instructions.ShouldContain("Claude instructions");
+        result.LoadedFiles.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task LoadAsync_DuplicateInstructionFiles_AreDeduplicated()
+    {
+        File.WriteAllText(Path.Combine(_projectRoot, "AGENTS.md"), "Agents instructions");
+
+        var loader = CreateLoader(opts =>
+        {
+            opts.InstructionFiles = ["AGENTS.md", ".\\AGENTS.md"];
+        });
+
+        var result = await loader.LoadAsync();
+
+        result.LoadedFiles.Count.ShouldBe(1);
+        result.Instructions.ShouldBe("Agents instructions");
+    }
+
     #endregion
 
     #region 自定义 projectRoot 参数
@@ -202,7 +254,7 @@ public class DefaultProjectContextLoaderTests : IDisposable
     [Fact]
     public async Task LoadAsync_ExplicitProjectRoot_OverridesOptions()
     {
-        var altRoot = Path.Combine(Path.GetTempPath(), $"tnzi-alt-{Guid.NewGuid():N}");
+        var altRoot = Path.Combine(AppContext.BaseDirectory, ".tmp", "project-context", $"tnzi-alt-{Guid.NewGuid():N}");
         Directory.CreateDirectory(altRoot);
         try
         {
@@ -217,7 +269,18 @@ public class DefaultProjectContextLoaderTests : IDisposable
         }
         finally
         {
-            Directory.Delete(altRoot, true);
+            try
+            {
+                Directory.Delete(altRoot, true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup only.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best-effort cleanup only.
+            }
         }
     }
 

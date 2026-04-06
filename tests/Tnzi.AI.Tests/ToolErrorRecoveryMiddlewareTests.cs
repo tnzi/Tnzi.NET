@@ -23,38 +23,35 @@ public class ToolErrorRecoveryMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_OperationCanceled_Rethrows()
+    public async Task InvokeAsync_AiPipelineException_Bubbles()
     {
         var middleware = new ToolErrorRecoveryMiddleware(NullLogger<ToolErrorRecoveryMiddleware>.Instance);
         var context = TestHelpers.CreateMinimalContext();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            middleware.InvokeAsync(context,
+                (ctx, ct) => throw new InvalidOperationException("pipeline broke")));
+    }
+
+    [Fact]
+    public async Task InvokeToolAsync_OperationCanceled_Rethrows()
+    {
+        var middleware = new ToolErrorRecoveryMiddleware(NullLogger<ToolErrorRecoveryMiddleware>.Instance);
+        var context = new ToolExecutionContext { ToolName = "test_tool" };
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            middleware.InvokeAsync(context,
-                (ctx, ct) => throw new OperationCanceledException()));
+            middleware.InvokeAsync(context, () => throw new OperationCanceledException()));
     }
 
     [Fact]
-    public async Task InvokeAsync_Exception_ReturnsFailedResult()
+    public async Task InvokeToolAsync_Exception_ReturnsRecoveredResult()
     {
         var middleware = new ToolErrorRecoveryMiddleware(NullLogger<ToolErrorRecoveryMiddleware>.Instance);
-        var context = TestHelpers.CreateMinimalContext();
+        var context = new ToolExecutionContext { ToolName = "test_tool" };
 
-        var result = await middleware.InvokeAsync(context,
-            (ctx, ct) => throw new InvalidOperationException("tool broke"));
+        var result = await middleware.InvokeAsync(context, () => throw new InvalidOperationException("broken"));
 
-        Assert.Equal(AgentRunStatus.Failed, result.Status);
-        Assert.Contains("tool broke", result.Response);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_Exception_InjectsErrorMessage()
-    {
-        var middleware = new ToolErrorRecoveryMiddleware(NullLogger<ToolErrorRecoveryMiddleware>.Instance);
-        var context = TestHelpers.CreateMinimalContext();
-
-        await middleware.InvokeAsync(context,
-            (ctx, ct) => throw new InvalidOperationException("broken"));
-
-        Assert.Contains(context.Messages, m => m.Text?.Contains("TOOL ERROR") == true);
+        result.ShouldBe("Tool execution failed: InvalidOperationException: broken");
+        ToolErrorRecoveryMiddleware.GetRecoveredError(context).ShouldBe("InvalidOperationException: broken");
     }
 }

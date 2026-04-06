@@ -94,6 +94,59 @@ public class TodoMiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ResultWithTodos_PreservesExistingFields_AndClearsAccessorState()
+    {
+        var accessor = new AgentExecutionContextAccessor();
+        var middleware = CreateMiddleware(accessor);
+        var context = CreateContext(planMode: true);
+        var runId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+
+        var result = await middleware.InvokeAsync(context,
+            (ctx, ct) =>
+            {
+                accessor.Properties[ContextPropertyKeys.Todos] = new List<TodoItemDto>
+                {
+                    new() { Content = "Task B", Status = TodoStatus.InProgress, Order = 1 }
+                };
+
+                return Task.FromResult(new AgentRunResult
+                {
+                    Response = "done",
+                    RunId = runId,
+                    ThreadId = threadId,
+                    FinishReason = FinishReasons.Stop,
+                    Model = "gpt-5-think",
+                    Suggestions = ["next step"],
+                    Artifacts =
+                    [
+                        new AgentArtifactDto
+                        {
+                            RunId = runId,
+                            ThreadId = threadId,
+                            FileName = "report.md",
+                            VirtualPath = "/artifacts/report.md"
+                        }
+                    ],
+                    ClarificationQuestion = "n/a"
+                });
+            },
+            CancellationToken.None);
+
+        result.RunId.ShouldBe(runId);
+        result.ThreadId.ShouldBe(threadId);
+        result.Model.ShouldBe("gpt-5-think");
+        result.Suggestions.ShouldNotBeNull();
+        result.Suggestions.ShouldContain("next step");
+        result.Artifacts.ShouldNotBeNull();
+        result.Artifacts.Count.ShouldBe(1);
+        result.ClarificationQuestion.ShouldBe("n/a");
+        result.Todos.ShouldNotBeNull();
+        result.Todos.Count.ShouldBe(1);
+        accessor.Properties.ContainsKey(ContextPropertyKeys.Todos).ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task InvokeAsync_Disabled_PassesThrough()
     {
         var opts = new TodoOptions { Enabled = false };

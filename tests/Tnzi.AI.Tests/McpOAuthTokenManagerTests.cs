@@ -126,6 +126,125 @@ public class McpOAuthTokenManagerTests
         Assert.Equal(1, callCount); // 尚未过期
     }
 
+    [Fact]
+    public async Task RevokeAsync_NoCachedToken_ReturnsTrue()
+    {
+        var options = CreateOptions("server1");
+        var httpFactory = new Mock<IHttpClientFactory>();
+        var manager = new McpOAuthTokenManager(NullLogger<McpOAuthTokenManager>.Instance, httpFactory.Object, options);
+
+        var result = await manager.RevokeAsync("server1");
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task RevokeAsync_WithRevocationEndpoint_PostsAndClearsCache()
+    {
+        string? revokedToken = null;
+        var requestCount = 0;
+        var handler = new MockHttpHandler(async (request, ct) =>
+        {
+            requestCount++;
+            // token endpoint
+            if (request.RequestUri!.PathAndQuery.Contains("/token"))
+            {
+                var json = JsonSerializer.Serialize(new { access_token = "revoke-me", expires_in = 3600, token_type = "Bearer" });
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            }
+
+            // revocation endpoint
+            var body = await request.Content!.ReadAsStringAsync(ct);
+            if (body.Contains("revoke-me")) revokedToken = "revoke-me";
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var factory = CreateMockHttpFactoryWithHandler(handler);
+        var options = CreateOptionsWithRevocation("server1", "https://auth.example.com/revoke");
+        var manager = new McpOAuthTokenManager(NullLogger<McpOAuthTokenManager>.Instance, factory, options);
+
+        // 先获取 token 再撤销
+        await manager.GetAuthorizationHeaderAsync("server1");
+        var result = await manager.RevokeAsync("server1");
+
+        Assert.True(result);
+        Assert.Equal("revoke-me", revokedToken);
+        Assert.Equal(2, requestCount); // 1 token fetch + 1 revoke
+    }
+
+    [Fact]
+    public async Task RevokeAsync_NoRevocationEndpoint_ClearsCacheOnly()
+    {
+        var httpFactory = CreateMockHttpFactory(new OAuthTokenResponse
+        {
+            AccessToken = "local-clear-token",
+            ExpiresIn = 3600,
+            TokenType = "Bearer"
+        });
+        var options = CreateOptions("server1"); // 无 RevocationEndpoint
+        var manager = new McpOAuthTokenManager(NullLogger<McpOAuthTokenManager>.Instance, httpFactory, options);
+
+        await manager.GetAuthorizationHeaderAsync("server1");
+        var result = await manager.RevokeAsync("server1");
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task GetAuthorizationHeader_MetadataDiscovery_ResolvesTokenEndpoint()
+    {
+        var requestUrls = new List<string>();
+        var handler = new MockHttpHandler(async (request, ct) =>
+        {
+            requestUrls.Add(request.RequestUri!.ToString());
+
+            // metadata endpoint
+            if (request.RequestUri.PathAndQuery.Contains("well-known"))
+            {
+                var metadata = JsonSerializer.Serialize(new
+                {
+                    token_endpoint = "https://auth.example.com/discovered-token",
+                    revocation_endpoint = "https://auth.example.com/discovered-revoke"
+                });
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(metadata, Encoding.UTF8, "application/json")
+                };
+            }
+
+            // token endpoint
+            var tokenJson = JsonSerializer.Serialize(new { access_token = "discovered-token", expires_in = 3600, token_type = "Bearer" });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(tokenJson, Encoding.UTF8, "application/json")
+            };
+        });
+        var factory = CreateMockHttpFactoryWithHandler(handler);
+        var options = MsOptions.Create(new McpOAuthOptions
+        {
+            Servers = new Dictionary<string, McpOAuthServerConfig>
+            {
+                ["server1"] = new()
+                {
+                    // 无 TokenEndpoint — 需要 discovery
+                    ClientId = "test-client",
+                    ClientSecret = "test-secret",
+                    EnableMetadataDiscovery = true,
+                    AuthorizationServer = "https://auth.example.com"
+                }
+            }
+        });
+        var manager = new McpOAuthTokenManager(NullLogger<McpOAuthTokenManager>.Instance, factory, options);
+
+        var header = await manager.GetAuthorizationHeaderAsync("server1");
+
+        Assert.Equal("Bearer discovered-token", header);
+        Assert.Contains(requestUrls, u => u.Contains("well-known"));
+        Assert.Contains(requestUrls, u => u.Contains("discovered-token"));
+    }
+
     // Helper methods
     private static IOptions<McpOAuthOptions> CreateOptions(string serverName, string grantType = "client_credentials", int refreshSkewSeconds = 60)
     {
@@ -140,6 +259,23 @@ public class McpOAuthTokenManagerTests
                     ClientSecret = "test-secret",
                     GrantType = grantType,
                     RefreshSkewSeconds = refreshSkewSeconds
+                }
+            }
+        });
+    }
+
+    private static IOptions<McpOAuthOptions> CreateOptionsWithRevocation(string serverName, string revocationEndpoint)
+    {
+        return MsOptions.Create(new McpOAuthOptions
+        {
+            Servers = new Dictionary<string, McpOAuthServerConfig>
+            {
+                [serverName] = new()
+                {
+                    TokenEndpoint = "https://auth.example.com/token",
+                    ClientId = "test-client",
+                    ClientSecret = "test-secret",
+                    RevocationEndpoint = revocationEndpoint
                 }
             }
         });
@@ -161,6 +297,11 @@ public class McpOAuthTokenManagerTests
             };
         });
 
+        return CreateMockHttpFactoryWithHandler(handler);
+    }
+
+    private static IHttpClientFactory CreateMockHttpFactoryWithHandler(MockHttpHandler handler)
+    {
         var client = new HttpClient(handler);
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(client);

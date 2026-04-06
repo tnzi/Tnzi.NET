@@ -58,6 +58,8 @@ public class HistoryMiddleware : IAiMiddleware
                 context.Messages.AddRange(patched);
                 _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
             }
+
+            ApplyToolResultBudget(context.Messages, threadId);
         }
 
         // 执行下游管道
@@ -69,8 +71,8 @@ public class HistoryMiddleware : IAiMiddleware
             result = result.CloneWith(threadId: threadId);
         }
 
-        // After: 保存消息（guardrail 拒绝时不保存，避免将被拦截的内容写入历史）
-        if (threadId != null && result.FinishReason != "guardrail_rejected")
+        // After: 保存消息（被拒绝/配额不足时不保存，避免将失败内容写入历史）
+        if (threadId != null && ShouldPersistResult(result.FinishReason))
         {
             try
             {
@@ -150,6 +152,8 @@ public class HistoryMiddleware : IAiMiddleware
                 context.Messages.AddRange(patched);
                 _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
             }
+
+            ApplyToolResultBudget(context.Messages, threadId);
         }
 
         // 收集流式响应文本和工具调用详情
@@ -177,9 +181,11 @@ public class HistoryMiddleware : IAiMiddleware
                 // 仅在 tool call 后的纯文本 chunk 触发，避免误清理正常的段落换行。
                 if (afterToolCall && !isToolCallChunk
                     && text.StartsWith("\n\n") && responseBuilder.Length > 0
-                    && responseBuilder[^1] != '\n' && text.AsSpan().TrimStart().Length <= 15)
+                    && responseBuilder[^1] != '\n')
                 {
-                    text = " " + text.AsSpan(2).TrimStart().ToString();
+                    var trimmed = text.AsSpan(2).TrimStart().ToString();
+                    // Avoid double space when the previous token already ends with whitespace
+                    text = responseBuilder[^1] == ' ' ? trimmed : " " + trimmed;
                     chunk.Text = text;
                 }
                 else if (afterToolCall && !isToolCallChunk && !text.StartsWith("\n\n"))
@@ -205,10 +211,10 @@ public class HistoryMiddleware : IAiMiddleware
             yield return chunk;
         }
 
-        // After: 保存消息（guardrail 拒绝时不保存，避免将被拦截的内容写入历史）
+        // After: 保存消息（被拒绝/配额不足时不保存，避免将失败内容写入历史）
         // 使用 CancellationToken.None：流式结束后客户端可能已断开（token 已取消），
         // 但消息持久化必须完成，否则对话历史会丢失
-        if (threadId != null && lastFinishReason != "guardrail_rejected")
+        if (threadId != null && ShouldPersistResult(lastFinishReason))
         {
             try
             {
@@ -307,6 +313,70 @@ public class HistoryMiddleware : IAiMiddleware
     }
 
     /// <summary>
+    /// 截断超限的工具结果（不可变 — 返回新列表，不修改原消息）。
+    /// 借鉴 Claude Code maybePersistLargeToolResult。
+    /// </summary>
+    public static List<ChatMessage> TruncateLargeToolResults(
+        List<ChatMessage> messages, int maxChars, int previewChars)
+    {
+        // 单次遍历：检测 + 构建新列表
+        List<ChatMessage>? result = null;
+        for (var i = 0; i < messages.Count; i++)
+        {
+            var msg = messages[i];
+            var needsTruncation = false;
+            foreach (var c in msg.Contents)
+            {
+                if (c is FunctionResultContent frc && frc.Result is string s && s.Length > maxChars)
+                {
+                    needsTruncation = true;
+                    break;
+                }
+            }
+
+            if (!needsTruncation)
+            {
+                result?.Add(msg);
+                continue;
+            }
+
+            // 首次发现超限时，创建结果列表并回填之前的消息
+            if (result == null)
+            {
+                result = new List<ChatMessage>(messages.Count);
+                for (var j = 0; j < i; j++) result.Add(messages[j]);
+            }
+
+            // 创建新消息（不可变原则）
+            var newContents = msg.Contents.Select<AIContent, AIContent>(c =>
+                c is FunctionResultContent frc && frc.Result is string text && text.Length > maxChars
+                    ? new FunctionResultContent(frc.CallId,
+                        $"{text[..previewChars]}\n\n[truncated: original {text.Length:N0} chars]")
+                    : c).ToList();
+            result.Add(new ChatMessage(msg.Role, newContents));
+        }
+
+        return result ?? messages;
+    }
+
+    private void ApplyToolResultBudget(List<ChatMessage> messages, Guid? threadId)
+    {
+        var budgetOptions = _options.Value.ToolResultBudget;
+        if (!budgetOptions.Enabled)
+        {
+            return;
+        }
+
+        var truncated = TruncateLargeToolResults(messages, budgetOptions.MaxResultChars, budgetOptions.PreviewChars);
+        if (!ReferenceEquals(truncated, messages))
+        {
+            messages.Clear();
+            messages.AddRange(truncated);
+            _logger.LogDebug("Truncated large tool results in thread {ThreadId}", threadId);
+        }
+    }
+
+    /// <summary>
     /// 当 ThreadId 为 null 时，自动创建新线程并写回 Request.ThreadId
     /// </summary>
     private async Task EnsureThreadAsync(AiMiddlewareContext context, CancellationToken ct)
@@ -328,5 +398,19 @@ public class HistoryMiddleware : IAiMiddleware
         {
             _logger.LogWarning(ex, "Failed to auto-create thread for agent {AgentId}", context.Request.AgentId);
         }
+    }
+
+    private static bool ShouldPersistResult(string? finishReason)
+    {
+        return finishReason switch
+        {
+            FinishReasons.GuardrailRejected or
+            FinishReasons.QuotaExceeded or
+            FinishReasons.Error or
+            FinishReasons.Failed or
+            FinishReasons.Rejected or
+            FinishReasons.MaxHandoffs => false,
+            _ => true
+        };
     }
 }

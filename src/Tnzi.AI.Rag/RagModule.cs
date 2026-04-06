@@ -13,8 +13,8 @@ namespace Tnzi.AI.Rag;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 依赖 AIModule，在其之后加载。通过 RemoveAll + AddScoped 替换 NoOpTextSearchService
-/// 为 VectorTextSearchService，使 Agent 的 TextSearchProvider 获得真正的 RAG 检索能力。
+/// 依赖 AIModule，在其之后加载。AIModule 用 TryAddScoped 注册 NoOpTextSearchService，
+/// 本模块用 RemoveAll + AddScoped 替换为真实搜索实现。
 /// </para>
 /// </remarks>
 [DependsOn(typeof(AI.AIModule))]
@@ -67,6 +67,8 @@ public class RagModule : TnziApplicationModule
         services.AddSingleton<IFileExtractorService, WordFileExtractor>();
         services.AddSingleton<IFileExtractorService, MarkdownFileExtractor>();
         services.AddSingleton<IFileExtractorService, PlainTextFileExtractor>();
+        services.AddSingleton<IFileExtractorService, TableContentExtractor>();
+        services.AddScoped<IFileExtractorService, ImageContentExtractor>();
 
         // 切块策略（默认使用固定大小）
         services.TryAddSingleton<IChunkingStrategy, FixedSizeChunkingStrategy>();
@@ -86,9 +88,17 @@ public class RagModule : TnziApplicationModule
         services.AddScoped<ISearchPostProcessor, ScoreNormalizationPostProcessor>();
         services.AddScoped<ISearchPostProcessor, WeightedDiminishingReranker>();
 
+        // 知识图谱提取 + 搜索
+        services.AddScoped<IGraphExtractor, LlmGraphExtractor>();
+        services.AddScoped<IGraphSearchService, GraphSearchService>();
+
         // 核心业务服务
         services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
+        services.AddScoped<IIncrementalIndexService, IncrementalIndexService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
+
+        // Parent Document Retriever（可选，通过 AI:Rag:ParentDocumentRetrieval:Enabled 启用）
+        services.AddScoped<IParentDocumentRetriever, ParentDocumentRetriever>();
 
         // RAG 检索器 + 查询引擎 + 聊天引擎（Query/Chat split）
         services.AddScoped<IRagRetriever, RagRetriever>();
@@ -115,7 +125,7 @@ public class RagModule : TnziApplicationModule
         }
 
         // 替换 NoOpTextSearchService 为向量/混合搜索实现
-        // AIModule 使用 TryAddScoped 注册 NoOp，这里强制替换
+        // RemoveAll 清除 AIModule 的 NoOp 回退，再注册真实实现（避免容器中残留无用注册）
         services.RemoveAll<ITextSearchService>();
 
         var hybridEnabled = context.Configuration
