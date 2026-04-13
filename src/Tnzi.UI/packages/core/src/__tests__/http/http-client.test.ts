@@ -406,17 +406,19 @@ describe('HttpClient', () => {
   // ------------------------------------------
 
   describe('normalizeApiResult success field', () => {
-    it('should normalize response with success:true', async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ success: true, code: 200, data: { id: 1 } }));
+    it('should normalize response with succeeded:true and success:true', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: true, success: true, code: 200, data: { id: 1 } }));
       const result = await client.get<{ id: number }>('/test');
       expect(result.succeeded).toBe(true);
+      expect(result.success).toBe(true);
       expect(result.data?.id).toBe(1);
     });
 
-    it('should normalize response with success:false', async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ success: false, code: 400, message: 'Bad' }));
+    it('should normalize response with succeeded:false and success:false', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, success: false, code: 400, message: 'Bad' }));
       const result = await client.get('/test');
       expect(result.succeeded).toBe(false);
+      expect(result.success).toBe(false);
       expect(result.code).toBe(400);
     });
   });

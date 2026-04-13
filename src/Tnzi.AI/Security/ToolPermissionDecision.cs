@@ -112,6 +112,11 @@ public interface IToolPermissionEvaluator
     /// 获取当前所有 Session 级别规则
     /// </summary>
     IReadOnlyList<ToolPermissionRule> GetSessionRules() => [];
+
+    /// <summary>
+    /// Refresh cached rules from external sources (e.g. database). No-op by default.
+    /// </summary>
+    Task RefreshRulesAsync() => Task.CompletedTask;
 }
 
 /// <summary>

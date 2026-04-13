@@ -1,11 +1,3 @@
-using Microsoft.AspNetCore.Builder;
-using Tnzi.AI;
-using Tnzi.AI.Channels.Adapters.Dingtalk;
-using Tnzi.AI.Channels.Adapters.Discord;
-using Tnzi.AI.Channels.Adapters.Feishu;
-using Tnzi.AI.Channels.Adapters.Slack;
-using Tnzi.AI.Channels.Adapters.Telegram;
-
 namespace Tnzi.AI.Channels;
 
 /// <summary>
@@ -109,7 +101,7 @@ public class ChannelsModule : TnziApplicationModule
             services.AddSingleton<IReadOnlyList<SessionBindingRule>>(bindingRules.AsReadOnly());
             services.AddSingleton<ISessionBinder, DefaultSessionBinder>();
             services.AddSingleton<IPresenceTracker, DefaultPresenceTracker>();
-            services.AddScoped<IGateway, DefaultGateway>();
+            services.AddSingleton<IGateway, DefaultGateway>();
         }
 
         return Task.CompletedTask;

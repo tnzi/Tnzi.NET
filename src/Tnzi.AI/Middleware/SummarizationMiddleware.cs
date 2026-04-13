@@ -84,7 +84,8 @@ public class SummarizationMiddleware : IAiMiddleware
         if (messages.Count == 0)
             return;
 
-        if (!ShouldTrigger(messages, opts))
+        var contextWindow = ResolveContextWindow(opts, context.EffectiveProvider);
+        if (!ShouldTrigger(messages, opts, contextWindow))
             return;
 
         // 分离系统消息和非系统消息
@@ -150,7 +151,7 @@ public class SummarizationMiddleware : IAiMiddleware
         }
     }
 
-    private bool ShouldTrigger(List<ChatMessage> messages, SummarizationOptions opts)
+    private bool ShouldTrigger(List<ChatMessage> messages, SummarizationOptions opts, int contextWindow)
     {
         var trigger = opts.Trigger;
 
@@ -158,10 +159,25 @@ public class SummarizationMiddleware : IAiMiddleware
         {
             SummarizationTriggerType.Messages => messages.Count >= trigger.MessageThreshold,
             SummarizationTriggerType.Tokens => EstimateTotalTokens(messages) >= trigger.TokenThreshold,
-            SummarizationTriggerType.Fraction => opts.ModelContextWindow > 0
-                && (double)EstimateTotalTokens(messages) / opts.ModelContextWindow >= trigger.FractionThreshold,
+            SummarizationTriggerType.Fraction => contextWindow > 0
+                && (double)EstimateTotalTokens(messages) / contextWindow >= trigger.FractionThreshold,
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Resolve context window size: provider-specific → global SummarizationOptions fallback
+    /// </summary>
+    private int ResolveContextWindow(SummarizationOptions opts, string? providerName)
+    {
+        if (!string.IsNullOrEmpty(providerName)
+            && _options.CurrentValue.Providers.TryGetValue(providerName, out var providerOpts)
+            && providerOpts.ContextWindowSize.HasValue)
+        {
+            return providerOpts.ContextWindowSize.Value;
+        }
+
+        return opts.ModelContextWindow;
     }
 
     private int EstimateTotalTokens(List<ChatMessage> messages)

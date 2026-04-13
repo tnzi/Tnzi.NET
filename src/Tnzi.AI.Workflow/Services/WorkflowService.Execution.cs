@@ -61,7 +61,7 @@ public partial class WorkflowService
             }
 
             var graph = BuildWorkflowGraph(workflowDef);
-            engineResult = await _workflowEngine.ExecuteAsync(graph, input, ServiceProvider!, options, ct);
+            engineResult = await _workflowEngine.ExecuteAsync(graph, input, Check.NotNull(ServiceProvider), options, ct);
 
             if (engineResult.Usage != null)
             {
@@ -192,7 +192,7 @@ public partial class WorkflowService
             }
 
             var graph = BuildWorkflowGraph(workflowDef);
-            var engineResult = await _workflowEngine.ExecuteAsync(graph, input, ServiceProvider!, options, ct);
+            var engineResult = await _workflowEngine.ExecuteAsync(graph, input, Check.NotNull(ServiceProvider), options, ct);
             AggregateUsage(engineResult.Usage, ref actualInputTokens, ref actualOutputTokens);
             aggregatedStepResults.AddRange(engineResult.StepResults);
             finalOutput = engineResult.FinalOutput;
@@ -331,7 +331,7 @@ public partial class WorkflowService
                 CheckpointStore = _checkpointStore
             };
 
-            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, ServiceProvider!, options, ct);
+            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, ct);
 
             return Ok(new WorkflowExecutionResultDto
             {
@@ -607,7 +607,7 @@ public partial class WorkflowService
                 ResumeData = input
             };
 
-            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, ServiceProvider!, options, ct);
+            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, ct);
 
             // 更新执行状态
             if (dagResult.AwaitingInterrupt == null && !dagResult.AwaitingApproval)

@@ -200,14 +200,14 @@ describe('SortController', () => {
     });
 
     it('should return false when direction is desc', () => {
-      const s = new SortController({ defaultDirection: 'desc' });
+      const s = new SortController({ defaultField: 'name', defaultDirection: 'desc' });
       expect(s.isAscending).toBe(false);
     });
   });
 
   describe('isDescending', () => {
     it('should return true when direction is desc', () => {
-      const s = new SortController({ defaultDirection: 'desc' });
+      const s = new SortController({ defaultField: 'name', defaultDirection: 'desc' });
       expect(s.isDescending).toBe(true);
     });
 

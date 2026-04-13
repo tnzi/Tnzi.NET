@@ -1,47 +1,9 @@
 /**
  * Common Enums - Shared across modules
+ *
+ * Note: Gender/OAuthProvider are defined in services/identity/metadata.ts
+ * (domain-specific enums belong with their service module).
  */
-
-/**
- * User gender
- */
-export enum Gender {
-  Unknown = 0,
-  Male = 1,
-  Female = 2,
-}
-
-/**
- * Get gender display name
- */
-export function getGenderLabel(gender: Gender): string {
-  switch (gender) {
-    case Gender.Male:
-      return 'Male';
-    case Gender.Female:
-      return 'Female';
-    default:
-      return 'Unknown';
-  }
-}
-
-/**
- * OAuth provider types
- */
-export enum OAuthProvider {
-  Google = 'Google',
-  Microsoft = 'Microsoft',
-  Facebook = 'Facebook',
-  Twitter = 'Twitter',
-  GitHub = 'GitHub',
-}
-
-/**
- * Get OAuth provider display name
- */
-export function getOAuthProviderLabel(provider: OAuthProvider): string {
-  return provider;
-}
 
 /**
  * Boolean status enum (for explicit true/false/unknown states)
@@ -82,14 +44,6 @@ export enum OperationType {
   Create = 1,
   Update = 2,
   Delete = 3,
-}
-
-/**
- * Sort direction
- */
-export enum SortDirection {
-  Ascending = 'asc',
-  Descending = 'desc',
 }
 
 /**

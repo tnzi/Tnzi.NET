@@ -40,6 +40,12 @@ public class FeishuChannelAdapter : IChannelAdapter
         _bus = Check.NotNull(bus);
         _httpClientFactory = Check.NotNull(httpClientFactory);
         _options = Check.NotNull(options).Value.Feishu;
+
+        if (string.IsNullOrWhiteSpace(_options.AppId))
+            throw new ArgumentException("Feishu AppId is required when adapter is enabled");
+        if (string.IsNullOrWhiteSpace(_options.AppSecret))
+            throw new ArgumentException("Feishu AppSecret is required when adapter is enabled");
+
         _allowedUsers = [.. _options.AllowedUserIds];
     }
 

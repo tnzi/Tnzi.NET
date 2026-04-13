@@ -7,7 +7,7 @@ export default defineConfig({
 
         // 核心子路径
         "types/index": "src/types/index.ts",
-        "components/index": "src/components/index.ts",
+        "types/shared-ui": "src/types/shared-ui.ts",
         "enums/index": "src/enums/index.ts",
         "http/index": "src/http/index.ts",
         "utils/index": "src/utils/index.ts",
@@ -23,12 +23,6 @@ export default defineConfig({
         "adapters/theme/index": "src/adapters/theme/index.ts",
         "adapters/router/index": "src/adapters/router/index.ts",
 
-        // Store 类型定义
-        "stores/index": "src/stores/index.ts",
-        "stores/auth/index": "src/stores/auth/index.ts",
-        "stores/user/index": "src/stores/user/index.ts",
-        "stores/app/index": "src/stores/app/index.ts",
-
         // 状态管理逻辑层 ( 新增)
         "state/index": "src/state/index.ts",
 
@@ -37,9 +31,6 @@ export default defineConfig({
 
         // Composable 工厂函数
         "composables/index": "src/composables/index.ts",
-
-        // Playground 共享基础设施
-        "playground/index": "src/playground/index.ts",
 
         // 业务服务
         "services/ai/index": "src/services/ai/index.ts",

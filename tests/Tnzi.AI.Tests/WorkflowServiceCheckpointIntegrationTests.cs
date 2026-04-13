@@ -392,6 +392,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             executionRepository.Object,
             versionRepository.Object,
             runRepository.Object,
+            Mock.Of<IRepository<Agent, Guid>>(),
             usageLogService.Object,
             Mock.Of<IQuotaService>(),
             checkpointStore.Object,

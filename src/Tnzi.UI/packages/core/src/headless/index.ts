@@ -6,20 +6,20 @@
  */
 
 // 分页
-export { PaginationController } from './pagination';
-export type { PaginationOptions } from './pagination';
+export { PaginationController, initialPaginationState, normalizePageSize, calculateTotalPages, clampPageIndex, updatePageQuery } from './pagination';
+export type { PaginationOptions, PaginationState } from './pagination';
 
 // 选择
 export { SelectionController } from './selection';
 export type { SelectionMode, SelectionOptions } from './selection';
 
 // 排序
-export { SortController } from './sort';
-export type { SortDirection, SortField, SortOptions } from './sort';
+export { SortController, toggleSort } from './sort';
+export type { SortDirection, SortField, SortOptions, HeadlessSortDirection, SortState } from './sort';
 
 // 表单
 export { FormController } from './form';
-export type { FormFieldError, FormOptions } from './form';
+export type { FormFieldError, FormOptions, FormFieldState, FormState } from './form';
 
 // 数据查询编排
 export { DataQueryController } from './data-query';

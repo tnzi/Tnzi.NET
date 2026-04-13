@@ -125,7 +125,7 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
         }
 
         // History reduction validation
-        if (options.History?.Reduction is { Mode: HistoryReductionMode.Summarize })
+        if (options.History?.Reduction is { Mode: HistoryReductionMode.Summarize or HistoryReductionMode.PruneThenSummarize })
         {
             if (options.History.Reduction.Summarize.MaxSummaryTokens <= 0)
                 errors.Add("History Summarize MaxSummaryTokens must be greater than 0");

@@ -9,7 +9,7 @@ namespace Tnzi.AI.Skills;
 /// Parsing logic is in <see cref="SkillMarkdownParser"/>.
 /// Requirements validation is in <see cref="ISkillRequirementsValidator"/>.
 /// </remarks>
-public class FileSystemSkillStore : ISkillStore
+public class FileSystemSkillStore : ISkillStore, IDisposable
 {
     private readonly ILogger<FileSystemSkillStore> _logger;
     private readonly SkillsOptions _options;
@@ -24,16 +24,27 @@ public class FileSystemSkillStore : ISkillStore
     // 项目目录路径（来自 ContentRoot/Skills 等），用于标记 SkillSource.Project
     private readonly HashSet<string> _projectPaths = new(StringComparer.OrdinalIgnoreCase);
 
+    // OptionsMonitor 订阅 — SkillsOptions 变化时立即失效缓存
+    private readonly IDisposable? _optionsChangeListener;
+
     public FileSystemSkillStore(
         ILogger<FileSystemSkillStore> logger,
         IOptions<AIOptions> options,
         IHostEnvironment? hostEnvironment = null,
-        ITnziApplication? application = null)
+        ITnziApplication? application = null,
+        IOptionsMonitor<AIOptions>? optionsMonitor = null)
     {
         _logger = Check.NotNull(logger);
         _options = Check.NotNull(options).Value.ContextProviders.Skills;
         _contentRootPath = hostEnvironment?.ContentRootPath;
         _application = application;
+        _optionsChangeListener = optionsMonitor?.OnChange(_ => InvalidateCache());
+    }
+
+    public void Dispose()
+    {
+        _optionsChangeListener?.Dispose();
+        _cacheLock.Dispose();
     }
 
     /// <inheritdoc/>

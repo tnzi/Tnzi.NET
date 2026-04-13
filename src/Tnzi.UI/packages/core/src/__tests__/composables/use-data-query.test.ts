@@ -6,9 +6,8 @@ function createMockFetchFn<T>(data: T[], total?: number) {
   return vi.fn(
     async (_query: Record<string, unknown>, _signal?: AbortSignal): Promise<ApiResult<PagedList<T>>> => ({
       succeeded: true,
-      Success: true,
+      success: true,
       code: 200,
-      Code: 200,
       data: {
         items: data,
         totalCount: total ?? data.length,

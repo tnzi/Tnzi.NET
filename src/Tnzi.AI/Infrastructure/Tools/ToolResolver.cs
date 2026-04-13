@@ -19,17 +19,18 @@ public interface IToolResolver
 /// <summary>
 /// 工具解析器 — 解析 C# 工具、OpenAPI 工具、MCP 工具并合并
 /// </summary>
-public class ToolResolver : IToolResolver
+public class ToolResolver : IToolResolver, IDisposable
 {
     private readonly IToolRegistry _toolRegistry;
     private readonly IMcpToolProvider _mcpToolProvider;
     private readonly OpenApiToolGenerator _openApiToolGenerator;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IServiceProvider _serviceProvider;
     private readonly IToolApprovalHandler? _approvalHandler;
     private readonly IToolPermissionEvaluator? _permissionEvaluator;
     private readonly IShellCommandAnalyzer? _shellCommandAnalyzer;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
+    private readonly IEventBus? _eventBus;
     private readonly ILogger<ApprovalToolWrapper>? _approvalLogger;
     private readonly ILogger _toolAdapterLogger;
     private readonly ILogger<ToolResolver> _logger;
@@ -38,20 +39,24 @@ public class ToolResolver : IToolResolver
     /// OpenAPI 工具缓存（线程安全的延迟初始化，避免重复拉取规范）
     /// </summary>
     private readonly SemaphoreSlim _openApiCacheLock = new(1, 1);
+    private readonly IDisposable? _optionsChangeListener;
     private IReadOnlyList<AITool>? _openApiToolsCache;
+    private long _openApiCacheVersion;
+    private long _currentConfigVersion;
 
     public ToolResolver(
         IToolRegistry toolRegistry,
         IMcpToolProvider mcpToolProvider,
         OpenApiToolGenerator openApiToolGenerator,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IServiceProvider serviceProvider,
         ILoggerFactory loggerFactory,
         ILogger<ToolResolver> logger,
         IToolApprovalHandler? approvalHandler = null,
         IToolPermissionEvaluator? permissionEvaluator = null,
         IShellCommandAnalyzer? shellCommandAnalyzer = null,
-        IAgentExecutionContextAccessor? executionContextAccessor = null)
+        IAgentExecutionContextAccessor? executionContextAccessor = null,
+        IEventBus? eventBus = null)
     {
         _toolRegistry = Check.NotNull(toolRegistry);
         _mcpToolProvider = Check.NotNull(mcpToolProvider);
@@ -63,9 +68,15 @@ public class ToolResolver : IToolResolver
         _permissionEvaluator = permissionEvaluator;
         _shellCommandAnalyzer = shellCommandAnalyzer;
         _executionContextAccessor = executionContextAccessor;
+        _eventBus = eventBus;
         _approvalLogger = lf.CreateLogger<ApprovalToolWrapper>();
         _toolAdapterLogger = lf.CreateLogger(typeof(ToolAdapter).FullName!);
         _logger = Check.NotNull(logger);
+
+        _optionsChangeListener = options.OnChange(_ =>
+        {
+            Interlocked.Increment(ref _currentConfigVersion);
+        });
     }
 
     /// <inheritdoc />
@@ -108,7 +119,7 @@ public class ToolResolver : IToolResolver
         }
 
         // 3. MCP 工具（最低优先级）
-        if (_options.Value.Mcp?.Enabled == true)
+        if (_options.CurrentValue.Mcp?.Enabled == true)
         {
             var mcpTools = await _mcpToolProvider.GetToolsAsync(ct).ConfigureAwait(false);
             foreach (var t in mcpTools)
@@ -127,7 +138,7 @@ public class ToolResolver : IToolResolver
     {
         if (_approvalHandler == null && _permissionEvaluator == null) return tools;
 
-        var approvalOptions = _options.Value.ToolApproval;
+        var approvalOptions = _options.CurrentValue.ToolApproval;
         var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var td in toolDefinitions)
         {
@@ -137,24 +148,26 @@ public class ToolResolver : IToolResolver
             }
         }
 
-        return ApprovalToolWrapper.Wrap(tools, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, _approvalLogger, toolNameToGroup);
+        return ApprovalToolWrapper.Wrap(tools, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, _approvalLogger, toolNameToGroup, _eventBus);
     }
 
     private bool ShouldWrapWithApproval()
-        => _options.Value.ToolApproval.Enabled || _permissionEvaluator != null;
+        => _options.CurrentValue.ToolApproval.Enabled || _permissionEvaluator != null;
 
     /// <summary>
-    /// 获取 OpenAPI 生成的工具（线程安全的延迟初始化缓存，避免重复拉取规范）
+    /// 获取 OpenAPI 生成的工具（线程安全的延迟初始化缓存，配置变更时自动失效）
     /// </summary>
     private async Task<IReadOnlyList<AITool>?> GetOpenApiToolsAsync(CancellationToken ct)
     {
-        if (_options.Value.OpenApiTools is not { Enabled: true })
+        if (_options.CurrentValue.OpenApiTools is not { Enabled: true })
         {
             return null;
         }
 
-        // 双检锁：快速路径无锁读取，慢速路径仅在首次初始化时加锁
-        if (_openApiToolsCache != null)
+        var configVersion = Volatile.Read(ref _currentConfigVersion);
+
+        // 快速路径：缓存有效且版本匹配
+        if (_openApiToolsCache != null && Volatile.Read(ref _openApiCacheVersion) == configVersion)
         {
             return _openApiToolsCache;
         }
@@ -163,7 +176,7 @@ public class ToolResolver : IToolResolver
         try
         {
             // 二次检查：另一个线程可能已在等锁期间完成初始化
-            if (_openApiToolsCache != null)
+            if (_openApiToolsCache != null && Volatile.Read(ref _openApiCacheVersion) == configVersion)
             {
                 return _openApiToolsCache;
             }
@@ -173,6 +186,7 @@ public class ToolResolver : IToolResolver
             {
                 _logger.LogDebug("Resolved {Count} OpenAPI tools", _openApiToolsCache.Count);
             }
+            Volatile.Write(ref _openApiCacheVersion, configVersion);
             return _openApiToolsCache;
         }
         catch (Exception ex)
@@ -184,5 +198,12 @@ public class ToolResolver : IToolResolver
         {
             _openApiCacheLock.Release();
         }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _optionsChangeListener?.Dispose();
+        _openApiCacheLock.Dispose();
     }
 }

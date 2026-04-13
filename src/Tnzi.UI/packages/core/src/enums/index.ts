@@ -1,15 +1,10 @@
 // Common Enums
 export {
-  Gender,
-  getGenderLabel,
-  OAuthProvider,
-  getOAuthProviderLabel,
   TriState,
   EnableStatus,
   isEnabled,
   CommonStatus,
   OperationType,
-  SortDirection,
   DateRangePreset,
 } from './common';
 
@@ -22,6 +17,5 @@ export {
   isServerError,
   getStatusCategory,
   getStatusMessage,
-  HttpMethod,
   ContentType,
 } from './http';

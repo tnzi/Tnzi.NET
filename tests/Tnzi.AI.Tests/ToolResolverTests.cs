@@ -16,12 +16,13 @@ public class ToolResolverTests
     // Helpers
     // ------------------------------------------------------------------
 
-    private static IOptions<AIOptions> CreateOptions(Action<AIOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptionsMonitor(Action<AIOptions>? configure = null)
     {
         var options = new AIOptions();
         configure?.Invoke(options);
-        return Microsoft.Extensions.Options.Options.Create(options);
+        return new MutableOptionsMonitor<AIOptions>(options);
     }
+
 
     private static ILoggerFactory CreateLoggerFactory() =>
         LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.None));
@@ -30,7 +31,7 @@ public class ToolResolverTests
         IToolRegistry? toolRegistry = null,
         IMcpToolProvider? mcpToolProvider = null,
         OpenApiToolGenerator? openApiToolGenerator = null,
-        IOptions<AIOptions>? options = null,
+        IOptionsMonitor<AIOptions>? options = null,
         IServiceProvider? serviceProvider = null,
         IToolApprovalHandler? approvalHandler = null,
         IToolPermissionEvaluator? permissionEvaluator = null)
@@ -38,7 +39,7 @@ public class ToolResolverTests
         toolRegistry ??= CreateEmptyRegistry();
         mcpToolProvider ??= CreateEmptyMcpProvider();
         openApiToolGenerator ??= CreateOpenApiGenerator(Microsoft.Extensions.Options.Options.Create(new AIOptions()));
-        options ??= CreateOptions();
+        options ??= CreateOptionsMonitor();
         serviceProvider ??= Mock.Of<IServiceProvider>();
 
         var loggerFactory = CreateLoggerFactory();
@@ -144,7 +145,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { mcpTool });
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = true });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = true });
 
         var resolver = CreateResolver(mcpToolProvider: mcpProvider.Object, options: options);
 
@@ -163,7 +164,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { mcpTool });
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = false });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = false });
 
         var resolver = CreateResolver(mcpToolProvider: mcpProvider.Object, options: options);
 
@@ -187,7 +188,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { mcpTool });
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = true });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = true });
 
         // We cannot register real ToolDefinitions easily because ToolAdapter needs real MethodInfo.
         // Instead, verify deduplication by providing two MCP tools with the same name.
@@ -216,7 +217,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { toolA, toolB, toolC });
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = true });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = true });
 
         var resolver = CreateResolver(mcpToolProvider: mcpProvider.Object, options: options);
 
@@ -233,7 +234,7 @@ public class ToolResolverTests
     [Fact]
     public async Task ResolveToolsAsync_OpenApiDisabled_OpenApiToolsNotLoaded()
     {
-        var options = CreateOptions(o =>
+        var options = CreateOptionsMonitor(o =>
         {
             o.OpenApiTools = new OpenApiToolsOptions { Enabled = false };
         });
@@ -248,7 +249,7 @@ public class ToolResolverTests
     [Fact]
     public async Task ResolveToolsAsync_OpenApiEnabledNoSpecs_ReturnsNull()
     {
-        var options = CreateOptions(o =>
+        var options = CreateOptionsMonitor(o =>
         {
             o.OpenApiTools = new OpenApiToolsOptions
             {
@@ -272,7 +273,7 @@ public class ToolResolverTests
     {
         // When ToolApproval.Enabled = true but no IToolApprovalHandler is provided,
         // the WrapWithApproval method returns the tools as-is.
-        var options = CreateOptions(o =>
+        var options = CreateOptionsMonitor(o =>
         {
             o.ToolApproval = new ToolApprovalOptions
             {
@@ -345,7 +346,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { validTool, nullNameTool.Object });
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = true });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = true });
 
         var resolver = CreateResolver(mcpToolProvider: mcpProvider.Object, options: options);
 
@@ -369,7 +370,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { mcpTool });
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = true });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = true });
 
         var resolver = CreateResolver(mcpToolProvider: mcpProvider.Object, options: options);
 
@@ -391,7 +392,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
-        var options = CreateOptions(o => o.Mcp = new McpOptions { Enabled = true });
+        var options = CreateOptionsMonitor(o => o.Mcp = new McpOptions { Enabled = true });
 
         var resolver = CreateResolver(mcpToolProvider: mcpProvider.Object, options: options);
 
@@ -400,5 +401,96 @@ public class ToolResolverTests
 
         await Should.ThrowAsync<OperationCanceledException>(
             () => resolver.ResolveToolsAsync(null, ct: cts.Token));
+    }
+
+    // ------------------------------------------------------------------
+    // OpenAPI cache invalidation on config change
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ResolveToolsAsync_AfterOptionsChange_RegeneratesOpenApiTools()
+    {
+        // Arrange: OpenAPI enabled with one spec entry so GenerateToolsAsync is actually called.
+        // We mock OpenApiToolGenerator indirectly by using a subclass that tracks call count.
+        var callCount = 0;
+        var generatorMock = new Mock<OpenApiToolGenerator>(
+            Mock.Of<IHttpClientFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new AIOptions
+            {
+                OpenApiTools = new OpenApiToolsOptions { Enabled = true }
+            }),
+            Mock.Of<ILogger<OpenApiToolGenerator>>());
+        generatorMock
+            .Setup(g => g.GenerateToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                callCount++;
+                return Array.Empty<AITool>();
+            });
+
+        var monitor = new MutableOptionsMonitor<AIOptions>(new AIOptions
+        {
+            OpenApiTools = new OpenApiToolsOptions { Enabled = true }
+        });
+
+        using var resolver = CreateResolver(
+            openApiToolGenerator: generatorMock.Object,
+            options: monitor);
+
+        // Act 1: first call → generates and caches
+        await resolver.ResolveToolsAsync(null);
+        callCount.ShouldBe(1);
+
+        // Act 2: second call before config change → served from cache
+        await resolver.ResolveToolsAsync(null);
+        callCount.ShouldBe(1);
+
+        // Act 3: trigger config change → cache version bumped
+        monitor.Set(new AIOptions
+        {
+            OpenApiTools = new OpenApiToolsOptions { Enabled = true }
+        });
+
+        // Act 4: next call after config change → re-generates
+        await resolver.ResolveToolsAsync(null);
+        callCount.ShouldBe(2);
+
+        // Act 5: subsequent call without another change → served from refreshed cache
+        await resolver.ResolveToolsAsync(null);
+        callCount.ShouldBe(2);
+    }
+}
+
+file sealed class MutableOptionsMonitor<T> : IOptionsMonitor<T>
+{
+    private readonly List<Action<T, string?>> _listeners = [];
+
+    public MutableOptionsMonitor(T value)
+    {
+        CurrentValue = value;
+    }
+
+    public T CurrentValue { get; private set; }
+
+    public T Get(string? name) => CurrentValue;
+
+    public IDisposable OnChange(Action<T, string?> listener)
+    {
+        _listeners.Add(listener);
+        return new CallbackDisposable(() => _listeners.Remove(listener));
+    }
+
+    public void Set(T value, string? name = null)
+    {
+        CurrentValue = value;
+        foreach (var listener in _listeners.ToArray())
+        {
+            listener(value, name);
+        }
+    }
+
+    private sealed class CallbackDisposable(Action callback) : IDisposable
+    {
+        public void Dispose() => callback();
     }
 }

@@ -2,12 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createMemoryStorageAdapter,
   createStorageAdapter,
-  createStorageRuntime,
   useStorage,
   setStorageAdapter,
   resetStorageAdapter,
-  setActiveStorageRuntime,
-  getActiveStorageRuntime,
   type StorageAdapter,
 } from '../../adapters/storage';
 
@@ -155,77 +152,19 @@ describe('createStorageAdapter', () => {
 });
 
 // ------------------------------------------
-// StorageRuntime
+// Singleton (set/use/reset)
 // ------------------------------------------
 
-describe('createStorageRuntime', () => {
-  it('should create runtime with default memory adapter', () => {
-    const runtime = createStorageRuntime({ defaultType: 'memory' });
-    const adapter = runtime.use();
-    adapter.set('key', 'hello');
-    expect(adapter.get('key')).toBe('hello');
-  });
-
-  it('should allow setting a custom adapter', () => {
-    const runtime = createStorageRuntime({ defaultType: 'memory' });
-    const customAdapter = createMemoryStorageAdapter();
-    customAdapter.set('custom', true);
-    runtime.setAdapter(customAdapter);
-    expect(runtime.use().get('custom')).toBe(true);
-  });
-
-  it('should reset to a fresh default adapter', () => {
-    const runtime = createStorageRuntime({ defaultType: 'memory' });
-    const original = runtime.use();
-    original.set('orig', 'yes');
-
-    const customAdapter = createMemoryStorageAdapter();
-    runtime.setAdapter(customAdapter);
-    // Custom adapter has no data from original
-    expect(runtime.use().has('orig')).toBe(false);
-
-    runtime.reset();
-    // After reset, a new default memory adapter is created (fresh, empty)
-    expect(runtime.use()).toBeDefined();
-    expect(runtime.use().has('orig')).toBe(false);
-  });
-
-  it('should accept initial adapter', () => {
-    const initial = createMemoryStorageAdapter();
-    initial.set('init', 42);
-    const runtime = createStorageRuntime({ adapter: initial });
-    expect(runtime.use().get('init')).toBe(42);
-  });
-
-  it('should reset to initial adapter if provided', () => {
-    const initial = createMemoryStorageAdapter();
-    initial.set('init', 42);
-    const runtime = createStorageRuntime({ adapter: initial });
-
-    const custom = createMemoryStorageAdapter();
-    runtime.setAdapter(custom);
-    expect(runtime.use().has('init')).toBe(false);
-
-    runtime.reset();
-    expect(runtime.use().get('init')).toBe(42);
-  });
-});
-
-// ------------------------------------------
-// Convenience functions
-// ------------------------------------------
-
-describe('convenience functions', () => {
+describe('singleton pattern', () => {
   beforeEach(() => {
-    // Reset to a known state: use memory-based runtime
-    const runtime = createStorageRuntime({ defaultType: 'memory' });
-    setActiveStorageRuntime(runtime);
+    resetStorageAdapter();
   });
 
-  it('useStorage should return the active adapter', () => {
+  it('useStorage should return a default adapter when none is set', () => {
     const adapter = useStorage();
-    adapter.set('x', 1);
-    expect(adapter.get('x')).toBe(1);
+    expect(adapter).toBeDefined();
+    // In Node env, localStorage is unavailable so operations are no-ops
+    expect(adapter.getItem('key')).toBeNull();
   });
 
   it('setStorageAdapter should swap the adapter', () => {
@@ -235,20 +174,12 @@ describe('convenience functions', () => {
     expect(useStorage().get('from-custom')).toBe(true);
   });
 
-  it('resetStorageAdapter should reset to default', () => {
+  it('resetStorageAdapter should clear to null so useStorage returns default', () => {
     const custom = createMemoryStorageAdapter();
     custom.set('from-custom', true);
     setStorageAdapter(custom);
     resetStorageAdapter();
-    // After reset, fresh memory adapter has no data
+    // After reset, useStorage returns a fresh default (localStorage in Node = no-op)
     expect(useStorage().has('from-custom')).toBe(false);
-  });
-
-  it('getActiveStorageRuntime should return the runtime', () => {
-    const runtime = getActiveStorageRuntime();
-    expect(runtime).toBeDefined();
-    expect(typeof runtime.use).toBe('function');
-    expect(typeof runtime.setAdapter).toBe('function');
-    expect(typeof runtime.reset).toBe('function');
   });
 });

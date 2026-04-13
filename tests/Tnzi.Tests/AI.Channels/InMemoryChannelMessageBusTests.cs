@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Tnzi.AI.Channels.Bus;
 using Tnzi.AI.Channels.Models;
 
@@ -5,7 +6,7 @@ namespace Tnzi.Tests.AI.Channels;
 
 public class InMemoryChannelMessageBusTests
 {
-    private readonly InMemoryChannelMessageBus _bus = new();
+    private readonly InMemoryChannelMessageBus _bus = new(NullLogger<InMemoryChannelMessageBus>.Instance);
 
     [Fact]
     public async Task PublishInbound_ConsumeInbound_ReturnsMessage()

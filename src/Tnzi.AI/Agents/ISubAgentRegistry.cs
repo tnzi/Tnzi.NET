@@ -16,4 +16,7 @@ public interface ISubAgentRegistry
 
     /// <summary>取消注册子 Agent 类型</summary>
     bool Unregister(string name);
+
+    /// <summary>从数据库加载已启用的子 Agent 类型定义（合并到内存注册表，同名覆盖内置类型）</summary>
+    Task LoadFromStoreAsync(IRepository<SubAgentType, Guid> repository, CancellationToken cancellationToken = default);
 }

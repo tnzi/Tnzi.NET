@@ -24,9 +24,9 @@
   },
   "references": [
     { "path": "./packages/core" },
-    { "path": "./packages/ai" },
-    { "path": "./packages/shadcn" },
-    { "path": "./packages/vant" },
-    { "path": "./packages/naive-ui" }
+    { "path": "./packages/ui-ai" },
+    { "path": "./packages/ui" },
+    { "path": "./packages/mobile" },
+    { "path": "./packages/ui-admin" }
   ]
 }

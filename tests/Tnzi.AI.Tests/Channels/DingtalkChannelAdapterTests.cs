@@ -37,7 +37,7 @@ public class DingtalkChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new DingtalkChannelAdapter(
             NullLogger<DingtalkChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -52,7 +52,7 @@ public class DingtalkChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new DingtalkChannelAdapter(
             NullLogger<DingtalkChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -67,7 +67,7 @@ public class DingtalkChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new DingtalkChannelAdapter(
             NullLogger<DingtalkChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -129,7 +129,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_ValidTextMessage_PublishesToBus()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -156,7 +156,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_CommandMessage_DetectedCorrectly()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -178,7 +178,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonTextMessage_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -198,7 +198,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_EmptyText_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -219,7 +219,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedUser_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedUsers: ["staff999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -240,7 +240,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedOrganization_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedOrganizations: ["corp999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -432,7 +432,7 @@ public class DingtalkChannelAdapterTests
 
         return new DingtalkChannelAdapter(
             NullLogger<DingtalkChannelAdapter>.Instance,
-            bus ?? new InMemoryChannelMessageBus(),
+            bus ?? new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             factory,
             options);
     }

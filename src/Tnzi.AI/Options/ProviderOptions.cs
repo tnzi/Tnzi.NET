@@ -77,4 +77,13 @@ public class ProviderOptions
     /// Gemini: 通过 context caching API 缓存
     /// </remarks>
     public PromptCachingOptions? PromptCaching { get; set; }
+
+    /// <summary>
+    /// Model context window size (tokens). Used by SummarizationMiddleware for fraction-based triggers.
+    /// If null, falls back to SummarizationOptions.ModelContextWindow (default 128K).
+    /// </summary>
+    /// <remarks>
+    /// Common values: GPT-4.1 (1M), Claude Sonnet 4 (200K), GPT-4o (128K), DeepSeek-R1 (64K), GPT-4.1-mini (128K).
+    /// </remarks>
+    public int? ContextWindowSize { get; set; }
 }

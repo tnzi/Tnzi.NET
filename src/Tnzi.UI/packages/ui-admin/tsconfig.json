@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*", "../ui/src/*"],
+      "@tnzi/core": ["../core/src"],
+      "@tnzi/core/*": ["../core/src/*"],
+      "@tnzi/ui": ["../ui/src"],
+      "@tnzi/ui/*": ["../ui/src/*"]
+    },
+    "isolatedModules": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "src/components/**/*",
+    "src/headless/**/*",
+    "src/stores/**/*",
+    "src/template/**/*",
+    "src/plugin.ts",
+    "src/index.ts"
+  ],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

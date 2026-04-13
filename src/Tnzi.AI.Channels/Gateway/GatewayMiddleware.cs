@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>

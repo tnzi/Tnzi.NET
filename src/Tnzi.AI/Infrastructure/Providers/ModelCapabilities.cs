@@ -16,6 +16,8 @@ public static class ModelCapabilities
             || model.StartsWith("qwq", StringComparison.OrdinalIgnoreCase)
             || model.StartsWith("qwen3", StringComparison.OrdinalIgnoreCase)
             || model.StartsWith("grok-3-mini", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("kimi-k1", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("glm-z1", StringComparison.OrdinalIgnoreCase)
             || SupportsClaudeThinking(model);
     }
 
@@ -25,7 +27,9 @@ public static class ModelCapabilities
         if (string.IsNullOrEmpty(model)) return false;
 
         return StartsWithAny(model, "deepseek-reasoner", "deepseek-r1")
-            || model.StartsWith("qwq", StringComparison.OrdinalIgnoreCase);
+            || model.StartsWith("qwq", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("kimi-k1", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("glm-z1", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>是否支持推理强度控制（effort level）</summary>

@@ -75,37 +75,18 @@ public class TelegramChannelAdapter : IChannelAdapter
         return Task.CompletedTask;
     }
 
-    public async Task SendAsync(OutboundMessage message, CancellationToken ct = default)
+    public Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {
         var chatId = long.Parse(message.ChatId);
 
-        // Telegram 限制单条消息最多 4096 字符，超出则分块发送
-        const int maxLength = 4096;
-        var text = message.Text;
-
-        while (text.Length > 0)
-        {
-            var chunk = text.Length > maxLength ? text[..maxLength] : text;
-            text = text.Length > maxLength ? text[maxLength..] : string.Empty;
-
-            var retryCount = 0;
-            while (true)
-            {
-                try
-                {
-                    await _botClient.SendMessage(chatId, chunk, cancellationToken: ct);
-                    break;
-                }
-                catch (Exception ex) when (retryCount < _options.MaxRetries)
-                {
-                    retryCount++;
-                    var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, retryCount), 30));
-                    _logger.LogWarning(ex, "Telegram send failed (attempt {Attempt}/{Max}), retrying in {Delay}s",
-                        retryCount, _options.MaxRetries, delay.TotalSeconds);
-                    await Task.Delay(delay, ct);
-                }
-            }
-        }
+        return ChannelSendHelper.SendChunkedWithRetryAsync(
+            message.Text,
+            maxLength: 4096,
+            maxRetries: _options.MaxRetries,
+            sendChunk: (chunk, token) => _botClient.SendMessage(chatId, chunk, cancellationToken: token),
+            _logger,
+            "Telegram",
+            ct);
     }
 
     public async Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)

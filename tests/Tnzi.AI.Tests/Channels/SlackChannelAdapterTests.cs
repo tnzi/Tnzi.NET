@@ -37,7 +37,7 @@ public class SlackChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new SlackChannelAdapter(
             NullLogger<SlackChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -52,7 +52,7 @@ public class SlackChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new SlackChannelAdapter(
             NullLogger<SlackChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -107,7 +107,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_ChallengeEvent_DoesNotPublish()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new { challenge = "test-challenge", type = "url_verification" });
@@ -121,7 +121,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_BotMessage_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -146,7 +146,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_SubtypeMessage_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -171,7 +171,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_ValidMessage_PublishesToBus()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -201,7 +201,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_CommandMessage_DetectedCorrectly()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -226,7 +226,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_ThreadMessage_PreservesThreadTs()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -252,7 +252,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedChannel_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedChannels: ["C999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -276,7 +276,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedUser_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedUsers: ["U999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -519,7 +519,7 @@ public class SlackChannelAdapterTests
 
         return new SlackChannelAdapter(
             NullLogger<SlackChannelAdapter>.Instance,
-            bus ?? new InMemoryChannelMessageBus(),
+            bus ?? new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             factory,
             options);
     }

@@ -271,6 +271,32 @@ public partial class AgentRuntime
     private List<IAiMiddleware> ResolveMiddlewares() => _middlewares.Value;
 
     /// <summary>
+    /// 构建非流式管道委托（scope 内缓存，避免每次请求重建）
+    /// </summary>
+    private AiMiddlewareDelegate BuildPipelineDelegate()
+    {
+        var pipeline = new AiMiddlewarePipeline();
+        foreach (var middleware in ResolveMiddlewares())
+        {
+            pipeline.Use(middleware);
+        }
+        return pipeline.Build(ExecuteCoreAsync);
+    }
+
+    /// <summary>
+    /// 构建流式管道委托（scope 内缓存，避免每次请求重建）
+    /// </summary>
+    private AiStreamingMiddlewareDelegate BuildStreamingPipelineDelegate()
+    {
+        var pipeline = new AiMiddlewarePipeline();
+        foreach (var middleware in ResolveMiddlewares())
+        {
+            pipeline.Use(middleware);
+        }
+        return pipeline.BuildStreaming(ExecuteCoreStreamingAsync);
+    }
+
+    /// <summary>
     /// 根据 ReasoningEffort 自动解析有效模型。
     /// 当 ReasoningEffort != None 且当前模型不支持推理时，查找 Provider 的 "think" 模型别名。
     /// </summary>

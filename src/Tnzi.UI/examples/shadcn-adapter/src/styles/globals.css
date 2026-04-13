@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   naive-ui wave/ripple animation
+   ======================================== */
+@keyframes button-wave-spread {
+  from { box-shadow: 0 0 0.5px 0 var(--n-ripple-color, hsl(var(--primary))); }
+  to   { box-shadow: 0 0 0.5px 4.5px var(--n-ripple-color, hsl(var(--primary))); }
+}
+@keyframes button-wave-opacity {
+  from { opacity: 0.6; }
+  to   { opacity: 0; }
+}
+
+@layer base {
+  :root {
+    /* ---- naive-ui light theme exact values ---- */
+
+    /* Primary: #18a058 (green) */
+    --primary: 153 74% 35%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 153 51% 45%;
+    --primary-pressed: 153 86% 26%;
+
+    /* Neutral — naive-ui exact values */
+    --background: 0 0% 100%;
+    --foreground: 210 5% 21%;
+    --card: 0 0% 100%;
+    --card-foreground: 210 5% 21%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 5% 21%;
+
+    /* Secondary: rgba(46, 51, 56, 0.05) */
+    --secondary: 210 10% 96%;
+    --secondary-foreground: 210 5% 21%;
+
+    --muted: 240 3% 96%;
+    /* textColor3: rgb(118,124,130) */
+    --muted-foreground: 207 5% 49%;
+    /* placeholder: rgba(0,0,0,0.24) ≈ very light gray */
+    --placeholder: 0 0% 76%;
+
+    --accent: 240 3% 96%;
+    --accent-foreground: 210 5% 21%;
+
+    /* Error/Destructive: #d03050 */
+    --destructive: 349 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Info: #2080f0 */
+    --info: 216 88% 53%;
+    --info-foreground: 0 0% 100%;
+
+    /* Warning: #f0a020 */
+    --warning: 37 87% 53%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Success: #18a058 (= primary) */
+    --success: 153 74% 35%;
+    --success-foreground: 0 0% 100%;
+
+    /* Borders: rgb(224, 224, 230) */
+    --border: 240 5% 89%;
+    --input: 240 5% 89%;
+    --divider: 240 6% 95%;
+
+    /* Focus ring */
+    --ring: 153 74% 35%;
+
+    /* Border-radius: naive-ui 3px */
+    --radius: 3px;
+
+    /* naive-ui 3-tier shadows */
+    --shadow-1: 0 1px 2px -2px rgba(0,0,0,.08), 0 3px 6px 0 rgba(0,0,0,.06), 0 5px 12px 4px rgba(0,0,0,.04);
+    --shadow-2: 0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08), 0 9px 28px 8px rgba(0,0,0,.05);
+    --shadow-3: 0 6px 16px -9px rgba(0,0,0,.08), 0 9px 28px 0 rgba(0,0,0,.05), 0 12px 48px 16px rgba(0,0,0,.03);
+
+    /* Specific naive-ui colors */
+    --action-color: 240 8% 98%;
+    --hover-color: 240 3% 95%;
+    --pressed-color: 240 4% 93%;
+    --tag-color: 0 0% 93%;
+    --table-header-color: 240 8% 98%;
+  }
+
+  .dark {
+    /* ---- naive-ui dark theme exact values ---- */
+
+    /* Primary: #63e2b7 */
+    --primary: 161 68% 64%;
+    --primary-foreground: 220 8% 10%;
+    --primary-hover: 161 59% 70%;
+    --primary-pressed: 161 52% 58%;
+
+    --background: 240 11% 7%;
+    --foreground: 0 0% 93%;
+    --card: 240 8% 10%;
+    --card-foreground: 0 0% 93%;
+    --popover: 240 4% 29%;
+    --popover-foreground: 0 0% 93%;
+
+    /* Secondary: rgba(255, 255, 255, 0.08) */
+    --secondary: 220 6% 15%;
+    --secondary-foreground: 0 0% 93%;
+
+    --muted: 220 6% 15%;
+    /* dark textColor3: overlay(0.52) */
+    --muted-foreground: 0 0% 52%;
+    /* dark placeholder: rgba(255,255,255,0.38) */
+    --placeholder: 0 0% 38%;
+
+    --accent: 220 6% 15%;
+    --accent-foreground: 0 0% 82%;
+
+    /* Error: #e88080 */
+    --destructive: 0 72% 71%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Info: #70c0e8 */
+    --info: 202 69% 67%;
+    --info-foreground: 220 8% 10%;
+
+    /* Warning: #f2c97d */
+    --warning: 38 83% 72%;
+    --warning-foreground: 220 8% 10%;
+
+    /* Success: #63e2b7 */
+    --success: 161 68% 64%;
+    --success-foreground: 220 8% 10%;
+
+    --border: 220 8% 18%;
+    --input: 220 8% 18%;
+    --divider: 220 6% 12%;
+
+    --ring: 161 68% 64%;
+
+    --radius: 3px;
+
+    --shadow-1: 0 1px 2px -2px rgba(0,0,0,.24), 0 3px 6px 0 rgba(0,0,0,.18), 0 5px 12px 4px rgba(0,0,0,.12);
+    --shadow-2: 0 3px 6px -4px rgba(0,0,0,.24), 0 6px 12px 0 rgba(0,0,0,.16), 0 9px 18px 8px rgba(0,0,0,.10);
+    --shadow-3: 0 6px 16px -9px rgba(0,0,0,.08), 0 9px 28px 0 rgba(0,0,0,.05), 0 12px 48px 16px rgba(0,0,0,.03);
+
+    --action-color: 220 6% 12%;
+    --hover-color: 220 6% 14%;
+    --pressed-color: 220 6% 11%;
+    --tag-color: 220 8% 18%;
+    --table-header-color: 220 6% 12%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: v-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body input {
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  /* naive-ui scrollbar: 5px, rounded */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.4); }
+  .dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
+  .dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+}

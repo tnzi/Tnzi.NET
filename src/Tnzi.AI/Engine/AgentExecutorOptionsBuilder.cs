@@ -113,6 +113,7 @@ public class AgentExecutorOptionsBuilder
         {
             HistoryReductionMode.Prune => CreatePruneChatReducer(),
             HistoryReductionMode.Summarize => CreateSummarizeChatReducer(),
+            HistoryReductionMode.PruneThenSummarize => CreateChainedReducer(),
             _ => null
         };
 
@@ -135,7 +136,7 @@ public class AgentExecutorOptionsBuilder
             "Creating PruneChatReducer: KeepLastTurns={KeepLastTurns}, DropToolOutputsOlderThan={DropToolOutputsOlderThan}",
             pruneOptions.KeepLastTurns, pruneOptions.DropToolOutputsOlderThan);
 
-        return new PruneChatReducer(pruneOptions, logger);
+        return new PruneChatReducer(pruneOptions, _tokenEstimator, logger);
     }
 
     /// <summary>
@@ -162,6 +163,24 @@ public class AgentExecutorOptionsBuilder
             _logger.LogWarning(ex, "Failed to create SummarizeChatReducer. Falling back to no reduction.");
             return null;
         }
+    }
+
+    /// <summary>
+    /// 创建链式压缩器: Prune → Summarize
+    /// </summary>
+    private IHistoryReducer? CreateChainedReducer()
+    {
+        var pruneReducer = CreatePruneChatReducer();
+        var summarizeReducer = CreateSummarizeChatReducer();
+
+        if (summarizeReducer == null)
+        {
+            _logger.LogWarning("PruneThenSummarize mode: Summarize reducer creation failed, falling back to Prune only");
+            return pruneReducer;
+        }
+
+        _logger.LogDebug("Creating ChainedChatReducer: Prune → Summarize");
+        return new ChainedChatReducer([pruneReducer, summarizeReducer]);
     }
 
     /// <summary>

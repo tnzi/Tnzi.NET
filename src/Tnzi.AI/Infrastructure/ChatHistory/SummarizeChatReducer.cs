@@ -61,21 +61,22 @@ public sealed class SummarizeChatReducer : IHistoryReducer
     /// <param name="messages">原始消息列表</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>压缩后的消息列表</returns>
-    public async Task<List<ChatMessage>> ReduceAsync(
+    public async Task<HistoryReductionResult> ReduceAsync(
         List<ChatMessage> messages,
         CancellationToken ct = default)
     {
         var originalCount = messages.Count;
+        var originalTokens = messages.Sum(m => _tokenEstimator.Estimate(m.Text ?? ""));
 
         if (originalCount == 0)
         {
-            return messages;
+            return new HistoryReductionResult(messages, 0, 0, 0, 0, "Summarize");
         }
 
         // 检查是否需要压缩
         if (!ShouldSummarize(messages))
         {
-            return messages;
+            return new HistoryReductionResult(messages, originalCount, messages.Count, originalTokens, originalTokens, "Summarize");
         }
 
         try
@@ -86,12 +87,13 @@ public sealed class SummarizeChatReducer : IHistoryReducer
                 "Summarized chat history from {OriginalCount} to {NewCount} messages",
                 originalCount, result.Count);
 
-            return result;
+            var reducedTokens = result.Sum(m => _tokenEstimator.Estimate(m.Text ?? ""));
+            return new HistoryReductionResult(result, originalCount, result.Count, originalTokens, reducedTokens, "Summarize");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to summarize chat history, returning original messages");
-            return messages;
+            return new HistoryReductionResult(messages, originalCount, messages.Count, originalTokens, originalTokens, "Summarize");
         }
     }
 

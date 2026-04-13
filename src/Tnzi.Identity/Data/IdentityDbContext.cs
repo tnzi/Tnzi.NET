@@ -42,8 +42,6 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
 
-    public DbSet<Tenant> Tenants { get; set; } = null!;
-
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

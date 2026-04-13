@@ -20,8 +20,8 @@ public class SummarizeChatReducerTests
 
         var result = await reducer.ReduceAsync(messages);
 
-        result.Count.ShouldBe(3);
-        result.ShouldBe(messages);
+        result.Messages.Count.ShouldBe(3);
+        result.Messages.ShouldBe(messages);
     }
 
     [Fact]
@@ -44,12 +44,12 @@ public class SummarizeChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 应包含摘要系统消息 + 最后 1 轮
-        result.ShouldContain(m => m.Role == ChatRole.System && m.Text!.Contains("summary", StringComparison.OrdinalIgnoreCase));
-        result.ShouldContain(m => m.Text == "Turn 3");
-        result.ShouldContain(m => m.Text == "Reply 3");
+        result.Messages.ShouldContain(m => m.Role == ChatRole.System && m.Text!.Contains("summary", StringComparison.OrdinalIgnoreCase));
+        result.Messages.ShouldContain(m => m.Text == "Turn 3");
+        result.Messages.ShouldContain(m => m.Text == "Reply 3");
         // 旧消息被摘要替代
-        result.ShouldNotContain(m => m.Text == "Turn 1");
-        result.ShouldNotContain(m => m.Text == "Reply 1");
+        result.Messages.ShouldNotContain(m => m.Text == "Turn 1");
+        result.Messages.ShouldNotContain(m => m.Text == "Reply 1");
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class SummarizeChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 应触发摘要
-        result.ShouldContain(m => m.Role == ChatRole.System && m.Text!.Contains("summary", StringComparison.OrdinalIgnoreCase));
+        result.Messages.ShouldContain(m => m.Role == ChatRole.System && m.Text!.Contains("summary", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -95,9 +95,9 @@ public class SummarizeChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 原有系统消息保留
-        result.ShouldContain(m => m.Text == "You are a helpful assistant.");
+        result.Messages.ShouldContain(m => m.Text == "You are a helpful assistant.");
         // 摘要也作为系统消息注入
-        result.Count(m => m.Role == ChatRole.System).ShouldBeGreaterThanOrEqualTo(2);
+        result.Messages.Count(m => m.Role == ChatRole.System).ShouldBeGreaterThanOrEqualTo(2);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class SummarizeChatReducerTests
 
         var result = await reducer.ReduceAsync(messages);
 
-        var summaryMessage = result.FirstOrDefault(m =>
+        var summaryMessage = result.Messages.FirstOrDefault(m =>
             m.Role == ChatRole.System && m.Text!.Contains("[Previous conversation summary]"));
         summaryMessage.ShouldNotBeNull();
         summaryMessage.Text.ShouldContain("The users discussed weather.");
@@ -146,7 +146,7 @@ public class SummarizeChatReducerTests
         mockClient.Verify(
             c => c.GetResponseAsync(It.IsAny<IList<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()),
             Times.Once);
-        result.ShouldContain(m => m.Text!.Contains("Cached summary."));
+        result.Messages.ShouldContain(m => m.Text!.Contains("Cached summary."));
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public class SummarizeChatReducerTests
 
         // LLM 应被调用两次（缓存未命中）
         callCount.ShouldBe(2);
-        result.ShouldContain(m => m.Text!.Contains("Summary 2"));
+        result.Messages.ShouldContain(m => m.Text!.Contains("Summary 2"));
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public class SummarizeChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 应返回原始消息
-        result.Count.ShouldBe(messages.Count);
+        result.Messages.Count.ShouldBe(messages.Count);
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public class SummarizeChatReducerTests
 
         var result = await reducer.ReduceAsync([]);
 
-        result.ShouldBeEmpty();
+        result.Messages.ShouldBeEmpty();
     }
 
     #region Helpers

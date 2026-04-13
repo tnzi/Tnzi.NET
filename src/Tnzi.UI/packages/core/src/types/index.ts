@@ -1,3 +1,6 @@
+// Shared UI DTOs (re-exported for convenience via main entry)
+export * from './shared-ui';
+
 // API Types
 export type {
   ApiResult,
@@ -84,21 +87,21 @@ export {
   defaultThemeConfig,
 } from './theme';
 
-// Store Types
+// Async State Types
 export type {
   AsyncStatus,
   AsyncState,
-  PaginationState,
-  FormFieldState,
-  FormState,
-  NotificationState,
-  ModalState,
-} from './stores';
+} from './async';
 
 export {
   initialAsyncState,
   loadingAsyncState,
   successAsyncState,
   errorAsyncState,
-  initialPaginationState,
-} from './stores';
+} from './async';
+
+// Re-export moved types for backward compatibility
+export type { PaginationState } from '../headless/pagination';
+export { initialPaginationState } from '../headless/pagination';
+export type { FormFieldState, FormState } from '../headless/form';
+export type { NotificationState, ModalState } from '../state/types/app';

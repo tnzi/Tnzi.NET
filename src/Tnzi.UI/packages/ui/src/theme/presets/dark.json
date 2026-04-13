@@ -1,0 +1,14 @@
+{
+  "name": "dark",
+  "description": "Dark mode optimized — slightly desaturated colors for low light",
+  "colors": {
+    "primary": "#2d9960",
+    "info": "#4098fc",
+    "success": "#2d9960",
+    "warning": "#f2b443",
+    "error": "#e06070"
+  },
+  "mode": "dark",
+  "isInfoFollowPrimary": false,
+  "recommendColor": false
+}

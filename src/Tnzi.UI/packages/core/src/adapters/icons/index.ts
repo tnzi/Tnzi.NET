@@ -1,9 +1,8 @@
 /**
  * @tnzi/core/adapters/icons
  *
- * Icon registry and types.
+ * Icon types.
  */
 
 export * from './types';
-export * from './registry';
 

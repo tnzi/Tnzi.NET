@@ -1,3 +1,5 @@
+global using Microsoft.AspNetCore.Builder;
+global using Microsoft.AspNetCore.Http;
 global using System.Collections.Concurrent;
 global using System.Text.Json;
 global using System.Threading.Channels;
@@ -31,3 +33,10 @@ global using Tnzi.Modules;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Utilities;
+global using Tnzi.AI.Channels.Adapters;
+global using Tnzi.AI.Channels.Adapters.Telegram;
+global using Tnzi.AI.Channels.Adapters.Feishu;
+global using Tnzi.AI.Channels.Adapters.Slack;
+global using Tnzi.AI.Channels.Adapters.Discord;
+global using Tnzi.AI.Channels.Adapters.Dingtalk;
+global using Tnzi.AI;

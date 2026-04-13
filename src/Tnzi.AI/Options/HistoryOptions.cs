@@ -79,7 +79,13 @@ public enum HistoryReductionMode
     /// <summary>
     /// 摘要模式：对历史消息生成摘要
     /// </summary>
-    Summarize = 2
+    Summarize = 2,
+
+    /// <summary>
+    /// 链式模式：先裁剪旧消息，再对剩余消息生成摘要。
+    /// 结合低成本裁剪和选择性摘要，实现最优 Token 效率。
+    /// </summary>
+    PruneThenSummarize = 3
 }
 
 /// <summary>

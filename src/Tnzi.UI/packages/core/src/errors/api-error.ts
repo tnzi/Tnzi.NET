@@ -41,7 +41,7 @@ export class HttpError extends ApiError {
   public readonly statusCode: number;
 
   constructor(result: ApiResult<unknown>) {
-    const statusCode = result.Code ?? result.code ?? 500;
+    const statusCode = result.code ?? 500;
     super({
       message: getApiResultErrorMessage(result),
       code: statusCode,
@@ -53,10 +53,10 @@ export class HttpError extends ApiError {
   }
 }
 
-export function getApiResultErrorMessage(result: Pick<ApiResult<unknown>, 'message' | 'errorCode' | 'Code'>): string {
+export function getApiResultErrorMessage(result: Pick<ApiResult<unknown>, 'message' | 'errorCode' | 'code'>): string {
   if (result.message) return result.message;
   if (result.errorCode) return result.errorCode;
-  return `Error ${result.Code}`;
+  return `Error ${result.code}`;
 }
 
 export function createFailedApiResult<T>(
@@ -65,10 +65,9 @@ export function createFailedApiResult<T>(
   const code = options.code ?? 400;
   return {
     succeeded: false,
-    data: undefined as T,
+    success: false,
     code,
-    Code: code,
-    Success: false,
+    data: undefined as T,
     message: options.message,
     errorCode: options.errorCode,
     errorDetails: options.details,

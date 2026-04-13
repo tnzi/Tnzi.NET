@@ -196,16 +196,16 @@ public partial class WorkflowService
         var agentIds = steps.Where(s => s.AgentId.HasValue).Select(s => s.AgentId!.Value).Distinct().ToList();
         if (agentIds.Count > 0)
         {
-            var existingAgentCount = await _runRepository.AsQueryable()
-                .Join(
-                    ServiceProvider!.GetRequiredService<IRepository<Agent, Guid>>().AsQueryable(),
-                    r => r.Id, a => a.Id, (r, a) => a.Id)
-                .CountAsync();
+            var existingAgentIds = await _agentRepository.AsQueryable()
+                .Where(a => agentIds.Contains(a.Id))
+                .Select(a => a.Id)
+                .ToListAsync();
 
-            // Simplified: just check that the Agent repository has entries for the referenced IDs
-            // A full check would query IRepository<Agent, Guid>, but we use a warning approach
-            if (agentIds.Count > 0)
-                result.Warnings.Add($"Workflow references {agentIds.Count} agent(s). Verify agent IDs are valid at runtime.");
+            var missingAgentIds = agentIds.Except(existingAgentIds).ToList();
+            if (missingAgentIds.Count > 0)
+            {
+                result.Warnings.Add($"Workflow references {missingAgentIds.Count} non-existent agent(s): {string.Join(", ", missingAgentIds)}");
+            }
         }
 
         if (!entity.IsEnabled)

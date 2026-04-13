@@ -237,6 +237,13 @@ public class McpServerSecurityMiddleware
                 errorMessage: errorMessage,
                 agentId: agentId,
                 ct: ct);
+
+            // Also record to MCP-specific analytics for tool stats/popularity/errors
+            var analyticsService = scope.ServiceProvider.GetService<IMcpToolAnalyticsService>();
+            if (analyticsService != null)
+            {
+                await analyticsService.RecordUsageAsync(toolName, durationMs, isSuccess, errorMessage);
+            }
         }
         catch (Exception ex)
         {

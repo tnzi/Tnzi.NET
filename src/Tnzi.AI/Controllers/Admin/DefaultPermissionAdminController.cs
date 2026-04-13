@@ -6,17 +6,20 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/permissions")]
-[ApiExplorerSettings(GroupName = "admin")]
 public class DefaultPermissionAdminController : ApiAdminControllerBase
 {
     protected readonly IToolPermissionEvaluator PermissionEvaluator;
+    protected readonly IRepository<ToolPermissionRuleEntity, Guid> PermissionRuleRepository;
 
     /// <summary>
     /// 初始化权限管理控制器
     /// </summary>
-    public DefaultPermissionAdminController(IToolPermissionEvaluator permissionEvaluator)
+    public DefaultPermissionAdminController(
+        IToolPermissionEvaluator permissionEvaluator,
+        IRepository<ToolPermissionRuleEntity, Guid> permissionRuleRepository)
     {
         PermissionEvaluator = Check.NotNull(permissionEvaluator);
+        PermissionRuleRepository = Check.NotNull(permissionRuleRepository);
     }
 
     /// <summary>
@@ -95,103 +98,54 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
 
         return ApiResult<PermissionEvaluateResultDto>.Ok(dto);
     }
-}
 
-/// <summary>
-/// 权限规则列表响应
-/// </summary>
-public class PermissionRulesDto
-{
-    /// <summary>评估器是否包含任何规则</summary>
-    public bool HasRules { get; set; }
+    /// <summary>
+    /// 获取所有持久化的权限规则
+    /// </summary>
+    [HttpGet("persisted-rules")]
+    public virtual async Task<ApiResult<List<PersistedPermissionRuleDto>>> GetPersistedRules()
+    {
+        var entities = await PermissionRuleRepository.AsQueryable()
+            .OrderByDescending(e => e.Priority)
+            .ThenBy(e => e.Scope)
+            .ToListAsync();
 
-    /// <summary>当前 Session 级别规则</summary>
-    public List<PermissionRuleItemDto> SessionRules { get; set; } = [];
-}
+        return ApiResult<List<PersistedPermissionRuleDto>>.Ok(entities.MapToList<PersistedPermissionRuleDto>());
+    }
 
-/// <summary>
-/// 权限规则条目
-/// </summary>
-public class PermissionRuleItemDto
-{
-    public string ToolPattern { get; set; } = "*";
-    public string? ToolGroup { get; set; }
-    public string? CommandPrefix { get; set; }
-    public string? ServerName { get; set; }
-    public string? PathPrefix { get; set; }
-    public bool IsSubAgentOnly { get; set; }
-    public string? SubAgentName { get; set; }
-    public bool IsWorkflowOnly { get; set; }
-    public string? WorkflowNodeName { get; set; }
-    public PermissionBehavior Behavior { get; set; }
-    public ToolPermissionScope Scope { get; set; }
-    public int Priority { get; set; }
-    public bool IsDestructiveOnly { get; set; }
-    public string? Reason { get; set; }
-}
+    /// <summary>
+    /// 创建持久化权限规则
+    /// </summary>
+    [HttpPost("persisted-rules")]
+    public virtual async Task<ApiResult<PersistedPermissionRuleDto>> CreatePersistedRule(
+        [FromBody] CreatePersistedPermissionRuleDto input)
+    {
+        Check.NotNull(input);
 
-/// <summary>
-/// 权限评估测试请求
-/// </summary>
-public class PermissionEvaluateRequestDto
-{
-    /// <summary>工具名称</summary>
-    [Required]
-    public string? ToolName { get; set; }
+        var entity = input.MapTo<ToolPermissionRuleEntity>();
 
-    /// <summary>工具组</summary>
-    public string? ToolGroup { get; set; }
+        await PermissionRuleRepository.InsertAsync(entity);
+        await PermissionEvaluator.RefreshRulesAsync();
 
-    /// <summary>工作目录</summary>
-    public string? WorkingDirectory { get; set; }
+        return ApiResult<PersistedPermissionRuleDto>.Ok(entity.MapTo<PersistedPermissionRuleDto>());
+    }
 
-    /// <summary>候选路径</summary>
-    public List<string>? CandidatePaths { get; set; }
+    /// <summary>
+    /// 删除持久化权限规则
+    /// </summary>
+    [HttpDelete("persisted-rules/{id}")]
+    public virtual async Task<ApiResult> DeletePersistedRule(Guid id)
+    {
+        var entity = await PermissionRuleRepository.GetAsync(id);
+        if (entity == null)
+        {
+            return ApiResult.Error("Permission rule not found.", 404);
+        }
 
-    /// <summary>MCP server 名称</summary>
-    public string? ServerName { get; set; }
+        await PermissionRuleRepository.DeleteAsync(entity);
 
-    /// <summary>是否子 Agent</summary>
-    public bool IsSubAgent { get; set; }
+        await PermissionEvaluator.RefreshRulesAsync();
 
-    /// <summary>子 Agent 名称</summary>
-    public string? SubAgentName { get; set; }
-
-    /// <summary>是否 workflow 运行</summary>
-    public bool IsWorkflowRun { get; set; }
-
-    /// <summary>workflow 定义 ID</summary>
-    public Guid? WorkflowId { get; set; }
-
-    /// <summary>workflow 执行 ID</summary>
-    public string? WorkflowExecutionId { get; set; }
-
-    /// <summary>workflow 节点名称</summary>
-    public string? WorkflowNodeName { get; set; }
-
-    /// <summary>Shell 命令</summary>
-    public string? ShellCommand { get; set; }
-
-    /// <summary>是否破坏性工具</summary>
-    public bool IsDestructive { get; set; }
-
-    /// <summary>工具参数</summary>
-    public Dictionary<string, object?>? Arguments { get; set; }
-}
-
-/// <summary>
-/// 权限评估结果
-/// </summary>
-public class PermissionEvaluateResultDto
-{
-    public string ToolName { get; set; } = string.Empty;
-    public PermissionBehavior Behavior { get; set; }
-    public string? Reason { get; set; }
-    public ToolPermissionScope? Scope { get; set; }
-    public string? MatchedRulePattern { get; set; }
-    public string? MatchedToolGroup { get; set; }
-    public string? MatchedServerName { get; set; }
-    public string? MatchedPathPrefix { get; set; }
-    public string? MatchedSubAgentName { get; set; }
-    public string? MatchedWorkflowNodeName { get; set; }
+        return ApiResult.Ok();
+    }
 }

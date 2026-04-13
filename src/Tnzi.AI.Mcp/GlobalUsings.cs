@@ -20,6 +20,7 @@ global using Tnzi.AI.Engine;
 global using Tnzi.AI.Entities;
 global using Tnzi.AI.Entities.Configs;
 global using Tnzi.AI.Mcp.Server;
+global using Tnzi.AI.Mcp.Services.Interfaces;
 global using McpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 global using Tnzi.AI.Options;
 global using Tnzi.AI.Services.Interfaces;

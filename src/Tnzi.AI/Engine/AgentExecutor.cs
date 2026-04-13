@@ -410,7 +410,22 @@ public class AgentExecutor
             return messages;
         }
 
-        return await _options.HistoryReducer.ReduceAsync(messages, ct);
+        var reductionResult = await _options.HistoryReducer.ReduceAsync(messages, ct);
+
+        if (reductionResult.OriginalMessageCount != reductionResult.ReducedMessageCount)
+        {
+            _options.Logger?.LogInformation(
+                "History reduced by {Strategy}: {OriginalMessages}→{ReducedMessages} messages, ~{OriginalTokens}→{ReducedTokens} tokens ({TokensSaved} saved, {Ratio:P0} ratio)",
+                reductionResult.StrategyName,
+                reductionResult.OriginalMessageCount,
+                reductionResult.ReducedMessageCount,
+                reductionResult.EstimatedOriginalTokens,
+                reductionResult.EstimatedReducedTokens,
+                reductionResult.TokensSaved,
+                reductionResult.CompressionRatio);
+        }
+
+        return reductionResult.Messages;
     }
 
     /// <summary>

@@ -4,6 +4,8 @@
  * Event bus for cross-module communication.
  */
 
+import { useLogger } from '../logger';
+
 // ============================================
 // Type Definitions
 // ============================================
@@ -58,13 +60,7 @@ export interface EventBusOptions {
   maxListeners?: number;
 }
 
-/**
- * Event bus runtime for managing active event bus.
- */
-export interface EventBusRuntime {
-  eventBus: EventBus;
-  use(): EventBus;
-}
+// EventBusRuntime removed — use setEventBusAdapter/useEventBus/resetEventBusAdapter instead
 
 // ============================================
 // Event Bus Implementation
@@ -79,7 +75,7 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
 
   const log = (...args: unknown[]) => {
     if (debug) {
-      console.debug('[EventBus]', ...args);
+      useLogger().debug('[EventBus]', ...args);
     }
   };
 
@@ -94,7 +90,7 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
 
       // Check max listeners
       if (handlers.size >= maxListeners) {
-        console.warn(`[EventBus] Max listeners (${maxListeners}) reached for event: ${event}`); // TODO: Replace with logger injection
+        useLogger().warn(`[EventBus] Max listeners (${maxListeners}) reached for event: ${event}`);
       }
 
       handlers.add(handler as EventHandler);
@@ -156,7 +152,7 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
         try {
           handler(payload as T);
         } catch (error) {
-          console.error(`[EventBus] Error in handler for event "${event}":`, error); // TODO: Replace with logger injection
+          useLogger().error(`[EventBus] Error in handler for event "${event}":`, error);
         }
       }
     },
@@ -174,54 +170,20 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
 }
 
 // ============================================
-// Event Bus Runtime
+// Singleton
 // ============================================
 
-/**
- * Create event bus runtime.
- */
-export function createEventBusRuntime(options: EventBusOptions = {}): EventBusRuntime {
-  const eventBus = createEventBus(options);
+const _fallback: EventBus = createEventBus();
+let _active: EventBus | null = null;
 
-  return {
-    eventBus,
-    use(): EventBus {
-      return eventBus;
-    },
-  };
+export function setEventBusAdapter(eventBus: EventBus): void {
+  _active = eventBus;
 }
 
-// ============================================
-// Default Runtime Instance
-// ============================================
-
-const defaultEventBusRuntime = createEventBusRuntime();
-let activeEventBusRuntime: EventBusRuntime = defaultEventBusRuntime;
-
-/**
- * Set active event bus runtime.
- */
-export function setActiveEventBusRuntime(runtime: EventBusRuntime): void {
-  activeEventBusRuntime = runtime;
-}
-
-/**
- * Get active event bus runtime.
- */
-export function getActiveEventBusRuntime(): EventBusRuntime {
-  return activeEventBusRuntime;
-}
-
-/**
- * Get active event bus (convenience function).
- */
 export function useEventBus(): EventBus {
-  return activeEventBusRuntime.use();
+  return _active ?? _fallback;
 }
 
-/**
- * Reset event bus runtime to default. For tests and SSR isolation.
- */
-export function resetEventBusRuntime(): void {
-  activeEventBusRuntime = defaultEventBusRuntime;
+export function resetEventBusAdapter(): void {
+  _active = null;
 }

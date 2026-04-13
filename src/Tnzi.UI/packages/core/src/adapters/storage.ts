@@ -57,9 +57,10 @@ export interface StorageOptions {
 // Internal Helpers
 // ============================================
 
+import { useLogger } from './logger';
+
 /**
  * Log a warning when a storage write fails (e.g. quota exceeded).
- * Uses console.warn so the issue is visible during development without crashing.
  */
 function warnStorageError(operation: string, key: string, error: unknown): void {
   const isQuotaError =
@@ -67,9 +68,9 @@ function warnStorageError(operation: string, key: string, error: unknown): void 
     (error.code === 22 || error.code === 1014 || error.name === 'QuotaExceededError');
 
   if (isQuotaError) {
-    console.warn(`[Storage] Quota exceeded on ${operation}("${key}"). Consider clearing unused data.`); // TODO: Replace with logger injection
+    useLogger().warn(`[Storage] Quota exceeded on ${operation}("${key}"). Consider clearing unused data.`);
   } else {
-    console.warn(`[Storage] ${operation}("${key}") failed:`, error); // TODO: Replace with logger injection
+    useLogger().warn(`[Storage] ${operation}("${key}") failed:`, error);
   }
 }
 
@@ -78,24 +79,23 @@ function warnStorageError(operation: string, key: string, error: unknown): void 
 // ============================================
 
 /**
- * Create localStorage adapter with type-safe operations.
+ * Shared factory for Web Storage API adapters (localStorage/sessionStorage).
  */
-export function createLocalStorageAdapter(prefix: string = ''): StorageAdapter {
-  const storage = typeof window !== 'undefined' ? window.localStorage : null;
+function createWebStorageAdapter(
+  getStorage: () => Storage | null,
+  prefix: string
+): StorageAdapter {
+  const storage = typeof window !== 'undefined' ? getStorage() : null;
 
   return {
-    // String-based operations
     getItem(key: string): string | null {
       if (!storage) return null;
       return storage.getItem(prefix + key);
     },
     setItem(key: string, value: string): void {
       if (!storage) return;
-      try {
-        storage.setItem(prefix + key, value);
-      } catch (e) {
-        warnStorageError('localStorage.setItem', key, e);
-      }
+      try { storage.setItem(prefix + key, value); }
+      catch (e) { warnStorageError('setItem', key, e); }
     },
     removeItem(key: string): void {
       if (!storage) return;
@@ -110,25 +110,17 @@ export function createLocalStorageAdapter(prefix: string = ''): StorageAdapter {
         storage.clear();
       }
     },
-
-    // Type-safe operations
     get<T>(key: string): T | null {
       if (!storage) return null;
       try {
         const item = storage.getItem(prefix + key);
         return item ? JSON.parse(item) : null;
-      } catch {
-        return null;
-      }
+      } catch { return null; }
     },
     set<T>(key: string, value: T): void {
       if (!storage) return;
-      try {
-        const serialized = JSON.stringify(value);
-        storage.setItem(prefix + key, serialized);
-      } catch (e) {
-        warnStorageError('localStorage.set', key, e);
-      }
+      try { storage.setItem(prefix + key, JSON.stringify(value)); }
+      catch (e) { warnStorageError('set', key, e); }
     },
     remove(key: string): void {
       if (!storage) return;
@@ -153,78 +145,17 @@ export function createLocalStorageAdapter(prefix: string = ''): StorageAdapter {
 }
 
 /**
+ * Create localStorage adapter with type-safe operations.
+ */
+export function createLocalStorageAdapter(prefix: string = ''): StorageAdapter {
+  return createWebStorageAdapter(() => window.localStorage, prefix);
+}
+
+/**
  * Create sessionStorage adapter with type-safe operations.
  */
 export function createSessionStorageAdapter(prefix: string = ''): StorageAdapter {
-  const storage = typeof window !== 'undefined' ? window.sessionStorage : null;
-
-  return {
-    // String-based operations
-    getItem(key: string): string | null {
-      if (!storage) return null;
-      return storage.getItem(prefix + key);
-    },
-    setItem(key: string, value: string): void {
-      if (!storage) return;
-      try {
-        storage.setItem(prefix + key, value);
-      } catch (e) {
-        warnStorageError('sessionStorage.setItem', key, e);
-      }
-    },
-    removeItem(key: string): void {
-      if (!storage) return;
-      storage.removeItem(prefix + key);
-    },
-    clear(): void {
-      if (!storage) return;
-      if (prefix) {
-        const keys = Object.keys(storage).filter(k => k.startsWith(prefix));
-        keys.forEach(k => storage.removeItem(k));
-      } else {
-        storage.clear();
-      }
-    },
-
-    // Type-safe operations
-    get<T>(key: string): T | null {
-      if (!storage) return null;
-      try {
-        const item = storage.getItem(prefix + key);
-        return item ? JSON.parse(item) : null;
-      } catch {
-        return null;
-      }
-    },
-    set<T>(key: string, value: T): void {
-      if (!storage) return;
-      try {
-        const serialized = JSON.stringify(value);
-        storage.setItem(prefix + key, serialized);
-      } catch (e) {
-        warnStorageError('sessionStorage.set', key, e);
-      }
-    },
-    remove(key: string): void {
-      if (!storage) return;
-      storage.removeItem(prefix + key);
-    },
-    keys(): string[] {
-      if (!storage) return [];
-      const result: string[] = [];
-      for (let i = 0; i < storage.length; i++) {
-        const key = storage.key(i);
-        if (key && (!prefix || key.startsWith(prefix))) {
-          result.push(prefix ? key.slice(prefix.length) : key);
-        }
-      }
-      return result;
-    },
-    has(key: string): boolean {
-      if (!storage) return false;
-      return storage.getItem(prefix + key) !== null;
-    },
-  };
+  return createWebStorageAdapter(() => window.sessionStorage, prefix);
 }
 
 /**
@@ -271,112 +202,22 @@ export function createMemoryStorageAdapter(): StorageAdapter {
 }
 
 // ============================================
-// Storage Runtime
+// Singleton
 // ============================================
 
-/**
- * Storage runtime for managing active adapter.
- */
-export interface StorageRuntime {
-  /** Set current storage adapter */
-  setAdapter(adapter: StorageAdapter): void;
-  /** Get current storage adapter */
-  use(): StorageAdapter;
-  /** Reset to default adapter */
-  reset(): void;
-}
+const _fallback: StorageAdapter = createLocalStorageAdapter();
+let _active: StorageAdapter | null = null;
 
-/**
- * Storage runtime options.
- */
-export interface StorageRuntimeOptions {
-  /** Default storage type */
-  defaultType?: StorageType;
-  /** Initial adapter */
-  adapter?: StorageAdapter;
-}
-
-/**
- * Create storage runtime.
- */
-export function createStorageRuntime(options: StorageRuntimeOptions = {}): StorageRuntime {
-  const { defaultType = 'local', adapter: initialAdapter } = options;
-
-  // Create default adapter
-  function createDefaultStorage(type: StorageType): StorageAdapter {
-    switch (type) {
-      case 'session':
-        return createSessionStorageAdapter();
-      case 'memory':
-        return createMemoryStorageAdapter();
-      case 'local':
-      default:
-        return createLocalStorageAdapter();
-    }
-  }
-
-  let currentAdapter: StorageAdapter = initialAdapter ?? createDefaultStorage(defaultType);
-
-  return {
-    setAdapter(newAdapter: StorageAdapter): void {
-      currentAdapter = newAdapter;
-    },
-    use(): StorageAdapter {
-      return currentAdapter;
-    },
-    reset(): void {
-      currentAdapter = initialAdapter ?? createDefaultStorage(defaultType);
-    },
-  };
-}
-
-// ============================================
-// Default Runtime Instance
-// ============================================
-
-const defaultStorageRuntime = createStorageRuntime();
-let activeStorageRuntime: StorageRuntime = defaultStorageRuntime;
-
-/**
- * Set active storage runtime.
- */
-export function setActiveStorageRuntime(runtime: StorageRuntime): void {
-  activeStorageRuntime = runtime;
-}
-
-/**
- * Get active storage runtime.
- */
-export function getActiveStorageRuntime(): StorageRuntime {
-  return activeStorageRuntime;
-}
-
-/**
- * Get active storage adapter (convenience function).
- */
-export function useStorage(): StorageAdapter {
-  return activeStorageRuntime.use();
-}
-
-/**
- * Set storage adapter (convenience function).
- */
 export function setStorageAdapter(adapter: StorageAdapter): void {
-  activeStorageRuntime.setAdapter(adapter);
+  _active = adapter;
 }
 
-/**
- * Reset storage adapter (convenience function).
- */
+export function useStorage(): StorageAdapter {
+  return _active ?? _fallback;
+}
+
 export function resetStorageAdapter(): void {
-  activeStorageRuntime.reset();
-}
-
-/**
- * Reset storage runtime to default. For tests and SSR isolation.
- */
-export function resetStorageRuntime(): void {
-  activeStorageRuntime = defaultStorageRuntime;
+  _active = null;
 }
 
 // ============================================

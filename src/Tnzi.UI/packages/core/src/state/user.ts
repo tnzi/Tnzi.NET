@@ -5,11 +5,11 @@
  */
 
 import { reactive } from '@vue/reactivity';
-import type { UserState, UserPreferences, RecentItem } from '../stores/user/index';
-import { defaultUserPreferences } from '../stores/user/index';
+import type { UserState, UserPreferences, RecentItem } from './types/user';
+import { defaultUserPreferences } from './types/user';
 import type { UserDto, UpdateUserDto } from '../services/identity/types';
 import { useProfileApi } from '../services/identity/index';
-import type { StateDeps } from './types';
+import type { StateDeps } from './types/deps';
 
 // ============================================
 // Initial state

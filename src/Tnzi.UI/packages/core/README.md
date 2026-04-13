@@ -13,7 +13,7 @@ pnpm add @tnzi/core
 ```typescript
 import type { UserDto } from "@tnzi/core/services/identity";
 import type { ApiResult, PagedList } from "@tnzi/core/types";
-import type { ILoginFormProps, IDataTableProps } from "@tnzi/core/components";
+import type { ILoginFormProps, ILoginFormEmits } from "@tnzi/core/components";
 ```
 
 ### HTTP 客户端
@@ -66,10 +66,18 @@ import { loginSchema } from "@tnzi/core/services/identity";
 import { provideI18n, useI18n } from "@tnzi/core/adapters/i18n";
 ```
 
-### 无头数据状态工具
+### 无头控制器 & 工具
 
 ```typescript
-import { calculateTotalPages, clampPageIndex, toggleSort } from "@tnzi/core/utils";
+import { PaginationController, SortController, FormController } from "@tnzi/core/headless";
+import { calculateTotalPages, clampPageIndex, updatePageQuery } from "@tnzi/core/headless";
+```
+
+### 状态管理
+
+```typescript
+import type { AuthState, UserState, AppState } from "@tnzi/core/state";
+import { AuthStateManager, UserStateManager, AppStateManager } from "@tnzi/core/state";
 ```
 
 ## 服务覆盖
@@ -86,12 +94,14 @@ import { calculateTotalPages, clampPageIndex, toggleSort } from "@tnzi/core/util
 | AI           | ✅   | ✅  | ⏳     |
 | App          | ✅   | ✅  | ✅     |
 
-## OpenAPI 生成 API（可选）
+## OpenAPI Codegen（可选）
 
-每个服务模块均包含 `generated/` 入口（例如 `@tnzi/core/services/identity` 下的 `generated/api.generated.ts`），统一通过 `Tnzi.Cli` 生成并更新：
+当前 service 层类型为手写维护。可通过 `Tnzi.Cli` 从 OpenAPI spec 自动生成到 `{module}/generated/` 目录：
 
 ```bash
-pnpm -C src/Tnzi.UI contracts:sync
+# 前提: 安装 tnzi CLI + 项目根目录有 tnzi.json
+pnpm -C src/Tnzi.UI codegen:url   # 从运行中的后端生成
+pnpm -C src/Tnzi.UI codegen       # 从本地 openapi.json 生成
 ```
 
 ## License

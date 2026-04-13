@@ -5,16 +5,12 @@
  * Provides framework-agnostic state management interface definitions.
  */
 
-import type { StorageAdapter } from '../storage';
-
 // ============================================
 // Type Definitions
 // ============================================
 
-/**
- * Unsubscribe function type for store subscriptions.
- */
-export type Unsubscribe = () => void;
+// Unsubscribe type re-exported from event-bus (single canonical definition)
+export type { Unsubscribe } from '../event-bus';
 
 /**
  * Generic computed/ref type for getters.
@@ -136,34 +132,6 @@ export interface StoreFactory {
 }
 
 // ============================================
-// Store Runtime Interface
-// ============================================
-
-/**
- * Store runtime for managing store factory and persistence.
- */
-export interface StoreRuntime {
-  /** Store factory */
-  factory: StoreFactory;
-  /** Storage adapter for persistence */
-  storageAdapter?: StorageAdapter;
-  /** Install to framework (e.g., Vue app) */
-  install(app: unknown): void;
-  /**
-   * Get store by id.
-   */
-  useStore(id: string): StoreInstance<unknown, StoreGetters<unknown>, StoreActions<unknown>> | undefined;
-}
-
-/**
- * Store runtime options.
- */
-export interface StoreRuntimeOptions {
-  /** Storage adapter for persistence */
-  storageAdapter?: StorageAdapter;
-}
-
-// ============================================
 // Dependency Injection
 // ============================================
 
@@ -192,7 +160,7 @@ export type WithDeps<T> = T & {
 /**
  * Create a store adapter instance.
  * Note: This is a base implementation - concrete implementations
- * are provided by consuming packages (e.g., Pinia in @tnzi/shadcn).
+ * are provided by consuming packages (e.g., Pinia in @tnzi/ui).
  */
 export function createStoreAdapter(): StoreFactory {
   // Base implementation - concrete implementation provided by consuming packages.
@@ -201,7 +169,7 @@ export function createStoreAdapter(): StoreFactory {
     defineStore() {
       throw new Error(
         'StoreFactory.defineStore() is not implemented. ' +
-        'Install a store runtime (e.g. createPiniaRuntime from @tnzi/shadcn) before defining stores.'
+        'Install a store runtime (e.g. createPiniaRuntime from @tnzi/ui) before defining stores.'
       );
     },
     getStore: () => undefined,
@@ -210,90 +178,28 @@ export function createStoreAdapter(): StoreFactory {
   };
 }
 
-/**
- * Create store runtime.
- */
-export function createStoreRuntime(options: StoreRuntimeOptions = {}): StoreRuntime {
-  const { storageAdapter } = options;
-  const factory = createStoreAdapter();
-
-  return {
-    factory,
-    storageAdapter,
-    install(_app: unknown): void {
-      // Base implementation - concrete implementation provided by consuming packages
-    },
-    useStore(id: string) {
-      return factory.getStore(id);
-    },
-  };
-}
-
 // ============================================
-// Default Runtime Instance
+// Singleton
 // ============================================
 
-const defaultStoreRuntime = createStoreRuntime();
-let activeStoreRuntime: StoreRuntime = defaultStoreRuntime;
+const _fallback: StoreFactory = createStoreAdapter();
+let _active: StoreFactory | null = null;
 
-/**
- * Set active store runtime.
- */
-export function setActiveStoreRuntime(runtime: StoreRuntime): void {
-  activeStoreRuntime = runtime;
+export function setStoreAdapter(factory: StoreFactory): void {
+  _active = factory;
 }
 
-/**
- * Get active store runtime.
- */
-export function getActiveStoreRuntime(): StoreRuntime {
-  return activeStoreRuntime;
+export function useStore(): StoreFactory {
+  return _active ?? _fallback;
 }
 
-/**
- * Get store factory (convenience function).
- */
-export function getStoreFactory(): StoreFactory {
-  return activeStoreRuntime.factory;
+export function resetStoreAdapter(): void {
+  _active = null;
 }
 
-/**
- * Get store by id (convenience function).
- */
-export function useStore(id: string): StoreInstance<unknown, StoreGetters<unknown>, StoreActions<unknown>> | undefined {
-  return activeStoreRuntime.useStore(id);
-}
-
-/**
- * Get all store IDs (convenience function).
- */
-export function getStoreIds(): string[] {
-  return activeStoreRuntime.factory.getStoreIds();
-}
-
-/**
- * Define a store (convenience function).
- */
-export function defineStore<
-  State,
-  Getters extends StoreGetters<State>,
-  Actions extends StoreActions<State>
->(
-  options: StoreOptions<State, Getters, Actions>
-): StoreInstance<State, Getters, Actions> {
-  return activeStoreRuntime.factory.defineStore<State, Getters, Actions>(options);
-}
-
-/**
- * Remove a store (convenience function).
- */
-export function removeStore(id: string): void {
-  activeStoreRuntime.factory.removeStore(id);
-}
-
-/**
- * Reset store runtime to default. For tests and SSR isolation.
- */
-export function resetStoreRuntime(): void {
-  activeStoreRuntime = defaultStoreRuntime;
-}
+/** @deprecated Use `setStoreAdapter` instead */
+export const setStoreFactory = setStoreAdapter;
+/** @deprecated Use `useStore` instead */
+export const useStoreFactory = useStore;
+/** @deprecated Use `resetStoreAdapter` instead */
+export const resetStoreRuntime = resetStoreAdapter;

@@ -1,6 +1,6 @@
 # UI 包开发规范 (UI Package Development Guide)
 
-> 本文档定义了 `@tnzi/{shadcn|vant|naive-ui}` UI 包的开发规范和最佳实践，适用于新建和维护 UI 包。
+> 本文档定义了 `@tnzi/{ui|ui-admin|ai|mobile}` UI 包的开发规范和最佳实践，适用于新建和维护 UI 包。
 
 ## 目录
 
@@ -224,7 +224,7 @@ app.mount('#app');
 - **单页集中展示** — 不使用路由，所有功能在一个页面
 - **分区域组织** — 使用卡片/面板区分不同功能模块
 - **交互式演示** — 每个功能提供按钮触发，显示实时结果
-- **参考示例：** `packages/vant/playground/src/App.vue`
+- **参考示例：** `packages/mobile/playground/src/App.vue`
 
 **必须展示的内容：**
 
@@ -342,7 +342,7 @@ function showMessage() {
 | naive-ui | ✅ 良好 | 新创建，功能完整 |
 | shadcn | ⚠️ 需改进 | 目前仅测试 i18n，需补充适配器/Store/组件展示 |
 
-**参考模板：** `packages/vant/playground/src/App.vue` （最佳实践）
+**参考模板：** `packages/mobile/playground/src/App.vue` （最佳实践）
 
 ---
 
@@ -577,11 +577,22 @@ const handleSubmit = () => {
 <!-- packages/{ui-package}/src/components/data/TDataTable.vue -->
 <script setup lang="ts">
 import { DataQueryController } from '@tnzi/core/headless';
-import type { IDataTableProps, IDataTableEmits } from '@tnzi/core/components';
+import type { ITableColumn, IPaginationConfig } from '@tnzi/core/types/shared-ui';
 import { NDataTable, NPagination } from 'naive-ui';
 
-const props = defineProps<IDataTableProps>();
-const emit = defineEmits<IDataTableEmits>();
+// Props 直接内联定义于 defineProps (Vue 3 泛型推断最佳实践)
+const props = defineProps<{
+  data: unknown[];
+  columns: ITableColumn[];
+  controller?: DataQueryController;
+  fetchFn?: () => Promise<unknown>;
+  pageSize?: number;
+  immediate?: boolean;
+}>();
+const emit = defineEmits<{
+  sort: [field: string, order: 'asc' | 'desc'];
+  pageChange: [pageIndex: number, pageSize: number];
+}>();
 
 // 接收或创建 headless 控制器
 const controller = props.controller ?? new DataQueryController({
@@ -678,7 +689,7 @@ export function createTnziXxx(options: TnziXxxOptions = {}): Plugin {
 
 ### Plugin 规则
 
-1. **工厂函数命名**: `createTnzi{Framework}` — `createTnziShadcn`, `createTnziVant`, `createTnziNaiveUi`
+1. **工厂函数命名**: `createTnzi{Framework}` — `createTnziShadcn`, `createTnziMobile`, `createTnziNaiveUi`
 2. **必须返回 Vue Plugin 对象** (`{ install(app: App) }`)
 3. **Options 中的布尔开关默认为 `true`**（开箱即用）
 4. **适配器注册必须在 install 中完成**
@@ -764,8 +775,8 @@ export { TDataTable } from './components/data/TDataTable.vue';
 | **Plugin 工厂** | `createTnzi{Framework}` | `createTnziNaiveUi` |
 | **Composable** | `use{Framework}{Feature}` | `useNaiveTheme`, `useShadcnDialog` |
 | **Resolver** | `Tnzi{Framework}Resolver` | `TnziNaiveUiResolver` |
-| **组件 Props** | `I{Component}Props` | `ILoginFormProps`, `IDataTableProps` |
-| **组件 Emits** | `I{Component}Emits` | `ILoginFormEmits`, `IDataTableEmits` |
+| **组件 Props** | 内联 `defineProps<{...}>()` 或 `I{Component}Props` | `ILoginFormProps`（core 契约层导出） |
+| **组件 Emits** | 内联 `defineEmits<{...}>()` 或 `I{Component}Emits` | `ILoginFormEmits`（core 契约层导出） |
 
 ### 文件命名
 
@@ -860,7 +871,7 @@ describe('createNaiveMessageAdapter', () => {
 pnpm test
 
 # 运行单个包的测试
-pnpm --filter @tnzi/naive-ui test
+pnpm --filter @tnzi/ui-admin test
 
 # 类型检查
 pnpm typecheck

@@ -17,10 +17,10 @@
       "import": "./dist/services/*/index.js",
       "require": "./dist/services/*/index.cjs"
     },
-    "./components": {
-      "types": "./dist/components/index.d.ts",
-      "import": "./dist/components/index.js",
-      "require": "./dist/components/index.cjs"
+    "./types/shared-ui": {
+      "types": "./dist/types/shared-ui.d.ts",
+      "import": "./dist/types/shared-ui.js",
+      "require": "./dist/types/shared-ui.cjs"
     },
     "./types": {
       "types": "./dist/types/index.d.ts",
@@ -77,11 +77,6 @@
       "import": "./dist/composables/index.js",
       "require": "./dist/composables/index.cjs"
     },
-    "./stores/*": {
-      "types": "./dist/stores/*/index.d.ts",
-      "import": "./dist/stores/*/index.js",
-      "require": "./dist/stores/*/index.cjs"
-    },
     "./enums": {
       "types": "./dist/enums/index.d.ts",
       "import": "./dist/enums/index.js",
@@ -106,11 +101,6 @@
       "types": "./dist/errors/index.d.ts",
       "import": "./dist/errors/index.js",
       "require": "./dist/errors/index.cjs"
-    },
-    "./playground": {
-      "types": "./dist/playground/index.d.ts",
-      "import": "./dist/playground/index.js",
-      "require": "./dist/playground/index.cjs"
     }
   },
   "publishConfig": {

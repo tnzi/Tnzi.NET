@@ -5,31 +5,27 @@
 /**
  * Standard API response wrapper from Tnzi.NET backend.
  *
- * Both PascalCase and camelCase properties exist for backward compatibility:
- * - The backend serializes with PascalCase (`Code`, `Success`) by default.
- * - The frontend normalizes to camelCase (`code`, `succeeded`) for idiomatic JS.
- * - Both sets are kept in sync so consumers can use either convention.
+ * The backend serializes with `JsonNamingPolicy.CamelCase`, producing:
+ * `succeeded`, `success`, `code`, `data`, `message`, `errorCode`, `errorDetails`.
  *
  * Use the helper functions `isSuccess()`, `isFailed()`, `normalizeApiResult()`
  * from `@tnzi/core/http` instead of checking fields directly.
  */
 export interface ApiResult<T = unknown> {
-  /** Whether the operation succeeded (camelCase alias of `Success`). */
+  /** 操作是否成功 (BaseResult.Succeeded) */
   succeeded: boolean;
-  /** Human-readable message. */
-  message?: string;
-  /** HTTP status code (camelCase alias of `Code`). */
-  code?: number;
-  /** Application-specific error code. */
-  errorCode?: string;
-  /** Additional error details. */
-  errorDetails?: Record<string, unknown>;
-  /** Response data payload. */
+  /** HTTP 2xx 计算属性 (ApiResult.Success) */
+  success: boolean;
+  /** HTTP 状态码 (Result.Code) */
+  code: number;
+  /** 响应数据 */
   data: T;
-  /** @deprecated Use `code` instead. Kept for backward compatibility with PascalCase backends. */
-  Code: number;
-  /** @deprecated Use `succeeded` instead. Kept for backward compatibility with PascalCase backends. */
-  Success: boolean;
+  /** 消息 */
+  message?: string;
+  /** 业务错误码 */
+  errorCode?: string;
+  /** 错误详情 */
+  errorDetails?: Record<string, unknown>;
 }
 
 /**

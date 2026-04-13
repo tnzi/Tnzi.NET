@@ -17,16 +17,6 @@ export interface MessageAdapter {
   loading(content: string, options?: MessageOptions): () => void;
 }
 
-export interface MessageRuntime {
-  setAdapter(newAdapter: MessageAdapter): void;
-  use(): MessageAdapter;
-  reset(): void;
-}
-
-export interface MessageRuntimeOptions {
-  adapter?: MessageAdapter;
-}
-
 class ConsoleMessageAdapter implements MessageAdapter {
   info(content: string) {
     console.log(`[Info] ${content}`);
@@ -46,53 +36,21 @@ class ConsoleMessageAdapter implements MessageAdapter {
   }
 }
 
-function createDefaultMessageAdapter(): MessageAdapter {
-  return new ConsoleMessageAdapter();
+// ============================================
+// Singleton
+// ============================================
+
+const _fallback: MessageAdapter = new ConsoleMessageAdapter();
+let _active: MessageAdapter | null = null;
+
+export function setMessageAdapter(adapter: MessageAdapter): void {
+  _active = adapter;
 }
 
-export function createMessageRuntime(options: MessageRuntimeOptions = {}): MessageRuntime {
-  const defaultAdapter = createDefaultMessageAdapter();
-  let adapter: MessageAdapter = options.adapter ?? defaultAdapter;
-
-  return {
-    setAdapter(newAdapter: MessageAdapter) {
-      adapter = newAdapter;
-    },
-    use() {
-      return adapter;
-    },
-    reset() {
-      adapter = defaultAdapter;
-    },
-  };
+export function useMessage(): MessageAdapter {
+  return _active ?? _fallback;
 }
 
-const defaultMessageRuntime = createMessageRuntime();
-let activeMessageRuntime: MessageRuntime = defaultMessageRuntime;
-
-export function setActiveMessageRuntime(runtime: MessageRuntime): void {
-  activeMessageRuntime = runtime;
-}
-
-export function getActiveMessageRuntime(): MessageRuntime {
-  return activeMessageRuntime;
-}
-
-export function useMessage() {
-  return activeMessageRuntime.use();
-}
-
-export function setMessageAdapter(newAdapter: MessageAdapter) {
-  activeMessageRuntime.setAdapter(newAdapter);
-}
-
-export function resetMessageAdapter() {
-  activeMessageRuntime.reset();
-}
-
-/**
- * Reset message runtime to default. For tests and SSR isolation.
- */
-export function resetMessageRuntime(): void {
-  activeMessageRuntime = defaultMessageRuntime;
+export function resetMessageAdapter(): void {
+  _active = null;
 }

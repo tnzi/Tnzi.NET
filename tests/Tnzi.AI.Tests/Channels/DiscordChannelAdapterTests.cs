@@ -37,7 +37,7 @@ public class DiscordChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new DiscordChannelAdapter(
             NullLogger<DiscordChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -52,7 +52,7 @@ public class DiscordChannelAdapterTests
 
         Should.Throw<ArgumentException>(() => new DiscordChannelAdapter(
             NullLogger<DiscordChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             CreateMockHttpClientFactory().Object,
             options));
     }
@@ -123,7 +123,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_PingInteraction_DoesNotPublish()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new { type = 1 });
@@ -136,7 +136,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_BotMessage_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -160,7 +160,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonMessageEvent_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -178,7 +178,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_ValidMessage_PublishesToBus()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -208,7 +208,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_CommandMessage_DetectedCorrectly()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -233,7 +233,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_MessageWithReference_PreservesThreadId()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -259,7 +259,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedChannel_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedChannels: ["C999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -283,7 +283,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedUser_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedUsers: ["U999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -307,7 +307,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_NonAllowedGuild_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, allowedGuilds: ["G999"]);
 
         var json = JsonSerializer.Serialize(new
@@ -339,7 +339,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public async Task HandleEventAsync_EmptyContent_Ignored()
     {
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus);
 
         var json = JsonSerializer.Serialize(new
@@ -588,7 +588,7 @@ public class DiscordChannelAdapterTests
 
         return new DiscordChannelAdapter(
             NullLogger<DiscordChannelAdapter>.Instance,
-            bus ?? new InMemoryChannelMessageBus(),
+            bus ?? new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             factory,
             options);
     }

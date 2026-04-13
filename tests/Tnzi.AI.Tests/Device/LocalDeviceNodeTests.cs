@@ -20,7 +20,7 @@ public class LocalDeviceNodeTests
         _node.Name.ShouldBe(Environment.MachineName);
         _node.State.ShouldBe(DeviceConnectionState.Connected);
         _node.Capabilities.ShouldNotBeEmpty();
-        _node.Capabilities.Count.ShouldBeGreaterThanOrEqualTo(5);
+        _node.Capabilities.Count.ShouldBeGreaterThanOrEqualTo(2);
     }
 
     [Fact]

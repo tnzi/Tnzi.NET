@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace Tnzi.AI.Services;
 
 /// <summary>

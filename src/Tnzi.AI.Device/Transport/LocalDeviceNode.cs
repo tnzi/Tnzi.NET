@@ -18,11 +18,10 @@ public class LocalDeviceNode : IDeviceNode
 
     public IReadOnlyList<DeviceCapability> Capabilities { get; } =
     [
-        new("screenshot", ["capture", "region"]),
         new("clipboard", ["read", "write"]),
         new("notification", ["send"]),
-        new("system", ["run", "info"], DevicePermissionLevel.Elevated),
-        new("file", ["read", "write", "list"])
+        new("system", ["run", "info"], DevicePermissionLevel.Elevated)
+        // screenshot and file families not yet implemented — add when InvokeAsync handles them
     ];
 
     public async Task<DeviceCommandResult> InvokeAsync(DeviceCommand command, CancellationToken cancellationToken = default)

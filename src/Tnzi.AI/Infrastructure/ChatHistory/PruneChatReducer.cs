@@ -19,16 +19,19 @@ namespace Tnzi.AI.Infrastructure.ChatHistory;
 public sealed class PruneChatReducer : IHistoryReducer
 {
     private readonly PruneOptions _options;
+    private readonly ITokenEstimator _tokenEstimator;
     private readonly ILogger<PruneChatReducer> _logger;
 
     /// <summary>
     /// 初始化 PruneChatReducer
     /// </summary>
     /// <param name="options">裁剪配置选项</param>
+    /// <param name="tokenEstimator">Token 估算器</param>
     /// <param name="logger">日志记录器</param>
-    public PruneChatReducer(PruneOptions options, ILogger<PruneChatReducer> logger)
+    public PruneChatReducer(PruneOptions options, ITokenEstimator tokenEstimator, ILogger<PruneChatReducer> logger)
     {
         _options = Check.NotNull(options);
+        _tokenEstimator = Check.NotNull(tokenEstimator);
         _logger = Check.NotNull(logger);
     }
 
@@ -38,15 +41,16 @@ public sealed class PruneChatReducer : IHistoryReducer
     /// <param name="messages">原始消息列表</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>裁剪后的消息列表</returns>
-    public Task<List<ChatMessage>> ReduceAsync(
+    public Task<HistoryReductionResult> ReduceAsync(
         List<ChatMessage> messages,
         CancellationToken ct = default)
     {
         var originalCount = messages.Count;
+        var originalTokens = messages.Sum(m => _tokenEstimator.Estimate(m.Text ?? ""));
 
         if (originalCount == 0)
         {
-            return Task.FromResult(messages);
+            return Task.FromResult(new HistoryReductionResult(messages, 0, 0, 0, 0, "Prune"));
         }
 
         // 计算要保留的消息
@@ -59,7 +63,8 @@ public sealed class PruneChatReducer : IHistoryReducer
                 originalCount, result.Count, _options.KeepLastTurns);
         }
 
-        return Task.FromResult(result);
+        var reducedTokens = result.Sum(m => _tokenEstimator.Estimate(m.Text ?? ""));
+        return Task.FromResult(new HistoryReductionResult(result, originalCount, result.Count, originalTokens, reducedTokens, "Prune"));
     }
 
     /// <summary>

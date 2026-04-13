@@ -19,6 +19,8 @@ public partial class AgentRuntime : IAgentRuntime
     private readonly IEventBus? _eventBus;
     private readonly ILogger<AgentRuntime> _logger;
     private readonly Lazy<List<IAiMiddleware>> _middlewares;
+    private AiMiddlewareDelegate? _cachedPipelineDelegate;
+    private AiStreamingMiddlewareDelegate? _cachedStreamingPipelineDelegate;
 
     public AgentRuntime(
         IAgentResolver agentResolver,
@@ -103,7 +105,6 @@ public partial class AgentRuntime : IAgentRuntime
                 _executionContextAccessor.Properties[ContextPropertyKeys.CurrentRunId] = run.Id;
             }
 
-            // 发布运行开始事件
             await PublishRunStartedEventAsync(request, run, false, resolution.Provider, resolution.Model, resolution.ExecutionMode);
 
             // 3. 构建中间件上下文
@@ -115,26 +116,14 @@ public partial class AgentRuntime : IAgentRuntime
                 ServiceProvider = _serviceProvider
             };
 
-            // 4. 构建中间件管道
-            var middlewares = ResolveMiddlewares();
-            var pipeline = new AiMiddlewarePipeline();
-            foreach (var middleware in middlewares)
-            {
-                pipeline.Use(middleware);
-            }
+            // 4. 获取（或构建）中间件管道委托
+            _cachedPipelineDelegate ??= BuildPipelineDelegate();
 
-            // 5. 定义核心执行器（管道最内层）
-            AiMiddlewareDelegate coreExecutor = async (ctx, ct) =>
-            {
-                return await ExecuteCoreAsync(ctx, ct);
-            };
-
-            // 6. 执行管道
+            // 5. 执行管道
             AgentRunResult result;
             try
             {
-                var pipelineDelegate = pipeline.Build(coreExecutor);
-                result = await pipelineDelegate(context, cancellationToken);
+                result = await _cachedPipelineDelegate(context, cancellationToken);
                 if (run != null)
                 {
                     result = EnsureResultStatus(result);
@@ -167,7 +156,6 @@ public partial class AgentRuntime : IAgentRuntime
                     await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.RunCompleted, result, sw.ElapsedMilliseconds, cancellationToken);
                 }
 
-                // 发布运行完成事件
                 await PublishRunCompletedEventAsync(
                     request,
                     result,
@@ -189,7 +177,6 @@ public partial class AgentRuntime : IAgentRuntime
             {
                 _logger.LogError(ex, "AgentRuntime execution failed for request AgentId={AgentId}", request.AgentId);
 
-                // 发布运行失败事件
                 await PublishRunFailedEventAsync(request, run, ex, sw.ElapsedMilliseconds, false);
 
                 // 更新 Run 状态为失败
@@ -376,7 +363,6 @@ public partial class AgentRuntime : IAgentRuntime
                 _executionContextAccessor.Properties[ContextPropertyKeys.CurrentRunId] = run.Id;
             }
 
-            // 发布运行开始事件
             await PublishRunStartedEventAsync(request, run, true, resolution.Provider, resolution.Model, resolution.ExecutionMode);
 
             // 3. 构建中间件上下文
@@ -388,20 +374,8 @@ public partial class AgentRuntime : IAgentRuntime
                 ServiceProvider = _serviceProvider
             };
 
-            // 4. 构建流式中间件管道
-            var middlewares = ResolveMiddlewares();
-            var pipeline = new AiMiddlewarePipeline();
-            foreach (var middleware in middlewares)
-            {
-                pipeline.Use(middleware);
-            }
-
-            AiStreamingMiddlewareDelegate coreExecutor = (ctx, ct) =>
-            {
-                return ExecuteCoreStreamingAsync(ctx, ct);
-            };
-
-            var streamDelegate = pipeline.BuildStreaming(coreExecutor);
+            // 4. 获取（或构建）流式中间件管道委托
+            _cachedStreamingPipelineDelegate ??= BuildStreamingPipelineDelegate();
 
             // 5. 执行流式管道
             var totalInputTokens = 0;
@@ -413,7 +387,7 @@ public partial class AgentRuntime : IAgentRuntime
 
             try
             {
-                await foreach (var chunk in streamDelegate(context, cancellationToken).WithCancellation(cancellationToken))
+                await foreach (var chunk in _cachedStreamingPipelineDelegate(context, cancellationToken).WithCancellation(cancellationToken))
                 {
                     chunk.Model ??= context.EffectiveModel ?? resolution.Model;
                     lastModel = chunk.Model ?? lastModel;
@@ -482,7 +456,6 @@ public partial class AgentRuntime : IAgentRuntime
                                 new { finishReason = lastFinishReason, inputTokens = totalInputTokens, outputTokens = totalOutputTokens },
                                 sw.ElapsedMilliseconds, CancellationToken.None);
 
-                            // 发布流式运行完成事件
                             await PublishRunCompletedEventAsync(
                                 request,
                                 streamResult,
@@ -511,7 +484,6 @@ public partial class AgentRuntime : IAgentRuntime
                                 new { error = run.Error, finishReason = lastFinishReason },
                                 sw.ElapsedMilliseconds, CancellationToken.None);
 
-                            // 发布流式运行失败事件
                             await PublishRunFailedEventAsync(
                                 request, run,
                                 new InvalidOperationException("Streaming execution failed"),

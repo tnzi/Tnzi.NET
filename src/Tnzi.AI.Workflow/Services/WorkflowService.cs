@@ -9,6 +9,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
     private readonly IRepository<WorkflowExecution, Guid> _executionRepository;
     private readonly IRepository<WorkflowDefinitionVersion, Guid> _versionRepository;
     private readonly IRepository<AgentRun, Guid> _runRepository;
+    private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IUsageLogService _usageLogService;
     private readonly IQuotaService _quotaService;
     private readonly IWorkflowCheckpointStore _checkpointStore;
@@ -19,6 +20,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         IRepository<WorkflowExecution, Guid> executionRepository,
         IRepository<WorkflowDefinitionVersion, Guid> versionRepository,
         IRepository<AgentRun, Guid> runRepository,
+        IRepository<Agent, Guid> agentRepository,
         IUsageLogService usageLogService,
         IQuotaService quotaService,
         IWorkflowCheckpointStore checkpointStore,
@@ -30,6 +32,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         _executionRepository = Check.NotNull(executionRepository);
         _versionRepository = Check.NotNull(versionRepository);
         _runRepository = Check.NotNull(runRepository);
+        _agentRepository = Check.NotNull(agentRepository);
         _usageLogService = Check.NotNull(usageLogService);
         _quotaService = Check.NotNull(quotaService);
         _checkpointStore = Check.NotNull(checkpointStore);

@@ -26,7 +26,7 @@ import type { DataQueryOptions } from '../headless/data-query';
  */
 export interface UseDataQueryOptions<
   TItem,
-  TFilter extends Record<string, unknown> = Record<string, unknown>,
+  TFilter extends object = Record<string, unknown>,
 > extends DataQueryOptions<TItem, TFilter> {
   /**
    * Auto-refresh interval in milliseconds.
@@ -40,7 +40,7 @@ export interface UseDataQueryOptions<
  */
 export type UseDataQueryReturn<
   TItem,
-  TFilter extends Record<string, unknown> = Record<string, unknown>,
+  TFilter extends object = Record<string, unknown>,
 > = DataQueryController<TItem, TFilter> & {
   /**
    * Dispose resources: stops auto-refresh timer and resets the controller.
@@ -62,7 +62,7 @@ export type UseDataQueryReturn<
  */
 export function useDataQuery<
   TItem,
-  TFilter extends Record<string, unknown> = Record<string, unknown>,
+  TFilter extends object = Record<string, unknown>,
 >(options: UseDataQueryOptions<TItem, TFilter>): UseDataQueryReturn<TItem, TFilter> {
   const controller = new DataQueryController<TItem, TFilter>(options);
   let intervalId: ReturnType<typeof setInterval> | null = null;

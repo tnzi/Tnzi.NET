@@ -18,16 +18,6 @@ export interface DialogAdapter {
   prompt(message: string, options?: DialogOptions): Promise<string | null>;
 }
 
-export interface DialogRuntime {
-  setAdapter(newAdapter: DialogAdapter): void;
-  use(): DialogAdapter;
-  reset(): void;
-}
-
-export interface DialogRuntimeOptions {
-  adapter?: DialogAdapter;
-}
-
 class ConsoleDialogAdapter implements DialogAdapter {
   async alert(message: string): Promise<void> {
     console.log(`[Alert] ${message}`);
@@ -45,46 +35,21 @@ class ConsoleDialogAdapter implements DialogAdapter {
   }
 }
 
-function createDefaultDialogAdapter(): DialogAdapter {
-  return new ConsoleDialogAdapter();
+// ============================================
+// Singleton
+// ============================================
+
+const _fallback: DialogAdapter = new ConsoleDialogAdapter();
+let _active: DialogAdapter | null = null;
+
+export function setDialogAdapter(adapter: DialogAdapter): void {
+  _active = adapter;
 }
 
-export function createDialogRuntime(options: DialogRuntimeOptions = {}): DialogRuntime {
-  const defaultAdapter = createDefaultDialogAdapter();
-  let adapter: DialogAdapter = options.adapter ?? defaultAdapter;
-
-  return {
-    setAdapter(newAdapter: DialogAdapter) {
-      adapter = newAdapter;
-    },
-    use() {
-      return adapter;
-    },
-    reset() {
-      adapter = defaultAdapter;
-    },
-  };
+export function useDialog(): DialogAdapter {
+  return _active ?? _fallback;
 }
 
-const defaultDialogRuntime = createDialogRuntime();
-let activeDialogRuntime: DialogRuntime = defaultDialogRuntime;
-
-export function setActiveDialogRuntime(runtime: DialogRuntime): void {
-  activeDialogRuntime = runtime;
-}
-
-export function getActiveDialogRuntime(): DialogRuntime {
-  return activeDialogRuntime;
-}
-
-export function useDialog() {
-  return activeDialogRuntime.use();
-}
-
-export function setDialogAdapter(newAdapter: DialogAdapter) {
-  activeDialogRuntime.setAdapter(newAdapter);
-}
-
-export function resetDialogAdapter() {
-  activeDialogRuntime.reset();
+export function resetDialogAdapter(): void {
+  _active = null;
 }

@@ -1,0 +1,87 @@
+{
+  "name": "@tnzi/ui-admin",
+  "version": "0.1.0",
+  "description": "Tnzi admin panel UI components and pages, built on @tnzi/ui and @tnzi/core.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components.js"
+    },
+    "./headless": {
+      "types": "./dist/headless/index.d.ts",
+      "import": "./dist/headless.js"
+    },
+    "./pages": {
+      "types": "./dist/pages/index.d.ts",
+      "import": "./dist/pages.js"
+    },
+    "./template": {
+      "types": "./dist/template/index.d.ts",
+      "import": "./dist/template.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck",
+    "clean": "rimraf dist",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@tnzi/core": "workspace:*",
+    "@tnzi/ui": "workspace:*",
+    "@vueuse/core": "^11.0.0",
+    "naive-ui": "^2.40.0",
+    "pinia": "^3.0.0",
+    "pinia-plugin-persistedstate": "^4.0.0",
+    "vue": "^3.5.0",
+    "vue-draggable-plus": "^0.6.0",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "@vue/test-utils": "^2.4.6",
+    "happy-dom": "^15.11.7",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.0",
+    "vite-plugin-dts": "^3.9.0",
+    "vitest": "^3.0.0",
+    "vue-tsc": "^2.0.0"
+  },
+  "peerDependencies": {
+    "pinia": "^3.0.0",
+    "vue": "^3.5.0"
+  },
+  "keywords": [
+    "tnzi",
+    "admin",
+    "vue",
+    "components",
+    "ui"
+  ],
+  "author": "Tnzi.NET",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tnzi/tnzi.net"
+  }
+}

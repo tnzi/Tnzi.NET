@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@tnzi/core": ["../core/src"],
+      "@tnzi/core/*": ["../core/src/*"],
+      "@tnzi/ui": ["../ui/src"],
+      "@tnzi/ui/*": ["../ui/src/*"]
+    },
+    "isolatedModules": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "playground", "**/*.test.ts"]
+}

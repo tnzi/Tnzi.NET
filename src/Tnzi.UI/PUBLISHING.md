@@ -37,7 +37,7 @@ cd src/Tnzi.UI
 pnpm build
 ```
 
-4 个包必须全部构建成功，无 TS 错误。
+5 个包必须全部构建成功，无 TS 错误。
 
 ---
 
@@ -53,7 +53,7 @@ pnpm release <包名> [版本类型]
 
 | 参数 | 可选值 | 说明 |
 |------|--------|------|
-| 包名 | `core`, `shadcn`, `vant`, `naive-ui`, `all` | 要发布的包 |
+| 包名 | `core`, `ui`, `ui-admin`, `ai`, `mobile`, `all` | 要发布的包 |
 | 版本类型 | `patch`(默认), `minor`, `major`, `x.y.z` | 版本升级方式 |
 
 ### 常用命令
@@ -63,35 +63,35 @@ pnpm release <包名> [版本类型]
 pnpm release:status
 
 # patch 发布（最常用，修 bug / 小调整）
-pnpm release naive-ui              # 0.1.0 → 0.1.1
-pnpm release shadcn                # 0.1.0 → 0.1.1
+pnpm release ui                    # 0.1.0 → 0.1.1
+pnpm release mobile                # 0.1.0 → 0.1.1
 
 # minor 发布（新增功能）
-pnpm release naive-ui minor        # 0.1.0 → 0.2.0
+pnpm release ui minor              # 0.1.0 → 0.2.0
 
 # major 发布（破坏性变更）
 pnpm release core major            # 0.1.0 → 1.0.0
 
 # 指定具体版本号
-pnpm release naive-ui 0.3.0
+pnpm release ui-admin 0.2.0
 
 # 全部包同时发布（core 自动排首位）
 pnpm release all patch
 
 # 试运行（不实际发布，不修改版本号）
-pnpm release --dry naive-ui
+pnpm release --dry ui
 ```
 
 ### 执行流程
 
-`pnpm release naive-ui patch` 内部依次执行：
+`pnpm release ui patch` 内部依次执行：
 
 1. 检查 npm 登录状态
-2. 读取 `packages/naive-ui/package.json` 中的当前版本
+2. 读取 `packages/ui/package.json` 中的当前版本
 3. 计算新版本号（patch: `0.1.0` → `0.1.1`）
 4. 写入新版本号到 `package.json`
-5. 执行 `pnpm --filter @tnzi/naive-ui build`
-6. 执行 `pnpm --filter @tnzi/naive-ui publish --no-git-checks`
+5. 执行 `pnpm --filter @tnzi/ui build`
+6. 执行 `pnpm --filter @tnzi/ui publish --no-git-checks`
 
 ---
 
@@ -147,16 +147,16 @@ pnpm version:check
 不借助任何工具，直接操作：
 
 ```bash
-# 1. 手动修改 packages/naive-ui/package.json 中的 version 字段
+# 1. 手动修改 packages/ui/package.json 中的 version 字段
 
 # 2. 构建
-pnpm --filter @tnzi/naive-ui build
+pnpm --filter @tnzi/ui build
 
 # 3. 发布
-pnpm --filter @tnzi/naive-ui publish --no-git-checks
+pnpm --filter @tnzi/ui publish --no-git-checks
 
 # 试运行
-pnpm --filter @tnzi/naive-ui publish --no-git-checks --dry-run
+pnpm --filter @tnzi/ui publish --no-git-checks --dry-run
 ```
 
 ---
@@ -168,10 +168,11 @@ pnpm --filter @tnzi/naive-ui publish --no-git-checks --dry-run
 每个包的 `package.json` 中的 `version` 字段：
 
 ```
-packages/core/package.json       → "version": "0.1.0"
-packages/shadcn/package.json     → "version": "0.1.0"
-packages/vant/package.json       → "version": "0.1.0"
-packages/naive-ui/package.json   → "version": "0.1.0"
+packages/core/package.json       → "version": "0.1.2"
+packages/ui/package.json         → "version": "0.1.2"
+packages/ui-admin/package.json   → "version": "0.1.0"
+packages/ui-ai/package.json      → "version": "0.1.0"
+packages/mobile/package.json     → "version": "0.1.0"
 ```
 
 ### 版本策略
@@ -186,7 +187,7 @@ packages/naive-ui/package.json   → "version": "0.1.0"
 
 ### 包间依赖
 
-UI 包依赖 core 使用 `workspace:*`。发布时 pnpm 自动将其替换为实际版本号（如 `0.1.0`）。
+UI 包依赖 core 使用 `workspace:*`。发布时 pnpm 自动将其替换为实际版本号（如 `0.1.2`）。
 
 - 只改了 UI 包 → 只需发布该 UI 包，core 不受影响
 - 改了 core → 建议一起发布依赖它的 UI 包（`pnpm release all`）
@@ -195,23 +196,23 @@ UI 包依赖 core 使用 `workspace:*`。发布时 pnpm 自动将其替换为实
 
 ## 常见场景
 
-### 场景 1：修复 naive-ui 某个组件的样式
+### 场景 1：修复 ui 某个组件的样式
 
 ```bash
 # 1. 修改代码
 # 2. 试运行确认没问题
-pnpm release --dry naive-ui
+pnpm release --dry ui
 
 # 3. 正式发布 patch
-pnpm release naive-ui
+pnpm release ui
 ```
 
-### 场景 2：给 vant 包新增一个组件
+### 场景 2：给 mobile 包新增一个组件
 
 ```bash
 # 1. 开发组件，测试通过
 # 2. minor 发布
-pnpm release vant minor
+pnpm release mobile minor
 ```
 
 ### 场景 3：core 接口变更，需要同步所有包

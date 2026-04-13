@@ -33,7 +33,7 @@ public class TelegramChannelAdapterTests
 
         Assert.Throws<ArgumentException>(() => new TelegramChannelAdapter(
             NullLogger<TelegramChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             options));
     }
 
@@ -47,7 +47,7 @@ public class TelegramChannelAdapterTests
 
         Assert.Throws<ArgumentException>(() => new TelegramChannelAdapter(
             NullLogger<TelegramChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             options));
     }
 
@@ -99,7 +99,7 @@ public class TelegramChannelAdapterTests
 
         return new TelegramChannelAdapter(
             NullLogger<TelegramChannelAdapter>.Instance,
-            new InMemoryChannelMessageBus(),
+            new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance),
             options);
     }
 }

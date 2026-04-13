@@ -14,6 +14,7 @@ public class McpToolProvider : IMcpToolProvider
     private readonly IToolPermissionEvaluator? _permissionEvaluator;
     private readonly IShellCommandAnalyzer? _shellCommandAnalyzer;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
+    private readonly IEventBus? _eventBus;
     private readonly McpOAuthClientHandler? _oauthHandler;
     private readonly ILogger<McpToolProvider> _logger;
     private readonly ConcurrentDictionary<string, ToolCacheEntry> _toolCache = new(StringComparer.OrdinalIgnoreCase);
@@ -29,7 +30,8 @@ public class McpToolProvider : IMcpToolProvider
         IToolPermissionEvaluator? permissionEvaluator = null,
         IShellCommandAnalyzer? shellCommandAnalyzer = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null,
-        McpOAuthClientHandler? oauthHandler = null)
+        McpOAuthClientHandler? oauthHandler = null,
+        IEventBus? eventBus = null)
     {
         _options = Check.NotNull(options);
         _clientFactory = Check.NotNull(clientFactory);
@@ -39,6 +41,7 @@ public class McpToolProvider : IMcpToolProvider
         _permissionEvaluator = permissionEvaluator;
         _shellCommandAnalyzer = shellCommandAnalyzer;
         _executionContextAccessor = executionContextAccessor;
+        _eventBus = eventBus;
         _oauthHandler = oauthHandler;
     }
 
@@ -99,7 +102,7 @@ public class McpToolProvider : IMcpToolProvider
                                 toolNameToGroup[originalName] = "mcp:" + server.Name;
                             }
                         }
-                        toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, approvalLogger, toolNameToGroup);
+                        toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, approvalLogger, toolNameToGroup, _eventBus);
                     }
                 }
 

@@ -6,10 +6,11 @@
  */
 
 import { reactive } from '@vue/reactivity';
-import type { AuthState } from '../stores/auth/index';
+import type { AuthState } from './types/auth';
 import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateUserDto } from '../services/identity/types';
 import { useAuthApi, useProfileApi } from '../services/identity/index';
-import type { StateDeps } from './types';
+import { useLogger } from '../adapters/logger';
+import type { StateDeps } from './types/deps';
 
 /**
  * Map UserDto to UserProfile.
@@ -300,7 +301,7 @@ export class AuthStateManager {
         this.user = toUserProfile(result.data, this.permissions);
       }
     } catch (error) {
-      console.error('Failed to fetch user profile:', error); // TODO: Replace with logger injection
+      useLogger().error('Failed to fetch user profile:', error);
     }
   }
 
@@ -427,7 +428,7 @@ export class AuthStateManager {
         this.permissions = await this.deps.permissionsFetchFn();
       } catch {
         // Non-critical: keep existing permissions
-        console.warn('Failed to fetch permissions'); // TODO: Replace with logger injection
+        useLogger().warn('Failed to fetch permissions');
       }
     }
   }

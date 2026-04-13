@@ -97,6 +97,26 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             }
         }, CancellationToken.None);
 
+        // 发布子 Agent 启动事件
+        try
+        {
+            if (EventBus != null)
+            {
+                await EventBus.PublishAsync(new SubAgentSpawnedEvent
+                {
+                    ParentRunId = prepared.ParentRunId,
+                    ChildRunId = run.Id,
+                    SubAgentType = input.SubAgentType,
+                    AgentId = run.AgentId,
+                    ThreadId = run.ThreadId
+                }, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish SubAgentSpawnedEvent for RunId={RunId}", run.Id);
+        }
+
         return Result.Success(new AgentRunControlStateDto
         {
             RunId = run.Id,

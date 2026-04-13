@@ -408,6 +408,97 @@ public class SummarizationMiddlewareTests
 
     #endregion
 
+    #region ResolveContextWindow — provider-aware context window
+
+    [Fact]
+    public async Task ProviderContextWindow_SmallWindow_TriggersSummarization()
+    {
+        // Provider with ContextWindowSize = 32_000.
+        // Messages total ~30K tokens (~93.75% of 32K) → exceeds fraction threshold of 0.8.
+        // Global ModelContextWindow = 128_000 → 30K/128K ≈ 23%, would NOT trigger.
+        const string providerName = "small-provider";
+        const int providerWindow = 32_000;
+        const double fractionThreshold = 0.8;
+
+        // Each message: ~1500 chars ≈ 375 tokens; 80 messages × 375 ≈ 30_000 tokens
+        var messages = Enumerable.Range(0, 80)
+            .Select(i => new ChatMessage(i % 2 == 0 ? ChatRole.User : ChatRole.Assistant, new string('x', 1500)))
+            .ToList();
+
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IList<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Provider window summary")));
+
+        var mockFactory = new Mock<IChatClientFactory>();
+        // CreateContext 使用 "test" 作为 Agent.Provider，因此 GetChatClient 以 "test" 调用
+        mockFactory.Setup(x => x.GetChatClient("test", It.IsAny<string?>()))
+            .Returns(mockChatClient.Object);
+
+        var middleware = CreateMiddleware(o =>
+        {
+            o.Summarization.Enabled = true;
+            o.Summarization.Trigger.Type = SummarizationTriggerType.Fraction;
+            o.Summarization.Trigger.FractionThreshold = fractionThreshold;
+            o.Summarization.ModelContextWindow = 128_000; // 全局默认：30K/128K=23% → 不触发
+            o.Summarization.Keep.KeepLastMessages = 4;
+            o.Summarization.TrimTokensToSummarize = 1;
+            // 配置 EffectiveProvider 的 ContextWindowSize = 32_000
+            o.Providers[providerName] = new ProviderOptions { ContextWindowSize = providerWindow };
+        }, mockFactory.Object);
+
+        var context = CreateContext(messages: messages);
+        // EffectiveProvider 决定 ResolveContextWindow 使用哪个 provider 的上下文窗口
+        context.EffectiveProvider = providerName;
+
+        List<ChatMessage>? capturedMessages = null;
+        await middleware.InvokeAsync(context, (ctx, ct) =>
+        {
+            capturedMessages = [.. ctx.Messages];
+            return Task.FromResult(new AgentRunResult { Response = "ok" });
+        });
+
+        // 摘要应被触发 — 因为 provider 的上下文窗口（32K）比全局默认（128K）小得多
+        capturedMessages.ShouldNotBeNull();
+        capturedMessages!.ShouldContain(m => m.Text != null && m.Text.Contains("[Conversation summary:"));
+        mockChatClient.Verify(c => c.GetResponseAsync(
+            It.IsAny<IList<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProviderContextWindow_LargeGlobalDefault_NoSummarization()
+    {
+        // Same messages (~30K tokens) but no provider override → uses global 128K window.
+        // 30K/128K ≈ 23% < 80% threshold → should NOT trigger summarization.
+        var messages = Enumerable.Range(0, 80)
+            .Select(i => new ChatMessage(i % 2 == 0 ? ChatRole.User : ChatRole.Assistant, new string('x', 1500)))
+            .ToList();
+        var originalCount = messages.Count;
+
+        var middleware = CreateMiddleware(o =>
+        {
+            o.Summarization.Enabled = true;
+            o.Summarization.Trigger.Type = SummarizationTriggerType.Fraction;
+            o.Summarization.Trigger.FractionThreshold = 0.8;
+            o.Summarization.ModelContextWindow = 128_000;
+        });
+
+        var context = CreateContext(messages: messages);
+        // EffectiveProvider not set → ResolveContextWindow returns ModelContextWindow (128K)
+
+        await middleware.InvokeAsync(context, (ctx, ct) =>
+        {
+            ctx.Messages.Count.ShouldBe(originalCount); // 不触发摘要
+            return Task.FromResult(new AgentRunResult { Response = "ok" });
+        });
+    }
+
+    #endregion
+
     #region Custom model name
 
     [Fact]

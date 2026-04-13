@@ -44,6 +44,38 @@ public class SubAgentRegistry : ISubAgentRegistry
         return _types.TryRemove(name, out _);
     }
 
+    /// <inheritdoc />
+    public async Task LoadFromStoreAsync(IRepository<SubAgentType, Guid> repository, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(repository);
+
+        // 清空所有类型，重新注册内置 + DB 启用的类型（确保禁用的类型被移除）
+        _types.Clear();
+        RegisterBuiltInTypes();
+
+        var entities = await repository.AsQueryable()
+            .Where(e => e.IsEnabled)
+            .ToListAsync(cancellationToken);
+
+        foreach (var entity in entities)
+        {
+            var definition = new SubAgentTypeDefinition(
+                Name: entity.Name,
+                Description: entity.Description,
+                ToolGroups: entity.ToolGroupsJson.FromJsonString<List<string>>() ?? [],
+                ExcludedToolGroups: entity.ExcludedToolGroupsJson.FromJsonString<List<string>>() ?? [],
+                MaxTurns: entity.MaxTurns,
+                Instructions: entity.Instructions,
+                DefaultModel: entity.DefaultModel,
+                DefaultApprovalMode: entity.DefaultApprovalMode.HasValue
+                    ? (ToolApprovalMode)entity.DefaultApprovalMode.Value
+                    : null,
+                CapabilityTags: entity.CapabilityTagsJson.FromJsonString<List<string>>() ?? []);
+
+            Register(definition);
+        }
+    }
+
     private void RegisterBuiltInTypes()
     {
         Register(new SubAgentTypeDefinition(

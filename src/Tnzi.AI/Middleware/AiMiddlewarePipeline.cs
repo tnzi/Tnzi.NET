@@ -53,7 +53,7 @@ public class AiMiddlewarePipeline
     {
         Check.NotNull(coreExecutor);
 
-        var ordered = _middlewares.OrderBy(m => m.Order).ToList();
+        var ordered = GetSortedMiddlewares();
 
         // 从内到外包装：最后一个中间件包裹 coreExecutor，第一个中间件最外层
         var next = coreExecutor;
@@ -74,7 +74,7 @@ public class AiMiddlewarePipeline
     {
         Check.NotNull(coreExecutor);
 
-        var ordered = _middlewares.OrderBy(m => m.Order).ToList();
+        var ordered = GetSortedMiddlewares();
 
         var next = coreExecutor;
         for (var i = ordered.Count - 1; i >= 0; i--)
@@ -86,6 +86,11 @@ public class AiMiddlewarePipeline
 
         return next;
     }
+
+    private List<IAiMiddleware>? _sortedCache;
+
+    private List<IAiMiddleware> GetSortedMiddlewares() =>
+        _sortedCache ??= _middlewares.OrderBy(m => m.Order).ToList();
 
     /// <summary>
     /// Lambda 中间件内部实现

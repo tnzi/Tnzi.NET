@@ -11,21 +11,21 @@ namespace Tnzi.AI.Channels.Controllers.Admin;
 [Route("admin/gateway")]
 public class DefaultGatewayAdminController : ApiAdminControllerBase
 {
-    private readonly IGateway _gateway;
-    private readonly IPresenceTracker _presence;
-    private readonly IRepository<SessionBindingRule, Guid> _bindingRuleRepository;
+    private readonly IGateway? _gateway;
+    private readonly IPresenceTracker? _presence;
+    private readonly IRepository<SessionBindingRule, Guid>? _bindingRuleRepository;
 
     /// <summary>
-    /// 初始化 Gateway 管理控制器
+    /// 初始化 Gateway 管理控制器（所有依赖可选，Gateway 未启用时返回 disabled 状态）
     /// </summary>
     public DefaultGatewayAdminController(
-        IGateway gateway,
-        IPresenceTracker presence,
-        IRepository<SessionBindingRule, Guid> bindingRuleRepository)
+        IGateway? gateway = null,
+        IPresenceTracker? presence = null,
+        IRepository<SessionBindingRule, Guid>? bindingRuleRepository = null)
     {
-        _gateway = Check.NotNull(gateway);
-        _presence = Check.NotNull(presence);
-        _bindingRuleRepository = Check.NotNull(bindingRuleRepository);
+        _gateway = gateway;
+        _presence = presence;
+        _bindingRuleRepository = bindingRuleRepository;
     }
 
     /// <summary>
@@ -34,6 +34,11 @@ public class DefaultGatewayAdminController : ApiAdminControllerBase
     [HttpGet("status")]
     public virtual async Task<ApiResult<GatewayStatusDto>> GetStatus()
     {
+        if (_gateway == null || _presence == null)
+        {
+            return ApiResult<GatewayStatusDto>.Ok(new GatewayStatusDto { Enabled = false });
+        }
+
         var connections = _presence.GetConnections();
         var sessions = await _gateway.GetSessionsAsync();
 
@@ -53,6 +58,11 @@ public class DefaultGatewayAdminController : ApiAdminControllerBase
     [HttpGet("connections")]
     public virtual ApiResult<IReadOnlyList<GatewayConnectionInfo>> GetConnections()
     {
+        if (_presence == null)
+        {
+            return ApiResult<IReadOnlyList<GatewayConnectionInfo>>.Ok(Array.Empty<GatewayConnectionInfo>());
+        }
+
         var connections = _presence.GetConnections();
         return ApiResult<IReadOnlyList<GatewayConnectionInfo>>.Ok(connections);
     }
@@ -63,6 +73,11 @@ public class DefaultGatewayAdminController : ApiAdminControllerBase
     [HttpGet("bindings")]
     public virtual async Task<ApiResult<IReadOnlyList<SessionBindingRule>>> GetBindings()
     {
+        if (_bindingRuleRepository == null)
+        {
+            return ApiResult<IReadOnlyList<SessionBindingRule>>.Ok(Array.Empty<SessionBindingRule>());
+        }
+
         var rules = await _bindingRuleRepository.ToListAsync();
         return ApiResult<IReadOnlyList<SessionBindingRule>>.Ok(rules.AsReadOnly());
     }

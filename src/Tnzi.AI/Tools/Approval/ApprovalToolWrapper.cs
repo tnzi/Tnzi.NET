@@ -16,11 +16,13 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<ApprovalToolWrapper>? _logger;
     private readonly string? _toolGroup;
+    private readonly IEventBus? _eventBus;
 
     /// <summary>
     /// 初始化包装器
     /// </summary>
     /// <param name="toolGroup">工具所属组名（用于 AlwaysRequireApprovalGroups 判断及审批请求）</param>
+    /// <param name="eventBus">可选事件总线，用于发布审批事件</param>
     public ApprovalToolWrapper(
         AIFunction innerFunction,
         IToolApprovalHandler? approvalHandler,
@@ -29,7 +31,8 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         IShellCommandAnalyzer? shellCommandAnalyzer = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null,
         ILogger<ApprovalToolWrapper>? logger = null,
-        string? toolGroup = null)
+        string? toolGroup = null,
+        IEventBus? eventBus = null)
         : base(innerFunction)
     {
         _approvalHandler = approvalHandler;
@@ -39,6 +42,7 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         _executionContextAccessor = executionContextAccessor;
         _logger = logger;
         _toolGroup = toolGroup;
+        _eventBus = eventBus;
     }
 
     /// <summary>
@@ -58,7 +62,8 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         IShellCommandAnalyzer? shellCommandAnalyzer = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null,
         ILogger<ApprovalToolWrapper>? logger = null,
-        IReadOnlyDictionary<string, string>? toolNameToGroup = null)
+        IReadOnlyDictionary<string, string>? toolNameToGroup = null,
+        IEventBus? eventBus = null)
     {
         if (tools == null || tools.Count == 0)
         {
@@ -83,7 +88,7 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
 
                 if (permissionEvaluator != null || RequiresApproval(aiFunction.Name, group, options))
                 {
-                    result.Add(new ApprovalToolWrapper(aiFunction, approvalHandler, options, permissionEvaluator, shellCommandAnalyzer, executionContextAccessor, logger, group));
+                    result.Add(new ApprovalToolWrapper(aiFunction, approvalHandler, options, permissionEvaluator, shellCommandAnalyzer, executionContextAccessor, logger, group, eventBus));
                 }
                 else
                 {
@@ -109,6 +114,7 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         if (decision.Behavior == PermissionBehavior.Deny)
         {
             _logger?.LogInformation("Tool call rejected by permission rule: {ToolName}, Reason: {Reason}", decision.ToolName, decision.Reason);
+            await PublishApprovalEventAsync(decision, "Deny");
             return $"Tool call rejected: {decision.Reason ?? "Not approved"}";
         }
 
@@ -122,6 +128,7 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
 
             var request = BuildRequest(InnerFunction, arguments, _options);
             _logger?.LogDebug("Requesting approval for tool: {ToolName}", request.ToolName);
+            await PublishApprovalEventAsync(decision, "Ask");
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
@@ -163,7 +170,77 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
             }
         }
 
-        return await base.InvokeCoreAsync(arguments, cancellationToken);
+        // 执行工具并发布执行事件
+        var toolSw = Stopwatch.StartNew();
+        object? toolResult;
+        string? errorMessage = null;
+        var success = true;
+        try
+        {
+            toolResult = await base.InvokeCoreAsync(arguments, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            success = false;
+            errorMessage = ex.Message;
+            toolSw.Stop();
+            await PublishToolCallEventAsync(toolSw.ElapsedMilliseconds, success, errorMessage);
+            throw;
+        }
+
+        toolSw.Stop();
+        await PublishToolCallEventAsync(toolSw.ElapsedMilliseconds, success, errorMessage);
+        return toolResult;
+    }
+
+    private async Task PublishToolCallEventAsync(long durationMs, bool success, string? errorMessage)
+    {
+        try
+        {
+            if (_eventBus == null) return;
+
+            var runId = _executionContextAccessor?.Properties.TryGetValue(ContextPropertyKeys.CurrentRunId, out var val) == true
+                ? val as Guid? : null;
+
+            await _eventBus.PublishAsync(new ToolCallExecutedEvent
+            {
+                RunId = runId,
+                ThreadId = _executionContextAccessor?.CurrentRequest?.ThreadId,
+                ToolName = InnerFunction.Name,
+                ToolGroup = _toolGroup,
+                DurationMs = durationMs,
+                Success = success,
+                ErrorMessage = errorMessage
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to publish ToolCallExecutedEvent for tool {ToolName}", InnerFunction.Name);
+        }
+    }
+
+    private async Task PublishApprovalEventAsync(ToolPermissionDecision decision, string behavior)
+    {
+        try
+        {
+            if (_eventBus == null) return;
+
+            var runId = _executionContextAccessor?.Properties.TryGetValue(ContextPropertyKeys.CurrentRunId, out var val) == true
+                ? val as Guid? : null;
+
+            await _eventBus.PublishAsync(new ApprovalRequestedEvent
+            {
+                RunId = runId,
+                ToolName = decision.ToolName,
+                Decision = behavior,
+                Reason = decision.Reason,
+                UserId = _executionContextAccessor?.CurrentRequest?.UserId
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to publish ApprovalRequestedEvent for tool {ToolName}", decision.ToolName);
+        }
     }
 
     private ToolPermissionDecision EvaluateDecision(AIFunctionArguments arguments)

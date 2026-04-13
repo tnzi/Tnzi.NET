@@ -108,11 +108,13 @@ public class AIModule : TnziApplicationModule
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
 
         // Multi-model provider message processors — 扩展点，用于处理特定提供商的消息格式差异。
-        // 当前由 MiniMax 实现 <think> 标签提取，DeepSeek/Gemini 为预留直通。
+        // ThinkTagChatMessageProcessorBase 处理 <think> 标签（MiniMax/Kimi/GLM 共用），DeepSeek/Gemini 为预留直通。
         // 应用代码可通过 IEnumerable<IChatMessageProcessor> 注入并按 ProviderName 匹配使用。
         services.AddSingleton<IChatMessageProcessor, DeepSeekChatMessageProcessor>();
         services.AddSingleton<IChatMessageProcessor, GeminiChatMessageProcessor>();
         services.AddSingleton<IChatMessageProcessor, MiniMaxChatMessageProcessor>();
+        services.AddSingleton<IChatMessageProcessor, KimiChatMessageProcessor>();
+        services.AddSingleton<IChatMessageProcessor, GlmChatMessageProcessor>();
         services.AddSingleton<IAgentExecutionContextAccessor, AgentExecutionContextAccessor>();
         // Scoped: AgentFactory/ToolResolver/OptionsBuilder must be Scoped so that
         // ToolAdapter captures the request-scoped IServiceProvider, enabling resolution of
@@ -195,6 +197,9 @@ public class AIModule : TnziApplicationModule
         services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
         services.TryAddSingleton<IToolPermissionEvaluator, ConfiguredToolPermissionEvaluator>();
         services.TryAddSingleton<IShellCommandAnalyzer, ShellCommandAnalyzer>();
+
+        // 注册工具权限规则持久化存储（Scoped：需要 IRepository）
+        services.AddScoped<IToolPermissionRuleStore, DatabaseToolPermissionRuleStore>();
 
         // [RequiresSkill] 兜底中间件 — 工具调用前检查 Skill 是否已加载
         services.AddScoped<IToolExecutionMiddleware, RequiresSkillToolMiddleware>();
@@ -327,6 +332,7 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<IAgentPersonaService, AgentPersonaService>();
         services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddScoped<IAgentArtifactService, AgentArtifactService>();
+        services.AddScoped<IAgentTaskService, AgentTaskService>();
 
         // Phase 3: 后续建议生成服务
         services.TryAddScoped<ISuggestionService, SuggestionService>();
@@ -458,6 +464,20 @@ public class AIModule : TnziApplicationModule
             if (!builtInOptions.EnableText) toolRegistry.UnregisterByProviderType(typeof(TextTools));
             if (!builtInOptions.EnableWebSearch) toolRegistry.UnregisterByProviderType(typeof(WebSearchTools));
             if (!builtInOptions.EnableMemory) toolRegistry.UnregisterByProviderType(typeof(MemoryTools));
+        }
+
+        // 从数据库加载持久化的子 Agent 类型定义
+        try
+        {
+            var subAgentRegistry = serviceProvider.GetRequiredService<ISubAgentRegistry>();
+            using var subAgentScope = serviceProvider.CreateScope();
+            var subAgentTypeRepo = subAgentScope.ServiceProvider.GetRequiredService<IRepository<SubAgentType, Guid>>();
+            await subAgentRegistry.LoadFromStoreAsync(subAgentTypeRepo);
+            logger.LogDebug("Sub-agent type definitions loaded from database.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to load sub-agent type definitions from database. Using built-in types only.");
         }
 
         // Memory 工具依赖 ContextProviders 的记忆召回能力 —— 如果召回不可用，

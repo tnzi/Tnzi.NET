@@ -309,6 +309,7 @@ public class WorkflowServiceStreamingTests
             executionRepository.Object,
             versionRepository.Object,
             runRepository.Object,
+            Mock.Of<IRepository<Agent, Guid>>(),
             usageLog.Object,
             quota.Object,
             checkpointStore.Object,

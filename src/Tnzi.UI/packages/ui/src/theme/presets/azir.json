@@ -1,0 +1,14 @@
+{
+  "name": "azir",
+  "description": "Azir preset — inspired by soybean-admin Azir theme, deep blue primary",
+  "colors": {
+    "primary": "#646cff",
+    "info": "#0284c7",
+    "success": "#22c55e",
+    "warning": "#f59e0b",
+    "error": "#ef4444"
+  },
+  "mode": "light",
+  "isInfoFollowPrimary": false,
+  "recommendColor": true
+}

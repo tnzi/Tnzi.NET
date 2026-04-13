@@ -168,35 +168,3 @@ public class AgentRunListItemDto
     public DateTime CreationTime { get; set; }
 }
 
-/// <summary>
-/// 子 Agent 类型 DTO
-/// </summary>
-public class SubAgentTypeDto
-{
-    /// <summary>Name</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Description</summary>
-    public string Description { get; set; } = string.Empty;
-
-    /// <summary>Tool groups</summary>
-    public List<string> ToolGroups { get; set; } = [];
-
-    /// <summary>Excluded tool groups</summary>
-    public List<string> ExcludedToolGroups { get; set; } = [];
-
-    /// <summary>Max turns</summary>
-    public int MaxTurns { get; set; }
-
-    /// <summary>Default instructions</summary>
-    public string? Instructions { get; set; }
-
-    /// <summary>Default model</summary>
-    public string? DefaultModel { get; set; }
-
-    /// <summary>Default approval mode</summary>
-    public ToolApprovalMode? DefaultApprovalMode { get; set; }
-
-    /// <summary>Capability tags</summary>
-    public List<string> CapabilityTags { get; set; } = [];
-}

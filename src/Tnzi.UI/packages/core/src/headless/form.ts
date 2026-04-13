@@ -6,6 +6,7 @@
 
 import { reactive, toRaw } from '@vue/reactivity';
 import { deepEqual } from '../utils/deep-equal';
+import { useLogger } from '../adapters/logger';
 import type { z } from 'zod';
 
 // ============================================
@@ -20,7 +21,7 @@ function safeClone<T>(value: T): T {
   try {
     return structuredClone(value);
   } catch {
-    console.warn('[FormController] structuredClone failed, falling back to JSON round-trip'); // TODO: Replace with logger injection
+    useLogger().warn('[FormController] structuredClone failed, falling back to JSON round-trip');
     return JSON.parse(JSON.stringify(value));
   }
 }
@@ -34,7 +35,7 @@ export interface FormFieldError {
   message: string;
 }
 
-export interface FormOptions<T extends Record<string, unknown>> {
+export interface FormOptions<T extends object> {
   /** Initial values */
   initialValues: T;
   /** Zod schema (optional, for validation) */
@@ -62,7 +63,7 @@ export interface FormOptions<T extends Record<string, unknown>> {
  * await form.submit();
  * ```
  */
-export class FormController<T extends Record<string, unknown>> {
+export class FormController<T extends object> {
   /** Current form values (reactive) */
   values: T;
   /** Field-level errors */
@@ -229,4 +230,31 @@ export class FormController<T extends Record<string, unknown>> {
   setValues(values: Partial<T>): void {
     Object.assign(this.values, values);
   }
+}
+
+// ============================================
+// Form State Types (from types/stores.ts)
+// ============================================
+
+/**
+ * Form field state
+ */
+export interface FormFieldState<T = unknown> {
+  value: T;
+  touched: boolean;
+  dirty: boolean;
+  error?: string;
+}
+
+/**
+ * Form state
+ */
+export interface FormState<T extends Record<string, unknown>> {
+  values: T;
+  touched: Record<keyof T, boolean>;
+  dirty: Record<keyof T, boolean>;
+  errors: Partial<Record<keyof T, string>>;
+  isValid: boolean;
+  isSubmitting: boolean;
+  isDirty: boolean;
 }

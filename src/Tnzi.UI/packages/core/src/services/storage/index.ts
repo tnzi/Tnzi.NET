@@ -8,5 +8,4 @@ export * from './types';
 export * from './api';
 export * from './metadata';
 export * from './schemas';
-export * from './generated';
 

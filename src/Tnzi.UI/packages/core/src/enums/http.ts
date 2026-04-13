@@ -103,18 +103,8 @@ export function getStatusMessage(status: number): string {
   return messages[status] ?? 'Unknown Status';
 }
 
-/**
- * HTTP Methods
- */
-export enum HttpMethod {
-  Get = 'GET',
-  Post = 'POST',
-  Put = 'PUT',
-  Patch = 'PATCH',
-  Delete = 'DELETE',
-  Head = 'HEAD',
-  Options = 'OPTIONS',
-}
+// Note: HttpMethod type is defined in types/api.ts as string union.
+// Use that instead of a duplicate enum.
 
 /**
  * Content types

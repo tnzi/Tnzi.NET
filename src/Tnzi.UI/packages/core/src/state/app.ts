@@ -11,10 +11,10 @@ import type {
   AppModalState,
   OnlineStatus,
   ConnectionState,
-} from '../stores/app/index';
+} from './types/app';
 import type { ThemeMode } from '../types/theme';
 import type { Locale } from '../adapters/i18n/types';
-import type { StateDeps } from './types';
+import type { StateDeps } from './types/deps';
 import { generateId } from '../utils/id';
 
 // ============================================

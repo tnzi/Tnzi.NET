@@ -35,7 +35,7 @@ public partial class OpenApiToolGenerator
     /// </summary>
     /// <param name="ct">取消令牌</param>
     /// <returns>生成的 AITool 列表；禁用时返回空列表</returns>
-    public async Task<IReadOnlyList<AITool>> GenerateToolsAsync(CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<AITool>> GenerateToolsAsync(CancellationToken ct = default)
     {
         var options = _aiOptions.Value.OpenApiTools;
         if (options == null || !options.Enabled || options.Specs.Count == 0)

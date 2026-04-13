@@ -85,13 +85,12 @@ export function pagedListSchema<T extends z.ZodTypeAny>(itemSchema: T) {
 export function apiResultSchema<T extends z.ZodTypeAny>(dataSchema: T) {
   return z.object({
     succeeded: z.boolean(),
+    success: z.boolean(),
+    code: z.number(),
     message: z.string().optional(),
-    code: z.number().optional(),
     errorCode: z.string().optional(),
     errorDetails: z.record(z.unknown()).optional(),
     data: dataSchema,
-    Code: z.number(),
-    Success: z.boolean(),
   });
 }
 

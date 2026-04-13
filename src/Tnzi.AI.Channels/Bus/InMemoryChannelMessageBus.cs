@@ -10,6 +10,12 @@ public class InMemoryChannelMessageBus : IChannelMessageBus
 
     private readonly List<Func<OutboundMessage, Task>> _outboundSubscribers = [];
     private readonly object _subscriberLock = new();
+    private readonly ILogger<InMemoryChannelMessageBus> _logger;
+
+    public InMemoryChannelMessageBus(ILogger<InMemoryChannelMessageBus> logger)
+    {
+        _logger = Check.NotNull(logger);
+    }
 
     public async Task PublishInboundAsync(InboundMessage message, CancellationToken ct = default)
     {
@@ -47,9 +53,10 @@ public class InMemoryChannelMessageBus : IChannelMessageBus
             {
                 await subscriber(message);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // 单个 subscriber 异常不应中断其他 subscriber 的执行
+                _logger.LogWarning(ex, "Outbound message subscriber failed for channel '{Channel}'", message.ChannelName);
             }
         }
     }

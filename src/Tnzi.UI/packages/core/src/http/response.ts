@@ -8,21 +8,18 @@ import { HttpError, getApiResultErrorMessage } from '../errors/api-error';
 /**
  * Normalize API response from backend.
  *
- * The canonical (primary) format uses **camelCase** properties: `succeeded`, `code`, `data`, `message`.
- * The **PascalCase** aliases (`Success`, `Code`, `Data`, `Message`) are populated solely for
- * backward compatibility with older code that reads PascalCase fields.
- * New code should always consume the camelCase properties.
- *
- * Backend may return either convention; this function merges both into a unified ApiResult.
+ * The backend serializes with `JsonNamingPolicy.CamelCase`. This function also
+ * handles PascalCase keys for backward compatibility with older endpoints.
  */
 export function normalizeApiResult<T>(raw: Record<string, unknown>): ApiResult<T> {
-  const code = (raw.Code ?? raw.code ?? 200) as number;
-  const succeeded = raw.succeeded ?? raw.success ?? raw.Success ?? (code >= 200 && code < 300);
+  const code = (raw.code ?? raw.Code ?? 200) as number;
+  const succeededRaw = (raw.succeeded ?? raw.Succeeded) as boolean | undefined;
+  const success = (raw.success ?? raw.Success ?? (code >= 200 && code < 300)) as boolean;
+  const succeeded = succeededRaw ?? success;
   return {
     succeeded: Boolean(succeeded),
-    Success: Boolean(succeeded),
+    success: Boolean(success),
     code,
-    Code: code,
     data: (raw.data ?? raw.Data) as T,
     message: (raw.message ?? raw.Message) as string | undefined,
     errorCode: (raw.errorCode ?? raw.ErrorCode) as string | undefined,
@@ -36,7 +33,7 @@ export function normalizeApiResult<T>(raw: Record<string, unknown>): ApiResult<T
  */
 export function isSuccess<T>(result: ApiResult<T> | null | undefined): boolean {
   if (!result) return false;
-  return result.succeeded === true || result.Success === true;
+  return result.succeeded === true;
 }
 
 /**
@@ -102,6 +99,8 @@ export function extractDataOrThrow<T>(result: ApiResult<T>): T {
 export function emptyPaged<T>(): ApiResult<PagedList<T>> {
   return {
     succeeded: true,
+    success: true,
+    code: 200,
     data: {
       pageIndex: 1,
       pageSize: 10,
@@ -111,8 +110,5 @@ export function emptyPaged<T>(): ApiResult<PagedList<T>> {
       hasNextPage: false,
       items: [],
     },
-    code: 200,
-    Code: 200,
-    Success: true,
   };
 }

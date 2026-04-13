@@ -6,11 +6,14 @@ namespace Tnzi.AI.Tools;
 [AIToolGroup("todo")]
 public class TodoTools
 {
+    private static readonly SemaphoreSlim _persistLock = new(1, 1);
     private readonly IAgentExecutionContextAccessor _contextAccessor;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
-    public TodoTools(IAgentExecutionContextAccessor contextAccessor)
+    public TodoTools(IAgentExecutionContextAccessor contextAccessor, IServiceScopeFactory? scopeFactory = null)
     {
         _contextAccessor = Check.NotNull(contextAccessor);
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>
@@ -28,6 +31,36 @@ public class TodoTools
 
         if (items is not { Count: > 0 })
             return "Todo list cleared.";
+
+        // 异步持久化到数据库（fire-and-forget，不影响工具返回）
+        if (_scopeFactory != null && items is { Count: > 0 })
+        {
+            var runId = _contextAccessor.Properties.TryGetValue(ContextPropertyKeys.CurrentRunId, out var val)
+                ? val as Guid? : null;
+            if (runId.HasValue)
+            {
+                var capturedRunId = runId.Value;
+                var capturedItems = items.ToList();
+                _ = Task.Run(async () =>
+                {
+                    if (!_persistLock.Wait(0)) return; // Skip if another persist is in progress
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var taskService = scope.ServiceProvider.GetService<IAgentTaskService>();
+                        if (taskService != null)
+                        {
+                            await taskService.SyncFromTodosAsync(capturedRunId, capturedItems);
+                        }
+                    }
+                    catch { /* 持久化失败不影响主流程 */ }
+                    finally
+                    {
+                        _persistLock.Release();
+                    }
+                });
+            }
+        }
 
         var completed = items.Count(i => i.Status == TodoStatus.Completed);
         var total = items.Count;

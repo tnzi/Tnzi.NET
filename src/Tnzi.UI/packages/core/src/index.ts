@@ -14,8 +14,8 @@ export * from "./services/index";
 // Types
 export * from "./types/index";
 
-// Components (组件接口标准)
-export * from "./components/index";
+// Shared UI DTOs (formerly components — Props/Emits moved to UI packages)
+export * from "./types/shared-ui";
 
 // HTTP
 export * from "./http/index";
@@ -28,9 +28,6 @@ export * from "./state/index";
 
 // Headless (无头交互控制器) ★  新增
 export * from "./headless/index";
-
-// Stores (状态类型定义，向后兼容)
-export * from "./stores/index";
 
 // Utilities
 export * from "./utils/index";

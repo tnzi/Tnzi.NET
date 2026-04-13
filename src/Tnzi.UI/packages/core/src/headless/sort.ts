@@ -29,6 +29,34 @@ export interface SortOptions {
 }
 
 // ============================================
+// Sort Utility Functions (from headless-data)
+// ============================================
+
+export type HeadlessSortDirection = 'asc' | 'desc';
+
+export interface SortState {
+  sortBy?: string;
+  sortDirection?: HeadlessSortDirection;
+}
+
+export function toggleSort(
+  current: SortState,
+  nextSortBy: string,
+  initialDirection: HeadlessSortDirection = 'asc'
+): Required<SortState> {
+  if (current.sortBy === nextSortBy) {
+    return {
+      sortBy: nextSortBy,
+      sortDirection: current.sortDirection === 'asc' ? 'desc' : 'asc',
+    };
+  }
+  return {
+    sortBy: nextSortBy,
+    sortDirection: initialDirection,
+  };
+}
+
+// ============================================
 // SortController
 // ============================================
 
@@ -43,25 +71,30 @@ export interface SortOptions {
  * ```
  */
 export class SortController {
-  sortBy: string | null;
-  sortDirection: SortDirection;
   readonly multiple: boolean;
-  /** 多字段排序列表（multiple=true 时使用） */
+  /** 排序字段列表 — 唯一状态源 */
   sortFields: SortField[];
 
   constructor(options: SortOptions = {}) {
-    this.sortBy = options.defaultField ?? null;
-    this.sortDirection = options.defaultDirection ?? 'asc';
     this.multiple = options.multiple ?? false;
-    this.sortFields = this.sortBy
-      ? [{ field: this.sortBy, direction: this.sortDirection }]
+    this.sortFields = options.defaultField
+      ? [{ field: options.defaultField, direction: options.defaultDirection ?? 'asc' }]
       : [];
     return reactive(this) as this;
   }
 
-  // Getters
+  // Derived getters
+
+  get sortBy(): string | null {
+    return this.sortFields.length > 0 ? this.sortFields[0]!.field : null;
+  }
+
+  get sortDirection(): SortDirection {
+    return this.sortFields.length > 0 ? this.sortFields[0]!.direction : 'asc';
+  }
+
   get hasSorting(): boolean {
-    return this.sortBy !== null;
+    return this.sortFields.length > 0;
   }
 
   get isAscending(): boolean {
@@ -80,60 +113,60 @@ export class SortController {
    * - 点击新字段 → 按该字段升序
    */
   toggle(field: string): void {
-    if (this.sortBy === field) {
-      this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
-    } else {
-      this.sortBy = field;
-      this.sortDirection = 'asc';
-    }
+    const existingIndex = this.sortFields.findIndex(f => f.field === field);
 
-    // 更新 sortFields
     if (!this.multiple) {
-      this.sortFields = this.sortBy
-        ? [{ field: this.sortBy, direction: this.sortDirection }]
-        : [];
-    } else {
-      // Multiple mode: update or add entry in sortFields
-      const existingIndex = this.sortFields.findIndex(f => f.field === field);
       if (existingIndex >= 0) {
+        const current = this.sortFields[existingIndex]!;
+        this.sortFields = [{ field, direction: current.direction === 'asc' ? 'desc' : 'asc' }];
+      } else {
+        this.sortFields = [{ field, direction: 'asc' }];
+      }
+    } else {
+      if (existingIndex >= 0) {
+        const current = this.sortFields[existingIndex]!;
         this.sortFields = this.sortFields.map((f, i) =>
-          i === existingIndex ? { field, direction: this.sortDirection } : f
+          i === existingIndex ? { field, direction: current.direction === 'asc' ? 'desc' : 'asc' } : f
         );
       } else {
-        this.sortFields = [...this.sortFields, { field, direction: this.sortDirection }];
+        this.sortFields = [...this.sortFields, { field, direction: 'asc' }];
       }
     }
   }
 
   /** 设置排序 */
   setSort(field: string, direction: SortDirection): void {
-    this.sortBy = field;
-    this.sortDirection = direction;
     if (!this.multiple) {
       this.sortFields = [{ field, direction }];
+    } else {
+      const existingIndex = this.sortFields.findIndex(f => f.field === field);
+      if (existingIndex >= 0) {
+        this.sortFields = this.sortFields.map((f, i) =>
+          i === existingIndex ? { field, direction } : f
+        );
+      } else {
+        this.sortFields = [...this.sortFields, { field, direction }];
+      }
     }
   }
 
   /** 清除排序 */
   clear(): void {
-    this.sortBy = null;
-    this.sortDirection = 'asc';
     this.sortFields = [];
   }
 
   /** 获取指定字段的排序方向（用于 UI 图标显示） */
   getFieldDirection(field: string): SortDirection | null {
-    if (this.sortBy === field) return this.sortDirection;
     const entry = this.sortFields.find(f => f.field === field);
     return entry?.direction ?? null;
   }
 
   /** 生成排序查询参数 */
   toQuery(): { sortBy?: string; sortDescending?: boolean } {
-    if (!this.sortBy) return {};
+    if (this.sortFields.length === 0) return {};
     return {
-      sortBy: this.sortBy,
-      sortDescending: this.sortDirection === 'desc',
+      sortBy: this.sortFields[0]!.field,
+      sortDescending: this.sortFields[0]!.direction === 'desc',
     };
   }
 }

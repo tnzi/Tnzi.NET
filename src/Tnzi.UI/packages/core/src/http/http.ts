@@ -293,10 +293,9 @@ export class HttpClient {
       const blob = await response.blob();
       return {
         succeeded: true,
-        data: blob,
+        success: true,
         code: 200,
-        Code: 200,
-        Success: true,
+        data: blob,
       } as ApiResult<Blob>;
     } catch (error) {
       return createFailedApiResultFromError<Blob>(error);
@@ -377,7 +376,7 @@ export class HttpClient {
       lastResult = await this.executeRequest<T>(config);
 
       // Handle 401 with auto-refresh (only if not already a retry after refresh)
-      if (lastResult.Code === 401 && !isRetryAfterRefresh) {
+      if (lastResult.code === 401 && !isRetryAfterRefresh) {
         const refreshResult = await this.tryRefreshAndRetry<T>(config);
         if (refreshResult) {
           return refreshResult;
@@ -387,7 +386,7 @@ export class HttpClient {
       }
 
       // Check if we should retry on other status codes
-      const statusCode = lastResult.Code;
+      const statusCode = lastResult.code;
       if (attempt < maxRetries && retryableStatuses.includes(statusCode)) {
         continue;
       }

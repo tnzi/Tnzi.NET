@@ -23,13 +23,13 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 系统消息应始终保留
-        result.ShouldContain(m => m.Role == ChatRole.System && m.Text == "You are a helpful assistant.");
+        result.Messages.ShouldContain(m => m.Role == ChatRole.System && m.Text == "You are a helpful assistant.");
         // 只保留最后 1 轮
-        result.ShouldContain(m => m.Text == "New question");
-        result.ShouldContain(m => m.Text == "New answer");
+        result.Messages.ShouldContain(m => m.Text == "New question");
+        result.Messages.ShouldContain(m => m.Text == "New answer");
         // 旧消息被裁剪
-        result.ShouldNotContain(m => m.Text == "Old question");
-        result.ShouldNotContain(m => m.Text == "Old answer");
+        result.Messages.ShouldNotContain(m => m.Text == "Old question");
+        result.Messages.ShouldNotContain(m => m.Text == "Old answer");
     }
 
     [Fact]
@@ -51,13 +51,13 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 保留最后 2 轮
-        result.ShouldContain(m => m.Text == "Turn 2");
-        result.ShouldContain(m => m.Text == "Reply 2");
-        result.ShouldContain(m => m.Text == "Turn 3");
-        result.ShouldContain(m => m.Text == "Reply 3");
+        result.Messages.ShouldContain(m => m.Text == "Turn 2");
+        result.Messages.ShouldContain(m => m.Text == "Reply 2");
+        result.Messages.ShouldContain(m => m.Text == "Turn 3");
+        result.Messages.ShouldContain(m => m.Text == "Reply 3");
         // 第一轮被裁剪
-        result.ShouldNotContain(m => m.Text == "Turn 1");
-        result.ShouldNotContain(m => m.Text == "Reply 1");
+        result.Messages.ShouldNotContain(m => m.Text == "Turn 1");
+        result.Messages.ShouldNotContain(m => m.Text == "Reply 1");
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class PruneChatReducerTests
 
         var result = await reducer.ReduceAsync([]);
 
-        result.ShouldBeEmpty();
+        result.Messages.ShouldBeEmpty();
     }
 
     [Fact]
@@ -87,10 +87,10 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 未超限，所有消息保留
-        result.Count.ShouldBe(3);
-        result[0].Text.ShouldBe("System prompt");
-        result[1].Text.ShouldBe("Question");
-        result[2].Text.ShouldBe("Answer");
+        result.Messages.Count.ShouldBe(3);
+        result.Messages[0].Text.ShouldBe("System prompt");
+        result.Messages[1].Text.ShouldBe("Question");
+        result.Messages[2].Text.ShouldBe("Answer");
     }
 
     [Fact]
@@ -112,9 +112,9 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 所有系统消息保留
-        result.Count(m => m.Role == ChatRole.System).ShouldBe(2);
-        result.ShouldContain(m => m.Text == "System 1");
-        result.ShouldContain(m => m.Text == "System 2");
+        result.Messages.Count(m => m.Role == ChatRole.System).ShouldBe(2);
+        result.Messages.ShouldContain(m => m.Text == "System 1");
+        result.Messages.ShouldContain(m => m.Text == "System 2");
     }
 
     [Fact]
@@ -143,7 +143,7 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 旧工具消息应被裁剪
-        result.ShouldNotContain(m => m.Role == ChatRole.Tool);
+        result.Messages.ShouldNotContain(m => m.Role == ChatRole.Tool);
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 受保护工具的输出应保留（即使 turnAge > DropToolOutputsOlderThan）
-        result.ShouldContain(m => m.Role == ChatRole.Tool);
+        result.Messages.ShouldContain(m => m.Role == ChatRole.Tool);
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 不受保护的工具输出应被裁剪
-        result.ShouldNotContain(m => m.Role == ChatRole.Tool);
+        result.Messages.ShouldNotContain(m => m.Role == ChatRole.Tool);
     }
 
     [Fact]
@@ -237,11 +237,13 @@ public class PruneChatReducerTests
         var result = await reducer.ReduceAsync(messages);
 
         // 无法匹配到受保护工具 → 被裁剪
-        result.ShouldNotContain(m => m.Role == ChatRole.Tool);
+        result.Messages.ShouldNotContain(m => m.Role == ChatRole.Tool);
     }
+
+    private static readonly ITokenEstimator TokenEstimator = new HeuristicTokenEstimator();
 
     private static PruneChatReducer CreateReducer(PruneOptions options)
     {
-        return new PruneChatReducer(options, Mock.Of<ILogger<PruneChatReducer>>());
+        return new PruneChatReducer(options, TokenEstimator, Mock.Of<ILogger<PruneChatReducer>>());
     }
 }

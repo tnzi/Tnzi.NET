@@ -19,7 +19,7 @@ import type { ApiResult, PagedList } from '../types/index';
 
 export type DataQueryStatus = 'idle' | 'loading' | 'success' | 'error';
 
-export interface DataQueryOptions<TItem, TFilter extends Record<string, unknown> = Record<string, unknown>> {
+export interface DataQueryOptions<TItem, TFilter extends object = Record<string, unknown>> {
   /** Pagination options */
   pagination?: PaginationOptions;
   /** Sort options */
@@ -62,7 +62,7 @@ export interface DataQueryOptions<TItem, TFilter extends Record<string, unknown>
  * await query.applyFilter({ keyword: 'test' });
  * ```
  */
-export class DataQueryController<TItem, TFilter extends Record<string, unknown> = Record<string, unknown>> {
+export class DataQueryController<TItem, TFilter extends object = Record<string, unknown>> {
   /** Current data items */
   items: TItem[];
   /** Loading status */

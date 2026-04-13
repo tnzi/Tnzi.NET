@@ -15,5 +15,5 @@ public class CliOptions
     public List<string> AllowedDirectories { get; set; } = [];
 
     /// <summary>CLI 提供者配置（key = provider 名称）</summary>
-    public Dictionary<string, CliProviderOptions> Providers { get; set; } = new();
+    public Dictionary<string, CliProviderOptions> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

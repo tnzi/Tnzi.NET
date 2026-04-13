@@ -69,39 +69,41 @@ export interface ThemeConfig {
 }
 
 /**
- * Default light theme colors
+ * naive-ui default light theme
  */
 export const lightThemeColors: ThemeColors = {
-  primary: '#1890ff',
-  secondary: '#52c41a',
-  success: '#52c41a',
-  warning: '#faad14',
-  danger: '#ff4d4f',
-  info: '#1890ff',
+  primary: '#18a058',
+  secondary: '#f5f5f7',
+  success: '#18a058',
+  warning: '#f0a020',
+  danger: '#d03050',
+  info: '#2080f0',
+
   background: '#ffffff',
-  surface: '#fafafa',
-  text: '#000000',
-  textSecondary: '#666666',
-  border: '#d9d9d9',
-  divider: '#f0f0f0',
+  surface: '#fafafc',      // actionColor
+  text: '#333639',         // textColor2: rgb(51,54,57)
+  textSecondary: '#767c82',// textColor3: rgb(118,124,130)
+  border: '#e0e0e6',       // borderColor: rgb(224,224,230)
+  divider: '#efefF5',      // dividerColor: rgb(239,239,245)
 };
 
 /**
- * Default dark theme colors
+ * naive-ui default dark theme
  */
 export const darkThemeColors: ThemeColors = {
-  primary: '#177ddc',
-  secondary: '#49aa19',
-  success: '#49aa19',
-  warning: '#d89614',
-  danger: '#a61d24',
-  info: '#177ddc',
-  background: '#141414',
-  surface: '#1f1f1f',
-  text: '#ffffff',
-  textSecondary: '#a0a0a0',
-  border: '#434343',
-  divider: '#303030',
+  primary: '#63e2b7',
+  secondary: '#2a2a2e',
+  success: '#63e2b7',
+  warning: '#f2c97d',
+  danger: '#e88080',
+  info: '#70c0e8',
+
+  background: '#101014',   // bodyColor: rgb(16,16,20)
+  surface: '#18181c',      // cardColor: rgb(24,24,28)
+  text: '#e8e8e8',         // ~overlay(0.9)
+  textSecondary: '#8a8f98',// ~overlay(0.52)
+  border: '#3a3a40',       // ~overlay(0.24)
+  divider: '#232328',      // ~overlay(0.09)
 };
 
 /**
@@ -110,8 +112,8 @@ export const darkThemeColors: ThemeColors = {
 export const defaultThemeConfig: ThemeConfig = {
   mode: 'light',
   colors: lightThemeColors,
-  borderRadius: 4,
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  borderRadius: 3,         // naive-ui default: 3px
+  fontFamily: 'v-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontSize: 14,
   spacing: 8,
 };

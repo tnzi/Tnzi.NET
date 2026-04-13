@@ -146,19 +146,15 @@ public class DiscordChannelAdapter : IChannelAdapter
         {
             var publicKeyBytes = Convert.FromHexString(_options.PublicKey!);
             var signatureBytes = Convert.FromHexString(signature);
-            var message = Encoding.UTF8.GetBytes(timestamp + body);
+            var messageBytes = Encoding.UTF8.GetBytes(timestamp + body);
 
-            // 使用 .NET 内置 Ed25519 验证（.NET 9+）
-            // 对于不支持的运行时，降级到时间戳验证
             if (publicKeyBytes.Length != 32 || signatureBytes.Length != 64)
             {
                 _logger.LogDebug("Invalid Ed25519 key or signature length");
                 return false;
             }
 
-            // 尝试使用 System.Security.Cryptography 的 Ed25519
-            // .NET 9 尚不支持原生 Ed25519，使用 timestamp 新鲜度验证作为替代保护
-            // 完整 Ed25519 验证需要添加 NSec.Cryptography NuGet 包
+            // Timestamp freshness check (reject requests older than 5 minutes)
             if (!long.TryParse(timestamp, out var ts))
             {
                 _logger.LogDebug("Invalid X-Signature-Timestamp value");
@@ -172,11 +168,14 @@ public class DiscordChannelAdapter : IChannelAdapter
                 return false;
             }
 
-            // 验证签名格式和时间戳有效性通过，signature hex 格式正确
-            // NOTE: 完整的 Ed25519 签名验证需要 NSec.Cryptography 包
-            // 当前实现验证: PublicKey 格式 + 签名格式 + 时间戳新鲜度
-            _logger.LogDebug("Discord signature format and timestamp validated (full Ed25519 verification requires NSec package)");
-            return true;
+            // Ed25519 signature verification
+            // .NET 10 does not natively support Ed25519. Reject unverified requests as a security precaution.
+            // To enable full Discord webhook verification, add the NSec.Cryptography NuGet package
+            // and implement Ed25519.Verify(publicKeyBytes, messageBytes, signatureBytes).
+            _logger.LogWarning("Discord Ed25519 signature verification is not implemented. " +
+                "Add NSec.Cryptography NuGet package for full webhook security. " +
+                "Rejecting request as a security precaution.");
+            return false;
         }
         catch (FormatException ex)
         {

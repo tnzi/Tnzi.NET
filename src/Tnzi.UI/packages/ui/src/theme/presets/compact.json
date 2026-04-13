@@ -1,0 +1,25 @@
+{
+  "name": "compact",
+  "description": "Compact density — tighter spacing, smaller controls",
+  "colors": {
+    "primary": "#18a058",
+    "info": "#2080f0",
+    "success": "#18a058",
+    "warning": "#f0a020",
+    "error": "#d03050"
+  },
+  "mode": "light",
+  "isInfoFollowPrimary": false,
+  "recommendColor": false,
+  "naiveOverrides": {
+    "common": {
+      "fontSize": "13px",
+      "fontSizeSmall": "12px",
+      "fontSizeMedium": "13px",
+      "fontSizeLarge": "14px",
+      "heightSmall": "26px",
+      "heightMedium": "30px",
+      "heightLarge": "36px"
+    }
+  }
+}

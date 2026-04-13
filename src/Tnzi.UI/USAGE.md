@@ -7,9 +7,9 @@
 1. [概述](#概述)
 2. [安装与配置](#安装与配置)
 3. [@tnzi/core — 核心包](#tnzicore--核心包)
-4. [@tnzi/naive-ui — 管理后台](#tnzinaive-ui--管理后台)
-5. [@tnzi/shadcn — Web 应用](#tnzishadcn--web-应用)
-6. [@tnzi/vant — 移动端](#tnzivant--移动端)
+4. [@tnzi/ui — Web 应用 & 基础 UI](#tnziui--web-应用--基础-ui)
+5. [@tnzi/ui-admin — 管理后台扩展](#tnziui-admin--管理后台扩展)
+6. [@tnzi/mobile — 移动端](#tnzimobile--移动端)
 7. [完整示例](#完整示例)
 
 ---
@@ -27,11 +27,20 @@ Tnzi UI 采用 **核心 + 适配** 分层架构：
 ├── 适配器接口（message / dialog / theme / router / storage）
 └── 类型 / 枚举 / 工具函数 / Zod Schema
 
-@tnzi/{naive-ui | shadcn | vant}（适配层，实现视图）
+@tnzi/ui（Web 基础 UI 层，shadcn-vue + Tailwind）
 ├── Vue 插件（一键安装）
 ├── T* 业务组件（TLoginForm / TDataTable / TAdminLayout / ...）
 ├── 适配器实现（message → toast, dialog → modal, theme → CSS）
 └── Pinia Store 封装（委托 core/state）
+
+@tnzi/ui-admin（管理后台扩展，依赖 @tnzi/ui）
+├── TCrudPage（CRUD 模板页）
+└── 模块管理页、权限管理页等
+
+@tnzi/mobile（移动端，Vant 4，独立包）
+├── Vue 插件（一键安装）
+├── T* 业务组件（移动端版本）
+└── 适配器实现（Vant toast / dialog）
 ```
 
 **核心原则**：业务逻辑写一次（在 core），换 UI 库只需换包。
@@ -40,30 +49,13 @@ Tnzi UI 采用 **核心 + 适配** 分层架构：
 
 ## 安装与配置
 
-### 场景 1：企业管理后台（推荐 naive-ui）
+### 场景 1：企业管理后台（推荐 @tnzi/ui + @tnzi/ui-admin）
 
 ```json
 {
   "dependencies": {
-    "@tnzi/naive-ui": "^0.1.0",
-    "vue": "^3.5.0",
-    "vue-router": "^4.5.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
-    "typescript": "^5.9.0",
-    "vite": "^5.4.0",
-    "vue-tsc": "^2.0.0"
-  }
-}
-```
-
-### 场景 2：面向外部的 Web 站点（推荐 shadcn）
-
-```json
-{
-  "dependencies": {
-    "@tnzi/shadcn": "^0.1.0",
+    "@tnzi/ui": "^0.1.0",
+    "@tnzi/ui-admin": "^0.1.0",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"
   },
@@ -79,14 +71,35 @@ Tnzi UI 采用 **核心 + 适配** 分层架构：
 }
 ```
 
-> shadcn 基于 Tailwind CSS，需要额外安装 `tailwindcss` + `postcss` + `autoprefixer`。
+### 场景 2：面向外部的 Web 站点（推荐 @tnzi/ui）
+
+```json
+{
+  "dependencies": {
+    "@tnzi/ui": "^0.1.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.9.0",
+    "vite": "^5.4.0",
+    "vue-tsc": "^2.0.0"
+  }
+}
+```
+
+> @tnzi/ui 基于 shadcn-vue + Tailwind CSS，需要额外安装 `tailwindcss` + `postcss` + `autoprefixer`。
 
 ### 场景 3：移动端 APP / PWA（推荐 vant）
 
 ```json
 {
   "dependencies": {
-    "@tnzi/vant": "^0.1.0",
+    "@tnzi/mobile": "^0.1.0",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"
   },
@@ -120,9 +133,9 @@ UI 包已内置所有第三方依赖，用户**无需手动安装**：
 
 | 安装 | 自动获得 |
 |---|---|
-| `@tnzi/naive-ui` | `@tnzi/core`, `naive-ui`, `pinia`, `@vue/reactivity`, `zod` |
-| `@tnzi/shadcn` | `@tnzi/core`, `shadcn-vue`, `pinia`, `lucide-vue-next`, `reka-ui`, `@vueuse/core`, `vee-validate`, `vue-sonner`, `@vue/reactivity`, `zod` |
-| `@tnzi/vant` | `@tnzi/core`, `vant`, `@vue/reactivity`, `zod` |
+| `@tnzi/ui` | `@tnzi/core`, `shadcn-vue`, `pinia`, `lucide-vue-next`, `reka-ui`, `@vueuse/core`, `vee-validate`, `vue-sonner`, `@vue/reactivity`, `zod` |
+| `@tnzi/ui-admin` | `@tnzi/ui`, `@tnzi/core` |
+| `@tnzi/mobile` | `@tnzi/core`, `vant`, `@vue/reactivity`, `zod` |
 | `@tnzi/core` | `@vue/reactivity`, `zod` |
 
 ---
@@ -653,24 +666,24 @@ import {
 
 ---
 
-## @tnzi/naive-ui — 管理后台
+## @tnzi/ui — Web 应用 & 基础 UI
 
-基于 Naive UI 的企业管理后台组件包。
+基于 shadcn-vue + Tailwind CSS 的现代 Web 应用和管理后台组件包。包含完整 Pinia Store。
 
 ### 初始化
 
 ```typescript
 // main.ts
 import { createApp } from 'vue'
-import { createTnziNaiveUi } from '@tnzi/naive-ui'
+import { createTnziUi } from '@tnzi/ui'
 import App from './App.vue'
 
 const app = createApp(App)
 
-app.use(createTnziNaiveUi({
-  locale: 'zh-CN',                        // Naive UI 语言
+app.use(createTnziUi({
+  locale: 'zh-CN',
+  enablePinia: true,                      // 启用 Pinia 状态管理（默认 true）
   registerComponents: true,               // 全局注册 T* 组件（默认 true）
-  registerAdapters: true,                 // 注册适配器（默认 true）
 }))
 
 app.mount('#app')
@@ -683,13 +696,13 @@ app.mount('#app')
 ```typescript
 // vite.config.ts
 import Components from 'unplugin-vue-components/vite'
-import { TnziNaiveUiResolver } from '@tnzi/naive-ui'
+import { TnziUiResolver } from '@tnzi/ui'
 
 export default defineConfig({
   plugins: [
     vue(),
     Components({
-      resolvers: [TnziNaiveUiResolver()]
+      resolvers: [TnziUiResolver()]
     }),
   ],
 })
@@ -921,29 +934,7 @@ const fields = [
 
 ### 适配器
 
-```typescript
-import { useMessage, useDialog } from 'naive-ui'
-import {
-  createNaiveMessageAdapter,
-  createNaiveDialogAdapter,
-  createNaiveThemeAdapter,
-} from '@tnzi/naive-ui'
-import { setMessageAdapter, setDialogAdapter, setThemeAdapter } from '@tnzi/core'
-
-// 在 setup 中注册（需要在 NMessageProvider / NDialogProvider 内部）
-export default defineComponent({
-  setup() {
-    const message = useMessage()
-    const dialog = useDialog()
-
-    setMessageAdapter(createNaiveMessageAdapter(message))
-    setDialogAdapter(createNaiveDialogAdapter(dialog))
-    setThemeAdapter(createNaiveThemeAdapter())
-  },
-})
-```
-
-注册后，core 的状态管理器可以直接使用这些适配器：
+适配器在插件安装时自动注册（通过 `createTnziUi()`），无需手动配置。也可手动获取：
 
 ```typescript
 // 在任何地方
@@ -955,51 +946,40 @@ getMessageAdapter().error('Something went wrong')
 
 ---
 
-## @tnzi/shadcn — Web 应用
+## @tnzi/ui-admin — 管理后台扩展
 
-基于 shadcn-vue + Tailwind CSS 的现代 Web 应用组件包。功能最完整，包含 Pinia Store。
+基于 `@tnzi/ui` 的管理后台扩展包，提供 CRUD 模板页和模块管理页面。
 
 ### 初始化
 
 ```typescript
 // main.ts
 import { createApp } from 'vue'
-import { createTnziUi } from '@tnzi/shadcn'
+import { createTnziUi } from '@tnzi/ui'
+import { createTnziUiAdmin } from '@tnzi/ui-admin'
 import App from './App.vue'
 
 const app = createApp(App)
-
-app.use(createTnziUi({
-  locale: 'zh-CN',
-  enablePinia: true,                      // 启用 Pinia 状态管理（默认 true）
-  registerComponents: true,               // 全局注册 T* 组件（默认 true）
-}))
-
+app.use(createTnziUi({ locale: 'zh-CN' }))
+app.use(createTnziUiAdmin())
 app.mount('#app')
 ```
 
-### 组件自动导入（可选）
+### 额外组件
 
-```typescript
-// vite.config.ts
-import Components from 'unplugin-vue-components/vite'
-import { TnziUiResolver } from '@tnzi/shadcn'
+| 组件 | 说明 |
+|---|---|
+| `TCrudPage` | 完整 CRUD 模板（列表 + 表单弹窗 + 搜索 + 分页） |
+| `TModuleManagement` | 模块管理页 |
+| `TPermissionManagement` | 权限管理页 |
 
-export default defineConfig({
-  plugins: [
-    vue(),
-    Components({
-      resolvers: [TnziUiResolver()]
-    }),
-  ],
-})
-```
+---
 
-### 组件一览
+## @tnzi/ui 组件一览
 
-shadcn 包提供与 naive-ui 相同的 18 个 T* 语义组件，外加 60+ 个 shadcn-vue 原始组件：
+@tnzi/ui 提供 18 个 T* 语义组件，外加 330+ 个 shadcn-vue 原始组件：
 
-**T* 语义组件**（同 naive-ui 的 API 契约）：
+**T* 语义组件**：
 
 | 组件 | 说明 |
 |---|---|
@@ -1022,16 +1002,16 @@ shadcn 包提供与 naive-ui 相同的 18 个 T* 语义组件，外加 60+ 个 s
 | `TTabBar` | 标签导航 |
 | `TDialogProvider` | 对话框上下文 |
 
-> 由于所有 T* 组件实现相同的 `@tnzi/core` 接口，模板代码可在 naive-ui 和 shadcn 之间通用。
+> T* 组件接口定义在 `@tnzi/core`，@tnzi/ui 和 @tnzi/mobile 均实现相同接口，模板代码基本通用。
 
 ### Pinia Store
 
-shadcn 包内置了 3 个 Pinia Store，封装 core 的状态管理器：
+@tnzi/ui 内置了 3 个 Pinia Store，封装 core 的状态管理器：
 
 #### useAuth()（认证 Store）
 
 ```typescript
-import { useAuth } from '@tnzi/shadcn'
+import { useAuth } from '@tnzi/ui'
 
 const auth = useAuth()
 
@@ -1056,7 +1036,7 @@ await auth.logout()
 #### useUser()（用户偏好 Store）
 
 ```typescript
-import { useUser } from '@tnzi/shadcn'
+import { useUser } from '@tnzi/ui'
 
 const user = useUser()
 
@@ -1085,7 +1065,7 @@ user.recentItemsCount                     // number
 #### useApp()（应用全局状态 Store）
 
 ```typescript
-import { useApp } from '@tnzi/shadcn'
+import { useApp } from '@tnzi/ui'
 
 const app = useApp()
 
@@ -1114,7 +1094,7 @@ app.closeModal(id)
 ### Composables
 
 ```typescript
-import { useShadcnTheme, useShadcnMessage, useShadcnDialog } from '@tnzi/shadcn'
+import { useShadcnTheme, useShadcnMessage, useShadcnDialog } from '@tnzi/ui'
 
 // 主题
 const { isDark, toggleTheme, setTheme } = useShadcnTheme()
@@ -1145,7 +1125,7 @@ const input = await dialog.prompt('Enter your name')
 
 ### shadcn-vue 原始组件
 
-除 T* 组件外，shadcn 包还导出所有 shadcn-vue 原始组件，可直接使用：
+除 T* 组件外，@tnzi/ui 还导出所有 shadcn-vue 原始组件，可直接使用：
 
 ```vue
 <template>
@@ -1175,7 +1155,7 @@ const input = await dialog.prompt('Enter your name')
 
 ---
 
-## @tnzi/vant — 移动端
+## @tnzi/mobile — 移动端
 
 基于 Vant 4 的移动端组件包，适用于 H5、APP、PWA。
 
@@ -1184,13 +1164,13 @@ const input = await dialog.prompt('Enter your name')
 ```typescript
 // main.ts
 import { createApp } from 'vue'
-import { createTnziVant } from '@tnzi/vant'
-import '@tnzi/vant/style.css'          // 必须引入样式
+import { createTnziMobile } from '@tnzi/mobile'
+import '@tnzi/mobile/style.css'          // 必须引入样式
 import App from './App.vue'
 
 const app = createApp(App)
 
-app.use(createTnziVant({
+app.use(createTnziMobile({
   locale: 'zh-CN',                        // Vant 语言
   registerVant: true,                     // 全局注册 T* 组件（默认 true）
 }))
@@ -1316,7 +1296,7 @@ const handleTabChange = (key: string) => {
 ### 移动端视口检测
 
 ```typescript
-import { useMobileViewport } from '@tnzi/vant'
+import { useMobileViewport } from '@tnzi/mobile'
 
 const { width, isMobile } = useMobileViewport(768)
 
@@ -1327,7 +1307,7 @@ const { width, isMobile } = useMobileViewport(768)
 ### 适配器
 
 ```typescript
-import { createVantMessageAdapter, createVantDialogAdapter } from '@tnzi/vant'
+import { createVantMessageAdapter, createVantDialogAdapter } from '@tnzi/mobile'
 import { setMessageAdapter, setDialogAdapter } from '@tnzi/core'
 
 // 注册适配器
@@ -1347,13 +1327,13 @@ const ok = await getDialogAdapter().confirm('Delete this item?')  // Vant showCo
 
 - vant 包**不包含** Pinia Store，需自行管理状态或配合 `@tnzi/core` 的状态管理器
 - 移动端 `TDataTable` 渲染为**卡片式**布局（不是传统表格），更适合小屏
-- 记得引入 `@tnzi/vant/style.css` 以加载 Vant 基础样式
+- 记得引入 `@tnzi/mobile/style.css` 以加载 Vant 基础样式
 
 ---
 
 ## 完整示例
 
-### 示例 1：企业后台（naive-ui）
+### 示例 1：企业后台（@tnzi/ui + @tnzi/ui-admin）
 
 ```
 my-admin/
@@ -1376,14 +1356,14 @@ my-admin/
 
 ```typescript
 import { createApp } from 'vue'
-import { createTnziNaiveUi } from '@tnzi/naive-ui'
-import { createPinia } from 'pinia'
+import { createTnziUi } from '@tnzi/ui'
+import { createTnziUiAdmin } from '@tnzi/ui-admin'
 import App from './App.vue'
 import router from './router'
 
 const app = createApp(App)
-app.use(createPinia())
-app.use(createTnziNaiveUi({ locale: 'zh-CN' }))
+app.use(createTnziUi({ locale: 'zh-CN' }))
+app.use(createTnziUiAdmin())
 app.use(router)
 app.mount('#app')
 ```
@@ -1524,7 +1504,7 @@ const tabs = [
 3. **类型安全** — TypeScript 类型来自 core，三个包共享
 
 ```vue
-<!-- 这段模板在 naive-ui、shadcn、vant 三个包中完全一致 -->
+<!-- 这段模板在 @tnzi/ui 和 @tnzi/mobile 中基本通用 -->
 <TLoginForm
   :loading="loading"
   :show-captcha="showCaptcha"
@@ -1537,8 +1517,8 @@ const tabs = [
 
 如果需要从一个 UI 包迁移到另一个：
 
-1. 替换 `package.json` 中的依赖（如 `@tnzi/naive-ui` → `@tnzi/shadcn`）
-2. 修改 `main.ts` 中的插件引入（`createTnziNaiveUi` → `createTnziUi`）
+1. 替换 `package.json` 中的依赖（如 `@tnzi/mobile` → `@tnzi/ui`）
+2. 修改 `main.ts` 中的插件引入（`createTnziMobile` → `createTnziUi`）
 3. T* 组件模板代码**无需修改**
 4. 适配器注册代码需要替换为对应 UI 包的实现
 5. 如果使用了原生 UI 组件（如 `<n-button>`），需要替换为新 UI 库的组件

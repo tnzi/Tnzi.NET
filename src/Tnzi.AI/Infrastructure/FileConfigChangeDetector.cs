@@ -101,7 +101,7 @@ public class FileConfigChangeDetector : IConfigChangeDetector
         if (!Directory.Exists(directoryPath)) return DateTime.MinValue;
 
         var files = Directory.GetFiles(directoryPath, pattern ?? "*", SearchOption.AllDirectories);
-        if (files.Length == 0) return Directory.GetLastWriteTimeUtc(directoryPath);
+        if (files.Length == 0) return DateTime.MinValue;
 
         return files.Max(f => File.GetLastWriteTimeUtc(f));
     }

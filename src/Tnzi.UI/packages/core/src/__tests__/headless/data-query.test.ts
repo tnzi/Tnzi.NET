@@ -6,20 +6,18 @@ import type { ApiResult, PagedList } from '../../types/index';
 function pagedResult<T>(items: T[], totalCount: number): ApiResult<PagedList<T>> {
   return {
     succeeded: true,
-    data: { items, totalCount, pageIndex: 1, pageSize: 20 },
+    success: true,
     code: 200,
-    Code: 200,
-    Success: true,
+    data: { items, totalCount, pageIndex: 1, pageSize: 20 },
   } as ApiResult<PagedList<T>>;
 }
 
 function failedResult<T>(message = 'Fetch failed'): ApiResult<PagedList<T>> {
   return {
     succeeded: false,
-    message,
+    success: false,
     code: 500,
-    Code: 500,
-    Success: false,
+    message,
   } as ApiResult<PagedList<T>>;
 }
 

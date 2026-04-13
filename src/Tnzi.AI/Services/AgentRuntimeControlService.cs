@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace Tnzi.AI.Services;
 
 /// <summary>
@@ -12,6 +10,7 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
     private readonly IRunStore _runStore;
     private readonly IWorkflowService _workflowService;
     private readonly ISubAgentRegistry _subAgentRegistry;
+    private readonly IWorkflowExecutionQueryService? _workflowQueryService;
 
     public AgentRuntimeControlService(
         ISubAgentExecutionService subAgentExecutionService,
@@ -19,7 +18,8 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         IRunStore runStore,
         IWorkflowService workflowService,
         ISubAgentRegistry subAgentRegistry,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IWorkflowExecutionQueryService? workflowQueryService = null)
         : base(serviceProvider)
     {
         _subAgentExecutionService = Check.NotNull(subAgentExecutionService);
@@ -27,6 +27,7 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         _runStore = Check.NotNull(runStore);
         _workflowService = Check.NotNull(workflowService);
         _subAgentRegistry = Check.NotNull(subAgentRegistry);
+        _workflowQueryService = workflowQueryService;
     }
 
     public Task<Result<AgentRunControlStateDto>> SpawnAsync(SpawnAgentRunInput input, CancellationToken cancellationToken = default)
@@ -141,13 +142,13 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
             {
                 Name = x.Name,
                 Description = x.Description,
-                ToolGroups = x.ToolGroups.ToList(),
-                ExcludedToolGroups = x.ExcludedToolGroups.ToList(),
+                ToolGroups = x.ToolGroups.Any() ? x.ToolGroups.ToList() : null,
+                ExcludedToolGroups = x.ExcludedToolGroups.Any() ? x.ExcludedToolGroups.ToList() : null,
                 MaxTurns = x.MaxTurns,
                 Instructions = x.Instructions,
                 DefaultModel = x.DefaultModel,
                 DefaultApprovalMode = x.DefaultApprovalMode,
-                CapabilityTags = x.CapabilityTags?.ToList() ?? []
+                CapabilityTags = x.CapabilityTags?.Any() == true ? x.CapabilityTags.ToList() : null
             })
             .ToList();
 
@@ -191,9 +192,8 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
 
         if (!string.IsNullOrWhiteSpace(run.WorkflowExecutionId))
         {
-            var queryService = ServiceProvider.GetService<IWorkflowExecutionQueryService>();
-            var executionStatus = queryService != null
-                ? await queryService.GetExecutionStatusAsync(run.WorkflowExecutionId, cancellationToken)
+            var executionStatus = _workflowQueryService != null
+                ? await _workflowQueryService.GetExecutionStatusAsync(run.WorkflowExecutionId, cancellationToken)
                 : await _workflowService.GetExecutionStatusAsync(run.WorkflowExecutionId, cancellationToken);
             if (executionStatus.Succeeded && executionStatus.Data != null)
             {
@@ -211,8 +211,8 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
 
             if (dto.RequiresUserAction)
             {
-                var interrupt = queryService != null
-                    ? await queryService.GetPendingInterruptAsync(run.WorkflowExecutionId, cancellationToken)
+                var interrupt = _workflowQueryService != null
+                    ? await _workflowQueryService.GetPendingInterruptAsync(run.WorkflowExecutionId, cancellationToken)
                     : await _workflowService.GetPendingInterruptAsync(run.WorkflowExecutionId, cancellationToken);
                 if (interrupt.Succeeded && interrupt.Data != null && !string.IsNullOrWhiteSpace(interrupt.Data.StepId))
                 {

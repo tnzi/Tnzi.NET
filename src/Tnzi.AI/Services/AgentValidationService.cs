@@ -30,6 +30,39 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         if (agent == null)
             return Fail<AgentValidationResultDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
 
+        return Ok(await ValidateCoreAsync(agent));
+    }
+
+    public async Task<Result<AgentHealthSummaryDto>> GetHealthSummaryAsync()
+    {
+        var agents = await _agentRepository.AsQueryable().ToListAsync();
+
+        var summary = new AgentHealthSummaryDto
+        {
+            TotalAgents = agents.Count,
+            DisabledAgents = agents.Count(a => !a.IsEnabled)
+        };
+
+        var enabledAgents = agents.Where(a => a.IsEnabled).ToList();
+        foreach (var agent in enabledAgents)
+        {
+            var validationResult = await ValidateCoreAsync(agent);
+            if (validationResult.IsValid)
+            {
+                summary.HealthyAgents++;
+            }
+            else
+            {
+                summary.UnhealthyAgents++;
+                summary.UnhealthyDetails.Add(validationResult);
+            }
+        }
+
+        return Ok(summary);
+    }
+
+    private async Task<AgentValidationResultDto> ValidateCoreAsync(Agent agent)
+    {
         var checks = new List<ValidationCheckDto>();
 
         // Check 1: Provider availability
@@ -50,46 +83,13 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         // Check 5: Skill references valid
         checks.Add(await ValidateSkillReferencesAsync(agent));
 
-        var result = new AgentValidationResultDto
+        return new AgentValidationResultDto
         {
             AgentId = agent.Id,
             AgentName = agent.Name,
             IsValid = checks.All(c => c.Passed),
             Checks = checks
         };
-
-        return Ok(result);
-    }
-
-    public async Task<Result<AgentHealthSummaryDto>> GetHealthSummaryAsync()
-    {
-        var agents = await _agentRepository.AsQueryable().ToListAsync();
-
-        var summary = new AgentHealthSummaryDto
-        {
-            TotalAgents = agents.Count,
-            DisabledAgents = agents.Count(a => !a.IsEnabled)
-        };
-
-        var enabledAgents = agents.Where(a => a.IsEnabled).ToList();
-        foreach (var agent in enabledAgents)
-        {
-            var validationResult = await ValidateAsync(agent.Id);
-            if (validationResult.Succeeded && validationResult.Data != null)
-            {
-                if (validationResult.Data.IsValid)
-                {
-                    summary.HealthyAgents++;
-                }
-                else
-                {
-                    summary.UnhealthyAgents++;
-                    summary.UnhealthyDetails.Add(validationResult.Data);
-                }
-            }
-        }
-
-        return Ok(summary);
     }
 
     private ValidationCheckDto ValidateProvider(Agent agent)

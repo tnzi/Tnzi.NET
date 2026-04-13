@@ -1,6 +1,3 @@
-using Microsoft.Extensions.AI;
-using Tnzi.AI.Infrastructure;
-
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>

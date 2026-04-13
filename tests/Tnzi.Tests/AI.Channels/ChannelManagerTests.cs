@@ -17,7 +17,7 @@ public class ChannelManagerTests
     public async Task ProcessMessage_ChatType_CallsRuntimeAndPublishesOutbound()
     {
         // Arrange
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var threadStore = new Mock<IChannelThreadStore>();
         var runtime = new Mock<IAgentRuntime>();
         var threadService = new Mock<IAgentThreadService>();
@@ -66,7 +66,7 @@ public class ChannelManagerTests
     public async Task ProcessMessage_CommandNew_CreatesNewThread()
     {
         // Arrange
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var threadStore = new Mock<IChannelThreadStore>();
         var runtime = new Mock<IAgentRuntime>();
         var threadService = new Mock<IAgentThreadService>();
@@ -106,7 +106,7 @@ public class ChannelManagerTests
     public async Task ProcessMessage_CommandHelp_ReturnsHelpText()
     {
         // Arrange
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var threadStore = new Mock<IChannelThreadStore>();
         var runtime = new Mock<IAgentRuntime>();
         var threadService = new Mock<IAgentThreadService>();
@@ -141,7 +141,7 @@ public class ChannelManagerTests
     public async Task ProcessMessage_RuntimeThrows_SendsErrorReply()
     {
         // Arrange
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var threadStore = new Mock<IChannelThreadStore>();
         var runtime = new Mock<IAgentRuntime>();
         var threadService = new Mock<IAgentThreadService>();
@@ -180,7 +180,7 @@ public class ChannelManagerTests
     public void MaxConcurrency_RespectsSemaphoreLimit()
     {
         var options = MsOptions.Create(new ChannelsModuleOptions { MaxConcurrency = 3 });
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var scopeFactory = new Mock<IServiceScopeFactory>();
 
         var manager = new ChannelManager(
@@ -197,7 +197,7 @@ public class ChannelManagerTests
     public async Task ProcessMessage_Chat_SavesNewThreadMapping()
     {
         // Arrange
-        var bus = new InMemoryChannelMessageBus();
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var threadStore = new Mock<IChannelThreadStore>();
         var runtime = new Mock<IAgentRuntime>();
         var threadService = new Mock<IAgentThreadService>();
