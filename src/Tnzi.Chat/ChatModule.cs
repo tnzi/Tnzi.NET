@@ -21,6 +21,7 @@ public class ChatModule : TnziApplicationModule
         services.AddScoped<IMessageService, MessageService>();
         services.AddScoped<IMessageReplyService, MessageReplyService>();
         services.AddScoped<IDraftMessageService, DraftMessageService>();
+        services.AddScoped<IChatSessionService, ChatSessionService>();
 
         // 注册事件处理器
         services.AddEventHandler<MessageSentEvent, ChatSignalREventHandler>();

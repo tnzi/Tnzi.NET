@@ -6,10 +6,8 @@
  * readable name, and optional duration.
  */
 
-import { Badge } from '../../primitives';
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import type { ToolCallInfo } from '@/composables/useChat';
 import StreamLoader from '../streaming/StreamLoader.vue';
 
@@ -47,38 +45,58 @@ const durationLabel = computed(() => {
 </script>
 
 <template>
-  <div
-    :class="cn(
-      'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm bg-ai-tool-call-bg',
-    )"
-  >
+  <div class="t-tool-call">
     <!-- Status icon -->
     <StreamLoader v-if="status === 'running'" :size="14" />
     <Icon
       v-else-if="status === 'completed'"
       icon="lucide:check-circle-2"
-      class="size-3.5 text-ai-node-completed shrink-0"
+      class="size-3.5 t-tool-call__icon--completed shrink-0"
     />
     <Icon
       v-else-if="status === 'failed'"
       icon="lucide:x-circle"
-      class="size-3.5 text-ai-node-failed shrink-0"
+      class="size-3.5 t-tool-call__icon--failed shrink-0"
     />
     <Icon
       v-else
       icon="lucide:clock"
-      class="size-3.5 text-muted-foreground shrink-0"
+      class="size-3.5 t-tool-call__icon--muted shrink-0"
     />
 
     <!-- Tool name -->
-    <Badge variant="secondary" class="truncate font-medium">{{ readableName }}</Badge>
+    <span class="t-tool-call__name truncate font-medium">{{ readableName }}</span>
 
     <!-- Duration -->
     <span
       v-if="durationLabel"
-      class="ml-auto shrink-0 text-xs text-muted-foreground"
+      class="ml-auto shrink-0 text-xs t-tool-call__duration"
     >
       {{ durationLabel }}
     </span>
   </div>
 </template>
+
+<style scoped>
+.t-tool-call {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+  background-color: var(--tnzi-ai-tool-call-bg);
+}
+.t-tool-call__icon--completed { color: var(--tnzi-ai-node-completed); }
+.t-tool-call__icon--failed { color: var(--tnzi-ai-node-failed); }
+.t-tool-call__icon--muted { color: var(--tnzi-base-text-muted); }
+.t-tool-call__name {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--tnzi-container-bg);
+  border: 1px solid var(--tnzi-border);
+  color: var(--tnzi-base-text);
+}
+.t-tool-call__duration { color: var(--tnzi-base-text-muted); }
+</style>

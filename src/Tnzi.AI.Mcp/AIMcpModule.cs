@@ -44,6 +44,12 @@ public class AIMcpModule : TnziApplicationModule
         // MCP Tool Analytics
         services.AddScoped<IMcpToolAnalyticsService, McpToolAnalyticsService>();
 
+        // MCP Server Registration registry (Phase 5 backend prereq) — entity-driven
+        // CRUD for external MCP server client registrations. AuthToken encrypted via
+        // IDataProtectionProvider (registered by AIModule.AddDataProtection() — we
+        // depend on AIModule so that registration is already in the container).
+        services.AddScoped<IMcpServerRegistryService, McpServerRegistryService>();
+
         // MCP OAuth Token Manager（Singleton — per-server 锁和缓存）
         services.AddSingleton<IMcpOAuthTokenManager, McpOAuthTokenManager>();
 

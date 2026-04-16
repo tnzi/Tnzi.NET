@@ -6,7 +6,7 @@
  * keyboard shortcuts, and send/stop button.
  */
 
-import { Button } from '../../primitives';
+import { NButton } from 'naive-ui';
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -211,14 +211,9 @@ onBeforeUnmount(() => {
         <span class="text-[10px] text-muted-foreground">{{ formatFileSize(file.size) }}</span>
 
         <!-- Remove button -->
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="ml-0.5 size-4 rounded-full hover:bg-destructive/20 hover:text-destructive"
-          @click="removeFile(index)"
-        >
-          <Icon icon="lucide:x" class="size-3" />
-        </Button>
+        <NButton quaternary size="tiny" @click="removeFile(index)">
+          <template #icon><Icon icon="lucide:x" /></template>
+        </NButton>
       </div>
     </div>
 
@@ -226,14 +221,9 @@ onBeforeUnmount(() => {
     <div class="flex items-end gap-2 p-2">
       <!-- Prefix slot -->
       <slot name="prefix">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="mb-0.5 shrink-0"
-          @click="openFileDialog"
-        >
-          <Icon icon="lucide:paperclip" class="size-4" />
-        </Button>
+        <NButton quaternary size="small" class="mb-0.5 shrink-0" @click="openFileDialog">
+          <template #icon><Icon icon="lucide:paperclip" /></template>
+        </NButton>
       </slot>
 
       <!-- Textarea -->
@@ -255,28 +245,18 @@ onBeforeUnmount(() => {
 
       <!-- Actions -->
       <slot name="actions">
-        <Button
-          size="icon-sm"
+        <NButton
+          size="small"
           class="mb-0.5 shrink-0"
-          :class="loading
-            ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
-            : canSend
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : 'bg-muted text-muted-foreground'"
+          :type="loading ? 'error' : canSend ? 'primary' : 'default'"
           :disabled="!loading && !canSend"
           @click="handleSubmit"
         >
-          <Icon
-            v-if="loading"
-            icon="lucide:square"
-            class="size-4"
-          />
-          <Icon
-            v-else
-            icon="lucide:arrow-up"
-            class="size-4"
-          />
-        </Button>
+          <template #icon>
+            <Icon v-if="loading" icon="lucide:square" />
+            <Icon v-else icon="lucide:arrow-up" />
+          </template>
+        </NButton>
       </slot>
     </div>
 

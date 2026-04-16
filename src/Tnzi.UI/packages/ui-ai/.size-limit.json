@@ -1,0 +1,38 @@
+[
+  {
+    "name": "index (ESM entry, full transitive deps)",
+    "path": "dist/index.js",
+    "limit": "2 MB",
+    "gzip": true
+  },
+  {
+    "name": "chat barrel (pulls @vue-flow + shiki + markdown-it)",
+    "path": "dist/chat.js",
+    "limit": "1.8 MB",
+    "gzip": true
+  },
+  {
+    "name": "components barrel",
+    "path": "dist/components.js",
+    "limit": "2 MB",
+    "gzip": true
+  },
+  {
+    "name": "composables barrel",
+    "path": "dist/composables.js",
+    "limit": "70 kB",
+    "gzip": true
+  },
+  {
+    "name": "embed barrel",
+    "path": "dist/embed.js",
+    "limit": "80 kB",
+    "gzip": true
+  },
+  {
+    "name": "shell barrel (TCollapsibleSidebar/TCommandPalette/TSettingsDialog)",
+    "path": "dist/shell.js",
+    "limit": "25 kB",
+    "gzip": true
+  }
+]

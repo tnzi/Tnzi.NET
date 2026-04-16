@@ -10,8 +10,10 @@
     <File Path="build/icon.png" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/Tnzi.AI.Office/Tnzi.AI.Office.csproj" />
     <Project Path="src/Tnzi.AspNetCore/Tnzi.AspNetCore.csproj" />
     <Project Path="src/Tnzi.EFCore/Tnzi.EFCore.csproj" />
+    <Project Path="src/Tnzi.Export/Tnzi.Export.csproj" />
     <Project Path="src/Tnzi.Hangfire/Tnzi.Hangfire.csproj" />
     <Project Path="src/Tnzi.Hosting/Tnzi.Hosting.csproj" />
     <Project Path="src/Tnzi.Imaging/Tnzi.Imaging.csproj" />
@@ -57,12 +59,14 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tnzi.AI.Cli.Tests/Tnzi.AI.Cli.Tests.csproj" />
+    <Project Path="tests/Tnzi.AI.Office.Tests/Tnzi.AI.Office.Tests.csproj" />
     <Project Path="tests/Tnzi.AI.Tests/Tnzi.AI.Tests.csproj" />
     <Project Path="tests/Tnzi.AspNetCore.Tests/Tnzi.AspNetCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Audit.Tests/Tnzi.Audit.Tests.csproj" />
     <Project Path="tests/Tnzi.Authorization.Tests/Tnzi.Authorization.Tests.csproj" />
     <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
     <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
+    <Project Path="tests/Tnzi.Export.Tests/Tnzi.Export.Tests.csproj" />
     <Project Path="tests/Tnzi.Feature.Tests/Tnzi.Feature.Tests.csproj" />
     <Project Path="tests/Tnzi.Hangfire.Tests/Tnzi.Hangfire.Tests.csproj" />
     <Project Path="tests/Tnzi.HealthChecks.Tests/Tnzi.HealthChecks.Tests.csproj" />

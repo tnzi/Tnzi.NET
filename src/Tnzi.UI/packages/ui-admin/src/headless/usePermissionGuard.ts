@@ -1,65 +1,28 @@
-export interface UsePermissionGuardOptions {
-  hasPermission: (permission: string) => boolean
-  hasRole: (role: string) => boolean
-  isAuthenticated: () => boolean
-  onUnauthorized?: () => void
-  onForbidden?: () => void
-}
+import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 
-export interface RouteMeta {
-  requiresAuth?: boolean
-  permissions?: string[]
-  roles?: string[]
-}
+/**
+ * Permission guard composable — thin wrapper over `useAdminAuthStore`'s
+ * permission helpers that adds a super-user bypass.
+ *
+ * Returns stable function references; callers can destructure freely.
+ */
+export function usePermissionGuard() {
+  const auth = useAdminAuthStore()
 
-export interface UsePermissionGuardReturn {
-  canAccess: (meta: RouteMeta) => boolean
-  guardRoute: (meta: RouteMeta) => boolean
-}
-
-export function usePermissionGuard(options: UsePermissionGuardOptions): UsePermissionGuardReturn {
-  function canAccess(meta: RouteMeta): boolean {
-    if (meta.requiresAuth && !options.isAuthenticated()) {
-      return false
-    }
-
-    if (meta.permissions && meta.permissions.length > 0) {
-      const hasAll = meta.permissions.every((p) => options.hasPermission(p))
-      if (!hasAll) return false
-    }
-
-    if (meta.roles && meta.roles.length > 0) {
-      const hasAny = meta.roles.some((r) => options.hasRole(r))
-      if (!hasAny) return false
-    }
-
-    return true
+  function can(permission: string): boolean {
+    if (auth.isSuperUser) return true
+    return auth.hasPermission(permission)
   }
 
-  function guardRoute(meta: RouteMeta): boolean {
-    if (meta.requiresAuth && !options.isAuthenticated()) {
-      options.onUnauthorized?.()
-      return false
-    }
-
-    if (meta.permissions && meta.permissions.length > 0) {
-      const hasAll = meta.permissions.every((p) => options.hasPermission(p))
-      if (!hasAll) {
-        options.onForbidden?.()
-        return false
-      }
-    }
-
-    if (meta.roles && meta.roles.length > 0) {
-      const hasAny = meta.roles.some((r) => options.hasRole(r))
-      if (!hasAny) {
-        options.onForbidden?.()
-        return false
-      }
-    }
-
-    return true
+  function canAny(permissions: string[]): boolean {
+    if (auth.isSuperUser) return true
+    return auth.hasAnyPermission(permissions)
   }
 
-  return { canAccess, guardRoute }
+  function canAll(permissions: string[]): boolean {
+    if (auth.isSuperUser) return true
+    return auth.hasAllPermissions(permissions)
+  }
+
+  return { can, canAny, canAll }
 }

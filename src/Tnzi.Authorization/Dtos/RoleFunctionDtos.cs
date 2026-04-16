@@ -1,6 +1,77 @@
 namespace Tnzi.Authorization.Dtos;
 
 /// <summary>
+/// Role-function assignment read DTO for the canonical list endpoint.
+/// Denormalizes the function side (code / name / moduleId) so the admin
+/// UI does not have to issue a second lookup per row.
+/// </summary>
+public class RoleFunctionDto
+{
+    /// <summary>
+    /// Assignment ID (RoleFunction entity Id)
+    /// </summary>
+    public Guid Id { get; set; }
+
+    /// <summary>
+    /// Role ID the function is assigned to
+    /// </summary>
+    public Guid RoleId { get; set; }
+
+    /// <summary>
+    /// Function ID
+    /// </summary>
+    public Guid FunctionId { get; set; }
+
+    /// <summary>
+    /// Function code (permission name)
+    /// </summary>
+    public string FunctionCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Function display name
+    /// </summary>
+    public string FunctionName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Module ID the function belongs to
+    /// </summary>
+    public Guid ModuleId { get; set; }
+
+    /// <summary>
+    /// Whether the assignment is enabled
+    /// </summary>
+    public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// Assignment creation time (when the function was assigned to the role)
+    /// </summary>
+    public DateTime CreationTime { get; set; }
+}
+
+/// <summary>
+/// Paged query DTO for the canonical GET /admin/role-functions endpoint.
+/// Supports optional filters on role / function / enabled state on top of
+/// the framework-standard pagination + ordering inherited from PagedQueryDto.
+/// </summary>
+public class RoleFunctionQueryDto : PagedQueryDto
+{
+    /// <summary>
+    /// Filter by role ID (optional)
+    /// </summary>
+    public Guid? RoleId { get; set; }
+
+    /// <summary>
+    /// Filter by function ID (optional)
+    /// </summary>
+    public Guid? FunctionId { get; set; }
+
+    /// <summary>
+    /// Filter by enabled state (optional)
+    /// </summary>
+    public bool? IsEnabled { get; set; }
+}
+
+/// <summary>
 /// 分配功能请求
 /// </summary>
 public class AssignFunctionsRequest

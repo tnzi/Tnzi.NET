@@ -19,4 +19,16 @@ public class CliProviderOptions
 
     /// <summary>额外环境变量</summary>
     public Dictionary<string, string> EnvironmentVariables { get; set; } = new();
+
+    /// <summary>
+    /// Environment variables inherited from the host process. When null (default),
+    /// ALL host env vars are inherited — INSECURE in production because secrets
+    /// (database connection strings, cloud credentials, internal service tokens)
+    /// leak into the untrusted CLI subprocess. Set to a non-null list (even empty)
+    /// to enable host-env filtering: only listed keys are inherited, everything
+    /// else is stripped before EnvironmentVariables are applied.
+    /// Matching is case-insensitive on Windows, case-sensitive on Linux/macOS
+    /// (matching OS-native env semantics).
+    /// </summary>
+    public List<string>? EnvironmentWhitelist { get; set; }
 }

@@ -6,6 +6,13 @@ namespace Tnzi.Notification.Services;
 public interface INotificationPreferenceService
 {
     /// <summary>
+    /// Paged list of notification preferences across all users. Supports
+    /// optional filters on user / channel / category / enabled state.
+    /// Used by the admin NotificationSubscription page.
+    /// </summary>
+    Task<Result<IPagedList<NotificationPreferenceDto>>> GetPagedListAsync(NotificationPreferenceQueryDto query, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 获取用户的所有通知偏好
     /// </summary>
     Task<Result<List<NotificationPreferenceDto>>> GetUserPreferencesAsync(Guid userId, CancellationToken cancellationToken = default);

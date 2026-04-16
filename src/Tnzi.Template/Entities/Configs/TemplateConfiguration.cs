@@ -16,9 +16,27 @@ public class TemplateConfiguration : EntityTypeConfigurationBase<Template, Guid>
         builder.Property(t => t.SubjectTemplate).IsRequired();
         builder.Property(t => t.ContentTemplate).IsRequired();
         builder.Property(t => t.DefaultLayoutName).HasMaxLength(200);
+        builder.Property(t => t.Version).IsRequired().HasDefaultValue(1);
+        builder.Property(t => t.Type).IsRequired().HasConversion<int>().HasDefaultValue(TemplateType.Generic);
         builder.Property(t => t.IsActive).IsRequired().HasDefaultValue(true);
         builder.Property(t => t.Description).HasMaxLength(500);
         builder.Property(t => t.Metadata).HasMaxLength(4000);
+
+        // Optional header/footer layout FKs → Template_Layout. SetNull on delete
+        // so removing a shared layout does not cascade into every template that
+        // referenced it — preserves content at the cost of losing the wrapper.
+        builder.HasOne<Layout>()
+            .WithMany()
+            .HasForeignKey(t => t.HeaderLayoutId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne<Layout>()
+            .WithMany()
+            .HasForeignKey(t => t.FooterLayoutId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(t => t.Type);
 
         // 唯一索引：Module + Category + TemplateName（多租户下按 TenantId 分区）
         if (multiTenancyEnabled)

@@ -1,6 +1,6 @@
 {
   "name": "@tnzi/mobile",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "Tnzi UI components based on Vant 4. Ideal for mobile apps and PWA.",
   "type": "module",
   "main": "./dist/index.js",

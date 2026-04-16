@@ -7,7 +7,6 @@
  */
 
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import Shimmer from '../streaming/Shimmer.vue';
 
 export interface ThoughtStep {
@@ -35,18 +34,18 @@ defineProps<{
       <!-- Vertical connector line -->
       <div
         v-if="index < steps.length - 1"
-        class="absolute left-3 top-7 bottom-0 w-px"
-        :class="step.status === 'complete' ? 'bg-ai-node-completed/40' : 'bg-border'"
+        class="t-cot__connector"
+        :class="step.status === 'complete' ? 't-cot__connector--done' : 't-cot__connector--default'"
       />
 
       <!-- Status icon -->
       <div
-        :class="cn(
-          'relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full',
-          step.status === 'complete' && 'bg-ai-node-completed/20 text-ai-node-completed',
-          step.status === 'active' && 'bg-ai-node-active/20 text-ai-node-active',
-          step.status === 'pending' && 'bg-muted text-muted-foreground',
-        )"
+        class="t-cot__dot"
+        :class="{
+          't-cot__dot--complete': step.status === 'complete',
+          't-cot__dot--active': step.status === 'active',
+          't-cot__dot--pending': step.status === 'pending',
+        }"
       >
         <Icon
           v-if="step.status === 'complete'"
@@ -71,17 +70,15 @@ defineProps<{
       <!-- Content -->
       <div class="flex-1 min-w-0 pt-0.5">
         <p
-          :class="cn(
-            'text-sm font-medium leading-tight',
-            step.status === 'pending' && 'text-muted-foreground',
-          )"
+          class="text-sm font-medium leading-tight"
+          :class="{ 't-cot__label--pending': step.status === 'pending' }"
         >
           <Shimmer v-if="step.status === 'active'">{{ step.label }}</Shimmer>
           <template v-else>{{ step.label }}</template>
         </p>
         <p
           v-if="step.description"
-          class="mt-0.5 text-xs text-muted-foreground"
+          class="mt-0.5 text-xs t-cot__desc"
         >
           {{ step.description }}
         </p>
@@ -89,3 +86,40 @@ defineProps<{
     </div>
   </div>
 </template>
+
+<style scoped>
+.t-cot__connector {
+  position: absolute;
+  left: 12px;
+  top: 28px;
+  bottom: 0;
+  width: 1px;
+}
+.t-cot__connector--done { background-color: color-mix(in srgb, var(--tnzi-ai-node-completed) 40%, transparent); }
+.t-cot__connector--default { background-color: var(--tnzi-border); }
+.t-cot__dot {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.t-cot__dot--complete {
+  background-color: color-mix(in srgb, var(--tnzi-ai-node-completed) 20%, transparent);
+  color: var(--tnzi-ai-node-completed);
+}
+.t-cot__dot--active {
+  background-color: color-mix(in srgb, var(--tnzi-ai-node-active) 20%, transparent);
+  color: var(--tnzi-ai-node-active);
+}
+.t-cot__dot--pending {
+  background-color: var(--tnzi-container-bg);
+  color: var(--tnzi-base-text-muted);
+}
+.t-cot__label--pending { color: var(--tnzi-base-text-muted); }
+.t-cot__desc { color: var(--tnzi-base-text-muted); }
+</style>

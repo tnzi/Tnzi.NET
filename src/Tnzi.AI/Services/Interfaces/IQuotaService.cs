@@ -71,4 +71,12 @@ public interface IQuotaService
     /// <param name="ct">取消令牌</param>
     /// <returns>操作结果</returns>
     Task<Result> SettleQuotaAsync(Guid userId, QuotaReservation reservation, long actualTokens, CancellationToken ct = default);
+
+    /// <summary>
+    /// 分页查询用户配额列表
+    /// </summary>
+    /// <param name="query">查询参数</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>分页结果</returns>
+    Task<Result<IPagedList<UserQuotaDto>>> GetPagedListAsync(UserQuotaQueryDto query, CancellationToken ct = default);
 }

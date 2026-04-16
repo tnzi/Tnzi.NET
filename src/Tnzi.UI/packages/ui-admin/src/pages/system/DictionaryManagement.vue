@@ -1,51 +1,63 @@
-<script setup lang="ts">
-import CrudPage from '../../components/crud/CrudPage.vue'
-import type { CrudPageQuery, CrudPageResult } from '../../headless/useCrudPage'
-
-const columns = [
-  { key: 'id', title: 'ID', width: 80 },
-  { key: 'name', title: 'Name', sortable: true },
-  { key: 'code', title: 'Code' },
-  { key: 'value', title: 'Value' },
-  { key: 'sortOrder', title: 'Sort Order' },
-]
-
-const formFields = [
-  { key: 'name', type: 'text' as const, label: 'Name', required: true },
-  { key: 'code', type: 'text' as const, label: 'Code', required: true },
-  { key: 'value', type: 'text' as const, label: 'Value', required: true },
-  { key: 'description', type: 'text' as const, label: 'Description', required: false },
-]
-
-async function fetchData(query: CrudPageQuery): Promise<CrudPageResult<any>> {
-  return { items: [], totalCount: 0, pageIndex: query.pageIndex, pageSize: query.pageSize }
-}
-</script>
-
 <template>
-  <CrudPage
-    title="Dictionary Management"
-    :columns="columns"
-    :fetch-fn="fetchData"
-    row-key="id"
-    searchable
-    creatable
-    editable
-    deletable
+  <TCrudPage
+    :state="crud"
+    :all-columns="dictionaryColumns"
+    :title="title"
+    :translate="t"
   >
-    <template #form-modal="{ data }">
-      <div class="space-y-4">
-        <div v-for="field in formFields" :key="field.key">
-          <label class="block text-sm font-medium mb-1">{{ field.label }}</label>
-          <input
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            :type="field.type"
-            :value="(data as any)[field.key]"
-            :placeholder="field.label"
-            @input="(e: Event) => { (data as any)[field.key] = (e.target as HTMLInputElement).value }"
-          />
-        </div>
-      </div>
+    <template #toolbarLeft>
+      <NInput
+        :value="groupPrefix"
+        placeholder="Filter by group prefix"
+        clearable
+        style="max-width: 240px"
+        @update:value="onGroupPrefixChange"
+      />
     </template>
-  </CrudPage>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="dictionaryFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+      />
+    </template>
+  </TCrudPage>
 </template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { NInput } from 'naive-ui'
+import TCrudPage from '../../components/crud/TCrudPage.vue'
+import { useCrudPage } from '../../headless/useCrudPage'
+import { createSystemBridge } from '../../services/bridges/system-bridge'
+import { useAdminClient } from '../../plugin/client'
+import TFormSchemaRenderer from '../_shared/form-schema'
+import { dictionaryColumns, dictionaryFormSchema } from './dictionary-config'
+import { translatePageKey } from '../_shared/translate'
+import type { SettingDto } from '@tnzi/core/services/system'
+
+// Mapped to SettingDto — backend has no separate Dictionary entity.
+const title = 'Settings Management'
+const bridge = createSystemBridge({ client: useAdminClient() })
+
+const crud = useCrudPage<SettingDto, string>({
+  pageId: 'system.dictionary',
+  columns: dictionaryColumns,
+  rowKey: (r) => r.id,
+  fetchData: (query) => bridge.settings.fetch(query),
+  createData: (data) => bridge.settings.create(data as never),
+  updateData: (id, data) => bridge.settings.update(id, data as never),
+  deleteData: (ids) => bridge.settings.delete(ids),
+})
+
+const groupPrefix = ref('')
+function onGroupPrefixChange(v: string | null): void {
+  groupPrefix.value = v ?? ''
+  crud.setFilters({ groupPrefix: groupPrefix.value })
+  crud.refresh().catch(() => undefined)
+}
+
+crud.refresh().catch(() => undefined)
+
+const t = (key: string) => translatePageKey('system.dictionary', key)
+</script>

@@ -18,10 +18,14 @@ import type {
   UserNotificationDetail,
   QueryUserNotificationRequest,
   UnreadCountDto,
+  NotificationPreferenceDto,
+  NotificationPreferenceQueryDto,
+  SetNotificationPreferenceDto,
 } from './types';
 import type { TrendInterval } from './metadata';
 
 const ADMIN_BASE = '/admin/notifications';
+const PREFERENCES_BASE = '/admin/notification-preferences';
 const USER_BASE = '/notifications';
 
 /**
@@ -120,6 +124,34 @@ export function useAdminNotificationApi(client: HttpClient) {
     /** Get delivery report */
     getDeliveryReport: (id: string) =>
       client.get<DeliveryReportDto>(`${ADMIN_BASE}/${id}/delivery-report`),
+  };
+}
+
+/**
+ * Admin Notification Preference (Subscription) Management API.
+ * Backend: DefaultNotificationPreferenceAdminController.
+ */
+export function useAdminNotificationPreferenceApi(client: HttpClient) {
+  return {
+    /** Canonical paged list across all users (GET /admin/notification-preferences) */
+    getPagedList: (query?: NotificationPreferenceQueryDto) =>
+      client.get<PagedList<NotificationPreferenceDto>>(PREFERENCES_BASE, { params: query }),
+
+    /** Get all preferences for a specific user */
+    getByUser: (userId: string) =>
+      client.get<NotificationPreferenceDto[]>(`${PREFERENCES_BASE}/user/${userId}`),
+
+    /** Upsert a preference for the given user (PUT /admin/notification-preferences/user/{userId}) */
+    setPreference: (userId: string, data: SetNotificationPreferenceDto) =>
+      client.put<NotificationPreferenceDto>(`${PREFERENCES_BASE}/user/${userId}`, data),
+
+    /** Delete a preference by id */
+    delete: (id: string) =>
+      client.delete<void>(`${PREFERENCES_BASE}/${id}`),
+
+    /** Reset a user's preferences to platform defaults */
+    resetToDefault: (userId: string) =>
+      client.post<void>(`${PREFERENCES_BASE}/user/${userId}/reset`),
   };
 }
 

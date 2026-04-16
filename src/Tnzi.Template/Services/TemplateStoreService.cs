@@ -190,8 +190,12 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         }
 
         request.MapTo(existing);
+        // Service-managed revision counter: bumped on every successful update
+        // so consumers can detect concurrent edits. Intentionally NOT part of
+        // UpdateTemplateRequest — callers cannot overwrite it.
+        existing.Version++;
         await _repository.UpdateAsync(existing, cancellationToken);
-        LogInformation("Template updated: {TemplateName}, Module: {Module}, Category: {Category}", existing.TemplateName, existing.Module, existing.Category);
+        LogInformation("Template updated: {TemplateName}, Module: {Module}, Category: {Category}, Version: {Version}", existing.TemplateName, existing.Module, existing.Category, existing.Version);
         return Ok(existing.MapTo<TemplateDto>(), "Template updated successfully");
     }
 

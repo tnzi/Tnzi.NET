@@ -1,78 +1,111 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Playground theme tokens — Manus-inspired warm neutral palette.
+ *
+ * Token values were reverse-inspected from a live agent product session on
+ * 2026-04-14 using computed-style reads. Numeric measurements are facts, not
+ * copyrighted expression; token names are our own. See
+ * docs/superpowers/specs/2026-04-14-manus-inspired-ui-ai-redesign-design.md
+ * and memory/manus-research/observations.md for details.
+ */
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+@import '@fontsource/libre-baskerville/400.css';
+@import '@fontsource/libre-baskerville/400-italic.css';
 
-    /* AI semantic tokens (light) */
-    --ai-user-bubble: 222.2 47.4% 95%;
-    --ai-assistant-bubble: 0 0% 97%;
-    --ai-reasoning-bg: 45 100% 97%;
-    --ai-tool-call-bg: 210 40% 96%;
-    --ai-streaming-cursor: 222.2 47.4% 11.2%;
-    --ai-code-bg: 220 14% 96%;
-    --ai-node-active: 217.2 91.2% 59.8%;
-    --ai-node-completed: 142.1 76.2% 36.3%;
-    --ai-node-failed: 0 84.2% 60.2%;
-    --ai-handoff-accent: 262.1 83.3% 57.8%;
-  }
+:root {
+  /* Surfaces */
+  --tnzi-ai-bg:         #f8f8f7;        /* warm canvas (main content area) */
+  --tnzi-ai-sidebar-bg: #ebebeb;        /* sidebar — matches Manus `--background-nav` (235,235,235) */
+  --tnzi-ai-surface:    #ffffff;        /* elevated cards / composer / modal cards */
+  --tnzi-ai-rail:       #ebebeb;        /* collapsed rail / subdued strips */
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+  /* Text */
+  --tnzi-ai-text:           #34322d;
+  --tnzi-ai-text-secondary: rgba(52, 50, 45, 0.72);
+  --tnzi-ai-text-tertiary:  rgba(52, 50, 45, 0.48);
 
-    /* AI semantic tokens (dark) */
-    --ai-user-bubble: 217.2 32.6% 17.5%;
-    --ai-assistant-bubble: 222.2 84% 6%;
-    --ai-reasoning-bg: 40 30% 12%;
-    --ai-tool-call-bg: 217.2 32.6% 12%;
-    --ai-streaming-cursor: 210 40% 98%;
-    --ai-code-bg: 220 14% 11%;
-    --ai-node-active: 217.2 91.2% 59.8%;
-    --ai-node-completed: 142.1 70.6% 45.3%;
-    --ai-node-failed: 0 72.2% 50.6%;
-    --ai-handoff-accent: 262.1 83.3% 67.8%;
-  }
+  /* Borders */
+  --tnzi-ai-border:        rgba(0, 0, 0, 0.08);
+  --tnzi-ai-border-strong: rgba(0, 0, 0, 0.20);
+  --tnzi-ai-divider:       #ebebeb;
+
+  /* Accent (measured live: #0081F2) */
+  --tnzi-ai-accent:      #0081f2;
+  --tnzi-ai-accent-soft: rgba(0, 129, 242, 0.12);
+
+  /* Interaction overlays */
+  --tnzi-ai-hover:    rgba(55, 53, 47, 0.04);
+  --tnzi-ai-press:    rgba(55, 53, 47, 0.06);
+  --tnzi-ai-selected: rgba(55, 53, 47, 0.08);
+
+  /* Modal chrome */
+  --tnzi-ai-backdrop:        rgba(0, 0, 0, 0.60);
+  --tnzi-ai-backdrop-blur:   4px;
+  --tnzi-ai-modal-radius:    20px;
+  --tnzi-ai-modal-border:    1px solid rgba(0, 0, 0, 0.06);
+  --tnzi-ai-composer-radius: 22px;
+  --tnzi-ai-composer-shadow: 0 12px 32px rgba(0, 0, 0, 0.02);
+
+  /* Typography */
+  --tnzi-ai-font-display: 'Libre Baskerville', Georgia, Cambria, 'Times New Roman', Times, serif;
+  --tnzi-ai-font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', Helvetica, Arial, sans-serif;
+  --tnzi-ai-font-mono:    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* Motion */
+  --tnzi-ai-duration-fast: 120ms;
+  --tnzi-ai-duration-base: 200ms;
+  --tnzi-ai-duration-slow: 320ms;
+  --tnzi-ai-easing:        cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root.dark {
+  --tnzi-ai-bg:         #141414;
+  --tnzi-ai-sidebar-bg: #0f0f0f;
+  --tnzi-ai-surface:    #1c1c1b;
+  --tnzi-ai-rail:       #161616;
+
+  --tnzi-ai-text:           #ededec;
+  --tnzi-ai-text-secondary: rgba(237, 237, 236, 0.72);
+  --tnzi-ai-text-tertiary:  rgba(237, 237, 236, 0.48);
+
+  --tnzi-ai-border:        rgba(255, 255, 255, 0.08);
+  --tnzi-ai-border-strong: rgba(255, 255, 255, 0.20);
+  --tnzi-ai-divider:       rgba(255, 255, 255, 0.08);
+
+  --tnzi-ai-accent:      #3a9bf5;
+  --tnzi-ai-accent-soft: rgba(58, 155, 245, 0.18);
+
+  --tnzi-ai-hover:    rgba(255, 255, 255, 0.04);
+  --tnzi-ai-press:    rgba(255, 255, 255, 0.06);
+  --tnzi-ai-selected: rgba(255, 255, 255, 0.08);
+}
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--tnzi-ai-font-body);
+  background: var(--tnzi-ai-bg);
+  color: var(--tnzi-ai-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+* {
+  box-sizing: border-box;
+}
+
+/* Display helper for serif hero headings (Manus-style).
+ * Usage: <h1 class="t-ai-display">What can I do for you?</h1>
+ */
+.t-ai-display {
+  font-family: var(--tnzi-ai-font-display);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.5;
+  color: var(--tnzi-ai-text);
+}
+.t-ai-display.lg { font-size: 36px; }
+.t-ai-display.md { font-size: 28px; }
+.t-ai-display.sm { font-size: 22px; }

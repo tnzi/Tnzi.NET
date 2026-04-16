@@ -1,63 +1,52 @@
 import { ref, type Ref } from 'vue'
 
-export interface UseFormModalOptions<T> {
-  onSave?: (data: T, mode: 'create' | 'edit') => Promise<void>
-}
+export type FormModalMode = 'create' | 'edit' | 'view'
 
 export interface UseFormModalReturn<T> {
-  isOpen: Ref<boolean>
-  mode: Ref<'create' | 'edit'>
-  data: Ref<Partial<T>>
-  isSaving: Ref<boolean>
-  error: Ref<string | null>
-  open: (mode: 'create' | 'edit', initialData?: Partial<T>) => void
+  visible: Ref<boolean>
+  mode: Ref<FormModalMode | null>
+  formData: Ref<T | null>
+  open: (mode: FormModalMode, initial?: T | null) => void
   close: () => void
-  save: () => Promise<void>
+  confirm: () => Promise<T | null>
 }
 
-export function useFormModal<T extends Record<string, any> = Record<string, any>>(
-  options: UseFormModalOptions<T> = {},
-): UseFormModalReturn<T> {
-  const isOpen = ref(false)
-  const mode = ref<'create' | 'edit'>('create')
-  const data = ref<Partial<T>>({}) as Ref<Partial<T>>
-  const isSaving = ref(false)
-  const error = ref<string | null>(null)
+function cloneInitial<T>(initial: T | null | undefined): T | null {
+  if (initial == null) return null
+  if (typeof structuredClone === 'function') {
+    return structuredClone(initial)
+  }
+  return JSON.parse(JSON.stringify(initial)) as T
+}
 
-  function open(openMode: 'create' | 'edit', initialData?: Partial<T>): void {
-    mode.value = openMode
-    data.value = initialData ? { ...initialData } : {}
-    error.value = null
-    isOpen.value = true
+export function useFormModal<T = unknown>(): UseFormModalReturn<T> {
+  const visible = ref(false)
+  const mode = ref<FormModalMode | null>(null)
+  const formData = ref<T | null>(null) as Ref<T | null>
+
+  function open(nextMode: FormModalMode, initial: T | null = null): void {
+    mode.value = nextMode
+    formData.value = cloneInitial(initial)
+    visible.value = true
   }
 
   function close(): void {
-    isOpen.value = false
-    data.value = {}
-    error.value = null
+    visible.value = false
+    mode.value = null
+    formData.value = null
   }
 
-  async function save(): Promise<void> {
-    isSaving.value = true
-    error.value = null
-    try {
-      await options.onSave?.(data.value as T, mode.value)
-      close()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      isSaving.value = false
-    }
+  async function confirm(): Promise<T | null> {
+    if (!visible.value) return null
+    return formData.value
   }
 
   return {
-    isOpen,
+    visible,
     mode,
-    data,
-    isSaving,
-    error,
+    formData,
     open,
     close,
-    save,
+    confirm,
   }
 }

@@ -394,6 +394,30 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
         }
     }
 
+    /// <summary>
+    /// 分页查询用户配额列表
+    /// </summary>
+    public async Task<Result<IPagedList<UserQuotaDto>>> GetPagedListAsync(UserQuotaQueryDto query, CancellationToken ct = default)
+    {
+        Check.NotNull(query);
+
+        try
+        {
+            var queryable = _quotaRepository
+                .WhereIf(q => q.UserId == query.UserId!.Value, query.UserId.HasValue)
+                .WhereIf(q => q.IsEnabled == query.IsEnabled!.Value, query.IsEnabled.HasValue)
+                .OrderByDescending(q => q.CreationTime);
+
+            var pagedList = await queryable.ProjectTo<UserQuota, UserQuotaDto>().CreateAsync(query);
+            return Ok(pagedList);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error querying user quotas");
+            return Fail<IPagedList<UserQuotaDto>>("Failed to query user quotas", 500, ErrorCodes.QuotaGetFailed);
+        }
+    }
+
     #region IQuotaProvider 实现
 
     /// <inheritdoc />

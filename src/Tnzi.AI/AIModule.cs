@@ -7,7 +7,7 @@ namespace Tnzi.AI;
 /// </summary>
 [DependsOn(typeof(EFCoreModule))]
 [DependsOn(typeof(AspNetCoreModule))]
-public class AIModule : TnziApplicationModule
+public partial class AIModule : TnziApplicationModule
 {
     /// <summary>
     /// AI 模块加载顺序
@@ -53,11 +53,14 @@ public class AIModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI:Todo"))
             .ValidateWith<TodoOptions, TodoOptionsValidator>();
 
-        // 从环境变量补充 API Key（移自 Validator 的副作用）
+        // 从环境变量补充 API Key，并回填 Provider Name（用于 Polly pipeline 路由）
         context.Services.PostConfigure<AIOptions>(options =>
         {
             foreach (var (providerName, providerOptions) in options.Providers)
             {
+                // 回填 Name — configuration dictionary key 是权威来源
+                providerOptions.Name = providerName;
+
                 if (string.IsNullOrWhiteSpace(providerOptions.ApiKey))
                 {
                     var envVarName = $"AI__{providerName.ToUpperInvariant()}__APIKEY";
@@ -77,27 +80,45 @@ public class AIModule : TnziApplicationModule
     {
         var services = context.Services;
 
-        // 注册 HttpClient 工厂
         services.AddHttpClient();
 
-        // 配置带重试和熔断的命名 HttpClient（用于 AI 提供商调用）
-        // Note: Thinking injection and reasoning extraction are handled by
-        // ThinkingRequestPolicy (PipelinePolicy) inside the OpenAI SDK pipeline,
-        // not via DelegatingHandlers (which don't work with HttpClientPipelineTransport).
-        services.AddHttpClient("Tnzi.AI.Resilient")
-            .AddStandardResilienceHandler(options =>
-            {
-                // 配置重试策略
-                options.Retry.MaxRetryAttempts = 3;
-                options.Retry.Delay = TimeSpan.FromSeconds(1);
-                options.Retry.MaxDelay = TimeSpan.FromSeconds(10);
+        // Per-provider resilience pipelines — Polly keys its circuit state by HttpClient
+        // name, so giving each provider a unique name isolates their breakers. A 429 on
+        // one provider cannot open circuits on the others.
+        // Thinking injection / reasoning extraction run inside the OpenAI SDK pipeline
+        // (ThinkingRequestPolicy), not as DelegatingHandlers — the latter don't compose
+        // with HttpClientPipelineTransport.
+        static void ConfigureAiResilience(HttpStandardResilienceOptions options)
+        {
+            options.Retry.MaxRetryAttempts = 3;
+            options.Retry.Delay = TimeSpan.FromSeconds(1);
+            options.Retry.MaxDelay = TimeSpan.FromSeconds(10);
 
-                // 配置熔断器策略（SamplingDuration 必须 >= 2 * AttemptTimeout）
-                options.CircuitBreaker.FailureRatio = 0.5;
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
-                options.CircuitBreaker.MinimumThroughput = 5;
-                options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
-            });
+            // SamplingDuration must be >= 2 * AttemptTimeout (Polly invariant).
+            options.CircuitBreaker.FailureRatio = 0.5;
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+            options.CircuitBreaker.MinimumThroughput = 5;
+            options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
+        }
+
+        foreach (var providerChild in context.Configuration.GetSection("AI:Providers").GetChildren())
+        {
+            var providerName = providerChild.Key;
+            if (string.IsNullOrWhiteSpace(providerName)) continue;
+
+            // Skip providers explicitly disabled in config — no point wiring up a
+            // circuit for a client that will never be resolved.
+            if (providerChild.GetValue("Enabled", defaultValue: true) == false) continue;
+
+            services.AddHttpClient(ResilientHttpClientNames.For(providerName))
+                .AddStandardResilienceHandler(ConfigureAiResilience);
+        }
+
+        // Fallback client — shared pipeline for providers added dynamically at runtime
+        // (not listed in AI:Providers). Same-name circuit state is shared across them;
+        // static configuration is the recommended production setup.
+        services.AddHttpClient(ResilientHttpClientNames.Fallback)
+            .AddStandardResilienceHandler(ConfigureAiResilience);
 
         // OAuth 令牌请求专用 HttpClient（无重试/熔断，令牌端点自行处理错误）
         services.AddHttpClient("Tnzi.AI.OAuth");
@@ -177,6 +198,12 @@ public class AIModule : TnziApplicationModule
         services.AddScoped<QuotaService>();
         services.AddScoped<IQuotaService>(sp => sp.GetRequiredService<QuotaService>());
         services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
+
+        // Provider entity CRUD (Phase 5 backend prereq) — entity-driven provider management
+        // with encrypted credential storage. IDataProtectionProvider is provided by the host
+        // (added automatically when ASP.NET Core is referenced).
+        services.AddDataProtection();
+        services.AddScoped<IProviderService, ProviderService>();
         services.AddScoped<IBudgetService, BudgetService>();
         services.AddScoped<IAgentService, AgentService>();
         services.AddScoped<IAgentVersionRouter, AgentVersionRouter>();
@@ -494,129 +521,6 @@ public class AIModule : TnziApplicationModule
         }
     }
 
-    private static void ValidateRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
-    {
-        var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
-        var hasEnabledProvider = options.Providers.Values.Any(p => p.Enabled);
-
-        if (options.History.Reduction.Mode == HistoryReductionMode.Summarize && !hasEnabledProvider)
-        {
-            throw new InvalidOperationException(
-                "AI:History:Reduction:Mode is set to Summarize, but no enabled AI provider is configured.");
-        }
-
-        if (options.Guardrails.Enabled && options.Guardrails.LlmJudge.Enabled && !hasEnabledProvider)
-        {
-            throw new InvalidOperationException(
-                "AI:Guardrails:LlmJudge is enabled, but no enabled AI provider is configured.");
-        }
-
-        if (options.ContextProviders.Enabled && options.ContextProviders.EntityMemory.Enabled && !hasEnabledProvider)
-        {
-            throw new InvalidOperationException(
-                "AI:ContextProviders:EntityMemory is enabled, but no enabled AI provider is configured for entity extraction.");
-        }
-
-        if (options.BuiltInTools.Enabled && options.BuiltInTools.EnableWebSearch
-            && serviceProvider.GetService<IWebSearchProvider>() == null)
-        {
-            throw new InvalidOperationException(
-                "AI:BuiltInTools:EnableWebSearch is enabled, but no IWebSearchProvider is registered.");
-        }
-
-        if (options.ContextProviders.Enabled)
-        {
-            using var scope = serviceProvider.CreateScope();
-            var textSearchService = scope.ServiceProvider.GetRequiredService<ITextSearchService>();
-            if (textSearchService is INoOpService
-                && (options.ContextProviders.TextSearch.Enabled || options.ContextProviders.ChatHistoryMemory.Enabled))
-            {
-                throw new InvalidOperationException(
-                    "AI text search or chat history memory is enabled, but ITextSearchService is still a no-op fallback. Register a real ITextSearchService implementation.");
-            }
-
-            // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（��描模块程序集目录的 Skills/ 文件夹）
-        }
-
-        var workflowService = serviceProvider.GetRequiredService<IWorkflowService>();
-        if (workflowService is INoOpService)
-        {
-            logger.LogInformation(
-                "IWorkflowService is a no-op fallback; workflow APIs will return 501 until a workflow module is loaded.");
-        }
-
-        if (options.ContextProviders.Enabled
-            && options.ContextProviders.Skills.Enabled
-            && serviceProvider.GetService<ISkillRegistry>() == null)
-        {
-            logger.LogWarning(
-                "AI skills context provider is enabled but no ISkillRegistry is registered. Skill context injection will be unavailable.");
-        }
-
-        logger.LogDebug("AI runtime configuration validation passed.");
-    }
-
-    /// <summary>
-    /// 校验所有工具的 [RequiresSkill] 引用是否指向已注册的 Skill
-    /// </summary>
-    private static async Task ValidateRequiresSkillReferencesAsync(IToolRegistry toolRegistry, IServiceProvider serviceProvider, ILogger logger)
-    {
-        var allTools = toolRegistry.GetAllTools();
-        var toolsWithSkills = allTools.Where(t => t.RequiresSkillSlugs is { Count: > 0 }).ToList();
-        if (toolsWithSkills.Count == 0) return;
-
-        // ISkillRegistry is scoped — create a temporary scope for startup validation
-        using var scope = serviceProvider.CreateScope();
-        var skillRegistry = scope.ServiceProvider.GetService<ISkillRegistry>();
-        if (skillRegistry == null) return;
-
-        var allSlugs = toolsWithSkills.SelectMany(t => t.RequiresSkillSlugs!).Distinct(StringComparer.OrdinalIgnoreCase);
-        foreach (var slug in allSlugs)
-        {
-            var skill = await skillRegistry.GetBySlugAsync(slug, CancellationToken.None);
-            if (skill == null)
-            {
-                logger.LogWarning(
-                    "[RequiresSkill] references skill '{Slug}' which does not exist. " +
-                    "Tools referencing this skill: {Tools}. Check for typos or missing SKILL.md files.",
-                    slug,
-                    string.Join(", ", toolsWithSkills.Where(t => t.RequiresSkillSlugs!.Contains(slug, StringComparer.OrdinalIgnoreCase)).Select(t => t.Name)));
-            }
-        }
-    }
-
-    /// <summary>
-    /// 扫描程序集并注册工具到 ToolRegistry
-    /// </summary>
-    private static void RegisterTools(IToolRegistry registry, IToolScanner scanner, Assembly assembly, ILogger logger)
-    {
-        try
-        {
-            var tools = scanner.ScanAssembly(assembly);
-            foreach (var tool in tools)
-            {
-                registry.Register(tool);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "Failed to scan assembly '{AssemblyName}' for AI tools. Skipping this assembly.",
-                assembly.FullName);
-        }
-    }
-
-    /// <summary>
-    /// 判断是否为框架核心程序集
-    /// </summary>
-    /// <remarks>
-    /// 所有 Tnzi.* 程序集（包括 Tnzi.AI.Coder）由各自模块负责工具注册。
-    /// AIModule 只扫描自身程序集和用户应用程序集。
-    /// </remarks>
-    private static bool IsFrameworkCoreAssembly(Assembly a)
-    {
-        var name = a.GetName().Name;
-        if (name == null) return false;
-        return name.StartsWith("Tnzi.", StringComparison.Ordinal);
-    }
+    // Validation and tool-registration helpers live in AIModule.Validation.cs
+    // (partial class) to keep this file focused on module wiring.
 }

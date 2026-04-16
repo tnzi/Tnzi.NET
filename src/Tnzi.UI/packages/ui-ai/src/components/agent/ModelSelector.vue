@@ -3,8 +3,7 @@
  * ModelSelector — Model selection dialog with search filtering
  */
 
-import { NModal, NInput } from 'naive-ui';
-import { Button } from '../../primitives';
+import { NModal, NInput, NButton } from 'naive-ui';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -75,10 +74,10 @@ function getProviderLogoUrl(provider: string): string {
 <template>
   <div @click="showModal = true">
     <slot name="trigger">
-      <Button variant="outline" size="sm" class="gap-2">
-        <Icon icon="lucide:cpu" class="size-4" />
+      <NButton secondary size="small">
+        <template #icon><Icon icon="lucide:cpu" /></template>
         {{ t.model.select }}
-      </Button>
+      </NButton>
     </slot>
   </div>
 
@@ -122,7 +121,7 @@ function getProviderLogoUrl(provider: string): string {
               <img
                 :src="getProviderLogoUrl(model.provider)"
                 :alt="model.provider"
-                class="size-4 dark:invert"
+                class="size-4 t-model-logo"
                 loading="lazy"
               />
               <span class="flex-1 truncate text-xs">{{ model.name }}</span>
@@ -139,3 +138,11 @@ function getProviderLogoUrl(provider: string): string {
     </div>
   </NModal>
 </template>
+
+<style scoped>
+/* Provider logos that need dark-mode inversion */
+.dark .t-model-logo,
+[data-theme='dark'] .t-model-logo {
+  filter: invert(1);
+}
+</style>

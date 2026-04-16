@@ -30,6 +30,19 @@ public class DefaultQuotaAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 分页查询用户配额列表
+    /// </summary>
+    /// <param name="query">查询参数</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>分页结果</returns>
+    [HttpPost("query")]
+    public virtual async Task<ApiResult<IPagedList<UserQuotaDto>>> GetList([FromBody] UserQuotaQueryDto query, CancellationToken ct = default)
+    {
+        var result = await QuotaService.GetPagedListAsync(query, ct);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 设置用户配额
     /// </summary>
     /// <param name="request">设置配额请求</param>

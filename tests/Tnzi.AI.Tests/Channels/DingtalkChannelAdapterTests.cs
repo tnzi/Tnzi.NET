@@ -267,6 +267,48 @@ public class DingtalkChannelAdapterTests
     }
 
     [Fact]
+    public async Task HandleEventAsync_VerifySignatureEnabled_NoHeaders_RejectsEvent()
+    {
+        // 2026-04-15 audit fix: secure-by-default. When VerifyWebhookSignature is on
+        // (the production default), the no-headers overload must reject events because
+        // signature verification cannot be performed.
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, verifyWebhookSignature: true);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            conversationId = "conv001",
+            senderStaffId = "staff001",
+            msgtype = "text",
+            text = new { content = "should be rejected" },
+            conversationType = "1"
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        var consumed = await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100));
+        consumed.ShouldBeNull();
+    }
+
+    [Fact]
+    public void DingtalkOptions_ToString_RedactsSecrets()
+    {
+        var options = new DingtalkAdapterOptions
+        {
+            Enabled = true,
+            AppKey = "public-key",
+            AppSecret = "super-secret-value",
+            RobotCode = "robot-1"
+        };
+
+        var text = options.ToString();
+
+        text.ShouldNotContain("super-secret-value");
+        text.ShouldContain("REDACTED");
+        text.ShouldContain("robot-1");
+    }
+
+    [Fact]
     public async Task SendAsync_Success_PostsToDingtalkApi()
     {
         var handler = CreateMockHandler(HttpStatusCode.OK, new { processQueryKey = "abc123" });
@@ -411,8 +453,12 @@ public class DingtalkChannelAdapterTests
         Mock<HttpMessageHandler>? handler = null,
         Mock<HttpMessageHandler>? tokenHandler = null,
         int maxMessageLength = 20000,
-        int maxRetries = 3)
+        int maxRetries = 3,
+        bool verifyWebhookSignature = false)
     {
+        // Tests exercise the no-headers overload directly; default to
+        // VerifyWebhookSignature=false so existing behavioral tests continue
+        // to work. The production default is true (secure-by-default).
         var options = MsOptions.Create(new ChannelsModuleOptions
         {
             Dingtalk = new DingtalkAdapterOptions
@@ -424,7 +470,8 @@ public class DingtalkChannelAdapterTests
                 AllowedUsers = allowedUsers ?? [],
                 AllowedOrganizations = allowedOrganizations ?? [],
                 MaxMessageLength = maxMessageLength,
-                MaxRetries = maxRetries
+                MaxRetries = maxRetries,
+                VerifyWebhookSignature = verifyWebhookSignature
             }
         });
 

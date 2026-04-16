@@ -1,11 +1,19 @@
-import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import {
+  useColumnSettings,
+  type ColumnDef,
+  type UseColumnSettingsReturn,
+} from './useColumnSettings'
+import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
+import { useFormModal, type UseFormModalReturn } from './useFormModal'
 
 export interface CrudPageQuery {
-  keyword?: string
   pageIndex: number
   pageSize: number
-  sortBy?: string
-  sortOrder?: 'asc' | 'desc'
+  searchText: string
+  sortField?: string
+  sortOrder?: 'asc' | 'desc' | null
+  filters: Record<string, unknown>
 }
 
 export interface CrudPageResult<T> {
@@ -15,205 +23,201 @@ export interface CrudPageResult<T> {
   pageSize: number
 }
 
-export interface UseCrudPageOptions<T extends Record<string, any>> {
-  fetchFn: (query: CrudPageQuery) => Promise<CrudPageResult<T>>
-  onCreate?: (data: Partial<T>) => Promise<void>
-  onUpdate?: (data: Partial<T>) => Promise<void>
-  onDelete?: (item: T) => Promise<void>
-  onBatchDelete?: (keys: string[]) => Promise<void>
-  defaultPageSize?: number
-  rowKey?: string
+export interface UseCrudPageOptions<T, TId = string | number> {
+  pageId: string
+  columns: ColumnDef[]
+  rowKey: (row: T) => TId
+  initialPageSize?: number
+  fetchData: (query: CrudPageQuery) => Promise<CrudPageResult<T>>
+  createData: (data: Partial<T>) => Promise<T>
+  updateData: (id: TId, data: Partial<T>) => Promise<T>
+  deleteData: (ids: TId[]) => Promise<void>
+  exportData?: (query: CrudPageQuery) => Promise<Blob>
+  importData?: (file: File) => Promise<void>
+  onRefresh?: () => void
 }
 
-export interface UseCrudPageReturn<T extends Record<string, any>> {
+export interface UseCrudPageReturn<T, TId = string | number> {
+  query: Ref<CrudPageQuery>
   items: Ref<T[]>
-  isLoading: Ref<boolean>
-  selectedKeys: Ref<string[]>
-  searchKeyword: Ref<string>
-  isFormModalOpen: Ref<boolean>
-  formMode: Ref<'create' | 'edit'>
-  formData: Ref<Partial<T>>
-  isSaving: Ref<boolean>
-  totalCount: Ref<number>
-  pageIndex: Ref<number>
-  pageSize: Ref<number>
-  sortBy: Ref<string | undefined>
-  sortOrder: Ref<'asc' | 'desc' | undefined>
-  error: Ref<string | null>
-  hasSelection: ComputedRef<boolean>
-  totalPages: ComputedRef<number>
-  fetch: () => Promise<void>
-  search: () => Promise<void>
-  resetSearch: () => Promise<void>
-  changePage: (page: number, size: number) => Promise<void>
-  changeSort: (field: string, order: 'asc' | 'desc') => Promise<void>
+  total: Ref<number>
+  loading: Ref<boolean>
+  error: Ref<Error | null>
+  hasData: ComputedRef<boolean>
+  columnSettings: UseColumnSettingsReturn
+  batchActions: UseBatchActionsReturn<TId>
+  formModal: UseFormModalReturn<T>
+  /**
+   * The row-key extractor passed to {@link useCrudPage}. Re-exposed so
+   * consumer components (notably `TCrudPage`) can default to it instead of
+   * forcing callers to pass `rowKey` twice.
+   */
+  rowKey: (row: T) => TId
+  refresh: () => Promise<void>
+  setPage: (pageIndex: number) => void
+  setPageSize: (pageSize: number) => void
+  setSearch: (text: string) => void
+  setSort: (field: string | undefined, order: 'asc' | 'desc' | null) => void
+  setFilters: (filters: Record<string, unknown>) => void
+  resetQuery: () => void
   openCreate: () => void
-  openEdit: (item: T) => void
-  closeModal: () => void
-  save: () => Promise<void>
-  deleteItem: (item: T) => Promise<void>
-  batchDelete: () => Promise<void>
+  openEdit: (row: T) => void
+  openView: (row: T) => void
+  submit: () => Promise<T | null>
+  handleDelete: (ids?: TId[]) => Promise<void>
+  exportAll: () => Promise<Blob | null>
+  importFile: (file: File) => Promise<void>
 }
 
-export function useCrudPage<T extends Record<string, any>>(
-  options: UseCrudPageOptions<T>,
-): UseCrudPageReturn<T> {
-  const rowKey = options.rowKey ?? 'id'
-  const defaultPageSize = options.defaultPageSize ?? 20
+export function useCrudPage<T, TId = string | number>(
+  options: UseCrudPageOptions<T, TId>,
+): UseCrudPageReturn<T, TId> {
+  const initialPageSize = options.initialPageSize ?? 20
 
+  const makeInitialQuery = (): CrudPageQuery => ({
+    pageIndex: 1,
+    pageSize: initialPageSize,
+    searchText: '',
+    sortField: undefined,
+    sortOrder: null,
+    filters: {},
+  })
+
+  const query = ref<CrudPageQuery>(makeInitialQuery()) as Ref<CrudPageQuery>
   const items = ref<T[]>([]) as Ref<T[]>
-  const isLoading = ref(false)
-  const selectedKeys = ref<string[]>([])
-  const searchKeyword = ref('')
-  const isFormModalOpen = ref(false)
-  const formMode = ref<'create' | 'edit'>('create')
-  const formData = ref<Partial<T>>({}) as Ref<Partial<T>>
-  const isSaving = ref(false)
-  const totalCount = ref(0)
-  const pageIndex = ref(1)
-  const pageSize = ref(defaultPageSize)
-  const sortBy = ref<string | undefined>(undefined)
-  const sortOrder = ref<'asc' | 'desc' | undefined>(undefined)
-  const error = ref<string | null>(null)
+  const total = ref(0)
+  const loading = ref(false)
+  const error = ref<Error | null>(null)
 
-  const hasSelection = computed(() => selectedKeys.value.length > 0)
-  const totalPages = computed(() => (pageSize.value > 0 ? Math.ceil(totalCount.value / pageSize.value) : 0))
+  const hasData = computed(() => items.value.length > 0)
 
-  function buildQuery(): CrudPageQuery {
-    return {
-      keyword: searchKeyword.value || undefined,
-      pageIndex: pageIndex.value,
-      pageSize: pageSize.value,
-      sortBy: sortBy.value,
-      sortOrder: sortOrder.value,
-    }
-  }
+  const columnSettings = useColumnSettings({
+    pageId: options.pageId,
+    columns: options.columns,
+  })
+  const batchActions = useBatchActions<TId>()
+  const formModal = useFormModal<T>()
 
-  async function fetch(): Promise<void> {
-    isLoading.value = true
+  async function refresh(): Promise<void> {
+    loading.value = true
     error.value = null
     try {
-      const result = await options.fetchFn(buildQuery())
+      const result = await options.fetchData({ ...query.value })
       items.value = result.items
-      totalCount.value = result.totalCount
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      total.value = result.totalCount
+      options.onRefresh?.()
+    } catch (err) {
+      error.value = err instanceof Error ? err : new Error(String(err))
+      throw error.value
     } finally {
-      isLoading.value = false
+      loading.value = false
     }
   }
 
-  async function search(): Promise<void> {
-    pageIndex.value = 1
-    await fetch()
+  function setPage(pageIndex: number): void {
+    query.value = { ...query.value, pageIndex }
   }
 
-  async function resetSearch(): Promise<void> {
-    searchKeyword.value = ''
-    pageIndex.value = 1
-    await fetch()
+  function setPageSize(pageSize: number): void {
+    query.value = { ...query.value, pageSize, pageIndex: 1 }
   }
 
-  async function changePage(page: number, size: number): Promise<void> {
-    pageIndex.value = page
-    pageSize.value = size
-    await fetch()
+  function setSearch(text: string): void {
+    query.value = { ...query.value, searchText: text, pageIndex: 1 }
   }
 
-  async function changeSort(field: string, order: 'asc' | 'desc'): Promise<void> {
-    sortBy.value = field
-    sortOrder.value = order
-    pageIndex.value = 1
-    await fetch()
+  function setSort(field: string | undefined, order: 'asc' | 'desc' | null): void {
+    query.value = { ...query.value, sortField: field, sortOrder: order }
+  }
+
+  function setFilters(filters: Record<string, unknown>): void {
+    query.value = { ...query.value, filters, pageIndex: 1 }
+  }
+
+  function resetQuery(): void {
+    query.value = makeInitialQuery()
   }
 
   function openCreate(): void {
-    formMode.value = 'create'
-    formData.value = {}
-    error.value = null
-    isFormModalOpen.value = true
+    formModal.open('create', null)
   }
 
-  function openEdit(item: T): void {
-    formMode.value = 'edit'
-    formData.value = { ...item }
-    error.value = null
-    isFormModalOpen.value = true
+  function openEdit(row: T): void {
+    formModal.open('edit', row)
   }
 
-  function closeModal(): void {
-    isFormModalOpen.value = false
-    formData.value = {}
-    error.value = null
+  function openView(row: T): void {
+    formModal.open('view', row)
   }
 
-  async function save(): Promise<void> {
-    isSaving.value = true
-    error.value = null
-    try {
-      if (formMode.value === 'create') {
-        await options.onCreate?.(formData.value)
-      } else {
-        await options.onUpdate?.(formData.value)
-      }
-      closeModal()
-      await fetch()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      isSaving.value = false
+  async function submit(): Promise<T | null> {
+    const mode = formModal.mode.value
+    const data = formModal.formData.value
+    if (mode === 'view' || !mode || !data) {
+      formModal.close()
+      return null
     }
+    if (mode === 'create') {
+      const created = await options.createData(data as Partial<T>)
+      formModal.close()
+      await refresh()
+      return created
+    }
+    // edit
+    const id = options.rowKey(data as T)
+    const updated = await options.updateData(id, data as Partial<T>)
+    formModal.close()
+    await refresh()
+    return updated
   }
 
-  async function deleteItem(item: T): Promise<void> {
-    error.value = null
-    try {
-      await options.onDelete?.(item)
-      await fetch()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+  async function handleDelete(ids?: TId[]): Promise<void> {
+    const target = ids ?? batchActions.selectedIds.value
+    if (target.length === 0) return
+    await options.deleteData(target)
+    if (!ids) {
+      batchActions.clear()
+    } else {
+      batchActions.clear()
     }
+    await refresh()
   }
 
-  async function batchDelete(): Promise<void> {
-    if (selectedKeys.value.length === 0) return
-    error.value = null
-    try {
-      await options.onBatchDelete?.(selectedKeys.value)
-      selectedKeys.value = []
-      await fetch()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-    }
+  async function exportAll(): Promise<Blob | null> {
+    if (!options.exportData) return null
+    return options.exportData({ ...query.value })
+  }
+
+  async function importFile(file: File): Promise<void> {
+    if (!options.importData) return
+    await options.importData(file)
+    await refresh()
   }
 
   return {
+    query,
     items,
-    isLoading,
-    selectedKeys,
-    searchKeyword,
-    isFormModalOpen,
-    formMode,
-    formData,
-    isSaving,
-    totalCount,
-    pageIndex,
-    pageSize,
-    sortBy,
-    sortOrder,
+    total,
+    loading,
     error,
-    hasSelection,
-    totalPages,
-    fetch,
-    search,
-    resetSearch,
-    changePage,
-    changeSort,
+    hasData,
+    columnSettings,
+    batchActions,
+    formModal,
+    rowKey: options.rowKey,
+    refresh,
+    setPage,
+    setPageSize,
+    setSearch,
+    setSort,
+    setFilters,
+    resetQuery,
     openCreate,
     openEdit,
-    closeModal,
-    save,
-    deleteItem,
-    batchDelete,
+    openView,
+    submit,
+    handleDelete,
+    exportAll,
+    importFile,
   }
 }

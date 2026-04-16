@@ -3,7 +3,7 @@
  * ArtifactCodeView — Code view using Shiki
  */
 
-import { Button, Tooltip } from '../../primitives';
+import { NButton, NTooltip } from 'naive-ui';
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -55,22 +55,22 @@ async function copyCode(): Promise<void> {
       <span v-if="filename" class="text-xs font-mono text-muted-foreground">{{ filename }}</span>
       <span v-else class="text-xs text-muted-foreground">{{ language ?? 'text' }}</span>
       <div class="flex items-center gap-1">
-        <Tooltip>
+        <NTooltip>
           <template #trigger>
-            <Button variant="ghost" size="icon-sm" @click="copyCode">
-              <Icon icon="lucide:copy" class="size-3.5" />
-            </Button>
+            <NButton quaternary size="tiny" @click="copyCode">
+              <template #icon><Icon icon="lucide:copy" /></template>
+            </NButton>
           </template>
           {{ t.chat.copy }}
-        </Tooltip>
-        <Tooltip>
+        </NTooltip>
+        <NTooltip>
           <template #trigger>
-            <Button variant="ghost" size="icon-sm" @click="$emit('download')">
-              <Icon icon="lucide:download" class="size-3.5" />
-            </Button>
+            <NButton quaternary size="tiny" @click="$emit('download')">
+              <template #icon><Icon icon="lucide:download" /></template>
+            </NButton>
           </template>
           {{ t.artifact.download }}
-        </Tooltip>
+        </NTooltip>
       </div>
     </div>
     <div class="flex-1 min-h-0 overflow-auto p-4 text-sm [&_pre]:!bg-transparent [&_code]:!bg-transparent" v-html="highlightedHtml" />

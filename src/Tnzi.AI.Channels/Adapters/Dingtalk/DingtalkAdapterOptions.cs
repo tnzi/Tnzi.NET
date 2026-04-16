@@ -1,31 +1,60 @@
+using Tnzi.AI.Channels.Options;
+
 namespace Tnzi.AI.Channels.Adapters.Dingtalk;
 
 /// <summary>
-/// 钉钉适配器配置
+/// DingTalk adapter configuration. AppKey and AppSecret are redacted
+/// in ToString output to prevent log leakage.
 /// </summary>
 public class DingtalkAdapterOptions
 {
-    /// <summary>是否启用钉钉适配器</summary>
+    /// <summary>Whether the DingTalk adapter is enabled.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>应用 AppKey（建议通过环境变量 AI__CHANNELS__DINGTALK__APPKEY 注入）</summary>
+    /// <summary>Application AppKey. Inject via env var AI__CHANNELS__DINGTALK__APPKEY.</summary>
     public string? AppKey { get; set; }
 
-    /// <summary>应用 AppSecret（建议通过环境变量 AI__CHANNELS__DINGTALK__APPSECRET 注入）</summary>
+    /// <summary>
+    /// Application AppSecret. Also used for HMAC-SHA256 signature verification of
+    /// incoming webhooks; when set, the no-headers
+    /// <see cref="DingtalkChannelAdapter.HandleEventAsync(string, CancellationToken)"/>
+    /// overload rejects events because signature verification cannot be performed.
+    /// </summary>
     public string? AppSecret { get; set; }
 
-    /// <summary>机器人编码（用于接收消息路由）</summary>
+    /// <summary>Robot code (used for receive-side routing).</summary>
     public string? RobotCode { get; set; }
 
-    /// <summary>允许的用户 ID 白名单（空=不限制）</summary>
+    /// <summary>Allowed user ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedUsers { get; set; } = [];
 
-    /// <summary>允许的组织 ID 白名单（空=不限制）</summary>
+    /// <summary>Allowed organization ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedOrganizations { get; set; } = [];
 
-    /// <summary>单条消息最大长度（钉钉 Markdown 限制约 20000 字符）</summary>
+    /// <summary>Maximum length per message (DingTalk markdown limit is ~20000 chars).</summary>
     public int MaxMessageLength { get; set; } = 20000;
 
-    /// <summary>重试次数</summary>
+    /// <summary>Retry attempts.</summary>
     public int MaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Whether to verify webhook signatures on incoming events. Default: true.
+    /// When true, the no-headers
+    /// <see cref="DingtalkChannelAdapter.HandleEventAsync(string, CancellationToken)"/>
+    /// overload rejects events because signature verification cannot be performed
+    /// without the timestamp/sign headers. Set to false only for trusted private
+    /// networks where webhook signatures are unavailable (e.g. a fronting gateway
+    /// already validated the request).
+    /// </summary>
+    public bool VerifyWebhookSignature { get; set; } = true;
+
+    public override string ToString() =>
+        $"DingtalkAdapterOptions {{ Enabled = {Enabled}, " +
+        $"AppKey = {SecretMask.Mask(AppKey)}, " +
+        $"AppSecret = {SecretMask.Mask(AppSecret)}, " +
+        $"RobotCode = {RobotCode ?? "<null>"}, " +
+        $"AllowedUsers.Count = {AllowedUsers.Count}, " +
+        $"AllowedOrganizations.Count = {AllowedOrganizations.Count}, " +
+        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries}, " +
+        $"VerifyWebhookSignature = {VerifyWebhookSignature} }}";
 }

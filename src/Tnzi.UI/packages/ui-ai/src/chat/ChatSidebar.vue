@@ -3,9 +3,8 @@
  * ChatSidebar — Thread list with search, new chat, and agent gallery
  */
 
-import { Button, Input, ScrollArea, Separator } from '../primitives';
+import { NButton, NInput, NScrollbar, NDivider } from 'naive-ui';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import { useAiI18n } from '@/locale/index';
 import { useLocalSearch } from '@/composables/useLocalSearch';
 const t = useAiI18n();
@@ -49,57 +48,90 @@ function formatDate(dateStr: string): string {
     <!-- Header -->
     <div class="p-3 space-y-2">
       <slot name="header">
-        <Button class="w-full gap-2" @click="emit('new-chat')">
-          <Icon icon="lucide:plus" class="size-4" />
+        <NButton class="w-full" @click="emit('new-chat')">
+          <template #icon><Icon icon="lucide:plus" /></template>
           {{ t.chat.newChat }}
-        </Button>
+        </NButton>
       </slot>
-      <div class="relative">
-        <Icon icon="lucide:search" class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-        <Input v-model="searchQuery" :placeholder="t.common.search" class="pl-9 h-8" />
-      </div>
+      <NInput v-model:value="searchQuery" :placeholder="t.common.search" size="small" clearable>
+        <template #prefix>
+          <Icon icon="lucide:search" class="size-4" />
+        </template>
+      </NInput>
     </div>
 
-    <Separator />
+    <NDivider style="margin: 0" />
 
     <!-- Thread list -->
-    <ScrollArea class="flex-1">
+    <NScrollbar class="flex-1">
       <div class="p-2 space-y-0.5">
         <div
           v-for="thread in filtered"
           :key="thread.id"
-          :class="cn(
-            'group flex items-center gap-2 rounded-md px-2 py-2 text-sm cursor-pointer transition-colors',
-            thread.id === activeThreadId
-              ? 'bg-accent text-accent-foreground'
-              : 'hover:bg-accent/50',
-          )"
+          class="t-sidebar-thread"
+          :class="{ 't-sidebar-thread--active': thread.id === activeThreadId }"
           @click="emit('select-thread', thread.id)"
         >
           <slot name="item" :thread="thread">
             <div class="flex-1 min-w-0">
               <div class="truncate font-medium">{{ thread.title }}</div>
-              <div v-if="thread.lastMessage" class="truncate text-xs text-muted-foreground">
+              <div v-if="thread.lastMessage" class="truncate text-xs t-sidebar-thread__preview">
                 {{ thread.lastMessage }}
               </div>
             </div>
-            <span class="text-[10px] text-muted-foreground shrink-0">
+            <span class="t-sidebar-thread__date">
               {{ formatDate(thread.updatedAt) }}
             </span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="size-6 shrink-0 opacity-0 group-hover:opacity-100"
+            <NButton
+              quaternary
+              size="tiny"
+              class="t-sidebar-thread__delete"
               @click.stop="emit('delete-thread', thread.id)"
             >
-              <Icon icon="lucide:trash-2" class="size-3" />
-            </Button>
+              <template #icon><Icon icon="lucide:trash-2" /></template>
+            </NButton>
           </slot>
         </div>
       </div>
-    </ScrollArea>
+    </NScrollbar>
 
     <!-- Footer slot -->
     <slot name="footer" />
   </div>
 </template>
+
+<style scoped>
+.t-sidebar-thread {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.t-sidebar-thread:hover {
+  background-color: var(--tnzi-border);
+}
+.t-sidebar-thread--active {
+  background-color: var(--tnzi-border);
+  font-weight: 500;
+}
+.t-sidebar-thread__preview {
+  color: var(--tnzi-base-text-muted);
+}
+.t-sidebar-thread__date {
+  font-size: 10px;
+  color: var(--tnzi-base-text-muted);
+  flex-shrink: 0;
+}
+.t-sidebar-thread__delete {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.t-sidebar-thread:hover .t-sidebar-thread__delete {
+  opacity: 1;
+}
+</style>

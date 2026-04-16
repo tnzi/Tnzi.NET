@@ -8,7 +8,6 @@
 
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/composables/useChat';
 import type { FeedbackValue } from './MessageFeedback.vue';
 import MessageResponse from './MessageResponse.vue';
@@ -50,19 +49,15 @@ const hasAttachments = computed(
 
 <template>
   <div
-    :class="cn(
-      'group flex gap-3',
-      isUser ? 'flex-row-reverse' : 'flex-row',
-    )"
+    class="t-chat-message"
+    :class="{ 't-chat-message--user': isUser, 't-chat-message--assistant': isAssistant }"
   >
     <!-- Avatar -->
     <div class="shrink-0">
       <slot name="avatar">
         <div
-          :class="cn(
-            'flex size-8 items-center justify-center rounded-full',
-            isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-          )"
+          class="t-chat-message__avatar"
+          :class="{ 't-chat-message__avatar--user': isUser, 't-chat-message__avatar--assistant': isAssistant }"
         >
           <Icon
             :icon="isUser ? 'lucide:user' : 'lucide:bot'"
@@ -74,15 +69,13 @@ const hasAttachments = computed(
 
     <!-- Content -->
     <div
-      :class="cn(
-        'flex max-w-[80%] flex-col gap-2',
-        isUser ? 'items-end' : 'items-start',
-      )"
+      class="t-chat-message__content"
+      :class="{ 't-chat-message__content--user': isUser }"
     >
       <!-- Agent name -->
       <span
         v-if="isAssistant && message.agentName"
-        class="text-xs font-medium text-muted-foreground"
+        class="t-chat-message__agent-name"
       >
         {{ message.agentName }}
       </span>
@@ -116,12 +109,8 @@ const hasAttachments = computed(
       <!-- Message bubble -->
       <div
         v-if="message.content"
-        :class="cn(
-          'rounded-2xl px-4 py-2.5',
-          isUser
-            ? 'bg-ai-user-bubble text-foreground'
-            : 'bg-ai-assistant-bubble border border-border/50 text-foreground',
-        )"
+        class="t-chat-message__bubble"
+        :class="{ 't-chat-message__bubble--user': isUser, 't-chat-message__bubble--assistant': isAssistant }"
       >
         <!-- User: plain text -->
         <p v-if="isUser" class="whitespace-pre-wrap text-sm">
@@ -158,3 +147,59 @@ const hasAttachments = computed(
     </div>
   </div>
 </template>
+
+<style scoped>
+.t-chat-message {
+  display: flex;
+  gap: 12px;
+  flex-direction: row;
+}
+.t-chat-message--user {
+  flex-direction: row-reverse;
+}
+.t-chat-message__avatar {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.t-chat-message__avatar--user {
+  background-color: var(--tnzi-primary);
+  color: #fff;
+}
+.t-chat-message__avatar--assistant {
+  background-color: var(--tnzi-border);
+  color: var(--tnzi-base-text-muted);
+}
+.t-chat-message__content {
+  display: flex;
+  max-width: 80%;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.t-chat-message__content--user {
+  align-items: flex-end;
+}
+.t-chat-message__agent-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tnzi-base-text-muted);
+}
+.t-chat-message__bubble {
+  border-radius: 16px;
+  padding: 10px 16px;
+}
+.t-chat-message__bubble--user {
+  background-color: var(--tnzi-ai-chat-user-bg);
+  color: var(--tnzi-ai-chat-user-text);
+}
+.t-chat-message__bubble--assistant {
+  background-color: var(--tnzi-ai-chat-assistant-bg);
+  color: var(--tnzi-ai-chat-assistant-text);
+  border: 1px solid var(--tnzi-border);
+}
+</style>

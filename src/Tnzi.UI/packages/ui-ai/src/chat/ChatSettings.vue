@@ -4,13 +4,7 @@
  */
 
 import { computed } from 'vue';
-import { NSelect } from 'naive-ui';
-import {
-  Button,
-  Textarea,
-  Separator,
-  ScrollArea,
-} from '../primitives';
+import { NButton, NSelect, NInput, NDivider, NScrollbar } from 'naive-ui';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
 const t = useAiI18n();
@@ -44,11 +38,11 @@ function updateField<K extends keyof ChatSettingsData>(key: K, value: ChatSettin
   <div class="flex h-full flex-col">
     <div class="flex items-center justify-between border-b px-4 py-2">
       <span class="text-sm font-medium">{{ t.admin.settings }}</span>
-      <Button variant="ghost" size="icon-sm" @click="$emit('close')">
-        <Icon icon="lucide:x" class="size-4" />
-      </Button>
+      <NButton quaternary size="small" @click="$emit('close')">
+        <template #icon><Icon icon="lucide:x" /></template>
+      </NButton>
     </div>
-    <ScrollArea class="flex-1 p-4">
+    <NScrollbar class="flex-1 p-4">
       <div class="space-y-4">
         <!-- Model -->
         <div class="space-y-1.5">
@@ -78,19 +72,21 @@ function updateField<K extends keyof ChatSettingsData>(key: K, value: ChatSettin
           </div>
         </div>
 
-        <Separator />
+        <NDivider style="margin: 8px 0" />
 
         <!-- System prompt -->
         <div class="space-y-1.5">
           <label class="text-xs font-medium">{{ t.admin.systemPrompt }}</label>
-          <Textarea
-            :model-value="settings.systemPrompt"
+          <NInput
+            type="textarea"
+            :value="settings.systemPrompt"
             :rows="6"
-            class="text-xs resize-none"
-            @update:model-value="updateField('systemPrompt', String($event))"
+            class="text-xs"
+            :resizable="false"
+            @update:value="updateField('systemPrompt', String($event))"
           />
         </div>
       </div>
-    </ScrollArea>
+    </NScrollbar>
   </div>
 </template>

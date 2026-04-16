@@ -3,7 +3,7 @@
  * PersonaSelector — Agent persona/role selection dropdown
  */
 
-import { DropdownMenu, Button } from '../../primitives';
+import { NDropdown, NButton } from 'naive-ui';
 import { h, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -30,31 +30,19 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-const options = computed(() => [
-  {
-    key: 'header',
-    type: 'render',
-    render: () => h('div', { class: 'px-2 py-1.5 text-xs font-semibold text-muted-foreground' }, t.value.persona.select),
-  },
-  { type: 'divider', key: 'd1' },
-  ...(props.personas.length === 0
-    ? [{
-        key: 'empty',
-        type: 'render' as const,
-        render: () => h('div', { class: 'py-4 text-center text-sm text-muted-foreground' }, t.value.persona.noPersonas),
-      }]
+const options = computed(() =>
+  props.personas.length === 0
+    ? [{ key: 'empty', type: 'render' as const, render: () => h('div', { style: 'padding: 16px; text-align: center; font-size: 14px; color: var(--tnzi-base-text-muted)' }, t.value.persona.noPersonas) }]
     : props.personas.map((persona) => ({
         key: persona.id,
         label: persona.name,
         icon: () =>
           persona.avatarUrl
-            ? h('img', { src: persona.avatarUrl, class: 'size-5 rounded-full' })
-            : h('span', { class: 'inline-flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium' }, getInitials(persona.name)),
-        props: {
-          class: persona.id === props.selectedId ? 'text-primary' : '',
-        },
-      }))),
-]);
+            ? h('img', { src: persona.avatarUrl, style: 'width: 20px; height: 20px; border-radius: 50%' })
+            : h('span', { style: 'display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 50%; background: var(--tnzi-container-bg); font-size: 10px; font-weight: 500' }, getInitials(persona.name)),
+        class: persona.id === props.selectedId ? 't-persona-selected' : '',
+      })),
+);
 
 function handleSelect(key: string): void {
   emit('select', key);
@@ -62,12 +50,15 @@ function handleSelect(key: string): void {
 </script>
 
 <template>
-  <DropdownMenu :options="options" trigger="click" @select="handleSelect">
-    <span class="inline-flex">
-      <Button variant="outline" size="sm" class="gap-1.5">
-        <Icon icon="lucide:user-circle" class="size-4" />
-        {{ t.persona.select }}
-      </Button>
-    </span>
-  </DropdownMenu>
+  <NDropdown :options="options" trigger="click" @select="handleSelect">
+    <NButton secondary size="small">
+      <template #icon><Icon icon="lucide:user-circle" class="size-4" /></template>
+      {{ t.persona.select }}
+    </NButton>
+  </NDropdown>
 </template>
+
+<style>
+/* global — NDropdown renders outside component scope */
+.t-persona-selected { color: var(--tnzi-primary); }
+</style>

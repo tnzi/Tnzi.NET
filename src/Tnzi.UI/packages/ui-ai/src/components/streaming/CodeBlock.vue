@@ -6,10 +6,10 @@
  * Falls back to plain <pre><code> while shiki loads.
  */
 
-import { Button } from '../../primitives';
+import { NButton } from 'naive-ui';
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
+
 const props = withDefaults(defineProps<{
   code: string;
   /** Programming language (e.g., "typescript", "python"). */
@@ -77,40 +77,78 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div :class="cn('group relative rounded-lg bg-ai-code-bg overflow-hidden', props.class)">
+  <div class="t-code-block" :class="props.class">
     <!-- Header bar -->
-    <div class="flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground border-b border-border/50">
-      <span v-if="props.language" class="font-mono">{{ props.language }}</span>
+    <div class="t-code-block__header">
+      <span v-if="props.language" class="t-code-block__lang font-mono">{{ props.language }}</span>
       <span v-else>&nbsp;</span>
       <div class="flex items-center gap-1">
         <slot name="actions" />
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-auto px-1.5 py-0.5"
+        <NButton
+          text
+          size="small"
           :aria-label="isCopied ? 'Copied' : 'Copy code'"
           @click="handleCopy"
         >
-          <Icon
-            :icon="isCopied ? 'lucide:check' : 'lucide:copy'"
-            :class="cn('size-3.5', isCopied && 'text-ai-node-completed')"
-          />
-        </Button>
+          <template #icon>
+            <Icon
+              :icon="isCopied ? 'lucide:check' : 'lucide:copy'"
+              class="size-3.5"
+              :class="{ 't-code-block__copy--done': isCopied }"
+            />
+          </template>
+        </NButton>
       </div>
     </div>
 
     <!-- Highlighted code -->
     <div
       v-if="isLoaded && highlightedHtml"
-      class="overflow-x-auto p-3 text-sm [&>pre]:!bg-transparent [&>pre]:!p-0 [&>pre]:!m-0"
-      :class="showLineNumbers && '[&_.line]:before:content-[counter(line)] [&_.line]:before:counter-increment-[line] [&_.line]:before:mr-4 [&_.line]:before:text-muted-foreground/50 [&_.line]:before:text-right [&_.line]:before:inline-block [&_.line]:before:w-4 [&>pre]:counter-reset-[line]'"
+      class="t-code-block__highlighted"
+      :class="{ 't-code-block__highlighted--line-numbers': showLineNumbers }"
       v-html="highlightedHtml"
     />
 
     <!-- Fallback (plain text) -->
     <pre
       v-else
-      class="overflow-x-auto p-3 text-sm"
+      class="t-code-block__fallback"
     ><code :class="language && `language-${language}`">{{ props.code }}</code></pre>
   </div>
 </template>
+
+<style scoped>
+.t-code-block {
+  position: relative;
+  border-radius: 8px;
+  background-color: var(--tnzi-ai-code-bg);
+  overflow: hidden;
+}
+.t-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+  border-bottom: 1px solid color-mix(in srgb, var(--tnzi-border) 50%, transparent);
+}
+.t-code-block__lang { color: var(--tnzi-base-text-muted); }
+.t-code-block__copy--done { color: var(--tnzi-ai-node-completed); }
+.t-code-block__highlighted {
+  overflow-x: auto;
+  padding: 12px;
+  font-size: 14px;
+}
+.t-code-block__highlighted :deep(pre) {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+.t-code-block__fallback {
+  overflow-x: auto;
+  padding: 12px;
+  font-size: 14px;
+  margin: 0;
+}
+</style>

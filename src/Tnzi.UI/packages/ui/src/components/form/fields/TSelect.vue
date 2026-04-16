@@ -2,7 +2,7 @@
   <TField :label="label" :error="error" :hint="hint">
     <n-select
       :value="modelValue"
-      :options="(options as any)"
+      :options="options"
       :placeholder="placeholder"
       :disabled="disabled"
       :multiple="multiple"
@@ -14,10 +14,10 @@
 </template>
 
 <script setup lang="ts">
-import { NSelect } from 'naive-ui'
+import { NSelect, type SelectOption } from 'naive-ui'
 import TField from './TField.vue'
 
-interface Option {
+type Option = SelectOption & {
   value: string | number
   label: string
   disabled?: boolean

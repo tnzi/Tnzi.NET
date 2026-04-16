@@ -42,6 +42,14 @@ export interface SearchTestParams {
   threshold?: number;
 }
 
+/** Result returned from POST /admin/knowledge-bases/{id}/reindex */
+export interface ReindexResultDto {
+  knowledgeBaseId: string;
+  chunkCount: number;
+  documentCount: number;
+  durationMs: number;
+}
+
 // ---------------------------------------------------------------------------
 // User-facing RAG API
 // Route: /rag
@@ -118,5 +126,9 @@ export function useAdminKnowledgeBaseApi(client: HttpClient) {
     /** Get knowledge base stats (document count, chunk count, etc.) */
     getStats: (kbId: string) =>
       client.get(`${base}/${kbId}/stats`),
+
+    /** Trigger full re-vectorization of all chunks in a knowledge base (admin) */
+    reindex: (kbId: string) =>
+      client.post<ReindexResultDto>(`${base}/${kbId}/reindex`, {}),
   };
 }

@@ -42,6 +42,7 @@ import type {
   RejectRunDto,
   // Quotas
   UserQuotaDto,
+  UserQuotaQueryDto,
   SetQuotaDto,
   ResetQuotaDto,
   // Usage Analytics
@@ -58,10 +59,18 @@ import type {
   CostSummaryDto,
   // Providers
   ProviderDefaultModelDto,
+  ProviderDto,
+  ProviderQueryDto,
+  CreateProviderDto,
+  UpdateProviderDto,
+  ProviderTestResultDto,
   // Evaluations
   EvaluationRunDto,
   EvaluationRunDetailDto,
   EvaluationRunQueryDto,
+  CreateEvaluationRunDto,
+  BatchEvaluationDto,
+  BatchEvaluationResultDto,
   // Skills
   SkillSummaryDto,
   SkillDetailDto,
@@ -94,6 +103,11 @@ import type {
   McpServerStatusDto,
   McpToolInfoDto,
   McpToolExposureOptionsDto,
+  McpServerRegistrationDto,
+  McpServerRegistrationQueryDto,
+  CreateMcpServerRegistrationDto,
+  UpdateMcpServerRegistrationDto,
+  McpServerTestResultDto,
   // MCP Tool Analytics
   McpToolStatsDto,
   McpToolPopularityDto,
@@ -404,6 +418,10 @@ export function useAdminQuotaApi(client: HttpClient) {
     getQuota: (userId: string) =>
       client.get<UserQuotaDto>(`${base}/${userId}`),
 
+    /** Get user quotas (paged) */
+    getList: (data: UserQuotaQueryDto) =>
+      client.post<PagedList<UserQuotaDto>>(`${base}/query`, data),
+
     /** Set user quota */
     setQuota: (data: SetQuotaDto) =>
       client.post<UserQuotaDto>(base, data),
@@ -430,6 +448,32 @@ export function useAdminProviderApi(client: HttpClient) {
     /** Get default model for a provider */
     getDefaultModel: (providerName: string) =>
       client.get<ProviderDefaultModelDto>(`${base}/${providerName}/default-model`),
+
+    // ---- Entity-driven CRUD (Phase 5 backend prereq) ----------------------
+
+    /** Paged list of Provider entities */
+    getList: (query: ProviderQueryDto) =>
+      client.post<PagedList<ProviderDto>>(`${base}/query`, query),
+
+    /** Get Provider entity by id */
+    getById: (id: string) =>
+      client.get<ProviderDto>(`${base}/entities/${id}`),
+
+    /** Create Provider entity */
+    create: (data: CreateProviderDto) =>
+      client.post<ProviderDto>(`${base}/entities`, data),
+
+    /** Update Provider entity (apiKey null = keep, '' = clear, non-empty = rotate) */
+    update: (id: string, data: UpdateProviderDto) =>
+      client.put<ProviderDto>(`${base}/entities/${id}`, data),
+
+    /** Soft-delete Provider entity */
+    delete: (id: string) =>
+      client.delete(`${base}/entities/${id}`),
+
+    /** Test Provider connection (shallow probe) */
+    test: (id: string) =>
+      client.post<ProviderTestResultDto>(`${base}/entities/${id}/test`, {}),
   };
 }
 
@@ -496,6 +540,14 @@ export function useAdminEvaluationApi(client: HttpClient) {
     /** Delete evaluation run */
     delete: (id: string) =>
       client.delete<void>(`${base}/${id}`),
+
+    /** Create and run an evaluation in one shot */
+    create: (data: CreateEvaluationRunDto) =>
+      client.post<EvaluationRunDetailDto>(`${base}/run`, data),
+
+    /** Run a batch evaluation across multiple agents/versions */
+    runBatch: (data: BatchEvaluationDto) =>
+      client.post<BatchEvaluationResultDto>(`${base}/batch`, data),
   };
 }
 
@@ -639,7 +691,12 @@ export function useAdminWorkflowApi(client: HttpClient) {
     batchDelete: (ids: string[]) =>
       client.post<number>(`${base}/batch-delete`, ids),
 
-    /** Batch enable workflows */
+    /**
+     * Batch enable workflows. Workflow definitions have a single `IsEnabled`
+     * flag — there is no separate Draft/Published state machine, so enabling
+     * a workflow IS the framework's "publish" semantic.
+     * See docs/modules/ai.md → Workflow → Publish semantics.
+     */
     batchEnable: (ids: string[]) =>
       client.post<number>(`${base}/batch-enable`, ids),
 
@@ -685,6 +742,35 @@ export function useAdminMcpApi(client: HttpClient) {
     /** Remove an exposed agent */
     removeAgent: (agentId: string) =>
       client.delete<void>(`${base}/agents/${agentId}`),
+
+    // ---- Entity-driven MCP Server Registration CRUD (Phase 5 backend prereq) ----
+    // Catalog of EXTERNAL MCP servers Tnzi can connect to as a client. Auth tokens
+    // are encrypted server-side; DTOs only expose `hasAuthToken` boolean. Routes
+    // live under /admin/mcp/entities/* alongside the legacy hosting endpoints.
+
+    /** Page MCP server registrations */
+    getList: (query: McpServerRegistrationQueryDto) =>
+      client.post<PagedList<McpServerRegistrationDto>>(`${base}/entities/query`, query),
+
+    /** Get a single MCP server registration by id */
+    getById: (id: string) =>
+      client.get<McpServerRegistrationDto>(`${base}/entities/${id}`),
+
+    /** Create a new MCP server registration */
+    create: (data: CreateMcpServerRegistrationDto) =>
+      client.post<McpServerRegistrationDto>(`${base}/entities`, data),
+
+    /** Update an existing MCP server registration */
+    update: (id: string, data: UpdateMcpServerRegistrationDto) =>
+      client.put<McpServerRegistrationDto>(`${base}/entities/${id}`, data),
+
+    /** Soft-delete an MCP server registration */
+    delete: (id: string) =>
+      client.delete<void>(`${base}/entities/${id}`),
+
+    /** Shallow probe — verifies entity is enabled, URI parses, credentials decrypt */
+    test: (id: string) =>
+      client.post<McpServerTestResultDto>(`${base}/entities/${id}/test`, {}),
   };
 }
 

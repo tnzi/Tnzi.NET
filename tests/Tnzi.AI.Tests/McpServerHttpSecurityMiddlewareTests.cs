@@ -105,6 +105,8 @@ public class McpServerHttpSecurityMiddlewareTests
         var services = new ServiceCollection();
         using var serviceProvider = services.BuildServiceProvider();
 
+        // AllowApiKeyInQuery is off by default (secure). This test exercises
+        // the opt-in transitional compatibility path, so it must be explicitly enabled.
         var security = new McpServerSecurityMiddleware(
             MsOptions.Create(new McpServerOptions
             {
@@ -112,7 +114,8 @@ public class McpServerHttpSecurityMiddlewareTests
                 Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
-                TenantIsolation = true
+                TenantIsolation = true,
+                AllowApiKeyInQuery = true
             }),
             NullLogger<McpServerSecurityMiddleware>.Instance,
             serviceProvider);
@@ -132,7 +135,8 @@ public class McpServerHttpSecurityMiddlewareTests
                 Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
-                TenantIsolation = true
+                TenantIsolation = true,
+                AllowApiKeyInQuery = true
             }),
             security);
 

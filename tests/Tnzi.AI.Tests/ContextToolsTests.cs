@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Tnzi.AI.Coder.Context;
 using Tnzi.AI.Memory;
 
@@ -16,7 +17,12 @@ public class ContextToolsTests
     {
         _memoryStoreMock = new Mock<IMemoryStore>();
         _loggerMock = new Mock<ILogger<ContextTools>>();
-        _tools = new ContextTools(_memoryStoreMock.Object, _loggerMock.Object);
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => _memoryStoreMock.Object);
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        _tools = new ContextTools(scopeFactory, _loggerMock.Object);
     }
 
     [Fact]

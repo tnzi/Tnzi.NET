@@ -3,18 +3,9 @@
  * AgentPlan — Collapsible plan display card
  *
  * Shows a plan with shimmer-animated title during streaming.
- * Uses Card + Collapsible from shadcn-vue.
  */
 
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-  Button,
-} from '../../primitives';
+import { NCard, NButton } from 'naive-ui';
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -40,33 +31,35 @@ const isOpen = ref(props.defaultOpen);
 </script>
 
 <template>
-  <Card class="overflow-hidden">
-    <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-      <div class="space-y-1">
-        <CardTitle class="text-sm font-medium">
+  <NCard class="overflow-hidden">
+    <div class="flex flex-row items-center justify-between gap-2 mb-2">
+      <div class="space-y-0.5 flex-1 min-w-0">
+        <div class="text-sm font-medium">
           <Shimmer v-if="isStreaming">{{ title }}</Shimmer>
           <template v-else>{{ title }}</template>
-        </CardTitle>
-        <CardDescription v-if="description" class="text-xs text-balance">
+        </div>
+        <div v-if="description" class="text-xs t-agent-plan__desc">
           <Shimmer v-if="isStreaming">{{ description }}</Shimmer>
           <template v-else>{{ description }}</template>
-        </CardDescription>
+        </div>
       </div>
-      <Button variant="ghost" size="icon-sm" @click="isOpen = !isOpen">
-        <Icon
-          icon="lucide:chevrons-up-down"
-          class="size-4 text-muted-foreground"
-        />
+      <NButton text size="small" @click="isOpen = !isOpen">
+        <template #icon>
+          <Icon icon="lucide:chevrons-up-down" class="size-4 t-agent-plan__muted" />
+        </template>
         <span class="sr-only">{{ t.plan.collapse }}</span>
-      </Button>
-    </CardHeader>
-    <div v-show="isOpen">
-      <CardContent class="pt-0">
-        <slot />
-      </CardContent>
-      <CardFooter v-if="$slots.footer" class="pt-0">
-        <slot name="footer" />
-      </CardFooter>
+      </NButton>
     </div>
-  </Card>
+    <div v-show="isOpen">
+      <slot />
+      <div v-if="$slots.footer" class="mt-2">
+        <slot name="footer" />
+      </div>
+    </div>
+  </NCard>
 </template>
+
+<style scoped>
+.t-agent-plan__desc { color: var(--tnzi-base-text-muted); }
+.t-agent-plan__muted { color: var(--tnzi-base-text-muted); }
+</style>

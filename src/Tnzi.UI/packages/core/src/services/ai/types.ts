@@ -638,6 +638,12 @@ export interface ResetQuotaDto {
   resetMonthly: boolean;
 }
 
+/** User quota paged query */
+export interface UserQuotaQueryDto extends PagedQueryDto {
+  userId?: string | null;
+  isEnabled?: boolean | null;
+}
+
 // ============================================
 // Usage Analytics Types
 // ============================================
@@ -794,6 +800,61 @@ export interface ProviderDefaultModelDto {
   defaultModel?: string | null;
 }
 
+/** Provider entity DTO — never exposes plaintext or ciphertext API key */
+export interface ProviderDto {
+  id: string;
+  name: string;
+  providerType: string;
+  endpoint?: string | null;
+  defaultModel?: string | null;
+  priority: number;
+  isEnabled: boolean;
+  description?: string | null;
+  hasApiKey: boolean;
+  creationTime: string;
+  lastModificationTime?: string | null;
+}
+
+/** Provider list paged query */
+export interface ProviderQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  providerType?: string | null;
+  isEnabled?: boolean | null;
+  keyword?: string | null;
+}
+
+/** Provider create request */
+export interface CreateProviderDto {
+  name: string;
+  providerType: string;
+  endpoint?: string | null;
+  apiKey?: string | null;
+  defaultModel?: string | null;
+  priority?: number;
+  isEnabled?: boolean;
+  description?: string | null;
+}
+
+/** Provider update request — apiKey: null = keep, '' = clear, non-empty = rotate */
+export interface UpdateProviderDto {
+  name?: string | null;
+  providerType?: string | null;
+  endpoint?: string | null;
+  apiKey?: string | null;
+  defaultModel?: string | null;
+  priority?: number | null;
+  isEnabled?: boolean | null;
+  description?: string | null;
+}
+
+/** Provider connection test result */
+export interface ProviderTestResultDto {
+  success: boolean;
+  message?: string | null;
+  latencyMs: number;
+}
+
 // ============================================
 // Evaluation Types
 // ============================================
@@ -819,6 +880,37 @@ export interface EvaluationRunDetailDto extends EvaluationRunDto {
 export interface EvaluationRunQueryDto extends PagedQueryDto {
   agentId?: string | null;
   status?: EvaluationRunStatus | null;
+}
+
+/** Evaluation case (input + optional expected output) */
+export interface EvaluationCaseDto {
+  input: string;
+  expectedOutput?: string | null;
+}
+
+/** Create-and-run evaluation request */
+export interface CreateEvaluationRunDto {
+  agentId: string;
+  versionNumber?: number | null;
+  cases: EvaluationCaseDto[];
+}
+
+/** Batch evaluation target */
+export interface BatchEvaluationTargetDto {
+  agentId: string;
+  versionNumber?: number | null;
+}
+
+/** Batch evaluation request */
+export interface BatchEvaluationDto {
+  targets: BatchEvaluationTargetDto[];
+  cases: EvaluationCaseDto[];
+}
+
+/** Batch evaluation result */
+export interface BatchEvaluationResultDto {
+  results: EvaluationRunDetailDto[];
+  totalDuration: string;
 }
 
 // ============================================
@@ -1301,6 +1393,80 @@ export interface McpToolExposureOptionsDto {
   toolName?: string | null;
   description?: string | null;
   enableStreaming?: boolean;
+}
+
+// --- MCP Server Registration (Phase 5 backend prereq) ---------------------
+// Entity-driven catalogue of EXTERNAL MCP servers Tnzi can connect to as a
+// client. Distinct from McpServerStatusDto above (which describes Tnzi's own
+// MCP-server-hosting status). Auth tokens are encrypted server-side via
+// IDataProtectionProvider; DTOs only expose a `hasAuthToken` boolean — never
+// plaintext or ciphertext.
+
+/** MCP server registration entity DTO (read shape, no credential exposure) */
+export interface McpServerRegistrationDto {
+  id: string;
+  name: string;
+  serverUrl: string;
+  transport: string;
+  command?: string | null;
+  arguments?: string | null;
+  authType?: string | null;
+  hasAuthToken: boolean;
+  priority: number;
+  isEnabled: boolean;
+  description?: string | null;
+  tags?: string | null;
+  creationTime: string;
+  lastModificationTime?: string | null;
+}
+
+/** Paged-query DTO for MCP server registrations */
+export interface McpServerRegistrationQueryDto extends PagedQueryDto {
+  transport?: string | null;
+  isEnabled?: boolean | null;
+  keyword?: string | null;
+}
+
+/** Create payload for MCP server registration */
+export interface CreateMcpServerRegistrationDto {
+  name: string;
+  serverUrl: string;
+  transport: string;
+  command?: string | null;
+  arguments?: string | null;
+  /** Plaintext auth token — encrypted at rest by the backend */
+  authToken?: string | null;
+  authType?: string | null;
+  priority?: number;
+  isEnabled?: boolean;
+  description?: string | null;
+  tags?: string | null;
+}
+
+/**
+ * Update payload for MCP server registration. Tri-state semantic for
+ * authToken: `null`/omitted = keep current cipher; `""` = clear; non-empty
+ * = encrypt and replace.
+ */
+export interface UpdateMcpServerRegistrationDto {
+  name?: string | null;
+  serverUrl?: string | null;
+  transport?: string | null;
+  command?: string | null;
+  arguments?: string | null;
+  authToken?: string | null;
+  authType?: string | null;
+  priority?: number | null;
+  isEnabled?: boolean | null;
+  description?: string | null;
+  tags?: string | null;
+}
+
+/** MCP server registration test-connection result */
+export interface McpServerTestResultDto {
+  success: boolean;
+  message?: string | null;
+  latencyMs: number;
 }
 
 // ============================================

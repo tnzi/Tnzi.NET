@@ -3,7 +3,7 @@
  * SkillGallery — Skill store browsing with category filter and search
  */
 
-import { Input, ScrollArea, Badge } from '../../primitives';
+import { NInput, NScrollbar } from 'naive-ui';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -39,18 +39,64 @@ const filtered = computed(() => {
 <template>
   <div class="space-y-3">
     <div class="relative">
-      <Icon icon="lucide:search" class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-      <Input v-model="searchQuery" :placeholder="t.skill.search" class="pl-9" />
+      <Icon icon="lucide:search" class="t-skill-gallery__search-icon" />
+      <NInput v-model:value="searchQuery" :placeholder="t.skill.search" size="small" />
     </div>
     <div v-if="categories?.length" class="flex flex-wrap gap-1">
-      <Badge :variant="selectedCategory === null ? 'default' : 'outline'" class="cursor-pointer text-xs" @click="selectedCategory = null">All</Badge>
-      <Badge v-for="cat in categories" :key="cat" :variant="selectedCategory === cat ? 'default' : 'outline'" class="cursor-pointer text-xs" @click="selectedCategory = selectedCategory === cat ? null : cat">{{ cat }}</Badge>
+      <span
+        class="t-skill-gallery__cat-badge"
+        :class="{ 't-skill-gallery__cat-badge--active': selectedCategory === null }"
+        @click="selectedCategory = null"
+      >All</span>
+      <span
+        v-for="cat in categories"
+        :key="cat"
+        class="t-skill-gallery__cat-badge"
+        :class="{ 't-skill-gallery__cat-badge--active': selectedCategory === cat }"
+        @click="selectedCategory = selectedCategory === cat ? null : cat"
+      >{{ cat }}</span>
     </div>
-    <ScrollArea class="max-h-[500px]">
-      <div v-if="filtered.length === 0" class="py-8 text-center text-sm text-muted-foreground">{{ t.skill.noResults }}</div>
-      <div v-else class="grid grid-cols-2 gap-2">
-        <SkillCard v-for="skill in filtered" :key="skill.id" :skill="skill" @activate="emit('activate', $event)" @deactivate="emit('deactivate', $event)" @click="emit('skill-click', $event)" />
+    <NScrollbar style="max-height: 500px">
+      <div v-if="filtered.length === 0" class="py-8 text-center text-sm t-skill-gallery__empty">{{ t.skill.noResults }}</div>
+      <div v-else class="grid grid-cols-2 gap-2 pr-1">
+        <SkillCard
+          v-for="skill in filtered"
+          :key="skill.id"
+          :skill="skill"
+          @activate="emit('activate', $event)"
+          @deactivate="emit('deactivate', $event)"
+          @click="emit('skill-click', $event)"
+        />
       </div>
-    </ScrollArea>
+    </NScrollbar>
   </div>
 </template>
+
+<style scoped>
+.t-skill-gallery__search-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--tnzi-base-text-muted);
+  pointer-events: none;
+  z-index: 1;
+}
+.t-skill-gallery__empty { color: var(--tnzi-base-text-muted); }
+.t-skill-gallery__cat-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--tnzi-border);
+  cursor: pointer;
+  color: var(--tnzi-base-text-muted);
+  transition: background-color 0.15s, color 0.15s;
+}
+.t-skill-gallery__cat-badge--active {
+  background-color: var(--tnzi-primary);
+  border-color: var(--tnzi-primary);
+  color: #fff;
+}
+</style>

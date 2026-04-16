@@ -6,7 +6,10 @@ namespace Tnzi.AI.Coder.Context;
 [AIToolGroup("context", "Context Management", "Summarize and manage conversation context")]
 public class ContextTools : IAIToolProvider
 {
-    private readonly IMemoryStore _memoryStore;
+    // Singleton tool wrapper resolves IMemoryStore (potentially Scoped, e.g. DatabaseMemoryStore)
+    // per tool call via IServiceScopeFactory. This avoids captive dependency when this module
+    // is loaded alongside AIModule's DatabaseMemoryStore.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ContextTools> _logger;
 
     /// <summary>
@@ -14,9 +17,9 @@ public class ContextTools : IAIToolProvider
     /// </summary>
     private const int CondensationThresholdChars = 50_000;
 
-    public ContextTools(IMemoryStore memoryStore, ILogger<ContextTools> logger)
+    public ContextTools(IServiceScopeFactory scopeFactory, ILogger<ContextTools> logger)
     {
-        _memoryStore = Check.NotNull(memoryStore);
+        _scopeFactory = Check.NotNull(scopeFactory);
         _logger = Check.NotNull(logger);
     }
 
@@ -147,8 +150,12 @@ public class ContextTools : IAIToolProvider
 
             var summaryText = summary.ToString();
 
-            // Persist to memory store
-            await _memoryStore.WriteAsync(scope, summaryText);
+            // Persist to memory store (per-call DI scope to accommodate Scoped IMemoryStore)
+            using (var diScope = _scopeFactory.CreateScope())
+            {
+                var memoryStore = diScope.ServiceProvider.GetRequiredService<IMemoryStore>();
+                await memoryStore.WriteAsync(scope, summaryText);
+            }
 
             var compressionRatio = conversationText.Length > 0
                 ? (double)summaryText.Length / conversationText.Length

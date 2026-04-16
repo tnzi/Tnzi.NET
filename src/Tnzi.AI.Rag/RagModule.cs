@@ -68,7 +68,7 @@ public class RagModule : TnziApplicationModule
         services.AddSingleton<IFileExtractorService, MarkdownFileExtractor>();
         services.AddSingleton<IFileExtractorService, PlainTextFileExtractor>();
         services.AddSingleton<IFileExtractorService, TableContentExtractor>();
-        services.AddScoped<IFileExtractorService, ImageContentExtractor>();
+        services.AddSingleton<IFileExtractorService, ImageContentExtractor>();
 
         // 切块策略（默认使用固定大小）
         services.TryAddSingleton<IChunkingStrategy, FixedSizeChunkingStrategy>();

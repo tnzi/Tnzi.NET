@@ -16,6 +16,34 @@ public class NotificationPreferenceDto
 }
 
 /// <summary>
+/// Paged query DTO for the canonical GET /admin/notification-preferences list.
+/// Supports optional filters on user, channel, category and enabled state on
+/// top of the framework-standard pagination + ordering inherited from PagedQueryDto.
+/// </summary>
+public class NotificationPreferenceQueryDto : PagedQueryDto
+{
+    /// <summary>
+    /// Filter by user ID (optional)
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// Filter by channel name (optional) - Email, Sms, InApp, Webhook
+    /// </summary>
+    public string? Channel { get; set; }
+
+    /// <summary>
+    /// Filter by notification category (optional)
+    /// </summary>
+    public string? Category { get; set; }
+
+    /// <summary>
+    /// Filter by enabled state (optional)
+    /// </summary>
+    public bool? IsEnabled { get; set; }
+}
+
+/// <summary>
 /// 设置通知偏好输入 DTO
 /// </summary>
 public class SetNotificationPreferenceDto

@@ -2,10 +2,11 @@
  * @tnzi/ui-ai
  *
  * AI components for chat, agent visualization, workflow builder,
- * and admin panels. Built on Vue 3 + Tailwind CSS.
+ * and admin panels. Built on Vue 3 + UnoCSS (presetWind4 + presetTnzi).
  */
 
-import './themes/default.css';
+import 'virtual:uno.css';
+import './styles/index.css';
 
 // Theme
 export * from './themes/index';
@@ -14,7 +15,7 @@ export * from './themes/index';
 export * from './locale/index';
 
 // Utilities
-export { cn } from './lib/utils';
+export { formatCompactNumber } from './lib/utils';
 
 // Components (Phase 2+)
 export * from './components/index';
@@ -24,9 +25,6 @@ export * from './composables/index';
 
 // Chat (Phase 2+)
 export * from './chat/index';
-
-// Admin (Phase 3+)
-export * from './admin/index';
 
 // Embed (Phase 3+)
 export * from './embed/index';

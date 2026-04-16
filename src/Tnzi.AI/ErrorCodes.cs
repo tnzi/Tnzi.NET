@@ -279,4 +279,34 @@ public static class ErrorCodes
     /// Cost calculation failed.
     /// </summary>
     public const string CostCalculationFailed = "AI_COST_CALCULATION_FAILED";
+
+    /// <summary>
+    /// Provider entity not found.
+    /// </summary>
+    public const string ProviderNotFound = "AI_PROVIDER_NOT_FOUND";
+
+    /// <summary>
+    /// Provider with same name already exists.
+    /// </summary>
+    public const string ProviderAlreadyExists = "AI_PROVIDER_ALREADY_EXISTS";
+
+    /// <summary>
+    /// Provider operation failed.
+    /// </summary>
+    public const string ProviderOperationFailed = "AI_PROVIDER_OPERATION_FAILED";
+
+    /// <summary>
+    /// MCP server registration entity not found.
+    /// </summary>
+    public const string McpServerRegistrationNotFound = "AI_MCP_SERVER_REGISTRATION_NOT_FOUND";
+
+    /// <summary>
+    /// MCP server registration with same name already exists.
+    /// </summary>
+    public const string McpServerRegistrationAlreadyExists = "AI_MCP_SERVER_REGISTRATION_ALREADY_EXISTS";
+
+    /// <summary>
+    /// MCP server registration operation failed.
+    /// </summary>
+    public const string McpServerRegistrationOperationFailed = "AI_MCP_SERVER_REGISTRATION_OPERATION_FAILED";
 }

@@ -3,10 +3,9 @@
  * QuotaStatus — Quota remaining indicator with progress bar
  */
 
-import { Progress, Tooltip } from '../../primitives';
+import { NProgress, NTooltip } from 'naive-ui';
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import { useAiI18n } from '@/locale/index';
 const t = useAiI18n();
 
@@ -22,19 +21,40 @@ const isExceeded = computed(() => props.used >= props.limit);
 </script>
 
 <template>
-  <Tooltip>
+  <NTooltip>
     <template #trigger>
       <div class="flex items-center gap-2 text-xs">
-        <Icon :icon="isExceeded ? 'lucide:alert-triangle' : 'lucide:gauge'" :class="cn('size-3.5', isExceeded ? 'text-destructive' : 'text-muted-foreground')" />
-        <Progress :percentage="percentage" :show-indicator="false" :rail-style="{ height: '6px', width: '64px' }" :fill-style="{ height: '6px' }" :status="isExceeded ? 'error' : undefined" />
-        <span :class="cn('tabular-nums', isExceeded && 'text-destructive font-medium')">{{ percentage }}%</span>
+        <Icon
+          :icon="isExceeded ? 'lucide:alert-triangle' : 'lucide:gauge'"
+          class="size-3.5"
+          :class="isExceeded ? 't-quota__icon--exceeded' : 't-quota__icon'"
+        />
+        <NProgress
+          type="line"
+          :percentage="percentage"
+          :show-indicator="false"
+          :rail-style="{ height: '6px', width: '64px' }"
+          :fill-style="{ height: '6px' }"
+          :status="isExceeded ? 'error' : undefined"
+        />
+        <span
+          class="tabular-nums"
+          :class="{ 't-quota__pct--exceeded': isExceeded }"
+        >{{ percentage }}%</span>
       </div>
     </template>
     <div class="space-y-1 text-xs">
       <div>{{ t.quota.usage }}: {{ used }} / {{ limit }}</div>
       <div>{{ t.quota.remaining }}: {{ remaining }}</div>
       <div v-if="resetDate">{{ t.quota.resetDate.replace('{date}', resetDate) }}</div>
-      <div v-if="isExceeded" class="text-destructive font-medium">{{ t.quota.exceeded }}</div>
+      <div v-if="isExceeded" class="t-quota__exceeded-msg">{{ t.quota.exceeded }}</div>
     </div>
-  </Tooltip>
+  </NTooltip>
 </template>
+
+<style scoped>
+.t-quota__icon { color: var(--tnzi-base-text-muted); }
+.t-quota__icon--exceeded { color: var(--tnzi-error); }
+.t-quota__pct--exceeded { color: var(--tnzi-error); font-weight: 500; }
+.t-quota__exceeded-msg { color: var(--tnzi-error); font-weight: 500; }
+</style>

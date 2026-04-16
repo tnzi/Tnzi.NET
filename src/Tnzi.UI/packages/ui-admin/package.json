@@ -1,6 +1,6 @@
 {
   "name": "@tnzi/ui-admin",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "Tnzi admin panel UI components and pages, built on @tnzi/ui and @tnzi/core.",
   "type": "module",
   "main": "./dist/index.js",
@@ -42,6 +42,7 @@
     "dev": "vite build --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "vue-tsc --noEmit --skipLibCheck",
     "clean": "rimraf dist",
     "prepublishOnly": "pnpm build"
@@ -49,6 +50,7 @@
   "dependencies": {
     "@tnzi/core": "workspace:*",
     "@tnzi/ui": "workspace:*",
+    "@tnzi/ui-ai": "workspace:*",
     "@vueuse/core": "^11.0.0",
     "naive-ui": "^2.40.0",
     "pinia": "^3.0.0",

@@ -31,4 +31,21 @@ public class CliOptionsValidator : OptionsValidatorBase<CliOptions>
             }
         }
     }
+
+    protected override void CollectWarnings(CliOptions options, List<string> warnings)
+    {
+        Check.NotNull(options);
+
+        foreach (var (name, provider) in options.Providers)
+        {
+            if (provider.EnvironmentWhitelist is null)
+            {
+                AddWarning(warnings, $"Providers:{name}:EnvironmentWhitelist",
+                    $"CLI provider '{name}' has no EnvironmentWhitelist — the child process will inherit " +
+                    "ALL host environment variables, including secrets (database connection strings, " +
+                    "cloud credentials, internal tokens). Configure a whitelist (e.g. [\"PATH\", \"HOME\", " +
+                    "\"USERPROFILE\", \"LANG\", \"TMP\", \"TEMP\", \"SYSTEMROOT\"]) for production deployments.");
+            }
+        }
+    }
 }

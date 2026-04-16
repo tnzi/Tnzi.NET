@@ -406,6 +406,69 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
+    /// Paged list of role-function assignments across all roles. Supports
+    /// optional filters on roleId / functionId / enabled state.
+    /// </summary>
+    public async Task<Result<IPagedList<RoleFunctionDto>>> GetRoleFunctionsPagedAsync(RoleFunctionQueryDto query)
+    {
+        Check.NotNull(query);
+
+        var filtered = _roleFunctionRepository.Where(rf =>
+            (!query.RoleId.HasValue || rf.RoleId == query.RoleId.Value) &&
+            (!query.FunctionId.HasValue || rf.FunctionId == query.FunctionId.Value) &&
+            (!query.IsEnabled.HasValue || rf.IsEnabled == query.IsEnabled.Value));
+
+        var totalCount = await filtered.CountAsync();
+
+        var pageItems = await filtered
+            .OrderByDescending(rf => rf.CreationTime)
+            .Skip(query.Skip)
+            .Take(query.Take)
+            .ToListAsync();
+
+        if (pageItems.Count == 0)
+        {
+            var empty = new PagedList<RoleFunctionDto>(
+                Array.Empty<RoleFunctionDto>(),
+                query.PageIndex,
+                query.PageSize,
+                totalCount);
+            return Ok<IPagedList<RoleFunctionDto>>(empty);
+        }
+
+        // Join to ModuleFunction for denormalized Code / Name / ModuleId.
+        // We do this in a second round-trip rather than via Include/join because
+        // the repository abstraction here returns plain IQueryable<RoleFunction>
+        // and we only need a small distinct set of function ids for the current page.
+        var functionIds = pageItems.Select(rf => rf.FunctionId).Distinct().ToList();
+        var functions = await _moduleFunctionRepository
+            .Where(f => functionIds.Contains(f.Id))
+            .ToListAsync();
+        var functionsById = functions.ToDictionary(f => f.Id);
+
+        var dtos = pageItems
+            .Select(rf =>
+            {
+                functionsById.TryGetValue(rf.FunctionId, out var fn);
+                return new RoleFunctionDto
+                {
+                    Id = rf.Id,
+                    RoleId = rf.RoleId,
+                    FunctionId = rf.FunctionId,
+                    FunctionCode = fn?.Code ?? string.Empty,
+                    FunctionName = fn?.Name ?? string.Empty,
+                    ModuleId = fn?.ModuleId ?? Guid.Empty,
+                    IsEnabled = rf.IsEnabled,
+                    CreationTime = rf.CreationTime,
+                };
+            })
+            .ToList();
+
+        var paged = new PagedList<RoleFunctionDto>(dtos, query.PageIndex, query.PageSize, totalCount);
+        return Ok<IPagedList<RoleFunctionDto>>(paged);
+    }
+
+    /// <summary>
     /// 获取角色的功能列表
     /// </summary>
     /// <param name="roleId">角色ID</param>

@@ -27,5 +27,37 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'happy-dom',
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: ['src/**/*.{ts,vue}'],
+      exclude: [
+        // Barrel files (pure re-exports only — stores/*/index.ts carry real code, NOT excluded)
+        'src/index.ts',
+        'src/adapters/index.ts',
+        'src/adapters/*/index.ts',
+        'src/composables/index.ts',
+        'src/composables/*/index.ts',
+        'src/components/**',
+        'src/theme/index.ts',
+        'src/utils/index.ts',
+        // Low-value: types, locales, plugin entry, theme presets, playground, tests
+        'src/**/*.d.ts',
+        'src/plugin.ts',
+        'src/types.ts',
+        'src/**/types.ts',
+        'src/locales/**',
+        'src/resolvers/**',
+        'src/theme/presets/**',
+        'playground/**',
+        '**/__tests__/**',
+      ],
+      thresholds: {
+        lines: 80,
+        statements: 80,
+        functions: 80,
+        branches: 70,
+      },
+    },
   },
 });

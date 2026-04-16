@@ -59,4 +59,13 @@ public interface IKnowledgeBaseService
     /// 获取文档处理状态（用于异步摄取的轮询查询）
     /// </summary>
     Task<Result<KnowledgeDocumentDto>> GetDocumentStatusAsync(Guid kbId, Guid documentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 对知识库的所有块执行完整重新向量化（admin 触发）
+    /// </summary>
+    /// <remarks>
+    /// 同步前台批量执行：分批读取所有块、调用 IEmbeddingService 批量嵌入、回写 Embedding 字段。
+    /// 设计为幂等操作 — 多次执行结果一致。
+    /// </remarks>
+    Task<Result<ReindexResultDto>> ReindexAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default);
 }

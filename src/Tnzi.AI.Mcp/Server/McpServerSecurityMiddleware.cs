@@ -88,21 +88,35 @@ public class McpServerSecurityMiddleware
             }
         }
 
-        if (request.Query.TryGetValue("apiKey", out var apiKeyQueryValues))
+        // Query-string API key extraction is OFF by default because query strings
+        // leak into access logs, proxy caches, browser history, and referrer headers.
+        // See McpServerOptions.AllowApiKeyInQuery for opt-in semantics.
+        if (_options.Value.AllowApiKeyInQuery)
         {
-            var apiKey = apiKeyQueryValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(apiKey))
+            if (request.Query.TryGetValue("apiKey", out var apiKeyQueryValues))
             {
-                return apiKey;
+                var apiKey = apiKeyQueryValues.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(apiKey))
+                {
+                    _logger.LogWarning(
+                        "MCP Server accepted API key from query string (AllowApiKeyInQuery=true). " +
+                        "This is INSECURE — credentials leak to logs/proxies. Migrate client '{RemoteIp}' to X-Api-Key header.",
+                        request.HttpContext.Connection.RemoteIpAddress);
+                    return apiKey;
+                }
             }
-        }
 
-        if (request.Query.TryGetValue("apikey", out var legacyApiKeyQueryValues))
-        {
-            var apiKey = legacyApiKeyQueryValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(apiKey))
+            if (request.Query.TryGetValue("apikey", out var legacyApiKeyQueryValues))
             {
-                return apiKey;
+                var apiKey = legacyApiKeyQueryValues.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(apiKey))
+                {
+                    _logger.LogWarning(
+                        "MCP Server accepted API key from legacy 'apikey' query parameter (AllowApiKeyInQuery=true). " +
+                        "This is INSECURE. Migrate client '{RemoteIp}' to X-Api-Key header.",
+                        request.HttpContext.Connection.RemoteIpAddress);
+                    return apiKey;
+                }
             }
         }
 
@@ -170,10 +184,30 @@ public class McpServerSecurityMiddleware
     /// <returns>未超限返回 true</returns>
     public bool CheckRateLimit(string clientKey)
     {
-        var limit = _options.Value.RateLimitPerMinute;
+        var config = _options.Value;
+        var limit = config.RateLimitPerMinute;
         if (limit <= 0)
         {
             return true;
+        }
+
+        // Defensive cap: under a key-space flood attack the dict could grow before
+        // the normal eviction interval fires. Force eviction when we're at or
+        // above the configured cap, BEFORE adding a new entry.
+        if (_rateLimits.Count >= config.RateLimitTrackingMaxEntries && !_rateLimits.ContainsKey(clientKey))
+        {
+            EvictStaleEntries();
+            // After eviction, if still full (all entries are fresh), reject as a
+            // defensive measure rather than let memory grow unboundedly. A
+            // legitimate workload should never sustain > RateLimitTrackingMaxEntries
+            // distinct clients within a 2-minute window.
+            if (_rateLimits.Count >= config.RateLimitTrackingMaxEntries)
+            {
+                _logger.LogWarning(
+                    "MCP Server rate limit tracking table is full ({Count}/{Max}); rejecting request for new client '{ClientKey}'",
+                    _rateLimits.Count, config.RateLimitTrackingMaxEntries, clientKey);
+                return false;
+            }
         }
 
         var counter = _rateLimits.GetOrAdd(clientKey, _ => new SlidingWindowCounter());

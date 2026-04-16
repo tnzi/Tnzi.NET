@@ -24,7 +24,11 @@
       <transition name="t-drawer-slide">
         <aside
           v-if="drawerOpen"
+          ref="drawerRef"
           class="t-app-shell__drawer t-app-shell__drawer--open"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="drawerLabel"
         >
           <slot name="mobile-drawer" />
         </aside>
@@ -34,18 +38,30 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useFocusTrap } from '../../composables/feedback/useFocusTrap'
+
 interface Props {
   /** Whether the mobile drawer is open. Use with v-model:drawerOpen. */
   drawerOpen?: boolean
+  /** aria-label for the drawer dialog (defaults to "Navigation"). */
+  drawerLabel?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   drawerOpen: false,
+  drawerLabel: 'Navigation',
 })
 
 const emit = defineEmits<{
   'update:drawerOpen': [value: boolean]
 }>()
+
+const drawerRef = ref<HTMLElement | null>(null)
+
+useFocusTrap(drawerRef, () => props.drawerOpen, {
+  onEscape: () => emit('update:drawerOpen', false),
+})
 </script>
 
 <style scoped>

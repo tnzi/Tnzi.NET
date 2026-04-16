@@ -6,20 +6,20 @@ namespace Tnzi.AI.Coder.Memory;
 [AIToolGroup("memory", "Persistent Memory", "Read/write persistent memory")]
 public class MemoryTools : IAIToolProvider
 {
-    private readonly IMemoryStore _memoryStore;
-    private readonly ICurrentUser? _currentUser;
+    // Singleton tool wrapper resolves IMemoryStore (potentially Scoped, e.g. DatabaseMemoryStore)
+    // and ICurrentUser (Scoped) per tool call via IServiceScopeFactory. This avoids captive
+    // dependency when this module is loaded alongside AIModule's DatabaseMemoryStore.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<MemoryTools> _logger;
 
     public MemoryTools(
-        IMemoryStore memoryStore,
+        IServiceScopeFactory scopeFactory,
         ILogger<MemoryTools> logger,
-        ICurrentUser? currentUser = null,
         IConfiguration? configuration = null)
     {
-        _memoryStore = Check.NotNull(memoryStore);
+        _scopeFactory = Check.NotNull(scopeFactory);
         _logger = Check.NotNull(logger);
-        _currentUser = currentUser;
         _configuration = configuration;
     }
 
@@ -32,8 +32,10 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            var memoryScope = BuildScope(scope);
-            var content = await _memoryStore.ReadAsync(memoryScope);
+            using var diScope = _scopeFactory.CreateScope();
+            var memoryStore = diScope.ServiceProvider.GetRequiredService<IMemoryStore>();
+            var memoryScope = BuildScope(scope, diScope.ServiceProvider.GetService<ICurrentUser>());
+            var content = await memoryStore.ReadAsync(memoryScope);
 
             if (content == null)
             {
@@ -68,8 +70,10 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            var memoryScope = BuildScope(scope);
-            await _memoryStore.WriteAsync(memoryScope, content);
+            using var diScope = _scopeFactory.CreateScope();
+            var memoryStore = diScope.ServiceProvider.GetRequiredService<IMemoryStore>();
+            var memoryScope = BuildScope(scope, diScope.ServiceProvider.GetService<ICurrentUser>());
+            await memoryStore.WriteAsync(memoryScope, content);
 
             _logger.LogDebug("Wrote memory scope '{Scope}': {Length} chars", scope, content.Length);
 
@@ -97,8 +101,10 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            var memoryScope = BuildScope(scope);
-            await _memoryStore.AppendAsync(memoryScope, entry);
+            using var diScope = _scopeFactory.CreateScope();
+            var memoryStore = diScope.ServiceProvider.GetRequiredService<IMemoryStore>();
+            var memoryScope = BuildScope(scope, diScope.ServiceProvider.GetService<ICurrentUser>());
+            await memoryStore.AppendAsync(memoryScope, entry);
 
             _logger.LogDebug("Appended to memory scope '{Scope}': {Length} chars", scope, entry.Length);
 
@@ -152,8 +158,10 @@ public class MemoryTools : IAIToolProvider
     {
         try
         {
-            var memoryScope = BuildScope(scope);
-            var results = await _memoryStore.SearchAsync(memoryScope, query, maxResults);
+            using var diScope = _scopeFactory.CreateScope();
+            var memoryStore = diScope.ServiceProvider.GetRequiredService<IMemoryStore>();
+            var memoryScope = BuildScope(scope, diScope.ServiceProvider.GetService<ICurrentUser>());
+            var results = await memoryStore.SearchAsync(memoryScope, query, maxResults);
 
             _logger.LogDebug("Searched memory scope '{Scope}' for '{Query}': {Count} results",
                 scope, query, results.Count);
@@ -179,15 +187,15 @@ public class MemoryTools : IAIToolProvider
     }
 
     /// <summary>
-    /// 构建带用户隔离的 MemoryScope
+    /// 构建带用户隔离的 MemoryScope（currentUser 由调用方从 per-call DI scope 解析传入）
     /// </summary>
-    private MemoryScope BuildScope(string scope)
+    private MemoryScope BuildScope(string scope, ICurrentUser? currentUser)
     {
         var enableUserIsolation = false;
         if (bool.TryParse(_configuration?["AI:ContextProviders:Memory:EnableUserIsolation"], out var parsed))
         {
             enableUserIsolation = parsed;
         }
-        return new MemoryScope(scope, enableUserIsolation ? _currentUser?.Id : null);
+        return new MemoryScope(scope, enableUserIsolation ? currentUser?.Id : null);
     }
 }

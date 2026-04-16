@@ -64,7 +64,7 @@ public class AnthropicChatClientProvider : IChatClientProvider
 
         try
         {
-            var httpClient = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
+            var httpClient = _httpClientFactory.CreateClient(ResilientHttpClientNames.For(options.Name));
             if (options.TimeoutSeconds.HasValue)
             {
                 httpClient.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds.Value);

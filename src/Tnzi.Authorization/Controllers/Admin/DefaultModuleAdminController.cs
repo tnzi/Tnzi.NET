@@ -93,14 +93,29 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <summary>
     /// 获取模块的功能列表
     /// </summary>
+    /// <remarks>
+    /// Returns <see cref="ModuleFunctionDto"/> rather than the raw entity so that
+    /// audit/nav fields do not leak through the admin API surface.
+    /// </remarks>
     /// <param name="moduleId">模块ID</param>
     /// <returns>功能列表</returns>
     [HttpGet("{moduleId:guid}/functions")]
-    public virtual async Task<ApiResult<IEnumerable<ModuleFunction>>> GetModuleFunctions(Guid moduleId)
+    public virtual async Task<ApiResult<IEnumerable<ModuleFunctionDto>>> GetModuleFunctions(Guid moduleId)
     {
         var result = await ModuleManagementService.GetModuleFunctionsAsync(moduleId);
-        return result.ToApiResult();
+        return result.Map(items => (IEnumerable<ModuleFunctionDto>)items.Select(MapToDto).ToList()).ToApiResult();
     }
+
+    private static ModuleFunctionDto MapToDto(ModuleFunction entity) => new()
+    {
+        Id = entity.Id,
+        Name = entity.Name,
+        Code = entity.Code,
+        Description = entity.Description,
+        ModuleId = entity.ModuleId,
+        IsEnabled = entity.IsEnabled,
+        Order = entity.Order,
+    };
 
     /// <summary>
     /// 获取模块的子模块

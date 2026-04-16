@@ -77,8 +77,7 @@ public class OpenAIChatClientProvider : IChatClientProvider
                 clientOptions.Endpoint = endpoint;
             }
 
-            // 始终使用命名客户端，统一复用 AIModule 配置的重试与熔断策略
-            var httpClient = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
+            var httpClient = _httpClientFactory.CreateClient(ResilientHttpClientNames.For(options.Name));
             if (options.TimeoutSeconds.HasValue)
             {
                 httpClient.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds.Value);

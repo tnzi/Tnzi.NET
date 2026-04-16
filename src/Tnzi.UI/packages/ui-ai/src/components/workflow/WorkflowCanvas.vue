@@ -40,7 +40,7 @@ defineEmits<{
       @edge-click="$emit('edge-click', $event)"
       @connect="$emit('connect', $event)"
     >
-      <Background :style="{ backgroundColor: 'var(--sidebar, hsl(var(--muted)))' }" />
+      <Background :style="{ backgroundColor: 'var(--tnzi-layout-bg)' }" />
       <slot />
     </VueFlow>
   </div>

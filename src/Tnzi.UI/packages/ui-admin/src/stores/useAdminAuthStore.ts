@@ -25,6 +25,7 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
   const token = ref('')
   const refreshToken = ref('')
   const userInfo = ref<AdminUserInfo | null>(null)
+  const isSuperUser = ref(false)
 
   // Computed
   const isLogin = computed(() => !!token.value)
@@ -46,6 +47,11 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
     token.value = ''
     refreshToken.value = ''
     userInfo.value = null
+    isSuperUser.value = false
+  }
+
+  function setSuperUser(value: boolean): void {
+    isSuperUser.value = value
   }
 
   function hasPermission(permission: string): boolean {
@@ -72,12 +78,14 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
     token,
     refreshToken,
     userInfo,
+    isSuperUser,
     isLogin,
     userRoles,
     userPermissions,
     currentTenantId,
     setToken,
     setUserInfo,
+    setSuperUser,
     logout,
     hasPermission,
     hasAnyPermission,
@@ -88,6 +96,6 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
 }, {
   persist: {
     key: 'tnzi-admin-auth',
-    pick: ['token', 'refreshToken', 'userInfo'],
+    pick: ['token', 'refreshToken', 'userInfo', 'isSuperUser'],
   },
 })

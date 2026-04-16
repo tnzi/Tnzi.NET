@@ -1,14 +1,27 @@
 <template>
   <Teleport to="body">
     <Transition name="t-drawer">
-      <div v-if="show" class="t-drawer-wrapper" role="dialog" aria-modal="true">
+      <div
+        v-if="show"
+        ref="rootRef"
+        class="t-drawer-wrapper"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="title ? titleId : undefined"
+      >
         <div class="t-drawer__backdrop" @click="handleClose" />
         <div class="t-drawer__panel" :class="`t-drawer__panel--${placement}`" :style="panelStyle">
           <div v-if="title || $slots.header" class="t-drawer__header">
             <slot name="header">
-              <div class="t-drawer__title">{{ title }}</div>
+              <div :id="titleId" class="t-drawer__title">{{ title }}</div>
             </slot>
-            <button type="button" class="t-drawer__close" aria-label="Close" @click="handleClose">
+            <button
+              ref="closeBtnRef"
+              type="button"
+              class="t-drawer__close"
+              aria-label="Close"
+              @click="handleClose"
+            >
               &times;
             </button>
           </div>
@@ -25,7 +38,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type CSSProperties } from 'vue'
+import { computed, ref, type CSSProperties } from 'vue'
+import { useFocusTrap } from '../../composables/feedback/useFocusTrap'
 
 type Placement = 'left' | 'right' | 'top' | 'bottom'
 
@@ -49,6 +63,11 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const rootRef = ref<HTMLElement | null>(null)
+const closeBtnRef = ref<HTMLButtonElement | null>(null)
+
+const titleId = `t-drawer-title-${Math.random().toString(36).slice(2, 10)}`
+
 function handleClose() {
   emit('update:show', false)
   emit('close')
@@ -59,6 +78,11 @@ const panelStyle = computed<CSSProperties>(() => {
     return { width: props.width }
   }
   return { height: props.height }
+})
+
+useFocusTrap(rootRef, () => props.show, {
+  onEscape: handleClose,
+  initialFocus: () => closeBtnRef.value,
 })
 </script>
 

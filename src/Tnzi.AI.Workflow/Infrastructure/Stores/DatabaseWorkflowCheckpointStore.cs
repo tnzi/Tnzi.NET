@@ -16,57 +16,95 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
         _logger = Check.NotNull(logger);
     }
 
+    // Max retry attempts when a concurrent writer wins the Insert race (unique index
+    // violation) or an Update hits a concurrency conflict. After this many attempts
+    // we rethrow so the caller sees the failure rather than silently dropping state.
+    private const int SaveCheckpointMaxRetries = 3;
+
     /// <inheritdoc />
+    /// <remarks>
+    /// Two concurrent writers with the same ExecutionId can both observe no existing
+    /// row and both attempt Insert. The unique index on ExecutionId (see
+    /// WorkflowExecutionConfiguration) causes one of them to fail with a unique
+    /// violation. We catch that, re-read, and retry as Update. Bounded retries
+    /// (SaveCheckpointMaxRetries) prevent runaway loops under pathological contention.
+    /// </remarks>
     public async Task SaveCheckpointAsync(WorkflowCheckpoint checkpoint, CancellationToken ct = default)
     {
         Check.NotNull(checkpoint);
         Check.NotNullOrWhiteSpace(checkpoint.ExecutionId);
 
-        var entity = await _repository.FirstOrDefaultAsync(e => e.ExecutionId == checkpoint.ExecutionId, ct);
-
-        if (entity == null)
+        for (var attempt = 1; attempt <= SaveCheckpointMaxRetries; attempt++)
         {
-            // 新建
-            entity = new WorkflowExecution
+            try
             {
-                ExecutionId = checkpoint.ExecutionId,
-                InitialInput = checkpoint.InitialInput,
-                CompletedSteps = JsonSerializer.Serialize(checkpoint.CompletedStepIds),
-                StepOutputs = JsonSerializer.Serialize(checkpoint.StepOutputs),
-                Status = checkpoint.Status,
-                UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt,
-                StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval),
-                PendingInterruptJson = checkpoint.PendingInterruptJson,
-                CurrentWaitReason = ResolveWaitReason(checkpoint)
-            };
+                var entity = await _repository.FirstOrDefaultAsync(e => e.ExecutionId == checkpoint.ExecutionId, ct);
 
-            if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
-            {
-                entity.CompletedTime = DateTime.UtcNow;
+                if (entity == null)
+                {
+                    entity = BuildNewEntity(checkpoint);
+                    await _repository.InsertAsync(entity);
+                    _logger.LogDebug("Created workflow checkpoint for execution {ExecutionId}", checkpoint.ExecutionId);
+                }
+                else
+                {
+                    ApplyCheckpoint(entity, checkpoint);
+                    await _repository.UpdateAsync(entity);
+                    _logger.LogDebug("Updated workflow checkpoint for execution {ExecutionId}, status: {Status}",
+                        checkpoint.ExecutionId, checkpoint.Status);
+                }
+
+                return;
             }
-
-            await _repository.InsertAsync(entity);
-            _logger.LogDebug("Created workflow checkpoint for execution {ExecutionId}", checkpoint.ExecutionId);
+            catch (DbUpdateException ex) when (attempt < SaveCheckpointMaxRetries)
+            {
+                // Lost the Insert race (unique violation) OR concurrent Update conflict.
+                // Small backoff scaled by attempt reduces hot-loop contention without
+                // significantly slowing down normal operation.
+                _logger.LogDebug(ex,
+                    "Checkpoint write conflict for {ExecutionId}, retrying (attempt {Attempt}/{Max})",
+                    checkpoint.ExecutionId, attempt, SaveCheckpointMaxRetries);
+                await Task.Delay(TimeSpan.FromMilliseconds(10 * attempt), ct);
+            }
         }
-        else
+    }
+
+    private WorkflowExecution BuildNewEntity(WorkflowCheckpoint checkpoint)
+    {
+        var entity = new WorkflowExecution
         {
-            // 更新
-            entity.CompletedSteps = JsonSerializer.Serialize(checkpoint.CompletedStepIds);
-            entity.StepOutputs = JsonSerializer.Serialize(checkpoint.StepOutputs);
-            entity.Status = checkpoint.Status;
-            entity.UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt;
-            entity.StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval);
-            entity.PendingInterruptJson = checkpoint.PendingInterruptJson;
-            entity.CurrentWaitReason = ResolveWaitReason(checkpoint);
+            ExecutionId = checkpoint.ExecutionId,
+            InitialInput = checkpoint.InitialInput,
+            CompletedSteps = JsonSerializer.Serialize(checkpoint.CompletedStepIds),
+            StepOutputs = JsonSerializer.Serialize(checkpoint.StepOutputs),
+            Status = checkpoint.Status,
+            UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt,
+            StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval),
+            PendingInterruptJson = checkpoint.PendingInterruptJson,
+            CurrentWaitReason = ResolveWaitReason(checkpoint)
+        };
 
-            if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
-            {
-                entity.CompletedTime = DateTime.UtcNow;
-            }
+        if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
+        {
+            entity.CompletedTime = DateTime.UtcNow;
+        }
 
-            await _repository.UpdateAsync(entity);
-            _logger.LogDebug("Updated workflow checkpoint for execution {ExecutionId}, status: {Status}",
-                checkpoint.ExecutionId, checkpoint.Status);
+        return entity;
+    }
+
+    private void ApplyCheckpoint(WorkflowExecution entity, WorkflowCheckpoint checkpoint)
+    {
+        entity.CompletedSteps = JsonSerializer.Serialize(checkpoint.CompletedStepIds);
+        entity.StepOutputs = JsonSerializer.Serialize(checkpoint.StepOutputs);
+        entity.Status = checkpoint.Status;
+        entity.UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt;
+        entity.StepsAwaitingApproval = JsonSerializer.Serialize(checkpoint.StepsAwaitingApproval);
+        entity.PendingInterruptJson = checkpoint.PendingInterruptJson;
+        entity.CurrentWaitReason = ResolveWaitReason(checkpoint);
+
+        if (checkpoint.Status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
+        {
+            entity.CompletedTime = DateTime.UtcNow;
         }
     }
 
@@ -111,31 +149,42 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
     }
 
     /// <summary>
-    /// 反序列化 JSON 数组为 HashSet
+    /// Deserialize a JSON array into a case-insensitive HashSet. On malformed
+    /// input we return an empty set so the workflow can resume, but we log a
+    /// Warning so operators can detect checkpoint corruption before it leads
+    /// to silent state loss.
     /// </summary>
-    private static HashSet<string> DeserializeHashSet(string json)
+    private HashSet<string> DeserializeHashSet(string json)
     {
         try
         {
             var list = JsonSerializer.Deserialize<List<string>>(json);
             return list != null ? new HashSet<string>(list, StringComparer.OrdinalIgnoreCase) : [];
         }
-        catch
+        catch (JsonException ex)
         {
+            _logger.LogWarning(ex,
+                "Failed to deserialize workflow checkpoint HashSet; returning empty. Raw (truncated): {Raw}",
+                Truncate(json));
             return [];
         }
     }
 
     /// <summary>
-    /// 反序列化 JSON 对象为 Dictionary
+    /// Deserialize a JSON object into a case-insensitive step-output dictionary.
+    /// Mirrors <see cref="DeserializeHashSet"/>: returns empty + Warning on
+    /// corruption rather than throwing, so workflow resume is best-effort.
     /// </summary>
-    private static Dictionary<string, WorkflowStepOutput> DeserializeStepOutputs(string json)
+    private Dictionary<string, WorkflowStepOutput> DeserializeStepOutputs(string json)
     {
         try
         {
             using var document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
+                _logger.LogWarning(
+                    "Workflow checkpoint step outputs expected JSON object, got {Kind}. Raw (truncated): {Raw}",
+                    document.RootElement.ValueKind, Truncate(json));
                 return new(StringComparer.OrdinalIgnoreCase);
             }
 
@@ -160,11 +209,17 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
 
             return result;
         }
-        catch
+        catch (JsonException ex)
         {
+            _logger.LogWarning(ex,
+                "Failed to deserialize workflow checkpoint step outputs; returning empty. Raw (truncated): {Raw}",
+                Truncate(json));
             return new(StringComparer.OrdinalIgnoreCase);
         }
     }
+
+    private static string Truncate(string value) =>
+        value.Length <= 200 ? value : value[..200] + "...";
 
     private static string? ResolveWaitReason(WorkflowCheckpoint checkpoint)
     {

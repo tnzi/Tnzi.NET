@@ -11,13 +11,15 @@ public class LocalSandbox : ISandbox
     private readonly long _maxOutputSize;
     private readonly HashSet<string> _deniedCommands;
     private readonly List<string> _environmentBlacklist;
+    private readonly IReadOnlyDictionary<string, string>? _environmentOverrides;
     private readonly object _outputLock = new();
 
     public string Id { get; }
 
     public LocalSandbox(string id, string workspacePath, TimeSpan commandTimeout,
         long maxOutputSize, IEnumerable<string>? deniedCommands = null,
-        IEnumerable<string>? environmentBlacklist = null)
+        IEnumerable<string>? environmentBlacklist = null,
+        IReadOnlyDictionary<string, string>? environmentOverrides = null)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _workspacePath = Check.NotNullOrWhiteSpace(workspacePath);
@@ -26,6 +28,7 @@ public class LocalSandbox : ISandbox
         _maxOutputSize = maxOutputSize;
         _deniedCommands = new HashSet<string>(deniedCommands ?? [], StringComparer.OrdinalIgnoreCase);
         _environmentBlacklist = (environmentBlacklist ?? []).ToList();
+        _environmentOverrides = environmentOverrides;
     }
 
     public async Task<CommandResult> ExecuteCommandAsync(string command, CancellationToken ct = default)
@@ -58,6 +61,13 @@ public class LocalSandbox : ISandbox
                 .ToList();
             foreach (var k in toRemove)
                 psi.Environment.Remove(k);
+        }
+
+        // Apply environment overrides AFTER blacklist filtering — overrides always win.
+        if (_environmentOverrides is not null)
+        {
+            foreach (var (k, v) in _environmentOverrides)
+                psi.Environment[k] = v;
         }
 
         using var process = new Process { StartInfo = psi };

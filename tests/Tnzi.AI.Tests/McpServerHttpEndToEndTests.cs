@@ -115,7 +115,12 @@ public class McpServerHttpEndToEndTests
             ["AI:McpServer:RequireAuthentication"] = "true",
             ["AI:McpServer:AllowedApiKeys:0"] = "secret",
             ["AI:McpServer:EnableAuditLog"] = "false",
-            ["AI:McpServer:RateLimitPerMinute"] = "0"
+            ["AI:McpServer:RateLimitPerMinute"] = "0",
+            // McpClientFactory uses a query-string fallback when the installed ModelContextProtocol
+            // SDK version does not support custom request headers (see TryApplyHttpQueryFallback).
+            // Server-side query-string auth is OFF by default for security; enable it here to
+            // exercise the end-to-end fallback path against the current SDK.
+            ["AI:McpServer:AllowApiKeyInQuery"] = "true"
         });
 
         var app = await TnziApp.CreateAsync<TestAiMcpStartupModule>(builder);

@@ -36,6 +36,32 @@ public class Template : MultiTenantAuditedEntity<Guid>
     public string? DefaultLayoutName { get; set; }
 
     /// <summary>
+    /// Revision counter. Starts at 1 on create and is incremented on every
+    /// successful update via the TemplateStoreService. Not user-assignable
+    /// through request DTOs; consumers read this to detect concurrent edits.
+    /// </summary>
+    public int Version { get; set; } = 1;
+
+    /// <summary>
+    /// Rendering-surface classification (Email / Sms / Page / Print / Pdf / Generic).
+    /// </summary>
+    public TemplateType Type { get; set; } = TemplateType.Generic;
+
+    /// <summary>
+    /// Optional foreign key to a Template_Layout row whose content should be
+    /// used as the header wrapper when rendering. Nullable — when null, the
+    /// engine uses the DefaultLayoutName string lookup path or no header at all.
+    /// SetNull cascade preserves templates when the referenced layout is removed.
+    /// </summary>
+    public Guid? HeaderLayoutId { get; set; }
+
+    /// <summary>
+    /// Optional foreign key to a Template_Layout row whose content should be
+    /// used as the footer wrapper when rendering. Nullable; SetNull cascade.
+    /// </summary>
+    public Guid? FooterLayoutId { get; set; }
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsActive { get; set; } = true;

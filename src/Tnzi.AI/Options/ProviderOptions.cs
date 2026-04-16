@@ -6,6 +6,13 @@ namespace Tnzi.AI.Options;
 public class ProviderOptions
 {
     /// <summary>
+    /// Provider name — auto-populated from the configuration dictionary key in PostConfigure.
+    /// Used to route each provider to its own isolated Polly resilience pipeline so that
+    /// a 429/circuit-open condition on one provider does not break other providers.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool Enabled { get; set; }

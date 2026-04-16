@@ -41,6 +41,26 @@ public class TemplateDto
     public string? DefaultLayoutName { get; set; }
 
     /// <summary>
+    /// Revision counter managed by the service. Read-only from the client side.
+    /// </summary>
+    public int Version { get; set; }
+
+    /// <summary>
+    /// Rendering-surface classification.
+    /// </summary>
+    public TemplateType Type { get; set; }
+
+    /// <summary>
+    /// Optional header layout FK (Template_Layout.Id).
+    /// </summary>
+    public Guid? HeaderLayoutId { get; set; }
+
+    /// <summary>
+    /// Optional footer layout FK (Template_Layout.Id).
+    /// </summary>
+    public Guid? FooterLayoutId { get; set; }
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsActive { get; set; }
@@ -108,6 +128,22 @@ public abstract class TemplateRequestBase
     /// </summary>
     [MaxLength(200)]
     public string? DefaultLayoutName { get; set; }
+
+    /// <summary>
+    /// Rendering-surface classification. Defaults to Generic when omitted.
+    /// </summary>
+    public TemplateType Type { get; set; } = TemplateType.Generic;
+
+    /// <summary>
+    /// Optional header layout FK — points to a Template_Layout row whose
+    /// content the engine should use as the header wrapper.
+    /// </summary>
+    public Guid? HeaderLayoutId { get; set; }
+
+    /// <summary>
+    /// Optional footer layout FK.
+    /// </summary>
+    public Guid? FooterLayoutId { get; set; }
 
     /// <summary>
     /// 是否启用
@@ -178,6 +214,8 @@ public class TemplateInfoDto
     public string Module { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string? DefaultLayoutName { get; set; }
+    public int Version { get; set; }
+    public TemplateType Type { get; set; }
     public bool IsActive { get; set; }
     public string? Description { get; set; }
     public DateTime CreationTime { get; set; }

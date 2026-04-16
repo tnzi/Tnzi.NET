@@ -100,11 +100,20 @@ public class DingtalkChannelAdapter : IChannelAdapter
     }
 
     /// <summary>
-    /// 处理钉钉 Webhook 回调事件（由 ASP.NET Controller 调用）。
-    /// 不含签名验证的兼容重载。
+    /// Handle DingTalk webhook callback (no-headers compatibility overload).
+    /// Rejects the event when <see cref="DingtalkAdapterOptions.VerifyWebhookSignature"/>
+    /// is enabled (the secure default) since signature verification cannot be performed
+    /// without the timestamp/sign headers. For trusted private networks where a
+    /// fronting gateway has already validated the request, set VerifyWebhookSignature=false.
     /// </summary>
     public Task HandleEventAsync(string eventJson, CancellationToken ct = default)
     {
+        if (_options.VerifyWebhookSignature)
+        {
+            _logger.LogWarning("DingTalk VerifyWebhookSignature is enabled but HandleEventAsync called without headers, rejecting event");
+            return Task.CompletedTask;
+        }
+
         return HandleEventCoreAsync(eventJson, ct);
     }
 

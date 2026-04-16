@@ -1,25 +1,39 @@
+using Tnzi.AI.Channels.Options;
+
 namespace Tnzi.AI.Channels.Adapters.Feishu;
 
 /// <summary>
-/// 飞书适配器配置
+/// Feishu (Lark) adapter configuration. AppSecret, VerificationToken,
+/// and EncryptKey are redacted in ToString output to prevent log leakage.
 /// </summary>
 public class FeishuAdapterOptions
 {
-    /// <summary>是否启用飞书适配器</summary>
+    /// <summary>Whether the Feishu adapter is enabled.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>飞书应用 App ID</summary>
+    /// <summary>Feishu application App ID.</summary>
     public string AppId { get; set; } = string.Empty;
 
-    /// <summary>飞书应用 App Secret</summary>
+    /// <summary>Feishu application App Secret.</summary>
     public string AppSecret { get; set; } = string.Empty;
 
-    /// <summary>事件验证 Token（可选，Webhook 模式使用）</summary>
+    /// <summary>Event verification token (optional, used in webhook mode).</summary>
     public string? VerificationToken { get; set; }
 
-    /// <summary>Encrypt Key（可选，消息加密）</summary>
+    /// <summary>
+    /// Encrypt key (required for HMAC signature verification of incoming webhooks;
+    /// when set, <see cref="FeishuChannelAdapter.HandleEventAsync(string, IDictionary{string, string}?, CancellationToken)"/>
+    /// requires headers and rejects events with invalid or missing signatures).
+    /// </summary>
     public string? EncryptKey { get; set; }
 
-    /// <summary>允许的用户 Open ID 列表（为空允许所有）</summary>
+    /// <summary>Allowed sender open_id list (empty = unrestricted).</summary>
     public List<string> AllowedUserIds { get; set; } = [];
+
+    public override string ToString() =>
+        $"FeishuAdapterOptions {{ Enabled = {Enabled}, AppId = {AppId}, " +
+        $"AppSecret = {SecretMask.Mask(AppSecret)}, " +
+        $"VerificationToken = {SecretMask.Mask(VerificationToken)}, " +
+        $"EncryptKey = {SecretMask.Mask(EncryptKey)}, " +
+        $"AllowedUserIds.Count = {AllowedUserIds.Count} }}";
 }

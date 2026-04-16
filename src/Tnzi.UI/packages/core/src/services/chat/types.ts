@@ -154,3 +154,78 @@ export interface ChatStatisticsDto {
   activeSenders: number;
   importantMessages: number;
 }
+
+// ============================================
+// Chat Session Types (admin-curated groupings; 2026-04-14)
+// ============================================
+
+/**
+ * ChatSession lifecycle status — aligned with backend
+ * <c>Tnzi.Chat.Entities.ChatSessionStatus</c>.
+ */
+export enum ChatSessionStatus {
+  Active = 1,
+  Archived = 2,
+}
+
+/**
+ * Chat session detail DTO.
+ * Backend: ChatSessionDto
+ */
+export interface ChatSessionDto {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: ChatSessionStatus;
+  participants: string[];
+  messageCount: number;
+  lastMessageAt?: string | null;
+  creationTime: string;
+  lastModificationTime?: string | null;
+}
+
+/**
+ * Chat session list item DTO (paging-optimised).
+ * Backend: ChatSessionListItemDto
+ */
+export interface ChatSessionListItemDto {
+  id: string;
+  title: string;
+  status: ChatSessionStatus;
+  participants: string[];
+  messageCount: number;
+  lastMessageAt?: string | null;
+  creationTime: string;
+}
+
+/**
+ * Create chat session request.
+ * Backend: CreateChatSessionDto
+ */
+export interface CreateChatSessionDto {
+  title: string;
+  description?: string | null;
+  status?: ChatSessionStatus;
+  participants?: string[];
+}
+
+/**
+ * Update chat session request.
+ * Backend: UpdateChatSessionDto
+ */
+export interface UpdateChatSessionDto {
+  title: string;
+  description?: string | null;
+  status?: ChatSessionStatus;
+  participants?: string[];
+}
+
+/**
+ * Chat session paged query.
+ * Backend: ChatSessionQueryDto
+ */
+export interface ChatSessionQueryDto extends SortedPagedQueryDto {
+  status?: ChatSessionStatus;
+  keyword?: string;
+  participantId?: string;
+}

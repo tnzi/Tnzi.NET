@@ -38,7 +38,7 @@ public class InMemoryChannelMessageBus : IChannelMessageBus
         return Task.CompletedTask;
     }
 
-    public async Task PublishOutboundAsync(OutboundMessage message, CancellationToken ct = default)
+    public Task PublishOutboundAsync(OutboundMessage message, CancellationToken ct = default)
     {
         Check.NotNull(message);
         Func<OutboundMessage, Task>[] subscribers;
@@ -47,17 +47,30 @@ public class InMemoryChannelMessageBus : IChannelMessageBus
             subscribers = [.. _outboundSubscribers];
         }
 
-        foreach (var subscriber in subscribers)
+        if (subscribers.Length == 0) return Task.CompletedTask;
+
+        // Fan out to subscribers in parallel. Each adapter typically filters by
+        // ChannelName, so sequential await would let an unrelated slow adapter
+        // (or the actively targeted one) block every other subscriber.
+        var tasks = new Task[subscribers.Length];
+        for (var i = 0; i < subscribers.Length; i++)
         {
-            try
-            {
-                await subscriber(message);
-            }
-            catch (Exception ex)
-            {
-                // 单个 subscriber 异常不应中断其他 subscriber 的执行
-                _logger.LogWarning(ex, "Outbound message subscriber failed for channel '{Channel}'", message.ChannelName);
-            }
+            tasks[i] = InvokeSubscriberSafelyAsync(subscribers[i], message);
+        }
+
+        return Task.WhenAll(tasks);
+    }
+
+    private async Task InvokeSubscriberSafelyAsync(Func<OutboundMessage, Task> subscriber, OutboundMessage message)
+    {
+        try
+        {
+            await subscriber(message);
+        }
+        catch (Exception ex)
+        {
+            // One subscriber's failure must not affect the others.
+            _logger.LogWarning(ex, "Outbound message subscriber failed for channel '{Channel}'", message.ChannelName);
         }
     }
 }

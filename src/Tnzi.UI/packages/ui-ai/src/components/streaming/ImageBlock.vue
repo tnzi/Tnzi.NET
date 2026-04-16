@@ -6,7 +6,6 @@
  */
 
 import { computed } from 'vue';
-import { cn } from '@/lib/utils';
 
 const props = withDefaults(defineProps<{
   src?: string | null;
@@ -39,6 +38,15 @@ const imageSrc = computed(() => {
     :src="imageSrc"
     :alt="props.alt"
     loading="lazy"
-    :class="cn('rounded-lg max-w-full h-auto', props.class)"
+    class="t-image-block"
+    :class="props.class"
   />
 </template>
+
+<style scoped>
+.t-image-block {
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+}
+</style>

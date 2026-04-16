@@ -15,5 +15,5 @@ const path = computed(() =>
 </script>
 
 <template>
-  <path :d="path" fill="none" stroke="hsl(var(--ring))" stroke-dasharray="5, 5" stroke-width="1.5" :style="{ opacity: 0.6 }" />
+  <path :d="path" fill="none" stroke="var(--tnzi-border)" stroke-dasharray="5, 5" stroke-width="1.5" :style="{ opacity: 0.6 }" />
 </template>

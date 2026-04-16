@@ -1,0 +1,32 @@
+[
+  {
+    "name": "index (ESM entry, with deps)",
+    "path": "dist/index.js",
+    "limit": "320 kB",
+    "gzip": true
+  },
+  {
+    "name": "stores/app",
+    "path": "dist/stores/app/index.js",
+    "limit": "8 kB",
+    "gzip": true
+  },
+  {
+    "name": "stores/auth",
+    "path": "dist/stores/auth/index.js",
+    "limit": "35 kB",
+    "gzip": true
+  },
+  {
+    "name": "stores/user",
+    "path": "dist/stores/user/index.js",
+    "limit": "30 kB",
+    "gzip": true
+  },
+  {
+    "name": "style.css",
+    "path": "dist/style.css",
+    "limit": "10 kB",
+    "gzip": true
+  }
+]

@@ -166,3 +166,29 @@ public class SearchRequestDto
     /// </summary>
     public Dictionary<string, string>? MetadataFilter { get; set; }
 }
+
+/// <summary>
+/// 知识库重新索引结果 DTO
+/// </summary>
+public class ReindexResultDto
+{
+    /// <summary>
+    /// 知识库 ID
+    /// </summary>
+    public Guid KnowledgeBaseId { get; set; }
+
+    /// <summary>
+    /// 重新嵌入的块总数
+    /// </summary>
+    public int ChunkCount { get; set; }
+
+    /// <summary>
+    /// 涉及的文档总数
+    /// </summary>
+    public int DocumentCount { get; set; }
+
+    /// <summary>
+    /// 重新索引耗时（毫秒）
+    /// </summary>
+    public long DurationMs { get; set; }
+}

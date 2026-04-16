@@ -3,16 +3,9 @@
  * WorkflowNode — Card-based graph node with handles
  */
 
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from '../../primitives';
+import { NCard } from 'naive-ui';
 import { Handle, Position } from '@vue-flow/core';
-import { cn } from '@/lib/utils';
+
 defineProps<{
   label: string;
   description?: string;
@@ -20,28 +13,48 @@ defineProps<{
   targetHandle?: boolean;
   sourceHandle?: boolean;
 }>();
-
-const statusClasses: Record<string, string> = {
-  pending: 'border-border',
-  active: 'border-ai-node-active ring-2 ring-ai-node-active/20',
-  completed: 'border-ai-node-completed',
-  failed: 'border-ai-node-failed ring-2 ring-ai-node-failed/20',
-};
 </script>
 
 <template>
-  <Card :class="cn('min-w-[180px] max-w-[250px] shadow-md', statusClasses[status ?? 'pending'])">
-    <Handle v-if="targetHandle" type="target" :position="Position.Left" class="!bg-primary !border-background !w-3 !h-3" />
-    <CardHeader class="p-3 pb-1">
-      <CardTitle class="text-xs font-medium">{{ label }}</CardTitle>
-      <CardDescription v-if="description" class="text-[11px]">{{ description }}</CardDescription>
-    </CardHeader>
-    <CardContent v-if="$slots.content || $slots.default" class="p-3 pt-0">
+  <NCard
+    size="small"
+    class="t-wf-node"
+    :class="`t-wf-node--${status ?? 'pending'}`"
+  >
+    <Handle v-if="targetHandle" type="target" :position="Position.Left" class="t-wf-handle" />
+    <div class="text-xs font-medium">{{ label }}</div>
+    <div v-if="description" class="text-[11px] t-wf-node__desc mt-0.5">{{ description }}</div>
+    <div v-if="$slots.content || $slots.default" class="mt-2">
       <slot name="content"><slot /></slot>
-    </CardContent>
-    <CardFooter v-if="$slots.footer" class="p-3 pt-0">
+    </div>
+    <div v-if="$slots.footer" class="mt-2">
       <slot name="footer" />
-    </CardFooter>
-    <Handle v-if="sourceHandle" type="source" :position="Position.Right" class="!bg-primary !border-background !w-3 !h-3" />
-  </Card>
+    </div>
+    <Handle v-if="sourceHandle" type="source" :position="Position.Right" class="t-wf-handle" />
+  </NCard>
 </template>
+
+<style scoped>
+.t-wf-node {
+  min-width: 180px;
+  max-width: 250px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.t-wf-node--pending { border-color: var(--tnzi-border); }
+.t-wf-node--active {
+  border-color: var(--tnzi-ai-node-active);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tnzi-ai-node-active) 20%, transparent);
+}
+.t-wf-node--completed { border-color: var(--tnzi-ai-node-completed); }
+.t-wf-node--failed {
+  border-color: var(--tnzi-ai-node-failed);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tnzi-ai-node-failed) 20%, transparent);
+}
+.t-wf-node__desc { color: var(--tnzi-base-text-muted); }
+.t-wf-handle {
+  background-color: var(--tnzi-primary) !important;
+  border-color: var(--tnzi-container-bg) !important;
+  width: 12px !important;
+  height: 12px !important;
+}
+</style>

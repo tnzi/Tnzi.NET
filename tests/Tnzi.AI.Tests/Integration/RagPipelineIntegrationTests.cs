@@ -96,6 +96,7 @@ public class RagPipelineIntegrationTests : IDisposable
         _knowledgeBaseService = new KnowledgeBaseService(
             _kbRepoMock.Object,
             _docRepoMock.Object,
+            _chunkRepoMock.Object,
             _ingestionService,
             _vectorStore,
             _embeddingServiceMock.Object,

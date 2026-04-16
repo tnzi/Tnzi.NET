@@ -18,6 +18,15 @@ public class LocalSandboxOptions
     public List<string> DeniedPatterns { get; set; } = [".env", "*.key", "*.pem", "credentials*"];
     public List<string> EnvironmentBlacklist { get; set; } =
         ["API_KEY", "SECRET_KEY", "ACCESS_TOKEN", "PRIVATE_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"];
+
+    /// <summary>
+    /// Opt-in flag to allow LocalSandboxProvider in Production environments.
+    /// Default: false. LocalSandbox runs commands directly on the host with only a
+    /// substring-based command blacklist, which offers no meaningful isolation and is
+    /// intended for development/CI use only. Set this to true only if you fully
+    /// understand the risk and have compensating controls at the OS layer.
+    /// </summary>
+    public bool AllowInProduction { get; set; }
 }
 
 public class DockerSandboxOptions

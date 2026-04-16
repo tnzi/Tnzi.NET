@@ -5,6 +5,7 @@
  */
 
 export * as AI from './ai';
+export * as Authorization from './authorization';
 export * as Identity from './identity';
 export * as Payment from './payment';
 export * as Chat from './chat';

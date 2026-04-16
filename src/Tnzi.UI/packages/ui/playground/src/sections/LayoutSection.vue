@@ -22,33 +22,6 @@
     </div>
 
     <div class="demo-block">
-      <h2 class="demo-label">Admin Layout (TAdminLayout)</h2>
-      <PreviewBox full-width min-height="360px">
-        <div style="border: 1px solid var(--n-border-color); border-radius: 4px; overflow: hidden; height: 360px; width: 100%">
-          <TAdminLayout
-            :sidebar-items="demoMenuItems"
-            :sidebar-width="200"
-            logo-text="Tnzi"
-            title="Admin Panel"
-            @menu-select="handleMenuSelect"
-          >
-            <n-breadcrumb style="margin-bottom: 12px">
-              <n-breadcrumb-item>Home</n-breadcrumb-item>
-              <n-breadcrumb-item>Dashboard</n-breadcrumb-item>
-            </n-breadcrumb>
-            <n-card size="small" title="Dashboard">
-              <n-p>Welcome to the admin dashboard. This uses TAdminLayout component.</n-p>
-              <n-space>
-                <n-tag type="success">Online</n-tag>
-                <n-tag>v1.0.0</n-tag>
-              </n-space>
-            </n-card>
-          </TAdminLayout>
-        </div>
-      </PreviewBox>
-    </div>
-
-    <div class="demo-block">
       <h2 class="demo-label">Collapsible Sider</h2>
       <PreviewBox full-width min-height="240px">
         <div style="border: 1px solid var(--n-border-color); border-radius: 4px; overflow: hidden; width: 100%">
@@ -75,18 +48,8 @@
 </template>
 
 <script setup lang="ts">
-import { useMessage } from 'naive-ui';
 import type { MenuOption } from 'naive-ui';
-import { demoMenuItems } from '../data/index';
-import { TAdminLayout, createMessageAdapter } from '@tnzi/ui';
 import PreviewBox from '../components/PreviewBox.vue';
-
-const message = useMessage();
-const msgAdapter = createMessageAdapter(message);
-
-function handleMenuSelect(key: string) {
-  msgAdapter.info(`Menu: ${key}`);
-}
 
 const siderMenuOptions: MenuOption[] = [
   { label: 'Inbox', key: 'inbox' },

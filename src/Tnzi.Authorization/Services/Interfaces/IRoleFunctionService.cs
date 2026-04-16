@@ -7,6 +7,14 @@ namespace Tnzi.Authorization.Services;
 public interface IRoleFunctionService
 {
     /// <summary>
+    /// Paged list of role-function assignments across ALL roles. Supports
+    /// filtering by role / function / enabled state via <see cref="RoleFunctionQueryDto"/>.
+    /// Unlike <see cref="GetRoleFunctionsAsync"/> which is scoped to one role,
+    /// this is the canonical admin-side query used by the RoleFunction page.
+    /// </summary>
+    Task<Result<IPagedList<RoleFunctionDto>>> GetRoleFunctionsPagedAsync(RoleFunctionQueryDto query);
+
+    /// <summary>
     /// 获取角色的功能列表
     /// </summary>
     /// <param name="roleId">角色ID</param>

@@ -1,63 +1,45 @@
-<script setup lang="ts">
-import CrudPage from '../../components/crud/CrudPage.vue'
-import type { CrudPageQuery, CrudPageResult } from '../../headless/useCrudPage'
-
-const columns = [
-  { key: 'id', title: 'ID', width: 80 },
-  { key: 'name', title: 'Name', sortable: true },
-  { key: 'description', title: 'Description' },
-  { key: 'isDefault', title: 'Default' },
-  { key: 'creationTime', title: 'Created At', sortable: true },
-]
-
-async function fetchData(query: CrudPageQuery): Promise<CrudPageResult<any>> {
-  return { items: [], totalCount: 0, pageIndex: query.pageIndex, pageSize: query.pageSize }
-}
-</script>
-
 <template>
-  <CrudPage
-    title="Role Management"
-    :columns="columns"
-    :fetch-fn="fetchData"
-    row-key="id"
-    searchable
-    creatable
-    editable
-    deletable
+  <TCrudPage
+    :state="crud"
+    :all-columns="roleColumns"
+    :title="title"
+    :translate="t"
   >
-    <template #form-modal="{ data }">
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium mb-1">Name</label>
-          <input
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            type="text"
-            :value="(data as any).name"
-            placeholder="Name"
-            @input="(e: Event) => { (data as any).name = (e.target as HTMLInputElement).value }"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1">Description</label>
-          <input
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            type="text"
-            :value="(data as any).description"
-            placeholder="Description"
-            @input="(e: Event) => { (data as any).description = (e.target as HTMLInputElement).value }"
-          />
-        </div>
-        <div class="flex items-center gap-2">
-          <input
-            id="isDefault"
-            type="checkbox"
-            :checked="(data as any).isDefault"
-            @change="(e: Event) => { (data as any).isDefault = (e.target as HTMLInputElement).checked }"
-          />
-          <label for="isDefault" class="text-sm font-medium">Default Role</label>
-        </div>
-      </div>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="roleFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+      />
     </template>
-  </CrudPage>
+  </TCrudPage>
 </template>
+
+<script setup lang="ts">
+import TCrudPage from '../../components/crud/TCrudPage.vue'
+import { useCrudPage } from '../../headless/useCrudPage'
+import { createIdentityBridge } from '../../services/bridges/identity-bridge'
+import { useAdminClient } from '../../plugin/client'
+import TFormSchemaRenderer from '../_shared/form-schema'
+import { roleColumns, roleFormSchema } from './role-config'
+import { translatePageKey } from '../_shared/translate'
+import type { RoleDto } from '@tnzi/core/services/identity'
+
+const title = 'Role Management'
+const bridge = createIdentityBridge({ client: useAdminClient() })
+
+const crud = useCrudPage<RoleDto, string>({
+  pageId: 'identity.roles',
+  columns: roleColumns,
+  rowKey: (r) => r.id,
+  fetchData: (query) => bridge.roles.fetch(query),
+  createData: (data) => bridge.roles.create(data as never),
+  updateData: (id, data) => bridge.roles.update(id, data as never),
+  deleteData: (ids) => bridge.roles.delete(ids),
+})
+
+
+crud.refresh().catch(() => undefined)
+
+const t = (key: string) => translatePageKey('identity.roles', key)
+</script>

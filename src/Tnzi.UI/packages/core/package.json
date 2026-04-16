@@ -1,6 +1,6 @@
 {
   "name": "@tnzi/core",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Vue-reactive core for Tnzi.NET frontend — types, HTTP client, state managers, headless controllers, and adapter interfaces.",
   "type": "module",
   "main": "./dist/index.cjs",

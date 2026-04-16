@@ -15,6 +15,36 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         _repository = Check.NotNull(repository);
     }
 
+    public async Task<Result<IPagedList<NotificationPreferenceDto>>> GetPagedListAsync(NotificationPreferenceQueryDto query, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(query);
+
+        var filtered = _repository
+            .AsQueryable()
+            .AsNoTracking()
+            .Where(p =>
+                (!query.UserId.HasValue || p.UserId == query.UserId.Value) &&
+                (string.IsNullOrEmpty(query.Channel) || p.Channel == query.Channel) &&
+                (string.IsNullOrEmpty(query.Category) || p.Category == query.Category) &&
+                (!query.IsEnabled.HasValue || p.IsEnabled == query.IsEnabled.Value));
+
+        var totalCount = await filtered.CountAsync(cancellationToken);
+
+        var items = await filtered
+            .OrderByDescending(p => p.CreationTime)
+            .Skip(query.Skip)
+            .Take(query.Take)
+            .ToListAsync(cancellationToken);
+
+        var paged = new PagedList<NotificationPreferenceDto>(
+            items.MapToList<NotificationPreferenceDto>(),
+            query.PageIndex,
+            query.PageSize,
+            totalCount);
+
+        return Ok<IPagedList<NotificationPreferenceDto>>(paged);
+    }
+
     public async Task<Result<List<NotificationPreferenceDto>>> GetUserPreferencesAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var preferences = await _repository

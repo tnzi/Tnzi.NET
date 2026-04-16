@@ -266,3 +266,52 @@ export interface UnreadCountDto {
   totalUnread: number;
   unreadByCategory: Record<string, number>;
 }
+
+// ─── Notification Preference (aka Subscription) ──────────────────────────────
+
+/**
+ * User notification preference read DTO. Backend: NotificationPreferenceDto.
+ * The Preference entity IS the subscription model in Tnzi.Notification —
+ * it controls per-channel+category opt-in and carries quiet-hours / rate-limit.
+ */
+export interface NotificationPreferenceDto {
+  id: string;
+  userId: string;
+  /** Channel name: Email, Sms, InApp, Webhook */
+  channel: string;
+  /** Notification category; null = global preference for the channel */
+  category?: string;
+  isEnabled: boolean;
+  /** Quiet hours start time (UTC, "HH:mm:ss") */
+  quietHoursStart?: string;
+  /** Quiet hours end time (UTC, "HH:mm:ss") */
+  quietHoursEnd?: string;
+  maxFrequencyPerHour?: number;
+}
+
+/**
+ * Paged query DTO for GET /admin/notification-preferences.
+ * Supports optional filters on user / channel / category / enabled state.
+ */
+export interface NotificationPreferenceQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  orderBy?: string;
+  userId?: string;
+  channel?: string;
+  category?: string;
+  isEnabled?: boolean;
+}
+
+/**
+ * Upsert input DTO for PUT /admin/notification-preferences/user/{userId}.
+ * Backend: SetNotificationPreferenceDto.
+ */
+export interface SetNotificationPreferenceDto {
+  channel: string;
+  category?: string;
+  isEnabled: boolean;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  maxFrequencyPerHour?: number;
+}

@@ -1,7 +1,22 @@
+using Microsoft.Extensions.DependencyInjection;
+
 namespace Tnzi.AI.Tests.Memory;
 
 public class MemoryToolsTests
 {
+    private static IServiceScopeFactory BuildScopeFactory(
+        IMemoryStore store,
+        ICurrentUser? currentUser = null)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => store);
+        if (currentUser is not null)
+        {
+            services.AddScoped(_ => currentUser);
+        }
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+    }
+
     [Fact]
     public async Task WriteMemoryAsync_WithoutConfig_UsesSharedScopeByDefault()
     {
@@ -11,9 +26,8 @@ public class MemoryToolsTests
 
         var store = new Mock<IMemoryStore>();
         var tools = new Tnzi.AI.Coder.Memory.MemoryTools(
-            store.Object,
+            BuildScopeFactory(store.Object, currentUser.Object),
             Mock.Of<ILogger<Tnzi.AI.Coder.Memory.MemoryTools>>(),
-            currentUser.Object,
             configuration: null);
 
         await tools.WriteMemoryAsync("shared", "default");
@@ -40,9 +54,8 @@ public class MemoryToolsTests
             .Build();
 
         var tools = new Tnzi.AI.Coder.Memory.MemoryTools(
-            store.Object,
+            BuildScopeFactory(store.Object, currentUser.Object),
             Mock.Of<ILogger<Tnzi.AI.Coder.Memory.MemoryTools>>(),
-            currentUser.Object,
             configuration);
 
         await tools.WriteMemoryAsync("shared", "default");

@@ -6,7 +6,7 @@
  * Slot: #header for custom header content.
  */
 
-import { Button } from '../primitives';
+import { NButton } from 'naive-ui';
 import { watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -57,7 +57,7 @@ watch(isOpen, (v) => {
   >
     <div
       v-if="isOpen"
-      class="fixed inset-0 z-40 bg-black/20"
+      class="t-sidebar-chat__overlay"
       @click="toggle()"
     />
   </Transition>
@@ -71,17 +71,17 @@ watch(isOpen, (v) => {
   >
     <div
       v-if="isOpen"
-      class="fixed top-0 right-0 bottom-0 z-50 flex flex-col border-l bg-background shadow-xl"
+      class="t-sidebar-chat__panel"
       :style="{ width: width ?? '380px' }"
     >
       <!-- Header -->
-      <div class="flex items-center justify-between border-b px-4 py-2">
+      <div class="t-sidebar-chat__header">
         <slot name="header">
           <span class="text-sm font-medium">AI Chat</span>
         </slot>
-        <Button variant="ghost" size="icon-sm" @click="toggle()">
-          <Icon icon="lucide:x" class="size-4" />
-        </Button>
+        <NButton text size="small" @click="toggle()">
+          <template #icon><Icon icon="lucide:x" class="size-4" /></template>
+        </NButton>
       </div>
 
       <!-- Chat -->
@@ -97,3 +97,31 @@ watch(isOpen, (v) => {
     </div>
   </Transition>
 </template>
+
+<style scoped>
+.t-sidebar-chat__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background-color: rgba(0, 0, 0, 0.2);
+}
+.t-sidebar-chat__panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--tnzi-border);
+  background-color: var(--tnzi-container-bg);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
+}
+.t-sidebar-chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--tnzi-border);
+  padding: 8px 16px;
+}
+</style>

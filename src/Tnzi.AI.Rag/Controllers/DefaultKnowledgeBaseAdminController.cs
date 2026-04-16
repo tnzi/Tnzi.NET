@@ -130,4 +130,14 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
         var result = await KnowledgeBaseService.SearchAllAsync(request.Query, request.TopK, request.MetadataFilter, ct);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 对知识库执行完整重新索引（重新生成所有块的嵌入向量）
+    /// </summary>
+    [HttpPost("{id:guid}/reindex")]
+    public virtual async Task<ApiResult<ReindexResultDto>> Reindex(Guid id, CancellationToken ct)
+    {
+        var result = await KnowledgeBaseService.ReindexAsync(id, ct);
+        return result.ToApiResult();
+    }
 }

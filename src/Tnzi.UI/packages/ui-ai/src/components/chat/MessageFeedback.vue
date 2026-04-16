@@ -6,7 +6,7 @@
  * Thumbs-down shows an inline reason input on first click.
  */
 
-import { Button, Tooltip } from '../../primitives';
+import { NButton, NTooltip, NInput } from 'naive-ui';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -53,52 +53,50 @@ function submitReason(): void {
 <template>
   <div class="flex items-center gap-1">
     <!-- Thumbs up -->
-    <Tooltip>
+    <NTooltip>
       <template #trigger>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="size-7"
+        <NButton
+          quaternary
+          size="tiny"
           :class="isPositive ? 'text-ai-node-completed' : ''"
           @click="handlePositive"
         >
-          <Icon icon="lucide:thumbs-up" class="size-3.5" />
-        </Button>
+          <template #icon><Icon icon="lucide:thumbs-up" /></template>
+        </NButton>
       </template>
       {{ t.feedback.helpful }}
-    </Tooltip>
+    </NTooltip>
 
     <!-- Thumbs down -->
-    <Tooltip>
+    <NTooltip>
       <template #trigger>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="size-7"
+        <NButton
+          quaternary
+          size="tiny"
           :class="isNegative ? 'text-ai-node-failed' : ''"
           @click="handleNegative"
         >
-          <Icon icon="lucide:thumbs-down" class="size-3.5" />
-        </Button>
+          <template #icon><Icon icon="lucide:thumbs-down" /></template>
+        </NButton>
       </template>
       {{ t.feedback.notHelpful }}
-    </Tooltip>
+    </NTooltip>
 
     <!-- Reason input (inline, appears when thumbs-down first clicked) -->
     <div
       v-if="showReasonInput"
       class="ml-1 flex items-center gap-1"
     >
-      <input
-        v-model="reason"
-        type="text"
-        class="h-7 w-48 rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      <NInput
+        v-model:value="reason"
+        size="tiny"
+        style="width: 192px"
         :placeholder="t.feedback.reasonPlaceholder"
         @keydown.enter="submitReason"
       />
-      <Button variant="ghost" size="icon-sm" class="size-7" @click="submitReason">
-        <Icon icon="lucide:send" class="size-3.5" />
-      </Button>
+      <NButton quaternary size="tiny" @click="submitReason">
+        <template #icon><Icon icon="lucide:send" /></template>
+      </NButton>
     </div>
   </div>
 </template>

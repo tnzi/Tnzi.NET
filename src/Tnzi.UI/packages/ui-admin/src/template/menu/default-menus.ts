@@ -1,4 +1,4 @@
-import type { AdminMenuItem } from '../../headless/useAdminMenu'
+import type { AdminMenuItem } from './types'
 
 export const defaultAdminMenus: AdminMenuItem[] = [
   {

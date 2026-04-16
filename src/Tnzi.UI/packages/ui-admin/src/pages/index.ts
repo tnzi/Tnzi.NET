@@ -1,5 +1,3 @@
-// Phase 2a: legacy page re-exports removed alongside CrudPage/FormModal deletion.
-// Pages are rewritten in Phase 3 (identity/authorization/system/...) and
-// the real barrel returns there. Kept as an empty module so `src/index.ts`
-// `export * from './pages'` continues to resolve during Phase 2a.
-export {}
+// Phase 2b Task 2.32: Re-exports the first rewritten page (UserManagement PoC).
+// Remaining pages (authorization/system/...) are rewritten incrementally in Phase 3.
+export { default as UserManagement } from './identity/UserManagement.vue'

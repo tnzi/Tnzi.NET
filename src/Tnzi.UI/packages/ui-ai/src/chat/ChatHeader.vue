@@ -3,7 +3,7 @@
  * ChatHeader — Top bar with agent info, token usage, export, and settings
  */
 
-import { Button, Separator, Tooltip } from '../primitives';
+import { NButton, NDivider, NTooltip } from 'naive-ui';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
 const t = useAiI18n();
@@ -25,10 +25,10 @@ defineEmits<{
 <template>
   <div class="flex items-center gap-2 border-b px-4 py-2 h-12">
     <slot name="left">
-      <Button variant="ghost" size="icon-sm" @click="$emit('toggle-sidebar')">
-        <Icon icon="lucide:panel-left" class="size-4" />
-      </Button>
-      <Separator orientation="vertical" class="h-5" />
+      <NButton quaternary size="small" @click="$emit('toggle-sidebar')">
+        <template #icon><Icon icon="lucide:panel-left" /></template>
+      </NButton>
+      <NDivider vertical style="height: 20px; margin: 0 4px" />
       <div class="flex items-center gap-2 min-w-0">
         <Icon v-if="agentName" icon="lucide:bot" class="size-4 text-primary shrink-0" />
         <span class="text-sm font-medium truncate">{{ title ?? agentName ?? '' }}</span>
@@ -38,22 +38,22 @@ defineEmits<{
     <div class="flex-1" />
 
     <slot name="right">
-      <Tooltip>
+      <NTooltip>
         <template #trigger>
-          <Button variant="ghost" size="icon-sm" @click="$emit('export')">
-            <Icon icon="lucide:download" class="size-4" />
-          </Button>
+          <NButton quaternary size="small" @click="$emit('export')">
+            <template #icon><Icon icon="lucide:download" /></template>
+          </NButton>
         </template>
         {{ t.artifact.download }}
-      </Tooltip>
-      <Tooltip>
+      </NTooltip>
+      <NTooltip>
         <template #trigger>
-          <Button variant="ghost" size="icon-sm" @click="$emit('settings')">
-            <Icon icon="lucide:settings" class="size-4" />
-          </Button>
+          <NButton quaternary size="small" @click="$emit('settings')">
+            <template #icon><Icon icon="lucide:settings" /></template>
+          </NButton>
         </template>
         {{ t.admin.settings }}
-      </Tooltip>
+      </NTooltip>
     </slot>
   </div>
 </template>

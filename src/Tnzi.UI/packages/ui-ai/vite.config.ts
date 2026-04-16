@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import UnoCSS from 'unocss/vite';
 import vue from '@vitejs/plugin-vue';
 import dts from 'vite-plugin-dts';
 import { readFileSync } from 'fs';
@@ -19,6 +20,7 @@ const coreDistPath = resolve(__dirname, '../core/dist').replace(/\\/g, '/');
 
 export default defineConfig({
   plugins: [
+    UnoCSS(),
     vue(),
     dts({
       include: ['src/**/*'],
@@ -39,8 +41,10 @@ export default defineConfig({
         components: resolve(__dirname, 'src/components/index.ts'),
         composables: resolve(__dirname, 'src/composables/index.ts'),
         chat: resolve(__dirname, 'src/chat/index.ts'),
-        admin: resolve(__dirname, 'src/admin/index.ts'),
         embed: resolve(__dirname, 'src/embed/index.ts'),
+        locale: resolve(__dirname, 'src/locale/index.ts'),
+        shell: resolve(__dirname, 'src/shell/index.ts'),
+        utils: resolve(__dirname, 'src/utils/index.ts'),
       },
       name: 'TnziAi',
       formats: ['es'],

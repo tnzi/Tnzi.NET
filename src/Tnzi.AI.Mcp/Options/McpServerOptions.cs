@@ -54,4 +54,22 @@ public class McpServerOptions
     /// 是否启用流式响应
     /// </summary>
     public bool EnableStreaming { get; set; } = true;
+
+    /// <summary>
+    /// Allow API key in query string (?apiKey=...). Default: false.
+    /// Query strings commonly leak into access logs, proxy caches, browser history,
+    /// and referrer headers — they are NOT a safe place for credentials. Enable this
+    /// flag ONLY for transitional compatibility with legacy clients; prefer the
+    /// X-Api-Key header or Authorization: Bearer. Every query-string key extraction
+    /// emits a warning log entry when this is enabled.
+    /// </summary>
+    public bool AllowApiKeyInQuery { get; set; } = false;
+
+    /// <summary>
+    /// Hard cap on the rate-limit tracking dictionary. Prevents unbounded memory
+    /// growth under key-space flood attacks (many unique IPs/keys per second).
+    /// When the dict reaches this size, opportunistic eviction is forced on the
+    /// next CheckRateLimit call regardless of the usual eviction interval.
+    /// </summary>
+    public int RateLimitTrackingMaxEntries { get; set; } = 10_000;
 }

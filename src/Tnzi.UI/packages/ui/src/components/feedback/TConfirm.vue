@@ -1,10 +1,17 @@
 <template>
   <Teleport to="body">
     <Transition name="t-confirm">
-      <div v-if="show" class="t-confirm-wrapper" role="dialog" aria-modal="true">
+      <div
+        v-if="show"
+        ref="rootRef"
+        class="t-confirm-wrapper"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="titleId"
+      >
         <div class="t-confirm__backdrop" @click="handleCancel" />
         <div class="t-confirm">
-          <div class="t-confirm__title">{{ title }}</div>
+          <div :id="titleId" class="t-confirm__title">{{ title }}</div>
           <div v-if="content || $slots.default" class="t-confirm__content">
             <slot>{{ content }}</slot>
           </div>
@@ -13,6 +20,7 @@
               {{ cancelText }}
             </button>
             <button
+              ref="primaryBtnRef"
               type="button"
               class="t-confirm__ok"
               :class="{ 't-confirm__ok--danger': danger }"
@@ -28,6 +36,9 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useFocusTrap } from '../../composables/feedback/useFocusTrap'
+
 interface Props {
   show: boolean
   title: string
@@ -50,6 +61,11 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
+const rootRef = ref<HTMLElement | null>(null)
+const primaryBtnRef = ref<HTMLButtonElement | null>(null)
+
+const titleId = `t-confirm-title-${Math.random().toString(36).slice(2, 10)}`
+
 function handleCancel() {
   emit('update:show', false)
   emit('cancel')
@@ -60,8 +76,10 @@ function handleConfirm() {
   emit('update:show', false)
 }
 
-// silence unused warning
-void props
+useFocusTrap(rootRef, () => props.show, {
+  onEscape: handleCancel,
+  initialFocus: () => primaryBtnRef.value,
+})
 </script>
 
 <style scoped>

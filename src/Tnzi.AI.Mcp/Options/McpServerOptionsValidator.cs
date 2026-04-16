@@ -52,5 +52,13 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
                 "RequireAuthentication has limited effect with stdio transport. " +
                 "Authentication is enforced at the process boundary. Use SSE transport for HTTP-level API key authentication.");
         }
+
+        if (options.AllowApiKeyInQuery)
+        {
+            AddWarning(warnings, nameof(options.AllowApiKeyInQuery),
+                "AllowApiKeyInQuery is enabled. Query-string API keys leak into access logs, " +
+                "proxy caches, browser history, and referrer headers. This flag is intended " +
+                "ONLY for transitional compatibility — migrate clients to X-Api-Key header.");
+        }
     }
 }

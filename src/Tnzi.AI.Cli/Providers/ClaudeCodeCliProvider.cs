@@ -65,6 +65,20 @@ public class ClaudeCodeCliProvider : ICliAgentProvider
             psi.ArgumentList.Add(arg);
         }
 
+        // Host environment filtering — strip unwanted variables BEFORE applying
+        // provider/request overrides. When EnvironmentWhitelist is non-null, only
+        // listed keys survive. Null = legacy behavior (inherit everything).
+        if (providerOptions.EnvironmentWhitelist is not null)
+        {
+            var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            var whitelist = new HashSet<string>(providerOptions.EnvironmentWhitelist, comparer);
+            var toRemove = psi.Environment.Keys.Where(k => !whitelist.Contains(k)).ToList();
+            foreach (var key in toRemove)
+            {
+                psi.Environment.Remove(key);
+            }
+        }
+
         // 合并环境变量：Provider 默认 + 请求级覆盖
         foreach (var kvp in providerOptions.EnvironmentVariables ?? [])
         {

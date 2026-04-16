@@ -1,34 +1,46 @@
+using Tnzi.AI.Channels.Options;
+
 namespace Tnzi.AI.Channels.Adapters.Slack;
 
 /// <summary>
-/// Slack 适配器配置
+/// Slack adapter configuration. BotToken, AppToken, and SigningSecret
+/// are redacted in ToString output to prevent log leakage.
 /// </summary>
 public class SlackAdapterOptions
 {
-    /// <summary>是否启用 Slack 适配器</summary>
+    /// <summary>Whether the Slack adapter is enabled.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>Bot Token（xoxb-... 格式，建议通过环境变量 AI__CHANNELS__SLACK__BOTTOKEN 注入）</summary>
+    /// <summary>Bot token (xoxb- prefix). Inject via env var AI__CHANNELS__SLACK__BOTTOKEN.</summary>
     public string? BotToken { get; set; }
 
-    /// <summary>App-Level Token（xapp-... 格式，Socket Mode 使用）</summary>
+    /// <summary>App-level token (xapp- prefix) for Socket Mode.</summary>
     public string? AppToken { get; set; }
 
-    /// <summary>Signing Secret（Webhook 签名验证）</summary>
+    /// <summary>Signing secret for webhook signature verification.</summary>
     public string? SigningSecret { get; set; }
 
-    /// <summary>允许的 Channel ID 白名单（空=不限制）</summary>
+    /// <summary>Allowed channel ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedChannels { get; set; } = [];
 
-    /// <summary>允许的用户 ID 白名单（空=不限制）</summary>
+    /// <summary>Allowed user ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedUsers { get; set; } = [];
 
-    /// <summary>单条消息最大长度（Slack blocks 限制约 4000 字符）</summary>
+    /// <summary>Maximum length per message (Slack blocks limit is ~4000 chars).</summary>
     public int MaxMessageLength { get; set; } = 4000;
 
-    /// <summary>重试次数</summary>
+    /// <summary>Retry attempts.</summary>
     public int MaxRetries { get; set; } = 3;
 
-    /// <summary>文件上传最大大小（字节）</summary>
+    /// <summary>Maximum file upload size in bytes.</summary>
     public long MaxFileSize { get; set; } = 50 * 1024 * 1024;
+
+    public override string ToString() =>
+        $"SlackAdapterOptions {{ Enabled = {Enabled}, " +
+        $"BotToken = {SecretMask.Mask(BotToken)}, " +
+        $"AppToken = {SecretMask.Mask(AppToken)}, " +
+        $"SigningSecret = {SecretMask.Mask(SigningSecret)}, " +
+        $"AllowedChannels.Count = {AllowedChannels.Count}, " +
+        $"AllowedUsers.Count = {AllowedUsers.Count}, " +
+        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries}, MaxFileSize = {MaxFileSize} }}";
 }

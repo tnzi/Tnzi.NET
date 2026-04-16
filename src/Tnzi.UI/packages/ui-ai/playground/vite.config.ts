@@ -22,7 +22,6 @@ export default defineConfig({
       { find: '@tnzi/ui-ai/components', replacement: resolve(__dirname, '../src/components') },
       { find: '@tnzi/ui-ai/composables', replacement: resolve(__dirname, '../src/composables') },
       { find: '@tnzi/ui-ai/chat', replacement: resolve(__dirname, '../src/chat') },
-      { find: '@tnzi/ui-ai/admin', replacement: resolve(__dirname, '../src/admin') },
       { find: '@tnzi/ui-ai/embed', replacement: resolve(__dirname, '../src/embed') },
       { find: '@tnzi/ui-ai', replacement: resolve(__dirname, '../src') },
       { find: '@', replacement: resolve(__dirname, '../src') },

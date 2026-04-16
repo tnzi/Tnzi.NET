@@ -138,6 +138,18 @@ public class SetQuotaDto
 }
 
 /// <summary>
+/// 用户配额分页查询 DTO
+/// </summary>
+public class UserQuotaQueryDto : PagedQueryDto
+{
+    /// <summary>按用户 ID 过滤（可选）</summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>仅返回启用的配额（可选）</summary>
+    public bool? IsEnabled { get; set; }
+}
+
+/// <summary>
 /// 重置配额请求 DTO
 /// </summary>
 public class ResetQuotaDto

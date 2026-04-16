@@ -3,18 +3,8 @@
  * AgentSelector — Agent card gallery with search
  */
 
-import {
-  Input,
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  Badge,
-  ScrollArea,
-} from '../../primitives';
+import { NInput, NCard, NBadge, NScrollbar } from 'naive-ui';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import { useAiI18n } from '@/locale/index';
 import { useLocalSearch } from '@/composables/useLocalSearch';
 const t = useAiI18n();
@@ -44,33 +34,58 @@ const { query: searchQuery, filtered } = useLocalSearch(
 
 <template>
   <div class="space-y-3">
-    <div class="relative">
-      <Icon icon="lucide:search" class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-      <Input v-model="searchQuery" :placeholder="t.common.search" class="pl-9" />
-    </div>
-    <ScrollArea class="max-h-[400px]">
-      <div v-if="filtered.length === 0" class="py-8 text-center text-sm text-muted-foreground">{{ t.common.noData }}</div>
+    <NInput v-model:value="searchQuery" :placeholder="t.common.search" clearable>
+      <template #prefix>
+        <Icon icon="lucide:search" class="size-4" />
+      </template>
+    </NInput>
+    <NScrollbar style="max-height: 400px">
+      <div v-if="filtered.length === 0" class="py-8 text-center text-sm t-agent-selector__empty">{{ t.common.noData }}</div>
       <div v-else class="grid grid-cols-2 gap-2">
-        <Card
+        <NCard
           v-for="agent in filtered"
           :key="agent.id"
-          :class="cn('cursor-pointer transition-colors hover:bg-accent/50', agent.id === selectedId && 'ring-2 ring-primary')"
+          size="small"
+          hoverable
+          class="t-agent-selector__card"
+          :class="{ 't-agent-selector__card--selected': agent.id === selectedId }"
           @click="emit('select', agent.id)"
         >
-          <CardHeader class="p-3 pb-1">
-            <div class="flex items-center gap-2">
-              <Icon :icon="agent.icon ?? 'lucide:bot'" class="size-5 shrink-0 text-primary" />
-              <CardTitle class="text-sm truncate">{{ agent.name }}</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent class="p-3 pt-0">
-            <CardDescription v-if="agent.description" class="text-xs line-clamp-2">{{ agent.description }}</CardDescription>
-            <div v-if="agent.tags?.length" class="flex flex-wrap gap-1 mt-1.5">
-              <Badge v-for="tag in agent.tags" :key="tag" variant="secondary" class="text-[10px] px-1.5 py-0">{{ tag }}</Badge>
-            </div>
-          </CardContent>
-        </Card>
+          <div class="flex items-center gap-2 mb-1">
+            <Icon :icon="agent.icon ?? 'lucide:bot'" class="size-5 shrink-0 t-agent-selector__icon" />
+            <span class="text-sm font-medium truncate">{{ agent.name }}</span>
+          </div>
+          <p v-if="agent.description" class="text-xs t-agent-selector__desc line-clamp-2">{{ agent.description }}</p>
+          <div v-if="agent.tags?.length" class="flex flex-wrap gap-1 mt-1.5">
+            <NBadge
+              v-for="tag in agent.tags"
+              :key="tag"
+              :value="tag"
+              type="default"
+              class="text-[10px]"
+            />
+          </div>
+        </NCard>
       </div>
-    </ScrollArea>
+    </NScrollbar>
   </div>
 </template>
+
+<style scoped>
+.t-agent-selector__empty {
+  color: var(--tnzi-base-text-muted);
+}
+.t-agent-selector__card {
+  cursor: pointer;
+}
+.t-agent-selector__card--selected {
+  outline: 2px solid var(--tnzi-primary);
+  outline-offset: -1px;
+}
+.t-agent-selector__icon {
+  color: var(--tnzi-primary);
+}
+.t-agent-selector__desc {
+  color: var(--tnzi-base-text-muted);
+}
+</style>

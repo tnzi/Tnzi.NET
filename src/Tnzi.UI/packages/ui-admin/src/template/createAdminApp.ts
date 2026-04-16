@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import type { RouteRecordRaw } from 'vue-router'
 import { createAdminRouter } from './router'
 import { defaultAdminMenus } from './menu/default-menus'
-import type { AdminMenuItem } from '../headless/useAdminMenu'
+import type { AdminMenuItem } from './menu/types'
 import AdminApp from './App.vue'
 
 export interface AdminAppOptions {

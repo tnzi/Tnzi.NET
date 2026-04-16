@@ -195,44 +195,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     abortController = new AbortController();
     options.onStreamStart?.();
 
-    // TODO: Integrate with @tnzi/core streamChat()
-    // The actual SSE streaming call would go here:
-    //
-    // streamChat({
-    //   url: `${options.apiBaseUrl}/chat/stream`,
-    //   body: {
-    //     message: content,
-    //     threadId: currentThreadId.value,
-    //     agentId: options.agentId,
-    //     model: options.modelId,
-    //   },
-    //   signal: abortController.signal,
-    //   onDelta: (text) => updateMessage(assistantMessage.id, {
-    //     content: assistantMessage.content + text,
-    //   }),
-    //   onAgentSwitch: (name) => {
-    //     currentAgentName.value = name;
-    //     options.onAgentSwitch?.(name);
-    //   },
-    //   onDone: (event) => {
-    //     if (event.threadId) currentThreadId.value = event.threadId;
-    //     updateMessage(assistantMessage.id, {
-    //       isStreaming: false,
-    //       usage: event.usage ?? null,
-    //       model: event.model ?? null,
-    //     });
-    //     isStreaming.value = false;
-    //     options.onStreamEnd?.();
-    //   },
-    //   onError: (err) => {
-    //     const e = err instanceof Error ? err : new Error(String(err));
-    //     error.value = e;
-    //     updateMessage(assistantMessage.id, { isStreaming: false });
-    //     isStreaming.value = false;
-    //     options.onError?.(e);
-    //     options.onStreamEnd?.();
-    //   },
-    // });
+    // SSE streaming wiring is delegated to the consumer via options.onStreamStart /
+    // options.onStreamEnd hooks; the in-package transport binding to
+    // @tnzi/core streamChat() is intentionally not implemented here so that
+    // consumers can bring their own transport (admin gateway, embed widget, etc.).
   }
 
   function regenerate(messageId: string): void {

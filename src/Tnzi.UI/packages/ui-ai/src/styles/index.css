@@ -1,0 +1,59 @@
+/* Tnzi UI-AI base styles — inherits from @tnzi/ui */
+@import '@tnzi/ui/style.css';
+
+/* AI-specific CSS variables (--tnzi-ai-* namespace) */
+:root {
+  /* Chat message bubbles */
+  --tnzi-ai-chat-user-bg: hsl(222.2 47.4% 95%);
+  --tnzi-ai-chat-user-text: var(--tnzi-base-text);
+  --tnzi-ai-chat-assistant-bg: var(--tnzi-container-bg);
+  --tnzi-ai-chat-assistant-text: var(--tnzi-base-text);
+  --tnzi-ai-chat-system-bg: rgba(0, 0, 0, 0.04);
+  --tnzi-ai-chat-system-text: var(--tnzi-base-text-muted);
+
+  /* Reasoning / thought panels */
+  --tnzi-ai-reasoning-indent: 16px;
+  --tnzi-ai-reasoning-border: var(--tnzi-border);
+  --tnzi-ai-reasoning-bg: hsl(45 100% 97%);
+
+  /* Tool call blocks */
+  --tnzi-ai-tool-call-bg: hsl(210 40% 96%);
+
+  /* Streaming */
+  --tnzi-ai-streaming-cursor: hsl(222.2 47.4% 11.2%);
+
+  /* Code blocks */
+  --tnzi-ai-code-bg: hsl(220 14% 96%);
+
+  /* Workflow node states */
+  --tnzi-ai-node-active: hsl(217.2 91.2% 59.8%);
+  --tnzi-ai-node-completed: hsl(142.1 76.2% 36.3%);
+  --tnzi-ai-node-failed: hsl(0 84.2% 60.2%);
+  --tnzi-ai-handoff-accent: hsl(262.1 83.3% 57.8%);
+
+  /* Shimmer animation */
+  --tnzi-ai-shimmer-from: rgba(0, 0, 0, 0.6);
+  --tnzi-ai-shimmer-to: rgba(0, 0, 0, 1);
+}
+
+.dark,
+[data-theme='dark'] {
+  --tnzi-ai-chat-user-bg: hsl(217.2 32.6% 17.5%);
+  --tnzi-ai-chat-assistant-bg: var(--tnzi-container-bg);
+  --tnzi-ai-chat-system-bg: rgba(255, 255, 255, 0.04);
+  --tnzi-ai-reasoning-bg: hsl(40 30% 12%);
+  --tnzi-ai-tool-call-bg: hsl(217.2 32.6% 12%);
+  --tnzi-ai-streaming-cursor: hsl(210 40% 98%);
+  --tnzi-ai-code-bg: hsl(220 14% 11%);
+  --tnzi-ai-node-completed: hsl(142.1 70.6% 45.3%);
+  --tnzi-ai-node-failed: hsl(0 72.2% 50.6%);
+  --tnzi-ai-handoff-accent: hsl(262.1 83.3% 67.8%);
+  --tnzi-ai-shimmer-from: rgba(255, 255, 255, 0.6);
+  --tnzi-ai-shimmer-to: rgba(255, 255, 255, 1);
+}
+
+/* Shared reasoning indent helper */
+.t-reasoning-indent {
+  padding-left: var(--tnzi-ai-reasoning-indent);
+  border-left: 1px solid var(--tnzi-ai-reasoning-border);
+}

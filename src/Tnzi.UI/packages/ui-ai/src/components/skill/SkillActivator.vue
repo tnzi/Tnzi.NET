@@ -3,17 +3,7 @@
  * SkillActivator — Skill activation config panel
  */
 
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-  Button,
-  Input,
-  Badge,
-} from '../../primitives';
+import { NCard, NButton, NInput } from 'naive-ui';
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -49,28 +39,26 @@ function handleActivate(): void {
 </script>
 
 <template>
-  <Card>
-    <CardHeader class="pb-2">
-      <div class="flex items-center gap-2">
-        <Icon :icon="skill.icon ?? 'lucide:zap'" class="size-6 text-primary" />
-        <div>
-          <CardTitle class="text-base">{{ skill.name }}</CardTitle>
-          <CardDescription v-if="skill.description">{{ skill.description }}</CardDescription>
-        </div>
+  <NCard>
+    <div class="flex items-center gap-2 mb-3">
+      <Icon :icon="skill.icon ?? 'lucide:zap'" class="size-6 t-skill-activator__icon" />
+      <div>
+        <div class="text-base font-medium">{{ skill.name }}</div>
+        <div v-if="skill.description" class="text-sm t-skill-activator__desc">{{ skill.description }}</div>
       </div>
-    </CardHeader>
-    <CardContent v-if="params?.length" class="space-y-3">
+    </div>
+    <div v-if="params?.length" class="space-y-3 mb-4">
       <div v-for="param in params" :key="param.key" class="space-y-1">
-        <label class="text-xs font-medium text-foreground">
+        <label class="text-xs font-medium">
           {{ param.label }}
-          <Badge v-if="param.required" variant="destructive" class="ml-1 text-[9px] px-1 py-0">*</Badge>
+          <span v-if="param.required" class="t-skill-activator__required ml-1">*</span>
         </label>
-        <Input v-model="paramValues[param.key]" :input-props="param.type === 'number' ? { inputmode: 'numeric' } : undefined" class="h-8" />
+        <NInput v-model:value="paramValues[param.key]" size="small" :inputmode="param.type === 'number' ? 'numeric' : undefined" />
       </div>
-    </CardContent>
-    <CardFooter class="gap-2 justify-end">
-      <Button variant="outline" size="sm" @click="$emit('cancel')">{{ t.common.cancel }}</Button>
-      <Button size="sm" @click="handleActivate">{{ t.skill.activate }}</Button>
-    </CardFooter>
-  </Card>
+    </div>
+    <div class="flex justify-end gap-2">
+      <NButton secondary size="small" @click="$emit('cancel')">{{ t.common.cancel }}</NButton>
+      <NButton type="primary" size="small" @click="handleActivate">{{ t.skill.activate }}</NButton>
+    </div>
+  </NCard>
 </template>

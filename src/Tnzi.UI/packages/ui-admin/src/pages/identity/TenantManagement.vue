@@ -1,50 +1,45 @@
-<script setup lang="ts">
-import CrudPage from '../../components/crud/CrudPage.vue'
-import type { CrudPageQuery, CrudPageResult } from '../../headless/useCrudPage'
-
-const columns = [
-  { key: 'id', title: 'ID', width: 80 },
-  { key: 'name', title: 'Name', sortable: true },
-  { key: 'hostName', title: 'Host Name' },
-  { key: 'isActive', title: 'Active' },
-  { key: 'creationTime', title: 'Created At', sortable: true },
-]
-
-const formFields = [
-  { key: 'name', type: 'text' as const, label: 'Name', required: true },
-  { key: 'hostName', type: 'text' as const, label: 'Host Name', required: false },
-  { key: 'adminEmail', type: 'email' as const, label: 'Admin Email', required: true },
-]
-
-async function fetchData(query: CrudPageQuery): Promise<CrudPageResult<any>> {
-  return { items: [], totalCount: 0, pageIndex: query.pageIndex, pageSize: query.pageSize }
-}
-</script>
-
 <template>
-  <CrudPage
-    title="Tenant Management"
-    :columns="columns"
-    :fetch-fn="fetchData"
-    row-key="id"
-    searchable
-    creatable
-    editable
-    deletable
+  <TCrudPage
+    :state="crud"
+    :all-columns="tenantColumns"
+    :title="title"
+    :translate="t"
   >
-    <template #form-modal="{ data }">
-      <div class="space-y-4">
-        <div v-for="field in formFields" :key="field.key">
-          <label class="block text-sm font-medium mb-1">{{ field.label }}</label>
-          <input
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            :type="field.type"
-            :value="(data as any)[field.key]"
-            :placeholder="field.label"
-            @input="(e: Event) => { (data as any)[field.key] = (e.target as HTMLInputElement).value }"
-          />
-        </div>
-      </div>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="tenantFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+      />
     </template>
-  </CrudPage>
+  </TCrudPage>
 </template>
+
+<script setup lang="ts">
+import TCrudPage from '../../components/crud/TCrudPage.vue'
+import { useCrudPage } from '../../headless/useCrudPage'
+import { createIdentityBridge } from '../../services/bridges/identity-bridge'
+import { useAdminClient } from '../../plugin/client'
+import TFormSchemaRenderer from '../_shared/form-schema'
+import { tenantColumns, tenantFormSchema } from './tenant-config'
+import { translatePageKey } from '../_shared/translate'
+import type { TenantDto } from '@tnzi/core/services/identity'
+
+const title = 'Tenant Management'
+const bridge = createIdentityBridge({ client: useAdminClient() })
+
+const crud = useCrudPage<TenantDto, string>({
+  pageId: 'identity.tenants',
+  columns: tenantColumns,
+  rowKey: (r) => r.id,
+  fetchData: (query) => bridge.tenants.fetch(query),
+  createData: (data) => bridge.tenants.create(data as never),
+  updateData: (id, data) => bridge.tenants.update(id, data as never),
+  deleteData: (ids) => bridge.tenants.delete(ids),
+})
+
+
+crud.refresh().catch(() => undefined)
+
+const t = (key: string) => translatePageKey('identity.tenants', key)
+</script>

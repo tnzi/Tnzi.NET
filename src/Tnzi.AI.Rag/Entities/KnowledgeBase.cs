@@ -49,4 +49,12 @@ public class KnowledgeBase : MultiTenantAuditedEntity<Guid>
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Timestamp when a reindex operation started. Used as a distributed mutex
+    /// to prevent concurrent reindex runs from corrupting chunk embeddings.
+    /// Null = no reindex in progress. Stale values older than ReindexStaleLockThreshold
+    /// are considered abandoned (crashed worker) and may be taken over by a new run.
+    /// </summary>
+    public DateTime? ReindexingAt { get; set; }
 }

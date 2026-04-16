@@ -7,6 +7,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
 {
     private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
+    private readonly IRepository<DocumentChunk, Guid> _chunkRepository;
     private readonly IDocumentIngestionService _ingestionService;
     private readonly IVectorStore _vectorStore;
     private readonly IEmbeddingService _embeddingService;
@@ -17,6 +18,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     public KnowledgeBaseService(
         IRepository<KnowledgeBase, Guid> kbRepository,
         IRepository<KnowledgeDocument, Guid> docRepository,
+        IRepository<DocumentChunk, Guid> chunkRepository,
         IDocumentIngestionService ingestionService,
         IVectorStore vectorStore,
         IEmbeddingService embeddingService,
@@ -27,6 +29,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     {
         _kbRepository = Check.NotNull(kbRepository);
         _docRepository = Check.NotNull(docRepository);
+        _chunkRepository = Check.NotNull(chunkRepository);
         _ingestionService = Check.NotNull(ingestionService);
         _vectorStore = Check.NotNull(vectorStore);
         _embeddingService = Check.NotNull(embeddingService);
@@ -403,6 +406,199 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         }
 
         return Ok(doc.MapTo<KnowledgeDocumentDto>());
+    }
+
+    // 重新索引批处理大小 — 每批读取/嵌入/回写的块数量。
+    // 选择 50 作为折中：足够大以摊销每批 LLM/HTTP 往返开销，又足够小以保持单批 UOW 提交可控、
+    // 内存占用稳定（每个 chunk 文本通常 < 2KB，50 chunks ≈ 100KB）。
+    private const int ReindexBatchSize = 50;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 设计选择：**前台分批同步执行**（Option A）。
+    /// - KnowledgeBaseService 已注入 IBackgroundJobManager（可选），但后台任务模式无法返回 ReindexResultDto 的
+    ///   完整统计（ChunkCount/DurationMs），UX 不一致。前台执行保持 admin 操作语义清晰：HTTP 请求完成即操作完成。
+    /// - 适用规模：典型 KB（≤ 数千 chunks）。超大规模 KB 应在未来迭代引入后台任务 + 进度查询端点。
+    /// - 幂等性：对同一 KB 多次调用产生相同终态（每个 chunk 的 Embedding 被对应文本的最新嵌入覆盖）。
+    /// - 失败语义：单个 chunk 嵌入失败 → fail-fast，返回错误并附带失败的 chunk id；不静默跳过。
+    /// - UOW 范围：按批提交（每批一次 UpdateManyAsync）。这是 stage-2 的明确权衡 —
+    ///   单一全量 UOW 对大 KB 内存压力过大；按批提交意味着中途失败时已嵌入的批次会持久化，
+    ///   但由于操作是幂等的，重新触发即可恢复一致状态。
+    /// </remarks>
+    // A reindex is considered abandoned (crashed worker) after this window —
+    // another caller is then allowed to take over the lock.
+    private static readonly TimeSpan ReindexStaleLockThreshold = TimeSpan.FromHours(2);
+
+    public async Task<Result<ReindexResultDto>> ReindexAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default)
+    {
+        var kb = await _kbRepository.GetAsync(knowledgeBaseId, cancellationToken);
+        if (kb == null)
+        {
+            return Fail<ReindexResultDto>("Knowledge base not found", 404, Tnzi.Exceptions.ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        var now = DateTime.UtcNow;
+        var acquired = await TryAcquireReindexLockAsync(kb, now, cancellationToken);
+
+        if (!acquired)
+        {
+            Logger.LogInformation("Reindex rejected for knowledge base {KbId} ({Name}): another reindex is already in progress", knowledgeBaseId, kb.Name);
+            return Fail<ReindexResultDto>(
+                "A reindex operation is already in progress for this knowledge base. " +
+                $"If you believe this is a stale lock from a crashed worker, wait up to {ReindexStaleLockThreshold.TotalHours:F0}h.",
+                409);
+        }
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+
+        // 加载所有块（按 ChunkIndex 排序保证确定性顺序，便于幂等性验证和日志追踪）
+        var allChunks = await _chunkRepository.AsQueryable()
+            .Where(c => c.KnowledgeBaseId == knowledgeBaseId)
+            .OrderBy(c => c.DocumentId)
+            .ThenBy(c => c.ChunkIndex)
+            .ToListAsync(cancellationToken);
+
+        if (allChunks.Count == 0)
+        {
+            sw.Stop();
+            Logger.LogInformation("Reindex skipped for empty knowledge base {KbId} ({Name})", knowledgeBaseId, kb.Name);
+            return Ok(new ReindexResultDto
+            {
+                KnowledgeBaseId = knowledgeBaseId,
+                ChunkCount = 0,
+                DocumentCount = 0,
+                DurationMs = sw.ElapsedMilliseconds
+            });
+        }
+
+        var embeddingOptions = new EmbeddingOptions
+        {
+            Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
+            Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
+        };
+
+        var documentCount = allChunks.Select(c => c.DocumentId).Distinct().Count();
+        var totalProcessed = 0;
+
+        for (var offset = 0; offset < allChunks.Count; offset += ReindexBatchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var batch = allChunks.Skip(offset).Take(ReindexBatchSize).ToList();
+            var texts = batch.Select(c => c.Content).ToList();
+
+            var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(texts, embeddingOptions, cancellationToken);
+            if (!embeddingResult.Succeeded)
+            {
+                var firstChunkId = batch[0].Id;
+                Logger.LogError("Reindex failed for knowledge base {KbId} at batch starting chunk {ChunkId}: {Error}",
+                    knowledgeBaseId, firstChunkId, embeddingResult.Message);
+                return Fail<ReindexResultDto>(
+                    $"Embedding generation failed at chunk {firstChunkId}: {embeddingResult.Message}");
+            }
+
+            var embeddings = embeddingResult.Data!;
+            if (embeddings.Count != batch.Count)
+            {
+                var firstChunkId = batch[0].Id;
+                Logger.LogError("Reindex embedding count mismatch for knowledge base {KbId} at chunk {ChunkId}: expected {Expected}, got {Actual}",
+                    knowledgeBaseId, firstChunkId, batch.Count, embeddings.Count);
+                return Fail<ReindexResultDto>(
+                    $"Embedding count mismatch at chunk {firstChunkId}: expected {batch.Count}, got {embeddings.Count}");
+            }
+
+            for (var i = 0; i < batch.Count; i++)
+            {
+                batch[i].Embedding = new Vector(embeddings[i]);
+            }
+
+            await _chunkRepository.UpdateManyAsync(batch, cancellationToken);
+            totalProcessed += batch.Count;
+
+            Logger.LogDebug("Reindex progress for knowledge base {KbId}: {Processed}/{Total} chunks",
+                knowledgeBaseId, totalProcessed, allChunks.Count);
+        }
+
+        sw.Stop();
+        Logger.LogInformation("Reindexed knowledge base {KbId} ({Name}): {ChunkCount} chunks across {DocCount} documents in {DurationMs}ms",
+            knowledgeBaseId, kb.Name, totalProcessed, documentCount, sw.ElapsedMilliseconds);
+
+        return Ok(new ReindexResultDto
+        {
+            KnowledgeBaseId = knowledgeBaseId,
+            ChunkCount = totalProcessed,
+            DocumentCount = documentCount,
+            DurationMs = sw.ElapsedMilliseconds
+        });
+        }
+        finally
+        {
+            await ReleaseReindexLockAsync(kb, now);
+        }
+    }
+
+    /// <remarks>
+    /// Acquires the reindex mutex via conditional UPDATE. ExecuteUpdateAsync makes
+    /// the check+set atomic server-side — safe across multiple app instances. Test
+    /// doubles that don't implement IAsyncQueryProvider fall back to a load+update
+    /// path with a narrower (milliseconds) race window that is adequate for a unit
+    /// test harness.
+    /// </remarks>
+    private async Task<bool> TryAcquireReindexLockAsync(KnowledgeBase kb, DateTime now, CancellationToken ct)
+    {
+        var staleCutoff = now - ReindexStaleLockThreshold;
+        try
+        {
+            var affected = await _kbRepository.AsQueryable()
+                .Where(k => k.Id == kb.Id && (k.ReindexingAt == null || k.ReindexingAt < staleCutoff))
+                .ExecuteUpdateAsync(s => s.SetProperty(k => k.ReindexingAt, now), ct);
+            return affected > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            if (kb.ReindexingAt != null && kb.ReindexingAt >= staleCutoff)
+            {
+                return false;
+            }
+            kb.ReindexingAt = now;
+            await _kbRepository.UpdateAsync(kb, cancellationToken: ct);
+            return true;
+        }
+    }
+
+    /// <remarks>
+    /// Guard with the acquired timestamp so a later run that legitimately took over
+    /// a stale lock from this one is not stomped. Release is best-effort: uses
+    /// CancellationToken.None and swallows all exceptions so the caller sees the
+    /// real error (if any) from the reindex body, not a release failure. If release
+    /// fails the stale-threshold mechanism eventually reclaims the lock.
+    /// </remarks>
+    private async Task ReleaseReindexLockAsync(KnowledgeBase kb, DateTime acquiredAt)
+    {
+        try
+        {
+            await _kbRepository.AsQueryable()
+                .Where(k => k.Id == kb.Id && k.ReindexingAt == acquiredAt)
+                .ExecuteUpdateAsync(s => s.SetProperty(k => k.ReindexingAt, (DateTime?)null), CancellationToken.None);
+        }
+        catch (InvalidOperationException)
+        {
+            if (kb.ReindexingAt == acquiredAt)
+            {
+                kb.ReindexingAt = null;
+                try { await _kbRepository.UpdateAsync(kb, cancellationToken: CancellationToken.None); }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to release reindex lock for knowledge base {KbId}", kb.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to release reindex lock for knowledge base {KbId}", kb.Id);
+        }
     }
 
     /// <summary>

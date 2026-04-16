@@ -6,7 +6,7 @@
  * breakdown of input/output/cached/reasoning tokens and cost.
  */
 
-import { HoverCard, Separator } from '../../primitives';
+import { NPopover, NDivider } from 'naive-ui';
 import { computed } from 'vue';
 import { useAiI18n } from '@/locale/index';
 import { formatCompactNumber } from '@/lib/utils';
@@ -49,7 +49,7 @@ function formatCost(cost: number): string {
 </script>
 
 <template>
-  <HoverCard trigger="hover">
+  <NPopover trigger="hover">
     <template #trigger>
       <!-- Ring + label -->
       <div class="inline-flex items-center gap-1.5 cursor-default">
@@ -118,7 +118,7 @@ function formatCost(cost: number): string {
         </div>
 
         <!-- Separator -->
-        <Separator />
+        <NDivider style="margin: 8px 0" />
 
         <!-- Total -->
         <div class="flex items-center justify-between">
@@ -137,5 +137,5 @@ function formatCost(cost: number): string {
           </span>
         </div>
     </div>
-  </HoverCard>
+  </NPopover>
 </template>

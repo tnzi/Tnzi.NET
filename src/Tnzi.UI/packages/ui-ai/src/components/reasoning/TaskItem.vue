@@ -3,10 +3,9 @@
  * TaskItem — Subtask display with left vertical border and file badges
  */
 
-import { Badge } from '../../primitives';
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
+
 const props = withDefaults(defineProps<{
   /** Task title. */
   title: string;
@@ -29,41 +28,74 @@ const isOpen = ref(props.defaultOpen);
   <div v-if="collapsible">
     <button
       type="button"
-      class="group flex w-full items-center gap-2 py-1.5 text-sm hover:bg-accent/50 rounded-md px-2 transition-colors"
+      class="t-task-item__trigger"
       @click="isOpen = !isOpen"
     >
-      <Icon icon="lucide:search" class="size-3.5 shrink-0 text-muted-foreground" />
+      <Icon icon="lucide:search" class="size-3.5 shrink-0 t-task-item__muted" />
       <span class="flex-1 text-left font-medium truncate">{{ title }}</span>
       <Icon
         icon="lucide:chevron-down"
-        :class="cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-180')"
+        class="size-3.5 shrink-0 t-task-item__muted t-task-item__chevron"
+        :class="{ 't-task-item__chevron--open': isOpen }"
       />
     </button>
-    <div v-show="isOpen" class="ml-2 border-l-2 border-border pl-4 space-y-2 py-2">
+    <div v-show="isOpen" class="t-task-item__body">
       <slot />
-      <div v-if="files.length > 0" class="flex flex-wrap gap-1">
-        <Badge
+      <div v-if="files.length > 0" class="flex flex-wrap gap-1 mt-1">
+        <span
           v-for="file in files"
           :key="file"
-          variant="secondary"
-          class="font-mono text-[11px]"
-        >
-          {{ file }}
-        </Badge>
+          class="t-task-item__file-badge"
+        >{{ file }}</span>
       </div>
     </div>
   </div>
-  <div v-else class="flex items-start gap-2 py-1 text-sm text-muted-foreground">
+  <div v-else class="flex items-start gap-2 py-1 text-sm t-task-item__muted">
     <slot />
     <div v-if="files.length > 0" class="flex flex-wrap gap-1">
-      <Badge
+      <span
         v-for="file in files"
         :key="file"
-        variant="secondary"
-        class="font-mono text-[11px]"
-      >
-        {{ file }}
-      </Badge>
+        class="t-task-item__file-badge"
+      >{{ file }}</span>
     </div>
   </div>
 </template>
+
+<style scoped>
+.t-task-item__trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 14px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.t-task-item__trigger:hover { background-color: var(--tnzi-hover-bg, rgba(0,0,0,0.04)); }
+.t-task-item__muted { color: var(--tnzi-base-text-muted); }
+.t-task-item__chevron { transition: transform 0.2s; }
+.t-task-item__chevron--open { transform: rotate(180deg); }
+.t-task-item__body {
+  margin-left: 8px;
+  border-left: 2px solid var(--tnzi-border);
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.t-task-item__file-badge {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--tnzi-container-bg);
+  border: 1px solid var(--tnzi-border);
+  color: var(--tnzi-base-text-muted);
+}
+</style>

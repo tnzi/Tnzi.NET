@@ -9,7 +9,6 @@
 
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
-import { cn } from '@/lib/utils';
 import { useAiI18n } from '@/locale/index';
 import Shimmer from '../streaming/Shimmer.vue';
 import StreamMarkdown from '../streaming/StreamMarkdown.vue';
@@ -86,39 +85,70 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="rounded-lg border border-border/50 bg-ai-reasoning-bg overflow-hidden">
+  <div class="t-reasoning">
     <!-- Trigger -->
     <button
       type="button"
-      class="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-accent/50 transition-colors"
+      class="t-reasoning__trigger"
       @click="handleOpenChange(!isOpen)"
     >
       <Icon icon="lucide:brain" class="size-4 shrink-0" />
 
       <template v-if="isStreaming">
-        <Shimmer class="text-foreground font-medium">{{ t.reasoning.thinking }}</Shimmer>
+        <Shimmer class="t-reasoning__title">{{ t.reasoning.thinking }}</Shimmer>
       </template>
       <template v-else>
-        <span class="font-medium">
+        <span class="t-reasoning__title">
           {{ elapsedSeconds > 0 ? t.reasoning.thoughtFor.replace('{seconds}', String(elapsedSeconds)) : t.reasoning.thinking }}
         </span>
       </template>
 
       <Icon
         icon="lucide:chevron-down"
-        :class="cn('ml-auto size-4 shrink-0 transition-transform', isOpen && 'rotate-180')"
+        class="ml-auto size-4 shrink-0 t-reasoning__chevron"
+        :class="{ 't-reasoning__chevron--open': isOpen }"
       />
     </button>
 
     <!-- Content -->
-    <div v-show="isOpen" class="border-t border-border/30">
+    <div v-show="isOpen" class="t-reasoning__content">
       <div class="px-3 py-2">
         <StreamMarkdown
           :content="content"
           :streaming="isStreaming"
-          class="text-sm text-muted-foreground"
+          class="text-sm t-reasoning__body"
         />
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.t-reasoning {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--tnzi-border) 50%, transparent);
+  background-color: var(--tnzi-ai-reasoning-bg);
+  overflow: hidden;
+}
+.t-reasoning__trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--tnzi-base-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.t-reasoning__trigger:hover { background-color: var(--tnzi-hover-bg, rgba(0,0,0,0.04)); }
+.t-reasoning__title { font-weight: 500; color: var(--tnzi-base-text); }
+.t-reasoning__chevron { transition: transform 0.2s; }
+.t-reasoning__chevron--open { transform: rotate(180deg); }
+.t-reasoning__content {
+  border-top: 1px solid color-mix(in srgb, var(--tnzi-border) 30%, transparent);
+}
+.t-reasoning__body { color: var(--tnzi-base-text-muted); }
+</style>

@@ -1,0 +1,63 @@
+<template>
+  <TCrudPage
+    :state="crud"
+    :all-columns="parameterColumns"
+    :title="title"
+    :translate="t"
+  >
+    <template #toolbarLeft>
+      <NInput
+        :value="groupPrefix"
+        placeholder="Filter by group prefix"
+        clearable
+        style="max-width: 240px"
+        @update:value="onGroupPrefixChange"
+      />
+    </template>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="parameterFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+      />
+    </template>
+  </TCrudPage>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { NInput } from 'naive-ui'
+import TCrudPage from '../../components/crud/TCrudPage.vue'
+import { useCrudPage } from '../../headless/useCrudPage'
+import { createSystemBridge } from '../../services/bridges/system-bridge'
+import { useAdminClient } from '../../plugin/client'
+import TFormSchemaRenderer from '../_shared/form-schema'
+import { parameterColumns, parameterFormSchema } from './parameter-config'
+import { translatePageKey } from '../_shared/translate'
+import type { SettingDto } from '@tnzi/core/services/system'
+
+// Mapped to SettingDto — no separate Parameter entity in the backend.
+const title = 'Parameter Management'
+const bridge = createSystemBridge({ client: useAdminClient() })
+
+const crud = useCrudPage<SettingDto, string>({
+  pageId: 'system.parameters',
+  columns: parameterColumns,
+  rowKey: (r) => r.id,
+  fetchData: (query) => bridge.settings.fetch(query),
+  createData: (data) => bridge.settings.create(data as never),
+  updateData: (id, data) => bridge.settings.update(id, data as never),
+  deleteData: (ids) => bridge.settings.delete(ids),
+})
+
+const groupPrefix = ref('')
+function onGroupPrefixChange(v: string | null): void {
+  groupPrefix.value = v ?? ''
+  crud.setFilters({ groupPrefix: groupPrefix.value })
+  crud.refresh().catch(() => undefined)
+}
+
+crud.refresh().catch(() => undefined)
+
+const t = (key: string) => translatePageKey('system.parameters', key)
+</script>

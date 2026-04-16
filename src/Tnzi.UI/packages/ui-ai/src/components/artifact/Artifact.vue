@@ -3,7 +3,7 @@
  * Artifact — Artifact panel container
  */
 
-import { Button, Tooltip } from '../../primitives';
+import { NButton, NTooltip } from 'naive-ui';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
 const t = useAiI18n();
@@ -30,19 +30,18 @@ defineEmits<{
       </div>
       <div class="flex items-center gap-1 shrink-0">
         <slot name="actions">
-          <Tooltip>
+          <NTooltip>
             <template #trigger>
-              <Button variant="ghost" size="icon-sm" @click="$emit('download')">
-                <Icon icon="lucide:download" class="size-4" />
-              </Button>
+              <NButton quaternary size="small" @click="$emit('download')">
+                <template #icon><Icon icon="lucide:download" /></template>
+              </NButton>
             </template>
             {{ t.artifact.download }}
-          </Tooltip>
+          </NTooltip>
         </slot>
-        <Button variant="ghost" size="icon-sm" @click="$emit('close')">
-          <Icon icon="lucide:x" class="size-4" />
-          <span class="sr-only">{{ t.artifact.close }}</span>
-        </Button>
+        <NButton quaternary size="small" @click="$emit('close')">
+          <template #icon><Icon icon="lucide:x" /></template>
+        </NButton>
       </div>
     </div>
     <div class="flex-1 min-h-0 overflow-auto p-4">

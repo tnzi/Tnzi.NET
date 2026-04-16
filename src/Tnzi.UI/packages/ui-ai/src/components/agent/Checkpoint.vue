@@ -3,7 +3,7 @@
  * Checkpoint — Workflow checkpoint marker
  */
 
-import { Separator, Button, Tooltip } from '../../primitives';
+import { NButton, NTooltip, NDivider } from 'naive-ui';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
 const t = useAiI18n();
@@ -19,17 +19,23 @@ defineEmits<{
 
 <template>
   <div class="flex items-center gap-2 py-1">
-    <Tooltip>
+    <NTooltip>
       <template #trigger>
-        <Button variant="ghost" size="icon-sm" @click="$emit('click')">
-          <slot>
-            <Icon icon="lucide:bookmark" class="size-4 text-muted-foreground" />
-          </slot>
+        <NButton text size="small" @click="$emit('click')">
+          <template #icon>
+            <slot>
+              <Icon icon="lucide:bookmark" class="size-4 t-checkpoint__icon" />
+            </slot>
+          </template>
           <span class="sr-only">{{ tooltip ?? t.checkpoint.label }}</span>
-        </Button>
+        </NButton>
       </template>
       {{ tooltip ?? t.checkpoint.label }}
-    </Tooltip>
-    <Separator class="flex-1" />
+    </NTooltip>
+    <NDivider class="flex-1" />
   </div>
 </template>
+
+<style scoped>
+.t-checkpoint__icon { color: var(--tnzi-base-text-muted); }
+</style>

@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tnzi\Tnzi.csproj" />
+    <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

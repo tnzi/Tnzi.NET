@@ -1,0 +1,6 @@
+/* Tnzi UI Admin base styles — Phase 2b (vite plugin + ui import deferred to Phase 6) */
+:root {
+  --tnzi-admin-header-height: 56px;
+  --tnzi-admin-tab-height: 40px;
+  --tnzi-admin-content-padding: 16px;
+}

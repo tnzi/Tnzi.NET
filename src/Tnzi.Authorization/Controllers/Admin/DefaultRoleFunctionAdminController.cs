@@ -20,6 +20,18 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// Canonical paged list of role-function assignments across all roles.
+    /// Used by the RoleFunction admin page (TCrudPage). Filters by role /
+    /// function / enabled state via query string.
+    /// </summary>
+    [HttpGet]
+    public virtual async Task<ApiResult<IPagedList<RoleFunctionDto>>> GetList([FromQuery] RoleFunctionQueryDto query)
+    {
+        var result = await RoleFunctionService.GetRoleFunctionsPagedAsync(query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取角色的功能列表
     /// </summary>
     /// <param name="roleId">角色ID</param>

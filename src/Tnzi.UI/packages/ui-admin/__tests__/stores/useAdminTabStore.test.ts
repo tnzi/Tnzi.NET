@@ -99,4 +99,14 @@ describe('useAdminTabStore', () => {
     store.updateTabTitle('a', 'New')
     expect(store.tabs[0].title).toBe('New')
   })
+
+  it('switchRouteByTab sets activeTabId to the target tab id', () => {
+    const store = useAdminTabStore()
+    store.addTab(sampleRoute('a', 'A'))
+    store.addTab(sampleRoute('b', 'B'))
+    store.setActiveTab('a')
+    expect(store.activeTabId).toBe('a')
+    store.switchRouteByTab({ id: 'b', title: 'B', fullPath: '/b' })
+    expect(store.activeTabId).toBe('b')
+  })
 })

@@ -66,7 +66,10 @@ public class SandboxMiddlewareTests
     public async Task InvokeAsync_Disabled_PassesThrough()
     {
         var options = new SandboxModuleOptions { Enabled = false };
-        var provider = new LocalSandboxProvider(Microsoft.Extensions.Options.Options.Create(options));
+        var provider = new LocalSandboxProvider(
+            Microsoft.Extensions.Options.Options.Create(options),
+            new TestHostEnvironment(),
+            NullLogger<LocalSandboxProvider>.Instance);
         var mw = new SandboxMiddleware(
             provider,
             Microsoft.Extensions.Options.Options.Create(options),
@@ -88,10 +91,22 @@ public class SandboxMiddlewareTests
     private static SandboxMiddleware CreateMiddleware()
     {
         var options = new SandboxModuleOptions();
-        var provider = new LocalSandboxProvider(Microsoft.Extensions.Options.Options.Create(options));
+        var provider = new LocalSandboxProvider(
+            Microsoft.Extensions.Options.Options.Create(options),
+            new TestHostEnvironment(),
+            NullLogger<LocalSandboxProvider>.Instance);
         return new SandboxMiddleware(
             provider,
             Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<SandboxMiddleware>.Instance);
+    }
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Tnzi.AI.Tests";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
+            new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 }

@@ -7,7 +7,7 @@
  * Copy shows a check icon for 2 seconds after clicking.
  */
 
-import { Button, Tooltip } from '../../primitives';
+import { NButton, NTooltip } from 'naive-ui';
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -44,40 +44,36 @@ function handleCopy(): void {
 <template>
   <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
     <!-- Copy -->
-    <Tooltip v-if="showCopy">
+    <NTooltip v-if="showCopy">
       <template #trigger>
-        <Button variant="ghost" size="icon-sm" class="size-7" @click="handleCopy">
-          <Icon
-            :icon="hasCopied ? 'lucide:check' : 'lucide:copy'"
-            class="size-3.5"
-          />
-          <span class="sr-only">{{ hasCopied ? t.chat.copied : t.chat.copy }}</span>
-        </Button>
+        <NButton quaternary size="tiny" @click="handleCopy">
+          <template #icon>
+            <Icon :icon="hasCopied ? 'lucide:check' : 'lucide:copy'" />
+          </template>
+        </NButton>
       </template>
       {{ hasCopied ? t.chat.copied : t.chat.copy }}
-    </Tooltip>
+    </NTooltip>
 
     <!-- Regenerate -->
-    <Tooltip v-if="showRegenerate">
+    <NTooltip v-if="showRegenerate">
       <template #trigger>
-        <Button variant="ghost" size="icon-sm" class="size-7" @click="emit('regenerate')">
-          <Icon icon="lucide:refresh-cw" class="size-3.5" />
-          <span class="sr-only">{{ t.chat.retry }}</span>
-        </Button>
+        <NButton quaternary size="tiny" @click="emit('regenerate')">
+          <template #icon><Icon icon="lucide:refresh-cw" /></template>
+        </NButton>
       </template>
       {{ t.chat.retry }}
-    </Tooltip>
+    </NTooltip>
 
     <!-- Edit -->
-    <Tooltip v-if="showEdit">
+    <NTooltip v-if="showEdit">
       <template #trigger>
-        <Button variant="ghost" size="icon-sm" class="size-7" @click="emit('edit')">
-          <Icon icon="lucide:pencil" class="size-3.5" />
-          <span class="sr-only">{{ t.common.edit }}</span>
-        </Button>
+        <NButton quaternary size="tiny" @click="emit('edit')">
+          <template #icon><Icon icon="lucide:pencil" /></template>
+        </NButton>
       </template>
       {{ t.common.edit }}
-    </Tooltip>
+    </NTooltip>
 
     <!-- Extra actions slot -->
     <slot name="extra" />

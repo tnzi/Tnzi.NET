@@ -12,9 +12,3 @@ export { default as CenteredLayout } from './CenteredLayout.vue'
 // Existing primitives retained
 export { default as TAppHeader } from './TAppHeader.vue'
 export { default as TBreadcrumb } from './TBreadcrumb.vue'
-
-// Deprecated (Phase 0 marking; removed in Phase 2 end)
-/** @deprecated use @tnzi/ui-admin TAdminShell */
-export { default as TAdminLayout } from './TAdminLayout.vue'
-/** @deprecated use @tnzi/ui-admin TAdminSidebar */
-export { default as TAppSidebar } from './TAppSidebar.vue'

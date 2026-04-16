@@ -7,15 +7,15 @@
  *   node tools/release.mjs <包名> [版本类型]
  *
  * 参数:
- *   包名:       core | shadcn | vant | naive-ui | all
+ *   包名:       core | ui | ui-admin | ui-ai | mobile | all
  *   版本类型:   patch (默认) | minor | major | <具体版本号如 0.2.1>
  *
  * 示例:
- *   pnpm release naive-ui              # naive-ui patch 发布 (0.1.0 → 0.1.1)
- *   pnpm release naive-ui minor        # naive-ui minor 发布 (0.1.0 → 0.2.0)
- *   pnpm release naive-ui 0.3.0        # naive-ui 指定版本号
- *   pnpm release all patch             # 所有包 patch 发布
- *   pnpm release --dry naive-ui        # 试运行，不实际发布
+ *   pnpm release ui                    # @tnzi/ui patch 发布 (0.1.2 → 0.1.3)
+ *   pnpm release ui minor              # @tnzi/ui minor 发布 (0.1.2 → 0.2.0)
+ *   pnpm release ui 0.3.0              # @tnzi/ui 指定版本号
+ *   pnpm release all patch             # 所有包 patch 发布 (顺序: core → 其余)
+ *   pnpm release --dry ui              # 试运行，不实际发布
  *   pnpm release --status              # 查看各包当前版本
  */
 
@@ -27,7 +27,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
-const PACKAGES = ['core', 'shadcn', 'vant', 'naive-ui'];
+const PACKAGES = ['core', 'ui', 'ui-admin', 'ui-ai', 'mobile'];
 const SCOPE = '@tnzi';
 
 // ── 工具函数 ──
@@ -43,7 +43,7 @@ function run(cmd, opts = {}) {
 
 function runCapture(cmd) {
   try {
-    return execSync(cmd, { cwd: ROOT, encoding: 'utf-8' }).trim();
+    return execSync(cmd, { cwd: ROOT, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
@@ -154,7 +154,7 @@ if (flags.includes('--help') || flags.includes('-h')) {
 const [target, versionType = 'patch'] = positional;
 
 if (!target) {
-  console.error('用法: pnpm release <core|shadcn|vant|naive-ui|all> [patch|minor|major|x.y.z]');
+  console.error('用法: pnpm release <core|ui|ui-admin|ui-ai|mobile|all> [patch|minor|major|x.y.z]');
   console.error('      pnpm release --status    查看版本');
   console.error('      pnpm release --dry <包>  试运行');
   process.exit(1);

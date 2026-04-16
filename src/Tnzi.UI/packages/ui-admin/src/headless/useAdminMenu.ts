@@ -1,82 +1,42 @@
-import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { ref, computed } from 'vue'
+import { useAdminRouteStore, type AdminMenuItem } from '../stores/useAdminRouteStore'
 
-export interface AdminMenuItem {
-  key: string
-  label: string
-  icon?: string
-  path?: string
-  children?: AdminMenuItem[]
-  permission?: string
-  hidden?: boolean
-}
+/**
+ * Admin menu composable — resolves the active menu item and its parent chain
+ * from a key against the route store's derived menu tree.
+ *
+ * Menus themselves live on `useAdminRouteStore.menus`; this composable owns
+ * only the presentation-level "which key is active" state and the flat index
+ * used for fast lookups / breadcrumb rendering.
+ */
+export function useAdminMenu() {
+  const routeStore = useAdminRouteStore()
+  const activeKey = ref<string>('')
 
-export interface UseAdminMenuOptions {
-  items: AdminMenuItem[]
-  hasPermission?: (permission: string) => boolean
-}
-
-export interface UseAdminMenuReturn {
-  visibleItems: ComputedRef<AdminMenuItem[]>
-  activeKey: Ref<string>
-  openKeys: Ref<string[]>
-  setActive: (key: string) => void
-  toggleOpen: (key: string) => void
-  findItemByPath: (path: string) => AdminMenuItem | undefined
-}
-
-function filterItems(items: AdminMenuItem[], hasPermission?: (p: string) => boolean): AdminMenuItem[] {
-  return items
-    .filter((item) => {
-      if (item.hidden) return false
-      if (item.permission && hasPermission && !hasPermission(item.permission)) return false
-      return true
-    })
-    .map((item) => {
-      if (!item.children) return item
-      const filteredChildren = filterItems(item.children, hasPermission)
-      return { ...item, children: filteredChildren }
-    })
-}
-
-function findByPath(items: AdminMenuItem[], path: string): AdminMenuItem | undefined {
-  for (const item of items) {
-    if (item.path === path) return item
-    if (item.children) {
-      const found = findByPath(item.children, path)
-      if (found) return found
+  const flatIndex = computed(() => {
+    const map = new Map<string, { menu: AdminMenuItem; parents: AdminMenuItem[] }>()
+    function walk(list: AdminMenuItem[], parents: AdminMenuItem[]): void {
+      for (const m of list) {
+        const chain = [...parents, m]
+        map.set(m.key, { menu: m, parents: chain })
+        if (m.children && m.children.length > 0) walk(m.children, chain)
+      }
     }
-  }
-  return undefined
-}
+    walk(routeStore.menus, [])
+    return map
+  })
 
-export function useAdminMenu(options: UseAdminMenuOptions): UseAdminMenuReturn {
-  const activeKey = ref('')
-  const openKeys = ref<string[]>([])
+  const activeMenu = computed<AdminMenuItem | null>(
+    () => flatIndex.value.get(activeKey.value)?.menu ?? null,
+  )
 
-  const visibleItems = computed(() => filterItems(options.items, options.hasPermission))
-
-  function setActive(key: string): void {
-    activeKey.value = key
-  }
-
-  function toggleOpen(key: string): void {
-    if (openKeys.value.includes(key)) {
-      openKeys.value = openKeys.value.filter((k) => k !== key)
-    } else {
-      openKeys.value = [...openKeys.value, key]
-    }
-  }
-
-  function findItemByPath(path: string): AdminMenuItem | undefined {
-    return findByPath(options.items, path)
-  }
+  const parentChain = computed<AdminMenuItem[]>(
+    () => flatIndex.value.get(activeKey.value)?.parents ?? [],
+  )
 
   return {
-    visibleItems,
     activeKey,
-    openKeys,
-    setActive,
-    toggleOpen,
-    findItemByPath,
+    activeMenu,
+    parentChain,
   }
 }

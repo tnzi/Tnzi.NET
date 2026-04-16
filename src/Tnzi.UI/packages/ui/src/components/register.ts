@@ -29,9 +29,7 @@ import TUserCard from './card/TUserCard.vue';
 import TStatCard from './card/TStatCard.vue';
 
 // Layout components
-import TAdminLayout from './layout/TAdminLayout.vue';
 import TAppHeader from './layout/TAppHeader.vue';
-import TAppSidebar from './layout/TAppSidebar.vue';
 import TBreadcrumb from './layout/TBreadcrumb.vue';
 
 // Navigation components
@@ -41,9 +39,6 @@ import TTabBar from './navigation/TTabBar.vue';
 
 // Icon components
 import { TIcon } from './icon/index';
-
-// CRUD components
-import TCrudPage from './crud/TCrudPage.vue';
 
 /**
  * Register all Tnzi UI components globally.
@@ -61,13 +56,10 @@ export function registerAllComponents(app: App): void {
   app.component('TSearchForm', TSearchForm);
   app.component('TUserCard', TUserCard);
   app.component('TStatCard', TStatCard);
-  app.component('TAdminLayout', TAdminLayout);
   app.component('TAppHeader', TAppHeader);
-  app.component('TAppSidebar', TAppSidebar);
   app.component('TBreadcrumb', TBreadcrumb);
   app.component('TMenu', TMenu);
   app.component('TNavBar', TNavBar);
   app.component('TTabBar', TTabBar);
   app.component('TIcon', TIcon);
-  app.component('TCrudPage', TCrudPage);
 }

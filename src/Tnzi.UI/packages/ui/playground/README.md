@@ -36,7 +36,6 @@ Naive UI 组件库的完整展示和测试环境。
 - TSearchForm - 搜索表单
 - TStatCard - 统计卡片
 - TUserCard - 用户卡片
-- TAdminLayout - 后台布局
 - TMenu - 菜单
 - TNavBar - 导航栏
 - TTabBar - 标签栏

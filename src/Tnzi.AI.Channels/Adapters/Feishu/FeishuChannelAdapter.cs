@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Tnzi.AI.Channels.Adapters.Feishu;
 
@@ -16,6 +18,10 @@ namespace Tnzi.AI.Channels.Adapters.Feishu;
 public class FeishuChannelAdapter : IChannelAdapter
 {
     private const string BaseUrl = "https://open.feishu.cn/open-apis";
+    private const string HeaderTimestamp = "X-Lark-Request-Timestamp";
+    private const string HeaderNonce = "X-Lark-Request-Nonce";
+    private const string HeaderSignature = "X-Lark-Signature";
+    private const int SignatureWindowSeconds = 300;
 
     private readonly ILogger<FeishuChannelAdapter> _logger;
     private readonly IChannelMessageBus _bus;
@@ -62,18 +68,113 @@ public class FeishuChannelAdapter : IChannelAdapter
     }
 
     /// <summary>
-    /// 处理飞书 Webhook 事件（由 ASP.NET Controller 调用）
+    /// Handle Feishu webhook event with request headers for signature verification.
+    /// Invoked by ASP.NET controller. Rejects the event if EncryptKey is configured
+    /// but signature verification fails or headers are missing.
     /// </summary>
-    public async Task HandleEventAsync(string eventJson, CancellationToken ct = default)
+    /// <param name="eventJson">Raw request body</param>
+    /// <param name="headers">HTTP request headers (X-Lark-Request-Timestamp / X-Lark-Request-Nonce / X-Lark-Signature)</param>
+    /// <param name="ct">Cancellation token</param>
+    public Task HandleEventAsync(string eventJson, IDictionary<string, string>? headers, CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.EncryptKey))
+        {
+            if (headers is null || !ValidateFeishuSignature(eventJson, headers))
+            {
+                _logger.LogWarning("Feishu webhook signature verification failed or headers missing, rejecting event");
+                return Task.CompletedTask;
+            }
+        }
+
+        return HandleEventCoreAsync(eventJson, ct);
+    }
+
+    /// <summary>
+    /// Handle Feishu webhook event (no-headers compatibility overload).
+    /// Rejects the event if EncryptKey is configured since signature verification
+    /// cannot be performed without headers.
+    /// </summary>
+    public Task HandleEventAsync(string eventJson, CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.EncryptKey))
+        {
+            _logger.LogWarning("Feishu EncryptKey is configured but HandleEventAsync called without headers, rejecting event");
+            return Task.CompletedTask;
+        }
+
+        return HandleEventCoreAsync(eventJson, ct);
+    }
+
+    /// <summary>
+    /// Validate Feishu webhook signature per Lark Open Platform event v2 spec:
+    /// compare SHA256(timestamp + nonce + encrypt_key + body) against the header
+    /// after a 5-minute replay window check. Uses a constant-time byte comparison
+    /// and tolerates any hex casing / length mismatch without throwing.
+    /// </summary>
+    internal bool ValidateFeishuSignature(string body, IDictionary<string, string> headers)
+    {
+        if (!headers.TryGetValue(HeaderTimestamp, out var timestampStr) || string.IsNullOrWhiteSpace(timestampStr))
+        {
+            _logger.LogDebug("Missing {Header} header", HeaderTimestamp);
+            return false;
+        }
+
+        if (!headers.TryGetValue(HeaderNonce, out var nonce) || string.IsNullOrWhiteSpace(nonce))
+        {
+            _logger.LogDebug("Missing {Header} header", HeaderNonce);
+            return false;
+        }
+
+        if (!headers.TryGetValue(HeaderSignature, out var signature) || string.IsNullOrWhiteSpace(signature))
+        {
+            _logger.LogDebug("Missing {Header} header", HeaderSignature);
+            return false;
+        }
+
+        if (!long.TryParse(timestampStr, out var timestamp))
+        {
+            _logger.LogDebug("Invalid {Header} value", HeaderTimestamp);
+            return false;
+        }
+
+        var drift = Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - timestamp);
+        if (drift > SignatureWindowSeconds)
+        {
+            _logger.LogDebug("Feishu request timestamp is too old ({Diff}s)", drift);
+            return false;
+        }
+
+        var stringToSign = timestampStr + nonce + _options.EncryptKey + body;
+        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(stringToSign));
+
+        // Parse the incoming hex (case-insensitive, length-validating) and compare
+        // raw 32-byte arrays. Convert.FromHexString throws FormatException on bad
+        // input; swallowing keeps the adapter robust against malformed headers and
+        // prevents CryptographicException from FixedTimeEquals when lengths differ.
+        byte[] actualHash;
+        try
+        {
+            actualHash = Convert.FromHexString(signature);
+        }
+        catch (FormatException)
+        {
+            _logger.LogDebug("Feishu signature header is not valid hex");
+            return false;
+        }
+
+        return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
+    }
+
+    private async Task HandleEventCoreAsync(string eventJson, CancellationToken ct)
     {
         try
         {
             using var doc = JsonDocument.Parse(eventJson);
             var root = doc.RootElement;
 
-            // URL 验证 challenge
+            // URL verification challenge
             if (root.TryGetProperty("challenge", out _))
-                return; // Controller 层处理 challenge 响应
+                return; // Controller layer handles challenge response
 
             if (!root.TryGetProperty("event", out var eventObj)) return;
             if (!eventObj.TryGetProperty("message", out var msgObj)) return;
@@ -83,7 +184,7 @@ public class FeishuChannelAdapter : IChannelAdapter
                 ? sender.GetProperty("sender_id").GetProperty("open_id").GetString() ?? ""
                 : "";
 
-            // 用户白名单
+            // User allowlist
             if (_allowedUsers.Count > 0 && !_allowedUsers.Contains(senderId))
             {
                 _logger.LogDebug("Feishu message from non-allowed user {UserId}, ignoring", senderId);
@@ -104,7 +205,7 @@ public class FeishuChannelAdapter : IChannelAdapter
                 Text: text,
                 Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat);
 
-            await _bus.PublishInboundAsync(inbound);
+            await _bus.PublishInboundAsync(inbound, ct);
         }
         catch (Exception ex)
         {

@@ -3,22 +3,27 @@
  * WorkflowPanel — Canvas floating panel
  */
 
-import { cn } from '@/lib/utils';
-
 defineProps<{
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 }>();
-
-const positionClasses: Record<string, string> = {
-  'top-left': 'top-3 left-3',
-  'top-right': 'top-3 right-3',
-  'bottom-left': 'bottom-3 left-3',
-  'bottom-right': 'bottom-3 right-3',
-};
 </script>
 
 <template>
-  <div :class="cn('absolute z-10', positionClasses[position ?? 'top-right'])">
+  <div
+    class="t-wf-panel"
+    :class="`t-wf-panel--${position ?? 'top-right'}`"
+  >
     <slot />
   </div>
 </template>
+
+<style scoped>
+.t-wf-panel {
+  position: absolute;
+  z-index: 10;
+}
+.t-wf-panel--top-left { top: 12px; left: 12px; }
+.t-wf-panel--top-right { top: 12px; right: 12px; }
+.t-wf-panel--bottom-left { bottom: 12px; left: 12px; }
+.t-wf-panel--bottom-right { bottom: 12px; right: 12px; }
+</style>

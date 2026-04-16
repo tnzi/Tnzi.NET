@@ -1,4 +1,5 @@
 
+using Microsoft.AspNetCore.DataProtection;
 using OpenAI.Chat;
 using OpenAI.Embeddings;
 
@@ -9,21 +10,37 @@ namespace Tnzi.AI.Infrastructure.Providers;
 /// </summary>
 public class ChatClientFactory : IChatClientFactory
 {
+    // TTL for DB-sourced provider options. Balances DB round-trip cost against
+    // staleness after admin edits to the Provider entity.
+    private static readonly TimeSpan DbProviderCacheTtl = TimeSpan.FromSeconds(60);
+
     private readonly IOptionsMonitor<AIOptions> _options;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly Dictionary<string, IChatClientProvider> _providers;
     private ConcurrentDictionary<string, IChatClient> _chatClients = new();
     private ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>> _embeddingClients = new();
     private ConcurrentDictionary<string, ChatClient> _openAIChatClients = new();
     private ConcurrentDictionary<string, EmbeddingClient> _openAIEmbeddingClients = new();
+
+    // DB-sourced provider cache. Lazy<T> wrapping ensures the DB query runs exactly
+    // once per key per TTL window even under concurrent first-callers (stampede
+    // protection). Null entry.Value.Options == confirmed-not-in-DB (negative cache).
+    private readonly ConcurrentDictionary<string, Lazy<DbProviderCacheEntry>> _dbProviderCache
+        = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly ILogger<ChatClientFactory> _logger;
+
+    private readonly record struct DbProviderCacheEntry(DateTime ExpiresAt, ProviderOptions? Options);
 
     public ChatClientFactory(
         IOptionsMonitor<AIOptions> options,
         IEnumerable<IChatClientProvider> providers,
+        IServiceScopeFactory scopeFactory,
         ILogger<ChatClientFactory> logger)
     {
         _options = Check.NotNull(options);
         Check.NotNull(providers);
+        _scopeFactory = Check.NotNull(scopeFactory);
         _logger = Check.NotNull(logger);
 
         // 配置热更新时原子替换整个字典引用，避免 Clear() 的竞态窗口
@@ -34,6 +51,10 @@ public class ChatClientFactory : IChatClientFactory
             var oldEmbeddingClients = Interlocked.Exchange(ref _embeddingClients, new ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>>());
             Volatile.Write(ref _openAIChatClients, new ConcurrentDictionary<string, ChatClient>());
             Volatile.Write(ref _openAIEmbeddingClients, new ConcurrentDictionary<string, EmbeddingClient>());
+
+            // Also clear DB provider cache so next resolution re-reads the DB in case
+            // the admin updated both config and DB rows in tandem.
+            _dbProviderCache.Clear();
 
             // 异步 Dispose 旧客户端，避免阻塞 OnChange 回调
             Task.Run(() => DisposeOldClientsAsync(oldChatClients, oldEmbeddingClients));
@@ -169,11 +190,35 @@ public class ChatClientFactory : IChatClientFactory
     }
 
     /// <summary>
-    /// 解析并验证提供商配置
+    /// 解析并验证提供商配置 — DB 记录优先于 appsettings 配置（override/补充层语义）。
     /// </summary>
+    /// <remarks>
+    /// Resolution order:
+    ///   1. If a Provider entity exists in DB with matching Name AND IsEnabled, use it
+    ///      (merged with matching config entry — DB fields override config fields).
+    ///   2. Otherwise fall back to appsettings.json `AI:Providers` configuration.
+    /// This gives admins a way to add/override providers at runtime without restart.
+    /// DB lookups are cached for <see cref="DbProviderCacheTtl"/> to avoid hot-path
+    /// round-trips; cache is invalidated on config hot-reload and on the TTL boundary.
+    /// </remarks>
     private (string name, ProviderOptions options) ResolveProvider(string? providerName)
     {
         providerName ??= _options.CurrentValue.DefaultProvider;
+        if (string.IsNullOrWhiteSpace(providerName))
+        {
+            throw new InvalidOperationException(
+                "No provider specified and no DefaultProvider configured in AI:DefaultProvider.");
+        }
+
+        var dbOptions = TryResolveFromDatabase(providerName);
+        if (dbOptions is not null)
+        {
+            if (!dbOptions.Enabled)
+            {
+                throw new InvalidOperationException($"Provider '{providerName}' is disabled");
+            }
+            return (providerName, dbOptions);
+        }
 
         if (!_options.CurrentValue.Providers.TryGetValue(providerName, out var providerOptions))
         {
@@ -186,6 +231,107 @@ public class ChatClientFactory : IChatClientFactory
         }
 
         return (providerName, providerOptions);
+    }
+
+    /// <summary>
+    /// Best-effort DB lookup for a Provider entity. Returns null if not found, the
+    /// DB is unavailable, or the IRepository dependency isn't registered (EF Core
+    /// module not loaded). Negative results are cached to avoid re-hitting the DB
+    /// on every call. Lazy&lt;T&gt; wrapping ensures concurrent first-callers for the
+    /// same key share a single DB query (stampede protection).
+    /// </summary>
+    private ProviderOptions? TryResolveFromDatabase(string providerName)
+    {
+        while (true)
+        {
+            var lazy = _dbProviderCache.GetOrAdd(providerName, key => new Lazy<DbProviderCacheEntry>(
+                () => LoadProviderFromDatabase(key),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+
+            var entry = lazy.Value;
+            if (entry.ExpiresAt > DateTime.UtcNow)
+            {
+                return entry.Options;
+            }
+
+            // Expired — evict and retry so the next caller re-runs the factory.
+            _dbProviderCache.TryRemove(new KeyValuePair<string, Lazy<DbProviderCacheEntry>>(providerName, lazy));
+        }
+    }
+
+    private DbProviderCacheEntry LoadProviderFromDatabase(string providerName)
+    {
+        var expiresAt = DateTime.UtcNow.Add(DbProviderCacheTtl);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var repository = scope.ServiceProvider.GetService<IRepository<Entities.Provider, Guid>>();
+            if (repository is null)
+            {
+                return new DbProviderCacheEntry(expiresAt, null);
+            }
+
+            var entity = repository.AsQueryable()
+                .Where(p => p.Name == providerName && p.IsEnabled)
+                .OrderByDescending(p => p.Priority)
+                .FirstOrDefault();
+
+            if (entity is null)
+            {
+                return new DbProviderCacheEntry(expiresAt, null);
+            }
+
+            string? apiKey = null;
+            if (!string.IsNullOrEmpty(entity.ApiKeyEncrypted))
+            {
+                try
+                {
+                    var protector = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>()
+                        .CreateProtector(Entities.Provider.ApiKeyProtectorPurpose);
+                    apiKey = protector.Unprotect(entity.ApiKeyEncrypted);
+                }
+                catch (Exception ex)
+                {
+                    // Data protection key ring rotation is the common cause — re-saving
+                    // the provider re-encrypts with the current key. Fall back to config.
+                    _logger.LogError(ex,
+                        "Failed to decrypt ApiKey for Provider '{Name}' (id={Id}); falling back to configuration",
+                        entity.Name, entity.Id);
+                    return new DbProviderCacheEntry(expiresAt, null);
+                }
+            }
+
+            // Start from the matching config entry (if any) so config-only fields
+            // (TimeoutSeconds, FallbackProviders, Models, Thinking, etc.) survive.
+            var configBase = _options.CurrentValue.Providers.TryGetValue(providerName, out var configOpts)
+                ? configOpts
+                : new ProviderOptions();
+
+            var resolved = new ProviderOptions
+            {
+                Name = entity.Name,
+                Enabled = entity.IsEnabled,
+                ApiKey = apiKey ?? configBase.ApiKey,
+                BaseUrl = entity.Endpoint ?? configBase.BaseUrl,
+                DefaultModel = entity.DefaultModel ?? configBase.DefaultModel,
+                TimeoutSeconds = configBase.TimeoutSeconds,
+                MaxTokens = configBase.MaxTokens,
+                Temperature = configBase.Temperature,
+                FallbackProviders = configBase.FallbackProviders,
+                Models = configBase.Models,
+                Thinking = configBase.Thinking,
+                PromptCaching = configBase.PromptCaching,
+                ContextWindowSize = configBase.ContextWindowSize
+            };
+
+            return new DbProviderCacheEntry(expiresAt, resolved);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to resolve Provider '{Name}' from database, falling back to configuration", providerName);
+            return new DbProviderCacheEntry(expiresAt, null);
+        }
     }
 
     /// <summary>
@@ -232,7 +378,10 @@ public class ChatClientFactory : IChatClientFactory
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to create fallback client for spec '{Spec}', skipping", spec);
+                // Elevated to Error because fallback misconfiguration silently
+                // weakens resilience: the primary provider stays up but the
+                // degraded-mode path is unavailable until an operator notices.
+                _logger.LogError(ex, "Failed to create fallback client for spec '{Spec}', skipping", spec);
             }
         }
         return clients;

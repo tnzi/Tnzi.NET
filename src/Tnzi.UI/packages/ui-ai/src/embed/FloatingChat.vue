@@ -6,7 +6,7 @@
  * Slot: #trigger for custom button.
  */
 
-import { Button } from '../primitives';
+import { NButton } from 'naive-ui';
 import { watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -46,7 +46,7 @@ watch(isOpen, (v) => {
 </script>
 
 <template>
-  <div class="fixed bottom-4 right-4 z-50">
+  <div class="t-floating-chat">
     <!-- Expanded chat window -->
     <Transition
       enter-active-class="transition-all duration-300 ease-out"
@@ -58,18 +58,18 @@ watch(isOpen, (v) => {
     >
       <div
         v-if="isOpen && !isMinimized"
-        class="mb-3 w-[380px] h-[560px] rounded-2xl border bg-background shadow-2xl overflow-hidden flex flex-col"
+        class="t-floating-chat__window"
       >
         <!-- Header -->
-        <div class="flex items-center justify-between border-b px-4 py-2">
+        <div class="t-floating-chat__header">
           <span class="text-sm font-medium">AI Chat</span>
           <div class="flex items-center gap-1">
-            <Button variant="ghost" size="icon-sm" @click="minimize()">
-              <Icon icon="lucide:minimize-2" class="size-3.5" />
-            </Button>
-            <Button variant="ghost" size="icon-sm" @click="toggle()">
-              <Icon icon="lucide:x" class="size-3.5" />
-            </Button>
+            <NButton text size="small" @click="minimize()">
+              <template #icon><Icon icon="lucide:minimize-2" class="size-3.5" /></template>
+            </NButton>
+            <NButton text size="small" @click="toggle()">
+              <template #icon><Icon icon="lucide:x" class="size-3.5" /></template>
+            </NButton>
           </div>
         </div>
 
@@ -89,28 +89,77 @@ watch(isOpen, (v) => {
     <!-- Minimized bar -->
     <div
       v-if="isOpen && isMinimized"
-      class="mb-3 flex items-center gap-2 rounded-full border bg-background px-4 py-2 shadow-lg cursor-pointer"
+      class="t-floating-chat__minimized"
       @click="expand()"
     >
-      <Icon icon="lucide:message-circle" class="size-4 text-primary" />
+      <Icon icon="lucide:message-circle" class="size-4 t-floating-chat__primary-icon" />
       <span class="text-sm">AI Chat</span>
-      <Button variant="ghost" size="icon-sm" class="size-5" @click.stop="toggle()">
-        <Icon icon="lucide:x" class="size-3" />
-      </Button>
+      <NButton text size="small" class="size-5" @click.stop="toggle()">
+        <template #icon><Icon icon="lucide:x" class="size-3" /></template>
+      </NButton>
     </div>
 
     <!-- Trigger button -->
     <slot name="trigger">
-      <Button
-        size="icon"
-        class="size-12 rounded-full shadow-lg"
+      <NButton
+        type="primary"
+        round
+        class="t-floating-chat__fab"
         @click="toggle()"
       >
-        <Icon
-          :icon="isOpen ? 'lucide:x' : 'lucide:message-circle'"
-          class="size-5"
-        />
-      </Button>
+        <template #icon>
+          <Icon
+            :icon="isOpen ? 'lucide:x' : 'lucide:message-circle'"
+            class="size-5"
+          />
+        </template>
+      </NButton>
     </slot>
   </div>
 </template>
+
+<style scoped>
+.t-floating-chat {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 50;
+}
+.t-floating-chat__window {
+  margin-bottom: 12px;
+  width: 380px;
+  height: 560px;
+  border-radius: 16px;
+  border: 1px solid var(--tnzi-border);
+  background-color: var(--tnzi-container-bg);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.t-floating-chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--tnzi-border);
+  padding: 8px 16px;
+}
+.t-floating-chat__minimized {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--tnzi-border);
+  background-color: var(--tnzi-container-bg);
+  padding: 8px 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+}
+.t-floating-chat__primary-icon { color: var(--tnzi-primary); }
+.t-floating-chat__fab {
+  width: 48px;
+  height: 48px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+</style>

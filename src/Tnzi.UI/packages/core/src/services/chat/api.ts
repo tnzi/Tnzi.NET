@@ -15,11 +15,17 @@ import type {
   MessageQueryDto,
   AdminMessageQueryDto,
   ChatStatisticsDto,
+  ChatSessionDto,
+  ChatSessionListItemDto,
+  CreateChatSessionDto,
+  UpdateChatSessionDto,
+  ChatSessionQueryDto,
 } from './types';
 
 // Routes aligned with backend DefaultChatController / DefaultChatAdminController
 const BASE = '/messages';
 const ADMIN_BASE = '/admin/messages';
+const ADMIN_SESSION_BASE = '/admin/chat-sessions';
 
 /**
  * Chat Message API (User)
@@ -102,5 +108,37 @@ export function useChatAdminApi(client: HttpClient) {
     /** Get statistics - GET /admin/messages/statistics */
     getStatistics: (params?: { startDate?: string; endDate?: string }) =>
       client.get<ChatStatisticsDto>(`${ADMIN_BASE}/statistics`, { params }),
+  };
+}
+
+/**
+ * Chat Session Admin API
+ * Backend: DefaultChatSessionAdminController [Route("admin/chat-sessions")]
+ */
+export function useAdminChatSessionApi(client: HttpClient) {
+  return {
+    /** Get paged list - GET /admin/chat-sessions */
+    getList: (params?: ChatSessionQueryDto) =>
+      client.get<PagedList<ChatSessionListItemDto>>(ADMIN_SESSION_BASE, { params }),
+
+    /** Get by id - GET /admin/chat-sessions/{id} */
+    getById: (id: string) =>
+      client.get<ChatSessionDto>(`${ADMIN_SESSION_BASE}/${id}`),
+
+    /** Create - POST /admin/chat-sessions */
+    create: (data: CreateChatSessionDto) =>
+      client.post<ChatSessionDto>(ADMIN_SESSION_BASE, data),
+
+    /** Update - PUT /admin/chat-sessions/{id} */
+    update: (id: string, data: UpdateChatSessionDto) =>
+      client.put<ChatSessionDto>(`${ADMIN_SESSION_BASE}/${id}`, data),
+
+    /** Delete - DELETE /admin/chat-sessions/{id} */
+    delete: (id: string) =>
+      client.delete<void>(`${ADMIN_SESSION_BASE}/${id}`),
+
+    /** Batch delete - DELETE /admin/chat-sessions/batch */
+    deleteBatch: (ids: string[]) =>
+      client.delete<number>(`${ADMIN_SESSION_BASE}/batch`, { body: ids }),
   };
 }

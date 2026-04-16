@@ -3,7 +3,7 @@
  * OpenIn — Open in external platform dropdown
  */
 
-import { DropdownMenu, Button } from '../../primitives';
+import { NDropdown, NButton } from 'naive-ui';
 import { h } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '@/locale/index';
@@ -29,19 +29,11 @@ const platforms: ExternalPlatform[] = [
   { id: 'v0', name: 'v0', icon: 'simple-icons:vercel', createUrl: (q) => `https://v0.dev/chat?q=${encodeURIComponent(q)}` },
 ];
 
-const options = [
-  {
-    key: 'header',
-    type: 'render',
-    render: () => h('div', { class: 'px-2 py-1.5 text-xs font-semibold text-muted-foreground' }, t.value.openIn.label),
-  },
-  { type: 'divider', key: 'd1' },
-  ...platforms.map((p) => ({
-    key: p.id,
-    label: p.name,
-    icon: () => h(Icon, { icon: p.icon, class: 'size-4' }),
-  })),
-];
+const options = platforms.map((p) => ({
+  key: p.id,
+  label: p.name,
+  icon: () => h(Icon, { icon: p.icon, class: 'size-4' }),
+}));
 
 function handleSelect(key: string): void {
   const platform = platforms.find((p) => p.id === key);
@@ -52,13 +44,11 @@ function handleSelect(key: string): void {
 </script>
 
 <template>
-  <DropdownMenu :options="options" trigger="click" @select="handleSelect">
-    <span class="inline-flex">
-      <Button variant="outline" size="sm" class="gap-1.5">
-        <Icon icon="lucide:message-circle" class="size-4" />
-        {{ t.openIn.label }}
-        <Icon icon="lucide:chevron-down" class="size-3" />
-      </Button>
-    </span>
-  </DropdownMenu>
+  <NDropdown :options="options" trigger="click" @select="handleSelect">
+    <NButton secondary size="small">
+      <template #icon><Icon icon="lucide:message-circle" class="size-4" /></template>
+      {{ t.openIn.label }}
+      <Icon icon="lucide:chevron-down" class="size-3 ml-1" />
+    </NButton>
+  </NDropdown>
 </template>

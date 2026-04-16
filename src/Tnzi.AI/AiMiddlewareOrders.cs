@@ -53,7 +53,7 @@ public static class AiMiddlewareOrders
     /// <summary>上下文注入：Memory/RAG/Skill/Soul/UserProfile/Template (Phase 3 enhanced)</summary>
     public const int ContextInjection = 400;
 
-    /// <summary>TODO 任务管理 (Phase 3)</summary>
+    /// <summary>Todo 任务管理</summary>
     public const int Todo = 420;
 
     /// <summary>技能约束执行：工具组/模型/Provider 过滤 (Phase 5 enhanced: audit)</summary>

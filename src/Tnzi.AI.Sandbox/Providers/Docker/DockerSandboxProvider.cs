@@ -124,11 +124,17 @@ public class DockerSandboxProvider : ISandboxProvider
         // 内存限制: Docker 使用字节
         var memoryBytes = (long)dockerOpts.MemoryLimitMb * 1024 * 1024;
 
+        // Docker API expects Env as ["KEY=VALUE", ...] at the root of the create body.
+        var envList = options.EnvironmentOverrides is { Count: > 0 }
+            ? options.EnvironmentOverrides.Select(kv => $"{kv.Key}={kv.Value}").ToArray()
+            : null;
+
         var createBody = new
         {
             Image = dockerOpts.Image,
             Cmd = new[] { "tail", "-f", "/dev/null" }, // 保持容器运行
             WorkingDir = "/workspace",
+            Env = envList,
             HostConfig = new
             {
                 Binds = new[] { $"{options.WorkspacePath}:/workspace" },

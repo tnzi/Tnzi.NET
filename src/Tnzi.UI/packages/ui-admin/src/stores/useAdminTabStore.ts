@@ -137,6 +137,12 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     activeTabId.value = id
   }
 
+  // Presentation stub — Task 2.29 router guard will replace this with real navigation.
+  // Keeping it on the store lets TAdminTabs stay router-agnostic and unit-testable.
+  function switchRouteByTab(tab: AdminTab): void {
+    activeTabId.value = tab.id
+  }
+
   return {
     tabs,
     activeTabId,
@@ -152,6 +158,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     moveTab,
     updateTabTitle,
     setActiveTab,
+    switchRouteByTab,
     findTab,
   }
 }, {

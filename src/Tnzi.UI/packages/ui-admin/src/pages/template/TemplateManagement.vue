@@ -1,67 +1,117 @@
-<script setup lang="ts">
-import CrudPage from '../../components/crud/CrudPage.vue'
-import type { CrudPageQuery, CrudPageResult } from '../../headless/useCrudPage'
-
-const columns = [
-  { key: 'id', title: 'ID', width: 80 },
-  { key: 'name', title: 'Name', sortable: true },
-  { key: 'type', title: 'Type' },
-  { key: 'isActive', title: 'Active' },
-  { key: 'creationTime', title: 'Created At', sortable: true },
-]
-
-const templateTypes = ['Email', 'SMS', 'Push', 'InApp']
-
-async function fetchData(query: CrudPageQuery): Promise<CrudPageResult<any>> {
-  return { items: [], totalCount: 0, pageIndex: query.pageIndex, pageSize: query.pageSize }
-}
-</script>
-
 <template>
-  <CrudPage
-    title="Template Management"
-    :columns="columns"
-    :fetch-fn="fetchData"
-    row-key="id"
-    searchable
-    creatable
-    editable
-    deletable
+  <!--
+    TemplateManagement page — Phase 3.36
+    Admin CRUD for notification/email templates.
+    Row actions "Preview" and "Clone":
+      Preview: calls bridge.templates.render(id, {}) and displays rendered HTML in modal.
+      Clone:   calls bridge.templates.clone(id) then refreshes the table.
+  -->
+  <TCrudPage
+    :state="crud"
+    :all-columns="templateColumns"
+    title="Templates"
+    :translate="t"
   >
-    <template #form-modal="{ data }">
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium mb-1">Name</label>
-          <input
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            type="text"
-            :value="(data as any).name"
-            placeholder="Name"
-            @input="(e: Event) => { (data as any).name = (e.target as HTMLInputElement).value }"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1">Type</label>
-          <select
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            :value="(data as any).type"
-            @change="(e: Event) => { (data as any).type = (e.target as HTMLSelectElement).value }"
-          >
-            <option value="">-- Select Type --</option>
-            <option v-for="t in templateTypes" :key="t" :value="t">{{ t }}</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1">Content</label>
-          <textarea
-            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            rows="6"
-            :value="(data as any).content"
-            placeholder="Template content..."
-            @input="(e: Event) => { (data as any).content = (e.target as HTMLTextAreaElement).value }"
-          />
-        </div>
-      </div>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="templateFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+      />
     </template>
-  </CrudPage>
+
+    <template #rowActions="{ row }">
+      <Button
+        size="small"
+        type="info"
+        style="margin-right: 4px;"
+        @click="openPreview(row as TemplateRow)"
+      >
+        Preview
+      </Button>
+      <Button
+        size="small"
+        type="default"
+        @click="handleClone(row as TemplateRow)"
+      >
+        Clone
+      </Button>
+    </template>
+  </TCrudPage>
+
+  <!-- Preview modal -->
+  <Modal
+    v-if="previewVisible"
+    :show="previewVisible"
+    title="Template Preview"
+    style="width: 640px;"
+    @update:show="(v: boolean) => { if (!v) previewVisible = false }"
+  >
+    <div
+      v-if="previewContent"
+      class="template-preview-content"
+      style="max-height: 60vh; overflow-y: auto; padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px;"
+      v-html="previewContent"
+    />
+    <p v-else style="color: #999;">No preview content available.</p>
+    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+      <Button @click="previewVisible = false">Close</Button>
+    </div>
+  </Modal>
 </template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { NButton as Button, NModal as Modal } from 'naive-ui'
+import TCrudPage from '../../components/crud/TCrudPage.vue'
+import { useCrudPage } from '../../headless/useCrudPage'
+import { createTemplateBridge } from '../../services/bridges/template-bridge'
+import { useAdminClient } from '../../plugin/client'
+import TFormSchemaRenderer from '../_shared/form-schema'
+import { templateColumns, templateFormSchema } from './template-config'
+import { translatePageKey } from '../_shared/translate'
+import type { TemplateInfoDto } from '@tnzi/core/services/template'
+
+type TemplateRow = TemplateInfoDto & { id: string }
+
+const bridge = createTemplateBridge({ client: useAdminClient() })
+
+const crud = useCrudPage<TemplateInfoDto, string>({
+  pageId: 'template.templates',
+  columns: templateColumns,
+  rowKey: (r) => r.id,
+  fetchData: (query) => bridge.templates.fetch(query),
+  createData: async (data) => bridge.templates.create(data as Partial<TemplateInfoDto>),
+  updateData: async (id, data) => bridge.templates.update(id, data as Partial<TemplateInfoDto>),
+  deleteData: async (ids) => bridge.templates.delete(ids),
+})
+
+
+// Preview dialog state
+const previewVisible = ref(false)
+const previewContent = ref('')
+
+async function openPreview(row: TemplateRow): Promise<void> {
+  try {
+    previewContent.value = await bridge.templates.render(row.id, {})
+  } catch {
+    previewContent.value = ''
+  }
+  previewVisible.value = true
+}
+
+async function handleClone(row: TemplateRow): Promise<void> {
+  try {
+    await bridge.templates.clone(row.id)
+    await crud.refresh()
+  } catch {
+    // Error handling deferred to error boundary / toast in full integration
+  }
+}
+
+onMounted(() => {
+  crud.refresh().catch(() => undefined)
+})
+
+const t = (key: string) => translatePageKey('template.templates', key)
+</script>
