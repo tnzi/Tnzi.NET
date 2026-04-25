@@ -45,14 +45,9 @@ public class AgentExecutorOptions
     public int ToolTimeoutSeconds { get; set; } = 120;
 
     /// <summary>
-    /// 历史消息压缩器（可选）
+    /// 历史消息压缩器（可选）— invoked by AgentExecutor before the tool-calling loop.
     /// </summary>
     public IHistoryReducer? HistoryReducer { get; set; }
-
-    /// <summary>
-    /// 上下文注入提供者（可选）
-    /// </summary>
-    public IContextProvider? ContextProvider { get; set; }
 
     /// <summary>
     /// 工具执行中间件列表（按注册顺序执行，洋葱模型）

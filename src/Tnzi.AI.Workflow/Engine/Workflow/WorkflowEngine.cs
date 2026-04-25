@@ -14,12 +14,10 @@ namespace Tnzi.AI.Engine.Workflow;
 /// </remarks>
 public partial class WorkflowEngine
 {
-    private readonly WorkflowNodeExecutor _nodeExecutor;
     private readonly ILogger<WorkflowEngine> _logger;
 
-    public WorkflowEngine(WorkflowNodeExecutor nodeExecutor, ILogger<WorkflowEngine> logger)
+    public WorkflowEngine(ILogger<WorkflowEngine> logger)
     {
-        _nodeExecutor = Check.NotNull(nodeExecutor);
         _logger = Check.NotNull(logger);
     }
 
@@ -108,8 +106,10 @@ public partial class WorkflowEngine
             var readyNodes = graph.GetReadyNodes(completed);
             if (readyNodes.Count == 0) break;
 
-            // 并行执行就绪节点
-            var executionTasks = readyNodes.Select(async step =>
+            // Phase 1 (sequential, outer scope) — create/track node records, evaluate conditions.
+            // All run-store mutations happen here on a single DbContext, never under Task.WhenAll.
+            var prepared = new List<NodePreparation>(readyNodes.Count);
+            foreach (var step in readyNodes)
             {
                 var stepId = step.StepId!;
                 var nodeRecord = await EnsureRunNodeAsync(
@@ -120,7 +120,6 @@ public partial class WorkflowEngine
                     BuildNodeInputSummary(step, state),
                     cancellationToken);
 
-                // 评估条件
                 if (!string.IsNullOrWhiteSpace(step.Condition))
                 {
                     var evaluatedCondition = state.ResolveTemplate(step.Condition);
@@ -131,9 +130,9 @@ public partial class WorkflowEngine
                             Output = string.Empty,
                             IsSuccess = true
                         };
-
                         await UpdateRunNodeAsync(runStore, nodeRecord, AgentRunNodeStatus.Skipped, skippedResult, null, cancellationToken);
-                        return (stepId, nodeRecord, result: skippedResult, skipped: true);
+                        prepared.Add(new NodePreparation(step, stepId, nodeRecord, ResumeData: null, Skipped: true, SkippedResult: skippedResult));
+                        continue;
                     }
                 }
 
@@ -143,7 +142,6 @@ public partial class WorkflowEngine
                     await runStore!.UpdateNodeAsync(nodeRecord, cancellationToken);
                 }
 
-                // 传递恢复数据（如果此步骤是中断恢复的目标）
                 Dictionary<string, object>? resumeData = null;
                 if (options?.ResumeStepId != null
                     && string.Equals(options.ResumeStepId, stepId, StringComparison.OrdinalIgnoreCase)
@@ -152,11 +150,33 @@ public partial class WorkflowEngine
                     resumeData = options.ResumeData;
                 }
 
-                var result = await _nodeExecutor.ExecuteAsync(step, state, run, resumeData, cancellationToken);
-                return (stepId, nodeRecord, result, skipped: false);
-            }).ToList();
+                prepared.Add(new NodePreparation(step, stepId, nodeRecord, resumeData, Skipped: false, SkippedResult: null));
+            }
 
-            var results = await Task.WhenAll(executionTasks);
+            // Phase 2 (parallel) — execute the actual node logic.
+            // Each task gets its own DI scope so that scoped dependencies (DbContext, ChatClient,
+            // tool middlewares, etc.) cannot interfere across concurrent fan-out nodes.
+            var executionTasks = prepared
+                .Where(p => !p.Skipped)
+                .Select(async p =>
+                {
+                    using var scope = serviceProvider.CreateScope();
+                    var scopedExecutor = scope.ServiceProvider.GetRequiredService<WorkflowNodeExecutor>();
+                    var result = await scopedExecutor.ExecuteAsync(p.Step, state, run, p.ResumeData, cancellationToken);
+                    return (p.StepId, p.NodeRecord, result, skipped: false);
+                })
+                .ToList();
+
+            var executedResults = await Task.WhenAll(executionTasks);
+            var executedById = executedResults.ToDictionary(r => r.StepId, StringComparer.OrdinalIgnoreCase);
+
+            // Phase 3 (sequential) — merge skipped + executed in ready-order for deterministic
+            // post-processing (state writes, conditional edges, loops, run-store updates).
+            var results = prepared
+                .Select(p => p.Skipped
+                    ? (p.StepId, p.NodeRecord, p.SkippedResult!, skipped: true)
+                    : executedById[p.StepId])
+                .ToArray();
 
             foreach (var (stepId, nodeRecord, result, skipped) in results)
             {
@@ -298,6 +318,18 @@ public partial class WorkflowEngine
             totalInputTokens, totalOutputTokens, failed, cancelled, awaitingApproval, awaitingApprovalStepId,
             awaitingInterrupt, checkpointStore, checkpointCreatedAt, run, runStore, cancellationToken);
     }
+
+    /// <summary>
+    /// Node preparation result captured in the sequential phase before parallel execution.
+    /// Carries either the prepared step (to execute in its own scope) or a pre-computed skipped result.
+    /// </summary>
+    private sealed record NodePreparation(
+        WorkflowStepDto Step,
+        string StepId,
+        AgentRunNode? NodeRecord,
+        Dictionary<string, object>? ResumeData,
+        bool Skipped,
+        WorkflowNodeResult? SkippedResult);
 
 }
 

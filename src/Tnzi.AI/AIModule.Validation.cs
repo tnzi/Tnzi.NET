@@ -30,11 +30,16 @@ public partial class AIModule
                 "AI:ContextProviders:EntityMemory is enabled, but no enabled AI provider is configured for entity extraction.");
         }
 
-        if (options.BuiltInTools.Enabled && options.BuiltInTools.EnableWebSearch
-            && serviceProvider.GetService<IWebSearchProvider>() == null)
+        if (options.BuiltInTools.Enabled && options.BuiltInTools.EnableWebSearch)
         {
-            throw new InvalidOperationException(
-                "AI:BuiltInTools:EnableWebSearch is enabled, but no IWebSearchProvider is registered.");
+            // Resolve through a scope so a Scoped IWebSearchProvider registration is
+            // also detected (matches the ISkillRegistry probe pattern below).
+            using var scope = serviceProvider.CreateScope();
+            if (scope.ServiceProvider.GetService<IWebSearchProvider>() == null)
+            {
+                throw new InvalidOperationException(
+                    "AI:BuiltInTools:EnableWebSearch is enabled, but no IWebSearchProvider is registered.");
+            }
         }
 
         if (options.ContextProviders.Enabled)
@@ -66,6 +71,33 @@ public partial class AIModule
             {
                 logger.LogWarning(
                     "AI skills context provider is enabled but no ISkillRegistry is registered. Skill context injection will be unavailable.");
+            }
+        }
+
+        using (var scope = serviceProvider.CreateScope())
+        {
+            if (scope.ServiceProvider.GetService<IExternalCliExecutor>() is INoOpService)
+            {
+                logger.LogInformation(
+                    "IExternalCliExecutor is a no-op fallback; ExternalCli agents will fail at runtime until Tnzi.AI.Cli module is loaded.");
+            }
+
+            if (scope.ServiceProvider.GetService<IWorkflowExecutionMailbox>() is INoOpService)
+            {
+                logger.LogInformation(
+                    "IWorkflowExecutionMailbox is a no-op fallback; workflow signal dispatch will be unavailable until a workflow module is loaded.");
+            }
+
+            if (scope.ServiceProvider.GetService<IVectorStore>() is INoOpService)
+            {
+                logger.LogInformation(
+                    "IVectorStore is a no-op fallback; vector search will return empty results until Tnzi.AI.Rag module is loaded.");
+            }
+
+            if (scope.ServiceProvider.GetService<ISkillService>() is INoOpService)
+            {
+                logger.LogInformation(
+                    "ISkillService is a no-op fallback; skill management APIs will return 501 until Tnzi.AI.Skills module is loaded.");
             }
         }
 

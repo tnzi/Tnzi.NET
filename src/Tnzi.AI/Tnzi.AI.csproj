@@ -19,6 +19,8 @@
     <PackageReference Include="ModelContextProtocol" Version="1.0.0" />
     <!-- YAML parsing for agent definition files -->
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <!-- T-SQL AST parser for AI SQL tools (validator hardening) -->
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="170.3.0" />
     <!-- Document conversion: Office formats -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
     <!-- Document conversion: PDF text extraction -->

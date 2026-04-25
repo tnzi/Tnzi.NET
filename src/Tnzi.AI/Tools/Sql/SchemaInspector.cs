@@ -1,37 +1,46 @@
 using System.Text.RegularExpressions;
-using Tnzi.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Tnzi.AI.Tools.Sql;
 
 /// <summary>
-/// Inspects database schema via ANSI <c>information_schema</c> views, using
-/// <see cref="IReadOnlySqlExecutor"/> so all queries go through the same
-/// validation / permission / read-only pipeline.
+/// Inspects database schema by delegating SQL construction to a dialect-specific
+/// <see cref="ISqlSchemaProvider"/> and routing execution through
+/// <see cref="IReadOnlySqlExecutor"/> so all queries respect the same validation,
+/// permission and read-only guarantees.
 /// </summary>
-public sealed partial class SchemaInspector : ISchemaInspector, IScopedDependency
+public sealed partial class SchemaInspector : ISchemaInspector
 {
     private readonly IReadOnlySqlExecutor _executor;
+    private readonly IReadOnlyDictionary<SqlDialect, ISqlSchemaProvider> _providersByDialect;
+    private readonly SqlToolOptions _options;
+    private readonly ReadOnlySqlExecutionOptions _execOptions;
 
-    // Only allow safe SQL identifier characters to prevent identifier injection
+    // Only allow safe SQL identifier characters to prevent identifier injection.
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.None, matchTimeoutMilliseconds: 100)]
     private static partial Regex SafeIdentifierRegex();
 
-    public SchemaInspector(IReadOnlySqlExecutor executor)
+    public SchemaInspector(
+        IReadOnlySqlExecutor executor,
+        IEnumerable<ISqlSchemaProvider> providers,
+        IOptions<SqlToolOptions> options)
     {
         _executor = Check.NotNull(executor);
+        _options = Check.NotNull(options).Value;
+        _execOptions = new ReadOnlySqlExecutionOptions(Dialect: _options.DefaultDialect);
+
+        var providersList = (providers ?? Array.Empty<ISqlSchemaProvider>()).ToList();
+        // Last registration wins for a given dialect — apps can override the built-in.
+        _providersByDialect = providersList
+            .GroupBy(p => p.Dialect)
+            .ToDictionary(g => g.Key, g => g.Last());
     }
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<TableInfo>> ListTablesAsync(CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT table_schema, table_name, NULL AS comment
-            FROM information_schema.tables
-            WHERE table_type = 'BASE TABLE'
-            ORDER BY table_schema, table_name
-            """;
-
-        var result = await _executor.ExecuteAsync(sql, ct: ct);
+        var provider = ResolveProvider();
+        var result = await _executor.ExecuteAsync(provider.ListTablesQuery(), _execOptions, ct);
 
         return result.Rows
             .Select(row => new TableInfo(
@@ -47,16 +56,8 @@ public sealed partial class SchemaInspector : ISchemaInspector, IScopedDependenc
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
         EnsureSafeIdentifier(tableName);
 
-        // Use inline value — tableName is sanitized by regex; parameterized queries aren't
-        // possible through the generic IReadOnlySqlExecutor text-only contract.
-        var sql = $"""
-            SELECT column_name, data_type, is_nullable, NULL AS comment
-            FROM information_schema.columns
-            WHERE table_name = '{EscapeLiteral(tableName)}'
-            ORDER BY ordinal_position
-            """;
-
-        var result = await _executor.ExecuteAsync(sql, ct: ct);
+        var provider = ResolveProvider();
+        var result = await _executor.ExecuteAsync(provider.ListColumnsQuery(tableName), _execOptions, ct);
 
         return result.Rows
             .Select(row => new ColumnInfo(
@@ -79,18 +80,23 @@ public sealed partial class SchemaInspector : ISchemaInspector, IScopedDependenc
         EnsureSafeIdentifier(tableName);
         EnsureSafeIdentifier(columnName);
 
-        // Both identifiers are regex-validated; quote them for correctness
-        var sql = $"""
-            SELECT DISTINCT "{columnName}"
-            FROM "{tableName}"
-            LIMIT {limit}
-            """;
-
-        var result = await _executor.ExecuteAsync(sql, ct: ct);
+        var provider = ResolveProvider();
+        var sql = provider.ListDistinctValuesQuery(tableName, columnName, limit);
+        var result = await _executor.ExecuteAsync(sql, _execOptions, ct);
 
         return result.Rows
             .Select(row => row.Count > 0 ? row[0] : null)
             .ToList();
+    }
+
+    private ISqlSchemaProvider ResolveProvider()
+    {
+        var dialect = _options.DefaultDialect;
+        if (_providersByDialect.TryGetValue(dialect, out var provider))
+            return provider;
+        throw new InvalidOperationException(
+            $"No ISqlSchemaProvider registered for dialect {dialect}. Register one via DI " +
+            "(AIModule registers TSql/PostgreSQL/MySQL/SQLite by default).");
     }
 
     private static void EnsureSafeIdentifier(string identifier)
@@ -100,10 +106,4 @@ public sealed partial class SchemaInspector : ISchemaInspector, IScopedDependenc
                 $"Invalid identifier '{identifier}'. Only letters, digits, and underscores allowed.",
                 nameof(identifier));
     }
-
-    /// <summary>
-    /// Escapes a single-quote in a SQL string literal (for the WHERE clause).
-    /// Already protected by <see cref="SafeIdentifierRegex"/> — this is belt-and-suspenders.
-    /// </summary>
-    private static string EscapeLiteral(string value) => value.Replace("'", "''");
 }

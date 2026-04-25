@@ -52,25 +52,8 @@ public class DeviceModule : TnziApplicationModule
         }
 
         // Scan and register AI tools (only when enabled)
-        var toolScanner = context.ServiceProvider.GetService<IToolScanner>();
-        if (toolScanner != null)
-        {
-            var toolRegistry = context.ServiceProvider.GetService<IToolRegistry>();
-            if (toolRegistry != null)
-            {
-                var tools = toolScanner.ScanAssembly(typeof(DeviceModule).Assembly);
-                var logger = context.ServiceProvider.GetRequiredService<ILogger<DeviceModule>>();
-                var count = 0;
-
-                foreach (var tool in tools)
-                {
-                    toolRegistry.Register(tool);
-                    count++;
-                }
-
-                logger.LogInformation("Registered {Count} AI device tools", count);
-            }
-        }
+        var logger = context.ServiceProvider.GetRequiredService<ILogger<DeviceModule>>();
+        AIToolRegistration.ScanAndRegisterAITools(context.ServiceProvider, typeof(DeviceModule).Assembly, logger);
 
         return Task.CompletedTask;
     }

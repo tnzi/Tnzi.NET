@@ -1,11 +1,11 @@
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Tnzi.AI.Tools.Sql;
 
 /// <summary>
-/// Extension point for consumers to apply custom permission rules
-/// (e.g. RBAC, tenant-scoped access) before a query executes.
+/// Permission check applied before <see cref="IReadOnlySqlExecutor"/> runs a query.
+/// AIModule registers <see cref="DenyAllSqlPermissionCheck"/> as the fail-secure default —
+/// applications must explicitly register a permissive implementation
+/// (e.g. <see cref="FrameworkPermissionSqlCheck"/> or a custom check)
+/// before AI agents can execute SQL.
 /// </summary>
 public interface IReadOnlySqlPermissionCheck
 {

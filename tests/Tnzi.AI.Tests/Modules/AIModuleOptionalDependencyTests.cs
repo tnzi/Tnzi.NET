@@ -49,16 +49,11 @@ public class AIModuleOptionalDependencyTests
     }
 
     [Fact]
-    public async Task OptionsBuilder_WithSkillsEnabledButWithoutSkillServices_SkipsSkillProvider()
+    public async Task OptionsBuilder_BuildsSuccessfullyWithEmptyContributors()
     {
         var aiOptions = new AIOptions();
         aiOptions.ContextProviders.Enabled = true;
-        aiOptions.ContextProviders.Skills.Enabled = true;
-        aiOptions.ContextProviders.Memory.Enabled = false;
-        aiOptions.ContextProviders.EntityMemory.Enabled = false;
-        aiOptions.ContextProviders.ProjectContext.Enabled = false;
 
-        // 不注册任何 contributor → ContextProvider 应为 null
         var builder = new AgentExecutorOptionsBuilder(
             Microsoft.Extensions.Options.Options.Create(aiOptions),
             LoggerFactory.Create(_ => { }),
@@ -71,7 +66,8 @@ public class AIModuleOptionalDependencyTests
 
         var options = builder.Build(null, "TestAgent", "hello", null, null, null);
 
-        options.ContextProvider.ShouldBeNull();
+        options.ShouldNotBeNull();
+        options.Name.ShouldBe("TestAgent");
         await Task.CompletedTask;
     }
 

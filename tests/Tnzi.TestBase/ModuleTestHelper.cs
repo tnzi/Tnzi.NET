@@ -21,12 +21,16 @@ public static class ModuleTestHelper
         var serviceMap = new Dictionary<Type, List<ServiceDescriptor>>();
 
         // 最小化配置，满足模块初始化需求
+        // StrictFrameworkRegistration is enabled in tests so any future framework assembly
+        // that mistakenly uses ISingletonDependency / IScopedDependency markers fails the
+        // test run loudly instead of silently skipping registration at runtime (rule #1).
         var configBuilder = new ConfigurationBuilder();
         configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Database:DbContexts:0:Provider"] = "SQLite",
             ["Database:DbContexts:0:ConnectionString"] = "Data Source=:memory:",
             ["Identity:Jwt:SecretKey"] = "test-key-for-architecture-tests-only-minimum-32-chars",
+            ["Tnzi:DependencyInjection:StrictFrameworkRegistration"] = "true",
         });
         var configuration = configBuilder.Build();
 

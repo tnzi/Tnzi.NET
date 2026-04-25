@@ -1,11 +1,13 @@
 using Tnzi.AI.Tools.Sql;
 using Xunit;
+using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Tools.Sql;
 
 public class RestrictiveSqlValidatorTests
 {
-    private readonly RestrictiveSqlValidator _validator = new();
+    private readonly RestrictiveSqlValidator _validator =
+        new(MsOptions.Create(new SqlToolOptions()));
 
     [Theory]
     [InlineData("SELECT * FROM users")]
@@ -53,5 +55,33 @@ public class RestrictiveSqlValidatorTests
     {
         var result = _validator.Validate("");
         Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_RejectsOversizedSql()
+    {
+        var opts = new SqlToolOptions { MaxSqlLength = 50 };
+        var sut = new RestrictiveSqlValidator(MsOptions.Create(opts));
+        var bigSql = "SELECT " + new string('a', 100) + " FROM t";
+        var result = sut.Validate(bigSql);
+        Assert.False(result.IsValid);
+        Assert.Contains("max length", result.ErrorMessage!);
+    }
+
+    [Fact]
+    public void Validate_RejectsNonTSqlDialectByDefault()
+    {
+        var result = _validator.Validate("SELECT 1", SqlDialect.PostgreSql);
+        Assert.False(result.IsValid);
+        Assert.Contains("disabled by default", result.ErrorMessage!);
+    }
+
+    [Fact]
+    public void Validate_AllowsNonTSqlWhenOptedIn()
+    {
+        var opts = new SqlToolOptions { AllowNonTSqlDialects = true };
+        var sut = new RestrictiveSqlValidator(MsOptions.Create(opts));
+        var result = sut.Validate("SELECT id FROM t", SqlDialect.PostgreSql);
+        Assert.True(result.IsValid, result.ErrorMessage);
     }
 }

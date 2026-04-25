@@ -1,30 +1,75 @@
 namespace Tnzi.AI.Infrastructure;
 
 /// <summary>
-/// AgentRuntime — 核心执行器 + 辅助方法
+/// AgentRuntime — core executor + helpers
 /// </summary>
 public partial class AgentRuntime
 {
     /// <summary>
-    /// 核心执行器（非流式）— 管道最内层，委托给执行策略
+    /// Setup result returned by <see cref="SetupContextAndResolveAsync"/>.
+    /// Captures the per-run context shared between RunAsync and RunStreamingAsync.
+    /// </summary>
+    private sealed record RunSetupResult(
+        AgentResolution Resolution,
+        AgentRun? Run,
+        AiMiddlewareContext Context);
+
+    /// <summary>
+    /// Shared prelude for both RunAsync and RunStreamingAsync:
+    /// resolve thinking model → resolve agent → get/create run → publish started event → build context.
+    /// Returns null if Agent resolution fails (caller decides how to surface the error).
+    /// </summary>
+    private async Task<RunSetupResult?> SetupContextAndResolveAsync(
+        AgentRunRequest request,
+        bool isStreaming,
+        CancellationToken ct)
+    {
+        var effectiveModel = ResolveThinkingModel(request);
+
+        var resolution = await _agentResolver.ResolveAgentAsync(
+            request.AgentId, request.Provider, effectiveModel, request.ToolGroups, ct);
+
+        if (!resolution.IsSuccess)
+        {
+            return new RunSetupResult(resolution, null, null!);
+        }
+
+        AgentRun? run = null;
+        if (request.EnableRunTracking)
+        {
+            run = await _runTracker.GetOrCreateRunAsync(request, resolution, ct);
+            _executionContextAccessor.Properties[ContextPropertyKeys.CurrentRunId] = run.Id;
+        }
+
+        await _eventPublisher.PublishRunStartedEventAsync(
+            request, run, isStreaming, resolution.Provider, resolution.Model, resolution.ExecutionMode);
+
+        var context = new AiMiddlewareContext
+        {
+            Request = request,
+            Agent = resolution,
+            Run = run,
+            ServiceProvider = _serviceProvider
+        };
+
+        return new RunSetupResult(resolution, run, context);
+    }
+
+    /// <summary>
+    /// Core executor (non-streaming) — innermost pipeline layer, delegates to execution strategy.
     /// </summary>
     private async Task<AgentRunResult> ExecuteCoreAsync(AiMiddlewareContext context, CancellationToken ct)
     {
         var resolution = context.Agent;
 
-        // ExternalCli 模式：不需要 AgentExecutor，委托给 CLI 策略
         if (resolution.ExecutionMode == AgentExecutionMode.ExternalCli)
         {
-            var cliExecutor = _serviceProvider.GetService<IExternalCliExecutor>()
-                ?? throw new BusinessException(
-                    "ExternalCli mode requires Tnzi.AI.Cli module. Add [DependsOn(typeof(AICliModule))] to your startup module.");
+            var cliExecutor = _serviceProvider.GetRequiredService<IExternalCliExecutor>();
             return await cliExecutor.ExecuteCliAsync(context, ct);
         }
 
-        // 应用 EffectiveModel/Provider 覆盖（由 SkillConstraintMiddleware 设置）
         var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
-        // 构建消息列表（包含中间件注入的消息）
         var messages = new List<ChatMessage>(context.Messages);
         if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
         {
@@ -33,10 +78,8 @@ public partial class AgentRuntime
             messages.Add(userMessage);
         }
 
-        // 合并中间件注入的工具（Skill 三件套等），按名称去重
         agent = MergeAdditionalTools(agent, context);
 
-        // 解析并执行策略
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
         var strategyContext = new ExecutionStrategyContext
         {
@@ -72,7 +115,7 @@ public partial class AgentRuntime
     }
 
     /// <summary>
-    /// 核心执行器（流式）— 管道最内层，委托给执行策略
+    /// Core executor (streaming) — innermost pipeline layer, delegates to execution strategy.
     /// </summary>
     private async IAsyncEnumerable<AgentStreamChunk> ExecuteCoreStreamingAsync(
         AiMiddlewareContext context,
@@ -80,12 +123,9 @@ public partial class AgentRuntime
     {
         var resolution = context.Agent;
 
-        // ExternalCli 模式：不需要 AgentExecutor，委托给 CLI 策略
         if (resolution.ExecutionMode == AgentExecutionMode.ExternalCli)
         {
-            var cliExecutor = _serviceProvider.GetService<IExternalCliExecutor>()
-                ?? throw new BusinessException(
-                    "ExternalCli mode requires Tnzi.AI.Cli module. Add [DependsOn(typeof(AICliModule))] to your startup module.");
+            var cliExecutor = _serviceProvider.GetRequiredService<IExternalCliExecutor>();
             await foreach (var chunk in cliExecutor.ExecuteCliStreamingAsync(context, ct))
             {
                 yield return chunk;
@@ -93,10 +133,8 @@ public partial class AgentRuntime
             yield break;
         }
 
-        // 应用 EffectiveModel/Provider 覆盖（由 SkillConstraintMiddleware 设置）
         var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
-        // 构建消息列表
         var messages = new List<ChatMessage>(context.Messages);
         if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
         {
@@ -105,11 +143,9 @@ public partial class AgentRuntime
             messages.Add(userMessage);
         }
 
-        // 合并中间件注入的工具（Skill 三件套等），按名称去重
         agent = MergeAdditionalTools(agent, context);
 
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
-        // Collect SSE events emitted by strategies (e.g., sub_agent_started/completed)
         var pendingEvents = new ConcurrentQueue<AgentStreamChunk>();
         var strategyContext = new ExecutionStrategyContext
         {
@@ -126,21 +162,19 @@ public partial class AgentRuntime
 
         await foreach (var chunk in strategy.ExecuteStreamingAsync(agent, messages, strategyContext, ct).WithCancellation(ct))
         {
-            // Flush any pending strategy events before each content chunk
             while (pendingEvents.TryDequeue(out var evt))
                 yield return evt;
 
             yield return chunk;
         }
 
-        // Flush remaining events after stream ends
         while (pendingEvents.TryDequeue(out var remaining))
             yield return remaining;
     }
 
     /// <summary>
-    /// 应用 SkillConstraintMiddleware 设置的 EffectiveModel/Provider 覆盖。
-    /// 若 Model 或 Provider 发生变化且保存了创建参数，则重建 AgentExecutor；否则返回原始 Agent。
+    /// Apply EffectiveModel/Provider override set by SkillConstraintMiddleware.
+    /// Rebuilds AgentExecutor if Model or Provider changed; returns original otherwise.
     /// </summary>
     private async Task<AgentExecutor> ApplyModelOverrideAsync(AgentResolution resolution, AiMiddlewareContext context, CancellationToken ct)
     {
@@ -148,7 +182,6 @@ public partial class AgentRuntime
         var effectiveModel = context.EffectiveModel;
         var effectiveProvider = context.EffectiveProvider;
 
-        // 没有覆盖 → 直接使用原始 Agent
         if (effectiveModel == null && effectiveProvider == null)
             return originalAgent;
 
@@ -158,7 +191,6 @@ public partial class AgentRuntime
         if (!modelChanged && !providerChanged)
             return originalAgent;
 
-        // 没有原始创建参数（无 AgentId 场景） → 无法重建，记录警告后继续
         if (resolution.CreationParameters == null)
         {
             _logger.LogWarning(
@@ -183,7 +215,7 @@ public partial class AgentRuntime
     }
 
     /// <summary>
-    /// 合并中间件注入的工具到 Agent（按名称去重，防止 Skill 工具出现两次）
+    /// Merge middleware-injected tools into Agent, deduplicating by name.
     /// </summary>
     private static AgentExecutor MergeAdditionalTools(AgentExecutor agent, AiMiddlewareContext context)
     {
@@ -196,82 +228,14 @@ public partial class AgentRuntime
         return newTools.Count > 0 ? agent.WithAdditionalTools(newTools) : agent;
     }
 
-    /// <summary>创建 Run 记录</summary>
-    private async Task<AgentRun> CreateRunAsync(AgentRunRequest request, AgentResolution resolution, CancellationToken ct)
-    {
-        var now = DateTime.UtcNow;
-        var run = new AgentRun
-        {
-            AgentId = request.AgentId ?? resolution.AgentId,
-            ThreadId = request.ThreadId,
-            WorkflowDefinitionId = request.WorkflowId,
-            Status = AgentRunStatus.Running,
-            ExecutionMode = resolution.ExecutionMode,
-            InputSummary = Truncate(request.UserMessage, 500),
-            ParentRunId = request.ParentRunId,
-            RootRunId = request.RootRunId ?? request.ParentRunId,
-            LastHeartbeatAt = now
-        };
-
-        return await _runStore.CreateAsync(run, ct);
-    }
-
-    /// <summary>复用现有 Run 或创建新 Run 记录</summary>
-    private async Task<AgentRun> GetOrCreateRunAsync(AgentRunRequest request, AgentResolution resolution, CancellationToken ct)
-    {
-        if (!request.ExistingRunId.HasValue)
-        {
-            return await CreateRunAsync(request, resolution, ct);
-        }
-
-        var run = await _runStore.GetAsync(request.ExistingRunId.Value, ct)
-            ?? throw new BusinessException("Tracked run not found", ErrorCodes.RunNotFound, 404);
-
-        run.AgentId ??= request.AgentId ?? resolution.AgentId;
-        run.ThreadId ??= request.ThreadId;
-        run.WorkflowDefinitionId ??= request.WorkflowId;
-        run.ExecutionMode = resolution.ExecutionMode;
-        run.InputSummary = string.IsNullOrWhiteSpace(run.InputSummary)
-            ? Truncate(request.UserMessage, 500)
-            : run.InputSummary;
-        run.ParentRunId ??= request.ParentRunId;
-        run.RootRunId ??= request.RootRunId ?? request.ParentRunId ?? run.Id;
-        run.Status = AgentRunStatus.Running;
-        run.LastHeartbeatAt = DateTime.UtcNow;
-        await _runStore.UpdateAsync(run, ct);
-        return run;
-    }
-
-    /// <summary>记录 Trace 条目</summary>
-    private async Task RecordTraceAsync(Guid runId, Guid? nodeId, string eventType, object? eventData, long durationMs, CancellationToken ct)
-    {
-        try
-        {
-            var trace = new AgentRunTrace
-            {
-                RunId = runId,
-                NodeId = nodeId,
-                EventType = eventType,
-                EventData = eventData?.ToJsonString(camelCase: true),
-                DurationMs = durationMs
-            };
-            await _traceStore.AddAsync(trace, ct);
-        }
-        catch (Exception ex)
-        {
-            // Trace 记录失败不影响主流程
-            _logger.LogWarning(ex, "Failed to record trace for Run {RunId}", runId);
-        }
-    }
-
     /// <summary>
-    /// 从 DI 解析所有已注册的中间件，按 Order 排序。
-    /// 中间件列表在首次访问时缓存，避免每次调用重复解析和排序。
+    /// Resolve all registered middlewares from DI, ordered by Order.
+    /// List is cached on first access.
     /// </summary>
     private List<IAiMiddleware> ResolveMiddlewares() => _middlewares.Value;
 
     /// <summary>
-    /// 构建非流式管道委托（scope 内缓存，避免每次请求重建）
+    /// Build non-streaming pipeline delegate (scope-cached).
     /// </summary>
     private AiMiddlewareDelegate BuildPipelineDelegate()
     {
@@ -284,7 +248,7 @@ public partial class AgentRuntime
     }
 
     /// <summary>
-    /// 构建流式管道委托（scope 内缓存，避免每次请求重建）
+    /// Build streaming pipeline delegate (scope-cached).
     /// </summary>
     private AiStreamingMiddlewareDelegate BuildStreamingPipelineDelegate()
     {
@@ -297,21 +261,19 @@ public partial class AgentRuntime
     }
 
     /// <summary>
-    /// 根据 ReasoningEffort 自动解析有效模型。
-    /// 当 ReasoningEffort != None 且当前模型不支持推理时，查找 Provider 的 "think" 模型别名。
+    /// Auto-resolve effective model based on ReasoningEffort.
+    /// When ReasoningEffort != None and current model doesn't support reasoning,
+    /// look up the provider's "think" model alias.
     /// </summary>
     private string? ResolveThinkingModel(AgentRunRequest request)
     {
         var model = request.Model;
 
-        // 没有指定推理需求 → 使用原始模型
         if (request.ReasoningEffort is null or ReasoningEffort.None) return model;
 
-        // 当前模型已支持推理 → 不需要切换
         if (ModelCapabilities.SupportsReasoning(model) || ModelCapabilities.IsAlwaysOnReasoning(model))
             return model;
 
-        // 查找 Provider 配置中的 "think" 模型别名
         var providerName = request.Provider;
         var options = _aiOptions.CurrentValue;
         providerName ??= options.DefaultProvider;
@@ -328,136 +290,5 @@ public partial class AgentRuntime
         }
 
         return model;
-    }
-
-    /// <summary>发布运行完成事件（静默失败，不影响主流程）</summary>
-    private async Task PublishRunCompletedEventAsync(AgentRunRequest request, AgentRunResult result, AgentRun? run, long durationMs, bool isStreaming, string? actualProvider = null)
-    {
-        try
-        {
-            if (_eventBus == null) return;
-
-            await _eventBus.PublishAsync(new AgentRunCompletedEvent
-            {
-                RunId = run?.Id ?? result.RunId,
-                ThreadId = result.ThreadId ?? request.ThreadId,
-                AgentId = request.AgentId,
-                UserId = request.UserId,
-                Provider = actualProvider ?? result.Provider ?? request.Provider,
-                Model = result.Model ?? request.Model,
-                TotalTokens = (result.Usage?.InputTokens ?? 0) + (result.Usage?.OutputTokens ?? 0),
-                DurationMs = durationMs,
-                Status = (run?.Status ?? result.Status ?? ResolveRunStatus(result.FinishReason)).ToString(),
-                FinishReason = result.FinishReason,
-                IsStreaming = isStreaming
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish AgentRunCompletedEvent");
-        }
-    }
-
-    /// <summary>发布运行开始事件（静默失败，不影响主流程）</summary>
-    private async Task PublishRunStartedEventAsync(
-        AgentRunRequest request, AgentRun? run, bool isStreaming, string? provider, string? model, AgentExecutionMode executionMode)
-    {
-        try
-        {
-            if (_eventBus == null) return;
-
-            await _eventBus.PublishAsync(new AgentRunStartedEvent
-            {
-                RunId = run?.Id,
-                AgentId = request.AgentId,
-                UserId = request.UserId,
-                ThreadId = request.ThreadId,
-                Provider = provider,
-                Model = model,
-                IsStreaming = isStreaming,
-                ExecutionMode = executionMode.ToString()
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish AgentRunStartedEvent");
-        }
-    }
-
-    /// <summary>发布运行失败事件（静默失败，不影响主流程）</summary>
-    private async Task PublishRunFailedEventAsync(
-        AgentRunRequest request, AgentRun? run, Exception exception, long durationMs, bool isStreaming)
-    {
-        try
-        {
-            if (_eventBus == null) return;
-
-            await _eventBus.PublishAsync(new AgentRunFailedEvent
-            {
-                RunId = run?.Id,
-                AgentId = request.AgentId,
-                UserId = request.UserId,
-                ThreadId = request.ThreadId,
-                ErrorMessage = exception.Message,
-                ExceptionType = exception.GetType().Name,
-                DurationMs = durationMs,
-                IsStreaming = isStreaming
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish AgentRunFailedEvent");
-        }
-    }
-
-    /// <summary>新线程首轮对话：应用 fallback 标题 + 发布标题生成事件（静默失败）</summary>
-    /// <remarks>
-    /// 使用独立 scope 而非请求 scope，因为 streaming 场景下此方法在 finally 块中执行，
-    /// 此时请求 scope 可能已被 ASP.NET Core 释放。
-    /// </remarks>
-    private async Task HandleNewThreadTitleAsync(AgentRunRequest request, AgentRunResult result)
-    {
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-
-            // Fallback 标题：用户首条消息截取
-            var threadOptions = sp.GetService<IOptionsMonitor<ThreadOptions>>();
-            var maxLength = threadOptions?.CurrentValue.TitleMaxLength ?? 50;
-            var fallbackTitle = AgentThreadService.GenerateFallbackTitle(request.UserMessage, maxLength);
-            if (fallbackTitle != null)
-            {
-                var threadService = sp.GetService<IAgentThreadService>();
-                if (threadService != null)
-                {
-                    await threadService.UpdateTitleAsync(request.ThreadId!.Value, fallbackTitle);
-                }
-            }
-
-            // 发布事件（触发 AI 标题生成，如果 AutoGenerateTitle 启用）
-            // EventBus 是 Singleton，但 handler 在 EventBus 内部创建独立 scope 运行
-            var eventBus = sp.GetService<IEventBus>();
-            if (eventBus != null && request.ThreadId != null && !string.IsNullOrWhiteSpace(request.UserMessage))
-            {
-                await eventBus.PublishAsync(new ThreadFirstReplyCompletedEvent
-                {
-                    ThreadId = request.ThreadId.Value,
-                    UserMessage = request.UserMessage,
-                    AssistantReply = Truncate(result.Response, 500)
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to update thread title/publish event for {ThreadId}", request.ThreadId);
-        }
-    }
-
-    /// <summary>截断字符串</summary>
-    private static string Truncate(string? value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 }

@@ -9,18 +9,24 @@ public class ContextInjectionMiddleware : IAiMiddleware
     private static readonly ConcurrentDictionary<string, Guid?> _personaIdCache = new();
     private static readonly ConcurrentDictionary<Guid, (string Content, DateTime CachedAt)> _personaContentCache = new();
 
-    private readonly CompositeContextProvider _contextProvider;
+    private readonly CompositeContextProviderFactory _providerFactory;
     private readonly ILogger<ContextInjectionMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.ContextInjection;
 
     public ContextInjectionMiddleware(
-        CompositeContextProvider contextProvider,
+        CompositeContextProviderFactory providerFactory,
         ILogger<ContextInjectionMiddleware> logger)
     {
-        _contextProvider = Check.NotNull(contextProvider);
+        _providerFactory = Check.NotNull(providerFactory);
         _logger = Check.NotNull(logger);
     }
+
+    /// <summary>
+    /// Property key used to stash the per-request CompositeContextProvider so the
+    /// post-completion hook can run after downstream pipeline finishes.
+    /// </summary>
+    internal const string ContextProviderKey = "__ContextInjectionMiddleware.Provider";
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
@@ -29,7 +35,14 @@ public class ContextInjectionMiddleware : IAiMiddleware
 
         // Before: 注入上下文
         await InjectContextAsync(context, cancellationToken);
-        return await next(context, cancellationToken);
+        try
+        {
+            return await next(context, cancellationToken);
+        }
+        finally
+        {
+            await NotifyContextCompletedAsync(context, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -47,9 +60,33 @@ public class ContextInjectionMiddleware : IAiMiddleware
         // Before: 注入上下文（与非流式路径相同逻辑）
         await InjectContextAsync(context, cancellationToken);
 
-        await foreach (var chunk in next(context, cancellationToken))
+        try
         {
-            yield return chunk;
+            await foreach (var chunk in next(context, cancellationToken))
+            {
+                yield return chunk;
+            }
+        }
+        finally
+        {
+            await NotifyContextCompletedAsync(context, cancellationToken);
+        }
+    }
+
+    private async Task NotifyContextCompletedAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
+    {
+        if (context.Properties.TryGetValue(ContextProviderKey, out var raw)
+            && raw is CompositeContextProvider provider
+            && provider.ProviderCount > 0)
+        {
+            try
+            {
+                await provider.OnCompletedAsync(context.Messages, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Context provider OnCompletedAsync failed");
+            }
         }
     }
 
@@ -66,15 +103,26 @@ public class ContextInjectionMiddleware : IAiMiddleware
             return;
         }
 
-        if (_contextProvider.ProviderCount > 0)
+        // Contributors are scoped factories that need per-agent context (AgentId/UserId)
+        // to decide whether to participate, so we cannot pre-build this in DI.
+        var compositeProvider = _providerFactory.TryBuild(new ContextProviderCreationContext
+        {
+            AgentId = context.Agent.AgentId,
+            AgentName = context.Agent.Agent?.Name,
+            UserId = context.Request.UserId
+        });
+        if (compositeProvider is not null)
         {
             try
             {
-                var injection = await _contextProvider.GetContextAsync(context.Messages, context, cancellationToken);
+                var injection = await compositeProvider.GetContextAsync(context.Messages, context, cancellationToken);
 
                 if (injection.Messages is { Count: > 0 })
                 {
-                    context.Messages.InsertRange(0, injection.Messages);
+                    // 在消息列表头部插入上下文消息（系统消息之后）
+                    var insertIndex = context.Messages.FindIndex(m => m.Role != ChatRole.System);
+                    if (insertIndex < 0) insertIndex = context.Messages.Count;
+                    context.Messages.InsertRange(insertIndex, injection.Messages);
                     _logger.LogDebug("Injected {Count} context messages", injection.Messages.Count);
                 }
 
@@ -95,6 +143,10 @@ public class ContextInjectionMiddleware : IAiMiddleware
                     context.Properties["ActiveSkills"] = injection.ActiveSkills;
                     _logger.LogDebug("Propagated {Count} active skills to middleware context", injection.ActiveSkills.Count);
                 }
+
+                // Propagate the composite provider into context so the post-completion
+                // hook (OnCompletedAsync) can run after the agent finishes.
+                context.Properties[ContextProviderKey] = compositeProvider;
             }
             catch (Exception ex)
             {

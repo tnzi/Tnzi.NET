@@ -55,7 +55,6 @@ public class AgentExecutor
             MaxToolIterations = _options.MaxToolIterations,
             ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
             HistoryReducer = _options.HistoryReducer,
-            ContextProvider = _options.ContextProvider,
             Middlewares = _options.Middlewares,
             ToolDefinitions = _options.ToolDefinitions
         };
@@ -78,7 +77,6 @@ public class AgentExecutor
             MaxToolIterations = _options.MaxToolIterations,
             ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
             HistoryReducer = _options.HistoryReducer,
-            ContextProvider = _options.ContextProvider,
             Middlewares = _options.Middlewares,
             ToolDefinitions = _options.ToolDefinitions
         };
@@ -87,22 +85,22 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 非流式执行
+    /// 非流式执行 — tool-calling loop. Context injection (RAG/Memory/Skills/Persona/Profile)
+    /// is fully owned by ContextInjectionMiddleware (Order=400) which runs before this executor
+    /// — AgentExecutor no longer calls IContextProvider directly. History reduction
+    /// (PruneChatReducer / SummarizeChatReducer) still runs inline so configured reducers stay active.
     /// </summary>
     public async Task<AgentResponse> ExecuteAsync(List<ChatMessage> messages, CancellationToken ct = default)
     {
         Check.NotNull(messages);
 
-        // 1. 历史压缩（先压缩，避免后续注入的 RAG 上下文被裁剪）
+        // 历史压缩（如果 OptionsBuilder 配置了 reducer）
         messages = await ReduceHistoryAsync(messages, ct);
 
-        // 2. 上下文注入
-        var contextInjection = await InjectContextAsync(messages, ct);
+        // 构建 ChatOptions（输出合并后的完整工具列表）
+        var chatOptions = BuildChatOptions(out var allTools);
 
-        // 3. 构建 ChatOptions（输出合并后的完整工具列表）
-        var chatOptions = BuildChatOptions(contextInjection, out var allTools);
-
-        // 4. 工具调用循环
+        // 工具调用循环
         var totalInputTokens = 0;
         var totalOutputTokens = 0;
 
@@ -142,8 +140,6 @@ public class AgentExecutor
             if (toolCalls.Count == 0)
             {
                 // 无工具调用，执行结束
-                await NotifyContextCompletedAsync(messages, ct);
-
                 return new AgentResponse
                 {
                     Text = response.Text,
@@ -155,7 +151,7 @@ public class AgentExecutor
                     },
                     FinishReason = response.FinishReason?.ToString(),
                     Messages = messages,
-                    Citations = contextInjection.Citations,
+                    Citations = null,
                     Reasoning = ExtractReasoning(response.Messages)
                 };
             }
@@ -166,8 +162,6 @@ public class AgentExecutor
         }
 
         // 达到最大迭代次数 — 附加提示告知用户 AI 因达到工具调用上限而停止
-        await NotifyContextCompletedAsync(messages, ct);
-
         var lastAssistantText = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
         var truncationNotice = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]";
         return new AgentResponse
@@ -181,7 +175,7 @@ public class AgentExecutor
             },
             FinishReason = FinishReasons.MaxToolIterations,
             Messages = messages,
-            Citations = contextInjection.Citations,
+            Citations = null,
             Reasoning = ExtractReasoning(messages)
         };
     }
@@ -195,16 +189,14 @@ public class AgentExecutor
     {
         Check.NotNull(messages);
 
-        // 1. 历史压缩（先压缩，避免后续注入的 RAG 上下文被裁剪）
+        // 历史压缩（如果 OptionsBuilder 配置了 reducer）
         messages = await ReduceHistoryAsync(messages, ct);
 
-        // 2. 上下文注入
-        var contextInjection = await InjectContextAsync(messages, ct);
+        // 构建 ChatOptions（输出合并后的完整工具列表）
+        // Context injection is owned by ContextInjectionMiddleware (already ran before us).
+        var chatOptions = BuildChatOptions(out var allTools);
 
-        // 3. 构建 ChatOptions（输出合并后的完整工具列表）
-        var chatOptions = BuildChatOptions(contextInjection, out var allTools);
-
-        // 4. 工具调用循环（流式版本）
+        // 工具调用循环（流式版本）
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
         {
             // 收集流式响应
@@ -340,13 +332,11 @@ public class AgentExecutor
             // 检查是否有工具调用
             if (toolCallContents.Count == 0)
             {
-                await NotifyContextCompletedAsync(messages, ct);
-
                 yield return new AgentStreamChunk
                 {
                     Usage = ConvertUsage(usage),
                     FinishReason = finishReason?.ToString(),
-                    Citations = contextInjection.Citations
+                    Citations = null
                 };
                 yield break;
             }
@@ -364,8 +354,6 @@ public class AgentExecutor
         }
 
         // 达到最大迭代次数 — 发送提示文本告知用户
-        await NotifyContextCompletedAsync(messages, ct);
-
         yield return new AgentStreamChunk
         {
             Text = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]"
@@ -373,35 +361,12 @@ public class AgentExecutor
         yield return new AgentStreamChunk
         {
             FinishReason = FinishReasons.MaxToolIterations,
-            Citations = contextInjection.Citations
+            Citations = null
         };
     }
 
     /// <summary>
-    /// 注入上下文
-    /// </summary>
-    private async Task<ContextInjection> InjectContextAsync(List<ChatMessage> messages, CancellationToken ct)
-    {
-        if (_options.ContextProvider == null)
-        {
-            return ContextInjection.Empty;
-        }
-
-        var injection = await _options.ContextProvider.GetContextAsync(messages, ct);
-
-        if (injection.Messages != null && injection.Messages.Count > 0)
-        {
-            // 在消息列表头部插入上下文消息（系统消息之后）
-            var insertIndex = messages.FindIndex(m => m.Role != ChatRole.System);
-            if (insertIndex < 0) insertIndex = messages.Count;
-            messages.InsertRange(insertIndex, injection.Messages);
-        }
-
-        return injection;
-    }
-
-    /// <summary>
-    /// 压缩历史
+    /// 压缩历史 — invokes the configured IHistoryReducer if any.
     /// </summary>
     private async Task<List<ChatMessage>> ReduceHistoryAsync(List<ChatMessage> messages, CancellationToken ct)
     {
@@ -429,9 +394,11 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 构建 ChatOptions，同时输出合并后的完整工具列表
+    /// 构建 ChatOptions，同时输出合并后的完整工具列表。
+    /// Tool injection from ContextProvider is now handled at the runtime layer
+    /// (AgentRuntime.MergeAdditionalTools) before this executor is called.
     /// </summary>
-    private ChatOptions BuildChatOptions(ContextInjection? contextInjection, out IList<AITool> allTools)
+    private ChatOptions BuildChatOptions(out IList<AITool> allTools)
     {
         var chatOptions = new ChatOptions();
 
@@ -450,22 +417,13 @@ public class AgentExecutor
             chatOptions.MaxOutputTokens = _options.MaxOutputTokens.Value;
         }
 
-        // 合并工具：Options 中的工具 + ContextProvider 注入的工具
-        var mergedTools = new List<AITool>();
-        if (_options.Tools != null)
+        var tools = _options.Tools is { Count: > 0 } ? new List<AITool>(_options.Tools) : new List<AITool>();
+        if (tools.Count > 0)
         {
-            mergedTools.AddRange(_options.Tools);
-        }
-        if (contextInjection?.Tools != null)
-        {
-            mergedTools.AddRange(contextInjection.Tools);
-        }
-        if (mergedTools.Count > 0)
-        {
-            chatOptions.Tools = mergedTools;
+            chatOptions.Tools = tools;
         }
 
-        allTools = mergedTools;
+        allTools = tools;
         return chatOptions;
     }
 
@@ -836,14 +794,4 @@ public class AgentExecutor
         return dto;
     }
 
-    /// <summary>
-    /// 通知 ContextProvider 执行完成
-    /// </summary>
-    private async Task NotifyContextCompletedAsync(List<ChatMessage> messages, CancellationToken ct)
-    {
-        if (_options.ContextProvider != null)
-        {
-            await _options.ContextProvider.OnCompletedAsync(messages, ct);
-        }
-    }
 }

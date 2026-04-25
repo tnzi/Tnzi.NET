@@ -1,5 +1,4 @@
 using System.Threading.Channels;
-using Tnzi.DependencyInjection;
 
 namespace Tnzi.AI.Tools.Approval.Sse;
 
@@ -8,15 +7,18 @@ namespace Tnzi.AI.Tools.Approval.Sse;
 /// Consumers (e.g., an SSE endpoint streaming to a browser) read from <see cref="Reader"/>
 /// to publish the request to the end user.
 /// </summary>
-public sealed class ApprovalRequestCollector : IScopedDependency
+public sealed class ApprovalRequestCollector
 {
     /// <summary>
-    /// Bounded channel with capacity=1 — only one tool runs at a time per request.
+    /// Bounded channel — sized to comfortably accommodate concurrent destructive tool calls
+    /// from a single agent run without blocking the writer. If callers consistently fill it
+    /// the SSE consumer is too slow / disconnected and writers will wait (which is the correct
+    /// back-pressure behavior).
     /// </summary>
     private readonly Channel<PendingApprovalRequest> _channel = Channel.CreateBounded<PendingApprovalRequest>(
-        new BoundedChannelOptions(1)
+        new BoundedChannelOptions(16)
         {
-            SingleWriter = true,
+            SingleWriter = false,
             SingleReader = true,
             FullMode = BoundedChannelFullMode.Wait
         });

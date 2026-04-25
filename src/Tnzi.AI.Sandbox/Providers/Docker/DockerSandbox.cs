@@ -18,13 +18,15 @@ public sealed class DockerSandbox : ISandbox
     private readonly long _maxOutputSize;
     private readonly ILogger _logger;
     private readonly HashSet<string> _deniedCommands;
+    private readonly Action? _onDisposed;
     private bool _disposed;
 
     public string Id { get; }
 
     public DockerSandbox(string id, HttpClient httpClient, string containerId,
         string workspacePath, TimeSpan commandTimeout, long maxOutputSize, ILogger logger,
-        IEnumerable<string>? deniedCommands = null)
+        IEnumerable<string>? deniedCommands = null,
+        Action? onDisposed = null)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _httpClient = Check.NotNull(httpClient);
@@ -34,6 +36,7 @@ public sealed class DockerSandbox : ISandbox
         _maxOutputSize = maxOutputSize;
         _logger = Check.NotNull(logger);
         _deniedCommands = new HashSet<string>(deniedCommands ?? DefaultDeniedCommands, StringComparer.OrdinalIgnoreCase);
+        _onDisposed = onDisposed;
     }
 
     public async Task<CommandResult> ExecuteCommandAsync(string command, CancellationToken ct = default)
@@ -221,6 +224,13 @@ public sealed class DockerSandbox : ISandbox
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Docker sandbox {Id}: error during container cleanup for {ContainerId}", Id, _containerId);
+        }
+        finally
+        {
+            // Always release provider-side resources (semaphore + active container map)
+            // even when container cleanup fails, to prevent slot exhaustion.
+            try { _onDisposed?.Invoke(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Docker sandbox {Id}: onDisposed callback failed", Id); }
         }
 
         _logger.LogDebug("Docker sandbox {Id} disposed (container {ContainerId})", Id, _containerId);

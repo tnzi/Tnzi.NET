@@ -34,6 +34,7 @@ global using Tnzi.AI.Extensions;
 global using Tnzi.AI.Guardrails;
 global using Tnzi.AI.Infrastructure;
 global using Tnzi.AI.Infrastructure.ChatHistory;
+global using Tnzi.AI.Infrastructure.Helpers;
 global using Tnzi.AI.Infrastructure.ContextProviders;
 global using Tnzi.AI.Infrastructure.Documents;
 global using Tnzi.AI.Infrastructure.Providers;

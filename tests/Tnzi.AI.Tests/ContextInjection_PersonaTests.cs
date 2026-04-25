@@ -5,16 +5,22 @@ namespace Tnzi.AI.Tests;
 /// </summary>
 public class ContextInjection_PersonaTests
 {
-    private readonly CompositeContextProvider _contextProvider;
+    private readonly CompositeContextProviderFactory _providerFactory;
     private readonly ILogger<ContextInjectionMiddleware> _logger;
 
     public ContextInjection_PersonaTests()
     {
         var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions());
-        _contextProvider = new CompositeContextProvider(
-            NullLogger<CompositeContextProvider>.Instance, aiOptions);
+        _providerFactory = new CompositeContextProviderFactory(
+            contributors: [],
+            options: aiOptions,
+            tokenEstimator: new HeuristicTokenEstimator(),
+            loggerFactory: NullLoggerFactory.Instance,
+            logger: NullLogger<CompositeContextProviderFactory>.Instance);
         _logger = NullLogger<ContextInjectionMiddleware>.Instance;
     }
+
+    private ContextInjectionMiddleware CreateMiddleware() => new(_providerFactory, _logger);
 
     [Fact]
     public async Task InvokeAsync_WithPersona_InjectsSoulBlock()
@@ -33,7 +39,7 @@ public class ContextInjection_PersonaTests
         var context = CreateContext(sp,
             agentConfig: JsonSerializer.Serialize(new { personaId = personaId.ToString() }));
 
-        var middleware = new ContextInjectionMiddleware(_contextProvider, _logger);
+        var middleware = CreateMiddleware();
 
         // Act
         await middleware.InvokeAsync(context, (ctx, ct) =>
@@ -71,7 +77,7 @@ public class ContextInjection_PersonaTests
         var sp = BuildServiceProvider(profileService: profileService.Object);
         var context = CreateContext(sp, userId: userId);
 
-        var middleware = new ContextInjectionMiddleware(_contextProvider, _logger);
+        var middleware = CreateMiddleware();
 
         // Act
         await middleware.InvokeAsync(context, (ctx, ct) =>
@@ -95,7 +101,7 @@ public class ContextInjection_PersonaTests
         var sp = BuildServiceProvider();
         var context = CreateContext(sp);
 
-        var middleware = new ContextInjectionMiddleware(_contextProvider, _logger);
+        var middleware = CreateMiddleware();
 
         // Act
         await middleware.InvokeAsync(context, (ctx, ct) =>
@@ -119,7 +125,7 @@ public class ContextInjection_PersonaTests
         var context = CreateContext(sp,
             agentConfig: JsonSerializer.Serialize(new { personaId = personaId.ToString() }));
 
-        var middleware = new ContextInjectionMiddleware(_contextProvider, _logger);
+        var middleware = CreateMiddleware();
 
         // Act
         await middleware.InvokeAsync(context, (ctx, ct) =>

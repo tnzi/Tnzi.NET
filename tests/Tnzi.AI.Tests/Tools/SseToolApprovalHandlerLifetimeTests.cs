@@ -1,8 +1,10 @@
-using Microsoft.AspNetCore.Http;
+using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Shouldly;
 using Tnzi.AI.Tools.Approval;
 using Tnzi.AI.Tools.Approval.Sse;
+using Xunit;
 
 namespace Tnzi.AI.Tests.Tools;
 
@@ -16,31 +18,16 @@ public class SseToolApprovalHandlerLifetimeTests
     [Fact]
     public void SseToolApprovalHandler_RegisteredAsSingleton_WithScopedCollector_NoCaptiveDependencyException()
     {
-        // Arrange
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddHttpContextAccessor();
+        services.AddAIToolApprovalSse();
 
-        // The default (auto-approve) handler — matches AIModule registration
-        services.AddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
-
-        // SSE-specific registrations
-        services.AddSingleton<InMemoryPendingApprovalStore>();
-        services.AddScoped<ApprovalRequestCollector>();
-
-        // Override with SSE handler (simulates what Fabrikam does)
-        services.AddSingleton<SseToolApprovalHandler>();
-
-        // Act — BuildServiceProvider with validateScopes:true throws if a Singleton
-        // captures a Scoped dependency directly.
         var act = () =>
         {
-            var provider = services.BuildServiceProvider(validateScopes: true);
-            // Resolve from root scope (simulates Singleton resolution path)
-            _ = provider.GetRequiredService<SseToolApprovalHandler>();
+            using var provider = services.BuildServiceProvider(validateScopes: true);
+            _ = provider.GetRequiredService<IToolApprovalHandler>();
         };
 
-        // Assert — must not throw InvalidOperationException about captive dependency
         act.ShouldNotThrow();
     }
 

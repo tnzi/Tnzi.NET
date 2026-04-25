@@ -452,92 +452,107 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         var sw = Stopwatch.StartNew();
         try
         {
+            // 加载所有块（按 ChunkIndex 排序保证确定性顺序，便于幂等性验证和日志追踪）
+            var allChunks = await _chunkRepository.AsQueryable()
+                .Where(c => c.KnowledgeBaseId == knowledgeBaseId)
+                .OrderBy(c => c.DocumentId)
+                .ThenBy(c => c.ChunkIndex)
+                .ToListAsync(cancellationToken);
 
-        // 加载所有块（按 ChunkIndex 排序保证确定性顺序，便于幂等性验证和日志追踪）
-        var allChunks = await _chunkRepository.AsQueryable()
-            .Where(c => c.KnowledgeBaseId == knowledgeBaseId)
-            .OrderBy(c => c.DocumentId)
-            .ThenBy(c => c.ChunkIndex)
-            .ToListAsync(cancellationToken);
+            if (allChunks.Count == 0)
+            {
+                sw.Stop();
+                Logger.LogInformation("Reindex skipped for empty knowledge base {KbId} ({Name})", knowledgeBaseId, kb.Name);
+                return Ok(new ReindexResultDto
+                {
+                    KnowledgeBaseId = knowledgeBaseId,
+                    ChunkCount = 0,
+                    DocumentCount = 0,
+                    DurationMs = sw.ElapsedMilliseconds
+                });
+            }
 
-        if (allChunks.Count == 0)
-        {
+            var embeddingOptions = new EmbeddingOptions
+            {
+                Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
+                Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
+            };
+
+            var documentCount = allChunks.Select(c => c.DocumentId).Distinct().Count();
+            var totalProcessed = 0;
+
+            for (var offset = 0; offset < allChunks.Count; offset += ReindexBatchSize)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // GetRange is O(batch); Skip+Take on List<T> is O(offset+batch) and walks
+                // the whole prefix every iteration — measurable on multi-thousand-chunk KBs.
+                var batchCount = Math.Min(ReindexBatchSize, allChunks.Count - offset);
+                var batch = allChunks.GetRange(offset, batchCount);
+                var texts = batch.Select(c => c.Content).ToList();
+
+                var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(texts, embeddingOptions, cancellationToken);
+                if (!embeddingResult.Succeeded)
+                {
+                    var firstChunkId = batch[0].Id;
+                    Logger.LogError("Reindex failed for knowledge base {KbId} at batch starting chunk {ChunkId}: {Error}",
+                        knowledgeBaseId, firstChunkId, embeddingResult.Message);
+                    return Fail<ReindexResultDto>(
+                        $"Embedding generation failed at chunk {firstChunkId}: {embeddingResult.Message}");
+                }
+
+                var embeddings = embeddingResult.Data!;
+                if (embeddings.Count != batch.Count)
+                {
+                    var firstChunkId = batch[0].Id;
+                    Logger.LogError("Reindex embedding count mismatch for knowledge base {KbId} at chunk {ChunkId}: expected {Expected}, got {Actual}",
+                        knowledgeBaseId, firstChunkId, batch.Count, embeddings.Count);
+                    return Fail<ReindexResultDto>(
+                        $"Embedding count mismatch at chunk {firstChunkId}: expected {batch.Count}, got {embeddings.Count}");
+                }
+
+                for (var i = 0; i < batch.Count; i++)
+                {
+                    batch[i].Embedding = new Vector(embeddings[i]);
+                }
+
+                await _chunkRepository.UpdateManyAsync(batch, cancellationToken);
+                totalProcessed += batch.Count;
+
+                Logger.LogDebug("Reindex progress for knowledge base {KbId}: {Processed}/{Total} chunks",
+                    knowledgeBaseId, totalProcessed, allChunks.Count);
+            }
+
             sw.Stop();
-            Logger.LogInformation("Reindex skipped for empty knowledge base {KbId} ({Name})", knowledgeBaseId, kb.Name);
+            Logger.LogInformation("Reindexed knowledge base {KbId} ({Name}): {ChunkCount} chunks across {DocCount} documents in {DurationMs}ms",
+                knowledgeBaseId, kb.Name, totalProcessed, documentCount, sw.ElapsedMilliseconds);
+
             return Ok(new ReindexResultDto
             {
                 KnowledgeBaseId = knowledgeBaseId,
-                ChunkCount = 0,
-                DocumentCount = 0,
+                ChunkCount = totalProcessed,
+                DocumentCount = documentCount,
                 DurationMs = sw.ElapsedMilliseconds
             });
-        }
-
-        var embeddingOptions = new EmbeddingOptions
-        {
-            Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
-            Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
-        };
-
-        var documentCount = allChunks.Select(c => c.DocumentId).Distinct().Count();
-        var totalProcessed = 0;
-
-        for (var offset = 0; offset < allChunks.Count; offset += ReindexBatchSize)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var batch = allChunks.Skip(offset).Take(ReindexBatchSize).ToList();
-            var texts = batch.Select(c => c.Content).ToList();
-
-            var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(texts, embeddingOptions, cancellationToken);
-            if (!embeddingResult.Succeeded)
-            {
-                var firstChunkId = batch[0].Id;
-                Logger.LogError("Reindex failed for knowledge base {KbId} at batch starting chunk {ChunkId}: {Error}",
-                    knowledgeBaseId, firstChunkId, embeddingResult.Message);
-                return Fail<ReindexResultDto>(
-                    $"Embedding generation failed at chunk {firstChunkId}: {embeddingResult.Message}");
-            }
-
-            var embeddings = embeddingResult.Data!;
-            if (embeddings.Count != batch.Count)
-            {
-                var firstChunkId = batch[0].Id;
-                Logger.LogError("Reindex embedding count mismatch for knowledge base {KbId} at chunk {ChunkId}: expected {Expected}, got {Actual}",
-                    knowledgeBaseId, firstChunkId, batch.Count, embeddings.Count);
-                return Fail<ReindexResultDto>(
-                    $"Embedding count mismatch at chunk {firstChunkId}: expected {batch.Count}, got {embeddings.Count}");
-            }
-
-            for (var i = 0; i < batch.Count; i++)
-            {
-                batch[i].Embedding = new Vector(embeddings[i]);
-            }
-
-            await _chunkRepository.UpdateManyAsync(batch, cancellationToken);
-            totalProcessed += batch.Count;
-
-            Logger.LogDebug("Reindex progress for knowledge base {KbId}: {Processed}/{Total} chunks",
-                knowledgeBaseId, totalProcessed, allChunks.Count);
-        }
-
-        sw.Stop();
-        Logger.LogInformation("Reindexed knowledge base {KbId} ({Name}): {ChunkCount} chunks across {DocCount} documents in {DurationMs}ms",
-            knowledgeBaseId, kb.Name, totalProcessed, documentCount, sw.ElapsedMilliseconds);
-
-        return Ok(new ReindexResultDto
-        {
-            KnowledgeBaseId = knowledgeBaseId,
-            ChunkCount = totalProcessed,
-            DocumentCount = documentCount,
-            DurationMs = sw.ElapsedMilliseconds
-        });
         }
         finally
         {
             await ReleaseReindexLockAsync(kb, now);
         }
     }
+
+    /// <summary>
+    /// True when the exception indicates the LINQ provider doesn't support ExecuteUpdateAsync
+    /// (in-memory EF Core provider, or test doubles missing IAsyncQueryProvider). Used to
+    /// distinguish provider capability from genuine runtime errors so we don't silently
+    /// swallow real failures.
+    /// </summary>
+    private static bool IsProviderUnsupportedExecuteUpdate(InvalidOperationException ex)
+        => ex.Message.Contains("ExecuteUpdate", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("ExecuteAsync", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("AsyncQueryProvider", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("does not implement", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("provider does not support", StringComparison.OrdinalIgnoreCase);
 
     /// <remarks>
     /// Acquires the reindex mutex via conditional UPDATE. ExecuteUpdateAsync makes
@@ -556,8 +571,11 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 .ExecuteUpdateAsync(s => s.SetProperty(k => k.ReindexingAt, now), ct);
             return affected > 0;
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex) when (IsProviderUnsupportedExecuteUpdate(ex))
         {
+            // Test double / in-memory provider — fall back to load-then-update with a
+            // narrower (millisecond) race window. Genuine runtime InvalidOperation now
+            // propagates instead of being silently swallowed.
             if (kb.ReindexingAt != null && kb.ReindexingAt >= staleCutoff)
             {
                 return false;
@@ -583,15 +601,16 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 .Where(k => k.Id == kb.Id && k.ReindexingAt == acquiredAt)
                 .ExecuteUpdateAsync(s => s.SetProperty(k => k.ReindexingAt, (DateTime?)null), CancellationToken.None);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex) when (IsProviderUnsupportedExecuteUpdate(ex))
         {
+            // Test double / in-memory fallback (mirrors TryAcquire path).
             if (kb.ReindexingAt == acquiredAt)
             {
                 kb.ReindexingAt = null;
                 try { await _kbRepository.UpdateAsync(kb, cancellationToken: CancellationToken.None); }
-                catch (Exception ex)
+                catch (Exception updateEx)
                 {
-                    Logger.LogWarning(ex, "Failed to release reindex lock for knowledge base {KbId}", kb.Id);
+                    Logger.LogWarning(updateEx, "Failed to release reindex lock for knowledge base {KbId}", kb.Id);
                 }
             }
         }

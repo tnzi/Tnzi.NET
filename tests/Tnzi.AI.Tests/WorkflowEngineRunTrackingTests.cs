@@ -21,10 +21,10 @@ public class WorkflowEngineRunTrackingTests
         services.AddLogging();
         services.AddSingleton(runStore.Object);
         services.AddScoped<IWorkflowNode, ApprovalNode>();
+        services.AddScoped<WorkflowNodeExecutor>();
         var serviceProvider = services.BuildServiceProvider();
 
-        var executor = new WorkflowNodeExecutor(serviceProvider, Mock.Of<ILogger<WorkflowNodeExecutor>>());
-        var engine = new WorkflowEngine(executor, Mock.Of<ILogger<WorkflowEngine>>());
+        var engine = new WorkflowEngine(Mock.Of<ILogger<WorkflowEngine>>());
 
         var graph = new WorkflowGraph([
             new WorkflowStepDto
@@ -70,10 +70,10 @@ public class WorkflowEngineRunTrackingTests
         services.AddScoped<IWorkflowNode, StepANode>();
         services.AddScoped<IWorkflowNode, StepBNode>();
         services.AddScoped<IWorkflowNode, JoinNode>();
+        services.AddScoped<WorkflowNodeExecutor>();
         var serviceProvider = services.BuildServiceProvider();
 
-        var executor = new WorkflowNodeExecutor(serviceProvider, Mock.Of<ILogger<WorkflowNodeExecutor>>());
-        var engine = new WorkflowEngine(executor, Mock.Of<ILogger<WorkflowEngine>>());
+        var engine = new WorkflowEngine(Mock.Of<ILogger<WorkflowEngine>>());
 
         var graph = new WorkflowGraph(
         [
@@ -134,10 +134,10 @@ public class WorkflowEngineRunTrackingTests
         services.AddSingleton(runStore.Object);
         services.AddScoped<IWorkflowNode, FailingNode>();
         services.AddScoped<IWorkflowNode, DownstreamNode>();
+        services.AddScoped<WorkflowNodeExecutor>();
         var serviceProvider = services.BuildServiceProvider();
 
-        var executor = new WorkflowNodeExecutor(serviceProvider, Mock.Of<ILogger<WorkflowNodeExecutor>>());
-        var engine = new WorkflowEngine(executor, Mock.Of<ILogger<WorkflowEngine>>());
+        var engine = new WorkflowEngine(Mock.Of<ILogger<WorkflowEngine>>());
 
         var graph = new WorkflowGraph(
         [
@@ -205,10 +205,10 @@ public class WorkflowEngineRunTrackingTests
         services.AddSingleton(runStore.Object);
         services.AddSingleton(mailbox.Object);
         services.AddScoped<IWorkflowNode, FixedNode>();
+        services.AddScoped<WorkflowNodeExecutor>();
         var serviceProvider = services.BuildServiceProvider();
 
-        var executor = new WorkflowNodeExecutor(serviceProvider, Mock.Of<ILogger<WorkflowNodeExecutor>>());
-        var engine = new WorkflowEngine(executor, Mock.Of<ILogger<WorkflowEngine>>());
+        var engine = new WorkflowEngine(Mock.Of<ILogger<WorkflowEngine>>());
 
         var graph = new WorkflowGraph(
         [

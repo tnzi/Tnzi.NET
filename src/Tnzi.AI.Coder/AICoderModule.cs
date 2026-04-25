@@ -80,31 +80,8 @@ public class AICoderModule : TnziApplicationModule
 
     public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
-        // 扫描并注册本模块的工具到 ToolRegistry
-        var serviceProvider = context.ServiceProvider;
-        var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
-        var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();
-        var logger = serviceProvider.GetRequiredService<ILogger<AICoderModule>>();
-
-        try
-        {
-            var assembly = typeof(AICoderModule).Assembly;
-            var tools = toolScanner.ScanAssembly(assembly);
-            var count = 0;
-
-            foreach (var tool in tools)
-            {
-                toolRegistry.Register(tool);
-                count++;
-            }
-
-            logger.LogInformation("Registered {Count} AI coder tools from {Assembly}",
-                count, assembly.GetName().Name);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to scan and register AI coder tools");
-        }
+        var logger = context.ServiceProvider.GetRequiredService<ILogger<AICoderModule>>();
+        AIToolRegistration.ScanAndRegisterAITools(context.ServiceProvider, typeof(AICoderModule).Assembly, logger);
 
         return Task.CompletedTask;
     }

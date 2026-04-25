@@ -194,9 +194,17 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
         // WorkflowService — Mock（工作流测试有独立 fixture）
         services.AddScoped(_ => Mock.Of<IWorkflowService>());
 
-        // IServiceScopeFactory — AgentRuntime 需要
+        // IServiceScopeFactory — EventPublisher 需要
         services.AddSingleton<IServiceScopeFactory>(sp =>
             sp.GetRequiredService<IServiceScopeFactory>());
+
+        // Phase 2 extracted services
+        services.AddScoped<IRunTracker, RunTracker>();
+        services.AddScoped<IEventPublisher>(sp => new EventPublisher(
+            sp.GetService<IEventBus>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<ILogger<EventPublisher>>()));
+        services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
 
         // 中间件 — 默认不注册中间件，子类可通过 ConfigureMiddlewares 添加
         ConfigureMiddlewares(services);

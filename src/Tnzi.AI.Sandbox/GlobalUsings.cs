@@ -25,6 +25,7 @@ global using Tnzi.AI.Sandbox.VirtualPath;
 global using Tnzi.AI.Services.Interfaces;
 global using Tnzi.Modules;
 global using Tnzi.Options;
+global using Tnzi.AI.Tools;
 global using Tnzi.AI.Tools.Attributes;
 global using Tnzi.AI.Skills;
 global using Tnzi.AI.Skills.Models;

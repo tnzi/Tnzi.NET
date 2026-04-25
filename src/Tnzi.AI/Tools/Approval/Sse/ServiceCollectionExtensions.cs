@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Tnzi.AI.Tools.Approval;
 
 namespace Tnzi.AI.Tools.Approval.Sse;
 
@@ -11,20 +10,28 @@ namespace Tnzi.AI.Tools.Approval.Sse;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the SSE-based tool approval handler. Replaces the default <c>AutoApprovalHandler</c>
-    /// so that any tool-call approval requests are emitted to a scoped <see cref="ApprovalRequestCollector"/>
-    /// (which a consumer wires to an HTTP SSE stream) and wait for an explicit decision before resolving.
+    /// Registers the full SSE-based tool approval pipeline. Replaces the default
+    /// <c>AutoApprovalHandler</c> with <see cref="SseToolApprovalHandler"/>; emits pending requests
+    /// to a per-request <see cref="ApprovalRequestCollector"/> (which a consumer wires to an HTTP
+    /// SSE stream) and waits for an explicit decision via <see cref="IPendingApprovalStore"/>.
     /// </summary>
     /// <remarks>
-    /// This method also ensures <see cref="IHttpContextAccessor"/> is registered, since the handler
-    /// uses it to resolve the per-request <see cref="ApprovalRequestCollector"/> from the active HTTP scope.
-    /// The rest of the SSE approval machinery (<see cref="IPendingApprovalStore"/>, the store implementation,
-    /// the handler itself, and the collector) is auto-registered via the framework's
-    /// <c>IScopedDependency</c> / <c>ISingletonDependency</c> marker interfaces.
+    /// All registrations are explicit per framework rule #1 (no marker-interface auto-registration
+    /// in framework assemblies). The registered components are:
+    /// <list type="bullet">
+    ///   <item><see cref="IHttpContextAccessor"/> (Singleton) — for resolving per-call request scope</item>
+    ///   <item><see cref="InMemoryPendingApprovalStore"/> (Singleton) + <see cref="IPendingApprovalStore"/> alias</item>
+    ///   <item><see cref="ApprovalRequestCollector"/> (Scoped) — per-request channel</item>
+    ///   <item><see cref="IToolApprovalHandler"/> (Singleton) — replaces any prior registration</item>
+    /// </list>
     /// </remarks>
     public static IServiceCollection AddAIToolApprovalSse(this IServiceCollection services)
     {
         services.AddHttpContextAccessor();
+
+        services.TryAddSingleton<InMemoryPendingApprovalStore>();
+        services.TryAddSingleton<IPendingApprovalStore>(sp => sp.GetRequiredService<InMemoryPendingApprovalStore>());
+        services.AddScoped<ApprovalRequestCollector>();
 
         // Replace any earlier registered IToolApprovalHandler (e.g. AutoApprovalHandler via TryAdd)
         // so the SSE handler takes precedence.

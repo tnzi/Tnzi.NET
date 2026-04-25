@@ -19,7 +19,7 @@ public class AgentRuntimeWorkflowDispatchTests
                 Status = "Completed"
             }));
 
-        var runtime = CreateRuntime(workflowService.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object);
 
         var result = await runtime.RunAsync(new AgentRunRequest
         {
@@ -55,7 +55,7 @@ public class AgentRuntimeWorkflowDispatchTests
             .Callback<AgentRunCompletedEvent, CancellationToken>((evt, _) => publishedEvents.Add(evt))
             .Returns(Task.CompletedTask);
 
-        var runtime = CreateRuntime(workflowService.Object, eventBus: eventBus.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object, eventBus: eventBus.Object);
 
         await runtime.RunAsync(new AgentRunRequest
         {
@@ -78,7 +78,7 @@ public class AgentRuntimeWorkflowDispatchTests
         workflowService.Setup(x => x.RunStreamingAsync(workflowId, "workflow input", null, It.IsAny<CancellationToken>()))
             .Returns(StreamWorkflowResults());
 
-        var runtime = CreateRuntime(workflowService.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object);
         var chunks = new List<AgentStreamChunk>();
 
         await foreach (var chunk in runtime.RunStreamingAsync(new AgentRunRequest
@@ -112,7 +112,7 @@ public class AgentRuntimeWorkflowDispatchTests
             .Callback<AgentRunCompletedEvent, CancellationToken>((evt, _) => publishedEvents.Add(evt))
             .Returns(Task.CompletedTask);
 
-        var runtime = CreateRuntime(workflowService.Object, eventBus: eventBus.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object, eventBus: eventBus.Object);
 
         await foreach (var _ in runtime.RunStreamingAsync(new AgentRunRequest
         {
@@ -136,7 +136,7 @@ public class AgentRuntimeWorkflowDispatchTests
         workflowService.Setup(x => x.RunStreamingAsync(workflowId, "workflow input", null, It.IsAny<CancellationToken>()))
             .Returns(StreamWorkflowPartialFailureResults());
 
-        var runtime = CreateRuntime(workflowService.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object);
         var chunks = new List<AgentStreamChunk>();
 
         await foreach (var chunk in runtime.RunStreamingAsync(new AgentRunRequest
@@ -166,7 +166,7 @@ public class AgentRuntimeWorkflowDispatchTests
                 Status = "Failed"
             }));
 
-        var runtime = CreateRuntime(workflowService.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object);
 
         var result = await runtime.RunAsync(new AgentRunRequest
         {
@@ -192,7 +192,7 @@ public class AgentRuntimeWorkflowDispatchTests
                 Status = "PartialFailure(step-a)"
             }));
 
-        var runtime = CreateRuntime(workflowService.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object);
 
         var result = await runtime.RunAsync(new AgentRunRequest
         {
@@ -218,7 +218,7 @@ public class AgentRuntimeWorkflowDispatchTests
                 Status = "AwaitingInput"
             }));
 
-        var runtime = CreateRuntime(workflowService.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object);
 
         var result = await runtime.RunAsync(new AgentRunRequest
         {
@@ -238,7 +238,7 @@ public class AgentRuntimeWorkflowDispatchTests
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AgentResolution.Failure("test", null, null, ErrorCodes.AgentNotFound));
 
-        var runtime = CreateRuntime(Mock.Of<IWorkflowService>(), resolver.Object);
+        var runtime = CreateRuntime(resolver: resolver.Object);
 
         var ex = await Should.ThrowAsync<Tnzi.Exceptions.BusinessException>(() => runtime.RunAsync(new AgentRunRequest
         {
@@ -279,7 +279,7 @@ public class AgentRuntimeWorkflowDispatchTests
             new() { Content = "Stale state", Status = TodoStatus.Pending, Order = 1 }
         };
 
-        var runtime = CreateRuntime(workflowService.Object, accessor: accessor);
+        var runtime = CreateRuntime(workflowService: workflowService.Object, accessor: accessor);
 
         await runtime.RunAsync(new AgentRunRequest { WorkflowId = workflowId, UserMessage = "one" });
         await runtime.RunAsync(new AgentRunRequest { WorkflowId = workflowId, UserMessage = "two" });
@@ -311,7 +311,7 @@ public class AgentRuntimeWorkflowDispatchTests
             .AddSingleton<IExternalCliExecutor>(cliExecutor.Object)
             .BuildServiceProvider();
 
-        var runtime = CreateRuntime(Mock.Of<IWorkflowService>(), resolver.Object, serviceProvider: serviceProvider);
+        var runtime = CreateRuntime(resolver: resolver.Object, serviceProvider: serviceProvider);
         var chunks = new List<AgentStreamChunk>();
 
         await foreach (var chunk in runtime.RunStreamingAsync(new AgentRunRequest
@@ -332,6 +332,8 @@ public class AgentRuntimeWorkflowDispatchTests
     {
         var updatedRuns = new List<AgentRun>();
         var runStore = CreateRunStore(updatedRuns);
+        var traceStore = CreateTraceStore();
+        var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("test-provider", "gpt-5", null, null, AgentExecutionMode.ExternalCli));
@@ -348,13 +350,12 @@ public class AgentRuntimeWorkflowDispatchTests
             resolver.Object,
             Mock.Of<IAgentFactory>(),
             Mock.Of<IRepository<Agent, Guid>>(),
-            runStore.Object,
-            CreateTraceStore().Object,
-            Mock.Of<IWorkflowService>(),
+            runTracker,
+            Mock.Of<IWorkflowDelegator>(),
             new AgentExecutionContextAccessor(),
             serviceProvider,
-            Mock.Of<IServiceScopeFactory>(),
             Mock.Of<IOptionsMonitor<AIOptions>>(),
+            Mock.Of<IEventPublisher>(),
             Mock.Of<ILogger<AgentRuntime>>());
 
         var result = await runtime.RunAsync(new AgentRunRequest
@@ -373,6 +374,8 @@ public class AgentRuntimeWorkflowDispatchTests
     {
         var updatedRuns = new List<AgentRun>();
         var runStore = CreateRunStore(updatedRuns);
+        var traceStore = CreateTraceStore();
+        var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("test-provider", "gpt-5", null, null, AgentExecutionMode.ExternalCli));
@@ -392,13 +395,12 @@ public class AgentRuntimeWorkflowDispatchTests
             resolver.Object,
             Mock.Of<IAgentFactory>(),
             Mock.Of<IRepository<Agent, Guid>>(),
-            runStore.Object,
-            CreateTraceStore().Object,
-            Mock.Of<IWorkflowService>(),
+            runTracker,
+            Mock.Of<IWorkflowDelegator>(),
             new AgentExecutionContextAccessor(),
             serviceProvider,
-            Mock.Of<IServiceScopeFactory>(),
             Mock.Of<IOptionsMonitor<AIOptions>>(),
+            Mock.Of<IEventPublisher>(),
             Mock.Of<ILogger<AgentRuntime>>());
 
         await foreach (var _ in runtime.RunStreamingAsync(new AgentRunRequest
@@ -439,15 +441,13 @@ public class AgentRuntimeWorkflowDispatchTests
             resolver.Object,
             Mock.Of<IAgentFactory>(),
             Mock.Of<IRepository<Agent, Guid>>(),
-            Mock.Of<IRunStore>(),
-            CreateTraceStore().Object,
-            Mock.Of<IWorkflowService>(),
+            Mock.Of<IRunTracker>(),
+            Mock.Of<IWorkflowDelegator>(),
             new AgentExecutionContextAccessor(),
             serviceProvider,
-            Mock.Of<IServiceScopeFactory>(),
             Mock.Of<IOptionsMonitor<AIOptions>>(),
-            Mock.Of<ILogger<AgentRuntime>>(),
-            eventBus.Object);
+            new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>()),
+            Mock.Of<ILogger<AgentRuntime>>());
 
         var result = await runtime.RunAsync(new AgentRunRequest
         {
@@ -476,7 +476,7 @@ public class AgentRuntimeWorkflowDispatchTests
             .Callback<AgentRunCompletedEvent, CancellationToken>((evt, _) => publishedEvents.Add(evt))
             .Returns(Task.CompletedTask);
 
-        var runtime = CreateRuntime(workflowService.Object, eventBus: eventBus.Object);
+        var runtime = CreateRuntime(workflowService: workflowService.Object, eventBus: eventBus.Object);
         var chunks = new List<AgentStreamChunk>();
 
         await foreach (var chunk in runtime.RunStreamingAsync(new AgentRunRequest
@@ -514,8 +514,7 @@ public class AgentRuntimeWorkflowDispatchTests
             .BuildServiceProvider();
 
         var runtime = CreateRuntime(
-            Mock.Of<IWorkflowService>(),
-            resolver.Object,
+            resolver: resolver.Object,
             serviceProvider: serviceProvider,
             scopeFactory: scopeFactory.Object);
 
@@ -528,27 +527,43 @@ public class AgentRuntimeWorkflowDispatchTests
     }
 
     private static AgentRuntime CreateRuntime(
-        IWorkflowService workflowService,
+        IWorkflowService? workflowService = null,
         IAgentResolver? resolver = null,
         IAgentExecutionContextAccessor? accessor = null,
         IServiceProvider? serviceProvider = null,
         IServiceScopeFactory? scopeFactory = null,
         IEventBus? eventBus = null)
     {
-        var sp = serviceProvider ?? new ServiceCollection().BuildServiceProvider();
+        var sp = serviceProvider ?? new ServiceCollection()
+            .AddSingleton(workflowService ?? Mock.Of<IWorkflowService>())
+            .BuildServiceProvider();
+
+        var runStore = new Mock<IRunStore>();
+        runStore.Setup(x => x.UpdateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentRun run, CancellationToken _) => { run.Id = Guid.NewGuid(); return run; });
+
+        var traceStore = new Mock<ITraceStore>();
+        traceStore.Setup(x => x.AddAsync(It.IsAny<AgentRunTrace>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentRunTrace trace, CancellationToken _) => trace);
+
+        var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
+
+        var wfService = workflowService ?? Mock.Of<IWorkflowService>();
+        var workflowDelegator = new WorkflowDelegator(wfService, runStore.Object, runTracker, Mock.Of<ILogger<WorkflowDelegator>>());
+
         return new AgentRuntime(
             resolver ?? Mock.Of<IAgentResolver>(),
             Mock.Of<IAgentFactory>(),
             Mock.Of<IRepository<Agent, Guid>>(),
-            Mock.Of<IRunStore>(),
-            Mock.Of<ITraceStore>(),
-            workflowService,
+            runTracker,
+            workflowDelegator,
             accessor ?? new AgentExecutionContextAccessor(),
             sp,
-            scopeFactory ?? Mock.Of<IServiceScopeFactory>(),
             Mock.Of<IOptionsMonitor<AIOptions>>(),
-            Mock.Of<ILogger<AgentRuntime>>(),
-            eventBus);
+            new EventPublisher(eventBus, scopeFactory ?? Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>()),
+            Mock.Of<ILogger<AgentRuntime>>());
     }
 
     private static Mock<IRunStore> CreateRunStore(List<AgentRun> updatedRuns)

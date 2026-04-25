@@ -21,37 +21,16 @@ public partial class AIModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 绑定配置选项（框架标准方式）
-        context.Services.AddOptions<AIOptions>()
-            .Bind(context.Configuration.GetSection("AI"))
-            .ValidateWith<AIOptions, AIOptionsValidator>();
-
-        context.Services.AddOptions<AiUtilityOptions>()
-            .Bind(context.Configuration.GetSection("AI:Utility"))
-            .ValidateWith<AiUtilityOptions, AiUtilityOptionsValidator>();
-
-        context.Services.AddOptions<ThreadOptions>()
-            .Bind(context.Configuration.GetSection("AI:Thread"))
-            .ValidateWith<ThreadOptions, ThreadOptionsValidator>();
-
-        context.Services.AddOptions<LoopDetectionOptions>()
-            .Bind(context.Configuration.GetSection("AI:LoopDetection"))
-            .ValidateWith<LoopDetectionOptions, LoopDetectionOptionsValidator>();
-        context.Services.AddOptions<SubAgentOptions>()
-            .Bind(context.Configuration.GetSection("AI:SubAgent"))
-            .ValidateWith<SubAgentOptions, SubAgentOptionsValidator>();
-
-        context.Services.AddOptions<BudgetOptions>()
-            .Bind(context.Configuration.GetSection("AI:Budget"))
-            .ValidateWith<BudgetOptions, BudgetOptionsValidator>();
-
-        context.Services.AddOptions<SuggestionOptions>()
-            .Bind(context.Configuration.GetSection("AI:Suggestions"))
-            .ValidateWith<SuggestionOptions, SuggestionOptionsValidator>();
-
-        context.Services.AddOptions<TodoOptions>()
-            .Bind(context.Configuration.GetSection("AI:Todo"))
-            .ValidateWith<TodoOptions, TodoOptionsValidator>();
+        // 绑定配置选项
+        BindAndValidate<AIOptions, AIOptionsValidator>(context, "AI");
+        BindAndValidate<AiUtilityOptions, AiUtilityOptionsValidator>(context, "AI:Utility");
+        BindAndValidate<ThreadOptions, ThreadOptionsValidator>(context, "AI:Thread");
+        BindAndValidate<LoopDetectionOptions, LoopDetectionOptionsValidator>(context, "AI:LoopDetection");
+        BindAndValidate<SubAgentOptions, SubAgentOptionsValidator>(context, "AI:SubAgent");
+        BindAndValidate<BudgetOptions, BudgetOptionsValidator>(context, "AI:Budget");
+        BindAndValidate<SuggestionOptions, SuggestionOptionsValidator>(context, "AI:Suggestions");
+        BindAndValidate<TodoOptions, TodoOptionsValidator>(context, "AI:Todo");
+        BindAndValidate<Tools.Sql.SqlToolOptions, Tools.Sql.SqlToolOptionsValidator>(context, "AI:Sql");
 
         // 从环境变量补充 API Key，并回填 Provider Name（用于 Polly pipeline 路由）
         context.Services.PostConfigure<AIOptions>(options =>
@@ -74,6 +53,74 @@ public partial class AIModule : TnziApplicationModule
         });
 
         return Task.CompletedTask;
+    }
+
+    private static void BindAndValidate<TOptions, TValidator>(
+        ServiceConfigurationContext context, string section)
+        where TOptions : class
+        where TValidator : class, IValidateOptions<TOptions>
+    {
+        context.Services.AddOptions<TOptions>()
+            .Bind(context.Configuration.GetSection(section))
+            .ValidateWith<TOptions, TValidator>();
+    }
+
+    private static void AddAiMiddleware<T>(IServiceCollection services)
+        where T : class, IAiMiddleware
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddAiMiddlewareSingleton<T>(IServiceCollection services,
+        bool forwardAsSingleton = false)
+        where T : class, IAiMiddleware
+    {
+        services.AddSingleton<T>();
+        if (forwardAsSingleton)
+            services.AddSingleton<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+        else
+            services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddToolMiddleware<T>(IServiceCollection services)
+        where T : class, IAiMiddleware, IToolExecutionMiddleware
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddInputGuardrail<T>(IServiceCollection services)
+        where T : class, IInputGuardrail, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddOutputGuardrail<T>(IServiceCollection services)
+        where T : class, IOutputGuardrail, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddDualGuardrail<T>(IServiceCollection services)
+        where T : class, IInputGuardrail, IOutputGuardrail, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddProviderOnlyGuardrail<T>(IServiceCollection services)
+        where T : class, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
     }
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
@@ -166,6 +213,28 @@ public partial class AIModule : TnziApplicationModule
         services.TryAddScoped<IWorkflowService, NoOpWorkflowService>();
         services.TryAddScoped<ISkillLoadTracker, NoOpSkillLoadTracker>();
 
+        // Workflow 子接口转发 — NoOpWorkflowService 已实现 IWorkflowService
+        //（继承 IWorkflowExecutionControlService + IWorkflowExecutionQueryService），
+        // 但 DI 不会自动转发子接口，需显式注册以消除 GetService<T>() null-check 脆弱性
+        services.TryAddScoped<IWorkflowExecutionControlService>(sp =>
+            (IWorkflowExecutionControlService)sp.GetRequiredService<IWorkflowService>());
+        services.TryAddScoped<IWorkflowExecutionQueryService>(sp =>
+            (IWorkflowExecutionQueryService)sp.GetRequiredService<IWorkflowService>());
+
+        // 其他 Category D NoOp 回退 — 已在核心被 GetService<T>() 消费
+        services.TryAddScoped<IExternalCliExecutor, NoOpExternalCliExecutor>();
+        services.TryAddScoped<IWorkflowExecutionMailbox, NoOpWorkflowExecutionMailbox>();
+        services.TryAddScoped<IAgentStreamForwarder, NoOpAgentStreamForwarder>();
+
+        // Category C NoOp 回退 — 接口在核心定义、实现在子模块，防止 DI 解析失败
+        services.TryAddScoped<ISkillService, NoOpSkillService>();
+        services.TryAddScoped<ISkillStore, NoOpSkillStore>();
+        services.TryAddScoped<ISkillTemplateEngine, NoOpSkillTemplateEngine>();
+        services.TryAddScoped<ISkillConstraintEnforcer, NoOpSkillConstraintEnforcer>();
+        services.TryAddScoped<ISkillSearchService, NoOpSkillSearchService>();
+        services.TryAddScoped<ISkillRequirementsValidator, NoOpSkillRequirementsValidator>();
+        services.TryAddScoped<IVectorStore, NoOpVectorStore>();
+
         // 注册对话存储和记忆存储（使用 TryAdd，允许 Agent 模块替换）
         services.TryAddScoped<IConversationStore, DatabaseConversationStore>();
         services.TryAddScoped<IMemoryStore, DatabaseMemoryStore>();
@@ -247,93 +316,45 @@ public partial class AIModule : TnziApplicationModule
         services.AddScoped<GuardrailRunner>();
 
         // 输入 guardrails（同时注册为 IGuardrailProvider）
-        services.AddScoped<MaxLengthGuardrail>();
-        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<MaxLengthGuardrail>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<MaxLengthGuardrail>());
-
-        services.AddScoped<PromptInjectionGuardrail>();
-        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<PromptInjectionGuardrail>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<PromptInjectionGuardrail>());
-
-        services.AddScoped<PiiDetectionGuardrail>();
-        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<PiiDetectionGuardrail>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<PiiDetectionGuardrail>());
+        AddInputGuardrail<MaxLengthGuardrail>(services);
+        AddInputGuardrail<PromptInjectionGuardrail>(services);
+        AddInputGuardrail<PiiDetectionGuardrail>(services);
 
         // 输出 guardrails（同时注册为 IGuardrailProvider）
-        services.AddScoped<ContentFilterGuardrail>();
-        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<ContentFilterGuardrail>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<ContentFilterGuardrail>());
+        AddOutputGuardrail<ContentFilterGuardrail>(services);
 
         // LLM-as-Judge guardrail（同时作为输入、输出和统一 guardrail provider）
-        services.AddScoped<LlmJudgeGuardrail>();
-        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
-        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<LlmJudgeGuardrail>());
+        AddDualGuardrail<LlmJudgeGuardrail>(services);
 
         // 工具白名单/黑名单 guardrail provider
-        services.AddScoped<AllowlistGuardrailProvider>();
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<AllowlistGuardrailProvider>());
+        AddProviderOnlyGuardrail<AllowlistGuardrailProvider>(services);
 
         // 注册中间件管道组件（手动注册，框架程序集不使用自动注册）
         // 每个中间件同时注册具体类型和 IAiMiddleware 接口转发，支持用户通过接口扩展
-        services.AddSingleton<RetryMiddleware>();
-        services.AddSingleton<IAiMiddleware>(sp => sp.GetRequiredService<RetryMiddleware>());
+        AddAiMiddlewareSingleton<RetryMiddleware>(services, forwardAsSingleton: true);
+        AddAiMiddleware<ThinkingMiddleware>(services);
+        AddAiMiddleware<PromptCachingMiddleware>(services);
+        AddAiMiddleware<QuotaMiddleware>(services);
+        AddAiMiddleware<InputGuardrailMiddleware>(services);
+        AddAiMiddleware<HistoryMiddleware>(services);
 
-        services.AddScoped<ThinkingMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ThinkingMiddleware>());
+        services.TryAddSingleton<CompositeContextProviderFactory>();
+        AddAiMiddleware<ContextInjectionMiddleware>(services);
+        AddAiMiddleware<UsageLoggingMiddleware>(services);
+        AddAiMiddleware<OutputGuardrailMiddleware>(services);
 
-        services.AddScoped<PromptCachingMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<PromptCachingMiddleware>());
+        AddToolMiddleware<ToolGuardrailMiddleware>(services);
+        AddAiMiddlewareSingleton<LoopDetectionMiddleware>(services);
+        AddToolMiddleware<ToolErrorRecoveryMiddleware>(services);
 
-        services.AddScoped<QuotaMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<QuotaMiddleware>());
+        AddAiMiddleware<SubAgentLimitMiddleware>(services);
+        AddAiMiddleware<DeferredToolFilterMiddleware>(services);
 
-        services.AddScoped<InputGuardrailMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<InputGuardrailMiddleware>());
-
-        services.AddScoped<HistoryMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<HistoryMiddleware>());
-
-        services.TryAddScoped<CompositeContextProvider>();
-
-        services.AddScoped<ContextInjectionMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ContextInjectionMiddleware>());
-
-        services.AddScoped<UsageLoggingMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<UsageLoggingMiddleware>());
-
-        services.AddScoped<OutputGuardrailMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<OutputGuardrailMiddleware>());
-
-        // Phase 5: Tool guardrail middleware
-        services.AddScoped<ToolGuardrailMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ToolGuardrailMiddleware>());
-        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<ToolGuardrailMiddleware>());
-
-        // Phase 1 middlewares
-        // Singleton: tracks tool call patterns across requests via LRU dictionary
-        services.AddSingleton<LoopDetectionMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<LoopDetectionMiddleware>());
-
-        services.AddScoped<ToolErrorRecoveryMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ToolErrorRecoveryMiddleware>());
-        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<ToolErrorRecoveryMiddleware>());
-
-        services.AddScoped<SubAgentLimitMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SubAgentLimitMiddleware>());
-
-        services.AddScoped<DeferredToolFilterMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<DeferredToolFilterMiddleware>());
-
-        // Phase 2: Context Intelligence middlewares
-        services.AddScoped<SummarizationMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SummarizationMiddleware>());
-
-        services.AddScoped<FileUploadMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<FileUploadMiddleware>());
-
-        services.AddScoped<ViewImageMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ViewImageMiddleware>());
+        AddAiMiddleware<SummarizationMiddleware>(services);
+        AddAiMiddleware<FileUploadMiddleware>(services);
+        AddAiMiddleware<ViewImageMiddleware>(services);
+        AddAiMiddleware<TodoMiddleware>(services);
+        AddAiMiddleware<ClarificationMiddleware>(services);
 
         // Document converter (default: native .NET, can be overridden with CliDocumentConverter)
         services.TryAddSingleton<IDocumentConverter, NativeDocumentConverter>();
@@ -341,6 +362,12 @@ public partial class AIModule : TnziApplicationModule
         // 注册 Runtime（统一 AI 执行入口 + Run/Trace 持久化）
         services.AddScoped<IRunStore, RunStore>();
         services.AddScoped<ITraceStore, TraceStore>();
+        services.AddScoped<IRunTracker, RunTracker>();
+        services.AddScoped<IEventPublisher>(sp => new EventPublisher(
+            sp.GetService<IEventBus>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<ILogger<EventPublisher>>()));
+        services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
         services.AddScoped<IAgentRuntime, AgentRuntime>();
 
         // 注册 Run 管理服务（查询、取消、审批、重试、反馈）
@@ -363,13 +390,6 @@ public partial class AIModule : TnziApplicationModule
 
         // Phase 3: 后续建议生成服务
         services.TryAddScoped<ISuggestionService, SuggestionService>();
-
-        // Phase 3: Todo 和 Clarification 中间件
-        services.AddScoped<TodoMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<TodoMiddleware>());
-
-        services.AddScoped<ClarificationMiddleware>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<ClarificationMiddleware>());
 
         // Phase 3: AI 工具（Clarification / Todo / Artifact）
         services.TryAddScoped<ClarificationTools>();
@@ -414,6 +434,21 @@ public partial class AIModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI:PortAllocator"))
             .ValidateWith<PortAllocatorOptions, PortAllocatorOptionsValidator>();
         services.AddSingleton<IPortAllocator, PortAllocator>();
+
+        // SQL tool suite — manual registration per framework rule #1.
+        // Permission check defaults to DenyAll (fail-secure); applications opt into a permissive
+        // implementation by replacing this registration with FrameworkPermissionSqlCheck or
+        // their own IReadOnlySqlPermissionCheck. The DbConnection factory MUST be registered
+        // by the application — without it, IReadOnlySqlExecutor cannot be resolved.
+        services.AddSingleton<Tools.Sql.ISqlValidator, Tools.Sql.RestrictiveSqlValidator>();
+        services.AddSingleton<Tools.Sql.ISqlColumnInferrer, Tools.Sql.HeuristicSqlColumnInferrer>();
+        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.TSqlSchemaProvider>();
+        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.PostgreSqlSchemaProvider>();
+        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.MySqlSchemaProvider>();
+        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.SqliteSchemaProvider>();
+        services.AddScoped<Tools.Sql.IReadOnlySqlExecutor, Tools.Sql.ReadOnlySqlExecutor>();
+        services.AddScoped<Tools.Sql.ISchemaInspector, Tools.Sql.SchemaInspector>();
+        services.TryAddScoped<Tools.Sql.IReadOnlySqlPermissionCheck, Tools.Sql.DenyAllSqlPermissionCheck>();
 
         return Task.CompletedTask;
     }

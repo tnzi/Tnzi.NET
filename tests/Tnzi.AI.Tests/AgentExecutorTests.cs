@@ -6,22 +6,18 @@ namespace Tnzi.AI.Tests;
 public class AgentExecutorTests
 {
     [Fact]
-    public async Task ExecuteAsync_WithContextInjectedTool_CanFindAndExecuteTool()
+    public async Task ExecuteAsync_WithAdditionalToolFromRuntime_CanFindAndExecuteTool()
     {
-        // Arrange: 创建一个 context-injected 工具
+        // Arrange: 模拟 AgentRuntime.MergeAdditionalTools — context-injected 工具
+        // 在新架构下由 ContextInjectionMiddleware 写入 AiMiddlewareContext.AdditionalTools，
+        // 然后 AgentRuntime 通过 AgentExecutor.WithAdditionalTools 合并到 Options.Tools。
+        // AgentExecutor 自身不再持有 IContextProvider 引用。
         var contextToolCalled = false;
         var contextTool = AIFunctionFactory.Create(() =>
         {
             contextToolCalled = true;
             return "context tool result";
         }, "skill_search", "Search skills");
-
-        // 创建 ContextProvider，注入工具
-        var contextProvider = new Mock<IContextProvider>();
-        contextProvider.Setup(p => p.GetContextAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ContextInjection { Tools = [contextTool] });
-        contextProvider.Setup(p => p.OnCompletedAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         // 第一次调用: LLM 返回工具调用
         var toolCallContent = new FunctionCallContent("call_1", "skill_search", new Dictionary<string, object?>());
@@ -49,20 +45,20 @@ public class AgentExecutorTests
         var options = new AgentExecutorOptions
         {
             Name = "TestAgent",
-            Tools = [], // 无内置工具 — 只有 context-injected 工具
-            ContextProvider = contextProvider.Object
+            Tools = [] // 无内置工具
         };
 
-        var executor = new AgentExecutor(mockClient.Object, options);
+        var executor = new AgentExecutor(mockClient.Object, options)
+            .WithAdditionalTools([contextTool]); // runtime-side merge — what AgentRuntime does
 
         // Act
         var messages = new List<ChatMessage> { new(ChatRole.User, "Find a skill") };
         var response = await executor.ExecuteAsync(messages, CancellationToken.None);
 
         // Assert
-        contextToolCalled.ShouldBeTrue(); // context-injected 工具应该被成功调用
+        contextToolCalled.ShouldBeTrue();
         response.Text.ShouldBe("Done");
-        callCount.ShouldBe(2); // LLM 被调用 2 次（工具调用 + 最终回复）
+        callCount.ShouldBe(2);
     }
 
     [Fact]

@@ -1,11 +1,8 @@
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Tnzi.AI.Tools.Sql;
 
 /// <summary>
 /// Executes SELECT-only SQL against a configured read-only connection.
-/// Enforces validation, row limits, timeout, and optional permission checks.
+/// Enforces validation, row limits, timeout, and a mandatory permission check.
 /// </summary>
 public interface IReadOnlySqlExecutor
 {
@@ -15,7 +12,12 @@ public interface IReadOnlySqlExecutor
         CancellationToken ct = default);
 }
 
+/// <summary>
+/// Per-call execution options. Values left null/0 fall back to <see cref="SqlToolOptions"/>
+/// defaults; supplied values are clamped to the corresponding <c>MaxAllowed*</c> ceilings.
+/// </summary>
 public sealed record ReadOnlySqlExecutionOptions(
-    int MaxRows = 10000,
-    int TimeoutSeconds = 30,
-    string? ConnectionName = null);
+    int? MaxRows = null,
+    int? TimeoutSeconds = null,
+    string? ConnectionName = null,
+    SqlDialect? Dialect = null);

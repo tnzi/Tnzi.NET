@@ -425,11 +425,6 @@ public class AiMiddlewarePipelineTests
     [Fact]
     public async Task ContextInjection_WithProviders_InjectsContext()
     {
-        var compositeProvider = new CompositeContextProvider(
-            Mock.Of<ILogger<CompositeContextProvider>>(),
-            CreateOptions());
-
-        // 添加一个返回 context 的 mock provider
         var mockProvider = new Mock<IContextProvider>();
         mockProvider.Setup(p => p.IsEnabled(It.IsAny<AiMiddlewareContext?>())).Returns(true);
         mockProvider.Setup(p => p.GetContextAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<CancellationToken>()))
@@ -438,10 +433,9 @@ public class AiMiddlewarePipelineTests
                 Messages = [new ChatMessage(ChatRole.System, "Context from RAG")],
                 Citations = [new CitationDto { SourceName = "Source 1" }]
             });
-        compositeProvider.AddProvider(mockProvider.Object);
 
         var middleware = new ContextInjectionMiddleware(
-            compositeProvider,
+            CreateProviderFactory([new TestContextContributor(mockProvider.Object)]),
             Mock.Of<ILogger<ContextInjectionMiddleware>>());
 
         var context = CreateContext();
@@ -463,12 +457,8 @@ public class AiMiddlewarePipelineTests
     [Fact]
     public async Task ContextInjection_NoProviders_PassesThrough()
     {
-        var compositeProvider = new CompositeContextProvider(
-            Mock.Of<ILogger<CompositeContextProvider>>(),
-            CreateOptions());
-
         var middleware = new ContextInjectionMiddleware(
-            compositeProvider,
+            CreateProviderFactory([]),
             Mock.Of<ILogger<ContextInjectionMiddleware>>());
 
         var context = CreateContext();
@@ -483,6 +473,22 @@ public class AiMiddlewarePipelineTests
             });
 
         result.ShouldBe(expected);
+    }
+
+    private static CompositeContextProviderFactory CreateProviderFactory(IEnumerable<IContextProviderContributor> contributors)
+        => new(
+            contributors,
+            CreateOptions(o => o.ContextProviders.Enabled = true),
+            new HeuristicTokenEstimator(),
+            NullLoggerFactory.Instance,
+            NullLogger<CompositeContextProviderFactory>.Instance);
+
+    private sealed class TestContextContributor : IContextProviderContributor
+    {
+        private readonly IContextProvider _provider;
+        public TestContextContributor(IContextProvider provider) => _provider = provider;
+        public int Order => 0;
+        public IContextProvider? TryCreate(ContextProviderCreationContext context) => _provider;
     }
 
     #endregion

@@ -63,7 +63,15 @@ public class DockerSandboxProvider : ISandboxProvider
                 workspacePath: "/workspace",
                 commandTimeout: options.CommandTimeout,
                 maxOutputSize: options.MaxOutputSizeBytes,
-                logger: _logger);
+                logger: _logger,
+                onDisposed: () =>
+                {
+                    // Provider-side cleanup invoked by sandbox.DisposeAsync():
+                    // release the slot AND remove from active map. Idempotent because
+                    // DockerSandbox.DisposeAsync guards with _disposed flag.
+                    _activeContainers.TryRemove(sandboxId, out _);
+                    _containerSemaphore.Release();
+                });
         }
         catch
         {
@@ -73,47 +81,16 @@ public class DockerSandboxProvider : ISandboxProvider
     }
 
     /// <summary>
-    /// Stops and removes a Docker container sandbox, releasing resources.
-    /// Always attempts cleanup even if errors occur.
+    /// Backwards-compatible disposal entry point. The real cleanup lives in
+    /// <see cref="DockerSandbox.DisposeAsync"/>; this method forwards to it so
+    /// callers using <c>provider.DisposeAsync(sandbox)</c> still work, while
+    /// <c>await using var sandbox</c> (the canonical path) also releases the slot.
     /// </summary>
     public async Task DisposeAsync(ISandbox sandbox, CancellationToken ct = default)
     {
         Check.NotNull(sandbox);
-
-        if (!_activeContainers.TryRemove(sandbox.Id, out var containerId))
-        {
-            _logger.LogWarning("Container for sandbox {SandboxId} not found in active list", sandbox.Id);
-            return;
-        }
-
-        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
-
-        try
-        {
-            // 停止容器 (5 秒超时)
-            await StopContainerAsync(httpClient, containerId, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to stop container {ContainerId} for sandbox {SandboxId}",
-                containerId[..Math.Min(12, containerId.Length)], sandbox.Id);
-        }
-
-        try
-        {
-            // 删除容器 (force 确保即使停止失败也能清理)
-            await RemoveContainerAsync(httpClient, containerId, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to remove container {ContainerId} for sandbox {SandboxId}",
-                containerId[..Math.Min(12, containerId.Length)], sandbox.Id);
-        }
-        finally
-        {
-            _containerSemaphore.Release();
-            _logger.LogInformation("Docker sandbox {SandboxId} disposed", sandbox.Id);
-        }
+        await sandbox.DisposeAsync();
+        _logger.LogInformation("Docker sandbox {SandboxId} disposed", sandbox.Id);
     }
 
     private async Task<string> CreateContainerAsync(HttpClient httpClient, string containerName,
@@ -181,28 +158,6 @@ public class DockerSandboxProvider : ISandboxProvider
         {
             var error = await response.Content.ReadAsStringAsync(ct);
             throw new InvalidOperationException($"Failed to start container: {error}");
-        }
-    }
-
-    private static async Task StopContainerAsync(HttpClient httpClient, string containerId, CancellationToken ct)
-    {
-        var response = await httpClient.PostAsync($"/containers/{containerId}/stop?t=5", null, ct);
-        // 304 = container already stopped, which is fine
-        if (!response.IsSuccessStatusCode && (int)response.StatusCode != 304)
-        {
-            var error = await response.Content.ReadAsStringAsync(ct);
-            throw new InvalidOperationException($"Failed to stop container: {error}");
-        }
-    }
-
-    private static async Task RemoveContainerAsync(HttpClient httpClient, string containerId, CancellationToken ct)
-    {
-        var response = await httpClient.DeleteAsync($"/containers/{containerId}?force=true&v=true", ct);
-        // 404 = container already removed (e.g., AutoRemove was on), which is fine
-        if (!response.IsSuccessStatusCode && (int)response.StatusCode != 404)
-        {
-            var error = await response.Content.ReadAsStringAsync(ct);
-            throw new InvalidOperationException($"Failed to remove container: {error}");
         }
     }
 

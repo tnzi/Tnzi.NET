@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Events;
 
 /// <summary>
-/// AgentRuntime 运行生命周期事件发布测试 — 验证 AgentRunStartedEvent 和 AgentRunFailedEvent 的发布行为
+/// AgentRuntime run lifecycle event publishing tests — verifies AgentRunStartedEvent and AgentRunFailedEvent publishing behavior.
 /// </summary>
 public class AgentRuntimeEventPublishingTests
 {
@@ -12,19 +12,23 @@ public class AgentRuntimeEventPublishingTests
         ITraceStore? traceStore = null)
     {
         var sp = new ServiceCollection().BuildServiceProvider();
+
+        var store = runStore ?? Mock.Of<IRunStore>();
+        var traces = traceStore ?? CreateDefaultTraceStore();
+        var runTracker = new RunTracker(store, traces, Mock.Of<ILogger<RunTracker>>());
+        var eventPublisher = new EventPublisher(eventBus, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+
         return new AgentRuntime(
             agentResolver ?? Mock.Of<IAgentResolver>(),
             Mock.Of<IAgentFactory>(),
             Mock.Of<IRepository<Agent, Guid>>(),
-            runStore ?? Mock.Of<IRunStore>(),
-            traceStore ?? CreateDefaultTraceStore(),
-            Mock.Of<IWorkflowService>(),
+            runTracker,
+            Mock.Of<IWorkflowDelegator>(),
             new AgentExecutionContextAccessor(),
             sp,
-            Mock.Of<IServiceScopeFactory>(),
             CreateOptionsMonitor(),
-            Mock.Of<ILogger<AgentRuntime>>(),
-            eventBus);
+            eventPublisher,
+            Mock.Of<ILogger<AgentRuntime>>());
     }
 
     private static ITraceStore CreateDefaultTraceStore()
@@ -55,7 +59,6 @@ public class AgentRuntimeEventPublishingTests
         string model = "gpt-4o",
         AgentExecutionMode executionMode = AgentExecutionMode.Single)
     {
-        // 创建最小化的 AgentExecutor — ChatClient 会在管道执行阶段才被调用
         var chatClient = Mock.Of<IChatClient>();
         var executor = new AgentExecutor(chatClient, new AgentExecutorOptions());
 

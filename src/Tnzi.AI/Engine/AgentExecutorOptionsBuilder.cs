@@ -2,13 +2,14 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// AgentExecutorOptions 构建器 — 负责构建 HistoryReducer 和 ContextProvider
+/// AgentExecutorOptions 构建器 — 负责构建 AgentExecutorOptions（含 HistoryReducer）。
 /// </summary>
 /// <remarks>
 /// 从 AgentFactory 提取，职责为：
 /// - 合并调用方传入的 Options 与方法参数
 /// - 根据配置创建 HistoryReducer（Prune / Summarize）
-/// - 根据配置创建 ContextProvider（TextSearch / ChatHistoryMemory / Memory / Skills）
+/// Context injection is now owned by ContextInjectionMiddleware (uses IContextProviderContributor
+/// directly), so this builder no longer creates IContextProvider instances.
 /// </remarks>
 public class AgentExecutorOptionsBuilder
 {
@@ -72,15 +73,13 @@ public class AgentExecutorOptionsBuilder
                 MaxOutputTokens = maxTokens ?? callerOptions.MaxOutputTokens,
                 MaxToolIterations = callerOptions.MaxToolIterations,
                 HistoryReducer = callerOptions.HistoryReducer,
-                ContextProvider = callerOptions.ContextProvider,
                 Middlewares = callerOptions.Middlewares ?? middlewares,
                 StripTextFromToolCallMessages = callerOptions.StripTextFromToolCallMessages
             };
         }
 
-        // 调用方未传入 options，根据配置自动创建 HistoryReducer 和 ContextProvider
+        // 调用方未传入 options，根据配置自动创建 HistoryReducer
         var historyReducer = CreateHistoryReducer();
-        var contextProvider = CreateContextProvider(agentId, agentName);
 
         return new AgentExecutorOptions
         {
@@ -90,7 +89,6 @@ public class AgentExecutorOptionsBuilder
             Temperature = temperature.HasValue ? (float)temperature.Value : null,
             MaxOutputTokens = maxTokens,
             HistoryReducer = historyReducer,
-            ContextProvider = contextProvider,
             Middlewares = middlewares,
             StripTextFromToolCallMessages = _options.Value.StripTextFromToolCallMessages
         };
@@ -181,53 +179,6 @@ public class AgentExecutorOptionsBuilder
 
         _logger.LogDebug("Creating ChainedChatReducer: Prune → Summarize");
         return new ChainedChatReducer([pruneReducer, summarizeReducer]);
-    }
-
-    /// <summary>
-    /// 根据配置创建 IContextProvider（通过 DI 注册的 contributor 组合多个子 Provider）
-    /// </summary>
-    private IContextProvider? CreateContextProvider(Guid? agentId = null, string? agentName = null)
-    {
-        var contextConfig = _options.Value.ContextProviders;
-        if (!contextConfig.Enabled)
-        {
-            return null;
-        }
-
-        var compositeLogger = _loggerFactory.CreateLogger<CompositeContextProvider>();
-        var compositeProvider = new CompositeContextProvider(compositeLogger, _options, _tokenEstimator);
-
-        var creationContext = new ContextProviderCreationContext
-        {
-            AgentId = agentId,
-            AgentName = agentName,
-            UserId = ResolveCurrentUserId()
-        };
-
-        foreach (var contributor in _contextContributors.OrderBy(c => c.Order))
-        {
-            try
-            {
-                var provider = contributor.TryCreate(creationContext);
-                if (provider != null)
-                {
-                    compositeProvider.AddProvider(provider);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Context provider contributor {ContributorType} failed", contributor.GetType().Name);
-            }
-        }
-
-        if (compositeProvider.ProviderCount == 0)
-        {
-            _logger.LogDebug("No context providers configured, skipping ContextProvider creation");
-            return null;
-        }
-
-        _logger.LogDebug("Created CompositeContextProvider with {ProviderCount} sub-providers", compositeProvider.ProviderCount);
-        return compositeProvider;
     }
 
     /// <summary>

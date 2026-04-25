@@ -54,6 +54,13 @@ public class SandboxModule : TnziApplicationModule
         return Task.CompletedTask;
     }
 
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        var logger = context.ServiceProvider.GetRequiredService<ILogger<SandboxModule>>();
+        AIToolRegistration.ScanAndRegisterAITools(context.ServiceProvider, typeof(SandboxModule).Assembly, logger);
+        return Task.CompletedTask;
+    }
+
     private static void RegisterDockerHttpClient(ServiceConfigurationContext context)
     {
         var dockerHost = context.Configuration.GetSection("AI:Sandbox:Docker:DockerHost").Value;
@@ -65,10 +72,16 @@ public class SandboxModule : TnziApplicationModule
         }
 
         context.Services.AddHttpClient(DockerSandboxProvider.HttpClientName)
-            .ConfigurePrimaryHttpMessageHandler(() => new DockerSocketHandler(dockerHost))
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            {
+                // .NET handles HTTP/1.1 framing; we only supply the underlying transport
+                // (unix socket / Windows named pipe / TCP) via ConnectCallback.
+                ConnectCallback = DockerSocketConnector.CreateConnectCallback(dockerHost),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            })
             .ConfigureHttpClient(client =>
             {
-                // Docker API 需要一个 base address，但实际连接通过 socket handler
+                // Docker API 需要一个 base address，但实际连接通过 SocketsHttpHandler.ConnectCallback
                 client.BaseAddress = new Uri("http://localhost/v1.45");
                 client.Timeout = TimeSpan.FromMinutes(5);
             });
