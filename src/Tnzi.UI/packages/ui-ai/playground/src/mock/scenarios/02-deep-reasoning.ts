@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Shows reasoning trace alongside the final answer',
     category: 'reasoning',
     icon: 'lucide:brain',
-    componentsShowcased: ['ReasoningTrace', 'ChainOfThought', 'StreamingText', 'TypingIndicator'],
+    componentsShowcased: ['Reasoning', 'TReasoningStage', 'ChainOfThought', 'StreamMarkdown'],
   },
   events: [
     {

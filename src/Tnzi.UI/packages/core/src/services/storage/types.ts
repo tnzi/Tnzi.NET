@@ -26,6 +26,8 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
   thumbnailPath?: string | null;
   creatorId?: string | null;
   creatorName?: string | null;
+  /** Owning folder id; null = root / unfiled. */
+  folderId?: string | null;
   url: string;
   thumbnailUrl?: string | null;
 }
@@ -45,6 +47,52 @@ export interface FileQueryDto extends SortedPagedQueryDto {
   provider?: string;
   originalName?: string;
   tag?: string;
+  /**
+   * Folder filter. Set to a folder id to list its direct children only.
+   * Used together with {@link includeUnfiled}=false to scope to a specific folder;
+   * set {@link includeUnfiled}=true to scope to the root (FolderId IS NULL).
+   * Leaving both undefined keeps the legacy "no folder filter" behaviour.
+   */
+  folderId?: string;
+  /** Show only files not in any folder (root). Set with `folderId` undefined. */
+  includeUnfiled?: boolean;
+}
+
+/**
+ * Folder DTO — output of /admin/storage/folders/tree.
+ * `children` is populated by the tree endpoint; flat lookup endpoints leave it undefined.
+ */
+export interface FileFolderDto {
+  id: string;
+  name: string;
+  parentId?: string | null;
+  /** Hierarchical path like "/root/sub1/sub2". */
+  path: string;
+  sortOrder: number;
+  description?: string | null;
+  /** Files directly under this folder (excluding sub-folder contents). */
+  fileCount: number;
+  /** Populated by the tree endpoint; undefined on flat lookups. */
+  children?: FileFolderDto[] | null;
+}
+
+export interface CreateFileFolderDto {
+  name: string;
+  parentId?: string | null;
+  description?: string | null;
+  sortOrder?: number;
+}
+
+export interface UpdateFileFolderDto {
+  name?: string | null;
+  description?: string | null;
+  sortOrder?: number | null;
+}
+
+export interface MoveFilesToFolderRequest {
+  fileIds: string[];
+  /** Target folder id; null moves files to the root (unfiled). */
+  folderId?: string | null;
 }
 
 /**

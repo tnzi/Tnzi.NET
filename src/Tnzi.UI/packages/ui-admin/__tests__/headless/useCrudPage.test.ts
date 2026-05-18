@@ -62,10 +62,15 @@ describe('useCrudPage', () => {
   })
 
   it('refetches when page index changes', async () => {
+    // setPage auto-triggers refresh (NDataTable @update:page emit fires once
+    // per click — without the auto-refresh the table content stayed on
+    // page 1 even though the pagination index moved).
     const { crud, bridge } = makeCrud()
     await crud.refresh()
     crud.setPage(2)
-    await crud.refresh()
+    // Let the queued microtask complete.
+    await Promise.resolve()
+    await Promise.resolve()
     expect(bridge.fetchData).toHaveBeenCalledTimes(2)
     const secondCall = bridge.fetchData.mock.calls[1][0]
     expect(secondCall.pageIndex).toBe(2)

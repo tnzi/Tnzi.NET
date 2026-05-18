@@ -45,7 +45,7 @@ function onClear(): void {
   padding: var(--tnzi-spacing-sm, 8px) var(--tnzi-spacing-md, 12px);
   background: var(--tnzi-color-info-bg, #f0f7ff);
   border: 1px solid var(--tnzi-color-info-border, #d6e4ff);
-  border-radius: var(--tnzi-radius-sm, 4px);
+  border-radius: var(--tnzi-admin-radius-sm, 4px);
 }
 
 .t-batch-actions__count {

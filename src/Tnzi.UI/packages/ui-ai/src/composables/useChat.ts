@@ -104,6 +104,25 @@ export interface UseChatReturn {
   loadThread: (threadId: string, messages: ChatMessage[]) => void;
   /** Cleanup resources (abort controller, etc.). */
   dispose: () => void;
+
+  // -- Streaming integration API ------------------------------------
+  // The composable does not own SSE transport (see `send` docstring
+  // for rationale). The following hooks let a consumer's transport
+  // adapter feed deltas back into the reactive message list without
+  // re-implementing the message store.
+
+  /** Append a user-authored or assistant-authored message verbatim. */
+  addMessage: (message: ChatMessage) => void;
+  /** Patch an existing message by ID. rAF-batched. */
+  updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
+  /** Append a delta chunk to a message's `content` or `reasoning`
+   *  field, preserving prior content. Synchronous so deltas never
+   *  race or coalesce. */
+  appendDelta: (id: string, field: 'content' | 'reasoning', delta: string) => void;
+  /** Set the global `isStreaming` flag explicitly. Useful when the
+   *  consumer owns the streaming lifecycle (e.g. external SSE
+   *  client) and needs to mirror its state into the composable. */
+  setStreaming: (value: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +181,21 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
   function removeMessage(id: string): void {
     messages.value = messages.value.filter((msg) => msg.id !== id);
+  }
+
+  function appendDelta(id: string, field: 'content' | 'reasoning', delta: string): void {
+    if (delta === '') return;
+    messages.value = messages.value.map((msg) => {
+      if (msg.id !== id) return msg;
+      if (field === 'content') {
+        return { ...msg, content: msg.content + delta };
+      }
+      return { ...msg, reasoning: (msg.reasoning ?? '') + delta };
+    });
+  }
+
+  function setStreaming(value: boolean): void {
+    isStreaming.value = value;
   }
 
   // -- Public API --
@@ -270,5 +304,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     clearThread,
     loadThread,
     dispose,
+    addMessage,
+    updateMessage,
+    appendDelta,
+    setStreaming,
   };
 }

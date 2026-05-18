@@ -3,13 +3,13 @@ import type { FormSchemaItem } from '../_shared/form-schema'
 
 // Aligned to Tnzi.Storage.Dtos.FileVersionAuditDto (Plan E 2026-04-14).
 export const versionColumns: ColumnDef[] = [
-  { key: 'fileId',        title: 'File ID' },
-  { key: 'version',       title: 'Version' },
-  { key: 'size',          title: 'Size (bytes)' },
-  { key: 'isCurrent',     title: 'Current' },
-  { key: 'creatorId',     title: 'Creator' },
-  { key: 'creationTime',  title: 'Created At' },
-  { key: 'description',   title: 'Note' },
+  { key: 'fileId',        title: 'columns.fileId' },
+  { key: 'version',       title: 'columns.version' },
+  { key: 'size',          title: 'columns.size' },
+  { key: 'isCurrent',     title: 'columns.isCurrent' },
+  { key: 'creatorId',     title: 'columns.creatorId' },
+  { key: 'creationTime',  title: 'columns.creationTime' },
+  { key: 'description',   title: 'columns.description' },
 ]
 
 export const versionFormSchema: FormSchemaItem[] = [

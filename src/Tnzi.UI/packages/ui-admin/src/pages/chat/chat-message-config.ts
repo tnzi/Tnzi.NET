@@ -17,11 +17,27 @@ import type { FormSchemaItem } from '../_shared/form-schema'
  */
 
 export const chatMessageColumns: ColumnDef[] = [
-  { key: 'sessionId',   title: 'Session' },
-  { key: 'senderId',    title: 'Sender' },
-  { key: 'content',     title: 'Content' },
-  { key: 'messageType', title: 'Type' },
-  { key: 'sentAt',      title: 'Sent At' },
+  { key: 'sessionId',   title: 'columns.sessionId' },
+  { key: 'senderId',    title: 'columns.senderId' },
+  { key: 'content',     title: 'columns.content' },
+  { key: 'messageType', title: 'columns.messageType' },
+  { key: 'sentAt',      title: 'columns.sentAt' },
+]
+
+/**
+ * Advanced search fields — wired through `state.query.filters` to the bridge.
+ * Bridge already passes filters through to MessageListQueryDto, so adding new
+ * keys here exposes the corresponding backend filter without further work.
+ */
+export const chatMessageSearchFields: FormSchemaItem[] = [
+  { key: 'sessionId',   label: 'columns.sessionId',  type: 'text', placeholder: 'columns.sessionId' },
+  { key: 'senderId',    label: 'columns.senderId',   type: 'text', placeholder: 'columns.senderId' },
+  { key: 'messageType', label: 'columns.messageType', type: 'select', options: [
+    { label: 'Text',   value: 'text' },
+    { label: 'Image',  value: 'image' },
+    { label: 'File',   value: 'file' },
+    { label: 'System', value: 'system' },
+  ] },
 ]
 
 export const chatMessageFormSchema: FormSchemaItem[] = [

@@ -270,35 +270,44 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         }
 
         // 无 threadId，创建新的线程和空的 ConversationContext
+        // 注意：必须在 InsertAsync 之前把 SerializedData 填好，不能在 InsertAsync 之后
+        // 再调用 SaveThreadSerializedDataAsync。后者会 GetAsync 拿到尚未持久化的实体
+        // （ChangeTracker State=Added），然后 UpdateAsync 把状态翻转成 Modified，导致
+        // SaveChanges 时 EF Core 发 UPDATE 而非 INSERT，得到 0 rows affected 并整事务回滚。
+        var newContext = new ConversationContext();
         var newEntity = new AgentThreadEntity
         {
             AgentId = agentId,
             Title = $"Thread {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
-            LastActivityTime = DateTime.UtcNow
+            LastActivityTime = DateTime.UtcNow,
+            SerializedData = newContext.Serialize()
         };
 
         await _repository.InsertAsync(newEntity);
 
         Logger.LogDebug("Created new thread: {ThreadId} for Agent: {AgentId}", newEntity.Id, agentId);
 
-        var newContext = new ConversationContext();
-
-        // 序列化并保存
-        await SaveThreadSerializedDataAsync(newEntity.Id, newContext, ct);
-
         return (newContext, newEntity.Id, true);
     }
 
     /// <summary>
-    /// 保存消息到线程
+    /// 保存消息到线程。<paramref name="messageId"/> 非空时使用该 ID 持久化；为空时由
+    /// framework SaveChangesAsync 自动生成 sequential GUID。返回最终持久化的 message ID。
     /// </summary>
-    public async Task SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, CancellationToken ct = default)
+    public async Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
     {
-        var exists = await _repository.AsQueryable().AnyAsync(t => t.Id == threadId, ct);
-        if (!exists)
+        // Existence probe via GetAsync (DbSet.FindAsync). FindAsync consults the
+        // ChangeTracker first — a ChangeTracker hit returns the entity without issuing a
+        // SQL query (and therefore without applying global query filters). This matters
+        // for streaming pipelines where the thread was InsertAsync'd within the SAME
+        // UnitOfWork transaction and is not yet flushed to DB under
+        // EnableGlobalUnitOfWork=true. A DB fallback still applies query filters, so the
+        // caller must have arranged ownership/tenant alignment before reaching here.
+        var existing = await _repository.GetAsync(threadId, ct);
+        if (existing == null)
         {
             Logger.LogWarning("Thread not found when saving message: {ThreadId}", threadId);
-            return;
+            return Guid.Empty;
         }
 
         // 按 threadId 加锁，确保 MAX(Order)+1 读写原子性（进程内互斥）
@@ -307,6 +316,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         var maxOrder = await _messageRepository
             .Where(m => m.ThreadId == threadId)
+            .IgnoreQueryFilters()
             .Select(m => (int?)m.Order)
             .MaxAsync(ct) ?? 0;
 
@@ -319,15 +329,27 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             Usage = usage,
             Order = maxOrder + 1
         };
+        if (messageId.HasValue && messageId.Value != Guid.Empty)
+        {
+            message.Id = messageId.Value;
+        }
 
         await _messageRepository.InsertAsync(message);
+        // Force-flush the INSERT so that the next SaveMessageAsync call within the same
+        // UnitOfWork transaction can see this message when it queries MAX(Order).
+        // Without this, ShouldSaveImmediately() returns false under an active UoW
+        // transaction and both user + assistant messages end up with Order=1, violating
+        // the (ThreadId, Order) unique index.
+        await _messageRepository.SaveChangesAsync(ct);
 
-        // 更新线程最后活动时间
+        // 更新线程最后活动时间 — 同样跳过 query filter（见上方注释）
         await _repository.AsQueryable()
+            .IgnoreQueryFilters()
             .Where(t => t.Id == threadId)
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastActivityTime, DateTime.UtcNow), ct);
 
-        Logger.LogDebug("Message saved to thread: {ThreadId}, Role: {Role}, Order: {Order}", threadId, role, message.Order);
+        Logger.LogDebug("Message saved to thread: {ThreadId}, Role: {Role}, Order: {Order}, MessageId: {MessageId}", threadId, role, message.Order, message.Id);
+        return message.Id;
     }
 
     /// <summary>

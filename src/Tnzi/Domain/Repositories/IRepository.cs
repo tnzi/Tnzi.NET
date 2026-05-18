@@ -20,6 +20,15 @@ public interface IRepository<TEntity> : IReadOnlyRepository<TEntity>
     Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default);
     Task DeleteManyAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default);
     Task DeleteAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Flush pending changes for this repository's underlying DbContext.
+    /// Useful when callers need a previously-staged Insert/Update to be visible to
+    /// subsequent queries within the same UnitOfWork transaction — by default the
+    /// repository defers SaveChanges when a transaction is enabled, so writes only
+    /// land at commit time. Default implementation is a no-op; EF Core repository overrides.
+    /// </summary>
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 }
 
 /// <summary>

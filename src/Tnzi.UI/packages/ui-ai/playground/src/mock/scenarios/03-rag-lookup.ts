@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Answer grounded in knowledge base citations',
     category: 'knowledge',
     icon: 'lucide:book-open',
-    componentsShowcased: ['KnowledgeBaseCard', 'CitationList', 'useRagChat'],
+    componentsShowcased: ['KnowledgePanel', 'SourceCitations', 'TCitation', 'useRagChat'],
   },
   events: [
     { at: 0, type: 'user-message', content: 'What modules does Tnzi.NET ship?' },

@@ -29,6 +29,10 @@ import type {
   FileShareSummaryDto,
   ActiveSharesQueryDto,
   SetFileTagsDto,
+  FileFolderDto,
+  CreateFileFolderDto,
+  UpdateFileFolderDto,
+  MoveFilesToFolderRequest,
 } from './types';
 
 // Aligned with DefaultStorageController [Route("files")]
@@ -37,6 +41,8 @@ const BASE = '/files';
 const PREVIEW_BASE = '/files/preview';
 // Aligned with DefaultStorageAdminController [Route("admin/files")]
 const ADMIN_BASE = '/admin/files';
+// Aligned with DefaultFileFolderAdminController [Route("admin/storage/folders")]
+const ADMIN_FOLDER_BASE = '/admin/storage/folders';
 
 /**
  * File Storage API (User)
@@ -310,5 +316,47 @@ export function useAdminFileApi(client: HttpClient) {
     /** Get files by tag */
     getFilesByTag: (tag: string, pageIndex: number = 1, pageSize: number = 20) =>
       client.get<PagedList<FileRecordDto>>(`${ADMIN_BASE}/by-tag/${tag}`, { params: { pageIndex, pageSize } }),
+  };
+}
+
+/**
+ * Admin File Folder API
+ * Aligned with DefaultFileFolderAdminController under /admin/storage/folders.
+ * The folder tree drives the master pane of the StorageFile browser; the
+ * move endpoints let admins reorganize files in bulk.
+ */
+export function useAdminFileFolderApi(client: HttpClient) {
+  return {
+    /** Fetch the folder tree rooted at `parentId` (omit for full tree from root). */
+    getTree: (parentId?: string | null) =>
+      client.get<FileFolderDto[]>(`${ADMIN_FOLDER_BASE}/tree`, {
+        params: parentId ? { parentId } : undefined,
+      }),
+
+    /** Lookup a single folder by id. */
+    getById: (id: string) =>
+      client.get<FileFolderDto>(`${ADMIN_FOLDER_BASE}/${id}`),
+
+    /** Create a folder under an optional parent. */
+    create: (data: CreateFileFolderDto) =>
+      client.post<FileFolderDto>(ADMIN_FOLDER_BASE, data),
+
+    /** Rename / re-describe / re-sort an existing folder. */
+    update: (id: string, data: UpdateFileFolderDto) =>
+      client.put<FileFolderDto>(`${ADMIN_FOLDER_BASE}/${id}`, data),
+
+    /** Delete an (empty) folder. */
+    delete: (id: string) =>
+      client.delete<void>(`${ADMIN_FOLDER_BASE}/${id}`),
+
+    /** Move a folder under a new parent (or to root when `newParentId` is null). */
+    move: (id: string, newParentId?: string | null) =>
+      client.post<void>(`${ADMIN_FOLDER_BASE}/${id}/move`, null, {
+        params: newParentId ? { newParentId } : undefined,
+      }),
+
+    /** Bulk-move files into a target folder (or root when folderId is null). */
+    moveFiles: (data: MoveFilesToFolderRequest) =>
+      client.post<void>(`${ADMIN_FOLDER_BASE}/move-files`, data),
   };
 }

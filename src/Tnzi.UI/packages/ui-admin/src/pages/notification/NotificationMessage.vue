@@ -16,19 +16,22 @@
     :translate="t"
     :show-create="false"
   >
-    <!-- Resend row action: only shown for failed messages -->
-    <template #rowActions="{ row }">
-      <NButton
-        v-if="isFailed(row)"
-        size="tiny"
-        type="warning"
-        :loading="resendingIds.has(String(row.id ?? ''))"
-        @click="resendMessage(row)"
-      >
-        Resend
-      </NButton>
+    <template #batchActions="{ selectedIds }">
+      <NPopconfirm @positive-click="() => batchResend(selectedIds)">
+        <template #trigger>
+          <NButton
+            v-if="selectedIds.length > 0"
+            size="small"
+            type="warning"
+            ghost
+            :loading="batchResending"
+          >
+            {{ t('actions.batchResend') }} ({{ selectedIds.length }})
+          </NButton>
+        </template>
+        {{ t('actions.confirmBatchResend') }}
+      </NPopconfirm>
     </template>
-
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="notificationMessageFormSchema"
@@ -36,13 +39,30 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" :show-edit="false">
+        <template #prepend>
+          <NButton
+            v-if="isFailed(row)"
+            size="small"
+            type="warning"
+            ghost
+            :loading="resendingIds.has(String(row.id ?? ''))"
+            @click="resendMessage(row)"
+          >
+            {{ t('actions.resend') }}
+          </NButton>
+        </template>
+      </TRowActions>
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NPopconfirm } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -51,7 +71,7 @@ import { notificationMessageColumns, notificationMessageFormSchema } from './not
 import { translatePageKey } from '../_shared/translate'
 import type { NotificationInfo } from '@tnzi/core/services/notification'
 
-const title = 'Notification Messages'
+const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
 
 // Messages are read-only (immutable after sending) except delete
@@ -72,6 +92,7 @@ crud.refresh().catch(() => undefined)
 
 // ---- Resend action ----
 const resendingIds = ref<Set<string>>(new Set())
+const batchResending = ref(false)
 
 function isFailed(row: NotificationInfo): boolean {
   // NotificationInfo.status is a NotificationStatus enum; 3 = Failed
@@ -90,6 +111,26 @@ async function resendMessage(row: NotificationInfo): Promise<void> {
     const next = new Set(resendingIds.value)
     next.delete(id)
     resendingIds.value = next
+  }
+}
+
+async function batchResend(ids: Array<string | number>): Promise<void> {
+  if (!ids.length) return
+  batchResending.value = true
+  try {
+    // Backend's send endpoint is per-id — fan out sequentially so partial
+    // failures don't poison the whole batch (admin can re-trigger the rest).
+    for (const id of ids) {
+      try {
+        await bridge.messages.send(String(id))
+      } catch {
+        // Swallow per-id error; the UI will reflect remaining failed status
+        // on the next refresh.
+      }
+    }
+    await crud.refresh()
+  } finally {
+    batchResending.value = false
   }
 }
 

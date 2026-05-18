@@ -1,5 +1,15 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+
+const WORKFLOW_RUN_STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
+  '0': { type: 'info',    label: 'Running' },
+  '1': { type: 'success', label: 'Completed' },
+  '2': { type: 'error',   label: 'Failed' },
+  '3': { type: 'warning', label: 'Paused' },
+  '4': { type: 'warning', label: 'Awaiting Approval' },
+}
 
 /**
  * Phase 5 Task 5.6 — WorkflowRunViewer page config.
@@ -22,14 +32,23 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *     the bridge passes them straight through to the backend execution query.
  */
 export const workflowRunColumns: ColumnDef[] = [
-  { key: 'workflowDefinitionId', title: 'Workflow' },
-  { key: 'executionId', title: 'Run ID' },
-  { key: 'status', title: 'Status' },
-  { key: 'completedStepCount', title: 'Completed Steps' },
-  { key: 'awaitingApprovalCount', title: 'Awaiting Approval', visible: false },
-  { key: 'creationTime', title: 'Started' },
-  { key: 'completedTime', title: 'Completed' },
-  { key: 'updatedTime', title: 'Last Updated', visible: false },
+  { key: 'workflowDefinitionId', title: 'columns.workflowDefinitionId' },
+  { key: 'executionId', title: 'columns.executionId' },
+  {
+    key: 'status',
+    title: 'columns.status',
+    width: 150,
+    render: (row) => {
+      const raw = String(row.status ?? '')
+      const m = WORKFLOW_RUN_STATUS_MAP[raw] ?? { type: 'default' as const, label: row.status as string ?? '—' }
+      return h(TStatusBadge, { value: raw, type: m.type, label: m.label })
+    },
+  },
+  { key: 'completedStepCount', title: 'columns.completedStepCount' },
+  { key: 'awaitingApprovalCount', title: 'columns.awaitingApprovalCount', visible: false },
+  { key: 'creationTime', title: 'columns.creationTime' },
+  { key: 'completedTime', title: 'columns.completedTime' },
+  { key: 'updatedTime', title: 'columns.updatedTime', visible: false },
 ]
 
 export const workflowRunStatusOptions: Array<{ label: string; value: number }> = [

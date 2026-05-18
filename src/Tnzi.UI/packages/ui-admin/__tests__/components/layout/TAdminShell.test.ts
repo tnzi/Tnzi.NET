@@ -41,6 +41,11 @@ const naiveStubs = {
   Breadcrumb: { template: '<div class="n-breadcrumb-stub"><slot /></div>' },
   BreadcrumbItem: { template: '<span class="n-breadcrumb-item-stub"><slot /></span>' },
   Dropdown: { template: '<div class="n-dropdown-stub" />' },
+  Tooltip: {
+    template: '<div class="n-tooltip-stub"><slot name="trigger" /><slot /></div>',
+  },
+  Modal: { template: '<div class="n-modal-stub"><slot /></div>' },
+  Input: { template: '<input class="n-input-stub" />' },
   VueDraggable: {
     props: ['modelValue'],
     template: '<div class="vue-draggable-stub"><slot /></div>',
@@ -49,7 +54,20 @@ const naiveStubs = {
 
 function mountShell(props: Record<string, unknown> = {}) {
   return mount(TAdminShell, {
-    props,
+    props: {
+      // Phase H2 B4: default-mounted TAdminUserAvatar uses useDialog()
+      // which needs an NDialogProvider that the test harness doesn't
+      // set up. Opt out for these layout-structure tests.
+      builtinUserAvatar: false,
+      // Phase H1 I1: same for TGlobalSearch (uses NModal). The keyboard-
+      // shortcut behaviour is exercised by a dedicated test elsewhere
+      // when we add one; here we want a minimal mount.
+      builtinSearch: false,
+      // Phase H4 L6: TBackTop wraps NBackTop which uses scroll
+      // listeners — not needed for layout-structure assertions.
+      builtinBackTop: false,
+      ...props,
+    },
     global: {
       stubs: naiveStubs,
     },
@@ -85,11 +103,18 @@ describe('TAdminShell', () => {
     expect(wrapper.attributes('data-mode')).toBe('vertical')
   })
 
-  it('renders vertical-mix mode with two sidebars', () => {
+  it('renders vertical-mix mode with TAdminMixRail (90px first-level rail) + sub-sider container', () => {
     forceMobile(false)
     const wrapper = mountShell({ mode: 'vertical-mix' })
+    // Phase G follow-up #4: vertical-mix uses TAdminMixRail (custom
+    // div-based rail ported from soybean's first-level-menu.vue) instead
+    // of TAdminSidebar — NMenu can't render the icon-on-top + label-below
+    // geometry cleanly. So no TAdminSidebar instance is rendered in this
+    // mode. The second-level drawer still lives as `.t-admin-shell__sub-sider`.
     const sidebars = wrapper.findAllComponents(TAdminSidebar)
-    expect(sidebars.length).toBe(2)
+    expect(sidebars.length).toBe(0)
+    expect(wrapper.find('.t-admin-mix-rail').exists()).toBe(true)
+    expect(wrapper.find('.t-admin-shell__sub-sider').exists()).toBe(true)
     expect(wrapper.attributes('data-mode')).toBe('vertical-mix')
   })
 

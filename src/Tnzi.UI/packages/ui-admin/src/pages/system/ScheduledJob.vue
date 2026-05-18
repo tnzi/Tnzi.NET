@@ -25,6 +25,9 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
@@ -32,6 +35,7 @@
 import { ref } from 'vue'
 import { NButton } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createSystemBridge, type ScheduledJobDto } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -39,7 +43,7 @@ import TFormSchemaRenderer from '../_shared/form-schema'
 import { scheduledJobColumns, scheduledJobFormSchema } from './scheduled-job-config'
 import { translatePageKey } from '../_shared/translate'
 
-const title = 'Scheduled Jobs'
+const title = 'title'
 // Wired to Tnzi.Hangfire /admin/scheduled-jobs (2026-04-14). Client is
 // injected by createTnziUiAdmin({ client }) at app bootstrap.
 const bridge = createSystemBridge({ client: useAdminClient() })

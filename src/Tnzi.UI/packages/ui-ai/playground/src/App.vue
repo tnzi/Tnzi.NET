@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * @tnzi/ui-ai playground — high-fidelity chat application.
+ * @tnzi/ui-ai playground — living examples of the package's components.
  *
- * The playground is a fully interactive chat app shell that plays
- * 10 scripted mock scenarios exercising the ui-ai component library.
- * All state lives in usePlaygroundStore(); AppShell composes the
- * TCollapsibleSidebar / TCommandPalette / TSettingsDialog shell with
- * the MockChatEngine event player.
+ * `AppShell.vue` is a thin consumer of `@tnzi/ui-ai/chat`'s `TChatApp`
+ * (the canonical chat shell). It contributes only the playground-specific
+ * bits: the scenario picker sidebar, replay controls, command palette
+ * and settings dialog wiring — all driven by `usePlaygroundStore()` and
+ * a scripted `MockChatEngine`.
  */
 import AppShell from './components/AppShell.vue'
 </script>

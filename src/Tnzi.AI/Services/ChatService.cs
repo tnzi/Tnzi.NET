@@ -55,7 +55,9 @@ public class ChatService : ApplicationService, IChatService
                 ThreadId = result.ThreadId,
                 Citations = result.Citations,
                 HandoffPath = result.HandoffPath,
-                Reasoning = result.Reasoning
+                Reasoning = result.Reasoning,
+                UserMessageId = result.UserMessageId,
+                AssistantMessageId = result.AssistantMessageId
             });
         }
         catch (BusinessException ex)
@@ -115,6 +117,8 @@ public class ChatService : ApplicationService, IChatService
     {
         int inputTokens = 0;
         int outputTokens = 0;
+        Guid? userMessageId = null;
+        Guid? assistantMessageId = null;
 
         // 构建 AgentRunRequest 并委托给 Runtime
         var runRequest = new AgentRunRequest
@@ -167,6 +171,10 @@ public class ChatService : ApplicationService, IChatService
                 streamFinishReason = chunk.FinishReason;
             }
 
+            // Capture persisted message ids stamped onto the terminal chunk by HistoryMiddleware.
+            if (chunk.UserMessageId.HasValue) userMessageId = chunk.UserMessageId;
+            if (chunk.AssistantMessageId.HasValue) assistantMessageId = chunk.AssistantMessageId;
+
             var streamEvent = CreateStreamEvent(chunk, currentThreadId, ErrorCodes.ChatFailed);
             if (streamEvent != null)
             {
@@ -194,7 +202,9 @@ public class ChatService : ApplicationService, IChatService
                         OutputTokens = outputTokens,
                         TotalTokens = inputTokens + outputTokens
                     },
-                    Citations = citations
+                    Citations = citations,
+                    UserMessageId = userMessageId,
+                    AssistantMessageId = assistantMessageId
                 };
             }
         }
@@ -224,7 +234,9 @@ public class ChatService : ApplicationService, IChatService
                     OutputTokens = outputTokens,
                     TotalTokens = inputTokens + outputTokens
                 },
-                Citations = citations
+                Citations = citations,
+                UserMessageId = userMessageId,
+                AssistantMessageId = assistantMessageId
             };
         }
     }

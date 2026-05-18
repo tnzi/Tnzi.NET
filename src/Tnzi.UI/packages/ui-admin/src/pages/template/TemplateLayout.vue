@@ -18,12 +18,16 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createTemplateBridge } from '../../services/bridges/template-bridge'
 import { useAdminClient } from '../../plugin/client'

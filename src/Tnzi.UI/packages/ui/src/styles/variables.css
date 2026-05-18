@@ -1,70 +1,89 @@
 /**
  * Default CSS variable values for Tnzi UI.
  *
- * These are the initial values — `createTnziUi()` plugin will override them at runtime
+ * These are the initial values — `createTnziUi()` plugin overrides them at runtime
  * based on consumer-provided theme settings. This file exists so components render
- * correctly even if the plugin hasn't initialized yet (SSR, early mount).
+ * correctly even before the plugin initializes (SSR, early mount).
+ *
+ * Each color also has an `-rgb` companion variable holding the `R G B` triplet,
+ * which enables dynamic transparency via `rgb(var(--tnzi-X-rgb) / 0.5)` syntax.
  */
 
 :root {
-  /* Primary color ramp */
+  /* Primary color ramp (default Naive UI green #18a058) */
   --tnzi-primary: #18a058;
+  --tnzi-primary-rgb: 24 160 88;
   --tnzi-primary-50: #f3faf5;
   --tnzi-primary-100: #dbf1e3;
   --tnzi-primary-200: #b5e3c6;
   --tnzi-primary-300: #7ccda1;
   --tnzi-primary-400: #43b27c;
   --tnzi-primary-500: #18a058;
+  --tnzi-primary-500-rgb: 24 160 88;
   --tnzi-primary-600: #148b4b;
   --tnzi-primary-700: #0f703c;
   --tnzi-primary-800: #0a552d;
   --tnzi-primary-900: #063a1e;
   --tnzi-primary-950: #04281a;
 
-  /* Non-primary roles ship base+500 only; createTnziUi() injects full ramps at runtime. */
+  /* Non-primary roles ship base+500+rgb only; createTnziUi() injects full ramps at runtime. */
 
-  /* Info color ramp */
   --tnzi-info: #2080f0;
+  --tnzi-info-rgb: 32 128 240;
   --tnzi-info-500: #2080f0;
 
-  /* Success color ramp */
   --tnzi-success: #18a058;
+  --tnzi-success-rgb: 24 160 88;
   --tnzi-success-500: #18a058;
 
-  /* Warning color ramp */
   --tnzi-warning: #f0a020;
+  --tnzi-warning-rgb: 240 160 32;
   --tnzi-warning-500: #f0a020;
 
-  /* Error color ramp */
   --tnzi-error: #d03050;
+  --tnzi-error-rgb: 208 48 80;
   --tnzi-error-500: #d03050;
 
-  /* Functional tokens */
+  /* Functional tokens (light) */
   --tnzi-base-text: rgb(51, 54, 57);
   --tnzi-base-text-muted: rgb(118, 124, 130);
-  --tnzi-layout-bg: rgb(240, 242, 245);
-  --tnzi-container-bg: #ffffff;
+  --tnzi-base-text-rgb: 51 54 57;
+  --tnzi-layout-bg: rgb(247, 250, 252);
+  --tnzi-layout-bg-rgb: 247 250 252;
+  --tnzi-container-bg: rgb(255, 255, 255);
+  --tnzi-container-bg-rgb: 255 255 255;
   --tnzi-inverted: rgb(0, 20, 40);
+  --tnzi-inverted-rgb: 0 20 40;
   --tnzi-border: rgb(239, 239, 245);
+  --tnzi-border-rgb: 239 239 245;
+  --tnzi-divider: rgb(231, 234, 237);
   --tnzi-header-blur-bg: rgba(255, 255, 255, 0.75);
 
   /* Shadow tokens */
-  --tnzi-shadow-header: 0 1px 4px 0 rgb(0 21 41 / 8%);
+  --tnzi-shadow-header: 0 1px 2px rgb(0 21 41 / 8%);
   --tnzi-shadow-sider: 2px 0 8px 0 rgb(29 35 41 / 5%);
-  --tnzi-shadow-tab: 0 1px 2px 0 rgb(0 21 41 / 4%);
+  --tnzi-shadow-tab: 0 1px 2px 0 rgb(0 21 41 / 8%);
   --tnzi-shadow-card: 0 1px 2px 0 rgb(0 0 0 / 3%), 0 1px 6px -1px rgb(0 0 0 / 2%);
+  --tnzi-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
 }
 
 .dark {
-  --tnzi-base-text: rgba(255, 255, 255, 0.82);
-  --tnzi-base-text-muted: rgba(255, 255, 255, 0.52);
-  --tnzi-layout-bg: rgb(16, 16, 20);
-  --tnzi-container-bg: rgb(24, 24, 28);
+  --tnzi-base-text: rgb(224, 224, 224);
+  --tnzi-base-text-muted: rgb(150, 150, 150);
+  --tnzi-base-text-rgb: 224 224 224;
+  --tnzi-layout-bg: rgb(18, 18, 18);
+  --tnzi-layout-bg-rgb: 18 18 18;
+  --tnzi-container-bg: rgb(28, 28, 28);
+  --tnzi-container-bg-rgb: 28 28 28;
   --tnzi-inverted: rgb(255, 255, 255);
+  --tnzi-inverted-rgb: 255 255 255;
   --tnzi-border: rgba(255, 255, 255, 0.09);
+  --tnzi-border-rgb: 255 255 255;
+  --tnzi-divider: rgba(255, 255, 255, 0.06);
   --tnzi-header-blur-bg: rgba(20, 20, 24, 0.6);
   --tnzi-shadow-header: 0 1px 4px 0 rgb(0 0 0 / 40%);
   --tnzi-shadow-sider: 2px 0 8px 0 rgb(0 0 0 / 40%);
   --tnzi-shadow-tab: 0 1px 2px 0 rgb(0 0 0 / 40%);
   --tnzi-shadow-card: 0 1px 2px 0 rgb(0 0 0 / 30%), 0 1px 6px -1px rgb(0 0 0 / 25%);
+  --tnzi-shadow-drawer: 0 8px 24px rgb(0 0 0 / 50%);
 }

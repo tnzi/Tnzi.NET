@@ -33,13 +33,15 @@ public interface IConversationStore
     Task SaveAsync(string conversationId, ConversationContext context, CancellationToken ct = default);
 
     /// <summary>
-    /// 追加消息到对话
+    /// 追加消息到对话。
     /// </summary>
     /// <param name="conversationId">对话 ID</param>
     /// <param name="role">消息角色</param>
     /// <param name="content">消息内容</param>
+    /// <param name="messageId">可选预生成消息 ID — 让流式管线提前将 ID 暴露给客户端。null 时由实现生成。</param>
     /// <param name="ct">取消令牌</param>
-    Task AppendMessageAsync(string conversationId, string role, string content, CancellationToken ct = default);
+    /// <returns>持久化后的消息 ID（实现自由选择编码方式）。</returns>
+    Task<string> AppendMessageAsync(string conversationId, string role, string content, string? messageId = null, CancellationToken ct = default);
 
     /// <summary>
     /// 列出对话摘要

@@ -1,37 +1,42 @@
 <template>
-  <TCrudPage
-    :state="crud"
-    :all-columns="versionColumns"
-    :title="title"
-    :translate="t"
-  >
-    <!-- Restore action: available when exactly 1 row is selected -->
-    <template #batchActions="{ selectedIds }">
-      <NButton
-        v-if="selectedIds.length === 1"
-        class="t-version-restore"
-        type="warning"
-        size="small"
-        :loading="restoring"
-        @click="restoreVersion(String(selectedIds[0]))"
-      >
-        Restore This Version
-      </NButton>
-    </template>
+  <div>
+    <NAlert :type="'info'" :title="t('banner.title')" closable style="margin: 16px 16px 0">
+      {{ t('banner.body') }}
+    </NAlert>
+    <TCrudPage
+      :state="crud"
+      :all-columns="versionColumns"
+      :title="title"
+      :translate="t"
+    >
+      <!-- Restore action: available when exactly 1 row is selected -->
+      <template #batchActions="{ selectedIds }">
+        <NButton
+          v-if="selectedIds.length === 1"
+          class="t-version-restore"
+          type="warning"
+          size="small"
+          :loading="restoring"
+          @click="restoreVersion(String(selectedIds[0]))"
+        >
+          {{ t('actions.restore') }}
+        </NButton>
+      </template>
 
-    <template #form="{ formData, mode }">
-      <TFormSchemaRenderer
-        :schema="versionFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
-      />
-    </template>
-  </TCrudPage>
+      <template #form="{ formData, mode }">
+        <TFormSchemaRenderer
+          :schema="versionFormSchema"
+          :model="(formData ?? {}) as Record<string, unknown>"
+          :readonly="mode === 'view'"
+        />
+      </template>
+    </TCrudPage>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NAlert } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createStorageBridge, type FileVersionAuditDto } from '../../services/bridges/storage-bridge'
@@ -40,7 +45,7 @@ import TFormSchemaRenderer from '../_shared/form-schema'
 import { versionColumns, versionFormSchema } from './version-config'
 import { translatePageKey } from '../_shared/translate'
 
-const title = 'File Version History'
+const title = 'title'
 // Wired to /admin/storage/audit/versions via DefaultStorageAuditAdminController
 // (Plan E, 2026-04-14). Supports optional fileId + currentOnly filters.
 const bridge = createStorageBridge({ client: useAdminClient() })

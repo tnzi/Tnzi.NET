@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Invokes a registered skill, shows tool-call and tool-result bubbles',
     category: 'agent',
     icon: 'lucide:cloud-sun',
-    componentsShowcased: ['SkillBrowserPanel', 'SkillCard', 'MessageResponse'],
+    componentsShowcased: ['SkillGallery', 'SkillCard', 'SkillActivator', 'MessageResponse', 'useSkillBrowser'],
   },
   events: [
     { at: 0, type: 'user-message', content: "What's the weather in Beijing today?" },

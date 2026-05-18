@@ -22,21 +22,12 @@
     </template>
 
     <template #rowActions="{ row }">
-      <Button
-        size="small"
-        type="success"
-        style="margin-right: 4px;"
-        @click="openApprove(row as RefundRow)"
-      >
-        Approve
-      </Button>
-      <Button
-        size="small"
-        type="error"
-        @click="openReject(row as RefundRow)"
-      >
-        Reject
-      </Button>
+      <TRowActions :row="row" :state="crud" :translate="t" :show-edit="false">
+        <template #prepend>
+          <Button size="small" type="success" ghost @click="openApprove(row as RefundRow)">Approve</Button>
+          <Button size="small" type="error" ghost @click="openReject(row as RefundRow)">Reject</Button>
+        </template>
+      </TRowActions>
     </template>
   </TCrudPage>
 
@@ -79,6 +70,7 @@
 import { ref, onMounted } from 'vue'
 import { NButton as Button, NModal as Modal, NInput as Input } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'

@@ -116,10 +116,12 @@ export function useCrudPage<T, TId = string | number>(
 
   function setPage(pageIndex: number): void {
     query.value = { ...query.value, pageIndex }
+    void refresh()
   }
 
   function setPageSize(pageSize: number): void {
     query.value = { ...query.value, pageSize, pageIndex: 1 }
+    void refresh()
   }
 
   function setSearch(text: string): void {

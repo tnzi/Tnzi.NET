@@ -28,6 +28,10 @@ public class AuthorizationModule : TnziApplicationModule
         // 注意：Authorization 模块实体已通过实体配置类自动注册到主 DbContext
         // 不再需要独立的 AuthorizationDbContext，实体配置会自动应用到主 DbContext
 
+        // Options
+        services.Configure<Tnzi.Authorization.Options.AuthorizationOptions>(
+            context.Configuration.GetSection("Authorization"));
+
         // 注册授权服务（单一实现，多接口注册）
         services.AddScoped<FunctionAuthorizationService>();
         services.AddScoped<Tnzi.Authorization.Services.IFunctionAuthorizationService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());

@@ -525,14 +525,24 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     public virtual async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         Check.NotNull(entity);
-        
+
         await DbSet.AddAsync(entity, cancellationToken);
-        
+
         // 智能保存：如果应该立即保存，则保存更改
         if (ShouldSaveImmediately())
         {
             await DbContext.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Explicit flush — forces pending changes through SaveChangesAsync regardless of
+    /// the transaction-deferred policy. Use sparingly when subsequent operations within
+    /// the same UnitOfWork need to observe writes (e.g. sequence-number computation).
+    /// </summary>
+    public virtual Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        return DbContext.SaveChangesAsync(cancellationToken);
     }
 
     public virtual async Task InsertManyAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)

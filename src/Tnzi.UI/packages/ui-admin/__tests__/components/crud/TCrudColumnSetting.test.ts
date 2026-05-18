@@ -5,9 +5,12 @@ import TCrudColumnSetting from '../../../src/components/crud/TCrudColumnSetting.
 
 const popoverStub = {
   name: 'Popover',
-  props: ['show'],
+  // After moving NPopover from `:show` (controlled) to `:default-show`
+  // (uncontrolled with outside-click auto-close), the test stub also
+  // needs to accept either prop. Mirrors Naive UI's actual API surface.
+  props: ['show', 'defaultShow'],
   template:
-    '<div v-if="show" class="n-popover-stub"><slot name="trigger" /><slot /></div>',
+    '<div v-if="show || defaultShow" class="n-popover-stub"><slot name="trigger" /><slot /></div>',
 }
 
 const checkboxStub = {
@@ -36,10 +39,13 @@ function makeSettings() {
     visibleColumns: ref([{ key: 'name', title: 'Name' }]),
     orderedKeys: ref(['name', 'note']),
     hiddenKeys: ref(new Set(['note'])),
+    fixedOverrides: ref(new Map()),
     hide: vi.fn(),
     show: vi.fn(),
     toggle: vi.fn(),
     reorder: vi.fn(),
+    cycleFixed: vi.fn(),
+    getFixed: vi.fn(() => undefined),
     reset: vi.fn(),
   } as any
 }
@@ -60,15 +66,18 @@ describe('TCrudColumnSetting', () => {
     expect(rows).toHaveLength(2)
   })
 
-  it('clicking a checkbox toggles column visibility', async () => {
+  it('clicking a column row checkbox toggles column visibility', async () => {
+    // New header layout adds a tri-state "Select all" checkbox in front of
+    // the per-column rows, so the first <input type="checkbox"> in the DOM
+    // is the select-all. Index [1] is the first column row ('name').
     const settings = makeSettings()
     const wrapper = mount(TCrudColumnSetting, {
       props: { settings, allColumns, show: true },
       global: { stubs },
     })
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    expect(checkboxes.length).toBeGreaterThan(0)
-    await checkboxes[0].trigger('change')
+    expect(checkboxes.length).toBeGreaterThanOrEqual(2)
+    await checkboxes[1].trigger('change')
     expect(settings.toggle).toHaveBeenCalledWith('name')
   })
 

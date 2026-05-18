@@ -1,9 +1,36 @@
 import type { App } from 'vue'
 import type { Pinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
-import type { HttpClient } from '@tnzi/core/http/http'
+import type { HttpClient } from '@tnzi/core/http'
+import {
+  THEME_CONTEXT_KEY,
+  createThemeContext,
+  mergeThemeSettings,
+  type ThemeColors,
+} from '@tnzi/ui'
 import '../styles/index.css'
 import { TNZI_ADMIN_CLIENT_KEY } from './client'
+import { installDirectives } from '../directives'
+import {
+  provideAdminLoginConfig,
+  type AdminLoginConfig,
+} from './loginConfig'
+
+/**
+ * Default palette for ui-admin when the consumer hasn't installed
+ * `createTnziUi()` upstream. Cyan-500 primary gives admin a distinct
+ * identity vs the @tnzi/ui default (Naive green). Consumers wanting a
+ * different palette pass `themeOverride: { primary: '...' }`, or install
+ * `createTnziUi({ theme: ... })` first to fully take over.
+ */
+export const DEFAULT_ADMIN_PRIMARY_COLOR = '#06B6D4'
+export const DEFAULT_ADMIN_COLORS = {
+  primary: '#06B6D4',
+  info: '#2080f0',
+  success: '#18a058',
+  warning: '#f0a020',
+  error: '#d03050',
+} as const
 
 export interface TnziUiAdminOptions {
   pinia?: Pinia
@@ -15,6 +42,24 @@ export interface TnziUiAdminOptions {
    * bridge factories stay on their stub / mock paths.
    */
   client?: HttpClient
+  /**
+   * Partial theme override applied when this plugin installs its own theme
+   * context (i.e. consumer didn't already call `createTnziUi()`). Use to
+   * change the admin default primary color away from `#646cff`.
+   *
+   * When the consumer has already installed `@tnzi/ui`, this option is
+   * **ignored** — the consumer's theme wins. Pass to `createTnziUi` instead.
+   */
+  themeOverride?: Partial<ThemeColors>
+  /**
+   * Phase I.7+ — configuration for the built-in `/login/:module(…)?` route.
+   * Pass `brand` + `callbacks.pwdLogin` to get a working login page out of
+   * the box; pass `demoAccounts` to render quick-fill buttons.
+   *
+   * The route still renders without this option, but the 5 form modules
+   * behave as placeholders.
+   */
+  login?: AdminLoginConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -28,6 +73,42 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
 
   if (options.client) {
     app.provide(TNZI_ADMIN_CLIENT_KEY, options.client)
+  }
+
+  // Phase I.7.2+ — install the login config so the built-in `/login/:module(…)?`
+  // route can pull consumer-supplied auth callbacks + brand + demo accounts
+  // without each consumer needing to override the route component itself.
+  // Always provide (even when undefined) so `useAdminLoginConfig()` always
+  // resolves to a stable object.
+  provideAdminLoginConfig(app, options.login ?? {})
+
+  // Install global directives (v-permission, etc).
+  installDirectives(app)
+
+  // Provide a fallback `@tnzi/ui` theme context when the consumer has not
+  // already installed `createTnziUi()`. Without this, `TThemeDrawer` (mounted
+  // by `AdminShellRoot` in 0.2.3+) calls `useTheme()` during setup, the
+  // injection fails, and the entire route subtree silently fails to render
+  // any of the Phase A features.
+  //
+  // When we install the fallback, we override the default primary to
+  // `#646cff` (soybean-admin signature) so admin apps have a distinct
+  // identity vs the site theme. Consumers can opt out by either
+  // (a) installing `createTnziUi()` first with their own colors, or
+  // (b) passing `themeOverride: { primary: '...' }`.
+  //
+  // Detection uses `app._context.provides` — an internal-but-stable accessor.
+  // The cast to `Record<symbol, unknown>` matches Vue 3.5's own internal type.
+  const provides = (app as unknown as {
+    _context: { provides: Record<symbol, unknown> }
+  })._context.provides
+  if (provides[THEME_CONTEXT_KEY] === undefined) {
+    const colors: Partial<ThemeColors> = {
+      ...DEFAULT_ADMIN_COLORS,
+      ...(options.themeOverride ?? {}),
+    }
+    const defaultThemeCtx = createThemeContext(mergeThemeSettings({ colors }))
+    app.provide(THEME_CONTEXT_KEY, defaultThemeCtx)
   }
 
   let keyHandler: ((e: KeyboardEvent) => void) | null = null
@@ -50,3 +131,18 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
 
 export { TnziUiAdminResolver } from './resolver'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
+export { defineAdminApp } from './defineAdminApp'
+export { installDirectives, vPermission } from '../directives'
+export type { DefineAdminAppOptions, DefineAdminAppResult } from './defineAdminApp'
+export {
+  ADMIN_LOGIN_CONFIG_KEY,
+  provideAdminLoginConfig,
+  useAdminLoginConfig,
+  type AdminLoginConfig,
+} from './loginConfig'
+export {
+  fetchAdminManifest,
+  type AdminManifest,
+  type AdminManifestModule,
+  type AdminManifestEntity,
+} from '../services/admin-manifest'

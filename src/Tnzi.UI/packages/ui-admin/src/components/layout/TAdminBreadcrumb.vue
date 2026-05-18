@@ -48,7 +48,7 @@ function resolveLabel(label: string): string {
   display: flex;
   align-items: center;
   font-size: 14px;
-  color: var(--tnzi-text-2);
+  color: var(--tnzi-base-text-muted);
 }
 @media (max-width: 640px) {
   .t-admin-breadcrumb {

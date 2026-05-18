@@ -121,6 +121,7 @@ public class HistoryMiddlewareTests
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -155,6 +156,7 @@ public class HistoryMiddlewareTests
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -228,6 +230,7 @@ public class HistoryMiddlewareTests
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -262,8 +265,61 @@ public class HistoryMiddlewareTests
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_SuccessfulStream_PreGeneratesAndExposesMessageIdsViaProperties()
+    {
+        var threadId = Guid.NewGuid();
+        var mockThreadService = new Mock<IAgentThreadInternalService>();
+        mockThreadService
+            .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ChatMessage>());
+        mockThreadService
+            .Setup(s => s.SaveMessageAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, string _, string _, string? _, string? _, Guid? messageId, CancellationToken _) =>
+                Task.FromResult(messageId ?? Guid.NewGuid()));
+
+        var middleware = new HistoryMiddleware(
+            mockThreadService.Object,
+            CreateOptions(maxLoadedMessages: 100),
+            Mock.Of<ILogger<HistoryMiddleware>>());
+
+        var context = CreateContext(threadId);
+
+        Guid? observedUserId = null;
+        Guid? observedAssistantId = null;
+        await foreach (var chunk in middleware.InvokeStreamingAsync(
+            context,
+            (_, _) => CreateCompletedStream(),
+            CancellationToken.None))
+        {
+            // HistoryMiddleware stamps persisted ids directly onto the terminal chunk so the
+            // downstream streaming service can surface them on the SSE event. AsyncLocal does
+            // not propagate writes across async iterator yield boundaries.
+            if (chunk.FinishReason != null && observedUserId == null)
+            {
+                observedUserId = chunk.UserMessageId;
+                observedAssistantId = chunk.AssistantMessageId;
+            }
+        }
+
+        observedUserId.ShouldNotBeNull();
+        observedAssistantId.ShouldNotBeNull();
+        observedUserId!.Value.ShouldNotBe(Guid.Empty);
+        observedAssistantId!.Value.ShouldNotBe(Guid.Empty);
+        // The IDs surfaced mid-stream must match what was finally persisted.
+        mockThreadService.Verify(s => s.SaveMessageAsync(
+            threadId, "user", "test", It.IsAny<string?>(), It.IsAny<string?>(),
+            observedUserId, It.IsAny<CancellationToken>()), Times.Once);
+        mockThreadService.Verify(s => s.SaveMessageAsync(
+            threadId, "assistant", "ok", It.IsAny<string?>(), It.IsAny<string?>(),
+            observedAssistantId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #region Helpers

@@ -42,12 +42,18 @@ public class DatabaseConversationStore : IConversationStore
     }
 
     /// <inheritdoc />
-    public async Task AppendMessageAsync(string conversationId, string role, string content, CancellationToken ct = default)
+    public async Task<string> AppendMessageAsync(string conversationId, string role, string content, string? messageId = null, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(role);
         Check.NotNullOrWhiteSpace(content);
         var threadId = ParseThreadId(conversationId);
-        await _threadService.SaveMessageAsync(threadId, role, content, ct: ct);
+        Guid? parsedId = null;
+        if (!string.IsNullOrWhiteSpace(messageId) && Guid.TryParse(messageId, out var parsed))
+        {
+            parsedId = parsed;
+        }
+        var persistedId = await _threadService.SaveMessageAsync(threadId, role, content, messageId: parsedId, ct: ct);
+        return persistedId.ToString();
     }
 
     /// <inheritdoc />

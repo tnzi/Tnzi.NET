@@ -57,6 +57,10 @@ public class ChatResponseDto
     public List<CitationDto>? Citations { get; set; }
     /// <summary>Reasoning/thinking content (populated in non-streaming mode)</summary>
     public string? Reasoning { get; set; }
+    /// <summary>Persisted user message ID for this turn (null when persistence was skipped).</summary>
+    public Guid? UserMessageId { get; set; }
+    /// <summary>Persisted assistant message ID for this turn (null when persistence was skipped).</summary>
+    public Guid? AssistantMessageId { get; set; }
 }
 
 /// <summary>

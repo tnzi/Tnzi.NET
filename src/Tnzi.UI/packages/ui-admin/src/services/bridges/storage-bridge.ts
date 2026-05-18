@@ -21,9 +21,13 @@
  */
 import {
   useAdminFileApi,
+  useAdminFileFolderApi,
   useStorageApi,
   type FileRecordDto,
   type FileQueryDto,
+  type FileFolderDto,
+  type CreateFileFolderDto,
+  type UpdateFileFolderDto,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { mapQueryToListRequest } from '../_mappers'
@@ -40,14 +44,33 @@ export interface ChunkUploader {
 export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> {
   /** Returns a direct download URL for a file. Works offline (no async needed). */
   downloadUrl(id: string): string
+  /** Move a batch of files to a target folder (null = root / unfiled). */
+  moveTo(fileIds: string[], folderId: string | null): Promise<void>
   /** ChunkUploader methods for TChunkFileUpload */
   initUpload: ChunkUploader['initUpload']
   uploadChunk: ChunkUploader['uploadChunk']
   completeUpload: ChunkUploader['completeUpload']
 }
 
+/**
+ * Folder management surface — drives the StorageFile browser's left tree
+ * and the create/move-folder dialogs.
+ */
+export interface StorageFoldersContract {
+  /** Full folder tree from root (or rooted at `parentId`). */
+  getTree(parentId?: string | null): Promise<FileFolderDto[]>
+  getById(id: string): Promise<FileFolderDto>
+  create(data: CreateFileFolderDto): Promise<FileFolderDto>
+  update(id: string, data: UpdateFileFolderDto): Promise<FileFolderDto>
+  delete(id: string): Promise<void>
+  /** Move a folder under a new parent (null = make it a root). */
+  move(id: string, newParentId: string | null): Promise<void>
+}
+
 export interface StorageBridge {
   files: StorageFilesContract
+  /** Hierarchical folder management — see {@link StorageFoldersContract}. */
+  folders: StorageFoldersContract
   /**
    * Chunks — paged audit list wired to
    * DefaultStorageAuditAdminController (Plan E, 2026-04-14).
@@ -104,6 +127,7 @@ export interface StorageBridgeDeps {
   /** Test path: inject mock API objects directly. */
   fileApi?: ReturnType<typeof useAdminFileApi>
   storageApi?: ReturnType<typeof useStorageApi>
+  folderApi?: ReturnType<typeof useAdminFileFolderApi>
 }
 
 function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
@@ -116,6 +140,12 @@ function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
 export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge {
   const fileApi = deps.fileApi ?? (deps.client ? useAdminFileApi(deps.client) : null)
   const storageApi = deps.storageApi ?? (deps.client ? useStorageApi(deps.client) : null)
+  // folderApi is optional — when neither a client nor an explicit api was
+  // supplied the folders sub-contract degrades to lazy-rejecting stubs (same
+  // pattern as identity-bridge). This keeps the existing 2-api test fixtures
+  // green while still providing real implementations in production.
+  const folderApi =
+    deps.folderApi ?? (deps.client ? useAdminFileFolderApi(deps.client) : null)
 
   if (!fileApi || !storageApi) {
     const noOp = () => Promise.reject(new Error('createStorageBridge: no deps provided'))
@@ -127,14 +157,28 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         update: noOp as never,
         delete: noOp as never,
         downloadUrl: () => '',
+        moveTo: noOp as never,
         initUpload: noOp as never,
         uploadChunk: noOp as never,
         completeUpload: noOp as never,
+      },
+      folders: {
+        getTree: noOp as never,
+        getById: noOp as never,
+        create: noOp as never,
+        update: noOp as never,
+        delete: noOp as never,
+        move: noOp as never,
       },
       chunks: { fetch: stub as never, delete: noOp as never },
       versions: { fetch: stub as never, restore: stub as never },
     }
   }
+
+  const missing = <T>(label: string): Promise<T> =>
+    Promise.reject(
+      new Error(`storage-bridge: ${label} requires an HttpClient or explicit folderApi mock`),
+    )
 
   // ---- files ----
 
@@ -169,6 +213,14 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     downloadUrl: (id: string): string => {
       // Use a relative path that matches the backend route /api/files/{id}/download
       return `/api/files/${id}/download`
+    },
+
+    moveTo: async (fileIds: string[], folderId: string | null): Promise<void> => {
+      if (!folderApi) {
+        throw new Error('files.moveTo: folderApi not configured')
+      }
+      if (!fileIds.length) return
+      await folderApi.moveFiles({ fileIds, folderId })
     },
 
     initUpload: async (fileMeta: { name: string; size: number; chunkCount: number }): Promise<{ uploadId: string }> => {
@@ -266,5 +318,33 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
   }
 
-  return { files, chunks, versions }
+  const folders: StorageFoldersContract = folderApi
+    ? {
+        getTree: async (parentId?: string | null): Promise<FileFolderDto[]> => {
+          const items = unwrap<FileFolderDto[]>(await folderApi.getTree(parentId))
+          return Array.isArray(items) ? items : []
+        },
+        getById: async (id: string) =>
+          unwrap<FileFolderDto>(await folderApi.getById(id)),
+        create: async (data: CreateFileFolderDto) =>
+          unwrap<FileFolderDto>(await folderApi.create(data)),
+        update: async (id: string, data: UpdateFileFolderDto) =>
+          unwrap<FileFolderDto>(await folderApi.update(id, data)),
+        delete: async (id: string) => {
+          await folderApi.delete(id)
+        },
+        move: async (id: string, newParentId: string | null) => {
+          await folderApi.move(id, newParentId)
+        },
+      }
+    : {
+        getTree: () => missing('folders.getTree'),
+        getById: () => missing('folders.getById'),
+        create: () => missing('folders.create'),
+        update: () => missing('folders.update'),
+        delete: () => missing('folders.delete'),
+        move: () => missing('folders.move'),
+      }
+
+  return { files, folders, chunks, versions }
 }

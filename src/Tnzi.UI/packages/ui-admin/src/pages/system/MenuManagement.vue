@@ -12,11 +12,15 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -25,7 +29,7 @@ import { menuColumns, menuFormSchema } from './menu-config'
 import { translatePageKey } from '../_shared/translate'
 import type { MenuInfoDto } from '@tnzi/core/services/system'
 
-const title = 'Menu Management'
+const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<MenuInfoDto, string>({

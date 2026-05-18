@@ -155,4 +155,98 @@ describe('useChat', () => {
     chat.dispose();
     expect(chat.isStreaming.value).toBe(false);
   });
+
+  // --- streaming integration API (added 0.2.x) ---
+
+  it('addMessage appends a verbatim message', () => {
+    const chat = useChat();
+    const msg: ChatMessage = {
+      id: 'm1',
+      role: 'assistant',
+      content: 'verbatim',
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+    chat.addMessage(msg);
+    expect(chat.messages.value).toHaveLength(1);
+    expect(chat.messages.value[0]?.id).toBe('m1');
+    expect(chat.messages.value[0]?.content).toBe('verbatim');
+  });
+
+  it('appendDelta appends to content synchronously', () => {
+    const chat = useChat();
+    chat.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: 'Hel',
+      createdAt: '2026-01-01T00:00:00Z',
+      isStreaming: true,
+    });
+    chat.appendDelta('a1', 'content', 'lo');
+    chat.appendDelta('a1', 'content', ' world');
+    expect(chat.messages.value[0]?.content).toBe('Hello world');
+  });
+
+  it('appendDelta appends to reasoning, treating undefined as empty', () => {
+    const chat = useChat();
+    chat.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      createdAt: '2026-01-01T00:00:00Z',
+      isStreaming: true,
+    });
+    chat.appendDelta('a1', 'reasoning', 'Thinking…');
+    chat.appendDelta('a1', 'reasoning', ' done.');
+    expect(chat.messages.value[0]?.reasoning).toBe('Thinking… done.');
+  });
+
+  it('appendDelta is a no-op for an empty delta', () => {
+    const chat = useChat();
+    chat.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: 'kept',
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+    const before = chat.messages.value;
+    chat.appendDelta('a1', 'content', '');
+    expect(chat.messages.value).toBe(before);
+  });
+
+  it('appendDelta ignores unknown message id without error', () => {
+    const chat = useChat();
+    chat.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: 'kept',
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+    expect(() => chat.appendDelta('does-not-exist', 'content', 'x')).not.toThrow();
+    expect(chat.messages.value[0]?.content).toBe('kept');
+  });
+
+  it('updateMessage patches an existing message via rAF', async () => {
+    const chat = useChat();
+    chat.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: 'old',
+      createdAt: '2026-01-01T00:00:00Z',
+      isStreaming: true,
+    });
+    chat.updateMessage('a1', { content: 'new', isStreaming: false });
+    // Wait one animation frame for the batched flush.
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(chat.messages.value[0]?.content).toBe('new');
+    expect(chat.messages.value[0]?.isStreaming).toBe(false);
+  });
+
+  it('setStreaming flips the streaming flag', () => {
+    const chat = useChat();
+    expect(chat.isStreaming.value).toBe(false);
+    chat.setStreaming(true);
+    expect(chat.isStreaming.value).toBe(true);
+    chat.setStreaming(false);
+    expect(chat.isStreaming.value).toBe(false);
+  });
 });

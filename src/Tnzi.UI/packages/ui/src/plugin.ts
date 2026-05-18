@@ -9,7 +9,7 @@
 
 import type { App, Plugin } from 'vue';
 import type { Locale as CoreLocale } from '@tnzi/core/adapters/i18n';
-import type { HttpClient } from '@tnzi/core/http/http';
+import type { HttpClient } from '@tnzi/core/http';
 import type { StorageAdapter } from '@tnzi/core/adapters';
 import { DEFAULT_LOCALE, provideI18n } from '@tnzi/core/adapters/i18n';
 import {

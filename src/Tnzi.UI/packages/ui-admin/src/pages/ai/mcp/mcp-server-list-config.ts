@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 
 /**
  * Phase 5 Task 5.11 — McpServerList page config.
@@ -30,14 +32,26 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *   semantics can paste a JSON literal — the backend stores it verbatim.
  */
 export const mcpServerColumns: ColumnDef[] = [
-  { key: 'name', title: 'Name' },
-  { key: 'transport', title: 'Transport' },
-  { key: 'serverUrl', title: 'Server URL' },
-  { key: 'authType', title: 'Auth Type' },
-  { key: 'priority', title: 'Priority' },
-  { key: 'isEnabled', title: 'Enabled' },
-  { key: 'hasAuthToken', title: 'Auth Token Set' },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'name', title: 'columns.name' },
+  { key: 'transport', title: 'columns.transport' },
+  { key: 'serverUrl', title: 'columns.serverUrl' },
+  { key: 'authType', title: 'columns.authType' },
+  { key: 'priority', title: 'columns.priority' },
+  {
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.isEnabled),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
+  { key: 'hasAuthToken', title: 'columns.hasAuthToken' },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 export const mcpTransportOptions: Array<{ label: string; value: string }> = [

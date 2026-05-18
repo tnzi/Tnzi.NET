@@ -63,9 +63,15 @@ public interface IAgentThreadInternalService
     Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
 
     /// <summary>
-    /// 保存消息到线程
+    /// 保存消息到线程。
     /// </summary>
-    Task SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, CancellationToken ct = default);
+    /// <param name="messageId">
+    /// Optional pre-generated message ID. When supplied, the message is persisted with this
+    /// exact ID — letting callers (e.g. streaming pipelines) surface the ID to clients
+    /// before the database write completes. When null, the framework generates one.
+    /// </param>
+    /// <returns>The persisted message ID.</returns>
+    Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default);
 
     /// <summary>
     /// 获取线程消息历史

@@ -1,0 +1,188 @@
+/**
+ * Global polish — scrollbars, focus rings, selection colors, and the
+ * little touches that make an admin app feel handcrafted.
+ *
+ * Applied app-wide via `styles/index.css`.
+ */
+
+/* ===== Custom scrollbars — reserved-gutter overlay style =====
+ *
+ * Design goals (user-stated):
+ *   1. Showing the scrollbar must NOT push content sideways.
+ *   2. The scrollbar must NOT cover (occlude) content.
+ *
+ * Strategy — permanently reserve an 5px gutter on every scrollable
+ * element, with a transparent thumb that fades in on hover. Because
+ * the gutter is always present, the scrollbar appearing/disappearing
+ * never triggers a layout shift; because the thumb lives inside the
+ * gutter, it can't overlap content.
+ *
+ * Why not `width: 0 → 5px on hover` (the macOS-overlay illusion)?
+ *   That toggling causes WebKit to re-layout the scrollable element
+ *   by exactly 5px every time the cursor enters or leaves — the
+ *   "jumping content" the user reported.
+ *
+ * Why not `scrollbar-gutter: stable` alone?
+ *   It only governs the *standard* scrollbar (where `scrollbar-width`
+ *   actually paints). It does nothing for `::-webkit-scrollbar` width
+ *   transitions, so WebKit users would still see the shift.
+ *
+ * Trade-off accepted: every scrollable element permanently carves out
+ * 5px on the inline-end edge, even when the content fits. This is
+ * negligible against the alternative (jittering layouts) and matches
+ * how Naive UI / shadcn / soybean treat scrollbars in practice.
+ *
+ * Scope: body-level. NModal / NDrawer teleport to document.body, so a
+ * shell-scoped selector would miss every modal. */
+
+/* Permanently reserve gutter; default thumb is invisible. */
+body * {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+body *::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+  background: transparent;
+}
+
+body *::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: var(--tnzi-admin-radius-full, 9999px);
+  transition: background var(--tnzi-admin-motion-duration-base, 0.25s) ease;
+}
+
+body *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Hover the scrollable element (or any of its descendants — cursor is
+   usually over the content, not the empty gutter) — fade the thumb in.
+   Firefox `scrollbar-color` follows the same hover trigger. */
+body *:hover {
+  scrollbar-color: rgb(var(--tnzi-border-rgb, 230 230 240) / 0.45) transparent;
+}
+
+body *:hover::-webkit-scrollbar-thumb {
+  background: rgb(var(--tnzi-border-rgb, 230 230 240) / 0.45);
+}
+
+/* Direct hover on the thumb — slight primary tint so the user can
+   confirm grab affordance. */
+body *::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.55) !important;
+}
+
+/* Active drag — slightly darker tint for grab feedback. */
+body *::-webkit-scrollbar-thumb:active {
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.7) !important;
+}
+
+/* ── Page-level scroll wrapper ──
+ * Utility for long-form pages (Workbench, AgentDetail, exception pages,
+ * documentation views, etc.) under the new TAdminContent which itself
+ * does NOT scroll. Wrap the page body in `<div class="t-page-scroll">…`
+ * to get a flex-filling vertical scroll surface. CRUD-style pages
+ * (TCrudPage) don't need this — they manage their own internal scroll
+ * via NDataTable's `flex-height`. */
+.t-page-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── Navigation menus — fully hidden scrollbar (no gutter) ──
+ * The sidebar / mix rail / vertical-mix sub-sider all carry their own
+ * brand identity; an even-5px gutter cuts into the icon column on
+ * narrow rail widths and looks like a glitch. Hide the scrollbar
+ * entirely — keyboard / wheel scrolling still works.
+ * Selector specificity (1 class + 1 pseudo = 0,1,1) outranks the
+ * global `body *::-webkit-scrollbar` (0,0,2) so this wins without
+ * !important. */
+.t-admin-sidebar__body,
+.t-admin-shell__sub-sider-body,
+.t-admin-mix-rail__list {
+  scrollbar-width: none;
+}
+.t-admin-sidebar__body::-webkit-scrollbar,
+.t-admin-shell__sub-sider-body::-webkit-scrollbar,
+.t-admin-mix-rail__list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ===== Focus ring — accessibility + visual hint ===== */
+/* Only show focus-ring for keyboard nav (`:focus-visible` not `:focus`)
+   to avoid distracting click users. */
+.t-admin-shell *:focus-visible {
+  outline: 2px solid rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.55);
+  outline-offset: 2px;
+  border-radius: var(--tnzi-admin-radius-sm, 4px);
+}
+
+/* ===== Selection color (text highlight) ===== */
+.t-admin-shell ::selection {
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.28);
+  color: var(--tnzi-base-text);
+}
+
+/* ===== Reduce motion preference ===== */
+@media (prefers-reduced-motion: reduce) {
+  .t-admin-shell *,
+  .t-admin-content *,
+  .t-admin-shell *::before,
+  .t-admin-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===== Smooth font rendering on macOS / iOS ===== */
+.t-admin-shell {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* ===== Naive UI button restoration (Tailwind / UnoCSS preflight override) =====
+ *
+ * Tailwind / UnoCSS preflight emits
+ *   `button, [type="submit"], … { background-color: transparent }`
+ * with selector specificity (0,1,0). Naive UI's `.n-button { background-color:
+ * var(--n-color) }` is also (0,1,0) — they tie, so cascade order decides, and
+ * preflight wins when the reset is imported after naive-ui's CSS-in-JS injects
+ * its rules (or when naive-ui's rules use `:where()` to keep specificity at 0).
+ *
+ * Result: primary/info/success/warning/error buttons render as transparent
+ * outlines with white text on white surfaces — basically invisible.
+ *
+ * Fix: double the class selector to raise specificity to (0,2,0) and restore
+ * the var-driven background / border / hover / pressed colors. Applies app-
+ * wide so login/dialog/popover buttons recover too, not just admin-shell ones.
+ */
+/* ONLY restore background — naive-ui draws the button outline via a
+   `.n-button__border` pseudo element, NOT on the button itself.
+   Reapplying `border: var(--n-border)` here was producing a double
+   border (1px from the pseudo + 1px from this rule) and the button
+   read visibly thicker than soybean's reference. */
+.n-button.n-button {
+  background-color: var(--n-color);
+}
+.n-button.n-button:hover {
+  background-color: var(--n-color-hover);
+}
+.n-button.n-button:active,
+.n-button.n-button.n-button--pressed {
+  background-color: var(--n-color-pressed);
+}
+.n-button.n-button:focus {
+  background-color: var(--n-color-focus);
+}
+.n-button.n-button.n-button--disabled {
+  background-color: var(--n-color-disabled);
+}

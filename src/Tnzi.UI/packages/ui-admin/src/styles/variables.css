@@ -1,0 +1,112 @@
+/**
+ * @tnzi/ui-admin layout & visual tokens.
+ *
+ * These extend the base theme tokens shipped in @tnzi/ui (--tnzi-primary,
+ * --tnzi-base-text, --tnzi-shadow-*, …) with admin-specific layout sizing,
+ * sider/header inverted variants, motion curves and z-index strata.
+ *
+ * All admin-scoped variables use the `--tnzi-admin-` prefix to avoid colliding
+ * with the base UI tokens.
+ */
+
+:root {
+  /* ------ Layout sizing ------ */
+  --tnzi-admin-header-height: 56px;
+  --tnzi-admin-tab-height: 44px;
+  --tnzi-admin-footer-height: 48px;
+
+  /* 4-tier sider width system (matches soybean-admin) */
+  --tnzi-admin-sider-width: 220px;
+  --tnzi-admin-sider-collapsed-width: 64px;
+  --tnzi-admin-sider-mix-width: 90px;
+  --tnzi-admin-sider-mix-child-width: 200px;
+
+  --tnzi-admin-content-padding: 16px;
+  --tnzi-admin-content-padding-mobile: 12px;
+
+  /* ------ Z-index strata ------ */
+  --tnzi-admin-z-header: 80;
+  --tnzi-admin-z-tabs: 70;
+  --tnzi-admin-z-sider: 90;
+  --tnzi-admin-z-watermark: 9;
+  --tnzi-admin-z-drawer-backdrop: 1000;
+  --tnzi-admin-z-drawer: 1001;
+  --tnzi-admin-z-overlay: 2000;
+
+  /* ------ Motion ------ */
+  --tnzi-admin-motion-duration-fast: 0.15s;
+  --tnzi-admin-motion-duration-base: 0.25s;
+  --tnzi-admin-motion-duration-slow: 0.4s;
+  --tnzi-admin-motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --tnzi-admin-motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --tnzi-admin-motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --tnzi-admin-motion-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ------ Radius scale ------ */
+  --tnzi-admin-radius-xs: 2px;
+  --tnzi-admin-radius-sm: 4px;
+  --tnzi-admin-radius: 6px;
+  --tnzi-admin-radius-md: 8px;
+  --tnzi-admin-radius-lg: 12px;
+  --tnzi-admin-radius-full: 9999px;
+
+  /* ------ Admin-specific surfaces ------ */
+  --tnzi-admin-header-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  --tnzi-admin-sider-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  --tnzi-admin-tab-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  --tnzi-admin-footer-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  /* Content area background — soybean uses the layout color directly (no
+     primary tint). Earlier comment claimed soybean mixes 5% primary; that
+     was wrong (soybean's `bg-layout` is the flat container surface). Mixing
+     primary made content area drift toward whichever theme color was active
+     (cold purple by default), which never matched soybean's neutral grey. */
+  --tnzi-admin-content-bg: var(--tnzi-layout-bg);
+
+  /* ------ NProgress (route loading bar) ------ */
+  --tnzi-admin-nprogress-color: var(--tnzi-primary);
+  --tnzi-admin-nprogress-height: 2px;
+
+  /* Inverted (dark) sider — used when invertSider toggles independent of
+     global theme mode. Header always follows the global mode (no invert). */
+  --tnzi-admin-sider-inverted-bg: rgb(0, 20, 40);
+  --tnzi-admin-inverted-text: rgba(255, 255, 255, 0.92);
+  --tnzi-admin-inverted-text-muted: rgba(255, 255, 255, 0.6);
+  --tnzi-admin-inverted-border: rgba(255, 255, 255, 0.12);
+  --tnzi-admin-inverted-hover-bg: rgba(255, 255, 255, 0.08);
+  --tnzi-admin-inverted-active-bg: rgb(var(--tnzi-primary-rgb) / 0.18);
+
+  /* Menu item visual states */
+  --tnzi-admin-menu-item-height: 44px;
+  --tnzi-admin-menu-item-collapsed-height: 48px;
+  --tnzi-admin-menu-item-hover-bg: rgb(var(--tnzi-primary-rgb) / 0.06);
+  --tnzi-admin-menu-item-active-bg: rgb(var(--tnzi-primary-rgb) / 0.1);
+  --tnzi-admin-menu-item-active-color: var(--tnzi-primary);
+  --tnzi-admin-menu-item-indent: 12px;
+
+  /* Overlay / mask */
+  --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.45);
+}
+
+/* Dark mode adjustments — surfaces become container/layout dark equivalents */
+.dark {
+  --tnzi-admin-header-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  --tnzi-admin-sider-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  --tnzi-admin-tab-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+  --tnzi-admin-footer-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
+
+  --tnzi-admin-sider-inverted-bg: rgb(12, 12, 12);
+
+  --tnzi-admin-menu-item-hover-bg: rgb(var(--tnzi-primary-rgb) / 0.12);
+  --tnzi-admin-menu-item-active-bg: rgb(var(--tnzi-primary-rgb) / 0.16);
+
+  --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.6);
+}
+
+/* Mobile compact tokens */
+@media (max-width: 768px) {
+  :root {
+    --tnzi-admin-header-height: 52px;
+    --tnzi-admin-tab-height: 40px;
+    --tnzi-admin-content-padding: var(--tnzi-admin-content-padding-mobile);
+  }
+}

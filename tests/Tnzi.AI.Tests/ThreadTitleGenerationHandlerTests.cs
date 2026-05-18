@@ -16,6 +16,26 @@ public class ThreadTitleGenerationHandlerTests
         return monitor.Object;
     }
 
+    /// <summary>
+    /// Builds a real <see cref="IServiceScopeFactory"/> backed by an in-memory container so the
+    /// handler — which now isolates work in a child scope — can resolve its dependencies from
+    /// the supplied mocks. Optional services may be passed as <c>null</c> to simulate "service
+    /// not registered" scenarios such as HostingLite.
+    /// </summary>
+    private static IServiceScopeFactory CreateScopeFactory(
+        IAiUtility? aiUtility,
+        IRepository<AgentThreadEntity, Guid>? repository,
+        IOptionsMonitor<ThreadOptions>? options,
+        IUnitOfWork? unitOfWork = null)
+    {
+        var services = new ServiceCollection();
+        if (aiUtility != null) services.AddSingleton(aiUtility);
+        if (repository != null) services.AddSingleton(repository);
+        if (options != null) services.AddSingleton(options);
+        if (unitOfWork != null) services.AddSingleton(unitOfWork);
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+    }
+
     [Fact]
     public async Task HandleAsync_WhenEnabled_GeneratesAndUpdatesTitle()
     {
@@ -35,8 +55,9 @@ public class ThreadTitleGenerationHandlerTests
         repository.Setup(x => x.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var handler = new ThreadTitleGenerationHandler(
-            aiUtility.Object, repository.Object, CreateOptions(true));
+        var unitOfWork = new Mock<IUnitOfWork>();
+        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(true), unitOfWork.Object);
+        var handler = new ThreadTitleGenerationHandler(scopeFactory);
 
         var @event = new ThreadFirstReplyCompletedEvent
         {
@@ -49,6 +70,7 @@ public class ThreadTitleGenerationHandlerTests
 
         thread.Title.ShouldBe("Code Help");
         repository.Verify(x => x.UpdateAsync(thread, It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -57,8 +79,8 @@ public class ThreadTitleGenerationHandlerTests
         var aiUtility = new Mock<IAiUtility>();
         var repository = new Mock<IRepository<AgentThreadEntity, Guid>>();
 
-        var handler = new ThreadTitleGenerationHandler(
-            aiUtility.Object, repository.Object, CreateOptions(false));
+        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(false));
+        var handler = new ThreadTitleGenerationHandler(scopeFactory);
 
         var @event = new ThreadFirstReplyCompletedEvent
         {
@@ -92,8 +114,8 @@ public class ThreadTitleGenerationHandlerTests
         repository.Setup(x => x.GetAsync(threadId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);
 
-        var handler = new ThreadTitleGenerationHandler(
-            aiUtility.Object, repository.Object, CreateOptions(true));
+        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(true));
+        var handler = new ThreadTitleGenerationHandler(scopeFactory);
 
         var @event = new ThreadFirstReplyCompletedEvent
         {
@@ -117,8 +139,8 @@ public class ThreadTitleGenerationHandlerTests
         repository.Setup(x => x.GetAsync(threadId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
-        var handler = new ThreadTitleGenerationHandler(
-            aiUtility.Object, repository.Object, CreateOptions(true));
+        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(true));
+        var handler = new ThreadTitleGenerationHandler(scopeFactory);
 
         var @event = new ThreadFirstReplyCompletedEvent
         {

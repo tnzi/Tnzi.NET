@@ -1,5 +1,5 @@
 <template>
-  <footer class="t-admin-footer">
+  <footer class="t-admin-footer" :class="{ 't-admin-footer--fixed': fixed }">
     <div v-if="copyright" class="t-admin-footer__copyright">{{ copyright }}</div>
     <ul v-if="links && links.length > 0" class="t-admin-footer__links">
       <li v-for="link in links" :key="link.href">
@@ -26,9 +26,11 @@ export interface TAdminFooterLink {
 interface Props {
   copyright?: string
   links?: TAdminFooterLink[]
+  /** Pin the footer to the bottom of the viewport (sticky). */
+  fixed?: boolean
 }
 
-defineProps<Props>()
+withDefaults(defineProps<Props>(), { fixed: false })
 </script>
 
 <style scoped>
@@ -37,12 +39,20 @@ defineProps<Props>()
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
+  /* Phase H1 D1: flex-shrink:0 so the column-flex parent doesn't
+     squash the footer when content is empty. */
+  flex-shrink: 0;
   gap: 12px;
+  min-height: var(--tnzi-admin-footer-height, 48px);
   padding: 12px 16px;
   font-size: 12px;
-  color: var(--tnzi-text-3);
-  background-color: var(--tnzi-footer-bg, transparent);
-  border-top: 1px solid var(--tnzi-border-color);
+  color: var(--tnzi-base-text-muted);
+  background-color: var(--tnzi-admin-footer-bg, transparent);
+  border-top: 1px solid var(--tnzi-border);
+}
+.t-admin-footer--fixed {
+  position: sticky;
+  bottom: 0;
 }
 .t-admin-footer__links {
   display: flex;
@@ -52,9 +62,9 @@ defineProps<Props>()
   padding: 0;
 }
 .t-admin-footer__links a {
-  color: var(--tnzi-text-3);
+  color: var(--tnzi-base-text-muted);
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
 }
 .t-admin-footer__links a:hover {
   color: var(--tnzi-primary);

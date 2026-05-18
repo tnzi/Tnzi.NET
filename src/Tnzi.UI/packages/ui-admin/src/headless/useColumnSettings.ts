@@ -1,11 +1,22 @@
-import { computed, ref, watch, type Ref, type ComputedRef } from 'vue'
+import { computed, ref, watch, type Ref, type ComputedRef, type VNode } from 'vue'
 
-export interface ColumnDef {
+export interface ColumnDef<TRow = Record<string, unknown>> {
   key: string
   title: string
   visible?: boolean
   width?: number
   fixed?: 'left' | 'right'
+  /**
+   * Custom cell renderer. Receives the row object and returns a string or VNode.
+   * Use for status badges, relative timestamps, action buttons, links, etc.
+   *
+   * @example
+   * ```ts
+   * { key: 'isEnabled', title: 'Status',
+   *   render: (row) => h(TStatusBadge, { value: row.isEnabled }) }
+   * ```
+   */
+  render?: (row: TRow) => VNode | string | number | null
 }
 
 export interface UseColumnSettingsOptions {
@@ -18,16 +29,28 @@ export interface UseColumnSettingsReturn {
   visibleColumns: ComputedRef<ColumnDef[]>
   orderedKeys: Ref<string[]>
   hiddenKeys: Ref<Set<string>>
+  /**
+   * Runtime overrides for the `fixed` property — separate from the
+   * ColumnDef's static value so the user's column-setting popover
+   * choices don't mutate the page config. `null` means "explicitly
+   * unfix", absent means "use the ColumnDef default".
+   */
+  fixedOverrides: Ref<Map<string, 'left' | 'right' | null>>
   hide: (key: string) => void
   show: (key: string) => void
   toggle: (key: string) => void
   reorder: (newKeys: string[]) => void
+  /** Cycle the column's fixed state: undefined → left → right → undefined. */
+  cycleFixed: (key: string) => void
+  /** Read the effective fixed state (override > ColumnDef default). */
+  getFixed: (key: string) => 'left' | 'right' | undefined
   reset: () => void
 }
 
 interface PersistedState {
   hidden: string[]
   order: string[]
+  fixed?: Record<string, 'left' | 'right' | null>
 }
 
 export function useColumnSettings(options: UseColumnSettingsOptions): UseColumnSettingsReturn {
@@ -40,6 +63,7 @@ export function useColumnSettings(options: UseColumnSettingsOptions): UseColumnS
 
   const orderedKeys = ref<string[]>([...originalOrder])
   const hiddenKeys = ref<Set<string>>(new Set(defaultHidden))
+  const fixedOverrides = ref<Map<string, 'left' | 'right' | null>>(new Map())
 
   // Attempt restore from storage
   try {
@@ -56,17 +80,39 @@ export function useColumnSettings(options: UseColumnSettingsOptions): UseColumnS
       if (Array.isArray(parsed.hidden)) {
         hiddenKeys.value = new Set(parsed.hidden.filter((k) => columnMap.has(k)))
       }
+      if (parsed.fixed && typeof parsed.fixed === 'object') {
+        const map = new Map<string, 'left' | 'right' | null>()
+        for (const [k, v] of Object.entries(parsed.fixed)) {
+          if (!columnMap.has(k)) continue
+          if (v === 'left' || v === 'right' || v === null) map.set(k, v)
+        }
+        fixedOverrides.value = map
+      }
     }
   } catch {
     // ignore storage errors
   }
 
-  const visibleColumns = computed<ColumnDef[]>(() =>
-    orderedKeys.value
-      .filter((k) => !hiddenKeys.value.has(k))
-      .map((k) => columnMap.get(k))
-      .filter((c): c is ColumnDef => c !== undefined),
-  )
+  function getFixed(key: string): 'left' | 'right' | undefined {
+    if (fixedOverrides.value.has(key)) {
+      const v = fixedOverrides.value.get(key)
+      return v === null ? undefined : v
+    }
+    return columnMap.get(key)?.fixed
+  }
+
+  const visibleColumns = computed<ColumnDef[]>(() => {
+    const out: ColumnDef[] = []
+    for (const k of orderedKeys.value) {
+      if (hiddenKeys.value.has(k)) continue
+      const col = columnMap.get(k)
+      if (!col) continue
+      // Apply runtime fixed override so the user's pin-toggle choices
+      // show up in the rendered table without mutating page config.
+      out.push({ ...col, fixed: getFixed(k) })
+    }
+    return out
+  })
 
   function hide(key: string): void {
     if (!columnMap.has(key)) return
@@ -93,19 +139,37 @@ export function useColumnSettings(options: UseColumnSettingsOptions): UseColumnS
     orderedKeys.value = [...filtered]
   }
 
+  /** Cycle: undefined → 'left' → 'right' → undefined.
+   *  Mirrors soybean's `handleFixed` rotation in table-column-setting.vue. */
+  function cycleFixed(key: string): void {
+    if (!columnMap.has(key)) return
+    const current = getFixed(key)
+    const next: 'left' | 'right' | null =
+      current === undefined ? 'left' : current === 'left' ? 'right' : null
+    const map = new Map(fixedOverrides.value)
+    map.set(key, next)
+    fixedOverrides.value = map
+  }
+
   function reset(): void {
     orderedKeys.value = [...originalOrder]
     hiddenKeys.value = new Set(defaultHidden)
+    fixedOverrides.value = new Map()
   }
 
   watch(
-    [orderedKeys, hiddenKeys],
+    [orderedKeys, hiddenKeys, fixedOverrides],
     () => {
       try {
         if (typeof localStorage === 'undefined') return
+        const fixedRecord: Record<string, 'left' | 'right' | null> = {}
+        fixedOverrides.value.forEach((v, k) => {
+          fixedRecord[k] = v
+        })
         const payload: PersistedState = {
           hidden: [...hiddenKeys.value],
           order: [...orderedKeys.value],
+          fixed: fixedRecord,
         }
         localStorage.setItem(storageKey, JSON.stringify(payload))
       } catch {
@@ -119,10 +183,13 @@ export function useColumnSettings(options: UseColumnSettingsOptions): UseColumnS
     visibleColumns,
     orderedKeys,
     hiddenKeys,
+    fixedOverrides,
     hide,
     show,
     toggle,
     reorder,
+    cycleFixed,
+    getFixed,
     reset,
   }
 }

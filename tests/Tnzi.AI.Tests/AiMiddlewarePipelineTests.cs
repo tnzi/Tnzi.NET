@@ -354,8 +354,8 @@ public class AiMiddlewarePipelineTests
         result.Response.ShouldBe("New answer");
 
         // 验证保存了用户消息和助手回复
-        threadService.Verify(s => s.SaveMessageAsync(threadId, "user", "Hello", null, null, It.IsAny<CancellationToken>()), Times.Once);
-        threadService.Verify(s => s.SaveMessageAsync(threadId, "assistant", "New answer", null, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.SaveMessageAsync(threadId, "user", "Hello", null, null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.SaveMessageAsync(threadId, "assistant", "New answer", null, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -385,8 +385,8 @@ public class AiMiddlewarePipelineTests
 
         // 验证自动创建了线程并保存了用户消息和助手回复
         threadService.Verify(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
-        threadService.Verify(s => s.SaveMessageAsync(autoThreadId, "user", "Hello", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        threadService.Verify(s => s.SaveMessageAsync(autoThreadId, "assistant", "Hi there", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.SaveMessageAsync(autoThreadId, "user", "Hello", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.SaveMessageAsync(autoThreadId, "assistant", "Hi there", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -415,7 +415,7 @@ public class AiMiddlewarePipelineTests
         // Guardrail 拒绝时不应保存任何消息
         threadService.Verify(s => s.SaveMessageAsync(
             It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion

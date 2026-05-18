@@ -61,6 +61,12 @@ public class AgentService : ApplicationService, IAgentService
         if (input.QualityTier.HasValue) entity.QualityTier = input.QualityTier.Value;
         if (input.LatencyTier.HasValue) entity.LatencyTier = input.LatencyTier.Value;
         if (input.CostTier.HasValue) entity.CostTier = input.CostTier.Value;
+        // PersonaId — accept Guid.Empty as the "unlink persona" sentinel so the
+        // PATCH-style update can both set and clear the link.
+        if (input.PersonaId.HasValue)
+        {
+            entity.PersonaId = input.PersonaId.Value == Guid.Empty ? null : input.PersonaId.Value;
+        }
         var executionModeChanged = input.ExecutionMode.HasValue && input.ExecutionMode.Value != entity.ExecutionMode;
         if (input.ExecutionMode.HasValue) entity.ExecutionMode = input.ExecutionMode.Value;
         if (input.ExecutionConfig != null || executionModeChanged) entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
@@ -107,7 +113,10 @@ public class AgentService : ApplicationService, IAgentService
             Roles = source.Roles?.ToList(),
             QualityTier = source.QualityTier,
             LatencyTier = source.LatencyTier,
-            CostTier = source.CostTier
+            CostTier = source.CostTier,
+            // Carry the persona link to the clone — the soul/role template
+            // is a meaningful part of the agent's identity, not transient state.
+            PersonaId = source.PersonaId,
         };
 
         await _repository.InsertAsync(clone);
@@ -181,6 +190,7 @@ public class AgentService : ApplicationService, IAgentService
         agent.QualityTier = snapshot.QualityTier;
         agent.LatencyTier = snapshot.LatencyTier;
         agent.CostTier = snapshot.CostTier;
+        agent.PersonaId = snapshot.PersonaId;
 
         await _repository.UpdateAsync(agent);
 
@@ -555,4 +565,6 @@ internal class AgentConfigSnapshot
     public int QualityTier { get; set; }
     public int LatencyTier { get; set; }
     public int CostTier { get; set; }
+    /// <summary>Persona FK at snapshot time so rollback restores the soul link.</summary>
+    public Guid? PersonaId { get; set; }
 }

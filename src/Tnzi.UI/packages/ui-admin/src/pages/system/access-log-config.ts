@@ -1,15 +1,76 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
-// Real AccessLogInfoDto fields from @tnzi/core/services/system/types.ts
-export const accessLogColumns: ColumnDef[] = [
-  { key: 'path',         title: 'Path' },
-  { key: 'method',       title: 'Method' },
-  { key: 'statusCode',   title: 'Status' },
-  { key: 'responseTime', title: 'Duration (ms)' },
-  { key: 'ipAddress',    title: 'IP' },
-  { key: 'userName',     title: 'User' },
-  { key: 'creationTime', title: 'Requested At' },
+interface AccessLogRow {
+  id?: string
+  path?: string
+  method?: string
+  statusCode?: number
+  responseTime?: number
+  ipAddress?: string
+  userName?: string
+  creationTime?: string
+  requestBody?: string
+  responseBody?: string
+}
+
+function methodType(method?: string): 'info' | 'success' | 'warning' | 'error' | 'default' {
+  switch (method?.toUpperCase()) {
+    case 'GET': return 'info'
+    case 'POST': return 'success'
+    case 'PUT':
+    case 'PATCH': return 'warning'
+    case 'DELETE': return 'error'
+    default: return 'default'
+  }
+}
+
+function statusType(code?: number): 'success' | 'info' | 'warning' | 'error' | 'default' {
+  if (!code) return 'default'
+  if (code < 300) return 'success'
+  if (code < 400) return 'info'
+  if (code < 500) return 'warning'
+  return 'error'
+}
+
+export const accessLogColumns: ColumnDef<AccessLogRow>[] = [
+  {
+    key: 'method',
+    title: 'columns.method',
+    width: 90,
+    fixed: 'left',
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.method ?? '?',
+        type: methodType(row.method),
+        label: row.method ?? '—',
+      }),
+  },
+  { key: 'path', title: 'columns.path' },
+  {
+    key: 'statusCode',
+    title: 'columns.statusCode',
+    width: 100,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.statusCode ?? 0,
+        type: statusType(row.statusCode),
+        label: row.statusCode ? String(row.statusCode) : '—',
+      }),
+  },
+  { key: 'responseTime', title: 'columns.responseTime', width: 130 },
+  { key: 'ipAddress', title: 'columns.ipAddress', width: 140 },
+  { key: 'userName', title: 'columns.userName', width: 140 },
+  {
+    key: 'creationTime',
+    title: 'columns.creationTime',
+    width: 140,
+    fixed: 'right',
+    render: (row) => h(TRelativeTime, { value: row.creationTime }),
+  },
 ]
 
 // Read-only view schema — form is shown for detail view only, not create/edit

@@ -41,6 +41,13 @@ export function buildNaiveThemeOverrides(settings: ThemeSettings): GlobalThemeOv
       errorColorHover: palettes.error[400],
       errorColorPressed: palettes.error[600],
       errorColorSuppl: palettes.error[500],
+
+      // soybean parity: Naive UI's default 3px radius reads as too sharp
+      // next to soybean's 6px buttons / pagination items / inputs. The
+      // cards still get 8px via per-component style — this base 6 only
+      // affects buttons / inputs / pagination / popovers etc.
+      borderRadius: '6px',
+      borderRadiusSmall: '4px',
     },
   }
 

@@ -20,17 +20,22 @@ describe('TAdminHeader', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders default title when no logo slot', () => {
+  it('renders no logo block when no logo slot is supplied (Phase I.7.7+)', () => {
+    // Phase I.7.7: the header no longer auto-renders `title` as a fallback
+    // logo — the logo lives in the sidebar (`TAdminSidebar`) in vertical
+    // layout modes, and consumers wanting the title in the header opt in
+    // via the `#logo` slot.
     const wrapper = mount(TAdminHeader, { props: { title: 'Tnzi Admin' } })
-    expect(wrapper.find('.t-admin-header__logo').text()).toContain('Tnzi Admin')
+    expect(wrapper.find('.t-admin-header__logo').exists()).toBe(false)
   })
 
-  it('logo slot overrides default title', () => {
+  it('logo slot renders when consumer supplies it', () => {
     const wrapper = mount(TAdminHeader, {
       props: { title: 'X' },
       slots: { logo: '<div class="custom-logo">LOGO</div>' },
     })
     expect(wrapper.find('.custom-logo').exists()).toBe(true)
+    expect(wrapper.find('.t-admin-header__logo').exists()).toBe(true)
     expect(wrapper.find('.t-admin-header__logo').text()).not.toContain('X')
   })
 

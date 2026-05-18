@@ -16,11 +16,15 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import TRowActions from '../../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -33,7 +37,7 @@ import type {
   UpdateAgentPersonaDto,
 } from '@tnzi/core/services/ai'
 
-const title = 'Personas'
+const title = 'title'
 
 const bridge = createAiBridge({ client: useAdminClient() })
 

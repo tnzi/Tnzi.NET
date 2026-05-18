@@ -18,11 +18,15 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -31,7 +35,7 @@ import TFormSchemaRenderer from '../_shared/form-schema'
 import { notificationSubscriptionColumns, notificationSubscriptionFormSchema } from './notification-subscription-config'
 import { translatePageKey } from '../_shared/translate'
 
-const title = 'Notification Subscriptions'
+const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<NotificationPreferenceDto>({

@@ -21,6 +21,9 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
@@ -28,6 +31,7 @@
 import { ref } from 'vue'
 import { NInput } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -37,7 +41,7 @@ import { translatePageKey } from '../_shared/translate'
 import type { SettingDto } from '@tnzi/core/services/system'
 
 // Mapped to SettingDto — backend has no separate Dictionary entity.
-const title = 'Settings Management'
+const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<SettingDto, string>({

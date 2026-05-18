@@ -1,5 +1,18 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+
+const SUBSCRIPTION_STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
+  active:    { type: 'success', label: 'Active' },
+  trialing:  { type: 'info',    label: 'Trialing' },
+  pastDue:   { type: 'warning', label: 'Past Due' },
+  past_due:  { type: 'warning', label: 'Past Due' },
+  paused:    { type: 'warning', label: 'Paused' },
+  cancelled: { type: 'default', label: 'Cancelled' },
+  expired:   { type: 'default', label: 'Expired' },
+  ended:     { type: 'default', label: 'Ended' },
+}
 
 /**
  * Payment Subscription page config — aligned with SubscriptionDto
@@ -13,16 +26,25 @@ import type { FormSchemaItem } from '../_shared/form-schema'
  * Row action "Cancel at Period End" maps to POST /admin/subscriptions/{id}/cancel.
  */
 export const paymentSubscriptionColumns: ColumnDef[] = [
-  { key: 'subscriptionNo',  title: 'Subscription No' },
-  { key: 'userId',          title: 'Customer' },
-  { key: 'planName',        title: 'Plan' },
-  { key: 'status',          title: 'Status' },
-  { key: 'cycleType',       title: 'Cycle' },
-  { key: 'startTime',       title: 'Start' },
-  { key: 'nextBillingTime', title: 'Next Billing' },
-  { key: 'paidAmount',      title: 'Paid', visible: false },
-  { key: 'currency',        title: 'Currency', visible: false },
-  { key: 'autoRenew',       title: 'Auto Renew', visible: false },
+  { key: 'subscriptionNo',  title: 'columns.subscriptionNo' },
+  { key: 'userId',          title: 'columns.userId' },
+  { key: 'planName',        title: 'columns.planName' },
+  {
+    key: 'status',
+    title: 'columns.status',
+    width: 130,
+    render: (row) => {
+      const raw = String(row.status ?? '').toLowerCase()
+      const m = SUBSCRIPTION_STATUS_MAP[raw] ?? { type: 'default' as const, label: row.status as string ?? '—' }
+      return h(TStatusBadge, { value: raw, type: m.type, label: m.label })
+    },
+  },
+  { key: 'cycleType',       title: 'columns.cycleType' },
+  { key: 'startTime',       title: 'columns.startTime' },
+  { key: 'nextBillingTime', title: 'columns.nextBillingTime' },
+  { key: 'paidAmount',      title: 'columns.paidAmount', visible: false },
+  { key: 'currency',        title: 'columns.currency', visible: false },
+  { key: 'autoRenew',       title: 'columns.autoRenew', visible: false },
 ]
 
 export const paymentSubscriptionFormSchema: FormSchemaItem[] = [

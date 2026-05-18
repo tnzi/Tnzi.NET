@@ -21,6 +21,13 @@ export const useAdminAppStore = defineStore('admin-app', () => {
   const locale = ref<'en' | 'zh-cn'>('en')
   const fullContent = ref(false)
   const reloadFlag = ref(true)
+  /**
+   * Pin the second-level sub-sider when the layout is `vertical-mix`.
+   * Default `false` — sub-sider auto-hides on mouseleave. When pinned,
+   * the drawer stays open so the user can browse children freely.
+   * Mirrors soybean-admin's `appStore.mixSiderFixed`.
+   */
+  const mixSiderFixed = ref(false)
 
   // Saved desktop config for mobile restoration
   const desktopSiderCollapseSnapshot = ref<boolean | null>(null)
@@ -73,11 +80,19 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     reloadFlag.value = true
   }
 
+  function toggleMixSiderFixed(): void {
+    mixSiderFixed.value = !mixSiderFixed.value
+  }
+  function setMixSiderFixed(v: boolean): void {
+    mixSiderFixed.value = v
+  }
+
   return {
     siderCollapse,
     locale,
     fullContent,
     reloadFlag,
+    mixSiderFixed,
     isMobile,
     isTablet,
     isDesktop,
@@ -86,10 +101,12 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     setLocale,
     toggleFullContent,
     reloadPage,
+    toggleMixSiderFixed,
+    setMixSiderFixed,
   }
 }, {
   persist: {
     key: 'tnzi-admin-app',
-    pick: ['siderCollapse', 'locale'],
+    pick: ['siderCollapse', 'locale', 'mixSiderFixed'],
   },
 })

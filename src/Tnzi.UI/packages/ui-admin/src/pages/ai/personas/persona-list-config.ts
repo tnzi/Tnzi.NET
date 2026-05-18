@@ -14,11 +14,11 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *     Config follows backend reality (canonical-compact rule from Task 5.2).
  */
 export const personaColumns: ColumnDef[] = [
-  { key: 'name', title: 'Name' },
-  { key: 'slug', title: 'Slug' },
-  { key: 'description', title: 'Description' },
-  { key: 'isSystem', title: 'System' },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'name', title: 'columns.name' },
+  { key: 'slug', title: 'columns.slug' },
+  { key: 'description', title: 'columns.description' },
+  { key: 'isSystem', title: 'columns.isSystem' },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 export const personaFormSchema: FormSchemaItem[] = [

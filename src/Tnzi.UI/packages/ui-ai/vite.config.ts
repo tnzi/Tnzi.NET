@@ -45,6 +45,14 @@ export default defineConfig({
         locale: resolve(__dirname, 'src/locale/index.ts'),
         shell: resolve(__dirname, 'src/shell/index.ts'),
         utils: resolve(__dirname, 'src/utils/index.ts'),
+        // Declaring `themes` as a top-level entry forces rollup to
+        // preserve the named re-exports in `themes/index.ts`
+        // (applyAiTheme / lightTokens / darkTokens / AiThemeTokens).
+        // Otherwise tree-shake strips the `export { … } from
+        // './tokens'` line and leaves only the locally-defined
+        // applyTheme / resetTheme. Consumers can import the barrel
+        // via the `./themes/*` subpath declared in package.json.
+        themes: resolve(__dirname, 'src/themes/index.ts'),
       },
       name: 'TnziAi',
       formats: ['es'],

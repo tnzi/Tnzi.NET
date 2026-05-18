@@ -56,11 +56,14 @@ public partial class AIModule
             // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
         }
 
-        var workflowService = serviceProvider.GetRequiredService<IWorkflowService>();
-        if (workflowService is INoOpService)
+        using (var workflowScope = serviceProvider.CreateScope())
         {
-            logger.LogInformation(
-                "IWorkflowService is a no-op fallback; workflow APIs will return 501 until a workflow module is loaded.");
+            var workflowService = workflowScope.ServiceProvider.GetRequiredService<IWorkflowService>();
+            if (workflowService is INoOpService)
+            {
+                logger.LogInformation(
+                    "IWorkflowService is a no-op fallback; workflow APIs will return 501 until a workflow module is loaded.");
+            }
         }
 
         if (options.ContextProviders.Enabled

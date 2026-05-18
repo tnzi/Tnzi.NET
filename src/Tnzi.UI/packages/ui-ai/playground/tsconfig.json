@@ -4,9 +4,7 @@
     "baseUrl": ".",
     "paths": {
       "@tnzi/ui-ai": ["../src"],
-      "@tnzi/ui-ai/*": ["../src/*"],
-      "@tnzi/core": ["../../core/src"],
-      "@tnzi/core/*": ["../../core/src/*"]
+      "@tnzi/ui-ai/*": ["../src/*"]
     },
     "isolatedModules": false,
     "noUnusedLocals": false,

@@ -41,6 +41,7 @@ global using Tnzi.AI.Infrastructure.Providers;
 global using Tnzi.AI.Infrastructure.Stores;
 global using Tnzi.AI.Infrastructure.Streaming;
 global using Tnzi.AI.Infrastructure.Tools;
+global using Tnzi.Utilities;
 global using Tnzi.AI.Memory;
 global using Tnzi.AI.Middleware;
 global using Tnzi.AI.Options;

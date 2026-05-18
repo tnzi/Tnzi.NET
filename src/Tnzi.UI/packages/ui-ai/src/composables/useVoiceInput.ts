@@ -1,7 +1,56 @@
 import { ref, type Ref, onUnmounted } from 'vue';
 
 // ---------------------------------------------------------------------------
-// Types
+// Web Speech API — local type subset
+//
+// `lib.dom.d.ts` ships partial Web Speech declarations whose presence varies
+// across TS releases (`SpeechRecognitionEvent` / `SpeechRecognitionErrorEvent`
+// in particular). Declaring the minimal shape we actually consume keeps this
+// composable typecheck-safe regardless of the host lib version.
+// ---------------------------------------------------------------------------
+
+interface SpeechRecognitionAlternativeLike {
+  readonly transcript: string;
+  readonly confidence: number;
+}
+
+interface SpeechRecognitionResultLike {
+  readonly isFinal: boolean;
+  readonly length: number;
+  readonly [index: number]: SpeechRecognitionAlternativeLike;
+}
+
+interface SpeechRecognitionResultListLike {
+  readonly length: number;
+  readonly [index: number]: SpeechRecognitionResultLike;
+}
+
+interface SpeechRecognitionEventLike extends Event {
+  readonly results: SpeechRecognitionResultListLike;
+  readonly resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEventLike extends Event {
+  readonly error: string;
+  readonly message?: string;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+// ---------------------------------------------------------------------------
+// Public types
 // ---------------------------------------------------------------------------
 
 export interface UseVoiceInputOptions {
@@ -30,27 +79,32 @@ export interface UseVoiceInputReturn {
 // Composable
 // ---------------------------------------------------------------------------
 
+function resolveRecognitionCtor(): SpeechRecognitionCtor | null {
+  const g = globalThis as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return g.SpeechRecognition ?? g.webkitSpeechRecognition ?? null;
+}
+
 export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
   const isListening = ref(false);
   const isSupported = ref(false);
   const error = ref<string | null>(null);
 
-  let recognition: SpeechRecognition | null = null;
+  let recognition: SpeechRecognitionLike | null = null;
+  const Ctor = resolveRecognitionCtor();
 
-  const SpeechRecognition =
-    (globalThis as unknown as { SpeechRecognition: typeof SpeechRecognition }).SpeechRecognition ??
-    (globalThis as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
-
-  if (SpeechRecognition) {
+  if (Ctor) {
     isSupported.value = true;
   }
 
   function start(): void {
-    if (!SpeechRecognition) return;
+    if (!Ctor) return;
 
     stop();
 
-    recognition = new SpeechRecognition();
+    recognition = new Ctor();
     recognition.continuous = options.continuous ?? false;
     recognition.interimResults = true;
     recognition.lang = options.lang ?? 'en-US';
@@ -60,15 +114,17 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       error.value = null;
     };
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = Array.from(event.results as unknown as SpeechRecognitionResult[])
-        .map((r) => (r as unknown as SpeechRecognitionAlternative[])[0]?.transcript)
-        .join('');
-      const isFinal = (event.results[0] as unknown as SpeechRecognitionResult).isFinal;
+    recognition.onresult = (event) => {
+      const results = event.results;
+      let transcript = '';
+      for (let i = 0; i < results.length; i++) {
+        transcript += results[i]?.[0]?.transcript ?? '';
+      }
+      const isFinal = results[0]?.isFinal ?? false;
       options.onResult?.(transcript, isFinal);
     };
 
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    recognition.onerror = (event) => {
       isListening.value = false;
       if (event.error === 'not-allowed') {
         error.value = 'Microphone access denied. Please allow access in your browser.';

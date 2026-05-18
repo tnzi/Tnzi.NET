@@ -1,16 +1,40 @@
 <template>
+  <!-- trigger="click" + uncontrolled: NPopover fully manages its own
+       open/close state (trigger click toggles, outside click closes).
+       The optional :show prop only seeds initial visibility for tests
+       that need to mount with the popover already open; passing it as
+       a reactive value puts NPopover into "controlled" mode where
+       outside-click dismissal silently no-ops. Forward update:show so
+       parents can still observe state changes. -->
   <NPopover
-    :show="show"
-    trigger="manual"
+    :default-show="show"
+    trigger="click"
     placement="bottom-end"
+    :show-arrow="false"
+    raw
+    class="t-crud-column-setting-popover"
     @update:show="(v: boolean) => emit('update:show', v)"
   >
     <template #trigger>
-      <slot name="trigger" />
+      <slot name="trigger">
+        <!-- NPopover.Binder.Target requires exactly one child; fall back to a hidden anchor
+             so the popover stays render-safe when the consumer drives `show` manually
+             without supplying its own trigger element. -->
+        <span aria-hidden="true" style="display:inline-block;width:0;height:0" />
+      </slot>
     </template>
     <div class="t-crud-column-setting">
+      <!-- Header: select-all tri-state checkbox + reset button.
+           Mirrors soybean (NCheckbox indeterminate when partial). -->
       <div class="t-crud-column-setting__header">
-        <span class="t-crud-column-setting__title">{{ t('admin.crud.columns') }}</span>
+        <NCheckbox
+          :checked="selectAllChecked"
+          :indeterminate="selectAllIndeterminate"
+          :disabled="localOrder.length === 0"
+          @update:checked="(c: boolean) => toggleSelectAll(c)"
+        >
+          {{ t('admin.crud.selectAll') }}
+        </NCheckbox>
         <button
           type="button"
           class="t-crud-column-setting__reset"
@@ -20,24 +44,42 @@
           {{ t('admin.crud.reset') }}
         </button>
       </div>
+      <NDivider class="t-crud-column-setting__divider" />
+      <!-- Draggable rows. `filter=".none_draggable"` keeps clicks on the
+           checkbox from initiating a drag.
+           v-model AND v-for both bind to `localOrder` (string[]) — earlier
+           split (v-model on the keys array, v-for on a derived ColumnDef
+           list) made VueDraggable's reactivity inconsistent: after a drag
+           the popover went blank because the two arrays drifted out of
+           sync. -->
       <VueDraggable
-        :model-value="localOrder"
-        handle=".drag-handle"
+        v-model="localOrder"
+        :animation="150"
+        handle=".t-crud-column-setting__drag"
+        filter=".none_draggable"
         class="t-crud-column-setting__list"
         @update:model-value="onReorder"
       >
         <div
-          v-for="col in orderedColumns"
-          :key="col.key"
+          v-for="key in localOrder"
+          :key="key"
           class="t-crud-column-setting__row"
         >
-          <span class="drag-handle" aria-label="Drag">::</span>
-          <NCheckbox
-            :checked="!props.settings.hiddenKeys.value.has(col.key)"
-            @update:checked="() => props.settings.toggle(col.key)"
-          >
-            {{ col.title }}
-          </NCheckbox>
+          <div class="t-crud-column-setting__row-main">
+            <span
+              class="t-crud-column-setting__drag"
+              :aria-label="t('admin.crud.dragToReorder')"
+            >
+              <TSvgIcon icon="mdi:drag" :size="16" />
+            </span>
+            <NCheckbox
+              class="none_draggable t-crud-column-setting__check"
+              :checked="!props.settings.hiddenKeys.value.has(key)"
+              @update:checked="() => props.settings.toggle(key)"
+            >
+              {{ columnLabel(key) }}
+            </NCheckbox>
+          </div>
         </div>
       </VueDraggable>
     </div>
@@ -46,8 +88,9 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NPopover, NCheckbox } from 'naive-ui'
+import { NPopover, NCheckbox, NDivider } from 'naive-ui'
 import { VueDraggable } from 'vue-draggable-plus'
+import TSvgIcon from '../display/TSvgIcon.vue'
 import { useColumnSettings, type ColumnDef } from '../../headless/useColumnSettings'
 
 type ColumnSettings = ReturnType<typeof useColumnSettings>
@@ -69,6 +112,16 @@ function t(key: string): string {
   return props.translate ? props.translate(key) : key
 }
 
+/** Translate a column title that may be either an i18n key
+ *  (`columns.username`, `admin.crud.columns.role`) or a plain label
+ *  ("Username"). Same heuristic as TCrudPage.maybeTranslate so the
+ *  Columns popover shows the same human label as the table header. */
+function maybeTranslate(value: string | undefined, fallback: string): string {
+  if (!value) return fallback
+  if (/^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)*$/.test(value)) return t(value)
+  return value
+}
+
 const localOrder = ref<string[]>([...props.settings.orderedKeys.value])
 
 watch(
@@ -81,15 +134,46 @@ watch(
 
 const columnMap = computed(() => new Map(props.allColumns.map((c) => [c.key, c])))
 
-const orderedColumns = computed<ColumnDef[]>(() =>
-  localOrder.value
-    .map((k) => columnMap.value.get(k))
-    .filter((c): c is ColumnDef => !!c),
-)
+/** Resolve display label for a key — handles i18n keys (`columns.username`,
+ *  `admin.crud.X`) and falls back to the raw title or the key itself. */
+function columnLabel(key: string): string {
+  const col = columnMap.value.get(key)
+  if (!col) return key
+  return maybeTranslate(col.title, col.title)
+}
 
-function onReorder(next: string[]): void {
-  localOrder.value = [...next]
-  props.settings.reorder(next)
+/** Tri-state select-all: derived from the count of currently-checked
+ *  columns vs total. Mirrors soybean (full / indeterminate / unchecked). */
+const visibleStats = computed(() => {
+  const total = localOrder.value.length
+  let checked = 0
+  for (const k of localOrder.value) {
+    if (!props.settings.hiddenKeys.value.has(k)) checked += 1
+  }
+  return { total, checked }
+})
+const selectAllChecked = computed(() => {
+  const { total, checked } = visibleStats.value
+  return total > 0 && checked === total
+})
+const selectAllIndeterminate = computed(() => {
+  const { total, checked } = visibleStats.value
+  return checked > 0 && checked < total
+})
+function toggleSelectAll(checked: boolean): void {
+  for (const k of localOrder.value) {
+    const currentlyHidden = props.settings.hiddenKeys.value.has(k)
+    if (checked && currentlyHidden) props.settings.show(k)
+    if (!checked && !currentlyHidden) props.settings.hide(k)
+  }
+}
+
+function onReorder(next: unknown[]): void {
+  // VueDraggable now binds to `localOrder` (string[]) directly, so we
+  // get a string[] back. Keep the cast loose to tolerate other shapes
+  // emitted by older / patched vue-draggable-plus releases.
+  const keys = (next as unknown[]).map((v) => (typeof v === 'string' ? v : (v as ColumnDef).key))
+  props.settings.reorder(keys)
 }
 
 function onReset(): void {
@@ -99,49 +183,76 @@ function onReset(): void {
 
 <style scoped>
 .t-crud-column-setting {
-  min-width: 240px;
-  padding: var(--tnzi-spacing-sm, 8px);
+  min-width: 260px;
+  background: var(--tnzi-container-bg, #fff);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  padding: 6px;
 }
-
 .t-crud-column-setting__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: var(--tnzi-spacing-sm, 8px);
-  border-bottom: 1px solid var(--tnzi-color-border, #eee);
+  padding: 4px 8px;
 }
-
-.t-crud-column-setting__title {
-  font-weight: 600;
-  color: var(--tnzi-color-text, inherit);
-}
-
 .t-crud-column-setting__reset {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--tnzi-color-primary, #2080f0);
+  color: var(--tnzi-primary, #646cff);
   padding: 0;
   font: inherit;
+  font-size: 13px;
 }
-
+.t-crud-column-setting__reset:hover {
+  text-decoration: underline;
+}
+.t-crud-column-setting__divider {
+  margin: 4px 0 !important;
+}
+/* List — capped height so very wide tables don't push the popover off
+   screen; internal scroll picks up the global macOS-style overlay rules. */
 .t-crud-column-setting__list {
   display: flex;
   flex-direction: column;
-  gap: var(--tnzi-spacing-xs, 4px);
-  padding-top: var(--tnzi-spacing-sm, 8px);
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 2px;
 }
-
 .t-crud-column-setting__row {
   display: flex;
   align-items: center;
-  gap: var(--tnzi-spacing-sm, 8px);
-  padding: var(--tnzi-spacing-xs, 4px) 0;
+  gap: 4px;
+  height: 32px;
+  padding: 0 4px;
+  border-radius: var(--tnzi-admin-radius-sm, 4px);
+  transition: background-color 0.12s ease;
 }
-
-.drag-handle {
+.t-crud-column-setting__row:hover {
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.08);
+}
+.t-crud-column-setting__row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.t-crud-column-setting__drag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   cursor: grab;
-  user-select: none;
-  color: var(--tnzi-color-text-muted, #999);
+  color: var(--tnzi-base-text-muted, #9ca3af);
+}
+.t-crud-column-setting__drag:active {
+  cursor: grabbing;
+}
+.t-crud-column-setting__check {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 </style>

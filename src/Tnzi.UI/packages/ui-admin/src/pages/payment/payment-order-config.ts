@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 
 /**
  * Payment Order page config — aligned with PaymentDto (2026-04-14 Plan C unstub).
@@ -12,17 +14,37 @@ import type { FormSchemaItem } from '../_shared/form-schema'
  * The page is read-only — payment records are immutable once created.
  * State transitions flow through close/sync admin endpoints.
  */
+const ORDER_STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
+  pending:    { type: 'warning', label: 'Pending' },
+  processing: { type: 'info',    label: 'Processing' },
+  paid:       { type: 'success', label: 'Paid' },
+  completed:  { type: 'success', label: 'Completed' },
+  cancelled:  { type: 'default', label: 'Cancelled' },
+  refunded:   { type: 'default', label: 'Refunded' },
+  failed:     { type: 'error',   label: 'Failed' },
+  closed:     { type: 'default', label: 'Closed' },
+}
+
 export const orderColumns: ColumnDef[] = [
-  { key: 'paymentNo',       title: 'Payment No' },
-  { key: 'businessOrderNo', title: 'Business Order' },
-  { key: 'userId',          title: 'Customer' },
-  { key: 'amount',          title: 'Amount' },
-  { key: 'currency',        title: 'Currency' },
-  { key: 'status',          title: 'Status' },
-  { key: 'paymentMethod',   title: 'Method' },
-  { key: 'paidTime',        title: 'Paid At' },
-  { key: 'creationTime',    title: 'Created At', visible: false },
-  { key: 'refundAmount',    title: 'Refunded',   visible: false },
+  { key: 'paymentNo',       title: 'columns.paymentNo' },
+  { key: 'businessOrderNo', title: 'columns.businessOrderNo' },
+  { key: 'userId',          title: 'columns.userId' },
+  { key: 'amount',          title: 'columns.amount' },
+  { key: 'currency',        title: 'columns.currency' },
+  {
+    key: 'status',
+    title: 'columns.status',
+    width: 130,
+    render: (row) => {
+      const raw = String(row.status ?? '').toLowerCase()
+      const m = ORDER_STATUS_MAP[raw] ?? { type: 'default' as const, label: row.status as string ?? '—' }
+      return h(TStatusBadge, { value: raw, type: m.type, label: m.label })
+    },
+  },
+  { key: 'paymentMethod',   title: 'columns.paymentMethod' },
+  { key: 'paidTime',        title: 'columns.paidTime' },
+  { key: 'creationTime',    title: 'columns.creationTime', visible: false },
+  { key: 'refundAmount',    title: 'columns.refundAmount',   visible: false },
 ]
 
 export const orderFormSchema: FormSchemaItem[] = [

@@ -12,22 +12,19 @@
     :title="title"
     :translate="t"
   >
-    <template #rowActions="{ row }">
-      <NButton
-        size="tiny"
-        type="primary"
-        @click="viewMessages(row)"
-      >
-        View Messages
-      </NButton>
-    </template>
-
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="chatSessionFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
       />
+    </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t">
+        <template #prepend>
+          <NButton size="small" type="info" ghost @click="viewMessages(row)">Messages</NButton>
+        </template>
+      </TRowActions>
     </template>
   </TCrudPage>
 </template>
@@ -37,6 +34,7 @@ import { useRouter } from 'vue-router'
 import { NButton } from 'naive-ui'
 import type { ChatSessionListItemDto } from '@tnzi/core/services/chat'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -44,7 +42,7 @@ import TFormSchemaRenderer from '../_shared/form-schema'
 import { chatSessionColumns, chatSessionFormSchema } from './chat-session-config'
 import { translatePageKey } from '../_shared/translate'
 
-const title = 'Chat Sessions'
+const title = 'title'
 const router = useRouter()
 const bridge = createChatBridge({ client: useAdminClient() })
 

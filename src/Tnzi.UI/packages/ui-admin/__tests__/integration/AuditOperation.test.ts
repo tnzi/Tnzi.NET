@@ -9,10 +9,6 @@ vi.mock('../../src/services/bridges/audit-bridge', () => ({
   createAuditBridge: () => ({
     logs: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-      exportCsvUrl: vi.fn(() => '/admin/audit-operations/export/csv'),
     },
     operations: {
       fetch: vi.fn(async () => ({
@@ -24,44 +20,28 @@ vi.mock('../../src/services/bridges/audit-bridge', () => ({
         pageIndex: 1,
         pageSize: 20,
       })),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
     },
   }),
 }))
 
-const stubs = {
-  DataTable: { props: ['data'], template: '<div class="dt" :data-rows="data.length" />' },
-  Pagination: { template: '<div />' },
-  Input: { props: ['value'], template: '<input />' },
-  Button: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
-  Modal: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
-  Popover: { template: '<div><slot name="trigger" /></div>' },
-  Checkbox: { template: '<input type="checkbox" />' },
-  Form: { template: '<form><slot /></form>' },
-  FormItem: { template: '<div><slot /></div>' },
-  InputNumber: { template: '<input type="number" />' },
-  Switch: { template: '<button />' },
-  Select: { template: '<select />' },
-  DatePicker: { template: '<input type="date" />' },
-}
-
-describe('AuditOperation page (Phase 3.23)', () => {
+describe('AuditOperation page (Tier 2: timeline view)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
 
-  it('mounts and fetches audit operations on load', async () => {
-    const wrapper = mount(AuditOperation, { global: { stubs } })
+  it('mounts the timeline view and fetches operation entries on load', async () => {
+    const wrapper = mount(AuditOperation)
     await nextTick()
-    await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
-    expect(wrapper.find('.dt').attributes('data-rows')).toBe('2')
+    await new Promise(r => setTimeout(r, 50))
+    await nextTick()
+    expect(wrapper.find('.t-audit-timeline').exists()).toBe(true)
+    const items = wrapper.findAll('.n-timeline-item')
+    expect(items.length).toBeGreaterThanOrEqual(2)
   })
 
-  it('does not show Create button (read-only page)', async () => {
-    const wrapper = mount(AuditOperation, { global: { stubs } })
+  it('does not show TCrudPage chrome (timeline view replaces it)', async () => {
+    const wrapper = mount(AuditOperation)
     await nextTick()
-    await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.t-crud-page__create').exists()).toBe(false)
+    await new Promise(r => setTimeout(r, 50))
+    expect(wrapper.find('.t-crud-page').exists()).toBe(false)
+    expect(wrapper.find('.t-crud-toolbar').exists()).toBe(false)
   })
 })

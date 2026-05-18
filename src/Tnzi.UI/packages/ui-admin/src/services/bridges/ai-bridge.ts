@@ -62,6 +62,7 @@ import {
   useAdminPersonaApi,
   useAdminEvaluationApi,
   useAdminMcpApi,
+  UsageGranularity,
   type AgentDto,
   type CreateAgentDto,
   type UpdateAgentDto,
@@ -76,6 +77,7 @@ import {
   type UpdateWorkflowDefinitionDto,
   type WorkflowDefinitionQueryDto,
   type WorkflowExecutionSummaryDto,
+  type WorkflowExecutionDetailDto,
   type SkillSummaryDto,
   type SkillDetailDto,
   type CreateSkillDto,
@@ -174,6 +176,8 @@ export interface AiBridge {
   }
   workflowRuns: Pick<BridgeCrudContract<WorkflowExecutionSummaryDto>, 'fetch'> & {
     tail(id: string): Promise<ReadableStream<Uint8Array>>
+    /** Fetch the full execution detail (steps + outputs + pending approvals). */
+    getDetail(executionId: string): Promise<WorkflowExecutionDetailDto>
   }
   skills: BridgeCrudContract<SkillSummaryDto, CreateSkillDto, UpdateSkillDto> & {
     activate(id: string): Promise<void>
@@ -203,6 +207,8 @@ export interface AiBridge {
   evaluations: BridgeCrudContract<EvaluationRunDto, CreateEvaluationRunDto, Partial<EvaluationRunDto>> & {
     run(id: string): Promise<{ runId: string }>
     runBatch(data: BatchEvaluationDto): Promise<BatchEvaluationResultDto>
+    /** Fetch an EvaluationRun with its full resultsJson (drives the diff drawer). */
+    getDetail(id: string): Promise<EvaluationRunDetailDto>
   }
 }
 
@@ -382,6 +388,8 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       )
     },
     tail: notImplemented('workflowRuns.tail') as () => Promise<ReadableStream<Uint8Array>>,
+    getDetail: async (executionId: string): Promise<WorkflowExecutionDetailDto> =>
+      unwrap<WorkflowExecutionDetailDto>(await workflowApi.getExecutionDetail(executionId)),
   }
 
   // ---- skills -------------------------------------------------------------
@@ -472,11 +480,19 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     },
     byDay: async (q: CrudPageQuery): Promise<UsageTrendPointDto[]> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
+      // Backend enum is UsageGranularity { Daily=0, Weekly=1, Monthly=2 } — use
+      // the canonical enum reference rather than a string literal so refactors
+      // on the enum are caught at type-check time. Also coalesce empty
+      // start/end times so an unconfigured dashboard probe doesn't bounce on
+      // DateTime binding before the user has picked a range.
+      const start = String(filters.startTime ?? '')
+      const end = String(filters.endTime ?? '')
+      if (!start || !end) return []
       const items = unwrap<UsageTrendPointDto[] | undefined>(await usageApi.getTrend({
-        startTime: String(filters.startTime ?? ''),
-        endTime: String(filters.endTime ?? ''),
-        granularity: 'Day',
-      } as unknown as never))
+        startTime: start,
+        endTime: end,
+        granularity: UsageGranularity.Daily,
+      }))
       return Array.isArray(items) ? items : []
     },
   }
@@ -485,7 +501,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const knowledge = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<Record<string, unknown>>> => {
       const result = unwrap<unknown>(await kbApi.getList({
-        page: q.pageIndex ?? 1,
+        pageIndex: q.pageIndex ?? 1,
         pageSize: q.pageSize ?? 20,
       }))
       // Backend may return either a plain array or PagedList<KbDto> — handle both.
@@ -621,6 +637,8 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       ),
     runBatch: async (data: BatchEvaluationDto): Promise<BatchEvaluationResultDto> =>
       unwrap<BatchEvaluationResultDto>(await evaluationApi.runBatch(data)),
+    getDetail: async (id: string): Promise<EvaluationRunDetailDto> =>
+      unwrap<EvaluationRunDetailDto>(await evaluationApi.getById(id)),
   }
 
   return {

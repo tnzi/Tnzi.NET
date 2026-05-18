@@ -12,6 +12,8 @@ import {
   useAdminRoleApi,
   useAdminTenantApi,
   useAdminLoginLogApi,
+  useAdminOrganizationApi,
+  useAdminSessionApi,
   type UserListItemDto,
   type CreateUserDto,
   type UpdateUserDto,
@@ -26,6 +28,12 @@ import {
   type TenantQueryDto,
   type LoginLogDto,
   type LoginLogQueryDto,
+  type OrganizationDto as CoreOrganizationDto,
+  type OrganizationTreeNodeDto,
+  type CreateOrganizationDto,
+  type UpdateOrganizationDto,
+  type UserSessionDto,
+  type SessionStatisticsDto,
 } from '@tnzi/core/services/identity'
 import type { ApiResult, PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
@@ -34,13 +42,15 @@ import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types
 type HttpClient = Parameters<typeof useAdminUserApi>[0]
 
 export interface IdentityBridgeDeps {
-  /** Production path: provide an HttpClient and the bridge builds all 4 APIs internally. */
+  /** Production path: provide an HttpClient and the bridge builds all APIs internally. */
   client?: HttpClient
   /** Test path: inject mock APIs directly. If provided, `client` is ignored for that API. */
   userApi?: ReturnType<typeof useAdminUserApi>
   roleApi?: ReturnType<typeof useAdminRoleApi>
   tenantApi?: ReturnType<typeof useAdminTenantApi>
   loginLogApi?: ReturnType<typeof useAdminLoginLogApi>
+  organizationApi?: ReturnType<typeof useAdminOrganizationApi>
+  sessionApi?: ReturnType<typeof useAdminSessionApi>
 }
 
 /** A pending GDPR request from a user (admin view). */
@@ -54,10 +64,64 @@ export interface GdprRequestDto {
   notes?: string
 }
 
+// Re-export core's OrganizationDto for bridge consumers.
+export type OrganizationDto = CoreOrganizationDto
+export type { OrganizationTreeNodeDto, CreateOrganizationDto, UpdateOrganizationDto } from '@tnzi/core/services/identity'
+
+export interface SessionDto {
+  id: string
+  userName?: string
+  ip?: string
+  userAgent?: string
+  location?: string
+  loginTime?: string
+  lastActiveAt?: string
+  isActive?: boolean
+}
+
 export interface IdentityBridge {
-  users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto>
+  users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto> & {
+    /** Enable a user account (sets isEnabled=true). */
+    enable(id: string): Promise<void>
+    /** Disable a user account (sets isEnabled=false). Optional reason recorded in audit log. */
+    disable(id: string, reason?: string | null): Promise<void>
+    /** Lock a user account. `until` null = permanent lock. */
+    lock(id: string, until?: string | null, reason?: string | null): Promise<void>
+    /** Unlock a previously locked user account. */
+    unlock(id: string): Promise<void>
+    /** Admin-side password reset. The user must change it on next login. */
+    resetPassword(id: string, newPassword: string): Promise<void>
+  }
   roles: BridgeCrudContract<RoleDto, CreateRoleDto, UpdateRoleDto>
   tenants: BridgeCrudContract<TenantDto, CreateTenantDto, UpdateTenantDto>
+  /**
+   * Organizations are a hierarchical tree, not a paged list — the surface is
+   * tree-shaped (getTree/move/getChildren) rather than BridgeCrudContract.
+   * Wires the full DefaultOrganizationAdminController endpoint set.
+   */
+  organizations: {
+    getTree(): Promise<OrganizationTreeNodeDto[]>
+    getById(id: string): Promise<OrganizationDto>
+    create(data: CreateOrganizationDto): Promise<OrganizationDto>
+    update(id: string, data: UpdateOrganizationDto): Promise<OrganizationDto>
+    delete(id: string): Promise<void>
+    /** Move under a new parent. `newParentId=null` makes the node a root. */
+    move(id: string, newParentId: string | null): Promise<void>
+    getChildren(id: string): Promise<OrganizationDto[]>
+    search(keyword: string, maxResults?: number): Promise<OrganizationDto[]>
+  }
+  sessions: {
+    /** Per-user session list (admin can pull any user's sessions). */
+    listForUser(userId: string, includeRevoked?: boolean): Promise<UserSessionDto[]>
+    /** Aggregate online/active/expired counts across all users. */
+    statistics(): Promise<SessionStatisticsDto>
+    /** Force-revoke a single session (logs the target user out of that device). */
+    revoke(sessionId: string): Promise<void>
+    /** Revoke every session for a user except optionally the current one. */
+    revokeAllForUser(userId: string, excludeSessionId?: string | null): Promise<void>
+    /** Sweep sessions inactive for N minutes (defaults to backend policy). */
+    cleanExpired(inactiveMinutes?: number): Promise<number>
+  }
   loginLogs: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>>
   }
@@ -107,6 +171,15 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const tenantApi = deps.tenantApi ?? (deps.client ? useAdminTenantApi(deps.client) : null)
   const loginLogApi =
     deps.loginLogApi ?? (deps.client ? useAdminLoginLogApi(deps.client) : null)
+  // organizationApi + sessionApi are optional — they back the
+  // organizations / sessions sub-contracts only. If neither a client
+  // nor an explicit mock is supplied, the sub-contract methods reject
+  // with a clear error, leaving the rest of the bridge usable. This
+  // keeps the existing 4-api test fixtures passing.
+  const organizationApi =
+    deps.organizationApi ?? (deps.client ? useAdminOrganizationApi(deps.client) : null)
+  const sessionApi =
+    deps.sessionApi ?? (deps.client ? useAdminSessionApi(deps.client) : null)
 
   if (!userApi || !roleApi || !tenantApi || !loginLogApi) {
     throw new Error(
@@ -114,7 +187,11 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     )
   }
 
-  const users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto> = {
+  // Helper: lazy-reject when an optional sub-api wasn't wired.
+  const missing = <T>(label: string): Promise<T> =>
+    Promise.reject(new Error(`identity-bridge: ${label} requires an HttpClient or explicit api mock`))
+
+  const users: IdentityBridge['users'] = {
     fetch: async (q) =>
       toCrudResult(
         unwrap<PagedList<UserListItemDto>>(
@@ -134,6 +211,21 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     },
     import: async (file) => {
       await userApi.importCsv(file)
+    },
+    enable: async (id) => {
+      await userApi.enable(id)
+    },
+    disable: async (id, reason) => {
+      await userApi.disable(id, reason ?? null)
+    },
+    lock: async (id, until, reason) => {
+      await userApi.lock(id, { lockoutEnd: until ?? null, reason: reason ?? null })
+    },
+    unlock: async (id) => {
+      await userApi.unlock(id)
+    },
+    resetPassword: async (id, newPassword) => {
+      await userApi.resetPassword(id, { newPassword })
     },
   }
 
@@ -210,5 +302,57 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     },
   }
 
-  return { users, roles, tenants, loginLogs, gdpr }
+  const organizations: IdentityBridge['organizations'] = organizationApi
+    ? {
+        getTree: async () =>
+          unwrap(await organizationApi.getTree()) as OrganizationTreeNodeDto[],
+        getById: async (id) => unwrap(await organizationApi.getById(id)) as OrganizationDto,
+        create: async (data) => unwrap(await organizationApi.create(data)) as OrganizationDto,
+        update: async (id, data) =>
+          unwrap(await organizationApi.update(id, data)) as OrganizationDto,
+        delete: async (id) => {
+          await organizationApi.delete(id)
+        },
+        move: async (id, newParentId) => {
+          await organizationApi.move(id, { newParentId })
+        },
+        getChildren: async (id) =>
+          unwrap(await organizationApi.getChildren(id)) as OrganizationDto[],
+        search: async (keyword, maxResults) =>
+          unwrap(await organizationApi.search(keyword, maxResults)) as OrganizationDto[],
+      }
+    : {
+        getTree: () => missing('organizations.getTree'),
+        getById: () => missing('organizations.getById'),
+        create: () => missing('organizations.create'),
+        update: () => missing('organizations.update'),
+        delete: () => missing('organizations.delete'),
+        move: () => missing('organizations.move'),
+        getChildren: () => missing('organizations.getChildren'),
+        search: () => missing('organizations.search'),
+      }
+
+  const sessions: IdentityBridge['sessions'] = sessionApi
+    ? {
+        listForUser: async (userId, includeRevoked) =>
+          unwrap(await sessionApi.getUserSessions(userId, { includeRevoked })) as UserSessionDto[],
+        statistics: async () => unwrap(await sessionApi.getStatistics()) as SessionStatisticsDto,
+        revoke: async (sessionId) => {
+          await sessionApi.revokeSession(sessionId)
+        },
+        revokeAllForUser: async (userId, excludeSessionId) => {
+          await sessionApi.revokeAllSessions(userId, excludeSessionId ?? null)
+        },
+        cleanExpired: async (inactiveMinutes) =>
+          unwrap(await sessionApi.cleanExpired(inactiveMinutes)) as number,
+      }
+    : {
+        listForUser: () => missing('sessions.listForUser'),
+        statistics: () => missing('sessions.statistics'),
+        revoke: () => missing('sessions.revoke'),
+        revokeAllForUser: () => missing('sessions.revokeAllForUser'),
+        cleanExpired: () => missing('sessions.cleanExpired'),
+      }
+
+  return { users, roles, tenants, organizations, sessions, loginLogs, gdpr }
 }

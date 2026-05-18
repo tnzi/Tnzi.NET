@@ -84,9 +84,16 @@ export function useAdminKnowledgeBaseApi(client: HttpClient) {
   const base = '/admin/knowledge-bases';
 
   return {
-    /** Get paginated knowledge base list */
-    getList: (params?: { page?: number; pageSize?: number }) =>
-      client.get(base, { params }),
+    /**
+     * Get paginated knowledge base list.
+     *
+     * Backend exposes the query as POST /admin/knowledge-bases/query (consistent
+     * with the rest of the AI module's PagedQueryDto endpoints). GET /admin/
+     * knowledge-bases is reserved for the POST create endpoint, so calling it
+     * with `?page=…&pageSize=…` returns 405 Method Not Allowed.
+     */
+    getList: (params?: { pageIndex?: number; pageSize?: number; keyword?: string }) =>
+      client.post(`${base}/query`, params ?? {}),
 
     /** Get knowledge base by ID */
     getById: (id: string) =>

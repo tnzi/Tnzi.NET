@@ -7,17 +7,88 @@
  * stub used speculative field names (name/lastRun/nextRun/enabled) that do
  * not exist on Hangfire recurring jobs.
  */
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
-export const scheduledJobColumns: ColumnDef[] = [
-  { key: 'id',            title: 'Job ID' },
-  { key: 'cron',          title: 'Cron' },
-  { key: 'queue',         title: 'Queue' },
-  { key: 'lastExecution', title: 'Last Run' },
-  { key: 'nextExecution', title: 'Next Run' },
-  { key: 'lastJobState',  title: 'Last State' },
-  { key: 'removed',       title: 'Removed' },
+interface ScheduledJobRow {
+  id?: string
+  cron?: string
+  queue?: string
+  lastExecution?: string
+  nextExecution?: string
+  lastJobId?: string
+  lastJobState?: string
+  error?: string
+  removed?: boolean
+}
+
+function stateType(state?: string): 'success' | 'warning' | 'error' | 'info' | 'default' {
+  switch (state?.toLowerCase()) {
+    case 'succeeded': return 'success'
+    case 'processing': return 'info'
+    case 'failed': return 'error'
+    case 'enqueued':
+    case 'scheduled': return 'warning'
+    default: return 'default'
+  }
+}
+
+export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
+  { key: 'id', title: 'columns.id', width: 220, fixed: 'left' },
+  {
+    key: 'cron',
+    title: 'columns.cron',
+    width: 140,
+    render: (row) =>
+      h(
+        'code',
+        { style: 'font-family: monospace; font-size: 12px; padding: 2px 6px; background: var(--tnzi-layout-bg); border-radius: 3px' },
+        row.cron ?? '—',
+      ),
+  },
+  { key: 'queue', title: 'columns.queue', width: 100 },
+  {
+    key: 'lastJobState',
+    title: 'columns.lastJobState',
+    width: 120,
+    render: (row) =>
+      row.lastJobState
+        ? h(TStatusBadge, {
+            value: row.lastJobState,
+            type: stateType(row.lastJobState),
+            label: row.lastJobState,
+          })
+        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—'),
+  },
+  {
+    key: 'lastExecution',
+    title: 'columns.lastExecution',
+    width: 140,
+    render: (row) => h(TRelativeTime, { value: row.lastExecution }),
+  },
+  {
+    key: 'nextExecution',
+    title: 'columns.nextExecution',
+    width: 140,
+    render: (row) => h(TRelativeTime, { value: row.nextExecution }),
+  },
+  {
+    key: 'removed',
+    title: 'columns.removed',
+    width: 110,
+    fixed: 'right',
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.removed ?? false,
+        mapping: {
+          true: { type: 'default', label: 'Removed' },
+          false: { type: 'success', label: 'Active' },
+        },
+      }),
+  },
 ]
 
 /**

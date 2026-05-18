@@ -76,13 +76,18 @@ public class HistoryMiddleware : IAiMiddleware
         {
             try
             {
+                Guid? userMessageId = null;
+                Guid? assistantMessageId = null;
+
                 // 保存用户消息
                 if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
                 {
-                    await _threadService.SaveMessageAsync(
+                    var preGenUserId = SequentialGuid.NewGuid();
+                    userMessageId = await _threadService.SaveMessageAsync(
                         threadId.Value,
                         "user",
                         context.Request.UserMessage,
+                        messageId: preGenUserId,
                         ct: cancellationToken);
                 }
 
@@ -93,12 +98,25 @@ public class HistoryMiddleware : IAiMiddleware
                         ? JsonSerializer.Serialize(result.Usage)
                         : null;
 
-                    await _threadService.SaveMessageAsync(
+                    var preGenAssistantId = SequentialGuid.NewGuid();
+                    assistantMessageId = await _threadService.SaveMessageAsync(
                         threadId.Value,
                         "assistant",
                         result.Response,
                         usage: usageJson,
+                        messageId: preGenAssistantId,
                         ct: cancellationToken);
+                }
+
+                // Surface persisted IDs to upstream consumers via the AgentRunResult.
+                // AsyncLocal cannot back-propagate writes to the caller, so we attach the
+                // ids directly on the result that flows back up the middleware stack.
+                if ((userMessageId is { } uid && uid != Guid.Empty) ||
+                    (assistantMessageId is { } aid && aid != Guid.Empty))
+                {
+                    result = result.CloneWith(
+                        userMessageId: userMessageId,
+                        assistantMessageId: assistantMessageId);
                 }
 
                 _logger.LogDebug("Persisted messages for thread {ThreadId}", threadId);
@@ -162,6 +180,8 @@ public class HistoryMiddleware : IAiMiddleware
         TokenUsageDto? lastUsage = null;
         string? lastFinishReason = null;
         var afterToolCall = false;
+        Guid? preGenUserMessageId = null;
+        Guid? preGenAssistantMessageId = null;
 
         await foreach (var chunk in next(context, cancellationToken))
         {
@@ -206,7 +226,28 @@ public class HistoryMiddleware : IAiMiddleware
             }
             if (chunk.FinishReason != null)
             {
+                // Pre-generate persisted message ids on the first terminal chunk so the
+                // streaming consumer (ChatService -> SSE) can lift them onto the early
+                // IsDone event before the after-block writes to the database.
+                if (lastFinishReason == null
+                    && threadId != null
+                    && ShouldPersistResult(chunk.FinishReason))
+                {
+                    if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
+                    {
+                        preGenUserMessageId = SequentialGuid.NewGuid();
+                    }
+                    preGenAssistantMessageId = SequentialGuid.NewGuid();
+                }
                 lastFinishReason = chunk.FinishReason;
+            }
+            // Stamp the ids onto the chunk. AsyncLocal writes inside an async iterator do
+            // not flow back to the calling iterator across yield boundaries (each
+            // MoveNextAsync forks the EC), so chunk-borne is the only reliable handoff.
+            if (chunk.FinishReason != null)
+            {
+                if (preGenUserMessageId.HasValue) chunk.UserMessageId = preGenUserMessageId;
+                if (preGenAssistantMessageId.HasValue) chunk.AssistantMessageId = preGenAssistantMessageId;
             }
             yield return chunk;
         }
@@ -220,8 +261,9 @@ public class HistoryMiddleware : IAiMiddleware
             {
                 if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
                 {
+                    var userId = preGenUserMessageId ?? SequentialGuid.NewGuid();
                     await _threadService.SaveMessageAsync(
-                        threadId.Value, "user", context.Request.UserMessage, ct: CancellationToken.None);
+                        threadId.Value, "user", context.Request.UserMessage, messageId: userId, ct: CancellationToken.None);
                 }
 
                 var response = responseBuilder.ToString();
@@ -234,8 +276,9 @@ public class HistoryMiddleware : IAiMiddleware
                         ? JsonSerializer.Serialize(toolCallDetails)
                         : null;
 
+                    var assistantId = preGenAssistantMessageId ?? SequentialGuid.NewGuid();
                     await _threadService.SaveMessageAsync(
-                        threadId.Value, "assistant", response, toolCalls: toolCallsJson, usage: usageJson, ct: CancellationToken.None);
+                        threadId.Value, "assistant", response, toolCalls: toolCallsJson, usage: usageJson, messageId: assistantId, ct: CancellationToken.None);
                 }
 
                 _logger.LogDebug("Persisted streaming messages for thread {ThreadId}", threadId);

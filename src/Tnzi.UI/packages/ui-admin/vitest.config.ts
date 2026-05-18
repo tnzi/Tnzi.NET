@@ -26,9 +26,12 @@ export default defineConfig({
     environment: 'happy-dom',
     // Integration tests mount Phase 3/5 pages via dynamic imports; cold-cache
     // SFC transform + TCrudPage + bridge init can exceed vitest's 5s default
-    // on the first test in a file. 15s accommodates the first-mount latency
-    // without masking genuine hangs.
-    testTimeout: 15000,
+    // on the first test in a file. We previously ran at 15s but Phase G
+    // started seeing 1-4 flaky timeouts per run on Windows SSDs (the page
+    // shifted between runs — i.e. environmental, not regression). Bumped
+    // to 30s to give all integration mounts headroom; genuine hangs still
+    // surface within a reasonable wall-clock for CI.
+    testTimeout: 30000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

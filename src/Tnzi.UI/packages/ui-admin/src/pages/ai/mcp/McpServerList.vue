@@ -24,7 +24,7 @@
   >
     <template #header>
       <div class="mcp-server-list__header">
-        <h2 class="t-crud-page__title">{{ title }}</h2>
+        <h2 class="t-crud-page__title">{{ t(title) }}</h2>
         <p class="mcp-server-list__note">
           These are <strong>external</strong> MCP servers that Tnzi connects to
           as a client. Self-hosted MCP server settings (for exposing Tnzi's
@@ -64,12 +64,16 @@
         </span>
       </div>
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import TRowActions from '../../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -82,7 +86,7 @@ import type {
   UpdateMcpServerRegistrationDto,
 } from '@tnzi/core/services/ai'
 
-const title = 'MCP Server Registrations'
+const title = 'pageTitle'
 
 const bridge = createAiBridge({ client: useAdminClient() })
 

@@ -407,8 +407,10 @@ public class AgentThreadServiceTests
     {
         var threadId = Guid.NewGuid();
 
-        // For AnyAsync check in SaveMessageAsync
-        SetupThreadQueryable([MakeThread(threadId)]);
+        // Thread existence probe in SaveMessageAsync now goes through GetAsync (ChangeTracker-friendly)
+        var thread = MakeThread(threadId);
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        SetupThreadQueryable([thread]);
 
         // Existing messages — max order = 3
         var existingMessages = new List<AgentThreadMessage>
@@ -440,7 +442,9 @@ public class AgentThreadServiceTests
     {
         var threadId = Guid.NewGuid();
 
-        SetupThreadQueryable([MakeThread(threadId)]);
+        var thread = MakeThread(threadId);
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        SetupThreadQueryable([thread]);
         SetupMessageQueryable([]); // No existing messages
 
         AgentThreadMessage? saved = null;

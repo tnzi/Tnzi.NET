@@ -4,16 +4,23 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import Permission from '../../src/pages/authorization/Permission.vue'
 
-// Mock the client composable — the page calls useAdminClient() to get an
-// HttpClient for the bridge. Tests don't need a real client because the
-// bridge factory is fully mocked below.
 vi.mock('../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
 vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
-    functionModules: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    functionModules: {
+      fetch: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      // Master-Detail page calls getAll() to populate the left tree.
+      getAll: vi.fn(async () => [
+        { id: 'm1', code: 'user', name: 'User', order: 1, isEnabled: true },
+        { id: 'm2', code: 'order', name: 'Order', order: 2, isEnabled: true },
+      ]),
+    },
     permissions: {
       fetch: vi.fn(async () => ({
         items: [
@@ -22,7 +29,7 @@ vi.mock('../../src/services/bridges/authorization-bridge', () => ({
         ],
         totalCount: 2,
         pageIndex: 1,
-        pageSize: 20,
+        pageSize: 200,
       })),
     },
     roleFunctions: { fetch: vi.fn() },
@@ -30,38 +37,28 @@ vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   }),
 }))
 
-const stubs = {
-  DataTable: { props: ['data'], template: '<div class="dt" :data-rows="data.length" />' },
-  Pagination: { template: '<div />' },
-  Input: { props: ['value'], template: '<input />' },
-  Button: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
-  Modal: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
-  Popover: { template: '<div><slot name="trigger" /></div>' },
-  Checkbox: { template: '<input type="checkbox" />' },
-  Form: { template: '<form><slot /></form>' },
-  FormItem: { template: '<div><slot /></div>' },
-  InputNumber: { template: '<input type="number" />' },
-  Switch: { template: '<button />' },
-  Select: { template: '<select />' },
-  DatePicker: { template: '<input type="date" />' },
-  VueDraggable: { template: '<div><slot /></div>' },
-}
-
-describe('Permission page (Phase 3.8)', () => {
+describe('Permission page (Tier 2: Master-Detail tree)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
 
-  it('mounts and fetches permissions on load', async () => {
-    const wrapper = mount(Permission, { global: { stubs } })
+  it('mounts the master-detail layout and loads modules + permissions', async () => {
+    const wrapper = mount(Permission)
     await nextTick()
-    await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
-    expect(wrapper.find('.dt').attributes('data-rows')).toBe('2')
+    await new Promise(r => setTimeout(r, 50))
+    await nextTick()
+    expect(wrapper.find('.t-permission-page').exists()).toBe(true)
+    // Module tree is hydrated with the seeded modules.
+    const tree = wrapper.find('.t-permission-page__naive-tree')
+    expect(tree.exists()).toBe(true)
+    expect(tree.text()).toContain('User')
+    expect(tree.text()).toContain('Order')
   })
 
-  it('renders the toolbar', async () => {
-    const wrapper = mount(Permission, { global: { stubs } })
+  it('renders a detail pane (auto-selects first module after load)', async () => {
+    const wrapper = mount(Permission)
     await nextTick()
-    await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.html()).toContain('dt')
+    await new Promise(r => setTimeout(r, 100))
+    await nextTick()
+    // After loadModules() auto-picks the first root, the detail header appears.
+    expect(wrapper.find('.t-permission-page__detail-header').exists()).toBe(true)
   })
 })

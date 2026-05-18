@@ -4,62 +4,72 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import EntityRole from '../../src/pages/authorization/EntityRole.vue'
 
-vi.mock('../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
+vi.mock('../../src/plugin/client', () => ({
+  useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
+}))
+
 vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
-    functionModules: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
-    permissions: { fetch: vi.fn() },
-    roleFunctions: { fetch: vi.fn() },
+    functionModules: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), getAll: vi.fn() },
+    permissions: { fetch: vi.fn(), getByModule: vi.fn() },
+    roleFunctions: { fetch: vi.fn(), getAssignedIds: vi.fn(), setForRole: vi.fn(), clearForRole: vi.fn() },
+    entityInfos: {
+      getAll: vi.fn(async () => [
+        { id: 'ei1', name: 'User', typeName: 'Tnzi.Identity.User', displayName: 'User', isDataAuthEnabled: true },
+        { id: 'ei2', name: 'Order', typeName: 'Demo.Order', displayName: 'Order', isDataAuthEnabled: true },
+      ]),
+    },
     entityRoles: {
-      fetch: vi.fn(async () => ({
-        items: [
-          { id: 'er1', entityInfoId: 'e1', roleId: 'r1', operation: 'Query', isEnabled: true },
-          { id: 'er2', entityInfoId: 'e2', roleId: 'r1', operation: 'All', isEnabled: true },
-        ],
-        totalCount: 2,
-        pageIndex: 1,
-        pageSize: 20,
-      })),
-      create: vi.fn(async (d: unknown) => ({ ...(d as object), id: 'er-new' })),
-      update: vi.fn(async (id: string, d: unknown) => ({ id, ...(d as object) })),
-      delete: vi.fn(async () => undefined),
+      fetch: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getByEntityInfo: vi.fn(async () => []),
+      setCell: vi.fn(async () => undefined),
     },
   }),
 }))
 
-const stubs = {
-  DataTable: { props: ['data'], template: '<div class="dt" :data-rows="data.length" />' },
-  Pagination: { template: '<div />' },
-  Input: { props: ['value'], template: '<input />' },
-  Button: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
-  Modal: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
-  Popover: { template: '<div><slot name="trigger" /></div>' },
-  Checkbox: { template: '<input type="checkbox" />' },
-  Form: { template: '<form><slot /></form>' },
-  FormItem: { template: '<div><slot /></div>' },
-  InputNumber: { template: '<input type="number" />' },
-  Switch: { template: '<button />' },
-  Select: { template: '<select />' },
-  DatePicker: { template: '<input type="date" />' },
-  VueDraggable: { template: '<div><slot /></div>' },
-}
+vi.mock('../../src/services/bridges/identity-bridge', () => ({
+  createIdentityBridge: () => ({
+    roles: {
+      fetch: vi.fn(async () => ({
+        items: [
+          { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
+        ],
+        totalCount: 1,
+        pageIndex: 1,
+        pageSize: 500,
+      })),
+    },
+    users: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    tenants: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    organizations: { getTree: vi.fn() },
+    sessions: { listForUser: vi.fn() },
+    loginLogs: { fetch: vi.fn() },
+    gdpr: { fetchRequests: vi.fn() },
+  }),
+}))
 
-describe('EntityRole page (Phase 3.10)', () => {
+describe('EntityRole page (Tier 3: data-permission matrix)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
 
-  it('mounts and fetches entity roles on load', async () => {
-    const wrapper = mount(EntityRole, { global: { stubs } })
+  it('mounts the matrix page and shows a select-entity prompt before pick', async () => {
+    const wrapper = mount(EntityRole)
     await nextTick()
-    await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
-    expect(wrapper.find('.dt').attributes('data-rows')).toBe('2')
+    await new Promise(r => setTimeout(r, 100))
+    expect(wrapper.find('.t-entity-role-page').exists()).toBe(true)
+    expect(wrapper.find('.t-entity-role-page__placeholder').exists()).toBe(true)
   })
 
-  it('opens form modal when Create button is clicked', async () => {
-    const wrapper = mount(EntityRole, { global: { stubs } })
+  it('renders the toolbar entity selector', async () => {
+    const wrapper = mount(EntityRole)
     await nextTick()
-    await new Promise(r => setTimeout(r, 10))
-    await wrapper.find('.t-crud-page__create').trigger('click')
-    expect(wrapper.find('form').exists()).toBe(true)
+    await new Promise(r => setTimeout(r, 100))
+    // Toolbar contains the entity-picker label + NSelect placeholder. We don't
+    // probe the underlying entity options because NSelect renders them lazily
+    // in a teleported popover only when the trigger is opened.
+    expect(wrapper.find('.t-entity-role-page__toolbar').exists()).toBe(true)
+    expect(wrapper.find('.n-base-selection').exists()).toBe(true)
   })
 })

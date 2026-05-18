@@ -10,11 +10,11 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 
 export const parameterColumns: ColumnDef[] = [
-  { key: 'key',         title: 'Key' },
-  { key: 'value',       title: 'Value' },
-  { key: 'valueType',   title: 'Type' },
-  { key: 'group',       title: 'Group' },
-  { key: 'description', title: 'Description', visible: false },
+  { key: 'key',         title: 'columns.key' },
+  { key: 'value',       title: 'columns.value' },
+  { key: 'valueType',   title: 'columns.valueType' },
+  { key: 'group',       title: 'columns.group' },
+  { key: 'description', title: 'columns.description', visible: false },
 ]
 
 // Value editor switches on the sibling `valueType` enum via typeFn:

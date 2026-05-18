@@ -56,6 +56,9 @@
           :readonly="mode === 'view'"
         />
       </template>
+      <template #rowActions="{ row }">
+        <TRowActions :row="row" :state="crud" :translate="t" :show-edit="false" />
+      </template>
     </TCrudPage>
   </div>
 </template>
@@ -63,6 +66,7 @@
 <script setup lang="ts">
 import { ref, watchEffect, onMounted } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -105,7 +109,11 @@ const crud = useCrudPage<PaymentDto>({
 
 async function refreshStats(): Promise<void> {
   try {
-    stats.value = await bridge.orders.statistics()
+    const result = await bridge.orders.statistics()
+    // Bridge may return null/undefined when the backend endpoint is down or
+    // unauthorized; keep the default-stats shape so the template's
+    // `stats.totalRevenue` access stays safe.
+    stats.value = result ? { ...defaultStats, ...result } : { ...defaultStats }
   } catch {
     // Stats fetch failure must not block the main table
     stats.value = { ...defaultStats }

@@ -85,6 +85,18 @@ public class FileQueryRequest : PagedQueryDto
     public string? Provider { get; set; }
 
     /// <summary>
+    /// 文件夹 ID 过滤。传入 Guid.Empty 表示"根目录（未归档）"，
+    /// 传入具体 ID 表示该文件夹直接子文件，不传则不按文件夹过滤。
+    /// </summary>
+    public Guid? FolderId { get; set; }
+
+    /// <summary>
+    /// 当 FolderId 传入 Guid.Empty 时，表示要查根目录下未归档的文件。
+    /// 配合 IncludeUnfiled 一起使用以区分"明确指定根目录" vs "不过滤"。
+    /// </summary>
+    public bool IncludeUnfiled { get; set; }
+
+    /// <summary>
     /// 原始文件名（模糊匹配）
     /// </summary>
     public string? OriginalName { get; set; }

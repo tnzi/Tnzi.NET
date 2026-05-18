@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 
 /**
  * NotificationSubscription page config — aligned with NotificationPreferenceDto
@@ -12,13 +14,25 @@ import type { FormSchemaItem } from '../_shared/form-schema'
  * PUT /admin/notification-preferences/user/{userId}.
  */
 export const notificationSubscriptionColumns: ColumnDef[] = [
-  { key: 'userId',              title: 'User' },
-  { key: 'channel',             title: 'Channel' },
-  { key: 'category',            title: 'Category' },
-  { key: 'isEnabled',           title: 'Enabled' },
-  { key: 'quietHoursStart',     title: 'Quiet From', visible: false },
-  { key: 'quietHoursEnd',       title: 'Quiet To',   visible: false },
-  { key: 'maxFrequencyPerHour', title: 'Max/Hour',   visible: false },
+  { key: 'userId',              title: 'columns.userId' },
+  { key: 'channel',             title: 'columns.channel' },
+  { key: 'category',            title: 'columns.category' },
+  {
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.isEnabled),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
+  { key: 'quietHoursStart',     title: 'columns.quietHoursStart', visible: false },
+  { key: 'quietHoursEnd',       title: 'columns.quietHoursEnd',   visible: false },
+  { key: 'maxFrequencyPerHour', title: 'columns.maxFrequencyPerHour',   visible: false },
 ]
 
 export const notificationSubscriptionFormSchema: FormSchemaItem[] = [

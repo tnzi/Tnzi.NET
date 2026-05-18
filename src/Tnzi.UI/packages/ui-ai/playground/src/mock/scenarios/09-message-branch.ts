@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Edit an earlier user message and compare regenerated replies',
     category: 'conversation',
     icon: 'lucide:git-fork',
-    componentsShowcased: ['MessageBranch', 'useMessageBranch', 'MessageActions regenerate'],
+    componentsShowcased: ['MessageBranch', 'MessageActions', 'useMessageBranch'],
   },
   events: [
     { at: 0, type: 'user-message', content: 'Write a haiku about autumn.' },

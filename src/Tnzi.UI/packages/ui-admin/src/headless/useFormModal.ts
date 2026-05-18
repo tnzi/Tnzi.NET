@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { ref, toRaw, type Ref } from 'vue'
 
 export type FormModalMode = 'create' | 'edit' | 'view'
 
@@ -11,12 +11,20 @@ export interface UseFormModalReturn<T> {
   confirm: () => Promise<T | null>
 }
 
+// `structuredClone` cannot serialise Vue reactive Proxy (DataCloneError, by spec).
+// Strip Proxy via `toRaw` first, then prefer structuredClone (preserves Date/Map/Set);
+// fall back to JSON round-trip for anything structuredClone still rejects (functions, etc.).
 function cloneInitial<T>(initial: T | null | undefined): T | null {
   if (initial == null) return null
+  const raw = toRaw(initial) as T
   if (typeof structuredClone === 'function') {
-    return structuredClone(initial)
+    try {
+      return structuredClone(raw)
+    } catch {
+      // fall through to JSON
+    }
   }
-  return JSON.parse(JSON.stringify(initial)) as T
+  return JSON.parse(JSON.stringify(raw)) as T
 }
 
 export function useFormModal<T = unknown>(): UseFormModalReturn<T> {

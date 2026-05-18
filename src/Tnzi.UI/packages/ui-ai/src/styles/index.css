@@ -1,7 +1,100 @@
 /* Tnzi UI-AI base styles — inherits from @tnzi/ui */
 @import '@tnzi/ui/style.css';
 
-/* AI-specific CSS variables (--tnzi-ai-* namespace) */
+/* ===========================================================================
+ * Manus-inspired chat-app surface tokens (powers TChatApp + shell components).
+ *
+ * Values derived from a live agent product session on 2026-04-14 (computed
+ * styles; measurements are facts, not copyrighted expression). Override at
+ * the consumer level by redefining any variable on `:root` or any ancestor.
+ *
+ * To enable dark mode: toggle `.dark` (or `[data-theme="dark"]`) on the
+ * documentElement; the existing dark block below also covers these tokens.
+ * ========================================================================= */
+:root {
+  /* Surfaces */
+  --tnzi-ai-bg:         #f8f8f7;        /* warm canvas (main content area) */
+  --tnzi-ai-sidebar-bg: #ebebeb;        /* sidebar canvas */
+  --tnzi-ai-surface:    #ffffff;        /* elevated cards / composer / modals */
+  --tnzi-ai-rail:       #ebebeb;        /* collapsed rail */
+
+  /* Text */
+  --tnzi-ai-text:           #34322d;
+  --tnzi-ai-text-secondary: rgba(52, 50, 45, 0.72);
+  --tnzi-ai-text-tertiary:  rgba(52, 50, 45, 0.48);
+
+  /* Borders / dividers */
+  --tnzi-ai-border:        rgba(0, 0, 0, 0.08);
+  --tnzi-ai-border-strong: rgba(0, 0, 0, 0.20);
+  --tnzi-ai-divider:       #ebebeb;
+
+  /* Accent */
+  --tnzi-ai-accent:      #0081f2;
+  --tnzi-ai-accent-soft: rgba(0, 129, 242, 0.12);
+
+  /* Interaction overlays */
+  --tnzi-ai-hover:    rgba(55, 53, 47, 0.04);
+  --tnzi-ai-press:    rgba(55, 53, 47, 0.06);
+  --tnzi-ai-selected: rgba(55, 53, 47, 0.08);
+
+  /* Modal chrome (consumed by TSettingsDialog / TCommandPalette) */
+  --tnzi-ai-backdrop:        rgba(0, 0, 0, 0.60);
+  --tnzi-ai-backdrop-blur:   4px;
+  --tnzi-ai-modal-radius:    20px;
+  --tnzi-ai-modal-border:    1px solid rgba(0, 0, 0, 0.06);
+  --tnzi-ai-composer-radius: 22px;
+  --tnzi-ai-composer-shadow: 0 12px 32px rgba(0, 0, 0, 0.02);
+
+  /* Typography (consumers should `@import` Libre Baskerville themselves if
+   * they want the display face; falls back to Georgia otherwise) */
+  --tnzi-ai-font-display: 'Libre Baskerville', Georgia, Cambria, 'Times New Roman', Times, serif;
+  --tnzi-ai-font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', Helvetica, Arial, sans-serif;
+  --tnzi-ai-font-mono:    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* Motion */
+  --tnzi-ai-duration-fast: 120ms;
+  --tnzi-ai-duration-base: 200ms;
+  --tnzi-ai-duration-slow: 320ms;
+  --tnzi-ai-easing:        cubic-bezier(0.2, 0, 0, 1);
+}
+
+.dark,
+[data-theme='dark'] {
+  --tnzi-ai-bg:         #141414;
+  --tnzi-ai-sidebar-bg: #0f0f0f;
+  --tnzi-ai-surface:    #1c1c1b;
+  --tnzi-ai-rail:       #161616;
+
+  --tnzi-ai-text:           #ededec;
+  --tnzi-ai-text-secondary: rgba(237, 237, 236, 0.72);
+  --tnzi-ai-text-tertiary:  rgba(237, 237, 236, 0.48);
+
+  --tnzi-ai-border:        rgba(255, 255, 255, 0.08);
+  --tnzi-ai-border-strong: rgba(255, 255, 255, 0.20);
+  --tnzi-ai-divider:       rgba(255, 255, 255, 0.08);
+
+  --tnzi-ai-accent:      #3a9bf5;
+  --tnzi-ai-accent-soft: rgba(58, 155, 245, 0.18);
+
+  --tnzi-ai-hover:    rgba(255, 255, 255, 0.04);
+  --tnzi-ai-press:    rgba(255, 255, 255, 0.06);
+  --tnzi-ai-selected: rgba(255, 255, 255, 0.08);
+}
+
+/* Display helper for serif hero headings (Manus-style).
+ * Usage: <h1 class="t-ai-display lg">What can I do for you?</h1> */
+.t-ai-display {
+  font-family: var(--tnzi-ai-font-display);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.5;
+  color: var(--tnzi-ai-text);
+}
+.t-ai-display.lg { font-size: 36px; }
+.t-ai-display.md { font-size: 28px; }
+.t-ai-display.sm { font-size: 22px; }
+
+/* AI-specific CSS variables (--tnzi-ai-* namespace) — chat bubble + reasoning */
 :root {
   /* Chat message bubbles */
   --tnzi-ai-chat-user-bg: hsl(222.2 47.4% 95%);

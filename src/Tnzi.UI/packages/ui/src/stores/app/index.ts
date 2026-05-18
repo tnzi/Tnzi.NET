@@ -14,7 +14,7 @@ import type {
   OnlineStatus,
 } from '@tnzi/core/state';
 import type { Locale } from '@tnzi/core/adapters/i18n';
-import type { ThemeMode } from '@tnzi/core/types/theme';
+import type { ThemeMode } from '@tnzi/core/types';
 import { getStoreStorage } from '../factory';
 import { applyThemeToDOM, applyLanguageToDOM } from '../../utils/naive-helpers';
 

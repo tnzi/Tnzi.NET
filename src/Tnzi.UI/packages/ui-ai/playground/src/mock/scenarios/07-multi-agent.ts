@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Three agents collaborate on a product research task',
     category: 'agent',
     icon: 'lucide:users',
-    componentsShowcased: ['AgentCard', 'AgentQueue', 'ChatMessage agentName badge', 'MessageBranch'],
+    componentsShowcased: ['AgentStatus', 'AgentQueue', 'AgentHandoff', 'ChatMessage', 'MessageBranch'],
   },
   events: [
     { at: 0, type: 'user-message', content: 'Give me a quick market snapshot for standing desks.' },

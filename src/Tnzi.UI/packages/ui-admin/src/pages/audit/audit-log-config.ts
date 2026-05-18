@@ -1,15 +1,48 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
-// Real AuditOperationDto fields from @tnzi/core/services/audit/types.ts
-export const auditLogColumns: ColumnDef[] = [
-  { key: 'userId',       title: 'User' },
-  { key: 'functionName', title: 'Action' },
-  { key: 'url',          title: 'Resource' },
-  { key: 'ip',           title: 'IP' },
-  { key: 'startTime',    title: 'Time' },
-  { key: 'resultType',   title: 'Result' },
-  { key: 'elapsed',      title: 'Duration (ms)' },
+interface AuditLogRow {
+  id?: string
+  userId?: string
+  userName?: string
+  functionName?: string
+  url?: string
+  httpMethod?: string
+  ip?: string
+  startTime?: string
+  resultType?: 'Success' | 'Fail' | string
+  elapsed?: number
+}
+
+export const auditLogColumns: ColumnDef<AuditLogRow>[] = [
+  { key: 'userName', title: 'columns.userName', width: 160, fixed: 'left' },
+  { key: 'functionName', title: 'columns.functionName', width: 200 },
+  { key: 'url', title: 'columns.url' },
+  { key: 'ip', title: 'columns.ip', width: 140 },
+  {
+    key: 'resultType',
+    title: 'columns.resultType',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.resultType ?? 'unknown',
+        type:
+          row.resultType === 'Success' ? 'success' :
+          row.resultType === 'Fail' ? 'error' : 'default',
+        label: row.resultType ?? '—',
+      }),
+  },
+  { key: 'elapsed', title: 'columns.elapsed', width: 130 },
+  {
+    key: 'startTime',
+    title: 'columns.startTime',
+    width: 140,
+    fixed: 'right',
+    render: (row) => h(TRelativeTime, { value: row.startTime }),
+  },
 ]
 
 // Read-only view schema — shown in detail view only, not create/edit

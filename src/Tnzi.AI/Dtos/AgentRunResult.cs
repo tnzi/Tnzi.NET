@@ -56,6 +56,12 @@ public class AgentRunResult
     /// <summary>澄清问题（Status=RequiresClarification 时非 null）</summary>
     public string? ClarificationQuestion { get; init; }
 
+    /// <summary>Persisted user message ID for this turn (set by HistoryMiddleware when persisted).</summary>
+    public Guid? UserMessageId { get; init; }
+
+    /// <summary>Persisted assistant message ID for this turn (set by HistoryMiddleware when persisted).</summary>
+    public Guid? AssistantMessageId { get; init; }
+
     /// <summary>
     /// 创建副本并覆盖指定字段。用于中间件修改结果时保留所有原始字段。
     /// </summary>
@@ -75,7 +81,9 @@ public class AgentRunResult
         List<string>? suggestions = null,
         List<TodoItemDto>? todos = null,
         List<AgentArtifactDto>? artifacts = null,
-        string? clarificationQuestion = null)
+        string? clarificationQuestion = null,
+        Guid? userMessageId = null,
+        Guid? assistantMessageId = null)
     {
         return new AgentRunResult
         {
@@ -94,7 +102,9 @@ public class AgentRunResult
             Suggestions = suggestions ?? Suggestions,
             Todos = todos ?? Todos,
             Artifacts = artifacts ?? Artifacts,
-            ClarificationQuestion = clarificationQuestion ?? ClarificationQuestion
+            ClarificationQuestion = clarificationQuestion ?? ClarificationQuestion,
+            UserMessageId = userMessageId ?? UserMessageId,
+            AssistantMessageId = assistantMessageId ?? AssistantMessageId
         };
     }
 }

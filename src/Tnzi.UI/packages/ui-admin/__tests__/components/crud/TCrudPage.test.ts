@@ -6,7 +6,8 @@ import TCrudPage from '../../../src/components/crud/TCrudPage.vue'
 const stubs = {
   DataTable: {
     name: 'DataTable',
-    props: ['data', 'columns', 'loading'],
+    props: ['data', 'columns', 'loading', 'pagination'],
+    emits: ['update:page', 'update:pageSize'],
     template: '<div class="n-data-table-stub" :data-rows="data.length"></div>',
   },
   Pagination: {
@@ -40,6 +41,27 @@ const stubs = {
   },
   Checkbox: { name: 'Checkbox', template: '<input type="checkbox" />' },
   VueDraggable: { name: 'VueDraggable', template: '<div><slot /></div>' },
+  // Phase I.7.x — TCrudPage now wraps the page in NSpace + NCard +
+  // NCollapse. Stub these passthrough-style so child slot content
+  // (search input, toolbar buttons, etc) keeps rendering for tests.
+  Card: {
+    name: 'Card',
+    template:
+      '<div class="n-card-stub"><div class="n-card__header-stub"><slot name="header" /><slot name="header-extra" /></div><slot /></div>',
+  },
+  Collapse: {
+    name: 'Collapse',
+    template: '<div class="n-collapse-stub"><slot /></div>',
+  },
+  CollapseItem: {
+    name: 'CollapseItem',
+    template:
+      '<div class="n-collapse-item-stub"><slot name="header" /><slot /></div>',
+  },
+  Space: {
+    name: 'Space',
+    template: '<div class="n-space-stub"><slot /></div>',
+  },
 }
 
 interface Row {
@@ -72,14 +94,18 @@ function makeState() {
   const orderedKeys = ref(['id', 'name'])
   const hiddenKeys = ref<Set<string>>(new Set())
 
+  const fixedOverrides = ref<Map<string, 'left' | 'right' | null>>(new Map())
   const columnSettings = {
     visibleColumns,
     orderedKeys,
     hiddenKeys,
+    fixedOverrides,
     hide: vi.fn(),
     show: vi.fn(),
     toggle: vi.fn(),
     reorder: vi.fn(),
+    cycleFixed: vi.fn(),
+    getFixed: vi.fn(() => undefined),
     reset: vi.fn(),
   }
 
@@ -148,7 +174,9 @@ describe('TCrudPage', () => {
     expect(table.attributes('data-rows')).toBe('2')
   })
 
-  it('search input calls state.setSearch on input', async () => {
+  it('simple search commits keyword on Search button click', async () => {
+    // Simple search now commits on Enter / Search-button click instead
+    // of firing on every keystroke (avoids spamming refetches while typing).
     const state = makeState()
     const wrapper = mount(TCrudPage, {
       props: { state: state as any, allColumns: state.columnSettings.visibleColumns.value },
@@ -156,6 +184,14 @@ describe('TCrudPage', () => {
     })
     const input = wrapper.find('.t-crud-page__search .n-input-stub')
     await input.setValue('query')
+    expect(state.setSearch).not.toHaveBeenCalled()
+    // Find the primary Search button — it's the only n-button stub with
+    // text "Search" inside the search panel.
+    const searchBtn = wrapper
+      .findAll('.t-crud-page__search button')
+      .find((b) => b.text() === 'admin.crud.search' || b.text().toLowerCase().includes('search'))
+    expect(searchBtn).toBeTruthy()
+    await searchBtn!.trigger('click')
     expect(state.setSearch).toHaveBeenCalledWith('query')
   })
 
@@ -175,7 +211,11 @@ describe('TCrudPage', () => {
       props: { state: state as any, allColumns: state.columnSettings.visibleColumns.value },
       global: { stubs },
     })
-    await wrapper.find('.t-crud-toolbar__refresh button').trigger('click')
+    // Phase I.7.x: refresh is now a NButton inside the list-card actions
+    // strip, with stable class `.t-crud-toolbar__refresh` so existing
+    // selectors keep working. The Button stub renders a real <button>
+    // child, so we still trigger the same DOM node.
+    await wrapper.find('.t-crud-toolbar__refresh').trigger('click')
     expect(state.refresh).toHaveBeenCalled()
   })
 

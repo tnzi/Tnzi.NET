@@ -258,12 +258,12 @@ public class MiddlewarePipelineIntegrationTests
             _threadServiceMock
                 .Setup(t => t.SaveMessageAsync(
                     It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .Callback((Guid threadId, string role, string content, string? toolCalls, string? usage, CancellationToken ct) =>
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid threadId, string role, string content, string? toolCalls, string? usage, Guid? messageId, CancellationToken ct) =>
                 {
                     _savedMessages.Add((threadId, role, content));
-                })
-                .Returns(Task.CompletedTask);
+                    return Task.FromResult(messageId ?? Guid.NewGuid());
+                });
 
             services.AddSingleton(_threadServiceMock.Object);
             services.AddSingleton<IAiMiddleware>(sp =>

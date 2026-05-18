@@ -5,7 +5,11 @@ namespace Tnzi.Identity.Events.Handlers;
 /// <summary>
 /// 用户登录事件处理器
 /// 处理登录日志记录、会话创建等辅助操作
+/// Runs as background handler: gets an independent scope (and independent DbContext)
+/// via Task.Run so DB writes (SessionService.CreateSessionAsync etc.) do not race
+/// with the request-scope DbContext that is still busy completing the login response.
 /// </summary>
+[BackgroundEventHandler]
 public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
 {
     private readonly ILoginLogInternalService? _loginLogInternalService;
@@ -78,7 +82,10 @@ public class UserLoggedOutEventHandler : IEventHandler<UserLoggedOutEvent>
 /// <summary>
 /// 用户登录失败事件处理器
 /// 处理失败登录日志记录
+/// Same rationale as <see cref="UserLoggedInEventHandler"/>: background scope isolates
+/// the login-log DB write from the request-scope DbContext.
 /// </summary>
+[BackgroundEventHandler]
 public class UserLoginFailedEventHandler : IEventHandler<UserLoginFailedEvent>
 {
     private readonly ILoginLogInternalService? _loginLogInternalService;

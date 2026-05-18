@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Basic conversational exchange with streaming deltas',
     category: 'conversation',
     icon: 'lucide:message-circle',
-    componentsShowcased: ['ChatBox', 'MessageList', 'StreamingText', 'PromptInput', 'MessageActions'],
+    componentsShowcased: ['ChatBox', 'MessageList', 'StreamMarkdown', 'PromptInput', 'MessageActions'],
   },
   events: [
     { at: 0, type: 'user-message', content: 'What is TypeScript?' },

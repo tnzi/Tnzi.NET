@@ -39,14 +39,117 @@ describe('useAdminThemeStore', () => {
     expect(store.tabVisible).toBe(false)
   })
 
-  it('pageTransition defaults to fade', () => {
+  it('pageTransition defaults to fade-slide (soybean signature)', () => {
     const store = useAdminThemeStore()
-    expect(store.pageTransition).toBe('fade')
+    expect(store.pageTransition).toBe('fade-slide')
   })
 
   it('setPageTransition accepts known transitions', () => {
     const store = useAdminThemeStore()
     store.setPageTransition('slide-left')
     expect(store.pageTransition).toBe('slide-left')
+  })
+
+  it('accepts all 6 layout modes including the 3 hybrid variants', () => {
+    const store = useAdminThemeStore()
+    const validModes = [
+      'vertical',
+      'horizontal',
+      'vertical-mix',
+      'vertical-hybrid-header-first',
+      'top-hybrid-sidebar-first',
+      'top-hybrid-header-first',
+    ] as const
+    for (const m of validModes) {
+      store.setLayoutMode(m)
+      expect(store.layoutMode).toBe(m)
+    }
+  })
+
+  it('watermark defaults to disabled with sensible fallbacks', () => {
+    const store = useAdminThemeStore()
+    expect(store.watermark.enabled).toBe(false)
+    expect(store.watermark.text).toBe('Tnzi Admin')
+    expect(store.watermark.includeUserName).toBe(true)
+    expect(store.watermark.includeDate).toBe(true)
+    expect(store.watermark.opacity).toBeCloseTo(0.15)
+    expect(store.watermark.fontSize).toBe(16)
+  })
+
+  it('setWatermark patches a single field without disturbing others', () => {
+    const store = useAdminThemeStore()
+    store.setWatermark({ enabled: true })
+    expect(store.watermark.enabled).toBe(true)
+    expect(store.watermark.text).toBe('Tnzi Admin')
+    store.setWatermark({ text: 'Custom' })
+    expect(store.watermark.enabled).toBe(true)
+    expect(store.watermark.text).toBe('Custom')
+  })
+
+  it('resetWatermark restores defaults', () => {
+    const store = useAdminThemeStore()
+    store.setWatermark({ enabled: true, text: 'Custom' })
+    store.resetWatermark()
+    expect(store.watermark.enabled).toBe(false)
+    expect(store.watermark.text).toBe('Tnzi Admin')
+  })
+
+  it('tabStyle defaults to chrome and validates input', () => {
+    const store = useAdminThemeStore()
+    expect(store.tabStyle).toBe('chrome')
+    store.setTabStyle('button')
+    expect(store.tabStyle).toBe('button')
+    // @ts-expect-error — invalid style ignored
+    store.setTabStyle('invalid')
+    expect(store.tabStyle).toBe('button')
+  })
+
+  it('fixed positioning flags have sensible defaults', () => {
+    const store = useAdminThemeStore()
+    expect(store.fixedHeader).toBe(true)
+    expect(store.fixedTab).toBe(true)
+    expect(store.fixedFooter).toBe(false)
+    store.setFixedFooter(true)
+    expect(store.fixedFooter).toBe(true)
+  })
+
+  it('pageAnimate defaults true and toggles', () => {
+    const store = useAdminThemeStore()
+    expect(store.pageAnimate).toBe(true)
+    store.setPageAnimate(false)
+    expect(store.pageAnimate).toBe(false)
+  })
+
+  it('4-tier sider width system defaults match ui-admin spec', () => {
+    // Defaults aligned to the user-supplied ui-admin default config
+    // (2026-05-17): siderWidth 220, siderCollapsedWidth 60 (replacing
+    // the earlier 240/64 that tried to fit "Organization Management"
+    // — long English labels now wrap or use icons-only mode).
+    const store = useAdminThemeStore()
+    expect(store.siderWidth).toBe(220)
+    expect(store.siderCollapsedWidth).toBe(60)
+    expect(store.mixSiderWidth).toBe(90)
+    expect(store.mixChildMenuWidth).toBe(200)
+  })
+
+  it('setMixChildMenuWidth updates the second-level rail width', () => {
+    const store = useAdminThemeStore()
+    store.setMixChildMenuWidth(240)
+    expect(store.mixChildMenuWidth).toBe(240)
+  })
+
+  it('reset restores every Phase-A-added field too', () => {
+    const store = useAdminThemeStore()
+    store.setLayoutMode('top-hybrid-header-first')
+    store.setTabStyle('button')
+    store.setPageAnimate(false)
+    store.setWatermark({ enabled: true, text: 'X' })
+    store.setFixedFooter(true)
+    store.reset()
+    expect(store.layoutMode).toBe('vertical')
+    expect(store.tabStyle).toBe('chrome')
+    expect(store.pageAnimate).toBe(true)
+    expect(store.watermark.enabled).toBe(false)
+    expect(store.fixedFooter).toBe(false)
   })
 })

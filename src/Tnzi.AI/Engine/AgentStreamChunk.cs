@@ -84,4 +84,17 @@ public class AgentStreamChunk
 
     /// <summary>产出的文件产物（最终 chunk 中包含）</summary>
     public List<AgentArtifactDto>? Artifacts { get; set; }
+
+    /// <summary>
+    /// Persisted user message ID (populated on the terminal chunk when the turn is persisted).
+    /// HistoryMiddleware sets this before yielding so downstream consumers (e.g. ChatService)
+    /// can surface it on the SSE event without relying on AsyncLocal back-propagation.
+    /// </summary>
+    public Guid? UserMessageId { get; set; }
+
+    /// <summary>
+    /// Persisted assistant message ID (populated on the terminal chunk).
+    /// Lets clients call message-scoped APIs (e.g. feedback) using the real DB id.
+    /// </summary>
+    public Guid? AssistantMessageId { get; set; }
 }

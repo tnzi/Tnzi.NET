@@ -24,7 +24,7 @@
     then, the page will surface a connection error in production and tests
     cover the contract via a mocked EventSource.
   -->
-  <div class="t-run-monitor">
+  <div class="t-run-monitor t-page-scroll">
     <header class="t-run-monitor__header">
       <router-link :to="`/admin/ai/agents/${agentId}`" class="t-run-monitor__back">
         {{ t('monitor.back') }}
@@ -331,14 +331,14 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
   grid-template-columns: 1fr auto;
   padding: 0.5rem 0.75rem;
   cursor: pointer;
-  border-bottom: 1px solid var(--t-border, #eee);
+  border-bottom: 1px solid var(--tnzi-base-border, #eee);
 }
 .t-run-monitor__list-row.is-selected {
-  background: var(--t-selection, #eef);
+  background: var(--tnzi-primary-color-suppl, rgba(6, 182, 212, 0.12));
 }
 .t-run-monitor__detail {
   padding: 1rem;
-  border: 1px solid var(--t-border, #eee);
+  border: 1px solid var(--tnzi-base-border, #eee);
 }
 .t-run-monitor__meta > div {
   margin-bottom: 0.25rem;
@@ -357,23 +357,23 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
 }
 .t-run-monitor__trace-row {
   padding: 0.25rem 0;
-  border-bottom: 1px dashed var(--t-border, #f0f0f0);
+  border-bottom: 1px dashed var(--tnzi-base-border, #f0f0f0);
 }
 .t-run-monitor__trace-type {
   display: inline-block;
   margin-right: 0.5rem;
   font-weight: 600;
-  color: var(--t-muted, #666);
+  color: var(--tnzi-base-text-muted, #666);
 }
 .t-run-monitor__error,
 .t-run-monitor__banner {
-  color: var(--t-danger, #c33);
+  color: var(--tnzi-error-color, #c33);
   padding: 0.5rem 0;
 }
 .t-run-monitor__status[data-state='ok'] {
-  color: var(--t-success, #2a7);
+  color: var(--tnzi-success-color, #2a7);
 }
 .t-run-monitor__status[data-state='err'] {
-  color: var(--t-danger, #c33);
+  color: var(--tnzi-error-color, #c33);
 }
 </style>

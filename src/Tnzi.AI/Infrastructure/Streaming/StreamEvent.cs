@@ -91,4 +91,17 @@ public class StreamEvent
 
     /// <summary>运行期间产出的文件产物</summary>
     public List<AgentArtifactDto>? Artifacts { get; set; }
+
+    /// <summary>
+    /// Persisted user message ID (populated on the terminal event when the
+    /// turn is persisted; null when persistence was skipped, e.g. guardrail rejection).
+    /// </summary>
+    public Guid? UserMessageId { get; set; }
+
+    /// <summary>
+    /// Persisted assistant message ID (populated on the terminal event when the
+    /// turn is persisted; null when persistence was skipped).
+    /// Consumers use this to call message-scoped APIs such as feedback submission.
+    /// </summary>
+    public Guid? AssistantMessageId { get; set; }
 }

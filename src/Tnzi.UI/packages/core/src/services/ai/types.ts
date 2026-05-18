@@ -128,6 +128,8 @@ export interface AgentDto {
   qualityTier: number;
   latencyTier: number;
   costTier: number;
+  /** Persona FK — links the agent to an AgentPersona's soul / role template. */
+  personaId?: string | null;
   creationTime: string;
   lastModificationTime?: string | null;
 }
@@ -179,6 +181,8 @@ export interface CreateAgentDto {
   qualityTier?: number;
   latencyTier?: number;
   costTier?: number;
+  /** Persona FK (optional). */
+  personaId?: string | null;
 }
 
 /** Update agent request */
@@ -200,6 +204,11 @@ export interface UpdateAgentDto {
   qualityTier?: number | null;
   latencyTier?: number | null;
   costTier?: number | null;
+  /**
+   * Persona FK. Pass a uuid to link, pass an empty-guid string
+   * ("00000000-0000-0000-0000-000000000000") to unlink, omit to leave unchanged.
+   */
+  personaId?: string | null;
   changeNote?: string | null;
 }
 
@@ -316,6 +325,10 @@ export interface ChatResponseDto {
   handoffPath?: string[] | null;
   citations?: CitationDto[] | null;
   reasoning?: string | null;
+  /** Persisted user message ID for this turn (null when persistence was skipped). */
+  userMessageId?: string | null;
+  /** Persisted assistant message ID for this turn (null when persistence was skipped). */
+  assistantMessageId?: string | null;
 }
 
 /** Tool call detail (name + duration) */
@@ -385,6 +398,10 @@ export interface ChatStreamEvent {
   runId?: string | null;
   /** Rich component reference */
   componentRef?: ComponentRefDto | null;
+  /** Persisted user message ID (populated on the terminal event when the turn is persisted; null when persistence was skipped). */
+  userMessageId?: string | null;
+  /** Persisted assistant message ID (populated on the terminal event when the turn is persisted). Clients use this for message-scoped APIs such as feedback submission. */
+  assistantMessageId?: string | null;
 }
 
 /** Content part (polymorphic: text | image | file) */

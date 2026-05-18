@@ -184,10 +184,7 @@ const naivePagination = computed<PaginationProps | false>(() => {
   return paginationProps
 })
 
-// 当前分页状态用于 pageSize 变化时使用
-const currentPage = computed(() =>
-  props.pagination !== false ? props.pagination.pageIndex : 1,
-)
+// 当前分页 pageSize 用于 pageSize 变化时使用
 const currentPageSize = computed(() =>
   props.pagination !== false ? props.pagination.pageSize : 10,
 )

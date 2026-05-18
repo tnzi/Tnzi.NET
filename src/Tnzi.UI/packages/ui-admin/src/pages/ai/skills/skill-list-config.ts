@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 
 /**
  * Phase 5 Task 5.7 — SkillList page config (sibling of SkillList.vue).
@@ -13,16 +15,28 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  * Note: backend uses `enabled` (not `isEnabled`) on skill DTOs.
  */
 export const skillColumns: ColumnDef[] = [
-  { key: 'name', title: 'Name' },
-  { key: 'slug', title: 'Slug' },
-  { key: 'scope', title: 'Scope' },
-  { key: 'description', title: 'Description' },
-  { key: 'priority', title: 'Priority', visible: false },
-  { key: 'version', title: 'Version', visible: false },
-  { key: 'author', title: 'Author', visible: false },
-  { key: 'enabled', title: 'Enabled' },
-  { key: 'source', title: 'Source', visible: false },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'name', title: 'columns.name' },
+  { key: 'slug', title: 'columns.slug' },
+  { key: 'scope', title: 'columns.scope' },
+  { key: 'description', title: 'columns.description' },
+  { key: 'priority', title: 'columns.priority', visible: false },
+  { key: 'version', title: 'columns.version', visible: false },
+  { key: 'author', title: 'columns.author', visible: false },
+  {
+    key: 'enabled',
+    title: 'columns.enabled',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.enabled),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
+  { key: 'source', title: 'columns.source', visible: false },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 export const skillScopeOptions: Array<{ label: string; value: string }> = [

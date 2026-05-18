@@ -10,6 +10,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="chatMessageColumns"
+    :search-fields="chatMessageSearchFields"
     :title="title"
     :translate="t"
     :show-create="false"
@@ -32,11 +33,11 @@ import { useCrudPage } from '../../headless/useCrudPage'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { chatMessageColumns, chatMessageFormSchema } from './chat-message-config'
+import { chatMessageColumns, chatMessageFormSchema, chatMessageSearchFields } from './chat-message-config'
 import { translatePageKey } from '../_shared/translate'
 import type { MessageListItemDto } from '@tnzi/core/services/chat'
 
-const title = 'Chat Messages'
+const title = 'title'
 const route = useRoute()
 const bridge = createChatBridge({ client: useAdminClient() })
 

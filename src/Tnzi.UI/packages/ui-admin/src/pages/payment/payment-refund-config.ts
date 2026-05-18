@@ -1,29 +1,82 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
-/**
- * Payment Refund page config — aligned with RefundDto
- * (2026-04-14 Plan C unstub).
- *
- * Backend fields (RefundDto):
- *   id, refundNo, tradeNo, paymentId, paymentNo, refundAmount, currency,
- *   reason, status, approverId, approveTime, completedTime, creationTime,
- *   lastModificationTime
- *
- * Row actions "Approve" / "Reject" map to POST /admin/refunds/{id}/approve
- * with approved=true/false.
- */
-export const refundColumns: ColumnDef[] = [
-  { key: 'refundNo',      title: 'Refund No' },
-  { key: 'paymentNo',     title: 'Payment No' },
-  { key: 'refundAmount',  title: 'Amount' },
-  { key: 'currency',      title: 'Currency' },
-  { key: 'reason',        title: 'Reason' },
-  { key: 'status',        title: 'Status' },
-  { key: 'creationTime',  title: 'Requested At' },
-  { key: 'completedTime', title: 'Completed At' },
-  { key: 'approverId',    title: 'Approver', visible: false },
-  { key: 'approveTime',   title: 'Approved At', visible: false },
+interface RefundRow {
+  id?: string
+  refundNo?: string
+  tradeNo?: string
+  paymentId?: string
+  paymentNo?: string
+  refundAmount?: number
+  currency?: string
+  reason?: string
+  status?: 'pending' | 'approved' | 'rejected' | 'completed' | 'failed' | string
+  creationTime?: string
+  completedTime?: string
+  approverId?: string
+  approveTime?: string
+}
+
+const STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
+  pending: { type: 'warning', label: 'Pending Review' },
+  approved: { type: 'info', label: 'Approved' },
+  rejected: { type: 'error', label: 'Rejected' },
+  completed: { type: 'success', label: 'Completed' },
+  failed: { type: 'error', label: 'Failed' },
+}
+
+function fmtMoney(amount?: number, currency?: string): string {
+  if (amount === null || amount === undefined) return '—'
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency ?? 'USD',
+    }).format(amount)
+  } catch {
+    return `${currency ?? ''} ${amount.toFixed(2)}`
+  }
+}
+
+export const refundColumns: ColumnDef<RefundRow>[] = [
+  { key: 'refundNo', title: 'columns.refundNo', width: 200, fixed: 'left' },
+  { key: 'paymentNo', title: 'columns.paymentNo', width: 200 },
+  {
+    key: 'refundAmount',
+    title: 'columns.refundAmount',
+    width: 140,
+    render: (row) =>
+      h(
+        'span',
+        { style: 'font-variant-numeric: tabular-nums; font-weight: 500' },
+        fmtMoney(row.refundAmount, row.currency),
+      ),
+  },
+  { key: 'reason', title: 'columns.reason' },
+  {
+    key: 'status',
+    title: 'columns.status',
+    width: 140,
+    render: (row) => {
+      const m = STATUS_MAP[row.status ?? ''] ?? { type: 'default' as const, label: row.status ?? '—' }
+      return h(TStatusBadge, { value: row.status ?? 'unknown', type: m.type, label: m.label })
+    },
+  },
+  {
+    key: 'creationTime',
+    title: 'columns.creationTime',
+    width: 140,
+    render: (row) => h(TRelativeTime, { value: row.creationTime }),
+  },
+  {
+    key: 'completedTime',
+    title: 'columns.completedTime',
+    width: 140,
+    fixed: 'right',
+    render: (row) => h(TRelativeTime, { value: row.completedTime }),
+  },
 ]
 
 export const refundFormSchema: FormSchemaItem[] = [

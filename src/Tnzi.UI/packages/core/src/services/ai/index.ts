@@ -16,5 +16,6 @@ export type {
   KnowledgeBaseCreateParams,
   KnowledgeBaseUpdateParams,
   SearchTestParams,
+  ReindexResultDto,
 } from './rag';
 

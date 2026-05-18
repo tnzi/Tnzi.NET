@@ -359,6 +359,23 @@ describe('ai-bridge', () => {
     expect(result.items).toHaveLength(1)
   })
 
+  it('workflowRuns.getDetail delegates to workflowApi.getExecutionDetail', async () => {
+    const workflowApi = mockWorkflowApi()
+    workflowApi.getExecutionDetail.mockResolvedValueOnce({
+      id: 'exec-1',
+      status: 'Completed',
+      completedStepIds: ['s1'],
+      stepsAwaitingApproval: [],
+      stepOutputs: {},
+      initialInput: '',
+      creationTime: '2026-04-14T00:00:00Z',
+    } as never)
+    const bridge = createAiBridge({ workflowApi: workflowApi as never, client: {} as never })
+    const result = await bridge.workflowRuns.getDetail('exec-1')
+    expect(workflowApi.getExecutionDetail).toHaveBeenCalledWith('exec-1')
+    expect(result.id).toBe('exec-1')
+  })
+
   it('skills.activate maps to batchEnable with the single id', async () => {
     const skillApi = mockSkillApi()
     const bridge = createAiBridge({ skillApi: skillApi as never, client: {} as never })
@@ -480,7 +497,7 @@ describe('ai-bridge', () => {
       searchText: '',
       filters: {},
     })
-    expect(kbApi.getList).toHaveBeenCalledWith({ page: 1, pageSize: 20 })
+    expect(kbApi.getList).toHaveBeenCalledWith({ pageIndex: 1, pageSize: 20 })
     expect(result.items).toHaveLength(1)
   })
 
@@ -630,5 +647,25 @@ describe('ai-bridge', () => {
     expect(evaluationApi.runBatch).toHaveBeenCalled()
 
     await expect(bridge.evaluations.run('e1')).rejects.toThrow(/creates and runs in one call/)
+  })
+
+  it('evaluations.getDetail delegates to evaluationApi.getById', async () => {
+    const evaluationApi = mockEvaluationApi()
+    evaluationApi.getById.mockResolvedValueOnce({
+      id: 'e1',
+      agentId: 'a1',
+      caseCount: 2,
+      passedCount: 2,
+      averageScore: 1.0,
+      status: 'Completed',
+      duration: '1s',
+      creationTime: '2026-04-14T00:00:00Z',
+      resultsJson: '{"cases":[]}',
+    } as never)
+    const bridge = createAiBridge({ evaluationApi: evaluationApi as never, client: {} as never })
+    const result = await bridge.evaluations.getDetail('e1')
+    expect(evaluationApi.getById).toHaveBeenCalledWith('e1')
+    expect(result.id).toBe('e1')
+    expect(result.resultsJson).toContain('cases')
   })
 })

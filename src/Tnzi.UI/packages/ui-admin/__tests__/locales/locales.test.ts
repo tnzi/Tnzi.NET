@@ -8,7 +8,10 @@ describe('locales', () => {
     expect(en.admin.crud.create).toBe('Create')
     expect(en.admin.crud.refresh).toBe('Refresh')
     expect(en.admin.tabs.closeCurrent).toBeTruthy()
-    expect(en.admin.theme.title).toBe('Theme')
+    expect(en.admin.theme.title).toBe('Theme settings')
+    expect(en.admin.theme.tabs.appearance).toBe('Appearance')
+    expect(en.admin.theme.layout.verticalHybridHeaderFirst).toBeTruthy()
+    expect(en.admin.theme.watermark.enabled).toBe('Show watermark')
     expect(en.admin.search.placeholder).toBeTruthy()
   })
 

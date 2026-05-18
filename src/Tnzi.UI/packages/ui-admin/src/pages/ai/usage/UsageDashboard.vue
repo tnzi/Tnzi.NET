@@ -17,7 +17,7 @@
       ./usage-dashboard-config.ts already produce ChartSpec records that a
       Phase 6 task can hand to vue-echarts with a one-line edit.
   -->
-  <div class="t-usage-dashboard" data-test="usage-dashboard">
+  <div class="t-usage-dashboard t-page-scroll" data-test="usage-dashboard">
     <header class="t-usage-dashboard__header">
       <h2 class="t-usage-dashboard__title">{{ t('title') }}</h2>
       <button
@@ -95,7 +95,7 @@
 
     <section class="t-usage-dashboard__chart-card" data-test="chart-trend">
       <h3>{{ t('charts.trend') }}</h3>
-      <p class="t-usage-dashboard__placeholder">{{ t('charts.placeholder') }}</p>
+      <TChartPanel v-if="trend.length" :option="trendOption" :height="320" />
       <ul class="t-usage-dashboard__list">
         <li v-for="point in trend" :key="point.period">
           <span>{{ point.period }}</span>
@@ -108,7 +108,7 @@
 
     <section class="t-usage-dashboard__chart-card" data-test="chart-by-agent">
       <h3>{{ t('charts.byAgent') }}</h3>
-      <p class="t-usage-dashboard__placeholder">{{ t('charts.placeholder') }}</p>
+      <TChartPanel v-if="topAgents.length" :option="agentOption" :height="280" />
       <ul class="t-usage-dashboard__list">
         <li v-for="row in topAgents" :key="row.agentId">
           <span>{{ row.agentName }}</span>
@@ -121,7 +121,7 @@
 
     <section class="t-usage-dashboard__chart-card" data-test="chart-by-model">
       <h3>{{ t('charts.byModel') }}</h3>
-      <p class="t-usage-dashboard__placeholder">{{ t('charts.placeholder') }}</p>
+      <TChartPanel v-if="topModels.length" :option="modelOption" :height="280" />
       <ul class="t-usage-dashboard__list">
         <li v-for="row in topModels" :key="`${row.provider}/${row.model}`">
           <span>{{ row.provider }}/{{ row.model }}</span>
@@ -136,6 +136,8 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
+import type { EChartsOption } from 'echarts'
+import TChartPanel from '../../../components/display/TChartPanel.vue'
 import { translatePageKey } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -185,6 +187,68 @@ const errors = ref<PartialError[]>([])
 
 const topAgents = computed(() => topAgentsByCost(agentRows.value, 10))
 const topModels = computed(() => topModelsByCost(modelRows.value, 10))
+
+// ---- ECharts option builders (Phase H follow-up: stat-cards → real charts) ---
+// useEcharts handles theme reactivity globally, so option callers don't need to
+// inject mode. Keep these as `computed` so resize / re-render fires on data
+// mutation.
+
+const trendOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'axis' },
+  legend: { data: ['Requests', 'Tokens'], top: 0 },
+  grid: { left: 40, right: 40, top: 32, bottom: 24, containLabel: true },
+  xAxis: { type: 'category', data: trend.value.map((p) => p.period) },
+  yAxis: [
+    { type: 'value', name: 'Requests', position: 'left' },
+    { type: 'value', name: 'Tokens', position: 'right' },
+  ],
+  series: [
+    {
+      name: 'Requests',
+      type: 'line',
+      smooth: true,
+      yAxisIndex: 0,
+      data: trend.value.map((p) => p.totalRequests),
+      itemStyle: { color: 'var(--tnzi-primary-color, #06B6D4)' },
+    },
+    {
+      name: 'Tokens',
+      type: 'line',
+      smooth: true,
+      yAxisIndex: 1,
+      data: trend.value.map((p) => p.totalTokens),
+      itemStyle: { color: 'var(--tnzi-success-color, #18A058)' },
+    },
+  ],
+}))
+
+const agentOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+  grid: { left: 40, right: 24, top: 16, bottom: 32, containLabel: true },
+  xAxis: { type: 'category', data: topAgents.value.map((r) => r.agentName), axisLabel: { rotate: 24 } },
+  yAxis: { type: 'value', name: 'USD' },
+  series: [
+    {
+      type: 'bar',
+      data: topAgents.value.map((r) => Number(r.totalEstimatedCostUsd.toFixed(4))),
+      itemStyle: { color: 'var(--tnzi-warning-color, #F0A020)' },
+    },
+  ],
+}))
+
+const modelOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+  grid: { left: 40, right: 24, top: 16, bottom: 32, containLabel: true },
+  xAxis: { type: 'category', data: topModels.value.map((r) => `${r.provider}/${r.model}`), axisLabel: { rotate: 24 } },
+  yAxis: { type: 'value', name: 'USD' },
+  series: [
+    {
+      type: 'bar',
+      data: topModels.value.map((r) => Number(r.totalEstimatedCostUsd.toFixed(4))),
+      itemStyle: { color: 'var(--tnzi-error-color, #D03050)' },
+    },
+  ],
+}))
 
 function formatStat(card: StatCardDefinition): string {
   const value = card.read(summary.value)
@@ -301,7 +365,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
   gap: 0.75rem;
   padding: 0.75rem;
   border: 1px solid var(--t-border, #eee);
-  border-radius: 6px;
+  border-radius: var(--tnzi-admin-radius-sm, 6px);
 }
 .t-usage-dashboard__field {
   display: flex;
@@ -317,7 +381,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
 .t-usage-dashboard__stat {
   padding: 1rem;
   border: 1px solid var(--t-border, #eee);
-  border-radius: 6px;
+  border-radius: var(--tnzi-admin-radius-sm, 6px);
   background: var(--t-surface, #fafafa);
 }
 .t-usage-dashboard__stat-label {
@@ -332,7 +396,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
 .t-usage-dashboard__chart-card {
   padding: 1rem;
   border: 1px solid var(--t-border, #eee);
-  border-radius: 6px;
+  border-radius: var(--tnzi-admin-radius-sm, 6px);
 }
 .t-usage-dashboard__placeholder {
   font-size: 0.8rem;
@@ -358,7 +422,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
 .t-usage-dashboard__errors {
   padding: 0.75rem;
   border: 1px solid var(--t-danger, #c33);
-  border-radius: 6px;
+  border-radius: var(--tnzi-admin-radius-sm, 6px);
   color: var(--t-danger, #c33);
   background: rgba(204, 51, 51, 0.05);
 }

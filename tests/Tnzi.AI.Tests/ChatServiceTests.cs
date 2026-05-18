@@ -149,6 +149,67 @@ public class ChatServiceTests
         events[1].FinishReason.ShouldBe(FinishReasons.RequiresClarification);
     }
 
+    [Fact]
+    public async Task ChatStreamingAsync_TerminalEvent_CarriesPersistedMessageIds()
+    {
+        // HistoryMiddleware stamps persisted message ids directly onto the terminal chunk —
+        // ChatService must lift those IDs onto the StreamEvent so the client can call
+        // message-scoped APIs (e.g. feedback) without an extra round-trip. AsyncLocal cannot
+        // back-propagate writes across async iterator yield boundaries, hence the chunk-borne
+        // wire format.
+        var userId = SequentialGuid.NewGuid();
+        var assistantId = SequentialGuid.NewGuid();
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(x => x.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(
+            [
+                new AgentStreamChunk { Text = "Hi" },
+                new AgentStreamChunk
+                {
+                    Text = "!",
+                    FinishReason = FinishReasons.Stop,
+                    UserMessageId = userId,
+                    AssistantMessageId = assistantId
+                }
+            ]));
+
+        var service = CreateService(runtime.Object);
+        var events = new List<StreamEvent>();
+        await foreach (var item in service.ChatStreamingAsync(new ChatRequestDto { Message = "hello" }))
+        {
+            events.Add(item);
+        }
+
+        var terminal = events.Single(e => e.IsDone);
+        terminal.UserMessageId.ShouldBe(userId);
+        terminal.AssistantMessageId.ShouldBe(assistantId);
+    }
+
+    [Fact]
+    public async Task ChatAsync_PersistedMessageIdsSurfaceOnResponse()
+    {
+        var userId = SequentialGuid.NewGuid();
+        var assistantId = SequentialGuid.NewGuid();
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(x => x.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult
+            {
+                Response = "Hi there",
+                FinishReason = FinishReasons.Stop,
+                ThreadId = Guid.NewGuid(),
+                UserMessageId = userId,
+                AssistantMessageId = assistantId
+            });
+
+        var service = CreateService(runtime.Object);
+        var result = await service.ChatAsync(new ChatRequestDto { Message = "hello" });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldNotBeNull();
+        result.Data!.UserMessageId.ShouldBe(userId);
+        result.Data.AssistantMessageId.ShouldBe(assistantId);
+    }
+
     private static ChatService CreateService(IAgentRuntime runtime)
     {
         return new ChatService(

@@ -14,10 +14,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
+import type { PageTransition } from '../../stores/useAdminThemeStore'
 
 interface Props {
-  /** Page transition name. Pass 'none' to disable animation. */
-  transitionName?: 'fade' | 'slide-left' | 'slide-right' | 'zoom' | 'none'
+  /**
+   * Page transition name. Maps to one of the keyframe families in
+   * `styles/transition.css` (all prefixed with `tnzi-`). Pass `'none'` to disable.
+   */
+  transitionName?: PageTransition
   /**
    * Optional key to force transition on route changes. Defaults to a static
    * 'default' so the component works outside vue-router; wire it to
@@ -27,75 +31,44 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  transitionName: 'fade',
+  transitionName: 'fade-slide',
   routeKey: 'default',
 })
 
 const appStore = useAdminAppStore()
 
-const currentTransition = computed(() => (props.transitionName === 'none' ? '' : props.transitionName))
+const currentTransition = computed(() => {
+  if (props.transitionName === 'none') return ''
+  return `tnzi-${props.transitionName}`
+})
 
 defineExpose({ currentTransition })
 </script>
 
 <style scoped>
+/* soybean parity: the content frame itself does NOT scroll. Each page
+   is responsible for placing its own scroll boundary — CRUD pages let
+   the NDataTable scroll internally (so the pagination footer stays
+   pinned), long-form pages opt into outer scroll by wrapping their
+   body in `.t-page-scroll` (utility class in styles/polish.css). The
+   page wrapper gets `height: 100% + flex column` so flex children
+   (TCrudPage's list-card) can claim a real `flex: 1` of vertical
+   space. */
 .t-admin-content {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  background-color: var(--tnzi-content-bg, var(--tnzi-layout-bg));
-  padding: var(--tnzi-content-padding, 16px);
+  overflow: hidden;
+  background-color: var(--tnzi-admin-content-bg, var(--tnzi-layout-bg));
+  padding: var(--tnzi-admin-content-padding, 16px);
 }
 .t-admin-content[data-full-content='true'] {
   padding: 0;
 }
 .t-admin-content__page {
-  min-height: 100%;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-.slide-left-enter-active,
-.slide-left-leave-active {
-  transition: all 0.25s ease;
-}
-.slide-left-enter-from {
-  transform: translateX(24px);
-  opacity: 0;
-}
-.slide-left-leave-to {
-  transform: translateX(-24px);
-  opacity: 0;
-}
-
-.slide-right-enter-active,
-.slide-right-leave-active {
-  transition: all 0.25s ease;
-}
-.slide-right-enter-from {
-  transform: translateX(-24px);
-  opacity: 0;
-}
-.slide-right-leave-to {
-  transform: translateX(24px);
-  opacity: 0;
-}
-
-.zoom-enter-active,
-.zoom-leave-active {
-  transition: all 0.2s ease;
-}
-.zoom-enter-from,
-.zoom-leave-to {
-  transform: scale(0.96);
-  opacity: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>

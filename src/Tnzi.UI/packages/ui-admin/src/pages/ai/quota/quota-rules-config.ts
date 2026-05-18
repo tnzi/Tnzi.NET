@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 
 /**
  * Phase 5 Task 5.12 — QuotaRules page config.
@@ -22,16 +24,28 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *     prop, but documents the gap here.
  */
 export const quotaColumns: ColumnDef[] = [
-  { key: 'userId', title: 'User ID' },
-  { key: 'dailyTokenLimit', title: 'Daily Limit' },
-  { key: 'monthlyTokenLimit', title: 'Monthly Limit' },
-  { key: 'currentDailyUsage', title: 'Daily Used' },
-  { key: 'currentMonthlyUsage', title: 'Monthly Used' },
-  { key: 'dailyUsagePercentage', title: 'Daily %', visible: false },
-  { key: 'monthlyUsagePercentage', title: 'Monthly %', visible: false },
-  { key: 'warningLevel', title: 'Warning Level' },
-  { key: 'isEnabled', title: 'Enabled' },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'userId', title: 'columns.userId' },
+  { key: 'dailyTokenLimit', title: 'columns.dailyTokenLimit' },
+  { key: 'monthlyTokenLimit', title: 'columns.monthlyTokenLimit' },
+  { key: 'currentDailyUsage', title: 'columns.currentDailyUsage' },
+  { key: 'currentMonthlyUsage', title: 'columns.currentMonthlyUsage' },
+  { key: 'dailyUsagePercentage', title: 'columns.dailyUsagePercentage', visible: false },
+  { key: 'monthlyUsagePercentage', title: 'columns.monthlyUsagePercentage', visible: false },
+  { key: 'warningLevel', title: 'columns.warningLevel' },
+  {
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.isEnabled),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 export const quotaFormSchema: FormSchemaItem[] = [

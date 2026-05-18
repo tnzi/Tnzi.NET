@@ -8,7 +8,6 @@ import {
   type AdminMenuItem,
 } from '../../../src/stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
-import { useAdminTabStore } from '../../../src/stores/useAdminTabStore'
 
 function seedRoutes(): AdminRouteRecord[] {
   return [
@@ -95,19 +94,19 @@ describe('TAdminSidebar', () => {
     expect(wrapper.find('.n-menu-stub').attributes('data-collapsed')).toBe('true')
   })
 
-  it('binds active value to tabStore.activeTabId', () => {
+  it('binds active value to the current route name (Phase I.7.6+)', () => {
+    // Phase I.7.6 rewired the active-menu signal: it used to read from
+    // `tabStore.activeTabId` (which only updated when a tab was opened),
+    // and now reads from `useRoute().name` directly so the first page
+    // load shows the active item without a click.
+    //
+    // The test mount doesn't install a router, so `useRoute()` returns
+    // null and the sidebar resolves `activeMenuKey` to "" — i.e. no
+    // active item. We assert that explicitly to lock in the fallback.
     const routeStore = useAdminRouteStore()
     routeStore.setConstantRoutes(seedRoutes())
-    const tabStore = useAdminTabStore()
-    tabStore.addTab({
-      name: 'identity',
-      path: '/identity',
-      fullPath: '/identity',
-      meta: { title: 'Identity' },
-    })
-    tabStore.setActiveTab('identity')
     const wrapper = mountSidebar()
-    expect(wrapper.find('.n-menu-stub').attributes('data-value')).toBe('identity')
+    expect(wrapper.find('.n-menu-stub').attributes('data-value')).toBe('')
   })
 
   it('emits menuSelect with resolved AdminMenuItem on selection', async () => {

@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 
 /**
  * Phase 5 Task 5.2 — canonical AI page config (sibling of AgentList.vue).
@@ -14,15 +16,27 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  * surfaced via columns, not the form.
  */
 export const agentColumns: ColumnDef[] = [
-  { key: 'name', title: 'Name' },
-  { key: 'description', title: 'Description' },
-  { key: 'provider', title: 'Provider' },
-  { key: 'model', title: 'Model' },
-  { key: 'isEnabled', title: 'Enabled' },
-  { key: 'qualityTier', title: 'Quality', visible: false },
-  { key: 'latencyTier', title: 'Latency', visible: false },
-  { key: 'costTier', title: 'Cost', visible: false },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'name', title: 'columns.name' },
+  { key: 'description', title: 'columns.description' },
+  { key: 'provider', title: 'columns.provider' },
+  { key: 'model', title: 'columns.model' },
+  {
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.isEnabled),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
+  { key: 'qualityTier', title: 'columns.qualityTier', visible: false },
+  { key: 'latencyTier', title: 'columns.latencyTier', visible: false },
+  { key: 'costTier', title: 'columns.costTier', visible: false },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 export const agentProviderOptions: Array<{ label: string; value: string }> = [

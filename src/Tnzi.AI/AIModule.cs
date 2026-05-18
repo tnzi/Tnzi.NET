@@ -338,7 +338,10 @@ public partial class AIModule : TnziApplicationModule
         AddAiMiddleware<InputGuardrailMiddleware>(services);
         AddAiMiddleware<HistoryMiddleware>(services);
 
-        services.TryAddSingleton<CompositeContextProviderFactory>();
+        // Scoped because the constructor consumes Scoped IContextProviderContributor instances
+        // (e.g. MemoryContextProvider depends on Scoped repositories). Cost of per-request
+        // construction is amortised by caching the contributor array internally.
+        services.TryAddScoped<CompositeContextProviderFactory>();
         AddAiMiddleware<ContextInjectionMiddleware>(services);
         AddAiMiddleware<UsageLoggingMiddleware>(services);
         AddAiMiddleware<OutputGuardrailMiddleware>(services);

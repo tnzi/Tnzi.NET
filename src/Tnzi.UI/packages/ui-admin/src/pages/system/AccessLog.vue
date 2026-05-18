@@ -28,7 +28,7 @@ import { accessLogColumns, accessLogFormSchema } from './access-log-config'
 import { translatePageKey } from '../_shared/translate'
 import type { AccessLogInfoDto } from '@tnzi/core/services/system'
 
-const title = 'Access Log'
+const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
 
 // No-op handlers: access logs are read-only; these callbacks are required by useCrudPage

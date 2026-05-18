@@ -1,4 +1,289 @@
-# Migration guide — `@tnzi/*` 0.1 → 0.2
+# Migration guide — `@tnzi/*`
+
+This guide collects breaking changes by version range. Read [CHANGELOG.md](./CHANGELOG.md) alongside.
+
+## `@tnzi/ui-admin` 0.2.58 → 0.2.59 — Phase G layout cards + tab overhaul
+
+### Breaking — `TabStyle` regained `'slider'`
+
+```diff
+- export type TabStyle = 'chrome' | 'button'
++ export type TabStyle = 'chrome' | 'button' | 'slider'
+```
+
+If you narrowed your own type alias to the 2-member union you'll need
+to widen it. `setTabStyle('slider')` now works.
+
+### Breaking — `TLayoutModeCard` internal class names
+
+If you targeted `TLayoutModeCard`'s internal classes from CSS, the
+class set changed. Old: `__top-menu`, `__sub-sider`, `__content-line`,
+`__sider--rail`. New: `__sider--primary`, `__sider--tertiary`,
+`__sider--w8/--w16/--w18`, `__header--primary`, `__header--secondary`,
+`__header--tertiary`, `__main`. The card's outer `t-layout-card`
+class + `t-layout-card--active` modifier are unchanged.
+
+### Behavioural — `useAdminTabStore` close ops skip pinned tabs
+
+`removeTab(id)` returns `null` (no-op) for pinned + home tabs.
+`removeLeftTabs / removeRightTabs / removeOtherTabs / clearAllTabs`
+all keep pinned tabs. If you have tests that asserted "close all
+clears the array completely", they need to either also `unfixTab`
+beforehand or assert against `tabStore.tabs.filter(t => !isTabPinned(t.id))`.
+
+### Behavioural — middle-click close now reads from theme store
+
+```ts
+// Before: TAdminTabs.props.closeByMiddleClick defaulted true
+<TAdminTabs />  // closes on middle click
+
+// After: defaults to themeStore.closeTabByMiddleClick (default false)
+<TAdminTabs />  // does NOT close on middle click unless user enables it
+                // in Theme Drawer → Layout → Close tab on middle click
+<TAdminTabs :close-by-middle-click="true" />  // explicit override still works
+```
+
+### New stable APIs
+
+`useAdminTabStore`:
+- `fixedTabIds: Ref<string[]>`
+- `isTabPinned(id) / isTabRetain(id) / fixTab(id) / unfixTab(id)`
+
+`useAdminThemeStore`:
+- `closeTabByMiddleClick: Ref<boolean>` + `setCloseTabByMiddleClick`
+
+`@tnzi/ui-admin/components` exports `TChromeTabBg.vue` (port of
+soybean's chrome SVG arc background, useful if you're building
+custom chrome-styled tabs).
+
+`AdminThemeSnapshotV1.closeTabByMiddleClick?: boolean`.
+
+## `@tnzi/ui-admin` 0.2.56 → 0.2.57 — Phase E hybrid layouts
+
+### Non-breaking improvements
+
+- The 4 hybrid layout modes finally render distinct menu structures.
+  If you've been using only `vertical` or `horizontal` you won't
+  notice anything.
+- `vertical-mix` drawer no longer ships empty when the user lands
+  on a 1st level leaf route.
+- `TAdminSidebar` and `TAdminTopMenu` accept a new `:items` prop
+  for callers that want to override the menu source. The default
+  (omit it) reads from `useAdminRouteStore().menus`.
+
+### New composable
+
+`useAdminMenuContext({ menus, routeName, autoSelectFirstWith? })`
+exposes layered menu slices + active-key state. If you build custom
+hybrid layouts in your app, prefer this over walking the menu tree
+manually:
+
+```ts
+import { useAdminMenuContext } from '@tnzi/ui-admin/headless'
+const ctx = useAdminMenuContext({
+  menus: computed(() => routeStore.menus),
+  routeName: computed(() => useRoute().name as string),
+})
+// ctx.firstLevelMenus / secondLevelMenus / childLevelMenus
+// ctx.activeFirstLevelMenuKey / activeSecondLevelMenuKey
+// ctx.isActiveFirstLevelMenuHasChildren
+// ctx.handleSelectFirstLevelMenu(key) / handleSelectSecondLevelMenu(key)
+```
+
+## `@tnzi/ui-admin` 0.2.54 → 0.2.55 — Phase C tab style + header guard
+
+### Breaking — `TabStyle` narrowed to `'chrome' | 'button'`
+
+```diff
+- export type TabStyle = 'chrome' | 'button' | 'slider'
++ export type TabStyle = 'chrome' | 'button'
+```
+
+`useAdminThemeStore.setTabStyle('slider')` now silently rejects
+(validation gate at `VALID_TAB_STYLES`); existing persisted state
+containing `tabStyle: 'slider'` reads back as the default `'chrome'`.
+The slider style was visually indistinguishable from chrome — drop
+the option from any consumer setting UI.
+
+### Non-breaking improvements
+
+- Button-mode tabs actually paint primary bg + white text now.
+- "Show header" toggle in the theme drawer self-disables in
+  horizontal/hybrid layouts (where the header hosts the menu).
+- The shell ignores a `headerVisible: false` value when the layout
+  needs the header — no more "I hid the header and lost all
+  navigation" foot-gun.
+
+## `@tnzi/ui-admin` 0.2.52 → 0.2.53 — Phase A 救命修复
+
+### Breaking — `invertHeader` removed from `useAdminThemeStore`
+
+The setting + setter + persistence pick are gone:
+
+```diff
+- themeStore.invertHeader            // ❌ removed
+- themeStore.toggleInvertHeader()    // ❌ removed
+- localStorage 'tnzi-admin-theme' .invertHeader  // ❌ no longer persisted
+```
+
+If you reference these from consumer code, just delete the calls — the
+header now always follows the global light/dark mode (matching
+soybean). Snapshot JSON written by 0.2.52 that contains
+`admin.invertHeader: false` will load fine in 0.2.53 (the field is
+silently ignored). Snapshot JSON written by 0.2.52 with
+`admin.invertHeader: true` will load with the header in light/dark
+mode following the global theme — visually closer to what soybean ships
+than the previous broken behaviour.
+
+`AdminThemeSnapshotV1` type lost the `admin.invertHeader: boolean`
+member. If you have a custom snapshot importer, drop the field.
+
+### Non-breaking improvements (no consumer action needed)
+
+- Every `<TCrudPage>` row's edit/view button now actually opens the
+  modal (was silently broken since the page introduced reactive list
+  state). No code change in your pages — the fix is internal to
+  `useFormModal`.
+- Route transitions now actually animate. If you previously worked
+  around the missing animation by adding your own `<Transition>` on
+  top of `<router-view>`, you can remove that wrapper.
+- Content area background is no longer cold-purple. If you overrode
+  `--tnzi-admin-content-bg` to compensate, you can remove the
+  override.
+
+## `@tnzi/ui-admin` 0.2.23 → 0.2.24 (Phase I.7.1: TLoginPage router-param rewrite)
+
+**Breaking — `TLoginPage` prop shape and route path both changed.** The
+component is now a router-param driven shell that mirrors
+`soybean-admin-example/views/_builtin/login/index.vue`. The old
+`centered` / `split` variant toggle was a design dead-end and has been
+removed entirely; the new single layout is what soybean has always
+shipped.
+
+### What broke
+
+- `<TLoginPage variant="centered|split" />` — the `variant` prop is
+  gone. The component now has only one layout (soybean centered card on
+  brand-tinted background with a `TWaveBg` underneath).
+- `<TLoginPage cardTitle cardSubtitle tagline />` — these single-shot
+  text props are gone. The page now renders 5 modules (pwd-login,
+  code-login, register, reset-pwd, bind-wechat) each with its own
+  title; override per-module titles via the `moduleLabels` prop.
+- `<TLoginPage onLogin demoAccounts enableCodeLogin defaultUserName
+  defaultPassword />` — gone. The shell no longer owns the form; each
+  module owns its own form and pulls callbacks from
+  `useLoginContext()`. Phase I.7.2+ will wire these.
+- `<TLoginPage translate="…" />` — the function signature changed from
+  `(key) => string` to `(key, fallback?) => string`. If your translate
+  function ignores extra args it'll keep working; otherwise wrap it:
+  `translate={(k, f) => myT(k) ?? f ?? k}`.
+- `import { TLoginPageVariant }` — type export removed.
+- `defaultAdminRoutes` — the `/login` entry now has the path
+  `/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?`.
+  Consumers matching by literal `'/login'` should match by `name ===
+  'login'` instead.
+
+### What you gain
+
+- Built-in admin login page (no need to write your own route component
+  for the common case). Consumers that pass `loginComponent` to
+  `defineAdminApp()` are unaffected.
+- 5 module slots — `moduleComponents` prop on `TLoginPage` is a
+  `Record<LoginModule, Component>` so you can replace any module
+  individually. The 5 built-in modules are exported from
+  `@tnzi/ui-admin/pages/login/modules/*` (also barreled at top level).
+- `useLoginContext()` composable — modules call `translate`,
+  `toggleLoginModule(name)`, and the consumer-supplied auth
+  `callbacks` (Promise-returning bag).
+
+### Recipe — minimal upgrade
+
+If you were previously rendering a single-card login with an `onLogin`
+callback:
+
+```ts
+// Before (0.2.23)
+<TLoginPage variant="centered" :on-login="login" :demo-accounts="[…]" />
+
+// After (0.2.24) — wrap with the route component and pass callbacks
+import { TnziAdminLoginPage } from '@tnzi/ui-admin'
+// register `TnziAdminLoginPage` at `/login/:module(…)?` (defaultAdminRoutes does this)
+// Then wire callbacks in your shell by overriding the route:
+defineAdminApp({
+  client,
+  loginComponent: MyLoginShell, // see Phase I.7.2 wire-up
+})
+```
+
+Phase I.7.2 (next commit) will ship a real wired-up reference example
+for consumers, including how to pass `callbacks.pwdLogin` to the page.
+
+## `@tnzi/ui-admin` 0.2.2 → 0.2.9 (7 Phase production overhaul)
+
+Patch-grade bumps across `0.2.3` through `0.2.9` collectively reshape the
+admin lib from "42-page scaffold" to "production-grade admin framework"
+benchmarked against soybean-admin. None of the individual patches break
+existing consumers, but the overall feature surface is materially larger:
+
+### What's new — opt-in, no migration required
+
+- **`defineAdminApp({ client, hideModules, showOnlyModules, overridePages,
+  addModules, loginComponent, forbiddenComponent })` factory** (0.2.4) —
+  shrinks consumer `admin/main.ts` boilerplate from ~110 lines to ~50.
+- **Backend module manifest** at `GET admin/diagnostics/admin-manifest`
+  (0.2.4) — frontend can call `useAdminModuleManifest()` to learn which
+  admin entities the backend actually exposes.
+- **`v-permission` directive** (0.2.6) — hide / remove DOM elements based
+  on user permissions. Auto-installed by `createTnziUiAdmin`.
+- **`TAdminLoginCard` component** (0.2.6) — soybean-style production login
+  card with pwd / SMS-code tabs, demo-account quick-fill cards, and
+  third-party login slot.
+- **`useFormRules(translate?)` + `useNaiveForm()` composables** (0.2.7) —
+  i18n-reactive Naive UI form validation rules (required / text / userName
+  / email / phone / password / matches / url / json / integer) plus an
+  ergonomic NForm wrapper.
+- **`TIconPicker` + `TJsonEditor` components** (0.2.7) — searchable
+  Iconify icon picker (80 curated MDI icons by default) and a textarea-
+  based JSON editor with format/minify/validate. Both bundle-light by
+  design.
+- **6 layout modes** in `useAdminThemeStore.layoutMode` (0.2.3) — vertical
+  / horizontal / vertical-mix / 3 hybrid variants. Driven by `TAdminShell`
+  dispatch.
+- **5-tab Theme Settings Drawer** (0.2.3) — Appearance / Layout / General
+  / Watermark / Preset. Auto-mounted by `AdminShellRoot` and wired to the
+  header 🎨 button.
+- **4 new admin pages scaffolded** (0.2.8) — identity/organizations,
+  identity/sessions, ai/threads, system/features.
+
+### Behavioral changes worth knowing
+
+- **CSS variable names aligned to `@tnzi/ui`** (0.2.5) — custom CSS
+  referencing `--tnzi-primary-color` / `--tnzi-text-color-1` /
+  `--tnzi-border-color` etc. should switch to `--tnzi-primary` /
+  `--tnzi-base-text` / `--tnzi-border`. Old names never existed in
+  `@tnzi/ui`'s actual injection set; they silently fell through to CSS
+  fallbacks.
+- **Header icons are now Iconify SVG** (0.2.5) — emoji buttons replaced
+  with `mdi:*` icons. CSS class names preserved for backward-compat.
+- **`createTnziUiAdmin` auto-provides a `@tnzi/ui` theme context** when
+  the consumer hasn't installed `createTnziUi()`. Before this fix
+  (`7bf20274`), `TThemeDrawer` would throw during setup and the whole
+  `/admin` subtree would silently fail to render.
+- **Menu titles auto-resolve dotted i18n keys** (0.2.9) — `meta.title`
+  values starting with `admin.` / `tnzi.admin.` are now looked up in the
+  bundled locale pack.
+
+### Required deps changes
+
+- **`@iconify/vue@^5.0.0`** added as a runtime dependency (0.2.5).
+
+### Tests
+
+488 → 560 tests (+72 across the 7 Phases). No regressions.
+
+---
+
+## `@tnzi/*` 0.1 → 0.2
 
 This guide walks a consumer of `@tnzi/core`, `@tnzi/ui`, `@tnzi/ui-admin`, `@tnzi/ui-ai`, or `@tnzi/mobile` through the breaking changes introduced in the 0.2.0-preview.1 release. Read [CHANGELOG.md](./CHANGELOG.md) alongside this guide.
 
@@ -90,11 +375,79 @@ import { AgentList, AgentDetail } from '@tnzi/ui-admin/pages/ai/agents'
 
 The `@tnzi/ui-ai` public surface now consists of:
 
-- `chat/` — `TChat`, `TThreadList`, `TMessage*` (60+ components)
-- `components/{agent,artifact,chat,context,knowledge,reasoning,skill,streaming,workflow}` — fine-grained building blocks
-- `composables/` — `useChat`, `useAgentExecution`, `useAutoScroll`, `useEmbedMode`, `useLocalSearch`, `useMessageBranch`, `useMessageGroup`, `useRagChat`, `useSkillBrowser`, `useStreamMarkdown`, `useTokenCounter`, `useWorkflowVisualization`
+- `chat/` — **`TChatApp`** (drop-in Manus-style chat application shell; the recommended entry point as of 0.2.1)
+- `components/{agent,artifact,chat,context,knowledge,reasoning,skill,streaming,workflow}` — fine-grained building blocks (62 SFCs)
+- `shell/` — reusable chrome (`TCollapsibleSidebar`, `TCommandPalette`, `TSettingsDialog`, `TLandingPage`) for custom layouts when `TChatApp` is too prescriptive
+- `composables/` — 13 headless composables (`useChat`, `useAgentExecution`, `useAutoScroll`, `useEmbedMode`, `useLocalSearch`, `useMessageBranch`, `useMessageGroup`, `useRagChat`, `useSidebarState`, `useSkillBrowser`, `useStreamMarkdown`, `useTokenCounter`, `useWorkflowVisualization`)
 - `embed/` — embed widget
 - `lib/` — `formatCompactNumber`, `cn` (deprecated — use `:class` bindings)
+
+### 0.2.x — `ChatLayout` → `TChatApp` (breaking)
+
+`@tnzi/ui-ai` 0.2.1 hard-removes the legacy `ChatLayout` family (`ChatLayout`,
+`ChatSidebar`, `ChatMain`, `ChatHeader`, `ChatArtifactPanel`, `ChatSettings`).
+All chat product code must move to `TChatApp`.
+
+```diff
+- import { ChatLayout } from '@tnzi/ui-ai'
++ import { TChatApp } from '@tnzi/ui-ai/chat'
+
+  <ChatLayout
+-   :threads="..."
+-   :active-thread-id="..."
+-   :messages="..."
+-   :is-streaming="..."
+-   :input-text="..."
+-   :agent-name="..."
+-   @new-chat
+-   @select-thread
+-   @send
+-   @stop
+- />
++ <TChatApp
++   brand-name="..."          <!-- new: sidebar brand wordmark -->
++   :threads="..."
++   :active-thread-id="..."
++   :messages="..."
++   :is-streaming="..."
++   v-model:input-text="..."  <!-- now two-way bound -->
++   agent-name="..."
++   agent-label="..."         <!-- new: small tag rendered after agent name -->
++   landing-greeting="..."    <!-- new: serif headline on empty state -->
++   :landing-chips="..."      <!-- new: suggestion chips -->
++   @new-chat
++   @select-thread
++   @send
++   @stop
++ />
+```
+
+**Slot mapping** (old → new):
+
+| Old (`ChatLayout`) | New (`TChatApp`) |
+|---|---|
+| `#sidebar-header` | `#brand` |
+| `#sidebar-footer` | `#sidebar-footer` |
+| `#header-extra` | `#topbar-actions` |
+| `#input-above` | `#thread-composer-left` / `#thread-composer-right` |
+| _(no equivalent)_ | `#sidebar-content`, `#sidebar-nav`, `#rail` |
+| _(no equivalent)_ | `#landing-plan`, `#landing-headline`, `#landing-subline`, `#landing-chips`, `#composer-left`, `#composer-right` |
+| _(no equivalent)_ | `#settings-account`, `#settings-appearance`, `#settings-about`, `#settings-{customId}` |
+
+**New capabilities** that consumers no longer need to build manually:
+
+- Three-mode collapsible sidebar (expanded / icon-rail / hidden + mobile drawer)
+- Settings dialog (Account / Appearance / About defaults; extensible via `settingsSections`)
+- Command palette (Cmd+K, opt-in via `enable-command-palette`)
+- Landing empty state with serif headline, suggestion chips, composer
+- Auto theme application (`autoApplyTheme` defaults to `true` → calls `applyAiTheme()` on mount and theme change)
+- Top-bar with workspace title + actions slot
+- Stop button automatically appears in composer when `is-streaming=true`
+
+If `TChatApp`'s shell is too prescriptive (embedded chat panel, customer-support
+widget, kiosk mode, etc.), compose the `@tnzi/ui-ai/shell` primitives
+(`TCollapsibleSidebar`, `TLandingPage`, `TSettingsDialog`, `TCommandPalette`)
+together with the `components/chat/*` thread primitives directly.
 
 ---
 

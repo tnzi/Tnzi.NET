@@ -12,19 +12,19 @@
     :title="title"
     :translate="t"
   >
-    <!-- Preview row action: renders template using bridge.templates.preview -->
-    <template #rowActions="{ row }">
-      <NButton size="tiny" @click="openPreview(row as Record<string, unknown>)">
-        Preview
-      </NButton>
-    </template>
-
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="notificationTemplateFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
       />
+    </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t">
+        <template #prepend>
+          <NButton size="small" ghost @click="openPreview(row as Record<string, unknown>)">Preview</NButton>
+        </template>
+      </TRowActions>
     </template>
   </TCrudPage>
 
@@ -40,6 +40,7 @@
 import { ref } from 'vue'
 import { NButton, NModal } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -47,7 +48,7 @@ import TFormSchemaRenderer from '../_shared/form-schema'
 import { notificationTemplateColumns, notificationTemplateFormSchema } from './notification-template-config'
 import { translatePageKey } from '../_shared/translate'
 
-const title = 'Notification Templates'
+const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
 
 /**

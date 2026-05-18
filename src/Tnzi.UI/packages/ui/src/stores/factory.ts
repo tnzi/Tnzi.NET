@@ -6,7 +6,7 @@
  */
 
 import { inject, type App, type InjectionKey } from 'vue';
-import type { HttpClient } from '@tnzi/core/http/http';
+import type { HttpClient } from '@tnzi/core/http';
 import type { StorageAdapter } from '@tnzi/core/adapters';
 
 // ============================================

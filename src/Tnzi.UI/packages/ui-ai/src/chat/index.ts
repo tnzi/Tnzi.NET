@@ -1,14 +1,13 @@
 /**
- * AI Chat
+ * AI Chat — full chat interface components.
  *
- * Full chat interface components and composables.
+ * Primary entry point: `TChatApp` — production-grade chat application
+ * shell with Manus-inspired design. Compose data via props/events and
+ * override visuals via slots. See `TChatApp.vue` JSDoc for the API.
+ *
+ * The legacy `ChatLayout` family is being removed; use `TChatApp` for
+ * any new code.
  */
 
-export { default as ChatLayout } from './ChatLayout.vue';
-export { default as ChatSidebar } from './ChatSidebar.vue';
-export { default as ChatMain } from './ChatMain.vue';
-export { default as ChatHeader } from './ChatHeader.vue';
-export { default as ChatArtifactPanel } from './ChatArtifactPanel.vue';
-export { default as ChatSettings } from './ChatSettings.vue';
-export type { ThreadItem } from './ChatSidebar.vue';
-export type { ChatSettingsData } from './ChatSettings.vue';
+export { default as TChatApp } from './TChatApp.vue';
+export type { ThreadItem, NavItem, ThemePref, LandingChip } from './TChatApp.vue';

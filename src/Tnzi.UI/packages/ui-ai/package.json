@@ -1,6 +1,6 @@
 {
   "name": "@tnzi/ui-ai",
-  "version": "0.1.3",
+  "version": "0.2.2",
   "description": "Tnzi AI components - chat, agent visualization, and workflow builder for AI-powered applications.",
   "type": "module",
   "sideEffects": [
@@ -33,6 +33,10 @@
     "./shell": {
       "types": "./dist/shell/index.d.ts",
       "import": "./dist/shell.js"
+    },
+    "./themes": {
+      "types": "./dist/themes/index.d.ts",
+      "import": "./dist/themes.js"
     },
     "./themes/*": {
       "types": "./dist/themes/*.d.ts",

@@ -1,5 +1,13 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+
+const EVAL_STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
+  '0': { type: 'info',    label: 'Running' },
+  '1': { type: 'success', label: 'Completed' },
+  '2': { type: 'error',   label: 'Failed' },
+}
 
 /**
  * Phase 5 Task 5.14 — EvalViewer page config.
@@ -24,14 +32,23 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *     exposed via the bridge — useCrudPage requires a deleteData fn.
  */
 export const evalRunColumns: ColumnDef[] = [
-  { key: 'id', title: 'Run ID' },
-  { key: 'agentId', title: 'Agent' },
-  { key: 'caseCount', title: 'Cases' },
-  { key: 'passedCount', title: 'Passed' },
-  { key: 'averageScore', title: 'Avg Score' },
-  { key: 'status', title: 'Status' },
-  { key: 'duration', title: 'Duration' },
-  { key: 'creationTime', title: 'Started' },
+  { key: 'id', title: 'columns.id' },
+  { key: 'agentId', title: 'columns.agentId' },
+  { key: 'caseCount', title: 'columns.caseCount' },
+  { key: 'passedCount', title: 'columns.passedCount' },
+  { key: 'averageScore', title: 'columns.averageScore' },
+  {
+    key: 'status',
+    title: 'columns.status',
+    width: 120,
+    render: (row) => {
+      const raw = String(row.status ?? '')
+      const m = EVAL_STATUS_MAP[raw] ?? { type: 'default' as const, label: row.status as string ?? '—' }
+      return h(TStatusBadge, { value: raw, type: m.type, label: m.label })
+    },
+  },
+  { key: 'duration', title: 'columns.duration' },
+  { key: 'creationTime', title: 'columns.creationTime' },
 ]
 
 export const evalRunStatusOptions: Array<{ label: string; value: number }> = [

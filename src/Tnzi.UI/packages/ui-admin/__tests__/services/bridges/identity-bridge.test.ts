@@ -68,6 +68,10 @@ function mockLoginLogApi() {
   } as any
 }
 
+// organizationApi + sessionApi are optional — the bridge degrades the
+// organizations / sessions sub-contracts to lazy-rejecting stubs when they're
+// absent, so existing 4-api tests don't need to mock them. (See
+// identity-bridge.ts createIdentityBridge for the guard.)
 function makeBridge(overrides: Record<string, unknown> = {}) {
   return createIdentityBridge({
     userApi: mockUserApi(),

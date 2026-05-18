@@ -18,12 +18,20 @@ describe('TAdminContent', () => {
     expect(wrapper.find('.page').text()).toBe('hello')
   })
 
-  it('applies transition name prop to inner transition', () => {
+  it('applies transition name prop to inner transition (prefixed with `tnzi-`)', () => {
     const wrapper = mount(TAdminContent, {
       props: { transitionName: 'slide-left' },
       slots: { default: '<div>x</div>' },
     })
-    expect((wrapper.vm as unknown as { currentTransition: string }).currentTransition).toBe('slide-left')
+    expect((wrapper.vm as unknown as { currentTransition: string }).currentTransition).toBe('tnzi-slide-left')
+  })
+
+  it('supports soybean-style transition names', () => {
+    const wrapper = mount(TAdminContent, {
+      props: { transitionName: 'fade-bottom' },
+      slots: { default: '<div>x</div>' },
+    })
+    expect((wrapper.vm as unknown as { currentTransition: string }).currentTransition).toBe('tnzi-fade-bottom')
   })
 
   it('maps "none" transition to empty string (disables animation)', () => {
@@ -56,10 +64,10 @@ describe('TAdminContent', () => {
     expect(wrapper.find('.page').exists()).toBe(true)
   })
 
-  it('default transitionName is "fade"', () => {
+  it('default transitionName is "fade-slide" (soybean default)', () => {
     const wrapper = mount(TAdminContent, {
       slots: { default: 'x' },
     })
-    expect((wrapper.vm as unknown as { currentTransition: string }).currentTransition).toBe('fade')
+    expect((wrapper.vm as unknown as { currentTransition: string }).currentTransition).toBe('tnzi-fade-slide')
   })
 })

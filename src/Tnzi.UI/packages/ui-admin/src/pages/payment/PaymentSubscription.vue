@@ -21,13 +21,11 @@
     </template>
 
     <template #rowActions="{ row }">
-      <Button
-        size="small"
-        type="warning"
-        @click="cancelAtPeriodEnd(row as SubscriptionRow)"
-      >
-        Cancel at Period End
-      </Button>
+      <TRowActions :row="row" :state="crud" :translate="t" :show-delete="false">
+        <template #prepend>
+          <Button size="small" type="warning" ghost @click="cancelAtPeriodEnd(row as SubscriptionRow)">Cancel at Period End</Button>
+        </template>
+      </TRowActions>
     </template>
   </TCrudPage>
 
@@ -50,6 +48,7 @@
 import { ref, onMounted } from 'vue'
 import { NButton as Button, NModal as Modal } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'

@@ -41,6 +41,8 @@ public class AgentDto
     public int LatencyTier { get; set; }
     /// <summary>Cost tier (1-5, 1=cheapest)</summary>
     public int CostTier { get; set; }
+    /// <summary>Persona ID — FK to AgentPersona for soul / role injection (optional).</summary>
+    public Guid? PersonaId { get; set; }
     /// <summary>Creation time</summary>
     public DateTime CreationTime { get; set; }
     /// <summary>Last modification time</summary>
@@ -112,6 +114,9 @@ public class CreateAgentDto
     /// <summary>Cost tier (1-5, 1=cheapest)</summary>
     [Range(1, 5)]
     public int CostTier { get; set; } = 3;
+
+    /// <summary>Persona ID — FK to AgentPersona (optional).</summary>
+    public Guid? PersonaId { get; set; }
 }
 
 /// <summary>
@@ -177,6 +182,9 @@ public class UpdateAgentDto
     /// <summary>Cost tier (1-5, 1=cheapest)</summary>
     [Range(1, 5)]
     public int? CostTier { get; set; }
+
+    /// <summary>Persona ID — FK to AgentPersona; pass Guid.Empty to clear.</summary>
+    public Guid? PersonaId { get; set; }
 
     /// <summary>Change note for version tracking</summary>
     [MaxLength(500)]

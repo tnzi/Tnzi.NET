@@ -1,6 +1,13 @@
-/* Tnzi UI Admin base styles — Phase 2b (vite plugin + ui import deferred to Phase 6) */
-:root {
-  --tnzi-admin-header-height: 56px;
-  --tnzi-admin-tab-height: 40px;
-  --tnzi-admin-content-padding: 16px;
-}
+/**
+ * Entry point for @tnzi/ui-admin styles. Imported by `createTnziUiAdmin` so
+ * the layout + transition primitives are guaranteed available even when
+ * the consumer hasn't manually imported `@tnzi/ui-admin/style.css`.
+ *
+ * The base @tnzi/ui variables (--tnzi-primary, --tnzi-base-text, …) are
+ * injected separately by `createTnziUi()` or by the fallback theme context
+ * the admin plugin provides — do NOT duplicate them here.
+ */
+
+@import './variables.css';
+@import './transition.css';
+@import './polish.css';

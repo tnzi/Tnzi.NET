@@ -77,7 +77,7 @@ public class FileConversationStore : IConversationStore
     }
 
     /// <inheritdoc />
-    public async Task AppendMessageAsync(string conversationId, string role, string content, CancellationToken ct = default)
+    public async Task<string> AppendMessageAsync(string conversationId, string role, string content, string? messageId = null, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(conversationId);
         Check.NotNullOrWhiteSpace(role);
@@ -93,10 +93,15 @@ public class FileConversationStore : IConversationStore
             _ => ChatRole.User
         };
 
-        context.Messages.Add(new ChatMessage(chatRole, content));
+        var assignedId = string.IsNullOrWhiteSpace(messageId)
+            ? SequentialGuid.NewGuid().ToString()
+            : messageId;
+        var message = new ChatMessage(chatRole, content) { MessageId = assignedId };
+        context.Messages.Add(message);
         await SaveAsync(conversationId, context, ct);
 
-        _logger.LogDebug("Appended {Role} message to conversation '{ConversationId}'", role, conversationId);
+        _logger.LogDebug("Appended {Role} message to conversation '{ConversationId}' as {MessageId}", role, conversationId, assignedId);
+        return assignedId;
     }
 
     /// <inheritdoc />

@@ -21,21 +21,12 @@
     </template>
 
     <template #rowActions="{ row }">
-      <Button
-        size="small"
-        type="info"
-        style="margin-right: 4px;"
-        @click="openPreview(row as TemplateRow)"
-      >
-        Preview
-      </Button>
-      <Button
-        size="small"
-        type="default"
-        @click="handleClone(row as TemplateRow)"
-      >
-        Clone
-      </Button>
+      <TRowActions :row="row" :state="crud" :translate="t">
+        <template #prepend>
+          <Button size="small" type="info" @click="openPreview(row as TemplateRow)">Preview</Button>
+          <Button size="small" type="default" @click="handleClone(row as TemplateRow)">Clone</Button>
+        </template>
+      </TRowActions>
     </template>
   </TCrudPage>
 
@@ -64,6 +55,7 @@
 import { ref, onMounted } from 'vue'
 import { NButton as Button, NModal as Modal } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createTemplateBridge } from '../../services/bridges/template-bridge'
 import { useAdminClient } from '../../plugin/client'

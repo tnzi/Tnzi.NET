@@ -4,24 +4,24 @@ namespace Tnzi.AI.Events.Handlers;
 
 /// <summary>
 /// 线程首轮对话完成后自动生成标题。
-/// 所有依赖均为可选注入，因为 HostingLite 等场景下 EF Core/AI 服务可能不可用。
 /// </summary>
+/// <remarks>
+/// Runs in an isolated DI scope so that loading and updating the thread does not pollute the
+/// originating request's ChangeTracker. If the handler shared the request DbContext, the
+/// thread entity it tracked here would race with the main flow's SaveChanges batch — a 0-row
+/// UPDATE has been observed in that mode. All dependencies are optional because HostingLite
+/// scenarios may not have EF Core or AI services wired up.
+/// </remarks>
 public class ThreadTitleGenerationHandler : IEventHandler<ThreadFirstReplyCompletedEvent>
 {
-    private readonly IAiUtility? _aiUtility;
-    private readonly IRepository<AgentThreadEntity, Guid>? _threadRepository;
-    private readonly IOptionsMonitor<ThreadOptions>? _options;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ThreadTitleGenerationHandler> _logger;
 
     public ThreadTitleGenerationHandler(
-        IAiUtility? aiUtility = null,
-        IRepository<AgentThreadEntity, Guid>? threadRepository = null,
-        IOptionsMonitor<ThreadOptions>? options = null,
+        IServiceScopeFactory scopeFactory,
         ILogger<ThreadTitleGenerationHandler>? logger = null)
     {
-        _aiUtility = aiUtility;
-        _threadRepository = threadRepository;
-        _options = options;
+        _scopeFactory = Check.NotNull(scopeFactory);
         _logger = logger ?? NullLogger<ThreadTitleGenerationHandler>.Instance;
     }
 
@@ -29,27 +29,32 @@ public class ThreadTitleGenerationHandler : IEventHandler<ThreadFirstReplyComple
     {
         try
         {
-            if (_aiUtility == null || _threadRepository == null || _options == null)
+            using var scope = _scopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+
+            var aiUtility = sp.GetService<IAiUtility>();
+            var threadRepository = sp.GetService<IRepository<AgentThreadEntity, Guid>>();
+            var options = sp.GetService<IOptionsMonitor<ThreadOptions>>();
+
+            if (aiUtility == null || threadRepository == null || options == null)
             {
                 _logger.LogDebug("Required services not available, skipping AI title generation for {ThreadId}", @event.ThreadId);
                 return;
             }
 
-            var threadOptions = _options.CurrentValue;
+            var threadOptions = options.CurrentValue;
             if (!threadOptions.AutoGenerateTitle)
                 return;
 
-            var thread = await _threadRepository.GetAsync(@event.ThreadId, cancellationToken);
+            var thread = await threadRepository.GetAsync(@event.ThreadId, cancellationToken);
             if (thread == null)
             {
                 _logger.LogWarning("Thread not found for title generation: {ThreadId}", @event.ThreadId);
                 return;
             }
 
-            // 组合用户消息和 AI 回复作为生成内容
             var content = $"User: {@event.UserMessage}\nAssistant: {@event.AssistantReply}";
-
-            var title = await _aiUtility.GenerateTitleAsync(
+            var title = await aiUtility.GenerateTitleAsync(
                 content, threadOptions.TitleMaxLength, cancellationToken: cancellationToken);
 
             if (string.IsNullOrWhiteSpace(title))
@@ -59,13 +64,21 @@ public class ThreadTitleGenerationHandler : IEventHandler<ThreadFirstReplyComple
             }
 
             thread.Title = title;
-            await _threadRepository.UpdateAsync(thread, cancellationToken);
+            await threadRepository.UpdateAsync(thread, cancellationToken);
+
+            // Persist within the isolated scope so the unit of work does not bleed back into
+            // the originating request.
+            var uow = sp.GetService<IUnitOfWork>();
+            if (uow != null)
+            {
+                await uow.SaveChangesAsync(cancellationToken);
+            }
 
             _logger.LogDebug("Thread title generated: {ThreadId} -> {Title}", @event.ThreadId, title);
         }
         catch (Exception ex)
         {
-            // Silent catch: 标题生成失败不影响主流程
+            // Silent catch: title generation failure must not break the main chat flow.
             _logger.LogWarning(ex, "Failed to generate thread title for {ThreadId}", @event.ThreadId);
         }
     }

@@ -28,7 +28,7 @@ import { loginLogColumns, loginLogFormSchema } from './login-log-config'
 import { translatePageKey } from '../_shared/translate'
 import type { LoginLogDto } from '@tnzi/core/services/identity'
 
-const title = 'Login Log'
+const title = 'title'
 const bridge = createIdentityBridge({ client: useAdminClient() })
 
 // No-op handlers: login logs are read-only; these callbacks are required by useCrudPage

@@ -472,6 +472,21 @@ public class FileStorageService : ApplicationService, IFileStorageService
             query = query.Where(f => f.OriginalName != null && f.OriginalName.ToLower().Contains(keyword));
         }
 
+        // Folder filter — two modes:
+        //   1. FolderId set + IncludeUnfiled=false → that folder's direct children only.
+        //   2. FolderId=null + IncludeUnfiled=true  → root/unfiled (FolderId IS NULL).
+        // Other combinations leave the query unconstrained on folder so legacy
+        // callers (no folder filter at all) keep working unchanged.
+        if (request.IncludeUnfiled)
+        {
+            query = query.Where(f => f.FolderId == null);
+        }
+        else if (request.FolderId.HasValue)
+        {
+            var folderId = request.FolderId.Value;
+            query = query.Where(f => f.FolderId == folderId);
+        }
+
         if (!string.IsNullOrEmpty(request.Tag))
         {
             var tag = request.Tag.Trim().ToLower();

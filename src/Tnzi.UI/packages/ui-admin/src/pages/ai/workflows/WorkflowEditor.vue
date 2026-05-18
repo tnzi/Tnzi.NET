@@ -12,7 +12,7 @@
       - 12: do NOT bypass the canvas to call workflow APIs from this shell —
             the canvas owns the workflow data lifecycle
   -->
-  <div class="t-workflow-editor">
+  <div class="t-workflow-editor t-page-scroll">
     <Suspense>
       <WorkflowCanvas v-if="workflowId" :workflow-id="workflowId" />
       <div v-else class="t-workflow-editor__empty">{{ t('editor.missingId') }}</div>

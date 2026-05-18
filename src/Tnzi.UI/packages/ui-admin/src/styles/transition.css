@@ -1,0 +1,223 @@
+/**
+ * Route / Vue transition primitives for @tnzi/ui-admin.
+ *
+ * Six built-in transition modes (named to match `useAdminThemeStore.pageTransition`):
+ *  - fade
+ *  - fade-slide (horizontal slide-in / slide-out)
+ *  - fade-bottom (slide up / slide down)
+ *  - fade-scale (zoom in lightly)
+ *  - zoom-fade (subtle scale + fade — snappy)
+ *  - zoom-out (drop in from center, used for modals)
+ *
+ * Plus three legacy aliases for backwards compat with 0.2.11 (`slide-left`,
+ * `slide-right`, `zoom`).
+ */
+
+/* ===== fade ===== */
+.tnzi-fade-enter-active,
+.tnzi-fade-leave-active {
+  transition: opacity 0.3s ease-in-out;
+}
+.tnzi-fade-enter-from,
+.tnzi-fade-leave-to {
+  opacity: 0;
+}
+
+/* ===== fade-slide ===== */
+.tnzi-fade-slide-enter-active,
+.tnzi-fade-slide-leave-active {
+  transition: all 0.3s;
+}
+.tnzi-fade-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.tnzi-fade-slide-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+/* ===== fade-bottom ===== */
+.tnzi-fade-bottom-enter-active,
+.tnzi-fade-bottom-leave-active {
+  transition:
+    opacity 0.25s,
+    transform 0.3s;
+}
+.tnzi-fade-bottom-enter-from {
+  opacity: 0;
+  transform: translateY(-10%);
+}
+.tnzi-fade-bottom-leave-to {
+  opacity: 0;
+  transform: translateY(10%);
+}
+
+/* ===== fade-scale ===== */
+.tnzi-fade-scale-enter-active,
+.tnzi-fade-scale-leave-active {
+  transition: all 0.28s;
+}
+.tnzi-fade-scale-enter-from {
+  opacity: 0;
+  transform: scale(1.2);
+}
+.tnzi-fade-scale-leave-to {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+/* ===== zoom-fade ===== */
+.tnzi-zoom-fade-enter-active,
+.tnzi-zoom-fade-leave-active {
+  transition:
+    transform 0.2s,
+    opacity 0.3s ease-out;
+}
+.tnzi-zoom-fade-enter-from {
+  opacity: 0;
+  transform: scale(0.92);
+}
+.tnzi-zoom-fade-leave-to {
+  opacity: 0;
+  transform: scale(1.06);
+}
+
+/* ===== zoom-out (used for modals / drawers) ===== */
+.tnzi-zoom-out-enter-active,
+.tnzi-zoom-out-leave-active {
+  transition:
+    opacity 0.15s ease-in-out,
+    transform 0.2s ease-out;
+}
+.tnzi-zoom-out-enter-from,
+.tnzi-zoom-out-leave-to {
+  opacity: 0;
+  transform: scale(0);
+}
+
+/* ===== Legacy aliases (0.2.x) ===== */
+.tnzi-slide-left-enter-active,
+.tnzi-slide-left-leave-active,
+.tnzi-slide-right-enter-active,
+.tnzi-slide-right-leave-active {
+  transition: all 0.3s;
+}
+.tnzi-slide-left-enter-from {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.tnzi-slide-left-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+.tnzi-slide-right-enter-from {
+  opacity: 0;
+  transform: translateX(30px);
+}
+.tnzi-slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.tnzi-zoom-enter-active,
+.tnzi-zoom-leave-active {
+  transition: all 0.25s ease-out;
+}
+.tnzi-zoom-enter-from,
+.tnzi-zoom-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+/* ===== Collapse — used for sider expand / submenu open ===== */
+.tnzi-collapse-enter-active,
+.tnzi-collapse-leave-active {
+  transition:
+    max-height 0.3s var(--tnzi-admin-motion-ease-in-out, ease-in-out),
+    opacity 0.2s var(--tnzi-admin-motion-ease-in-out, ease-in-out);
+  overflow: hidden;
+}
+.tnzi-collapse-enter-from,
+.tnzi-collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+.tnzi-collapse-enter-to,
+.tnzi-collapse-leave-from {
+  max-height: 600px;
+  opacity: 1;
+}
+
+/* ===== Tab badge pulse — for unread / new indicators ===== */
+@keyframes tnzi-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.85;
+  }
+}
+.tnzi-pulse {
+  animation: tnzi-pulse 1.4s var(--tnzi-admin-motion-ease-in-out, ease-in-out) infinite;
+}
+
+/* ===== Spin — used for refresh / loading icons ===== */
+@keyframes tnzi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.tnzi-spin {
+  animation: tnzi-spin 0.9s linear infinite;
+}
+
+/* ===== Skeleton shimmer ===== */
+@keyframes tnzi-shimmer {
+  0% {
+    background-position: -468px 0;
+  }
+  100% {
+    background-position: 468px 0;
+  }
+}
+.tnzi-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--tnzi-border-rgb) / 0.4) 0%,
+    rgb(var(--tnzi-border-rgb) / 0.7) 50%,
+    rgb(var(--tnzi-border-rgb) / 0.4) 100%
+  );
+  background-size: 468px 100%;
+  animation: tnzi-shimmer 1.4s linear infinite;
+  border-radius: var(--tnzi-admin-radius-sm);
+}
+
+/* ===== Route progress bar (soybean nprogress-like, pure CSS) =====
+ * Toggled via `useRouteProgress(router)` setting
+ * `<html data-tnzi-route-loading="on">`. While loading, the bar grows from
+ * 0% → ~80% over 8s (a soft asymptote — soybean reaches ~90 before route
+ * resolves). On removal we fade out and clean up.
+ */
+html::before {
+  content: '';
+  position: fixed;
+  inset: 0 auto auto 0;
+  height: var(--tnzi-admin-nprogress-height, 2px);
+  width: 0%;
+  background: var(--tnzi-admin-nprogress-color, currentColor);
+  box-shadow: 0 0 8px rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.6);
+  opacity: 0;
+  z-index: 9999;
+  pointer-events: none;
+  transition: width 0.2s ease, opacity 0.2s ease;
+}
+html[data-tnzi-route-loading='on']::before {
+  opacity: 1;
+  width: 80%;
+  transition:
+    width 8s cubic-bezier(0.1, 0.9, 0.2, 1),
+    opacity 0.15s ease-in;
+}

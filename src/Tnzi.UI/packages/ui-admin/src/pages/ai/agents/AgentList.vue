@@ -22,11 +22,15 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import TRowActions from '../../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -39,7 +43,7 @@ import type {
   UpdateAgentDto,
 } from '@tnzi/core/services/ai'
 
-const title = 'Agents'
+const title = 'title'
 
 // TODO(phase-5.15+): inject HttpClient via createTnziUiAdmin options instead of
 // constructing the bridge inline. Mirrors the Phase 3 identity-bridge pattern;

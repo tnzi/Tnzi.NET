@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Image and PDF uploads in the user message',
     category: 'artifact',
     icon: 'lucide:paperclip',
-    componentsShowcased: ['MessageAttachments', 'PromptInput file picker'],
+    componentsShowcased: ['MessageAttachments', 'PromptInput'],
   },
   events: [
     {

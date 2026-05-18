@@ -12,12 +12,44 @@ import type { FormSchemaItem } from '../_shared/form-schema'
  * deserialise without an intermediate string→enum step.
  */
 
-export const chatSessionColumns: ColumnDef[] = [
-  { key: 'title',         title: 'Title' },
-  { key: 'participants',  title: 'Participants' },
-  { key: 'messageCount',  title: 'Messages' },
-  { key: 'lastMessageAt', title: 'Last Message' },
-  { key: 'status',        title: 'Status' },
+import { h } from 'vue'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
+
+interface ChatSessionRow {
+  id?: string
+  title?: string
+  description?: string
+  participants?: number
+  messageCount?: number
+  lastMessageAt?: string
+  status?: 1 | 2
+}
+
+export const chatSessionColumns: ColumnDef<ChatSessionRow>[] = [
+  { key: 'title', title: 'columns.title', width: 240, fixed: 'left' },
+  { key: 'participants', title: 'columns.participants', width: 100 },
+  { key: 'messageCount', title: 'columns.messageCount', width: 110 },
+  {
+    key: 'status',
+    title: 'columns.status',
+    width: 120,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.status ?? 0,
+        mapping: {
+          '1': { type: 'success', label: 'Active' },
+          '2': { type: 'default', label: 'Archived' },
+        },
+      }),
+  },
+  {
+    key: 'lastMessageAt',
+    title: 'columns.lastMessageAt',
+    width: 160,
+    fixed: 'right',
+    render: (row) => h(TRelativeTime, { value: row.lastMessageAt }),
+  },
 ]
 
 export const chatSessionFormSchema: FormSchemaItem[] = [

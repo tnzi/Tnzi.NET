@@ -57,18 +57,27 @@ describe('buildCssVars', () => {
     const colorKeys = Object.keys(vars).filter(k =>
       /^--tnzi-(primary|info|success|warning|error)(-\d+)?$/.test(k),
     )
-    // 5 bases + 5 roles × 11 levels = 60
+    // 5 bases + 5 roles × 11 levels = 60 (the `-rgb` variants don't match this regex)
     expect(colorKeys).toHaveLength(60)
     expect(vars['--tnzi-primary']).toBe('#18a058')
     expect(vars['--tnzi-primary-500']).toBe('#18a058')
     expect(vars['--tnzi-primary-50']).toMatch(/^#[0-9a-f]{6}$/i)
   })
 
+  it('emits matching `-rgb` triplet variant for every color var', () => {
+    const vars = buildCssVars(defaultThemeSettings.colors, 'light')
+    // RGB triplet format is "R G B" — space-separated, no rgb() wrapper.
+    expect(vars['--tnzi-primary-rgb']).toMatch(/^\d+ \d+ \d+$/)
+    expect(vars['--tnzi-primary-500-rgb']).toMatch(/^\d+ \d+ \d+$/)
+    // #18a058 == rgb(24, 160, 88)
+    expect(vars['--tnzi-primary-rgb']).toBe('24 160 88')
+  })
+
   it('emits light-mode functional tokens', () => {
     const vars = buildCssVars(defaultThemeSettings.colors, 'light')
     expect(vars['--tnzi-base-text']).toBe('rgb(51, 54, 57)')
-    expect(vars['--tnzi-layout-bg']).toBe('rgb(240, 242, 245)')
-    expect(vars['--tnzi-container-bg']).toBe('#ffffff')
+    expect(vars['--tnzi-layout-bg']).toBe('rgb(247, 250, 252)')
+    expect(vars['--tnzi-container-bg']).toBe('rgb(255, 255, 255)')
     expect(vars['--tnzi-shadow-header']).toContain('rgb(0 21 41 / 8%)')
   })
 
@@ -76,8 +85,8 @@ describe('buildCssVars', () => {
     const light = buildCssVars(defaultThemeSettings.colors, 'light')
     const dark = buildCssVars(defaultThemeSettings.colors, 'dark')
     expect(dark['--tnzi-base-text']).not.toBe(light['--tnzi-base-text'])
-    expect(dark['--tnzi-layout-bg']).toBe('rgb(16, 16, 20)')
-    expect(dark['--tnzi-container-bg']).toBe('rgb(24, 24, 28)')
+    expect(dark['--tnzi-layout-bg']).toBe('rgb(18, 18, 18)')
+    expect(dark['--tnzi-container-bg']).toBe('rgb(28, 28, 28)')
   })
 })
 

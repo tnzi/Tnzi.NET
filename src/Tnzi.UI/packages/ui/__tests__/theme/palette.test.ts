@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getColorPalette, getPaletteColorByNumber } from '../../src/theme/palette'
+import { getColorPalette, getPaletteColorByNumber, mixColor } from '../../src/theme/palette'
 
 describe('getPaletteColorByNumber', () => {
   it('returns the base color unchanged at level 500', () => {
@@ -52,5 +52,30 @@ describe('getColorPalette', () => {
     // At least verify 50 is lighter than 500 and 900 is darker
     expect(palette[50]).not.toBe(palette[500])
     expect(palette[900]).not.toBe(palette[500])
+  })
+})
+
+describe('mixColor', () => {
+  it('returns the `from` color at ratio 0', () => {
+    expect(mixColor('#ffffff', '#646cff', 0)).toBe('#ffffff')
+  })
+
+  it('returns the `to` color at ratio 1', () => {
+    expect(mixColor('#ffffff', '#646cff', 1)).toBe('#646cff')
+  })
+
+  it('blends toward the tint at intermediate ratios', () => {
+    const wash = mixColor('#ffffff', '#646cff', 0.2)
+    expect(wash).not.toBe('#ffffff')
+    expect(wash).not.toBe('#646cff')
+    expect(wash).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('clamps ratio < 0 to 0 (pure `from`)', () => {
+    expect(mixColor('#ffffff', '#000000', -1)).toBe('#ffffff')
+  })
+
+  it('clamps ratio > 1 to 1 (pure `to`)', () => {
+    expect(mixColor('#ffffff', '#000000', 2)).toBe('#000000')
   })
 })

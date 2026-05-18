@@ -41,12 +41,16 @@
         </span>
       </div>
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import TRowActions from '../../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -56,7 +60,7 @@ import { kbColumns, kbFormSchema } from './kb-manager-config'
 
 type KbRow = Record<string, unknown>
 
-const title = 'Knowledge Bases'
+const title = 'title'
 
 const bridge = createAiBridge({ client: useAdminClient() })
 

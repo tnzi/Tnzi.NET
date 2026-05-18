@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 
 /**
  * Template page config — Phase 3 Task 3.36.
@@ -20,11 +22,23 @@ import type { FormSchemaItem } from '../_shared/form-schema'
  */
 
 export const templateColumns: ColumnDef[] = [
-  { key: 'templateName',      title: 'Template Name' },
-  { key: 'module',            title: 'Module' },
-  { key: 'category',          title: 'Category' },
-  { key: 'defaultLayoutName', title: 'Layout' },
-  { key: 'isActive',          title: 'Enabled' },
+  { key: 'templateName',      title: 'columns.templateName' },
+  { key: 'module',            title: 'columns.module' },
+  { key: 'category',          title: 'columns.category' },
+  { key: 'defaultLayoutName', title: 'columns.defaultLayoutName' },
+  {
+    key: 'isActive',
+    title: 'columns.isActive',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.isActive),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
 ]
 
 export const templateFormSchema: FormSchemaItem[] = [

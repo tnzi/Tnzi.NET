@@ -15,6 +15,9 @@ import type {
   ModuleFunctionDto,
   RoleFunctionDto,
   RoleFunctionQueryDto,
+  EntityInfoDto,
+  CreateEntityInfoDto,
+  UpdateEntityInfoDto,
   EntityRoleDto,
   CreateEntityRoleDto,
   UpdateEntityRoleDto,
@@ -100,6 +103,33 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
     /** Get all RoleFunction records for a function */
     getFunctionRoles: (functionId: string) =>
       client.get<RoleFunctionDto[]>(`${ROLE_FUNCTIONS_BASE}/function/${functionId}/roles`),
+  }
+}
+
+// ─── Entity Info API (data-auth entity registry) ─────────────────────────────
+
+export function useAdminEntityInfoApi(client: HttpClient) {
+  return {
+    /** List every registered data-auth entity type. */
+    getAll: () =>
+      client.get<EntityInfoDto[]>(`${DATA_AUTH_BASE}/entity-infos`),
+
+    /** Lookup by .NET type name (qualified). */
+    getByTypeName: (typeName: string) =>
+      client.get<EntityInfoDto>(`${DATA_AUTH_BASE}/entity-info/${encodeURIComponent(typeName)}`),
+
+    /** Lookup by id. */
+    getById: (id: string) =>
+      client.get<EntityInfoDto>(`${DATA_AUTH_BASE}/entity-infos/${id}`),
+
+    create: (data: CreateEntityInfoDto) =>
+      client.post<EntityInfoDto>(`${DATA_AUTH_BASE}/entity-infos`, data),
+
+    update: (id: string, data: UpdateEntityInfoDto) =>
+      client.put<EntityInfoDto>(`${DATA_AUTH_BASE}/entity-infos/${id}`, data),
+
+    delete: (id: string) =>
+      client.delete<void>(`${DATA_AUTH_BASE}/entity-infos/${id}`),
   }
 }
 

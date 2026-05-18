@@ -24,12 +24,16 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" :show-edit="false" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { NButton } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -38,7 +42,7 @@ import { gdprColumns, gdprFormSchema } from './gdpr-config'
 import { translatePageKey } from '../_shared/translate'
 import type { GdprRequestDto } from '../../services/bridges/identity-bridge'
 
-const title = 'GDPR Requests'
+const title = 'title'
 const bridge = createIdentityBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<GdprRequestDto>({

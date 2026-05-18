@@ -13,12 +13,12 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  * exports a typed `KnowledgeBaseDto`, swap in the proper type here.
  */
 export const kbColumns: ColumnDef[] = [
-  { key: 'name', title: 'Name' },
-  { key: 'description', title: 'Description' },
-  { key: 'embeddingModel', title: 'Embedding Model' },
-  { key: 'chunkCount', title: 'Chunks', visible: false },
-  { key: 'documentCount', title: 'Documents', visible: false },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'name', title: 'columns.name' },
+  { key: 'description', title: 'columns.description' },
+  { key: 'embeddingModel', title: 'columns.embeddingModel' },
+  { key: 'chunkCount', title: 'columns.chunkCount', visible: false },
+  { key: 'documentCount', title: 'columns.documentCount', visible: false },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 export const kbFormSchema: FormSchemaItem[] = [

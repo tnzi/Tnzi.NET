@@ -67,6 +67,22 @@ export interface SystemBridge {
     trigger(id: string): Promise<void>
     delete(id: string): Promise<void>
   }
+  /**
+   * Feature flags — Tnzi.Feature module's FeatureDefinition/Value admin
+   * surface. Scaffolded in 0.2.8 (Phase E). Endpoints wired in Phase E
+   * backend follow-up.
+   */
+  features: BridgeCrudContract<FeatureDto, Partial<FeatureDto>, Partial<FeatureDto>>
+}
+
+export interface FeatureDto {
+  id: string
+  name: string
+  code: string
+  description?: string
+  valueType?: 'boolean' | 'string' | 'number' | 'json'
+  defaultValue?: string
+  isEnabled?: boolean
 }
 
 /**
@@ -115,6 +131,12 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       scheduledJobs: {
         fetch: noOp as never,
         trigger: noOp as never,
+        delete: noOp as never,
+      },
+      features: {
+        fetch: noOp as never,
+        create: noOp as never,
+        update: noOp as never,
         delete: noOp as never,
       },
     }
@@ -197,5 +219,16 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     },
   }
 
-  return { menus, settings, accessLogs, scheduledJobs }
+  const featureStub = <T>(label: string): Promise<T> =>
+    Promise.reject(
+      new Error(`system.features.${label}: backend endpoint pending (Phase E backend follow-up)`),
+    )
+  const features: SystemBridge['features'] = {
+    fetch: () => featureStub('fetch'),
+    create: () => featureStub('create'),
+    update: () => featureStub('update'),
+    delete: () => featureStub('delete'),
+  }
+
+  return { menus, settings, accessLogs, scheduledJobs, features }
 }

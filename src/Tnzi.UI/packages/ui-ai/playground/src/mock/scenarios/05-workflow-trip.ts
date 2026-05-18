@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'DAG workflow executes in the side panel with live node status',
     category: 'agent',
     icon: 'lucide:git-branch',
-    componentsShowcased: ['WorkflowCanvas', 'NodeEditor', 'AgentQueue', 'RunMonitor'],
+    componentsShowcased: ['WorkflowCanvas', 'WorkflowNode', 'WorkflowToolbar', 'AgentQueue'],
   },
   initial: {
     workflowNodes: [

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../src/services/bridges/identity-bridge', () => ({
@@ -71,6 +72,8 @@ const stubs = {
 }
 
 describe('UserManagement page (integration)', () => {
+  beforeEach(() => { setActivePinia(createPinia()) })
+
   it('mounts, fetches users on mount, and displays rows', async () => {
     const wrapper = mount(UserManagement, { global: { stubs } })
     await flushPromises()

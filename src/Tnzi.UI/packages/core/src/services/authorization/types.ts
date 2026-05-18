@@ -73,6 +73,29 @@ export interface RoleFunctionQueryDto {
   isEnabled?: boolean
 }
 
+// ─── EntityInfo (data-auth entity registry) ───────────────────────────────────
+
+/** Data-auth EntityInfo — describes a backend entity type that supports row-level authorization. */
+export interface EntityInfoDto {
+  id: string
+  name: string
+  typeName: string
+  displayName?: string | null
+  isDataAuthEnabled: boolean
+}
+
+export interface CreateEntityInfoDto {
+  name: string
+  typeName: string
+  displayName?: string | null
+  isDataAuthEnabled?: boolean
+}
+
+export interface UpdateEntityInfoDto {
+  displayName?: string | null
+  isDataAuthEnabled?: boolean
+}
+
 // ─── EntityRole ───────────────────────────────────────────────────────────────
 
 export type DataAuthOperation = 'Query' | 'Update' | 'Delete' | 'All'

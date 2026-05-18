@@ -7,7 +7,7 @@ const scenario: MockScenario = {
     description: 'Demonstrates the floating / sidebar / inline embed mode switcher',
     category: 'embed',
     icon: 'lucide:box',
-    componentsShowcased: ['useEmbedMode', 'embed floating mode', 'embed sidebar mode'],
+    componentsShowcased: ['FloatingChat', 'SidebarChat', 'useEmbedMode'],
   },
   events: [
     { at: 0, type: 'user-message', content: 'How do I embed this chat on my site?' },

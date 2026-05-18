@@ -39,7 +39,7 @@ const scenario: MockScenario = {
     description: 'Generates a code artifact shown in the side panel',
     category: 'artifact',
     icon: 'lucide:file-code-2',
-    componentsShowcased: ['ArtifactPreview', 'ChatArtifactPanel', 'shiki'],
+    componentsShowcased: ['ArtifactPreview', 'TArtifactPanel', 'shiki'],
   },
   events: [
     { at: 0, type: 'user-message', content: 'Write a Vue 3 todo list component with TypeScript.' },

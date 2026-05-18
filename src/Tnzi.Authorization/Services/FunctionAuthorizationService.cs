@@ -13,6 +13,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     private readonly IRepository<RoleFunction, Guid> _roleFunctionRepository;
     private readonly IUserRoleService? _userRoleService;
     private readonly FunctionAuthCache? _functionAuthCache;
+    private readonly IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? _options;
 
     /// <summary>
     /// 初始化一个<see cref="FunctionAuthorizationService"/>类型的新实例
@@ -25,7 +26,8 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         IRepository<RoleFunction, Guid> roleFunctionRepository,
         IServiceProvider serviceProvider,
         IUserRoleService? userRoleService = null,
-        FunctionAuthCache? functionAuthCache = null)
+        FunctionAuthCache? functionAuthCache = null,
+        IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? options = null)
         : base(serviceProvider)
     {
         _moduleRepository = Check.NotNull(moduleRepository);
@@ -35,6 +37,25 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         _roleFunctionRepository = Check.NotNull(roleFunctionRepository);
         _userRoleService = userRoleService;
         _functionAuthCache = functionAuthCache;
+        _options = options;
+    }
+
+    /// <summary>
+    /// True when the user is a member of any role configured under
+    /// <c>Authorization:SuperAdminRoles</c>. Super admins skip the regular
+    /// permission table and are treated as having every enabled function.
+    /// </summary>
+    private async Task<bool> IsSuperAdminAsync(Guid userId)
+    {
+        var superRoles = _options?.Value?.SuperAdminRoles;
+        if (superRoles == null || superRoles.Count == 0) return false;
+        if (_userRoleService == null) return false;
+
+        var lookup = await _userRoleService.GetUserRolesAsync(new[] { userId });
+        if (!lookup.TryGetValue(userId, out var userRoles)) return false;
+
+        var superSet = new HashSet<string>(superRoles, StringComparer.OrdinalIgnoreCase);
+        return userRoles.Any(r => superSet.Contains(r));
     }
 
     /// <summary>
@@ -47,6 +68,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     {
         if (string.IsNullOrEmpty(permissionName))
             return false;
+
+        // SuperAdmin bypass — short-circuit before touching the function tables.
+        if (await IsSuperAdminAsync(userId)) return true;
 
         // 获取用户的所有权限名称（内部已处理缓存和启用状态检查）
         var userPermissionNames = await GetUserPermissionNamesAsync(userId);
@@ -85,6 +109,18 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>权限名称集合</returns>
     public async Task<IEnumerable<string>> GetUserPermissionNamesAsync(Guid userId)
     {
+        // SuperAdmin bypass — return the full catalogue of enabled functions so
+        // both the legacy "has X" check and any caller that enumerates the user's
+        // permissions (menu builders, audit, etc.) sees a complete grant set.
+        if (await IsSuperAdminAsync(userId))
+        {
+            return await _moduleFunctionRepository
+                .Where(f => f.IsEnabled)
+                .Select(f => f.Code)
+                .Distinct()
+                .ToListAsync();
+        }
+
         // 1. 尝试从缓存获取
         if (_functionAuthCache != null)
         {

@@ -3,12 +3,12 @@ import type { FormSchemaItem } from '../_shared/form-schema'
 
 // Aligned to Tnzi.Storage.Dtos.FileChunkAuditDto (Plan E 2026-04-14).
 export const chunkColumns: ColumnDef[] = [
-  { key: 'id',               title: 'Chunk ID' },
-  { key: 'uploadSessionId',  title: 'Upload Session' },
-  { key: 'chunkIndex',       title: 'Index' },
-  { key: 'chunkSize',        title: 'Size (bytes)' },
-  { key: 'md5Hash',          title: 'MD5' },
-  { key: 'creationTime',     title: 'Created At' },
+  { key: 'id',               title: 'columns.id' },
+  { key: 'uploadSessionId',  title: 'columns.uploadSessionId' },
+  { key: 'chunkIndex',       title: 'columns.chunkIndex' },
+  { key: 'chunkSize',        title: 'columns.chunkSize' },
+  { key: 'md5Hash',          title: 'columns.md5Hash' },
+  { key: 'creationTime',     title: 'columns.creationTime' },
 ]
 
 export const chunkFormSchema: FormSchemaItem[] = [

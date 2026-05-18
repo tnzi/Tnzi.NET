@@ -12,11 +12,15 @@
         :readonly="mode === 'view'"
       />
     </template>
+    <template #rowActions="{ row }">
+      <TRowActions :row="row" :state="crud" :translate="t" />
+    </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -25,7 +29,7 @@ import { tenantColumns, tenantFormSchema } from './tenant-config'
 import { translatePageKey } from '../_shared/translate'
 import type { TenantDto } from '@tnzi/core/services/identity'
 
-const title = 'Tenant Management'
+const title = 'title'
 const bridge = createIdentityBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<TenantDto, string>({

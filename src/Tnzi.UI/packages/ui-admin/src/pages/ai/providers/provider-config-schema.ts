@@ -1,5 +1,7 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 
 /**
  * Phase 5 Task 5.8 — ProviderConfig page config (sibling of ProviderConfig.vue).
@@ -20,14 +22,26 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  * provider plugins from the UI.
  */
 export const providerColumns: ColumnDef[] = [
-  { key: 'name', title: 'Name' },
-  { key: 'providerType', title: 'Type' },
-  { key: 'endpoint', title: 'Endpoint' },
-  { key: 'defaultModel', title: 'Default Model' },
-  { key: 'priority', title: 'Priority' },
-  { key: 'isEnabled', title: 'Enabled' },
-  { key: 'hasApiKey', title: 'API Key Set' },
-  { key: 'lastModificationTime', title: 'Last Modified' },
+  { key: 'name', title: 'columns.name' },
+  { key: 'providerType', title: 'columns.providerType' },
+  { key: 'endpoint', title: 'columns.endpoint' },
+  { key: 'defaultModel', title: 'columns.defaultModel' },
+  { key: 'priority', title: 'columns.priority' },
+  {
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Boolean(row.isEnabled),
+        mapping: {
+          true: { type: 'success', label: 'Enabled' },
+          false: { type: 'warning', label: 'Disabled' },
+        },
+      }),
+  },
+  { key: 'hasApiKey', title: 'columns.hasApiKey' },
+  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
 /**
