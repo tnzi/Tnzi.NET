@@ -48,11 +48,14 @@ export default defineConfig({
         id === 'vueuc' ||
         id === 'css-render' ||
         id === '@iconify/vue' ||
+        id === 'vue-draggable-plus' ||
+        id.startsWith('echarts') ||
         id.startsWith('@vueuse/') ||
         id.startsWith('@css-render/') ||
         id.startsWith('@juggle/') ||
         id.startsWith('@tnzi/core') ||
-        id.startsWith('@tnzi/ui'),
+        id.startsWith('@tnzi/ui') ||
+        id.startsWith('@tnzi/ui-ai'),
       output: {
         preserveModules: true,
         preserveModulesRoot: resolve(__dirname, 'src'),
@@ -62,8 +65,11 @@ export default defineConfig({
           pinia: 'Pinia',
           'vue-router': 'VueRouter',
           'naive-ui': 'NaiveUI',
+          'vue-draggable-plus': 'VueDraggablePlus',
+          echarts: 'echarts',
           '@tnzi/core': 'TnziCore',
           '@tnzi/ui': 'TnziUi',
+          '@tnzi/ui-ai': 'TnziUiAi',
         },
       },
     },

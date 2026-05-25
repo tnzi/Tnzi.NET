@@ -22,11 +22,11 @@ export const personaColumns: ColumnDef[] = [
 ]
 
 export const personaFormSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'Name', type: 'text', required: true },
-  { key: 'slug', label: 'Slug', type: 'text', required: true },
-  { key: 'description', label: 'Description', type: 'textarea' },
-  { key: 'content', label: 'Persona Content', type: 'textarea', required: true },
-  { key: 'isSystem', label: 'System Persona', type: 'switch' },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'slug', labelKey: 'form.slug', label: 'Slug', type: 'text', required: true },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
+  { key: 'content', labelKey: 'form.content', label: 'Persona Content', type: 'textarea', required: true },
+  { key: 'isSystem', labelKey: 'form.isSystem', label: 'System Persona', type: 'switch' },
 ]
 
 /**

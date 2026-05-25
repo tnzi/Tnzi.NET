@@ -28,7 +28,17 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      external: (id) => id === 'vue' || id === 'naive-ui' || id === 'pinia' || id.startsWith('@tnzi/core') || id.startsWith('@iconify/vue'),
+      external: (id) =>
+        id === 'vue'
+        || id === 'naive-ui'
+        || id === 'pinia'
+        || id === 'echarts'
+        || id === 'vue-draggable-plus'
+        || id === '@vueuse/core'
+        || id.startsWith('echarts/')
+        || id.startsWith('@vueuse/')
+        || id.startsWith('@tnzi/core')
+        || id.startsWith('@iconify/vue'),
       output: {
         preserveModules: true,
         preserveModulesRoot: resolve(__dirname, 'src'),

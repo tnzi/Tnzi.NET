@@ -26,12 +26,15 @@
     :all-columns="providerColumns"
     :title="title"
     :translate="t"
+    :form-modal-width="760"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="providerFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
       <p v-if="mode === 'edit'" class="provider-config__hint">
         Leave <strong>API Key</strong> blank to keep the existing key. Enter a new
@@ -176,7 +179,7 @@ defineExpose({ onTestConnection, testBusy, testStatus, toCreateDto, toUpdateDto 
 .provider-config__hint {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
-  color: var(--n-text-color-3, #888);
+  color: var(--tnzi-base-text-muted, #888);
 }
 .provider-config__test {
   display: flex;
@@ -193,6 +196,6 @@ defineExpose({ onTestConnection, testBusy, testStatus, toCreateDto, toUpdateDto 
   opacity: 0.6;
 }
 .provider-config__status[data-status='error'] {
-  color: var(--n-error-color, #d03050);
+  color: var(--tnzi-error, #d03050);
 }
 </style>

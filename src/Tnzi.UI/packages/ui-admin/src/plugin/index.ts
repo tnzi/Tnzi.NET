@@ -15,6 +15,10 @@ import {
   provideAdminLoginConfig,
   type AdminLoginConfig,
 } from './loginConfig'
+import {
+  provideAdminWorkbenchConfig,
+  type AdminWorkbenchConfig,
+} from './workbenchConfig'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -60,6 +64,15 @@ export interface TnziUiAdminOptions {
    * behave as placeholders.
    */
   login?: AdminLoginConfig
+  /**
+   * Phase J / 0.2.71+ — configuration for the built-in Workbench page.
+   * When omitted, the page falls back to `defaultWorkbenchWidgets()`
+   * (HeaderBanner + KPIs + business stats + activity timeline + tips).
+   * Pass `widgets` to fully control the dashboard, `layout: 'draggable'`
+   * to let users re-order cards, and an `addModules` of your own
+   * widget components for app-specific cards.
+   */
+  workbench?: AdminWorkbenchConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -81,6 +94,13 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // Always provide (even when undefined) so `useAdminLoginConfig()` always
   // resolves to a stable object.
   provideAdminLoginConfig(app, options.login ?? {})
+
+  // Phase J — install the workbench config so the bundled dashboard page
+  // can pull consumer-supplied widget descriptors. Provide null when no
+  // config supplied so the page falls back to the bundled default deck.
+  if (options.workbench) {
+    provideAdminWorkbenchConfig(app, options.workbench)
+  }
 
   // Install global directives (v-permission, etc).
   installDirectives(app)
@@ -140,6 +160,12 @@ export {
   useAdminLoginConfig,
   type AdminLoginConfig,
 } from './loginConfig'
+export {
+  ADMIN_WORKBENCH_CONFIG_KEY,
+  provideAdminWorkbenchConfig,
+  useAdminWorkbenchConfig,
+  type AdminWorkbenchConfig,
+} from './workbenchConfig'
 export {
   fetchAdminManifest,
   type AdminManifest,

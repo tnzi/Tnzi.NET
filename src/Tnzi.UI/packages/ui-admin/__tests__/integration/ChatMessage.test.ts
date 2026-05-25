@@ -87,19 +87,20 @@ describe('ChatMessage page (Phase 3.30)', () => {
 
 describe('chatMessageColumns config', () => {
   it('exports columns with required keys', async () => {
+    // Fields aligned with backend MessageListItemDto (Tnzi.Chat in-app messages):
+    // title / messageType / senderName / isImportant / isRead / replyCount / creationTime.
     const { chatMessageColumns } = await import('../../src/pages/chat/chat-message-config')
     const keys = chatMessageColumns.map((c) => c.key)
-    expect(keys).toContain('sessionId')
-    expect(keys).toContain('senderId')
-    expect(keys).toContain('content')
+    expect(keys).toContain('title')
     expect(keys).toContain('messageType')
-    expect(keys).toContain('sentAt')
+    expect(keys).toContain('senderName')
+    expect(keys).toContain('creationTime')
   })
 
   it('exports formSchema with required fields', async () => {
     const { chatMessageFormSchema } = await import('../../src/pages/chat/chat-message-config')
     const keys = chatMessageFormSchema.map((f) => f.key)
-    expect(keys).toContain('sessionId')
+    expect(keys).toContain('title')
     expect(keys).toContain('content')
     expect(keys).toContain('messageType')
   })

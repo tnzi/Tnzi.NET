@@ -2,7 +2,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
 
 export interface GdprRow {
   id?: string
@@ -24,8 +24,8 @@ export const gdprColumns: ColumnDef<GdprRow>[] = [
       h(TStatusBadge, {
         value: row.requestType ?? 'export',
         mapping: {
-          export: { type: 'info', label: 'Data Export' },
-          deletion: { type: 'warning', label: 'Account Deletion' },
+          export: { type: 'info', labelKey: 'admin.modules.identity.gdpr.requestType.export' },
+          deletion: { type: 'warning', labelKey: 'admin.modules.identity.gdpr.requestType.deletion' },
         },
       }),
   },
@@ -37,9 +37,9 @@ export const gdprColumns: ColumnDef<GdprRow>[] = [
       h(TStatusBadge, {
         value: row.status ?? 'pending',
         mapping: {
-          pending: { type: 'warning', label: 'Pending' },
-          approved: { type: 'success', label: 'Approved' },
-          denied: { type: 'error', label: 'Denied' },
+          pending: { type: 'warning', labelKey: 'admin.shared.status.pending' },
+          approved: { type: 'success', labelKey: 'admin.shared.status.approved' },
+          denied: { type: 'error', labelKey: 'admin.shared.status.rejected' },
         },
       }),
   },
@@ -56,26 +56,26 @@ export const gdprColumns: ColumnDef<GdprRow>[] = [
 
 // View-only form (GDPR requests are submitted by end-users, not admins).
 export const gdprFormSchema: FormSchemaItem[] = [
-  { key: 'username', label: 'Subject User', type: 'text' },
-  { key: 'userId', label: 'User ID', type: 'text' },
+  { key: 'username', labelKey: 'form.username', label: 'Subject User', type: 'text' },
+  { key: 'userId', labelKey: 'form.userId', label: 'User ID', type: 'text' },
   {
     key: 'requestType',
-    label: 'Type',
+    labelKey: 'form.requestType', label: 'Type',
     type: 'select',
     options: [
-      { label: 'Data Export', value: 'export' },
-      { label: 'Account Deletion', value: 'deletion' },
+      { labelKey: 'admin.modules.identity.gdpr.requestType.export', label: 'Data Export', value: 'export' },
+      { labelKey: 'admin.modules.identity.gdpr.requestType.deletion', label: 'Account Deletion', value: 'deletion' },
     ],
   },
   {
     key: 'status',
-    label: 'Status',
+    labelKey: 'form.status', label: 'Status',
     type: 'select',
     options: [
-      { label: 'Pending', value: 'pending' },
-      { label: 'Approved', value: 'approved' },
-      { label: 'Denied', value: 'denied' },
+      { labelKey: 'admin.shared.status.pending', label: 'Pending', value: 'pending' },
+      { labelKey: 'admin.shared.status.approved', label: 'Approved', value: 'approved' },
+      { labelKey: 'admin.shared.status.rejected', label: 'Denied', value: 'denied' },
     ],
   },
-  { key: 'notes', label: 'Notes', type: 'textarea' },
+  { key: 'notes', labelKey: 'form.notes', label: 'Notes', type: 'textarea' },
 ]

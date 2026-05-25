@@ -115,6 +115,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
         ModuleId = entity.ModuleId,
         IsEnabled = entity.IsEnabled,
         Order = entity.Order,
+        IsSystemManaged = entity.IsSystemManaged,
     };
 
     /// <summary>

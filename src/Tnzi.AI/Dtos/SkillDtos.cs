@@ -41,6 +41,21 @@ public class SkillSummaryDto
     /// <summary>Skill source</summary>
     public SkillSource Source { get; set; }
 
+    /// <summary>
+    /// True when this row originates from a non-database source (file system /
+    /// plugin / managed / embedded / project). Admin UI hides Edit/Delete
+    /// buttons for such rows since the underlying data is owned by code or
+    /// configuration files.
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>
+    /// Absolute filesystem path of the source SKILL.md (file-source rows only).
+    /// Null for database rows. Surfaced so the admin UI can show a "View source"
+    /// link or copy-to-clipboard affordance.
+    /// </summary>
+    public string? FilePath { get; set; }
+
     /// <summary>Category ID</summary>
     public Guid? CategoryId { get; set; }
 
@@ -328,6 +343,15 @@ public class SkillQueryDto : PagedQueryDto
 
     /// <summary>Sort descending (default: true)</summary>
     public bool SortDesc { get; set; } = true;
+
+    /// <summary>
+    /// When true, the paged result is augmented with file-system / plugin /
+    /// managed / project / embedded skills discovered by ISkillRegistry.
+    /// File-source rows are read-only (DTO carries IsReadOnly=true) and are
+    /// not affected by `Scope`/`Enabled`/`Tag`/`CategoryId` filters that only
+    /// apply to database rows. Keyword filter applies post-merge in-memory.
+    /// </summary>
+    public bool IncludeFileSource { get; set; }
 }
 
 /// <summary>

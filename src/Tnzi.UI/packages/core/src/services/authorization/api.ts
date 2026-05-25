@@ -21,6 +21,8 @@ import type {
   EntityRoleDto,
   CreateEntityRoleDto,
   UpdateEntityRoleDto,
+  PermissionComparisonDto,
+  CloneRolePermissionsRequest,
 } from './types'
 
 const MODULES_BASE = '/admin/modules'
@@ -103,6 +105,26 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
     /** Get all RoleFunction records for a function */
     getFunctionRoles: (functionId: string) =>
       client.get<RoleFunctionDto[]>(`${ROLE_FUNCTIONS_BASE}/function/${functionId}/roles`),
+
+    /**
+     * Compare permissions between two roles.
+     * Returns `onlyInA`, `onlyInB`, and `common` function lists — the admin
+     * UI uses this to power the "compare with another role" modal.
+     */
+    compareRolePermissions: (roleAId: string, roleBId: string) =>
+      client.get<PermissionComparisonDto>(`${ROLE_FUNCTIONS_BASE}/compare`, {
+        params: { roleId1: roleAId, roleId2: roleBId },
+      }),
+
+    /**
+     * Copy every function assignment from `sourceRoleId` to `roleId`.
+     * Existing assignments on the target role are not removed first — pair
+     * with `clearFunctions(roleId)` if a hard reset is needed.
+     */
+    cloneRolePermissions: (roleId: string, sourceRoleId: string) =>
+      client.post<number>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/clone`, {
+        sourceRoleId,
+      } satisfies CloneRolePermissionsRequest),
   }
 }
 

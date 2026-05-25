@@ -105,8 +105,24 @@ public class LocalEventBus : IEventBus, IDisposable
 
                     try
                     {
-                        var bgHandler = bgScope.ServiceProvider.GetService(handlerType);
-                        if (bgHandler == null) return;
+                        // Handlers are registered via `AddEventHandler<TEvent, THandler>()` as
+                        // `services.AddScoped<IEventHandler<TEvent>, THandler>()` — i.e. only the
+                        // interface descriptor exists, not a binding for the concrete type.
+                        // Resolving by `handlerType` directly returns null and the background
+                        // dispatch silently drops the event (regression introduced when sync
+                        // handlers were converted to [BackgroundEventHandler]). Resolve via the
+                        // interface and filter by concrete type to fix the dispatch.
+                        var handlerInterface = typeof(IEventHandler<>).MakeGenericType(capturedEventType);
+                        var allHandlers = bgScope.ServiceProvider.GetServices(handlerInterface);
+                        var bgHandler = allHandlers.FirstOrDefault(h => h?.GetType() == handlerType);
+                        if (bgHandler == null)
+                        {
+                            _logger.LogWarning(
+                                "Background handler {HandlerType} for event {EventType} could not be resolved in a new scope. " +
+                                "Ensure the handler is registered via AddEventHandler<TEvent, THandler>().",
+                                handlerType.Name, capturedEventType.Name);
+                            return;
+                        }
 
                         await ExecuteHandlerAsync(bgHandler, capturedEvent, capturedEventType, CancellationToken.None);
                     }

@@ -28,8 +28,8 @@ export const agentColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.isEnabled),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },
@@ -48,21 +48,21 @@ export const agentProviderOptions: Array<{ label: string; value: string }> = [
 ]
 
 export const agentFormSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'Name', type: 'text', required: true },
-  { key: 'description', label: 'Description', type: 'textarea' },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
   {
     key: 'provider',
-    label: 'Provider',
+    labelKey: 'form.provider', label: 'Provider',
     type: 'select',
     required: true,
     options: agentProviderOptions,
   },
-  { key: 'model', label: 'Model', type: 'text' },
-  { key: 'instructions', label: 'System Prompt', type: 'textarea' },
-  { key: 'temperature', label: 'Temperature', type: 'number', min: 0, max: 2 },
-  { key: 'maxTokens', label: 'Max Tokens', type: 'number', min: 1, max: 1000000 },
-  { key: 'timeoutSeconds', label: 'Timeout (s)', type: 'number', min: 1, max: 3600 },
-  { key: 'isEnabled', label: 'Enabled', type: 'switch' },
+  { key: 'model', labelKey: 'form.model', label: 'Model', type: 'text' },
+  { key: 'instructions', labelKey: 'form.instructions', label: 'System Prompt', type: 'textarea' },
+  { key: 'temperature', labelKey: 'form.temperature', label: 'Temperature', type: 'number', min: 0, max: 2 },
+  { key: 'maxTokens', labelKey: 'form.maxTokens', label: 'Max Tokens', type: 'number', min: 1, max: 1000000 },
+  { key: 'timeoutSeconds', labelKey: 'form.timeoutSeconds', label: 'Timeout (s)', type: 'number', min: 1, max: 3600 },
+  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
 ]
 
 /**

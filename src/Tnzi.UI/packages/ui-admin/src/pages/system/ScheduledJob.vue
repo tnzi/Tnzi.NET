@@ -4,36 +4,38 @@
     :all-columns="scheduledJobColumns"
     :title="title"
     :translate="t"
+    :form-modal-width="760"
   >
-    <!-- Trigger now: available via batch-actions slot when exactly 1 row is selected -->
-    <template #batchActions="{ selectedIds }">
-      <NButton
-        v-if="selectedIds.length === 1"
-        type="warning"
-        size="small"
-        :loading="triggering"
-        @click="triggerJob(String(selectedIds[0]))"
-      >
-        Trigger Now
-      </NButton>
-    </template>
-
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="scheduledJobFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
     </template>
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t" />
+      <!-- "Trigger Now" lives in the per-row More menu, not the batch-action
+           slot — admins almost always run a single job on demand, so hiding
+           it behind a row selection was the wrong default. Confirm flow is
+           delegated to TRowActions/useDialog. The Edit action is suppressed
+           because Hangfire recurring jobs are registered in code via
+           IBackgroundJobManager.CreateRecurring; the admin surface is
+           list / trigger / delete only. -->
+      <TRowActions
+        :row="(row as ScheduledJobDto)"
+        :state="crud"
+        :translate="t"
+        :show-edit="false"
+        :more-options="moreOptionsFor"
+        :on-more-select="onMoreSelect"
+      />
     </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NButton } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
@@ -42,12 +44,14 @@ import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { scheduledJobColumns, scheduledJobFormSchema } from './scheduled-job-config'
 import { translatePageKey } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safeMessage'
 
 const title = 'title'
 // Wired to Tnzi.Hangfire /admin/scheduled-jobs (2026-04-14). Client is
 // injected by createTnziUiAdmin({ client }) at app bootstrap.
 const bridge = createSystemBridge({ client: useAdminClient() })
-const triggering = ref(false)
+const t = (key: string) => translatePageKey('system.scheduledJobs', key)
+const message = useSafeMessage()
 
 const readOnlyFn = async (): Promise<never> => {
   // Hangfire recurring jobs are registered in code via
@@ -70,18 +74,26 @@ const crud = useCrudPage<ScheduledJobDto>({
   },
 })
 
-
 crud.refresh().catch(() => undefined)
 
-async function triggerJob(id: string): Promise<void> {
-  triggering.value = true
-  try {
-    await bridge.scheduledJobs.trigger(id)
-    await crud.refresh()
-  } finally {
-    triggering.value = false
-  }
+function moreOptionsFor(row: ScheduledJobDto) {
+  return [
+    {
+      key: 'trigger',
+      label: t('actions.trigger'),
+      disabled: row.removed === true,
+    },
+  ]
 }
 
-const t = (key: string) => translatePageKey('system.scheduledJobs', key)
+async function onMoreSelect(key: string, row: ScheduledJobDto): Promise<void> {
+  if (key !== 'trigger' || !row.id) return
+  try {
+    await bridge.scheduledJobs.trigger(row.id)
+    message.success(t('actions.triggerSuccess'))
+    await crud.refresh()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
 </script>

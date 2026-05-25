@@ -223,7 +223,7 @@ defineExpose({ highlighted })
   padding: 10px 12px;
   cursor: pointer;
   border-radius: var(--tnzi-admin-radius-sm, 6px);
-  color: var(--tnzi-text-color, #1f2937);
+  color: var(--tnzi-base-text);
   transition: background-color 0.12s ease;
 }
 

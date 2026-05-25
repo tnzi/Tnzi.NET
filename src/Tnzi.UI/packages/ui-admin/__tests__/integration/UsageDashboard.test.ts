@@ -92,6 +92,24 @@ vi.mock('../../src/services/bridges/ai-bridge', () => ({
   }),
 }))
 
+// UsageDashboard now wraps TDashboardPage → useEcharts → useTheme. Provide
+// a minimal theme stub so tests can mount without installing @tnzi/ui plugin.
+vi.mock('@tnzi/ui', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@tnzi/ui')
+  return {
+    ...actual,
+    useTheme: () => ({
+      settings: { value: { mode: 'light', colors: { primary: '#646cff' } } },
+      isDark: { value: false },
+      resolvedMode: { value: 'light' },
+      setColor: vi.fn(),
+      setMode: vi.fn(),
+      reset: vi.fn(),
+      toggleTheme: vi.fn(),
+    }),
+  }
+})
+
 import UsageDashboard from '../../src/pages/ai/usage/UsageDashboard.vue'
 
 describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
@@ -173,10 +191,12 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     expect(wrapper.text()).toContain('89') // summary succeeded
   })
 
-  it('renders the page title', async () => {
+  it('renders the page root', async () => {
     const wrapper = mount(UsageDashboard)
     await flushPromises()
-    // translatePageKey falls back to bare key when locale entry missing.
-    expect(wrapper.find('.t-usage-dashboard__title').exists()).toBe(true)
+    // Phase 1 rewrite: title is now provided by the NCard filter slot
+    // (no dedicated h2). Assert the root container instead.
+    expect(wrapper.find('.t-usage-dashboard').exists()).toBe(true)
+    expect(wrapper.find('[data-test="usage-dashboard"]').exists()).toBe(true)
   })
 })

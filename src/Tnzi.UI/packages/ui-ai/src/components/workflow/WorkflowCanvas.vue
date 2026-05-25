@@ -42,6 +42,15 @@ defineEmits<{
     >
       <Background :style="{ backgroundColor: 'var(--tnzi-layout-bg)' }" />
       <slot />
+      <!--
+        Forward every named slot to VueFlow so consumers can override built-in
+        node/edge types (`#node-default`, `#node-input`, `#edge-default`, …) or
+        inject controls/minimap from outside the wrapper without having to
+        fork the component.
+      -->
+      <template v-for="(_, name) in $slots" #[name]="scope">
+        <slot :name="name" v-bind="scope" />
+      </template>
     </VueFlow>
   </div>
 </template>

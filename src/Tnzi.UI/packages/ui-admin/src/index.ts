@@ -8,6 +8,11 @@ import 'virtual:uno.css'
 export * from './components'
 export * from './headless'
 export * from './pages'
+export * from './stores'
 export * from './template'
 export * from './plugin'
 export * from './presets'
+// Phase J (0.2.71+): Workbench widget system. Exposes the WidgetDef
+// protocol, TWorkbenchLayout / TWidgetCard, useWidget(Data), the 14
+// built-in widgets, and the default deck preset.
+export * from './widgets'

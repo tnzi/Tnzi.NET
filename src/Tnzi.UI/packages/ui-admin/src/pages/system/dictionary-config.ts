@@ -39,9 +39,9 @@ export const dictionaryColumns: ColumnDef<DictionaryRow>[] = [
 ]
 
 export const dictionaryFormSchema: FormSchemaItem[] = [
-  { key: 'key',         label: 'Key',         type: 'text',     required: true },
-  { key: 'value',       label: 'Value',        type: 'text',     required: true },
-  { key: 'group',       label: 'Group',        type: 'text' },
-  { key: 'description', label: 'Description',  type: 'textarea' },
-  { key: 'sortOrder',   label: 'Sort',         type: 'number',   min: 0 },
+  { key: 'key',         labelKey: 'form.key', label: 'Key',         type: 'text',     required: true },
+  { key: 'value',       labelKey: 'form.value', label: 'Value',        type: 'text',     required: true },
+  { key: 'group',       labelKey: 'form.group', label: 'Group',        type: 'text' },
+  { key: 'description', labelKey: 'form.description', label: 'Description',  type: 'textarea' },
+  { key: 'sortOrder',   labelKey: 'form.sortOrder', label: 'Sort',         type: 'number',   min: 0 },
 ]

@@ -64,6 +64,7 @@ import type {
   // Session
   UserSessionDto,
   SessionStatisticsDto,
+  ActiveUserSummaryDto,
   // Role
   RoleDto,
   RoleDetailDto,
@@ -590,6 +591,10 @@ export function useAdminSessionApi(client: HttpClient) {
     /** Get session statistics */
     getStatistics: () =>
       client.get<SessionStatisticsDto>(`${ADMIN_SESSION_BASE}/statistics`),
+
+    /** List currently active users (sorted by last activity desc). */
+    getActiveUsers: (top?: number) =>
+      client.get<ActiveUserSummaryDto[]>(`${ADMIN_SESSION_BASE}/active-users`, { params: { top } }),
   };
 }
 

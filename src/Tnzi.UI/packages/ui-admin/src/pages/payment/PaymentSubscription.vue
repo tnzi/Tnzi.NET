@@ -8,7 +8,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="paymentSubscriptionColumns"
-    title="Payment Subscriptions"
+    :title="t('title')"
     :translate="t"
     :show-create="false"
   >
@@ -17,13 +17,14 @@
         :schema="paymentSubscriptionFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
     </template>
 
     <template #rowActions="{ row }">
       <TRowActions :row="row" :state="crud" :translate="t" :show-delete="false">
         <template #prepend>
-          <Button size="small" type="warning" ghost @click="cancelAtPeriodEnd(row as SubscriptionRow)">Cancel at Period End</Button>
+          <Button size="small" type="warning" ghost @click="cancelAtPeriodEnd(row as SubscriptionRow)">{{ t('cancelAtPeriodEnd') }}</Button>
         </template>
       </TRowActions>
     </template>
@@ -33,13 +34,13 @@
   <Modal
     v-if="confirmVisible"
     :show="confirmVisible"
-    title="Confirm Cancellation"
+    :title="t('confirmCancelTitle')"
     @update:show="(v: boolean) => { if (!v) confirmVisible = false }"
   >
-    <p>Cancel subscription at end of current billing period?</p>
+    <p>{{ t('confirmCancelPrompt') }}</p>
     <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
-      <Button @click="confirmVisible = false">No</Button>
-      <Button type="error" @click="confirmCancelAtPeriodEnd">Yes, Cancel</Button>
+      <Button @click="confirmVisible = false">{{ t('admin.common.no') }}</Button>
+      <Button type="error" @click="confirmCancelAtPeriodEnd">{{ t('confirmCancelConfirm') }}</Button>
     </div>
   </Modal>
 </template>

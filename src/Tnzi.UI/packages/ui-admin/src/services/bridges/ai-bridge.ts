@@ -78,6 +78,12 @@ import {
   type WorkflowDefinitionQueryDto,
   type WorkflowExecutionSummaryDto,
   type WorkflowExecutionDetailDto,
+  type WorkflowExecutionResultDto,
+  type WorkflowExecutionStatusDto,
+  type WorkflowValidationResultDto,
+  type WorkflowStatsDto,
+  type WorkflowStepApprovalDto,
+  type RunWorkflowRequestDto,
   type SkillSummaryDto,
   type SkillDetailDto,
   type CreateSkillDto,
@@ -112,7 +118,9 @@ import {
   type UpdateProviderDto,
   type ProviderTestResultDto,
 } from '@tnzi/core/services/ai'
-import { useAdminKnowledgeBaseApi } from '@tnzi/core/services/ai'
+import { useAdminKnowledgeBaseApi, useAdminWorkspaceAgentApi } from '@tnzi/core/services/ai'
+import type { WorkspaceAgentDto } from '@tnzi/core/services/ai'
+import { createPagedList } from '@tnzi/core'
 import type { ApiResult, PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 
@@ -171,13 +179,39 @@ export interface AiBridge {
     CreateWorkflowDefinitionDto,
     UpdateWorkflowDefinitionDto
   > & {
+    /** Fetch a single workflow definition by id. */
+    getById(id: string): Promise<WorkflowDefinitionDto>
+    /** Deep-copy a workflow definition. */
     clone(id: string): Promise<WorkflowDefinitionDto>
+    /** Toggle isEnabled=true. Workflow has no separate Draft/Published — IsEnabled IS the publish flag. */
     publish(id: string): Promise<WorkflowDefinitionDto>
+    /** Toggle isEnabled=false. */
+    unpublish(id: string): Promise<WorkflowDefinitionDto>
+    /** Synchronously execute the workflow once. */
+    run(id: string, input: string, userId?: string): Promise<WorkflowExecutionResultDto>
+    /** Resolve the SSE stream URL for `run/stream`. Caller opens EventSource. */
+    getRunStreamUrl(id: string): string
+    /** Pre-run validation (step refs, cycles, agent refs). */
+    validate(id: string): Promise<WorkflowValidationResultDto>
+    /** Workflow-wide statistics (definition counts + execution counts). */
+    getStats(): Promise<WorkflowStatsDto>
+    /** Batch enable workflows. */
+    batchEnable(ids: string[]): Promise<number>
+    /** Batch disable workflows. */
+    batchDisable(ids: string[]): Promise<number>
   }
   workflowRuns: Pick<BridgeCrudContract<WorkflowExecutionSummaryDto>, 'fetch'> & {
     tail(id: string): Promise<ReadableStream<Uint8Array>>
     /** Fetch the full execution detail (steps + outputs + pending approvals). */
     getDetail(executionId: string): Promise<WorkflowExecutionDetailDto>
+    /** Get current execution status (lighter than getDetail). */
+    getStatus(executionId: string): Promise<WorkflowExecutionStatusDto>
+    /** Resume a paused execution. */
+    resume(executionId: string): Promise<WorkflowExecutionResultDto>
+    /** Approve a step waiting on human review. */
+    approveStep(executionId: string, stepId: string, comment?: string): Promise<void>
+    /** Reject a step (`reason` required by backend). */
+    rejectStep(executionId: string, stepId: string, reason: string): Promise<void>
   }
   skills: BridgeCrudContract<SkillSummaryDto, CreateSkillDto, UpdateSkillDto> & {
     activate(id: string): Promise<void>
@@ -245,13 +279,12 @@ function unwrap<T>(res: ApiResult<T> | T): T {
   return res as T
 }
 
+// 0.2.72+ (C4): `CrudPageResult<T>` is now an alias for `@tnzi/core`'s
+// `PagedList<T>`, so the legacy 4-field projection collapses to identity.
+// Kept as an inline function for the existing call sites + so future
+// `PagedList`-shape drift can be caught here.
 function toCrudResult<T>(p: PagedList<T>): CrudPageResult<T> {
-  return {
-    items: p.items,
-    totalCount: p.totalCount,
-    pageIndex: p.pageIndex,
-    pageSize: p.pageSize,
-  }
+  return p
 }
 
 const notImplemented = (op: string) => () =>
@@ -349,7 +382,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   }
 
   // ---- workflows ----------------------------------------------------------
-  const workflows = {
+  const workflows: AiBridge['workflows'] = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<WorkflowDefinitionDto>> =>
       toCrudResult(
         unwrap<PagedList<WorkflowDefinitionDto>>(await workflowApi.getList(
@@ -363,7 +396,10 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     delete: async (ids: string[]) => {
       await workflowApi.batchDelete(ids.map(String))
     },
-    clone: async (id: string) => unwrap<WorkflowDefinitionDto>(await workflowApi.clone(String(id))),
+    getById: async (id: string) =>
+      unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id))),
+    clone: async (id: string) =>
+      unwrap<WorkflowDefinitionDto>(await workflowApi.clone(String(id))),
     // batchEnable is the current publish semantic — see docs/modules/ai.md Workflow section.
     // batchEnable returns affected-row count; we re-fetch the definition so the contract
     // (Promise<WorkflowDefinitionDto>) is honoured for callers that want the updated entity.
@@ -371,10 +407,27 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       await workflowApi.batchEnable([String(id)])
       return unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
     },
+    unpublish: async (id: string): Promise<WorkflowDefinitionDto> => {
+      await workflowApi.batchDisable([String(id)])
+      return unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
+    },
+    run: async (id: string, input: string, userId?: string) => {
+      const body: RunWorkflowRequestDto = { input, userId: userId ?? null }
+      return unwrap<WorkflowExecutionResultDto>(await workflowApi.run(String(id), body))
+    },
+    getRunStreamUrl: (id: string) => workflowApi.getRunStreamUrl(String(id)),
+    validate: async (id: string) =>
+      unwrap<WorkflowValidationResultDto>(await workflowApi.validate(String(id))),
+    getStats: async () =>
+      unwrap<WorkflowStatsDto>(await workflowApi.getStats()),
+    batchEnable: async (ids: string[]) =>
+      unwrap<number>(await workflowApi.batchEnable(ids.map(String))),
+    batchDisable: async (ids: string[]) =>
+      unwrap<number>(await workflowApi.batchDisable(ids.map(String))),
   }
 
   // ---- workflowRuns -------------------------------------------------------
-  const workflowRuns = {
+  const workflowRuns: AiBridge['workflowRuns'] = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<WorkflowExecutionSummaryDto>> => {
       const params = {
         pageIndex: q.pageIndex,
@@ -390,6 +443,18 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     tail: notImplemented('workflowRuns.tail') as () => Promise<ReadableStream<Uint8Array>>,
     getDetail: async (executionId: string): Promise<WorkflowExecutionDetailDto> =>
       unwrap<WorkflowExecutionDetailDto>(await workflowApi.getExecutionDetail(executionId)),
+    getStatus: async (executionId: string) =>
+      unwrap<WorkflowExecutionStatusDto>(await workflowApi.getExecutionStatus(executionId)),
+    resume: async (executionId: string) =>
+      unwrap<WorkflowExecutionResultDto>(await workflowApi.resumeExecution(executionId)),
+    approveStep: async (executionId: string, stepId: string, comment?: string) => {
+      const body: WorkflowStepApprovalDto | undefined = comment ? { feedback: comment } : undefined
+      await workflowApi.approveStep(executionId, stepId, body)
+    },
+    rejectStep: async (executionId: string, stepId: string, reason: string) => {
+      const body: WorkflowStepApprovalDto = { feedback: reason }
+      await workflowApi.rejectStep(executionId, stepId, body)
+    },
   }
 
   // ---- skills -------------------------------------------------------------
@@ -397,7 +462,11 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<SkillSummaryDto>> =>
       toCrudResult(
         unwrap<PagedList<SkillSummaryDto>>(await skillApi.getPaged(
-          mapQuery(q) as unknown as SkillQueryDto,
+          // Admin list always merges DB + file-source skills. Backend hides
+          // file-source rows behind this opt-in flag because they're not
+          // editable; the admin page distinguishes them via `isReadOnly` +
+          // `source` columns instead.
+          { ...mapQuery(q), includeFileSource: true } as unknown as SkillQueryDto,
         )),
       ),
     create: async (data: CreateSkillDto) =>
@@ -506,12 +575,12 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       }))
       // Backend may return either a plain array or PagedList<KbDto> — handle both.
       if (Array.isArray(result)) {
-        return {
-          items: result as Record<string, unknown>[],
-          totalCount: result.length,
-          pageIndex: q.pageIndex ?? 1,
-          pageSize: q.pageSize ?? 20,
-        }
+        return createPagedList(
+          result as Record<string, unknown>[],
+          result.length,
+          q.pageIndex ?? 1,
+          q.pageSize ?? 20,
+        )
       }
       const paged = result as PagedList<Record<string, unknown>>
       return toCrudResult(paged ?? { items: [], totalCount: 0, pageIndex: q.pageIndex ?? 1, pageSize: q.pageSize ?? 20, totalPages: 0, hasNextPage: false, hasPreviousPage: false })
@@ -655,5 +724,39 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     quota,
     personas,
     evaluations,
+  }
+}
+
+// 0.2.72+ (B4): re-export AI enums + types so pages can consume runtime
+// values via the bridge surface and stay clean under the
+// `no-restricted-imports` guard against `@tnzi/core/services/*` value
+// imports from `pages/**`.
+export { WorkflowExecutionMode } from '@tnzi/core/services/ai'
+
+/**
+ * Workspace-agent helper — used by the read-only `WorkspaceAgentList`
+ * page. We expose a minimal `list()` so the page no longer needs to
+ * import `useAdminWorkspaceAgentApi` directly. Lives outside the main
+ * bridge contract because workspace agents are discovered from YAML
+ * files on disk, not the DB, so the full CRUD shape doesn't apply.
+ */
+export interface WorkspaceAgentsBridge {
+  list(): Promise<WorkspaceAgentDto[]>
+}
+
+export interface WorkspaceAgentsBridgeDeps {
+  client?: HttpClient
+}
+
+export function createWorkspaceAgentsBridge(
+  deps: WorkspaceAgentsBridgeDeps,
+): WorkspaceAgentsBridge {
+  const api = deps.client ? useAdminWorkspaceAgentApi(deps.client) : null
+  return {
+    async list() {
+      if (!api) return []
+      const resp = await api.listAgents()
+      return resp?.data ?? []
+    },
   }
 }

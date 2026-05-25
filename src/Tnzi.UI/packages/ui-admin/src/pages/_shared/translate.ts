@@ -49,21 +49,40 @@ function lookup(messages: Record<string, unknown>, path: string): string | undef
  */
 export function translatePageKey(pageNs: string, key: string): string {
   if (!key) return key
-  const locale = useAdminAppStore().locale
+  // `useAdminAppStore()` requires an active Pinia. In test harnesses that
+  // mount components without `createPinia()` the store throws — catch and
+  // default to English so unit tests don't have to wire pinia for every
+  // mount. Production app shells always install pinia in main.ts.
+  let locale: 'en' | 'zh-cn' = 'en'
+  let overrides: Record<string, unknown> | undefined
+  try {
+    const store = useAdminAppStore()
+    locale = store.locale
+    overrides = store.messageOverrides?.[locale] as Record<string, unknown> | undefined
+  } catch {
+    locale = 'en'
+  }
   const messages = (locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
 
   // Strip optional `tnzi.` prefix — bundled locales are rooted at `admin.*`.
   const normalised = key.startsWith('tnzi.') ? key.slice(5) : key
 
+  // Resolution order for every lookup: consumer overrides (registered via
+  // `useAdminAppStore.extendLocaleMessages`) win first, then the bundled
+  // framework dictionary. Lets host apps surface their own
+  // `admin.modules.{module}.…` and `admin.shared.…` keys to every page,
+  // breadcrumb, and tab without forking the locale files.
+  const find = (path: string): string | undefined =>
+    (overrides && lookup(overrides, path)) ?? lookup(messages, path)
+
   // Absolute key — resolve directly without prefixing the page namespace.
   if (normalised.startsWith('admin.')) {
-    const hit = lookup(messages, normalised)
-    return hit ?? humanise(key)
+    return find(normalised) ?? humanise(key)
   }
 
   // Page-scoped key — prepend the namespace.
   const full = `admin.modules.${pageNs}.${normalised}`
-  const hit = lookup(messages, full)
+  const hit = find(full)
   if (hit !== undefined) return hit
 
   // Shared dictionary fallback for `columns.xxx` / `form.xxx` keys — lets a
@@ -71,7 +90,7 @@ export function translatePageKey(pageNs: string, key: string): string {
   // (column.key). Page-scoped entries always take precedence above; this
   // only kicks in when the page hasn't defined a per-key override.
   if (normalised.startsWith('columns.') || normalised.startsWith('form.')) {
-    const shared = lookup(messages, `admin.shared.${normalised}`)
+    const shared = find(`admin.shared.${normalised}`)
     if (shared !== undefined) return shared
   }
 
@@ -112,4 +131,29 @@ export function interpolate(template: string, params?: Record<string, unknown>):
 export function makePageTranslator(pageNs: string): (key: string, params?: Record<string, unknown>) => string {
   return (key: string, params?: Record<string, unknown>) =>
     interpolate(translatePageKey(pageNs, key), params)
+}
+
+/**
+ * Heuristic translator for fields that may hold either an i18n key or a
+ * pre-translated literal string.
+ *
+ * The "is this an i18n key?" check is the same one TCrudPage uses for its
+ * `title` prop — dotted lower-camel ASCII (`admin.modules.foo.bar`). When
+ * the value matches, it's resolved through `translatePageKey('', value)`;
+ * when it doesn't (e.g. "Hello world" or a raw display string), it passes
+ * through unchanged.
+ *
+ * Use this in widgets / list renderers that accept user-supplied strings
+ * that *might* be locale keys: KPI card titles, timeline item titles,
+ * etc. The detection is intentionally narrow so legitimate English
+ * sentences with periods (e.g. "Mr. Smith") aren't accidentally treated
+ * as keys.
+ */
+const I18N_KEY_PATTERN = /^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$/
+
+export function maybeTranslate(value: string | undefined | null): string {
+  if (!value) return ''
+  if (!I18N_KEY_PATTERN.test(value)) return value
+  const hit = translatePageKey('', value)
+  return hit || value
 }

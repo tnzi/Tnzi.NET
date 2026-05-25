@@ -118,9 +118,19 @@ public class DataAuthService : ApplicationService, IDataAuthService
             }
             catch (Exception ex)
             {
-                // 记录过滤条件解析错误，便于排查配置问题
-                Logger.LogWarning(ex, "Failed to parse data filter for EntityRole {RoleId}: {Filter}",
-                    entityRole.RoleId, entityRole.Filter);
+                // ⚠️ 安全策略 (deny-on-fail): 任何一条 EntityRole 的 filter
+                // 解析失败 → 这个角色对该实体的数据权限规则无效。我们*不能*
+                // 跳过这条规则继续 OR 合并，否则该 role 的"有限可见"会退化为
+                // "完全无过滤" → 用户拿到比配置更多的访问权限。
+                // 改为加入一个永远 false 的表达式，与其他 role 的过滤条件
+                // OR 合并后效果等价于"这条 role 不贡献任何可见行"。配错的
+                // 锅 admin 自己背，比静默扩大权限好。
+                Logger.LogWarning(ex,
+                    "Failed to parse data filter for EntityRole {EntityRoleId} (role {RoleId}). " +
+                    "Treating as deny-all for safety; admin must fix the filter via the EntityRole admin UI. Filter: {Filter}",
+                    entityRole.Id, entityRole.RoleId, entityRole.Filter);
+                var param = Expression.Parameter(typeof(TEntity), "e");
+                expressions.Add(Expression.Lambda<Func<TEntity, bool>>(Expression.Constant(false), param));
                 continue;
             }
         }
@@ -406,6 +416,100 @@ public class DataAuthService : ApplicationService, IDataAuthService
         return Ok("EntityInfo deleted successfully");
     }
 
+    /// <summary>
+    /// Save-time validation for an EntityRole's <c>Filter</c> JSON.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null/empty filter is legal (= no row restriction for this role +
+    /// operation). When supplied, we (1) deserialize as <see cref="FilterGroup"/>,
+    /// (2) resolve <see cref="EntityInfo.TypeName"/> to a CLR type, and
+    /// (3) trial-build the expression to surface bad property names /
+    /// type mismatches as 400 errors *at save time*, not silent skips
+    /// at query time.
+    /// </para>
+    /// <para>
+    /// Type resolution uses <see cref="Type.GetType(string)"/> which
+    /// only finds types from already-loaded assemblies. That's fine
+    /// because <see cref="EntityInfo"/> rows are typically seeded from
+    /// modules that *are* loaded; the validator returns "type not found"
+    /// when the host hasn't registered the target entity, which is also
+    /// a useful diagnostic (admin pointing at a non-existent entity).
+    /// </para>
+    /// </remarks>
+    private Result ValidateFilter(string? filterJson, EntityInfo entityInfo)
+    {
+        // Empty filter = "no row restriction". Legitimate, don't reject.
+        if (string.IsNullOrWhiteSpace(filterJson)) return Ok();
+
+        FilterGroup? filterGroup;
+        try
+        {
+            filterGroup = filterJson.FromJsonString<FilterGroup>();
+        }
+        catch (Exception ex)
+        {
+            return Fail($"Filter JSON is malformed: {ex.Message}");
+        }
+        if (filterGroup == null || !filterGroup.HasFilters)
+        {
+            // Filter JSON parsed but contained no rules — same as empty.
+            return Ok();
+        }
+
+        // Resolve the target entity type. AssemblyQualifiedName is preferred;
+        // bare type name works only if already loaded.
+        Type? entityType;
+        try
+        {
+            entityType = Type.GetType(entityInfo.TypeName, throwOnError: false, ignoreCase: false);
+        }
+        catch (Exception ex)
+        {
+            return Fail($"Failed to resolve entity type '{entityInfo.TypeName}': {ex.Message}");
+        }
+        if (entityType == null)
+        {
+            // Soft failure — type isn't in the loading context. Don't reject
+            // the save (admin may be authoring rules for a module they're
+            // about to load), but log a warning so the discrepancy is
+            // visible at startup-time when validators sweep the table.
+            Logger.LogWarning(
+                "EntityRole filter validation skipped: cannot resolve type '{TypeName}' (not loaded yet?). " +
+                "The filter will be checked again at query time.",
+                entityInfo.TypeName);
+            return Ok();
+        }
+
+        // Reflectively call FilterExpressionBuilder.Build<entityType>(filterGroup).
+        try
+        {
+            var buildMethod = typeof(FilterExpressionBuilder)
+                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == nameof(FilterExpressionBuilder.Build)
+                    && m.IsGenericMethodDefinition
+                    && m.GetParameters().Length == 1
+                    && m.GetParameters()[0].ParameterType == typeof(FilterGroup));
+            if (buildMethod == null)
+            {
+                return Fail("Internal: FilterExpressionBuilder.Build<T>(FilterGroup) not found.");
+            }
+            var generic = buildMethod.MakeGenericMethod(entityType);
+            generic.Invoke(null, new object?[] { filterGroup });
+            return Ok();
+        }
+        catch (System.Reflection.TargetInvocationException ex)
+        {
+            // Reflection wraps the real exception — unwrap for a useful message.
+            var inner = ex.InnerException ?? ex;
+            return Fail($"Filter expression failed to build against {entityType.FullName}: {inner.Message}");
+        }
+        catch (Exception ex)
+        {
+            return Fail($"Filter validation failed: {ex.Message}");
+        }
+    }
+
     #endregion
 
     #region EntityRole 管理
@@ -487,6 +591,26 @@ public class DataAuthService : ApplicationService, IDataAuthService
             return Fail<EntityRole>("EntityRole not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // Resolve EntityInfo to validate the filter against the target type.
+        // EntityInfoId is not editable so we use the existing entityRole's
+        // entity reference (avoids a second lookup in the validation path).
+        var entityInfo = await _entityInfoRepository.FindAsync(entityRole.EntityInfoId);
+        if (entityInfo == null)
+        {
+            // Shouldn't happen — entity row exists but its EntityInfo is
+            // missing → corrupted state. Surface as 500 not 400.
+            return Fail<EntityRole>(
+                $"Owning EntityInfo {entityRole.EntityInfoId} not found.",
+                500, ErrorCodes.INTERNAL_SERVER_ERROR);
+        }
+
+        var filterValidation = ValidateFilter(request.Filter, entityInfo);
+        if (!filterValidation.Succeeded)
+        {
+            return Fail<EntityRole>(filterValidation.Message ?? "Invalid filter expression",
+                400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         request.MapTo(entityRole);
 
         await _entityRoleRepository.UpdateAsync(entityRole);
@@ -541,6 +665,17 @@ public class DataAuthService : ApplicationService, IDataAuthService
         if (exists)
         {
             return Fail<EntityRole>("EntityRole with same EntityInfo, Role and Operation already exists", 409, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // Fail-fast on a bad Filter so the admin sees the error in the form,
+        // not silently at query time. Without this an invalid filter would
+        // be silently dropped on every query → user gets MORE access than
+        // intended (violates deny-by-default).
+        var filterValidation = ValidateFilter(request.Filter, entityInfo);
+        if (!filterValidation.Succeeded)
+        {
+            return Fail<EntityRole>(filterValidation.Message ?? "Invalid filter expression",
+                400, ErrorCodes.VALIDATION_ERROR);
         }
 
         var entityRole = request.MapTo<EntityRole>();

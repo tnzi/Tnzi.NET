@@ -30,7 +30,7 @@ import {
   type UpdateFileFolderDto,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest } from '../_mappers'
+import { mapQueryToListRequest, pagedResult } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminFileApi>[0]
 
@@ -87,7 +87,12 @@ export interface StorageBridge {
    */
   versions: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<FileVersionAuditDto>>
-    restore(versionId: string): Promise<void>
+    /**
+     * Restore an older version as the current one. Reuses the user-facing
+     * endpoint `POST /files/{fileId}/versions/{version}/restore` because the
+     * admin audit controller is intentionally read-only.
+     */
+    restore(fileId: string, version: number): Promise<void>
   }
 }
 
@@ -188,12 +193,12 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       const result = unwrap<{ items: FileRecordDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await fileApi.query(params),
       )
-      return {
+      return pagedResult({
         items: result.items ?? [],
         totalCount: result.totalCount ?? 0,
         pageIndex: result.pageIndex ?? query.pageIndex,
         pageSize: result.pageSize ?? query.pageSize,
-      }
+      })
     },
 
     // Files are not created via a form — creation happens through chunked upload.
@@ -266,16 +271,21 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         pageSize: number
       }>(`/admin/storage/audit/chunks?${params.toString()}`)
       const paged = unwrap(res)
-      return {
+      return pagedResult({
         items: paged.items ?? [],
         totalCount: paged.totalCount ?? 0,
         pageIndex: paged.pageIndex ?? query.pageIndex,
         pageSize: paged.pageSize ?? query.pageSize,
-      }
+      })
     },
-    delete: async (ids: string[]): Promise<void> => {
-      // Orphaned chunk cleanup reuses file batch delete (same repo semantics).
-      await fileApi.batchDelete(ids)
+    delete: async (_ids: string[]): Promise<void> => {
+      // Chunks are managed by the upload lifecycle (initiate/upload/complete/abort)
+      // — there's no direct admin "delete a single chunk row" endpoint. The previous
+      // implementation forwarded to `fileApi.batchDelete`, which targets FileRecord
+      // (the wrong table), so chunk delete was a silent no-op against the wrong rows.
+      throw new Error(
+        'chunks.delete: not supported by the admin audit endpoint — abort the parent upload session via the user-facing /storage API to clean up chunks',
+      )
     },
   }
 
@@ -304,17 +314,22 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         pageSize: number
       }>(`/admin/storage/audit/versions?${params.toString()}`)
       const paged = unwrap(res)
-      return {
+      return pagedResult({
         items: paged.items ?? [],
         totalCount: paged.totalCount ?? 0,
         pageIndex: paged.pageIndex ?? query.pageIndex,
         pageSize: paged.pageSize ?? query.pageSize,
-      }
+      })
     },
-    restore: async (_versionId: string): Promise<void> => {
-      // Backend audit endpoint is read-only. Per-file restore still goes
-      // through storageApi.restoreVersion with fileId + version number.
-      throw new Error('versions.restore: admin audit endpoint is read-only; use storageApi.restoreVersion(fileId, version) directly')
+    restore: async (fileId: string, version: number): Promise<void> => {
+      if (!deps.client) {
+        throw new Error('versions.restore: HttpClient (deps.client) is required')
+      }
+      // Admin audit endpoint is read-only — reuse the user-facing restore endpoint
+      // (DefaultStorageController.RestoreVersion). The audit controller could
+      // proxy it, but keeping a single source of truth for restore semantics
+      // matters more than ducking through `/admin`.
+      await deps.client.post(`/files/${encodeURIComponent(fileId)}/versions/${version}/restore`)
     },
   }
 

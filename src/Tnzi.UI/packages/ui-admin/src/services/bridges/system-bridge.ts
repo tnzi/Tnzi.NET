@@ -33,7 +33,7 @@ import {
   type AccessLogQueryDto,
 } from '@tnzi/core/services/system'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pageArray } from '../_mappers'
+import { mapQueryToListRequest, pageArray, pagedResult } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminMenuApi>[0]
 
@@ -72,17 +72,52 @@ export interface SystemBridge {
    * surface. Scaffolded in 0.2.8 (Phase E). Endpoints wired in Phase E
    * backend follow-up.
    */
-  features: BridgeCrudContract<FeatureDto, Partial<FeatureDto>, Partial<FeatureDto>>
+  features: BridgeCrudContract<FeatureDto, CreateFeatureDto, UpdateFeatureDto>
 }
 
+/**
+ * Mirror of Tnzi.Feature.Dtos.FeatureDefinitionDto.
+ * Kept inline here until `pnpm contracts:sync` regenerates
+ * `@tnzi/core/services/system` with the feature endpoints.
+ *
+ * `valueType` is the int form of `FeatureValueType` enum:
+ *   0 = Boolean, 1 = Integer, 2 = String
+ *
+ * `source` is "Database" (DB-stored, fully editable) or "Code" (defined by
+ * `IFeatureDefinitionProvider`, edit/delete disabled in the admin UI).
+ */
 export interface FeatureDto {
   id: string
   name: string
-  code: string
-  description?: string
-  valueType?: 'boolean' | 'string' | 'number' | 'json'
-  defaultValue?: string
+  displayName?: string | null
+  description?: string | null
+  defaultValue?: string | null
+  valueType: number
+  parentName?: string | null
+  isEnabled: boolean
+  group?: string | null
+  source?: string
+  isReadOnly?: boolean
+}
+
+export interface CreateFeatureDto {
+  name: string
+  displayName?: string | null
+  description?: string | null
+  defaultValue?: string | null
+  valueType: number
+  parentName?: string | null
+  group?: string | null
+}
+
+export interface UpdateFeatureDto {
+  displayName?: string | null
+  description?: string | null
+  defaultValue?: string | null
+  valueType: number
+  parentName?: string | null
   isEnabled?: boolean
+  group?: string | null
 }
 
 /**
@@ -184,12 +219,12 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       const result = unwrap<{ items: AccessLogInfoDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await accessLogApi.getList(params),
       )
-      return {
+      return pagedResult({
         items: result.items ?? [],
         totalCount: result.totalCount ?? 0,
         pageIndex: result.pageIndex ?? query.pageIndex,
         pageSize: result.pageSize ?? query.pageSize,
-      }
+      })
     },
   }
 
@@ -219,15 +254,51 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     },
   }
 
-  const featureStub = <T>(label: string): Promise<T> =>
-    Promise.reject(
-      new Error(`system.features.${label}: backend endpoint pending (Phase E backend follow-up)`),
-    )
+  // Wired directly to /admin/feature-definitions (Tnzi.Feature module).
+  // Bypasses @tnzi/core's generated factory because contracts:sync hasn't been
+  // re-run since DefaultFeatureDefinitionAdminController shipped — same pattern
+  // as scheduledJobs above. Replace with useAdminFeatureDefinitionApi once the
+  // SDK is regenerated.
+  const FEATURES_BASE = '/admin/feature-definitions'
   const features: SystemBridge['features'] = {
-    fetch: () => featureStub('fetch'),
-    create: () => featureStub('create'),
-    update: () => featureStub('update'),
-    delete: () => featureStub('delete'),
+    fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FeatureDto>> => {
+      if (!deps.client) {
+        throw new Error('features.fetch: HttpClient (deps.client) is required')
+      }
+      const res = await deps.client.get<FeatureDto[]>(FEATURES_BASE)
+      const items = unwrap<FeatureDto[]>(res) ?? []
+      // Backend returns the full list; client-side filter by keyword on
+      // name/displayName/group + paginate locally — feature definition
+      // counts are small (typically <100) so this stays cheap.
+      const keyword = typeof query.searchText === 'string'
+        ? query.searchText.trim().toLowerCase()
+        : ''
+      const filtered = keyword
+        ? items.filter((f) =>
+            (f.name ?? '').toLowerCase().includes(keyword) ||
+            (f.displayName ?? '').toLowerCase().includes(keyword) ||
+            (f.group ?? '').toLowerCase().includes(keyword),
+          )
+        : items
+      return pageArray(filtered, query)
+    },
+    create: async (data) => {
+      if (!deps.client) throw new Error('features.create: HttpClient required')
+      const res = await deps.client.post<FeatureDto>(FEATURES_BASE, data)
+      return unwrap(res) as FeatureDto
+    },
+    update: async (id, data) => {
+      if (!deps.client) throw new Error('features.update: HttpClient required')
+      const res = await deps.client.put<FeatureDto>(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`, data)
+      return unwrap(res) as FeatureDto
+    },
+    delete: async (ids) => {
+      if (!deps.client) throw new Error('features.delete: HttpClient required')
+      // Backend has no batch endpoint — loop sequentially.
+      for (const id of ids) {
+        await deps.client.delete(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`)
+      }
+    },
   }
 
   return { menus, settings, accessLogs, scheduledJobs, features }

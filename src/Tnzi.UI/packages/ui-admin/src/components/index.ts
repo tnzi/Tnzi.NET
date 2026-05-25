@@ -5,35 +5,47 @@ export type { DemoAccount, LoginPayload } from './auth/TAdminLoginCard.vue'
 export { default as TIconPicker } from './inputs/TIconPicker.vue'
 export { default as TJsonEditor } from './inputs/TJsonEditor.vue'
 
-// Display primitives
-export { default as TRelativeTime } from './display/TRelativeTime.vue'
+// Display primitives — TStatusBadge implementation was sunk to @tnzi/ui in
+// 0.2.x; the local SFC is now a thin wrapper that injects admin i18n via
+// translatePageKey. The other 8 are re-exported directly from @tnzi/ui.
 export { default as TStatusBadge } from './display/TStatusBadge.vue'
-export type { StatusType } from './display/TStatusBadge.vue'
-export { default as TStatToCards } from './display/TStatToCards.vue'
-export type { StatCard } from './display/TStatToCards.vue'
-export { default as TSvgIcon } from './display/TSvgIcon.vue'
-export { default as TButtonIcon } from './display/TButtonIcon.vue'
-export { default as TCountTo } from './display/TCountTo.vue'
-export { default as TWaveBg } from './display/TWaveBg.vue'
-export { default as TSkeleton } from './display/TSkeleton.vue'
+export {
+  TRelativeTime,
+  TCountTo,
+  TSvgIcon,
+  TButtonIcon,
+  TSourceBadge,
+  TStatToCards,
+  TWaveBg,
+  TSkeleton,
+} from '@tnzi/ui'
+export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
 
 // Layout primitives
 export { default as TDarkModeContainer } from './layout/TDarkModeContainer.vue'
 export { default as TAdminRouterView } from './layout/TAdminRouterView.vue'
+// 0.2.72+ (A1): one-shot wrapper that mounts the 5-provider naive-ui stack
+// (Config / LoadingBar / Message / Notification / Dialog) and pipes the
+// admin theme context through. Consumer App.vue becomes 3 lines.
+export { default as TAdminAppRoot } from './layout/TAdminAppRoot.vue'
 // Phase I.7.7: header companion components — auto-derived breadcrumb +
 // user-avatar dropdown.
 export { default as TAdminAutoBreadcrumb } from './layout/TAdminAutoBreadcrumb.vue'
 export { default as TAdminUserAvatar } from './layout/TAdminUserAvatar.vue'
 
-// Utility components (Phase I.6.3) — header / toolbar / brand-area widgets
-export { default as TThemeSchemaSwitch } from './utility/TThemeSchemaSwitch.vue'
-export type { ThemeSchema } from './utility/TThemeSchemaSwitch.vue'
-export { default as TLangSwitch } from './utility/TLangSwitch.vue'
-export type { LangOption } from './utility/TLangSwitch.vue'
-export { default as TFullScreen } from './utility/TFullScreen.vue'
-export { default as TReloadButton } from './utility/TReloadButton.vue'
-export { default as TPinToggler } from './utility/TPinToggler.vue'
-export { default as TMenuToggler } from './utility/TMenuToggler.vue'
+// Utility components — 6 sunk to @tnzi/ui in 0.2.71+ (generic UI patterns
+// reusable beyond admin shells), re-exported here for backward compat.
+// TSystemLogo stays in ui-admin (admin-specific brand surface).
+export {
+  TThemeSchemaSwitch,
+  TLangSwitch,
+  TFullScreen,
+  TReloadButton,
+  TPinToggler,
+  TMenuToggler,
+  type ThemeSchema,
+  type LangOption,
+} from '@tnzi/ui'
 export { default as TSystemLogo } from './utility/TSystemLogo.vue'
 export type { TSystemLogoLayout } from './utility/TSystemLogo.vue'
 
@@ -45,6 +57,8 @@ export { default as TLoginPage } from './pages/TLoginPage.vue'
 export { default as TExceptionPage } from './pages/TExceptionPage.vue'
 export { default as TDashboardPage } from './pages/TDashboardPage.vue'
 export type { KpiCard, KpiCardGradient, ChartSeriesPoint } from './pages/TDashboardPage.vue'
+// Phase J — declarative widget grid (Workbench scaffold).
+export { default as TWorkbenchLayout } from './pages/TWorkbenchLayout.vue'
 
 // Dashboard composition components (Phase I.6.4)
 export { default as THeaderBanner } from './dashboard/THeaderBanner.vue'

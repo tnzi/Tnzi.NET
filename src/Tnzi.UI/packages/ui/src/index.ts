@@ -31,5 +31,8 @@ export * from './stores/index';
 // Resolvers
 export * from './resolvers/index';
 
+// Utils (naive-helpers, device-icon)
+export * from './utils/index';
+
 // Locales
 export { en, zhCN, getNaiveLocale, type Locale, type NaiveLocaleBundle } from './locales';

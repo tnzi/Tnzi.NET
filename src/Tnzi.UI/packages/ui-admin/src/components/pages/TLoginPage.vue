@@ -15,10 +15,10 @@
 import { computed, ref, watch, type Component } from 'vue'
 import { NCard } from 'naive-ui'
 import { useTheme, getPaletteColorByNumber, mixColor } from '@tnzi/ui'
-import TWaveBg from '../display/TWaveBg.vue'
-import TSvgIcon from '../display/TSvgIcon.vue'
-import TThemeSchemaSwitch from '../utility/TThemeSchemaSwitch.vue'
-import TLangSwitch from '../utility/TLangSwitch.vue'
+import { TWaveBg } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import { TThemeSchemaSwitch } from '@tnzi/ui'
+import { TLangSwitch } from '@tnzi/ui'
 import {
   provideLoginContext,
   type LoginContext,

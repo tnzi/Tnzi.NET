@@ -24,6 +24,16 @@ export interface TemplateInfoDto extends AuditedEntity<string> {
   defaultLayoutName?: string | null;
   isActive: boolean;
   description?: string | null;
+  /** Origin of this row — "Database" | "FileSystem". */
+  source?: string;
+  /** True for filesystem-fallback rows (shipped with binaries, not editable). */
+  isReadOnly?: boolean;
+  /** Absolute filesystem path of the source template (file-source rows only). */
+  filePath?: string | null;
+  /** Subject template (Razor source) — populated inline for file-source rows. */
+  subjectTemplate?: string | null;
+  /** Content template (Razor source) — populated inline for file-source rows. */
+  contentTemplate?: string | null;
 }
 
 /**
@@ -99,6 +109,8 @@ export interface TemplateQueryDto extends SortedPagedQueryDto {
   category?: string;
   isActive?: boolean;
   keyword?: string;
+  /** Include filesystem-backed templates (Templates/{module}/.../*.cshtml). */
+  includeFileSource?: boolean;
 }
 
 /**
@@ -188,6 +200,12 @@ export interface LayoutInfoDto extends AuditedEntity<string> {
   isActive: boolean;
   isDefault: boolean;
   description?: string | null;
+  /** Origin of this row — "Database" | "FileSystem". */
+  source?: string;
+  /** True for filesystem-fallback rows. */
+  isReadOnly?: boolean;
+  /** Absolute filesystem path of the source layout. */
+  filePath?: string | null;
 }
 
 /**
@@ -245,6 +263,8 @@ export interface LayoutQueryDto extends SortedPagedQueryDto {
   isActive?: boolean;
   isDefault?: boolean;
   keyword?: string;
+  /** Include filesystem-backed layouts. */
+  includeFileSource?: boolean;
 }
 
 // ============================================

@@ -50,6 +50,14 @@ function resolveLabel(label: string): string {
   font-size: 14px;
   color: var(--tnzi-base-text-muted);
 }
+/* naive-ui's `.n-breadcrumb-item__link` defaults to `display: block`,
+   which stacks the slot icon above the label text on two lines. Force
+   inline-flex so the icon sits on the same baseline as the label, with
+   a small gap (the `mr-4px` on the slotted icon also contributes). */
+.t-admin-breadcrumb :deep(.n-breadcrumb-item__link) {
+  display: inline-flex;
+  align-items: center;
+}
 @media (max-width: 640px) {
   .t-admin-breadcrumb {
     font-size: 12px;

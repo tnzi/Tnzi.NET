@@ -72,9 +72,14 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // SuperAdmin bypass — short-circuit before touching the function tables.
         if (await IsSuperAdminAsync(userId)) return true;
 
-        // 获取用户的所有权限名称（内部已处理缓存和启用状态检查）
+        // Permission codes are matched case-insensitively. The SuperAdmin-roles
+        // comparison above already uses OrdinalIgnoreCase; this brings the
+        // regular check in line so a stored `Catalog.Product.Create` matches
+        // a controller-declared `catalog.product.create` (and vice versa).
+        // Without this, a single character-case mismatch between the DB row
+        // and the [ApiAuthorize(PermissionName=...)] attribute silently 403s.
         var userPermissionNames = await GetUserPermissionNamesAsync(userId);
-        return userPermissionNames.Contains(permissionName);
+        return ToCaseInsensitiveSet(userPermissionNames).Contains(permissionName);
     }
 
     /// <summary>
@@ -94,12 +99,45 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // 一次性获取用户的所有权限名称（带缓存）
         var userPermissions = await GetUserPermissionNamesAsync(userId);
-        var userPermissionSet = new HashSet<string>(userPermissions);
+        // Case-insensitive match — see comment in CheckPermissionAsync for rationale.
+        var userPermissionSet = ToCaseInsensitiveSet(userPermissions);
 
         return permissionNameList.ToDictionary(
             p => p,
             p => userPermissionSet.Contains(p)
         );
+    }
+
+    /// <summary>
+    /// Build a case-insensitive lookup over a permission name collection.
+    /// Centralised so every comparison site uses the same comparer.
+    /// </summary>
+    private static HashSet<string> ToCaseInsensitiveSet(IEnumerable<string> permissions)
+        => new(permissions, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolve the super-admin permission catalogue with cache.
+    /// Cache miss → single full-table scan + populate. Cache hit → O(1).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetSuperAdminCatalogueAsync()
+    {
+        if (_functionAuthCache != null)
+        {
+            var cached = await _functionAuthCache.GetSuperAdminCatalogueAsync();
+            if (cached != null) return cached;
+        }
+
+        var codes = await _moduleFunctionRepository
+            .Where(f => f.IsEnabled)
+            .Select(f => f.Code)
+            .Distinct()
+            .ToListAsync();
+
+        if (_functionAuthCache != null)
+        {
+            await _functionAuthCache.SetSuperAdminCatalogueAsync(codes);
+        }
+        return codes;
     }
 
     /// <summary>
@@ -112,13 +150,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // SuperAdmin bypass — return the full catalogue of enabled functions so
         // both the legacy "has X" check and any caller that enumerates the user's
         // permissions (menu builders, audit, etc.) sees a complete grant set.
+        // The catalogue is identical for every super-admin so it lives in a
+        // shared cache key (1h TTL), invalidated by Function/Module enable
+        // changes. This avoids a full ModuleFunction scan per super-admin
+        // request when a UI repeatedly enumerates permissions.
         if (await IsSuperAdminAsync(userId))
         {
-            return await _moduleFunctionRepository
-                .Where(f => f.IsEnabled)
-                .Select(f => f.Code)
-                .Distinct()
-                .ToListAsync();
+            return await GetSuperAdminCatalogueAsync();
         }
 
         // 1. 尝试从缓存获取
@@ -345,6 +383,18 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail<FunctionModule>("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // System-managed rows: only IsEnabled / Order are editable. Code /
+        // Name / Description / ParentId mirror the IPermissionDefinitionProvider
+        // declaration and changing them via admin UI would drift from code-
+        // as-truth on next startup (seeder restores). Treat attempts as 403
+        // so admin sees the constraint, not as silent revert.
+        if (module.IsSystemManaged && !string.Equals(module.Code, request.Code, StringComparison.Ordinal))
+        {
+            return Fail<FunctionModule>(
+                "System-managed module code cannot be changed. Update the IPermissionDefinitionProvider declaration in code instead.",
+                403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+        }
+
         // 检查代码是否被其他模块使用
         if (module.Code != request.Code)
         {
@@ -399,6 +449,16 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (module == null)
         {
             return Fail("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        // System-managed rows are owned by code — delete attempts via admin
+        // UI would resurrect on next startup (seeder re-inserts). Refuse so
+        // admin sees the constraint instead of silent "phantom" rebirth.
+        if (module.IsSystemManaged)
+        {
+            return Fail(
+                "System-managed module cannot be deleted. Remove the IPermissionDefinitionProvider declaration in code instead.",
+                403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
         }
 
         // 检查是否有子模块
@@ -807,6 +867,24 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail<ModuleFunction>("Module function not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // System-managed: Code/Name/ModuleId are owned by the
+        // IPermissionDefinitionProvider; admin can only flip IsEnabled.
+        if (function.IsSystemManaged)
+        {
+            if (!string.Equals(function.Code, request.Code, StringComparison.Ordinal))
+            {
+                return Fail<ModuleFunction>(
+                    "System-managed function code cannot be changed via admin UI. Update the IPermissionDefinitionProvider declaration in code instead.",
+                    403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+            }
+            if (function.ModuleId != request.ModuleId)
+            {
+                return Fail<ModuleFunction>(
+                    "System-managed function cannot be moved to a different module.",
+                    403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+            }
+        }
+
         // 检查代码是否被其他功能使用
         if (function.Code != request.Code)
         {
@@ -850,6 +928,15 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail("Module function not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // System-managed: the seeder will re-insert this row on next
+        // startup anyway. Refuse so admin doesn't see "phantom row" behaviour.
+        if (function.IsSystemManaged)
+        {
+            return Fail(
+                "System-managed function cannot be deleted. Remove the IPermissionDefinitionProvider declaration in code instead.",
+                403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+        }
+
         // 检查是否有角色关联
         var hasRoleFunctions = await _roleFunctionRepository
             .Where(rf => rf.FunctionId == id)
@@ -880,7 +967,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         function.IsEnabled = true;
         await _moduleFunctionRepository.UpdateAsync(function);
-        await InvalidateAllCacheAsync();
+        await InvalidateCacheForFunctionAsync(function.Id, function.ModuleId);
         await PublishFunctionEnabledChangedAsync(function.Id, function.Code, function.ModuleId, true);
         LogInformation("Module function enabled: {Code}, Name: {Name}", function.Code, function.Name);
         return Ok("Module function enabled successfully");
@@ -900,7 +987,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         function.IsEnabled = false;
         await _moduleFunctionRepository.UpdateAsync(function);
-        await InvalidateAllCacheAsync();
+        await InvalidateCacheForFunctionAsync(function.Id, function.ModuleId);
         await PublishFunctionEnabledChangedAsync(function.Id, function.Code, function.ModuleId, false);
         LogInformation("Module function disabled: {Code}, Name: {Name}", function.Code, function.Name);
         return Ok("Module function disabled successfully");
@@ -1370,11 +1457,88 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <summary>
     /// 全局清理功能权限缓存
     /// </summary>
+    /// <remarks>
+    /// Use this when the affected scope is broad or unknown (module cascade
+    /// enable/disable, schema migrations, ops "kick the cache" actions).
+    /// For narrow scopes (single-function toggle, single-role change),
+    /// prefer the precise variants below to avoid invalidating every
+    /// active user's cache entry.
+    /// </remarks>
     private async Task InvalidateAllCacheAsync()
     {
         if (_functionAuthCache != null)
         {
             await _functionAuthCache.ClearAllAsync();
+        }
+    }
+
+    /// <summary>
+    /// Invalidate only the users actually reachable by a single function —
+    /// users granted that function via any of the 3 paths
+    /// (<see cref="ModuleUser"/>, <see cref="ModuleRole"/>+UserRole,
+    /// <see cref="RoleFunction"/>+UserRole), plus the super-admin catalogue
+    /// (which always includes every enabled function). Cheaper than
+    /// <see cref="InvalidateAllCacheAsync"/> for the common
+    /// "admin toggled one function" path.
+    /// </summary>
+    private async Task InvalidateCacheForFunctionAsync(Guid functionId, Guid moduleId)
+    {
+        if (_functionAuthCache == null || _userRoleService == null)
+        {
+            // Without the user-role lookup we can't compute the precise
+            // user set, so fall back to the safe global clear.
+            await InvalidateAllCacheAsync();
+            return;
+        }
+
+        try
+        {
+            // (a) Direct ModuleUser grants on the function's module.
+            var moduleUserIds = await _moduleUserRepository
+                .Where(mu => mu.ModuleId == moduleId && mu.IsEnabled)
+                .Select(mu => mu.UserId)
+                .ToListAsync();
+
+            // (b) Role-scoped grants — collect every role that touches this
+            // function (either via ModuleRole on its module, or directly via
+            // RoleFunction) and fan out to their users.
+            var moduleRoleIds = await _moduleRoleRepository
+                .Where(mr => mr.ModuleId == moduleId && mr.IsEnabled)
+                .Select(mr => mr.RoleId)
+                .ToListAsync();
+            var roleFunctionRoleIds = await _roleFunctionRepository
+                .Where(rf => rf.FunctionId == functionId && rf.IsEnabled)
+                .Select(rf => rf.RoleId)
+                .ToListAsync();
+
+            var affectedUserIds = new HashSet<Guid>(moduleUserIds);
+            foreach (var roleId in moduleRoleIds.Concat(roleFunctionRoleIds).Distinct())
+            {
+                var roleUsers = await _userRoleService.GetRoleUserIdsAsync(roleId);
+                if (roleUsers != null)
+                {
+                    foreach (var uid in roleUsers) affectedUserIds.Add(uid);
+                }
+            }
+
+            if (affectedUserIds.Count > 0)
+            {
+                await _functionAuthCache.RemoveUserPermissionNamesAsync(affectedUserIds);
+            }
+
+            // The super-admin catalogue is "all enabled functions" — any
+            // function enable/disable affects it.
+            await _functionAuthCache.InvalidateSuperAdminCatalogueAsync();
+        }
+        catch (Exception ex)
+        {
+            // Precise invalidation is an optimisation, not a correctness
+            // guarantee — if anything goes wrong (DB transient error etc.),
+            // fall back to a global clear so we never leave stale entries.
+            Logger.LogWarning(ex,
+                "Precise cache invalidation failed for function {FunctionId}; falling back to global clear.",
+                functionId);
+            await InvalidateAllCacheAsync();
         }
     }
 

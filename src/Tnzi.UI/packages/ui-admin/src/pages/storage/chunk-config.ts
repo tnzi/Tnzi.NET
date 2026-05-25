@@ -12,9 +12,9 @@ export const chunkColumns: ColumnDef[] = [
 ]
 
 export const chunkFormSchema: FormSchemaItem[] = [
-  { key: 'id',               label: 'Chunk ID',        type: 'text' },
-  { key: 'uploadSessionId',  label: 'Upload Session',  type: 'text' },
-  { key: 'chunkIndex',       label: 'Chunk Index',     type: 'number' },
-  { key: 'chunkSize',        label: 'Size (bytes)',    type: 'number' },
-  { key: 'md5Hash',          label: 'MD5',             type: 'text' },
+  { key: 'id',               labelKey: 'form.id', label: 'Chunk ID',        type: 'text' },
+  { key: 'uploadSessionId',  labelKey: 'form.uploadSessionId', label: 'Upload Session',  type: 'text' },
+  { key: 'chunkIndex',       labelKey: 'form.chunkIndex', label: 'Chunk Index',     type: 'number' },
+  { key: 'chunkSize',        labelKey: 'form.chunkSize', label: 'Size (bytes)',    type: 'number' },
+  { key: 'md5Hash',          labelKey: 'form.md5Hash', label: 'MD5',             type: 'text' },
 ]

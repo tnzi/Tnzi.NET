@@ -71,7 +71,12 @@
                 <NInput v-model:value="form.code" :placeholder="t('fields.codePlaceholder')" />
               </NFormItem>
               <NFormItem :label="t('fields.remark')">
-                <NInput v-model:value="form.remark" type="textarea" :rows="2" />
+                <NInput
+                  v-model:value="form.remark"
+                  type="textarea"
+                  :rows="2"
+                  :placeholder="t('fields.remarkPlaceholder')"
+                />
               </NFormItem>
               <NFormItem :label="t('fields.sortOrder')">
                 <NInputNumber v-model:value="form.sortOrder" :min="0" />
@@ -86,13 +91,60 @@
               </NButton>
               <NButton @click="resetForm">{{ t('reset') }}</NButton>
             </div>
+
+            <!--
+              Organization members panel — paged user list scoped to the
+              selected org. The `includeChildren` toggle expands the
+              backend query to every descendant unit. The "Remove" row
+              action calls `users.removeFromOrganization(userId)` which
+              detaches the user without deleting them — the user just
+              ends up orphaned and an admin can reassign via the user
+              page or by adding them to a different org.
+            -->
+            <div class="t-org-page__members">
+              <header class="t-org-page__section-header">
+                <h4 class="t-org-page__section-title">{{ t('members.title') }}</h4>
+                <NSpace align="center">
+                  <NCheckbox v-model:checked="members.includeChildren" @update:checked="reloadMembers">
+                    {{ t('members.includeChildren') }}
+                  </NCheckbox>
+                  <NButton size="small" :loading="members.loading" @click="reloadMembers">
+                    {{ t('refresh') }}
+                  </NButton>
+                </NSpace>
+              </header>
+              <p class="t-org-page__hint">{{ t('members.hint') }}</p>
+              <NDataTable
+                :data="members.items"
+                :columns="memberColumns"
+                :loading="members.loading"
+                :pagination="{
+                  page: members.pageIndex,
+                  pageSize: members.pageSize,
+                  itemCount: members.totalCount,
+                  showSizePicker: true,
+                  pageSizes: [10, 20, 50],
+                  onUpdatePage: (p: number) => { members.pageIndex = p; reloadMembers() },
+                  onUpdatePageSize: (s: number) => { members.pageSize = s; members.pageIndex = 1; reloadMembers() },
+                }"
+                :bordered="false"
+                size="small"
+                remote
+                :row-key="(r: OrgMemberRow) => r.id"
+              />
+            </div>
           </div>
         </div>
       </div>
     </NCard>
 
     <!-- Create modal — works for both root and child create -->
-    <NModal v-model:show="createModal.show" :title="t(createModal.parentId ? 'addChild' : 'addRoot')" preset="card" style="width: 500px">
+    <NModal
+      v-model:show="createModal.show"
+      :title="t(createModal.parentId ? 'addChild' : 'addRoot')"
+      preset="card"
+      :style="createModalStyle"
+    >
       <NForm label-placement="left" label-width="100px">
         <NFormItem :label="t('fields.name')" required>
           <NInput v-model:value="createModal.form.name" />
@@ -101,7 +153,12 @@
           <NInput v-model:value="createModal.form.code" />
         </NFormItem>
         <NFormItem :label="t('fields.remark')">
-          <NInput v-model:value="createModal.form.remark" type="textarea" :rows="2" />
+          <NInput
+            v-model:value="createModal.form.remark"
+            type="textarea"
+            :rows="2"
+            :placeholder="t('fields.remarkPlaceholder')"
+          />
         </NFormItem>
         <NFormItem :label="t('fields.sortOrder')">
           <NInputNumber v-model:value="createModal.form.sortOrder" :min="0" />
@@ -120,25 +177,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, h, onMounted } from 'vue'
-import type { TreeOption } from 'naive-ui'
+import { computed, reactive, ref, h, onMounted, watch } from 'vue'
+import type { DataTableColumns, TreeOption } from 'naive-ui'
 import {
-  NCard, NTree, NSpace, NButton, NInput, NInputNumber, NSwitch, NSpin,
-  NForm, NFormItem, NPopconfirm, NModal, useMessage,
+  NCard, NTree, NSpace, NButton, NCheckbox, NDataTable, NInput, NInputNumber,
+  NSwitch, NSpin, NForm, NFormItem, NPopconfirm, NModal,
 } from 'naive-ui'
+import { useSafeMessage } from '../_shared/safeMessage'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import { createIdentityBridge, type OrganizationTreeNodeDto, type OrganizationDto } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { translatePageKey } from '../_shared/translate'
+import { interpolate, translatePageKey } from '../_shared/translate'
+import type { UserListItemDto } from '@tnzi/core/services/identity'
 
 const bridge = createIdentityBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('identity.organizations', key)
+const t = (key: string, params?: Record<string, unknown>) =>
+  interpolate(translatePageKey('identity.organizations', key), params)
 
-let message: { success(s: string): void; error(s: string): void }
-try {
-  message = useMessage()
-} catch {
-  message = { success: () => {}, error: () => {} }
-}
+type OrgMemberRow = UserListItemDto
+
+const message = useSafeMessage()
+const bp = useBreakpoint()
+
+// Phase 1 responsive parity: cap modal width at viewport - margins so
+// the dialog never escapes a phone screen. Mirrors TFormModal's
+// behaviour without the full state-machine refactor (reactive
+// metadata + form is convoluted to migrate to useFormModal).
+const createModalStyle = computed(() =>
+  bp.isSm.value
+    ? { width: '100vw', maxWidth: '100vw' }
+    : { width: 'min(500px, 95vw)' },
+)
 
 const tree = ref<OrganizationTreeNodeDto[]>([])
 const loading = ref(false)
@@ -286,6 +355,99 @@ async function submitCreate(): Promise<void> {
   }
 }
 
+// ─── Members panel ─────────────────────────────────────────────────────────
+// Paged list of users that belong to the currently selected org node.
+// Re-fetched whenever the selection or `includeChildren` toggle changes;
+// pagination changes reuse the same loader. We hold the result in a
+// `reactive` bag rather than a Pinia store because state is fully local
+// to this page.
+const members = reactive({
+  items: [] as OrgMemberRow[],
+  totalCount: 0,
+  pageIndex: 1,
+  pageSize: 10,
+  includeChildren: false,
+  loading: false,
+})
+
+async function loadMembers(orgId: string): Promise<void> {
+  members.loading = true
+  try {
+    const result = await bridge.organizations.getUsers(orgId, {
+      pageIndex: members.pageIndex,
+      pageSize: members.pageSize,
+      includeChildren: members.includeChildren,
+    })
+    members.items = result.items as OrgMemberRow[]
+    members.totalCount = result.totalCount
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    members.items = []
+    members.totalCount = 0
+  } finally {
+    members.loading = false
+  }
+}
+
+function reloadMembers(): void {
+  if (selectedKey.value) void loadMembers(selectedKey.value)
+}
+
+async function removeMember(user: OrgMemberRow): Promise<void> {
+  try {
+    await bridge.users.removeFromOrganization(user.id)
+    message.success(t('members.removeSuccess'))
+    reloadMembers()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// Reset paging + reload whenever the selected org changes. Skip the
+// effect when nothing's selected (the empty-state placeholder shows).
+watch(selectedKey, (key) => {
+  members.pageIndex = 1
+  members.items = []
+  members.totalCount = 0
+  if (key) void loadMembers(key)
+})
+
+const memberColumns = computed<DataTableColumns<OrgMemberRow>>(() => [
+  { key: 'userName', title: t('members.userName'), minWidth: 140 },
+  { key: 'email', title: t('members.email'), minWidth: 180, ellipsis: { tooltip: true } },
+  { key: 'phoneNumber', title: t('members.phoneNumber'), width: 140 },
+  // When includeChildren=true the user's actual org may differ from the
+  // selected node — surface it so admins can tell who lives in which
+  // sub-unit without exporting.
+  {
+    key: 'organizationName',
+    title: t('members.organization'),
+    minWidth: 160,
+    ellipsis: { tooltip: true },
+    render: (row) => row.organizationName ?? '—',
+  },
+  {
+    key: 'actions',
+    title: t('members.actions'),
+    width: 100,
+    align: 'right',
+    render: (row) =>
+      h(
+        NPopconfirm,
+        { onPositiveClick: () => removeMember(row) },
+        {
+          trigger: () =>
+            h(
+              NButton,
+              { size: 'tiny', type: 'error', ghost: true },
+              { default: () => t('members.remove') },
+            ),
+          default: () => t('members.confirmRemove', { user: row.userName }),
+        },
+      ),
+  },
+])
+
 onMounted(() => {
   void loadTree()
 })
@@ -293,28 +455,41 @@ onMounted(() => {
 
 <style scoped>
 .t-org-page {
-  padding: 16px;
+  /* `t-page-scroll` (from polish.css) gives us flex:1 1 auto + min-height:0;
+     the global `.t-page-scroll > .n-card:only-child` rule handles the card
+     and `.n-card-content` flex-fill so we don't repeat it here. We still
+     need to make the grid layout below stretch to the card's available
+     height. */
+  display: flex;
+  flex-direction: column;
 }
 .t-org-page__layout {
+  flex: 1;
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 16px;
-  min-height: 480px;
+  min-height: 0;
 }
 .t-org-page__tree {
-  border-right: 1px solid var(--tnzi-base-border, #efeff5);
+  border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .t-org-page__naive-tree {
+  flex: 1;
   margin-top: 8px;
-  max-height: 60vh;
+  min-height: 0;
   overflow: auto;
 }
 .t-org-page__detail {
   padding: 0 8px;
+  overflow: auto;
+  min-height: 0;
 }
 .t-org-page__placeholder {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 60px 16px;
 }
@@ -334,9 +509,36 @@ onMounted(() => {
   margin-top: 8px;
 }
 .t-org-page__empty {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 24px 8px;
   font-size: 13px;
+}
+/* Members panel — visually separated from the edit form by a top border
+   so the two zones don't run together. The panel itself doesn't claim
+   flex-grow; the underlying t-page-scroll container handles overflow. */
+.t-org-page__members {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--tnzi-border);
+}
+.t-org-page__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.t-org-page__section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+.t-org-page__hint {
+  color: var(--tnzi-base-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
 }
 </style>

@@ -2,6 +2,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import { TSourceBadge } from '@tnzi/ui'
 
 /**
  * Template page config — Phase 3 Task 3.36.
@@ -34,20 +35,26 @@ export const templateColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.isActive),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
+  },
+  {
+    key: 'source',
+    title: 'columns.source',
+    width: 110,
+    render: (row) => h(TSourceBadge, { value: String(row.source ?? 'Database') }),
   },
 ]
 
 export const templateFormSchema: FormSchemaItem[] = [
-  { key: 'templateName',      label: 'Template Name',    type: 'text',     required: true },
-  { key: 'module',            label: 'Module',           type: 'text',     required: true },
-  { key: 'category',          label: 'Category',         type: 'text' },
-  { key: 'defaultLayoutName', label: 'Layout Name',      type: 'text' },
-  { key: 'subjectTemplate',   label: 'Subject',          type: 'text' },
-  { key: 'contentTemplate',   label: 'Content',          type: 'textarea', required: true },
-  { key: 'description',       label: 'Description',      type: 'textarea' },
-  { key: 'isActive',          label: 'Enabled',          type: 'switch' },
+  { key: 'templateName',      labelKey: 'form.templateName', label: 'Template Name',    type: 'text',     required: true },
+  { key: 'module',            labelKey: 'form.module', label: 'Module',           type: 'text',     required: true },
+  { key: 'category',          labelKey: 'form.category', label: 'Category',         type: 'text' },
+  { key: 'defaultLayoutName', labelKey: 'form.defaultLayoutName', label: 'Layout Name',      type: 'text' },
+  { key: 'subjectTemplate',   labelKey: 'form.subjectTemplate', label: 'Subject',          type: 'text' },
+  { key: 'contentTemplate',   labelKey: 'form.contentTemplate', label: 'Content',          type: 'textarea', required: true },
+  { key: 'description',       labelKey: 'form.description', label: 'Description',      type: 'textarea' },
+  { key: 'isActive',          labelKey: 'form.isActive', label: 'Enabled',          type: 'switch' },
 ]

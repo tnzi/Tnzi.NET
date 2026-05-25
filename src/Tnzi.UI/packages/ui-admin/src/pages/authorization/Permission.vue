@@ -77,8 +77,9 @@
 import { computed, h, ref, onMounted } from 'vue'
 import type { TreeOption, DataTableColumns } from 'naive-ui'
 import {
-  NCard, NSpace, NButton, NTree, NInput, NSpin, NDataTable, NTag, useMessage,
+  NCard, NSpace, NButton, NTree, NInput, NSpin, NDataTable, NTag,
 } from 'naive-ui'
+import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
@@ -89,12 +90,7 @@ type PermissionRow = ModuleFunctionDto
 const bridge = createAuthorizationBridge({ client: useAdminClient() })
 const t = makePageTranslator('authorization.permissions')
 
-let message: { error(s: string): void }
-try {
-  message = useMessage()
-} catch {
-  message = { error: () => {} }
-}
+const message = useSafeMessage()
 
 const modules = ref<FunctionModuleDto[]>([])
 const permissions = ref<PermissionRow[]>([])
@@ -239,7 +235,7 @@ onMounted(() => {
 
 <style scoped>
 .t-permission-page {
-  padding: 16px;
+  /* no padding — owned by TAdminContent */
 }
 .t-permission-page__layout {
   display: grid;
@@ -248,7 +244,7 @@ onMounted(() => {
   min-height: 520px;
 }
 .t-permission-page__tree {
-  border-right: 1px solid var(--tnzi-base-border, #efeff5);
+  border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
 }
 .t-permission-page__naive-tree {
@@ -260,7 +256,7 @@ onMounted(() => {
   padding: 0 4px;
 }
 .t-permission-page__placeholder {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 60px 16px;
 }
@@ -276,12 +272,12 @@ onMounted(() => {
   font-size: 18px;
 }
 .t-permission-page__module-code {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-permission-page__count {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -289,14 +285,14 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 .t-permission-page__code {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
   padding: 1px 6px;
   border-radius: 3px;
 }
 .t-permission-page__empty {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 24px 8px;
   font-size: 13px;

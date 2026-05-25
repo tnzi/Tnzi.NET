@@ -2,8 +2,14 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
 
+/**
+ * RefundDto.status is the RefundStatus enum:
+ *   0=Pending / 1=Processing / 2=Approved / 3=Rejected /
+ *   4=Refunding / 5=Succeeded / 6=Failed / 7=Cancelled.
+ * Backend serialises as int — the previous string-keyed map never matched.
+ */
 interface RefundRow {
   id?: string
   refundNo?: string
@@ -13,19 +19,22 @@ interface RefundRow {
   refundAmount?: number
   currency?: string
   reason?: string
-  status?: 'pending' | 'approved' | 'rejected' | 'completed' | 'failed' | string
+  status?: number
   creationTime?: string
   completedTime?: string
   approverId?: string
   approveTime?: string
 }
 
-const STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
-  pending: { type: 'warning', label: 'Pending Review' },
-  approved: { type: 'info', label: 'Approved' },
-  rejected: { type: 'error', label: 'Rejected' },
-  completed: { type: 'success', label: 'Completed' },
-  failed: { type: 'error', label: 'Failed' },
+const STATUS_MAP: Record<number, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label?: string; labelKey?: string }> = {
+  0: { type: 'warning', label: 'Pending Review' },
+  1: { type: 'info',    label: 'Processing' },
+  2: { type: 'info',    labelKey: 'admin.shared.status.approved' },
+  3: { type: 'error',   labelKey: 'admin.shared.status.rejected' },
+  4: { type: 'info',    label: 'Refunding' },
+  5: { type: 'success', label: 'Succeeded' },
+  6: { type: 'error',   labelKey: 'admin.shared.status.failed' },
+  7: { type: 'default', labelKey: 'admin.shared.status.cancelled' },
 }
 
 function fmtMoney(amount?: number, currency?: string): string {
@@ -60,8 +69,12 @@ export const refundColumns: ColumnDef<RefundRow>[] = [
     title: 'columns.status',
     width: 140,
     render: (row) => {
-      const m = STATUS_MAP[row.status ?? ''] ?? { type: 'default' as const, label: row.status ?? '—' }
-      return h(TStatusBadge, { value: row.status ?? 'unknown', type: m.type, label: m.label })
+      const v = typeof row.status === 'number' ? row.status : Number(row.status)
+      const m = STATUS_MAP[v]
+      if (m) {
+        return h(TStatusBadge, { value: v, type: m.type, label: m.label, labelKey: m.labelKey })
+      }
+      return h(TStatusBadge, { value: v, type: 'default', label: String(row.status ?? '—') })
     },
   },
   {
@@ -80,9 +93,9 @@ export const refundColumns: ColumnDef<RefundRow>[] = [
 ]
 
 export const refundFormSchema: FormSchemaItem[] = [
-  { key: 'refundNo',     label: 'Refund No',    type: 'text' },
-  { key: 'paymentNo',    label: 'Payment No',   type: 'text' },
-  { key: 'refundAmount', label: 'Amount',       type: 'number', required: true },
-  { key: 'reason',       label: 'Reason',       type: 'textarea', required: true },
-  { key: 'status',       label: 'Status',       type: 'text' },
+  { key: 'refundNo',     labelKey: 'form.refundNo', label: 'Refund No',    type: 'text' },
+  { key: 'paymentNo',    labelKey: 'form.paymentNo', label: 'Payment No',   type: 'text' },
+  { key: 'refundAmount', labelKey: 'form.refundAmount', label: 'Amount',       type: 'number', required: true },
+  { key: 'reason',       labelKey: 'form.reason', label: 'Reason',       type: 'textarea', required: true },
+  { key: 'status',       labelKey: 'form.status', label: 'Status',       type: 'text' },
 ]

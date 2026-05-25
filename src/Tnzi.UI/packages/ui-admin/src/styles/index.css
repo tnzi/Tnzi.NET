@@ -3,11 +3,25 @@
  * the layout + transition primitives are guaranteed available even when
  * the consumer hasn't manually imported `@tnzi/ui-admin/style.css`.
  *
- * The base @tnzi/ui variables (--tnzi-primary, --tnzi-base-text, …) are
- * injected separately by `createTnziUi()` or by the fallback theme context
- * the admin plugin provides — do NOT duplicate them here.
+ * `@tnzi/ui/style.css` is pulled in first so admin consumers only need to
+ * import the single `@tnzi/ui-admin/style.css` aggregate to get every rule
+ * the admin shell uses — including
+ *   - `.t-form-schema--compact` (sunk to @tnzi/ui in 0.2.x, lives in
+ *     `@tnzi/ui/src/components/form/form-schema.css`)
+ *   - `.t-widget-card` / `.t-widget-card__*` (TWidgetCard scoped styles)
+ *   - `.t-workbench-layout--draggable` grid (TWorkbenchLayout scoped styles)
+ * Without this @import, those rules ship only inside `@tnzi/ui/dist/style.css`,
+ * and a consumer (e.g. Acme) that imports only `@tnzi/ui-admin/style.css`
+ * would render the layout/modal chrome with naive-ui defaults — modals
+ * overflow, widget cards lose shadow + ellipsis, draggable grid collapses
+ * to a single column.
+ *
+ * Vite's PostCSS pipeline resolves `@tnzi/ui/style.css` via node_modules,
+ * inlines the content into `dist/style.css`. Consumers paying the cost
+ * once is the right trade-off; consumers who also `import '@tnzi/ui/style.css'`
+ * directly will see harmless duplicate rules.
  */
-
+@import '@tnzi/ui/style.css';
 @import './variables.css';
 @import './transition.css';
 @import './polish.css';

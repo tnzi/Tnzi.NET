@@ -45,15 +45,18 @@
     <TCrudPage
       :state="crud"
       :all-columns="orderColumns"
-      title="Payment Orders"
+      :title="t('title')"
       :translate="t"
       :show-create="false"
+      :form-modal-width="760"
     >
       <template #form="{ formData, mode }">
         <TFormSchemaRenderer
           :schema="orderFormSchema"
           :model="(formData ?? {}) as Record<string, unknown>"
           :readonly="mode === 'view'"
+          :translate="t"
+          :columns="2"
         />
       </template>
       <template #rowActions="{ row }">

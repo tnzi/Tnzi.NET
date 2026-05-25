@@ -63,7 +63,12 @@
         </div>
       </aside>
 
-      <section class="t-run-monitor__detail" data-test="run-detail">
+      <NCard
+        size="small"
+        :bordered="false"
+        class="t-run-monitor__detail"
+        data-test="run-detail"
+      >
         <div v-if="!selectedRun" class="t-run-monitor__placeholder">
           {{ t('monitor.selectPrompt') }}
         </div>
@@ -79,15 +84,17 @@
               <strong>{{ t('monitor.field.duration') }}:</strong>
               {{ selectedRun.durationMs }}ms
             </div>
-            <button
+            <NButton
               v-if="isRunning(selectedRun)"
-              type="button"
+              type="error"
+              ghost
+              size="small"
+              :loading="cancelling"
               class="t-run-monitor__cancel"
-              :disabled="cancelling"
               @click="handleCancel"
             >
-              {{ cancelling ? '…' : t('monitor.cancel') }}
-            </button>
+              {{ t('monitor.cancel') }}
+            </NButton>
           </div>
 
           <div v-if="cancelStatus" class="t-run-monitor__status" :data-state="cancelStatus.kind">
@@ -113,7 +120,7 @@
             {{ t('monitor.traceWaiting') }}
           </div>
         </template>
-      </section>
+      </NCard>
     </div>
   </div>
 </template>
@@ -124,6 +131,7 @@ import { useRoute } from 'vue-router'
 import { translatePageKey } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import { NCard, NButton } from 'naive-ui'
 import { runStatusClass, type RunTraceEvent } from './run-monitor-config'
 import type { AgentRunDto } from '@tnzi/core/services/ai'
 
@@ -308,17 +316,17 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
 .t-run-monitor {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 16px;
 }
 .t-run-monitor__header {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 16px;
 }
 .t-run-monitor__body {
   display: grid;
   grid-template-columns: 320px 1fr;
-  gap: 1rem;
+  gap: 16px;
   min-height: 480px;
 }
 .t-run-monitor__list-items {
@@ -329,24 +337,24 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
 .t-run-monitor__list-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  padding: 0.5rem 0.75rem;
+  padding: 8px 12px;
   cursor: pointer;
-  border-bottom: 1px solid var(--tnzi-base-border, #eee);
+  border-bottom: 1px solid var(--tnzi-border);
 }
 .t-run-monitor__list-row.is-selected {
-  background: var(--tnzi-primary-color-suppl, rgba(6, 182, 212, 0.12));
+  background: rgb(var(--tnzi-primary-rgb) / 0.12);
 }
 .t-run-monitor__detail {
-  padding: 1rem;
-  border: 1px solid var(--tnzi-base-border, #eee);
+  /* NCard supplies the chrome (padding, border, surface). We only add
+     the soft shadow + radius for parity with TCrudPage list-card. */
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }
 .t-run-monitor__meta > div {
-  margin-bottom: 0.25rem;
+  margin-bottom: 4px;
 }
 .t-run-monitor__cancel {
-  margin-top: 0.5rem;
-  padding: 0.35rem 0.8rem;
-  cursor: pointer;
+  margin-top: 8px;
 }
 .t-run-monitor__trace {
   list-style: none;
@@ -356,24 +364,24 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
   overflow-y: auto;
 }
 .t-run-monitor__trace-row {
-  padding: 0.25rem 0;
-  border-bottom: 1px dashed var(--tnzi-base-border, #f0f0f0);
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--tnzi-border);
 }
 .t-run-monitor__trace-type {
   display: inline-block;
-  margin-right: 0.5rem;
+  margin-right: 8px;
   font-weight: 600;
-  color: var(--tnzi-base-text-muted, #666);
+  color: var(--tnzi-base-text-muted);
 }
 .t-run-monitor__error,
 .t-run-monitor__banner {
-  color: var(--tnzi-error-color, #c33);
-  padding: 0.5rem 0;
+  color: var(--tnzi-error);
+  padding: 8px 0;
 }
 .t-run-monitor__status[data-state='ok'] {
-  color: var(--tnzi-success-color, #2a7);
+  color: var(--tnzi-success);
 }
 .t-run-monitor__status[data-state='err'] {
-  color: var(--tnzi-error-color, #c33);
+  color: var(--tnzi-error);
 }
 </style>

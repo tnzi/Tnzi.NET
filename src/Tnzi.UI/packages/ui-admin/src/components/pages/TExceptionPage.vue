@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 
 /**
  * Reusable exception page — used by 403, 404, 500 routes and any

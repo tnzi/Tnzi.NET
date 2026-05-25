@@ -27,7 +27,7 @@ import {
   type AuditOperationQueryDto,
 } from '@tnzi/core/services/audit'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest } from '../_mappers'
+import { mapQueryToListRequest, pagedResult } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminAuditApi>[0]
 
@@ -75,12 +75,12 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
     const result = unwrap<{ items: AuditOperationDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await api.getList(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const logs: AuditBridge['logs'] = {
@@ -100,3 +100,9 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
 
   return { logs, operations }
 }
+
+// 0.2.72+ (B4): re-export the enum so pages can consume the runtime value
+// via the bridge surface and stay clean under the `no-restricted-imports`
+// guard against `@tnzi/core/services/*` value imports from `pages/**`.
+export { AuditResultType } from '@tnzi/core/services/audit'
+export type { AuditOperationDto } from '@tnzi/core/services/audit'

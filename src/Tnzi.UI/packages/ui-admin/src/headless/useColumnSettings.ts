@@ -7,6 +7,13 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
   width?: number
   fixed?: 'left' | 'right'
   /**
+   * Truncate long cell text with an ellipsis instead of wrapping. Pass
+   * `true` for plain truncation; pass `{ tooltip: true }` to also show
+   * the full text in a hover tooltip. Forwarded to NDataTable's
+   * `ellipsis` column option.
+   */
+  ellipsis?: boolean | { tooltip?: boolean }
+  /**
    * Custom cell renderer. Receives the row object and returns a string or VNode.
    * Use for status badges, relative timestamps, action buttons, links, etc.
    *

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NGrid, NGi } from 'naive-ui'
-import TCountTo from '../display/TCountTo.vue'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TCountTo } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
 import { useEcharts } from '../../headless/useEcharts'
+import { translatePageKey } from '../../pages/_shared/translate'
 import type { EChartsOption } from 'echarts'
 
 /**
@@ -64,6 +65,8 @@ interface Props {
   lineTitle?: string
   /** Pie chart title. */
   pieTitle?: string
+  /** Override the "No data" placeholder shown when a chart has no series. */
+  emptyText?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -73,6 +76,12 @@ const props = withDefaults(defineProps<Props>(), {
   pieData: () => [],
   lineTitle: 'Activity',
   pieTitle: 'Distribution',
+  emptyText: undefined,
+})
+
+const emptyLabel = computed(() => {
+  if (props.emptyText) return props.emptyText
+  return translatePageKey('', 'admin.common.noData') || 'No data'
 })
 
 const lineHasData = computed(
@@ -229,13 +238,13 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
       <NGi span="24 m:24 l:16">
         <NCard :title="lineTitle" size="small" class="t-dashboard-page__chart-card">
           <div v-if="lineHasData" ref="lineRef" class="t-dashboard-page__chart" />
-          <div v-else class="t-dashboard-page__empty">No data</div>
+          <div v-else class="t-dashboard-page__empty">{{ emptyLabel }}</div>
         </NCard>
       </NGi>
       <NGi span="24 m:24 l:8">
         <NCard :title="pieTitle" size="small" class="t-dashboard-page__chart-card">
           <div v-if="pieHasData" ref="pieRef" class="t-dashboard-page__chart" />
-          <div v-else class="t-dashboard-page__empty">No data</div>
+          <div v-else class="t-dashboard-page__empty">{{ emptyLabel }}</div>
         </NCard>
       </NGi>
     </NGrid>
@@ -252,7 +261,11 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: var(--tnzi-admin-content-padding, 16px);
+  /* No padding — the host page (Workbench / UsageDashboard) sits inside
+     TAdminContent which already supplies the 16px page-edge gutter. An
+     extra padding here was creating a transparent "凹陷" frame around
+     the KPI + chart cards because this wrapper has no background of
+     its own (the surrounding layout shows through). */
 }
 
 .t-dashboard-page__kpi-card {

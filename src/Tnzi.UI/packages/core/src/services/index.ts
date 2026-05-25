@@ -14,3 +14,4 @@ export * as Storage from './storage';
 export * as System from './system';
 export * as Audit from './audit';
 export * as Template from './template';
+export * as Logging from './logging';

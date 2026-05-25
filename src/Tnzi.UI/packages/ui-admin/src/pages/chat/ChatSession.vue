@@ -17,21 +17,23 @@
         :schema="chatSessionFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
     </template>
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t">
-        <template #prepend>
-          <NButton size="small" type="info" ghost @click="viewMessages(row)">Messages</NButton>
-        </template>
-      </TRowActions>
+      <TRowActions
+        :row="row as ChatSessionListItemDto"
+        :state="crud"
+        :translate="t"
+        :more-options="[{ key: 'viewMessages', label: t('viewMessages') }]"
+        :on-more-select="onMoreSelect"
+      />
     </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { NButton } from 'naive-ui'
 import type { ChatSessionListItemDto } from '@tnzi/core/services/chat'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
@@ -67,6 +69,10 @@ crud.refresh().catch(() => undefined)
 function viewMessages(row: ChatSessionListItemDto): void {
   const sessionId = String(row.id ?? '')
   router.push({ path: '/admin/chat/messages', query: { sessionId } })
+}
+
+function onMoreSelect(key: string, row: ChatSessionListItemDto): void {
+  if (key === 'viewMessages') viewMessages(row)
 }
 
 const t = (key: string) => translatePageKey('chat.sessions', key)

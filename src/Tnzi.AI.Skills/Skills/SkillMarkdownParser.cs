@@ -190,6 +190,17 @@ public static partial class SkillMarkdownParser
         if (frontmatter.TryGetValue("description", out var description))
             skill.Description = description;
 
+        // `whenToUse` is a routing-signal hint distinct from `description`:
+        // description is the human-readable summary, whenToUse is a pushy
+        // "trigger phrase" list aimed at the LLM router. Accept kebab-case,
+        // camelCase, and snake_case for ergonomic frontmatter authoring.
+        if (frontmatter.TryGetValue("when-to-use", out var whenToUseKebab))
+            skill.WhenToUse = whenToUseKebab;
+        else if (frontmatter.TryGetValue("whenToUse", out var whenToUseCamel))
+            skill.WhenToUse = whenToUseCamel;
+        else if (frontmatter.TryGetValue("when_to_use", out var whenToUseSnake))
+            skill.WhenToUse = whenToUseSnake;
+
         if (frontmatter.TryGetValue("version", out var version))
             skill.Version = version;
 

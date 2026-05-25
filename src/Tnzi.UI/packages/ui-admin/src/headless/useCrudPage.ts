@@ -1,4 +1,5 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import type { PagedList } from '@tnzi/core'
 import {
   useColumnSettings,
   type ColumnDef,
@@ -7,6 +8,21 @@ import {
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
 import { useFormModal, type UseFormModalReturn } from './useFormModal'
 
+/**
+ * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
+ *
+ * Field-level alignment with `@tnzi/core`'s `FullPagedQueryDto` shape:
+ *  - `pageIndex` / `pageSize` — identical contract (1-based index, items per page)
+ *  - `searchText`             — equivalent to FullPagedQueryDto.keyword
+ *  - `sortField` + `sortOrder` — equivalent to FullPagedQueryDto.sortBy + sortDescending
+ *  - `filters`                — ui-admin-specific (FullPagedQueryDto has no
+ *                               typed filter bag; pages typically extend it
+ *                               via subclassing on the .NET side)
+ *
+ * The names diverge from FullPagedQueryDto for backward compatibility — 30+
+ * bridges + 60+ pages built against the legacy shape. The `_mappers.ts`
+ * `mapQueryToListRequest` helper bridges the names when calling the backend.
+ */
 export interface CrudPageQuery {
   pageIndex: number
   pageSize: number
@@ -16,12 +32,26 @@ export interface CrudPageQuery {
   filters: Record<string, unknown>
 }
 
-export interface CrudPageResult<T> {
-  items: T[]
-  totalCount: number
-  pageIndex: number
-  pageSize: number
-}
+/**
+ * 0.2.72+ (C4): `CrudPageResult<T>` is now an alias for `@tnzi/core`'s
+ * `PagedList<T>` — a strict superset that also carries `totalPages`,
+ * `hasPreviousPage`, `hasNextPage` (handy for pagination UI). The legacy
+ * minimal shape (items / totalCount / pageIndex / pageSize) stays valid
+ * because PagedList includes those four fields.
+ *
+ * Bridges that previously returned `{ items, totalCount, pageIndex, pageSize }`
+ * keep working — the framework's `mapResultToCrud` helper now fills in
+ * the missing `totalPages` / `hasPreviousPage` / `hasNextPage` fields
+ * automatically so downstream consumers can rely on the full PagedList
+ * surface.
+ */
+export type CrudPageResult<T> = PagedList<T>
+
+/**
+ * Operation tag passed to `onError` so a single handler can disambiguate
+ * which surface failed (e.g. tailor the message or only log writes).
+ */
+export type CrudPageOp = 'fetch' | 'create' | 'update' | 'delete' | 'export' | 'import'
 
 export interface UseCrudPageOptions<T, TId = string | number> {
   pageId: string
@@ -35,6 +65,37 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   exportData?: (query: CrudPageQuery) => Promise<Blob>
   importData?: (file: File) => Promise<void>
   onRefresh?: () => void
+  /**
+   * Called whenever fetchData / createData / updateData / deleteData /
+   * exportData / importData rejects. The signature lets a page tailor
+   * messaging per operation. Default behavior — when this is omitted —
+   * is to surface the error via `window.$message.error(err.message)`
+   * (the global Naive UI toast registered by `NMessageProvider`).
+   *
+   * Return `false` to suppress the default toast; any other return value
+   * (including `void`) lets the default toast run after your handler.
+   *
+   * The error is *always* re-thrown after this callback so callers (e.g.
+   * a submit button) can still react. To swallow the throw entirely,
+   * catch at the call site.
+   */
+  onError?: (err: Error, op: CrudPageOp) => boolean | void
+  /**
+   * Retry attempts for `fetchData` on transient failures. Default `3` —
+   * three retries with exponential backoff, then surface the error. Set
+   * to `0` to disable retries.
+   *
+   * Only `fetchData` is retried. Write operations (create/update/delete/
+   * import) are never retried because duplicate writes are worse than
+   * a surfaced error; export is also single-attempt to avoid double
+   * billing for expensive report endpoints.
+   */
+  retryFetch?: number
+  /**
+   * Base delay (ms) for the exponential retry backoff. Each attempt waits
+   * `retryDelayMs * 2 ** attempt` — defaults give 300 → 600 → 1200ms.
+   */
+  retryDelayMs?: number
 }
 
 export interface UseCrudPageReturn<T, TId = string | number> {
@@ -67,12 +128,44 @@ export interface UseCrudPageReturn<T, TId = string | number> {
   handleDelete: (ids?: TId[]) => Promise<void>
   exportAll: () => Promise<Blob | null>
   importFile: (file: File) => Promise<void>
+  /**
+   * Clear `error` without re-running `refresh()`. Use from `#error` slot
+   * close buttons when the page wants to hide a stale alert without
+   * triggering another HTTP call.
+   */
+  dismissError: () => void
+}
+
+/**
+ * Look up Naive UI's `window.$message` if a `NMessageProvider` registered
+ * it. The interface is duck-typed so the helper stays decoupled from
+ * naive-ui's type surface and works in test environments where the
+ * provider isn't mounted.
+ */
+interface ToastApi {
+  error: (content: string) => void
+}
+function getGlobalMessage(): ToastApi | null {
+  if (typeof window === 'undefined') return null
+  const m = (window as unknown as { $message?: unknown }).$message
+  if (m && typeof (m as { error?: unknown }).error === 'function') {
+    return m as ToastApi
+  }
+  return null
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 export function useCrudPage<T, TId = string | number>(
   options: UseCrudPageOptions<T, TId>,
 ): UseCrudPageReturn<T, TId> {
   const initialPageSize = options.initialPageSize ?? 20
+  const retryAttempts = Math.max(0, options.retryFetch ?? 3)
+  const retryBaseMs = Math.max(0, options.retryDelayMs ?? 300)
 
   const makeInitialQuery = (): CrudPageQuery => ({
     pageIndex: 1,
@@ -98,20 +191,64 @@ export function useCrudPage<T, TId = string | number>(
   const batchActions = useBatchActions<TId>()
   const formModal = useFormModal<T>()
 
+  /**
+   * Run `op` and route any thrown error through `options.onError` plus
+   * the global toast fallback. Always re-throws so the caller still sees
+   * the failure — onError is a side channel for messaging, not a swallow.
+   */
+  async function runWithErrorHandling<R>(op: CrudPageOp, fn: () => Promise<R>): Promise<R> {
+    try {
+      return await fn()
+    } catch (rawErr) {
+      const wrapped = rawErr instanceof Error ? rawErr : new Error(String(rawErr))
+      const suppressed = options.onError?.(wrapped, op) === false
+      if (!suppressed) {
+        getGlobalMessage()?.error(wrapped.message)
+      }
+      throw wrapped
+    }
+  }
+
   async function refresh(): Promise<void> {
     loading.value = true
     error.value = null
+    let lastErr: Error | null = null
     try {
-      const result = await options.fetchData({ ...query.value })
-      items.value = result.items
-      total.value = result.totalCount
-      options.onRefresh?.()
-    } catch (err) {
-      error.value = err instanceof Error ? err : new Error(String(err))
-      throw error.value
+      for (let attempt = 0; attempt <= retryAttempts; attempt++) {
+        try {
+          const result = await options.fetchData({ ...query.value })
+          items.value = result.items
+          total.value = result.totalCount
+          options.onRefresh?.()
+          return
+        } catch (rawErr) {
+          lastErr = rawErr instanceof Error ? rawErr : new Error(String(rawErr))
+          if (attempt < retryAttempts) {
+            // Exponential backoff. Skip the wait entirely when base = 0
+            // (typical in tests) so unit assertions can race the loop
+            // without faking timers.
+            if (retryBaseMs > 0) {
+              await sleep(retryBaseMs * 2 ** attempt)
+            }
+            continue
+          }
+        }
+      }
+      // All attempts exhausted — record the error and surface it.
+      const finalErr = lastErr ?? new Error('Unknown fetch error')
+      error.value = finalErr
+      const suppressed = options.onError?.(finalErr, 'fetch') === false
+      if (!suppressed) {
+        getGlobalMessage()?.error(finalErr.message)
+      }
+      throw finalErr
     } finally {
       loading.value = false
     }
+  }
+
+  function dismissError(): void {
+    error.value = null
   }
 
   function setPage(pageIndex: number): void {
@@ -141,7 +278,13 @@ export function useCrudPage<T, TId = string | number>(
   }
 
   function openCreate(): void {
-    formModal.open('create', null)
+    // Open create with a fresh empty object — `useFormModal.open(mode, null)`
+    // would set formData to null, which fast-paths submit() into "close
+    // without calling createData" (the `!data` guard). Page form templates
+    // typically render `:model="(formData ?? {}) as Record<string, unknown>"`
+    // which would otherwise hand the user a throwaway local object whose
+    // edits never propagate back to formData.
+    formModal.open('create', {} as T)
   }
 
   function openEdit(row: T): void {
@@ -160,14 +303,18 @@ export function useCrudPage<T, TId = string | number>(
       return null
     }
     if (mode === 'create') {
-      const created = await options.createData(data as Partial<T>)
+      const created = await runWithErrorHandling('create', () =>
+        options.createData(data as Partial<T>),
+      )
       formModal.close()
       await refresh()
       return created
     }
     // edit
     const id = options.rowKey(data as T)
-    const updated = await options.updateData(id, data as Partial<T>)
+    const updated = await runWithErrorHandling('update', () =>
+      options.updateData(id, data as Partial<T>),
+    )
     formModal.close()
     await refresh()
     return updated
@@ -176,23 +323,19 @@ export function useCrudPage<T, TId = string | number>(
   async function handleDelete(ids?: TId[]): Promise<void> {
     const target = ids ?? batchActions.selectedIds.value
     if (target.length === 0) return
-    await options.deleteData(target)
-    if (!ids) {
-      batchActions.clear()
-    } else {
-      batchActions.clear()
-    }
+    await runWithErrorHandling('delete', () => options.deleteData(target))
+    batchActions.clear()
     await refresh()
   }
 
   async function exportAll(): Promise<Blob | null> {
     if (!options.exportData) return null
-    return options.exportData({ ...query.value })
+    return runWithErrorHandling('export', () => options.exportData!({ ...query.value }))
   }
 
   async function importFile(file: File): Promise<void> {
     if (!options.importData) return
-    await options.importData(file)
+    await runWithErrorHandling('import', () => options.importData!(file))
     await refresh()
   }
 
@@ -221,5 +364,6 @@ export function useCrudPage<T, TId = string | number>(
     handleDelete,
     exportAll,
     importFile,
+    dismissError,
   }
 }

@@ -40,6 +40,14 @@ public class ModuleFunctionDto
     /// Display order within the owning module
     /// </summary>
     public int Order { get; set; }
+
+    /// <summary>
+    /// True when the function row is owned by an
+    /// <c>IPermissionDefinitionProvider</c>. Admin UI shows a "system"
+    /// badge and locks the Code / Name / ModuleId edit fields. Admin can
+    /// still toggle IsEnabled for emergency disable without redeploying.
+    /// </summary>
+    public bool IsSystemManaged { get; set; }
 }
 
 /// <summary>

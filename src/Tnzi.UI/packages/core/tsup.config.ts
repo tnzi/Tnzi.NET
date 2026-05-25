@@ -43,6 +43,7 @@ export default defineConfig({
         "services/system/index": "src/services/system/index.ts",
         "services/audit/index": "src/services/audit/index.ts",
         "services/template/index": "src/services/template/index.ts",
+        "services/logging/index": "src/services/logging/index.ts",
     },
     format: ["cjs", "esm"],
     dts: true,

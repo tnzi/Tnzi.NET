@@ -8,7 +8,7 @@
  * into TDashboardPage's default slot or anywhere a feed makes sense.
  */
 import { NTimeline, NTimelineItem } from 'naive-ui'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 
 export type TimelineTone = 'default' | 'info' | 'success' | 'warning' | 'error'
 

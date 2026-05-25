@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Tnzi.AI.Security;
 
 namespace Tnzi.AI.Sandbox.Providers.Docker;
 
@@ -12,6 +13,7 @@ public class DockerSandboxProvider : ISandboxProvider
     private readonly IOptions<SandboxModuleOptions> _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DockerSandboxProvider> _logger;
+    private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private readonly ConcurrentDictionary<string, string> _activeContainers = new();
     private readonly SemaphoreSlim _containerSemaphore;
 
@@ -20,11 +22,13 @@ public class DockerSandboxProvider : ISandboxProvider
     public string Name => "docker";
 
     public DockerSandboxProvider(IOptions<SandboxModuleOptions> options,
-        IHttpClientFactory httpClientFactory, ILogger<DockerSandboxProvider> logger)
+        IHttpClientFactory httpClientFactory, ILogger<DockerSandboxProvider> logger,
+        IShellCommandAnalyzer? commandAnalyzer = null)
     {
         _options = Check.NotNull(options);
         _httpClientFactory = Check.NotNull(httpClientFactory);
         _logger = Check.NotNull(logger);
+        _commandAnalyzer = commandAnalyzer;
         _containerSemaphore = new SemaphoreSlim(_options.Value.Docker.MaxContainers);
     }
 
@@ -64,6 +68,7 @@ public class DockerSandboxProvider : ISandboxProvider
                 commandTimeout: options.CommandTimeout,
                 maxOutputSize: options.MaxOutputSizeBytes,
                 logger: _logger,
+                deniedCommands: dockerOpts.DeniedCommands,
                 onDisposed: () =>
                 {
                     // Provider-side cleanup invoked by sandbox.DisposeAsync():
@@ -71,7 +76,9 @@ public class DockerSandboxProvider : ISandboxProvider
                     // DockerSandbox.DisposeAsync guards with _disposed flag.
                     _activeContainers.TryRemove(sandboxId, out _);
                     _containerSemaphore.Release();
-                });
+                },
+                deniedCommandPrefixes: dockerOpts.DeniedCommandPrefixes,
+                commandAnalyzer: _commandAnalyzer);
         }
         catch
         {
@@ -106,11 +113,24 @@ public class DockerSandboxProvider : ISandboxProvider
             ? options.EnvironmentOverrides.Select(kv => $"{kv.Key}={kv.Value}").ToArray()
             : null;
 
+        var securityOpts = BuildSecurityOpts(dockerOpts.ExtraSecurityOpts);
+        var capDrop = dockerOpts.DropAllCapabilities ? new[] { "ALL" } : null;
+        // PidsLimit <= 0 disables the limit (Docker treats null/absent as unlimited).
+        long? pidsLimit = dockerOpts.PidsLimit > 0 ? dockerOpts.PidsLimit : null;
+        // When the rootfs is read-only, Python libs (PIL fontconfig cache, weasyprint
+        // tempfiles) still need a writable scratch space — give them /tmp via tmpfs.
+        var tmpfs = dockerOpts.ReadonlyRootfs
+            ? new Dictionary<string, string> { ["/tmp"] = "size=64m,nosuid,nodev" }
+            : null;
+
         var createBody = new
         {
             Image = dockerOpts.Image,
             Cmd = new[] { "tail", "-f", "/dev/null" }, // 保持容器运行
             WorkingDir = "/workspace",
+            // Override the image's USER directive explicitly — defends against
+            // accidentally pulling a tampered image with USER root.
+            User = dockerOpts.RunAsUser,
             Env = envList,
             HostConfig = new
             {
@@ -119,8 +139,11 @@ public class DockerSandboxProvider : ISandboxProvider
                 Memory = memoryBytes,
                 AutoRemove = dockerOpts.AutoRemove,
                 NetworkMode = "none", // 安全隔离: 无网络访问
-                ReadonlyRootfs = false,
-                SecurityOpt = new[] { "no-new-privileges" }
+                ReadonlyRootfs = dockerOpts.ReadonlyRootfs,
+                PidsLimit = pidsLimit,
+                CapDrop = capDrop,
+                SecurityOpt = securityOpts,
+                Tmpfs = tmpfs
             },
             Labels = new Dictionary<string, string>
             {
@@ -135,6 +158,20 @@ public class DockerSandboxProvider : ISandboxProvider
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(ct);
+
+            // Docker returns 404 with `{"message":"No such image: <name>"}` when the
+            // configured image is not present locally. Translate that into actionable
+            // guidance instead of leaking the raw API payload.
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound
+                && error.Contains("No such image", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Docker image '{dockerOpts.Image}' is not present on this host. " +
+                    $"Either pull it (`docker pull {dockerOpts.Image}`) or build it from " +
+                    $"the repository: `docker build -t {dockerOpts.Image} -f docker/sandbox/Dockerfile docker/sandbox`. " +
+                    "See docs/modules/ai-sandbox.md for setup instructions.");
+            }
+
             throw new InvalidOperationException($"Failed to create Docker container: {error}");
         }
 
@@ -149,6 +186,17 @@ public class DockerSandboxProvider : ISandboxProvider
         }
 
         return result.Id;
+    }
+
+    private static string[] BuildSecurityOpts(List<string> extras)
+    {
+        // "no-new-privileges" is always applied; additional opts come from config.
+        if (extras is not { Count: > 0 })
+            return ["no-new-privileges"];
+
+        var list = new List<string>(extras.Count + 1) { "no-new-privileges" };
+        list.AddRange(extras);
+        return [.. list];
     }
 
     private static async Task StartContainerAsync(HttpClient httpClient, string containerId, CancellationToken ct)

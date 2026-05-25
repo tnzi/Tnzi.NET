@@ -5,6 +5,18 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
+    // Phase J: RunViewer now pulls the workflow list for the filter
+    // dropdown on mount — mock the workflows surface as well.
+    workflows: {
+      fetch: vi.fn(async () => ({
+        items: [
+          { id: 'wf-001', name: 'Sample Workflow', steps: [], executionMode: 'Sequential', isEnabled: true, creationTime: '2026-04-10T00:00:00Z' },
+        ],
+        totalCount: 1,
+        pageIndex: 1,
+        pageSize: 20,
+      })),
+    },
     workflowRuns: {
       fetch: vi.fn(async () => ({
         items: [
@@ -22,8 +34,15 @@ vi.mock('../../src/services/bridges/ai-bridge', () => ({
         creationTime: '2026-04-10T00:00:00Z', completedTime: '2026-04-10T00:01:00Z', updatedTime: '2026-04-10T00:01:00Z',
         initialInput: '{}', completedStepIds: ['s1'], stepsAwaitingApproval: [], stepOutputs: { s1: 'output' },
       })),
+      resume: vi.fn(),
+      approveStep: vi.fn(),
+      rejectStep: vi.fn(),
     },
   }),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
 }))
 
 import RunViewer from '../../src/pages/ai/workflows/RunViewer.vue'

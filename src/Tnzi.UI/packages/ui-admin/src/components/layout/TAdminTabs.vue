@@ -172,7 +172,8 @@ import { useAdminTabStore, type AdminTab } from '../../stores/useAdminTabStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { translatePageKey } from '../../pages/_shared/translate'
+import { TSvgIcon } from '@tnzi/ui'
 import TChromeTabBg from './TChromeTabBg.vue'
 
 interface Props {
@@ -248,6 +249,11 @@ function renderTitle(raw: string): string {
     const translated = props.translate(raw)
     if (translated && translated !== raw) return translated
   }
+  // Bundled-locale fallback so tab titles localise without the consumer
+  // having to pass `translate`. `translatePageKey` resolves absolute
+  // `(tnzi.)admin.*` keys against the active locale.
+  const bundled = translatePageKey('', raw)
+  if (bundled && bundled !== raw) return bundled
   return humanise(raw)
 }
 
@@ -304,7 +310,16 @@ const contextY = ref(0)
 const contextTarget = ref<AdminTab | null>(null)
 
 const contextOptions = computed(() => {
-  const t = (k: string) => (props.translate ? props.translate(k) : k)
+  // Consumer-supplied translate wins; otherwise fall back to the bundled
+  // locale via translatePageKey so `admin.tabs.*` keys resolve out of the
+  // box instead of leaking dotted strings into the right-click menu.
+  const t = (k: string) => {
+    if (props.translate) {
+      const hit = props.translate(k)
+      if (hit && hit !== k) return hit
+    }
+    return translatePageKey('', k) || k
+  }
   const target = contextTarget.value
   const isPinned = target ? tabStore.isTabPinned(target.id) : false
   const isHome = target ? target.id === tabStore.homeTab?.id : false
@@ -549,7 +564,8 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
    (matches soybean #dee1e6); active gets primary tinted to white at 10%
    — using an opaque mixed colour (not `rgba primary / 0.10`) so the
    bg colour doesn't shift when the underlying tab-bar colour differs
-   between light/dark themes. */
+   between light/dark themes. Dark mode mixes against `#1f1f1f` instead
+   of `#ffffff` so the arc still reads as a tinted-but-darker chip. */
 .t-admin-tabs__chrome-bg {
   position: absolute;
   inset: 0;
@@ -560,14 +576,29 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
   color: transparent;
   transition: color 0.15s ease;
 }
-.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab:hover .t-admin-tabs__chrome-bg {
+/* Light + dark rules are BOTH wrapped in `:global(...)` so neither picks
+   up Vue's `[data-v-xxx]` scope hash. If only the dark variants are
+   global, the light rule's scope hash gives it +1 attribute selector
+   over the dark rule and wins the cascade tie — leaving the active arc
+   stuck on the light-mix colour in dark mode. The `.t-admin-tabs__chrome-bg`
+   class is unique to this component, so removing scope isolation here
+   doesn't risk collision. */
+:global(.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab:hover .t-admin-tabs__chrome-bg) {
   color: #dee1e6;
 }
-.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active .t-admin-tabs__chrome-bg {
+:global(.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active .t-admin-tabs__chrome-bg),
+:global(.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active:hover .t-admin-tabs__chrome-bg) {
   color: color-mix(in srgb, var(--tnzi-primary, #646cff) 10%, #ffffff 90%);
 }
-.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active:hover .t-admin-tabs__chrome-bg {
-  color: color-mix(in srgb, var(--tnzi-primary, #646cff) 10%, #ffffff 90%);
+/* Dark variants — flip the mix base so the arc background reads as a
+   darker tinted chip instead of a bright washed-out tile. soybean's
+   `.chrome-tab_dark` uses #18181c for hover and primary@30% for active. */
+:global(.dark .t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab:hover .t-admin-tabs__chrome-bg) {
+  color: #2b2b30;
+}
+:global(.dark .t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active .t-admin-tabs__chrome-bg),
+:global(.dark .t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active:hover .t-admin-tabs__chrome-bg) {
+  color: color-mix(in srgb, var(--tnzi-primary, #646cff) 22%, #1f1f1f 78%);
 }
 
 /* Vertical divider strip on the right of each chrome tab. soybean uses
@@ -587,7 +618,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
 }
 /* Phase H2 D6: dark mode flips the divider to soft white (matches
    soybean `.chrome-tab_dark .chrome-tab-divider`). */
-:global(.dark) .t-admin-tabs__chrome-divider {
+:global(.dark .t-admin-tabs__chrome-divider) {
   background: rgba(255, 255, 255, 0.9);
 }
 .t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active .t-admin-tabs__chrome-divider,

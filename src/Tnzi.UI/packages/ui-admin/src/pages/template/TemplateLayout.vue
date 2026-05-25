@@ -8,18 +8,29 @@
   <TCrudPage
     :state="crud"
     :all-columns="layoutColumns"
-    title="Template Layouts"
+    :title="t('title')"
     :translate="t"
+    :form-modal-width="760"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="layoutFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
     </template>
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t" />
+      <!-- FileSystem-source layouts ship with the binaries and backend
+           rejects edit/delete on them — suppress those actions. -->
+      <TRowActions
+        :row="row as LayoutInfoDto"
+        :state="crud"
+        :translate="t"
+        :show-edit="!((row as LayoutInfoDto).isReadOnly)"
+        :show-delete="!((row as LayoutInfoDto).isReadOnly)"
+      />
     </template>
   </TCrudPage>
 </template>
@@ -41,7 +52,12 @@ const bridge = createTemplateBridge({ client: useAdminClient() })
 const crud = useCrudPage<LayoutInfoDto, string>({
   pageId: 'template.layouts',
   columns: layoutColumns,
-  rowKey: (r) => r.id,
+  rowKey: (r) => {
+    const id = String(r.id ?? '')
+    return id && id !== '00000000-0000-0000-0000-000000000000'
+      ? id
+      : `file:${r.module}/${r.category || ''}/${r.layoutName}`
+  },
   fetchData: (query) => bridge.layouts.fetch(query),
   createData: async (data) => bridge.layouts.create(data as Partial<LayoutInfoDto>),
   updateData: async (id, data) => bridge.layouts.update(id, data as Partial<LayoutInfoDto>),

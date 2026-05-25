@@ -33,7 +33,11 @@
       <div v-else class="t-agent-detail__quadrants">
 
         <!-- Quadrant 1: Identity -->
-        <section class="t-agent-detail__panel">
+        <NCard
+          size="small"
+          :bordered="false"
+          class="t-agent-detail__panel"
+        >
           <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.identity') }}</h3>
           <NForm label-placement="left" label-width="100px">
             <NFormItem :label="t('form.name')" required>
@@ -46,10 +50,10 @@
               <NSwitch v-model:value="edit.isEnabled" />
             </NFormItem>
           </NForm>
-        </section>
+        </NCard>
 
         <!-- Quadrant 2: Provider / Model -->
-        <section class="t-agent-detail__panel">
+        <NCard size="small" :bordered="false" class="t-agent-detail__panel">
           <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.provider') }}</h3>
           <NForm label-placement="left" label-width="100px">
             <NFormItem :label="t('form.provider')" required>
@@ -73,10 +77,10 @@
               />
             </NFormItem>
           </NForm>
-        </section>
+        </NCard>
 
         <!-- Quadrant 3: Persona -->
-        <section class="t-agent-detail__panel">
+        <NCard size="small" :bordered="false" class="t-agent-detail__panel">
           <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.persona') }}</h3>
           <NSpace vertical size="small">
             <NSelect
@@ -101,10 +105,10 @@
               {{ t('detail.personaHint') }}
             </div>
           </NSpace>
-        </section>
+        </NCard>
 
         <!-- Quadrant 4: Tool groups + Recent runs -->
-        <section class="t-agent-detail__panel">
+        <NCard size="small" :bordered="false" class="t-agent-detail__panel">
           <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.tools') }}</h3>
           <NForm label-placement="left" label-width="100px">
             <NFormItem :label="t('form.toolGroups')">
@@ -139,7 +143,7 @@
             </li>
           </ul>
           <div v-else class="t-agent-detail__hint">{{ t('detail.noRuns') }}</div>
-        </section>
+        </NCard>
       </div>
     </NSpin>
 
@@ -450,8 +454,10 @@ watch(() => route.params?.id, async (next, prev) => {
 </script>
 
 <style scoped>
+/* TAdminContent supplies the 16px page padding; the previous local
+   override doubled it (32px) and broke parity with TCrudPage pages. */
 .t-agent-detail {
-  padding: 16px;
+  /* no padding — owned by TAdminContent */
 }
 .t-agent-detail__header {
   display: flex;
@@ -462,7 +468,7 @@ watch(() => route.params?.id, async (next, prev) => {
 }
 .t-agent-detail__back {
   font-size: 13px;
-  color: var(--tnzi-primary-color, #06B6D4);
+  color: var(--tnzi-primary);
   text-decoration: none;
 }
 .t-agent-detail__back:hover {
@@ -487,35 +493,38 @@ watch(() => route.params?.id, async (next, prev) => {
     grid-template-columns: 1fr;
   }
 }
+/* NCard supplies the chrome (border, padding). We only add the soft
+   drop-shadow + radius to match TCrudPage list-card parity, plus a
+   min-height so the 4-up grid doesn't collapse when one quadrant
+   is sparser than the others. */
 .t-agent-detail__panel {
-  border: 1px solid var(--tnzi-base-border, #efeff5);
-  border-radius: var(--tnzi-admin-radius-md, 4px);
-  padding: 16px;
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   min-height: 280px;
 }
 .t-agent-detail__panel-title {
   margin: 0 0 12px;
   font-size: 14px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 .t-agent-detail__panel-divider {
-  border-top: 1px solid var(--tnzi-base-border, #efeff5);
+  border-top: 1px solid var(--tnzi-border);
   margin: 12px 0;
 }
 .t-agent-detail__sub-title {
   margin: 0 0 8px;
   font-size: 13px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-agent-detail__hint {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   font-size: 12px;
 }
 .t-agent-detail__persona-preview {
   padding: 8px 10px;
-  border: 1px dashed var(--tnzi-base-border, #efeff5);
+  border: 1px dashed var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 4px);
 }
 .t-agent-detail__persona-name {
@@ -525,14 +534,14 @@ watch(() => route.params?.id, async (next, prev) => {
   gap: 6px;
 }
 .t-agent-detail__persona-slug {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-agent-detail__persona-content {
   margin: 6px 0 0;
   padding: 6px 8px;
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
   border-radius: 3px;
   font-size: 11px;
   max-height: 140px;
@@ -555,15 +564,15 @@ watch(() => route.params?.id, async (next, prev) => {
 }
 .t-agent-detail__runs-time {
   margin-left: auto;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-agent-detail__error {
-  color: var(--tnzi-error-color, #D03050);
+  color: var(--tnzi-error);
   font-size: 13px;
   margin: 12px 0;
 }
 .t-agent-detail__placeholder {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 60px 16px;
 }
@@ -572,9 +581,9 @@ watch(() => route.params?.id, async (next, prev) => {
   font-size: 12px;
 }
 .t-agent-detail__status[data-state="ok"] {
-  color: var(--tnzi-success-color, #18A058);
+  color: var(--tnzi-success);
 }
 .t-agent-detail__status[data-state="err"] {
-  color: var(--tnzi-error-color, #D03050);
+  color: var(--tnzi-error);
 }
 </style>

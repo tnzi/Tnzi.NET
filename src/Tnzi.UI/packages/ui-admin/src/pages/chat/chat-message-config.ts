@@ -1,53 +1,116 @@
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import { TRelativeTime } from '@tnzi/ui'
 
 /**
- * Chat Message page config — Phase 3 Task 3.30.
+ * Aligned with backend MessageListItemDto (Tnzi.Chat).
  *
- * Columns and form schema for the admin Chat Message view.
- * When route has ?sessionId=..., the page auto-injects a session filter.
+ *   id / title / messageType (1=Public / 2=Private) / senderId / senderName /
+ *   canReply / creationTime / isRead / replyCount / isImportant
  *
- * Backend fields from MessageListItemDto:
- *   id, title, messageType, senderId, senderName, canReply,
- *   creationTime, isRead, replyCount, isImportant
- *
- * The plan uses sessionId/senderId/content/messageType/sentAt as display keys.
- * MessageListItemDto has senderId, messageType, and creationTime (mapped to sentAt).
- * sessionId is a filter context, not a DTO field; shown as display column for context.
+ * Earlier columns assumed an IM session model (sessionId / content / sentAt /
+ * messageType: text|image|file|system) — Tnzi.Chat is the in-app message
+ * + announcement system, not IM. List was blank.
  */
+interface ChatMessageRow {
+  id?: string
+  title?: string
+  messageType?: number  // 1=Public, 2=Private
+  senderId?: string
+  senderName?: string
+  isRead?: boolean
+  isImportant?: boolean
+  replyCount?: number
+  creationTime?: string
+}
 
-export const chatMessageColumns: ColumnDef[] = [
-  { key: 'sessionId',   title: 'columns.sessionId' },
-  { key: 'senderId',    title: 'columns.senderId' },
-  { key: 'content',     title: 'columns.content' },
-  { key: 'messageType', title: 'columns.messageType' },
-  { key: 'sentAt',      title: 'columns.sentAt' },
+function messageTypeLabel(v?: number): string {
+  switch (v) {
+    case 1: return 'Public'
+    case 2: return 'Private'
+    default: return '—'
+  }
+}
+
+export const chatMessageColumns: ColumnDef<ChatMessageRow>[] = [
+  { key: 'title', title: 'columns.title', width: 280, fixed: 'left', ellipsis: { tooltip: true } },
+  {
+    key: 'messageType',
+    title: 'columns.messageType',
+    width: 100,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.messageType ?? 0,
+        type: row.messageType === 1 ? 'info' : 'success',
+        label: messageTypeLabel(row.messageType),
+      }),
+  },
+  { key: 'senderName', title: 'columns.senderName', width: 140 },
+  {
+    key: 'isImportant',
+    title: 'columns.isImportant',
+    width: 100,
+    render: (row) =>
+      row.isImportant
+        ? h(TStatusBadge, { value: true, type: 'warning', label: '★' })
+        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—'),
+  },
+  {
+    key: 'isRead',
+    title: 'columns.isRead',
+    width: 100,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.isRead ?? false,
+        mapping: {
+          true: { type: 'default', labelKey: 'admin.modules.chat.messages.status.read' },
+          false: { type: 'info', labelKey: 'admin.modules.chat.messages.status.unread' },
+        },
+      }),
+  },
+  { key: 'replyCount', title: 'columns.replyCount', width: 90 },
+  {
+    key: 'creationTime',
+    title: 'columns.creationTime',
+    width: 140,
+    fixed: 'right',
+    render: (row) => h(TRelativeTime, { value: row.creationTime }),
+  },
 ]
 
 /**
- * Advanced search fields — wired through `state.query.filters` to the bridge.
- * Bridge already passes filters through to MessageListQueryDto, so adding new
- * keys here exposes the corresponding backend filter without further work.
+ * Backend AdminMessageQueryDto accepts: messageType / isSent / senderId /
+ * keyword / startDate / endDate. The page commits these into state.filters
+ * via the standard CrudPage search panel.
  */
 export const chatMessageSearchFields: FormSchemaItem[] = [
-  { key: 'sessionId',   label: 'columns.sessionId',  type: 'text', placeholder: 'columns.sessionId' },
-  { key: 'senderId',    label: 'columns.senderId',   type: 'text', placeholder: 'columns.senderId' },
-  { key: 'messageType', label: 'columns.messageType', type: 'select', options: [
-    { label: 'Text',   value: 'text' },
-    { label: 'Image',  value: 'image' },
-    { label: 'File',   value: 'file' },
-    { label: 'System', value: 'system' },
-  ] },
+  { key: 'keyword', labelKey: 'form.keyword', label: 'Keyword', type: 'text', placeholder: 'columns.title' },
+  { key: 'senderId', labelKey: 'form.senderId', label: 'columns.senderName', type: 'text', placeholder: 'form.senderId' },
+  {
+    key: 'messageType',
+    labelKey: 'form.messageType', label: 'columns.messageType',
+    type: 'select',
+    options: [
+      { label: 'Public', value: 1 },
+      { label: 'Private', value: 2 },
+    ],
+  },
 ]
 
 export const chatMessageFormSchema: FormSchemaItem[] = [
-  { key: 'sessionId',   label: 'Session',  type: 'text',     required: true },
-  { key: 'senderId',    label: 'Sender',   type: 'text' },
-  { key: 'content',     label: 'Content',  type: 'textarea', required: true },
-  { key: 'messageType', label: 'Type',     type: 'select',   options: [
-    { label: 'Text',   value: 'text' },
-    { label: 'Image',  value: 'image' },
-    { label: 'File',   value: 'file' },
-    { label: 'System', value: 'system' },
-  ] },
+  { key: 'title', labelKey: 'form.title', label: 'Title', type: 'text' },
+  { key: 'senderName', labelKey: 'form.senderName', label: 'Sender', type: 'text' },
+  { key: 'content', labelKey: 'form.content', label: 'Content', type: 'textarea' },
+  {
+    key: 'messageType',
+    labelKey: 'form.messageType', label: 'Type',
+    type: 'select',
+    options: [
+      { label: 'Public', value: 1 },
+      { label: 'Private', value: 2 },
+    ],
+  },
+  { key: 'isImportant', labelKey: 'form.isImportant', label: 'Important', type: 'switch' },
 ]

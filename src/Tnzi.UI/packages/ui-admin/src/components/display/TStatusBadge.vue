@@ -1,70 +1,48 @@
 <script setup lang="ts">
 /**
- * `TStatusBadge` — soybean-style status pill with semantic color mapping.
+ * `TStatusBadge` admin wrapper.
  *
- * Accepts either a boolean (true=success/false=danger) or a string value
- * mapped via the `mapping` prop. Falls back to neutral color for unknown
- * keys.
+ * The component implementation lives in `@tnzi/ui/components/display`
+ * (sunk in 0.2.x). This wrapper just injects the admin-side
+ * `translatePageKey` helper so existing admin call-sites pick up i18n
+ * resolution without passing the translator explicitly.
+ *
+ * New code outside the admin shell should import directly from
+ * `@tnzi/ui`:
+ *
+ *   import { TStatusBadge } from '@tnzi/ui'
  */
-import { computed } from 'vue'
-import { NTag } from 'naive-ui'
-
-export type StatusType = 'success' | 'info' | 'warning' | 'error' | 'default'
+import { TStatusBadge as TStatusBadgeBase, type StatusType } from '@tnzi/ui'
+import { translatePageKey } from '../../pages/_shared/translate'
 
 interface Props {
   value: string | number | boolean | null | undefined
-  /** Map values to {type, label}. Keys are stringified `value`. */
-  mapping?: Record<string, { type: StatusType; label?: string }>
-  /** Label override (skips mapping lookup). */
+  mapping?: Record<string, { type: StatusType; label?: string; labelKey?: string }>
   label?: string
-  /** Type override (skips mapping lookup). */
+  labelKey?: string
   type?: StatusType
   size?: 'tiny' | 'small' | 'medium' | 'large'
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   mapping: () => ({}),
   label: undefined,
+  labelKey: undefined,
   type: undefined,
   size: 'small',
 })
 
-const DEFAULT_BOOL_MAPPING: Record<string, { type: StatusType; label: string }> = {
-  true: { type: 'success', label: 'Enabled' },
-  // soybean parity — disabled rows render with the `warning` tone (orange)
-  // rather than neutral grey so the negative state is visually obvious.
-  false: { type: 'warning', label: 'Disabled' },
-}
-
-const resolved = computed<{ type: StatusType; label: string }>(() => {
-  // Explicit overrides win
-  if (props.type && props.label) return { type: props.type, label: props.label }
-
-  const key = String(props.value)
-  const fromMapping = props.mapping[key]
-  if (fromMapping) {
-    return {
-      type: props.type ?? fromMapping.type,
-      label: props.label ?? fromMapping.label ?? key,
-    }
-  }
-
-  // Boolean default mapping
-  if (typeof props.value === 'boolean') {
-    const entry = DEFAULT_BOOL_MAPPING[key]!
-    return { type: props.type ?? entry.type, label: props.label ?? entry.label }
-  }
-
-  // Fallback — render whatever we have as neutral
-  return {
-    type: props.type ?? 'default',
-    label: props.label ?? key,
-  }
-})
+const adminTranslate = (key: string): string => translatePageKey('', key)
 </script>
 
 <template>
-  <NTag :type="resolved.type === 'default' ? 'default' : resolved.type" :size="size" round>
-    {{ resolved.label }}
-  </NTag>
+  <TStatusBadgeBase
+    :value="value"
+    :mapping="mapping"
+    :label="label"
+    :label-key="labelKey"
+    :type="type"
+    :size="size"
+    :translate="adminTranslate"
+  />
 </template>

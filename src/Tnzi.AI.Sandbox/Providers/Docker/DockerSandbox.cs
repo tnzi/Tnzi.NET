@@ -1,3 +1,6 @@
+using Tnzi.AI.Sandbox.Security;
+using Tnzi.AI.Security;
+
 namespace Tnzi.AI.Sandbox.Providers.Docker;
 
 /// <summary>
@@ -7,7 +10,8 @@ namespace Tnzi.AI.Sandbox.Providers.Docker;
 public sealed class DockerSandbox : ISandbox
 {
     /// <summary>
-    /// 默认拒绝命令列表 — 与 LocalSandbox 共享相同的安全策略
+    /// Default denied-substring list applied when the provider did not pass a
+    /// configured list. Kept in sync with <c>SandboxModuleOptions.Docker.DeniedCommands</c>.
     /// </summary>
     private static readonly string[] DefaultDeniedCommands = ["rm -rf /", "format c:", "chmod 777 /", "mkfs"];
 
@@ -17,7 +21,9 @@ public sealed class DockerSandbox : ISandbox
     private readonly TimeSpan _commandTimeout;
     private readonly long _maxOutputSize;
     private readonly ILogger _logger;
-    private readonly HashSet<string> _deniedCommands;
+    private readonly IReadOnlyCollection<string> _deniedCommands;
+    private readonly IReadOnlyCollection<string> _deniedCommandPrefixes;
+    private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private readonly Action? _onDisposed;
     private bool _disposed;
 
@@ -26,7 +32,9 @@ public sealed class DockerSandbox : ISandbox
     public DockerSandbox(string id, HttpClient httpClient, string containerId,
         string workspacePath, TimeSpan commandTimeout, long maxOutputSize, ILogger logger,
         IEnumerable<string>? deniedCommands = null,
-        Action? onDisposed = null)
+        Action? onDisposed = null,
+        IEnumerable<string>? deniedCommandPrefixes = null,
+        IShellCommandAnalyzer? commandAnalyzer = null)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _httpClient = Check.NotNull(httpClient);
@@ -35,7 +43,9 @@ public sealed class DockerSandbox : ISandbox
         _commandTimeout = commandTimeout;
         _maxOutputSize = maxOutputSize;
         _logger = Check.NotNull(logger);
-        _deniedCommands = new HashSet<string>(deniedCommands ?? DefaultDeniedCommands, StringComparer.OrdinalIgnoreCase);
+        _deniedCommands = (deniedCommands ?? DefaultDeniedCommands).ToArray();
+        _deniedCommandPrefixes = (deniedCommandPrefixes ?? []).ToArray();
+        _commandAnalyzer = commandAnalyzer;
         _onDisposed = onDisposed;
     }
 
@@ -44,12 +54,8 @@ public sealed class DockerSandbox : ISandbox
         Check.NotNullOrWhiteSpace(command);
         ThrowIfDisposed();
 
-        // 命令安全检查：拒绝包含危险模式的命令
-        foreach (var denied in _deniedCommands)
-        {
-            if (command.Contains(denied, StringComparison.OrdinalIgnoreCase))
-                return new CommandResult(-1, "", $"Command denied: contains blocked pattern '{denied}'");
-        }
+        if (DeniedCommandMatcher.IsDenied(_commandAnalyzer, command, _deniedCommands, _deniedCommandPrefixes, out var reason))
+            return new CommandResult(-1, "", $"Command denied: {reason}");
 
         _logger.LogDebug("Docker sandbox {Id}: executing command in container {ContainerId}", Id, _containerId);
 

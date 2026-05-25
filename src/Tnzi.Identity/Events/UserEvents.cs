@@ -333,3 +333,60 @@ public class PersonalDataExportedEvent : EventBase
     public DateTime ExportedTime { get; set; }
 }
 
+/// <summary>
+/// 用户-角色映射变更事件。
+/// </summary>
+/// <remarks>
+/// Published whenever a user's role membership changes (assign / remove /
+/// create-with-roles / delete). The Authorization module subscribes to this
+/// to invalidate its <c>FunctionAuthCache</c> per-user entry — without this
+/// signal the cache (30 min TTL) would let a revoked user retain elevated
+/// permissions for up to a TTL window.
+///
+/// <para>
+/// <b>Semantics</b>: <c>AddedRoleIds</c> + <c>RemovedRoleIds</c> describe the
+/// delta, not the final state. Consumers must NOT treat either field as
+/// "user's complete role set after the change". <c>ChangeType</c> documents
+/// intent for audit consumers.
+/// </para>
+/// </remarks>
+public class UserRolesChangedEvent : EventBase
+{
+    /// <summary>Affected user. Always set.</summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>User name at time of change (denormalised for audit logs).</summary>
+    public string UserName { get; set; } = string.Empty;
+
+    /// <summary>Role IDs newly granted to the user. Empty for pure-removal.</summary>
+    public List<Guid> AddedRoleIds { get; set; } = new();
+
+    /// <summary>Role IDs removed from the user. Empty for pure-addition.</summary>
+    public List<Guid> RemovedRoleIds { get; set; } = new();
+
+    /// <summary>Why this change happened (audit context).</summary>
+    public UserRolesChangeType ChangeType { get; set; }
+
+    /// <summary>UTC timestamp the change committed.</summary>
+    public DateTime ChangedTime { get; set; }
+
+    /// <summary>Admin who triggered the change (null for self-service flows).</summary>
+    public Guid? ChangedBy { get; set; }
+}
+
+/// <summary>
+/// Why a <see cref="UserRolesChangedEvent"/> was raised. Used by audit
+/// consumers; cache-invalidation consumers can ignore this field.
+/// </summary>
+public enum UserRolesChangeType
+{
+    /// <summary>Admin explicitly assigned one or more roles.</summary>
+    Assigned,
+    /// <summary>Admin explicitly removed one or more roles.</summary>
+    Removed,
+    /// <summary>User was created with an initial role set.</summary>
+    CreatedWithRoles,
+    /// <summary>User was deleted — all role memberships dropped.</summary>
+    UserDeleted,
+}
+

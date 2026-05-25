@@ -14,12 +14,15 @@
     :all-columns="agentColumns"
     :title="title"
     :translate="t"
+    :form-modal-width="760"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="agentFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
     </template>
     <template #rowActions="{ row }">

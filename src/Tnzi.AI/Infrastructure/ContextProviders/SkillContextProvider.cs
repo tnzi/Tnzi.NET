@@ -524,7 +524,12 @@ public sealed class SkillContextProvider : IContextProvider
     public const int SkillListingBudget = 8000;
 
     /// <summary>
-    /// Builds a skill summary (name + description only) for system prompt injection.
+    /// Builds a skill summary for system prompt injection. Each line shows the
+    /// skill name + slug + a one-line routing hint. The hint prefers
+    /// <see cref="SkillDefinition.WhenToUse"/> (a "pushy" trigger-phrase list
+    /// aimed at the router) and falls back to <see cref="SkillDefinition.Description"/>
+    /// (the human-readable summary) when WhenToUse is empty — most legacy
+    /// skills only populate Description.
     /// Applies character budget: if total exceeds <see cref="SkillListingBudget"/>, truncates by priority (lower priority dropped first).
     /// </summary>
     public static string BuildSkillSummary(IReadOnlyList<SkillDefinition> skills)
@@ -546,8 +551,9 @@ public sealed class SkillContextProvider : IContextProvider
         {
             var line = new StringBuilder();
             line.Append($"- **{skill.Name}** (`{skill.Slug}`)");
-            if (!string.IsNullOrWhiteSpace(skill.Description))
-                line.Append($" — {skill.Description}");
+            var routingHint = !string.IsNullOrWhiteSpace(skill.WhenToUse) ? skill.WhenToUse : skill.Description;
+            if (!string.IsNullOrWhiteSpace(routingHint))
+                line.Append($" — {routingHint}");
             line.AppendLine();
 
             var lineStr = line.ToString();

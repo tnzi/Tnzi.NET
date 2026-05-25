@@ -108,8 +108,9 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         var skillsDir = state.SkillsPath;
         Directory.Exists(skillsDir).ShouldBeTrue("Skills directory should exist after extraction");
 
-        // .extracted 标记文件应该存在
-        File.Exists(Path.Combine(skillsDir, ".extracted")).ShouldBeTrue("Extraction marker should exist");
+        // 完成标记位于父线程目录 (.skills_wired)，避免在 symlink 模式下把
+        // 标记写入共享只读目录污染其他 thread。
+        File.Exists(Path.Combine(state.ThreadDirectory, ".skills_wired")).ShouldBeTrue("Wiring marker should exist");
 
         // 至少有一个技能的 scripts 被提取
         var extractedDirs = Directory.GetDirectories(skillsDir);

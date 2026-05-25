@@ -2,6 +2,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="tenantColumns"
+    :search-fields="tenantSearchFields"
     :title="title"
     :translate="t"
   >
@@ -10,6 +11,7 @@
         :schema="tenantFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
     </template>
     <template #rowActions="{ row }">
@@ -25,7 +27,7 @@ import { useCrudPage } from '../../headless/useCrudPage'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { tenantColumns, tenantFormSchema } from './tenant-config'
+import { tenantColumns, tenantFormSchema, tenantSearchFields } from './tenant-config'
 import { translatePageKey } from '../_shared/translate'
 import type { TenantDto } from '@tnzi/core/services/identity'
 

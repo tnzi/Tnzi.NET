@@ -1,3 +1,5 @@
+using Tnzi.AI.Security;
+
 namespace Tnzi.AI.Sandbox.Providers.Local;
 
 public class LocalSandboxProvider : ISandboxProvider
@@ -5,6 +7,7 @@ public class LocalSandboxProvider : ISandboxProvider
     private readonly IOptions<SandboxModuleOptions> _options;
     private readonly IHostEnvironment _hostEnvironment;
     private readonly ILogger<LocalSandboxProvider> _logger;
+    private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private int _counter;
     private int _productionWarningIssued;
 
@@ -13,11 +16,13 @@ public class LocalSandboxProvider : ISandboxProvider
     public LocalSandboxProvider(
         IOptions<SandboxModuleOptions> options,
         IHostEnvironment hostEnvironment,
-        ILogger<LocalSandboxProvider> logger)
+        ILogger<LocalSandboxProvider> logger,
+        IShellCommandAnalyzer? commandAnalyzer = null)
     {
         _options = Check.NotNull(options);
         _hostEnvironment = Check.NotNull(hostEnvironment);
         _logger = Check.NotNull(logger);
+        _commandAnalyzer = commandAnalyzer;
     }
 
     public Task<ISandbox> CreateAsync(SandboxCreateOptions options, CancellationToken ct = default)
@@ -52,7 +57,9 @@ public class LocalSandboxProvider : ISandboxProvider
             maxOutputSize: options.MaxOutputSizeBytes,
             deniedCommands: localOpts.DeniedCommands,
             environmentBlacklist: options.EnvironmentBlacklist ?? localOpts.EnvironmentBlacklist,
-            environmentOverrides: options.EnvironmentOverrides);
+            environmentOverrides: options.EnvironmentOverrides,
+            deniedCommandPrefixes: localOpts.DeniedCommandPrefixes,
+            commandAnalyzer: _commandAnalyzer);
 
         return Task.FromResult(sandbox);
     }

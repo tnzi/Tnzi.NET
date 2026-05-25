@@ -11,7 +11,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
 
 interface ScheduledJobRow {
   id?: string
@@ -85,7 +85,7 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
         value: row.removed ?? false,
         mapping: {
           true: { type: 'default', label: 'Removed' },
-          false: { type: 'success', label: 'Active' },
+          false: { type: 'success', labelKey: 'admin.shared.status.active' },
         },
       }),
   },
@@ -97,12 +97,12 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
  * code via IBackgroundJobManager.CreateRecurring, not via admin UI).
  */
 export const scheduledJobFormSchema: FormSchemaItem[] = [
-  { key: 'id',            label: 'Job ID',      type: 'text' },
-  { key: 'cron',          label: 'Cron',        type: 'text' },
-  { key: 'queue',         label: 'Queue',       type: 'text' },
-  { key: 'lastExecution', label: 'Last Run',    type: 'text' },
-  { key: 'nextExecution', label: 'Next Run',    type: 'text' },
-  { key: 'lastJobId',     label: 'Last Job ID', type: 'text' },
-  { key: 'lastJobState',  label: 'Last State',  type: 'text' },
-  { key: 'error',         label: 'Error',       type: 'textarea' },
+  { key: 'id',            labelKey: 'form.id', label: 'Job ID',      type: 'text' },
+  { key: 'cron',          labelKey: 'form.cron', label: 'Cron',        type: 'text' },
+  { key: 'queue',         labelKey: 'form.queue', label: 'Queue',       type: 'text' },
+  { key: 'lastExecution', labelKey: 'form.lastExecution', label: 'Last Run',    type: 'text' },
+  { key: 'nextExecution', labelKey: 'form.nextExecution', label: 'Next Run',    type: 'text' },
+  { key: 'lastJobId',     labelKey: 'form.lastJobId', label: 'Last Job ID', type: 'text' },
+  { key: 'lastJobState',  labelKey: 'form.lastJobState', label: 'Last State',  type: 'text' },
+  { key: 'error',         labelKey: 'form.error', label: 'Error',       type: 'textarea' },
 ]

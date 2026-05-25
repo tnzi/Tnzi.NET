@@ -8,7 +8,7 @@ import {
   type AdminMenuItem,
 } from '../../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import { translatePageKey } from '../../pages/_shared/translate'
 

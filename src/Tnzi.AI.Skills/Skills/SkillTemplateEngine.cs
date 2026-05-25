@@ -63,7 +63,18 @@ public partial class SkillTemplateEngine : ISkillTemplateEngine
                     continue;
                 }
 
-                effectiveValues[paramDef.Name] = suppliedValue;
+                // Structural prompt-injection check on the user-supplied value.
+                // DefaultValue / built-in variables (SESSION_ID/AGENT_NAME) are
+                // author- or framework-provided and therefore trusted; only
+                // values coming through `provided` go through the sanitizer.
+                var sanitized = SkillParameterSanitizer.Sanitize(paramDef.Name, suppliedValue);
+                if (!sanitized.IsAllowed)
+                {
+                    result.Errors.Add(sanitized.Reason!);
+                    continue;
+                }
+
+                effectiveValues[paramDef.Name] = sanitized.Value;
             }
             else if (paramDef.DefaultValue != null)
             {

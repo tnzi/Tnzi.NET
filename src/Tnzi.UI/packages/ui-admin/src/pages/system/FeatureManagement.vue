@@ -9,11 +9,23 @@
       <TFormSchemaRenderer
         :schema="featureFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
+        :readonly="mode === 'view' || ((formData as FeatureDto | null)?.isReadOnly ?? false)"
+        :translate="t"
       />
     </template>
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t" />
+      <!--
+        Code-source rows (`isReadOnly`) ship from IFeatureDefinitionProvider —
+        backend rejects edit/delete on them. Hide both actions so users don't
+        click into a confusing server error.
+      -->
+      <TRowActions
+        :row="(row as FeatureDto)"
+        :state="crud"
+        :translate="t"
+        :show-edit="!(row as FeatureDto).isReadOnly"
+        :show-delete="!(row as FeatureDto).isReadOnly"
+      />
     </template>
   </TCrudPage>
 </template>
@@ -23,20 +35,10 @@ import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { createSystemBridge } from '../../services/bridges/system-bridge'
+import { createSystemBridge, type FeatureDto } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { translatePageKey } from '../_shared/translate'
 import { featureColumns, featureFormSchema } from './feature-config'
-
-interface FeatureDto {
-  id?: string
-  name?: string
-  code?: string
-  description?: string
-  valueType?: 'boolean' | 'string' | 'number' | 'json'
-  defaultValue?: string
-  isEnabled?: boolean
-}
 
 const bridge = createSystemBridge({ client: useAdminClient() })
 
@@ -45,8 +47,8 @@ const crud = useCrudPage<FeatureDto>({
   columns: featureColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.features.fetch(q),
-  createData: (d) => bridge.features.create(d),
-  updateData: (id, d) => bridge.features.update(String(id), d),
+  createData: (d) => bridge.features.create(d as never),
+  updateData: (id, d) => bridge.features.update(String(id), d as never),
   deleteData: (ids) => bridge.features.delete(ids.map(String)),
 })
 crud.refresh().catch(() => undefined)

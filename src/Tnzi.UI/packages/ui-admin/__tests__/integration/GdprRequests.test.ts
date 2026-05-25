@@ -33,7 +33,26 @@ vi.mock('../../src/services/bridges/identity-bridge', () => ({
   }),
 }))
 
-// Naive UI components are internally named WITHOUT the N prefix
+// `useMessage` requires NMessageProvider in the tree — stub the import so
+// the page can call `message.success` / `error` without a provider.
+vi.mock('naive-ui', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('naive-ui')
+  return {
+    ...actual,
+    useMessage: () => ({
+      success: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warning: vi.fn(),
+    }),
+  }
+})
+
+// Naive UI components are internally named WITHOUT the N prefix. The
+// Popconfirm stub renders its `trigger` slot and forwards the inner
+// button's click event as `positive-click` so tests can fire the
+// confirmed action with a single click (mirrors what NPopconfirm does
+// after the user clicks "OK" in production).
 const stubs = {
   DataTable: { props: ['data'], template: '<div class="dt" :data-rows="data.length" />' },
   Pagination: { template: '<div />' },
@@ -41,6 +60,10 @@ const stubs = {
   Button: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
   Modal: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
   Popover: { template: '<div><slot name="trigger" /></div>' },
+  Popconfirm: {
+    emits: ['positive-click'],
+    template: '<div class="popconfirm" @click="$emit(\'positive-click\')"><slot name="trigger" /></div>',
+  },
   Checkbox: { template: '<input type="checkbox" />' },
   Form: { template: '<form><slot /></form>' },
   FormItem: { template: '<div><slot /></div>' },
@@ -67,28 +90,46 @@ describe('GdprRequests (Phase 3 page)', () => {
     expect(wrapper.find('.dt').attributes('data-rows')).toBe('2')
   })
 
-  it('Approve button calls bridge.gdpr.approveRequest for selected items', async () => {
+  it('batch approve invokes bridge.gdpr.approveRequest after popconfirm', async () => {
     const wrapper = mount(GdprRequests, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    // Select a row via the exposed crud state, then click approve
     const vm = wrapper.vm as unknown as { crud: { batchActions: { toggle: (id: string) => void } } }
     vm.crud.batchActions.toggle('g1')
     await nextTick()
-    await wrapper.find('.gdpr-approve').trigger('click')
+    // Find the batch-approve popconfirm wrapper and click it (the stub
+    // fires `positive-click` on click, mirroring NPopconfirm post-confirm).
+    const approveBtn = wrapper.find('.gdpr-approve')
+    expect(approveBtn.exists()).toBe(true)
+    // Click the surrounding popconfirm stub (parent .popconfirm)
+    await approveBtn.element.closest('.popconfirm')?.dispatchEvent(new Event('click', { bubbles: true }))
     await nextTick()
+    await new Promise(r => setTimeout(r, 5))
     expect(mockApprove).toHaveBeenCalledWith('g1')
   })
 
-  it('Deny button calls bridge.gdpr.denyRequest for selected items', async () => {
+  it('batch reject invokes bridge.gdpr.denyRequest after popconfirm', async () => {
     const wrapper = mount(GdprRequests, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
     const vm = wrapper.vm as unknown as { crud: { batchActions: { toggle: (id: string) => void } } }
     vm.crud.batchActions.toggle('g2')
     await nextTick()
-    await wrapper.find('.gdpr-deny').trigger('click')
+    const denyBtn = wrapper.find('.gdpr-deny')
+    expect(denyBtn.exists()).toBe(true)
+    await denyBtn.element.closest('.popconfirm')?.dispatchEvent(new Event('click', { bubbles: true }))
     await nextTick()
+    await new Promise(r => setTimeout(r, 5))
     expect(mockDeny).toHaveBeenCalledWith('g2')
+  })
+
+  it('does not show batch actions when nothing is selected', async () => {
+    const wrapper = mount(GdprRequests, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    // With no rows selected, TBatchActions doesn't render — the
+    // gdpr-approve / gdpr-deny triggers should not exist in the DOM.
+    expect(wrapper.find('.gdpr-approve').exists()).toBe(false)
+    expect(wrapper.find('.gdpr-deny').exists()).toBe(false)
   })
 })

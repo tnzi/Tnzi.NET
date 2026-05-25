@@ -9,100 +9,60 @@
          lives inside the list card sub-title below). -->
     <slot v-if="$slots.header" name="header" />
 
-    <!-- Search panel — two-mode design:
-         (1) Simple (default): one long keyword input + Search/Reset on the
-             same row. Hits `state.setSearch(text)` which routes to bridge's
-             keyword param (consumer responsibility to wire backend support).
-         (2) Advanced: multi-field form built from `searchFields` schema.
-             Each field is a typed input; clicking Search commits all fields
-             into `state.setFilters({...})` (precise filters, NOT keyword).
-         An "Advanced" toggle button on the simple row jumps to mode (2),
-         and a "Simple" link on the advanced form returns to mode (1).
-         If `searchFields` isn't configured the toggle button hides and the
-         simple row is the only search surface. -->
+    <!-- Search panel — two-mode design (simple keyword + collapsible
+         advanced grid). The 200-line internal layout was extracted to
+         `TCrudSearch.vue` in 0.2.72+ (B5) so the simple/advanced surface
+         can be reused and tested in isolation. The `#search` slot still
+         takes precedence to let pages drop a fully custom search UI. -->
     <NCard
-      v-if="$slots.search || searchFields || showDefaultSearch"
+      v-if="$slots.search"
       :bordered="false"
       size="small"
       class="t-crud-page__search-card t-crud-page__search"
     >
-      <slot name="search">
-        <!-- ── Simple row — ALWAYS visible ──
-             Keyword input + Search + (toggle) "Advanced ▾". Clicking the
-             toggle expands an advanced form panel below this row;
-             clicking again collapses it (chevron flips ▾↔▴). The simple
-             row itself never disappears, so users always have keyword
-             search at hand without losing their advanced filter state. -->
-        <div class="t-crud-page__search-simple">
-          <NInput
-            :value="simpleQuery"
-            :placeholder="effectiveSearchPlaceholder"
-            clearable
-            class="t-crud-page__search-simple-input"
-            @update:value="(v: string) => (simpleQuery = v)"
-            @keydown.enter="onApplySimpleSearch"
-            @clear="onClearSimpleSearch"
-          >
-            <template #prefix>
-              <TSvgIcon icon="mdi:magnify" :size="16" />
-            </template>
-          </NInput>
-          <NButton type="primary" @click="onApplySimpleSearch">
-            {{ t('admin.crud.search') }}
-          </NButton>
-          <NButton
-            v-if="hasAdvancedSearch"
-            text
-            class="t-crud-page__search-toggle"
-            @click="advancedMode = !advancedMode"
-          >
-            {{ t('admin.crud.advancedSearch') }}
-            <template #icon>
-              <TSvgIcon
-                :icon="advancedMode ? 'mdi:chevron-up' : 'mdi:chevron-down'"
-                :size="16"
-              />
-            </template>
+      <slot name="search" />
+    </NCard>
+    <TCrudSearch
+      v-else-if="searchFields || showDefaultSearch"
+      :state="props.state"
+      :search-fields="searchFields"
+      :search-placeholder="searchPlaceholder"
+      :default-advanced-mode="defaultAdvancedMode"
+      :hide-simple-mode="hideSimpleMode"
+      :translate="translate"
+    />
+
+    <!-- Inline error banner — surfaces a transient `state.error` (set when
+         all `retryFetch` attempts have been exhausted) so the user can
+         click Retry without scrolling. The `#error` slot lets a page
+         override the default NAlert (e.g. show a contextual recovery
+         hint or a custom retry CTA). Closing the banner only dismisses
+         it locally via `state.dismissError()`; the next call to
+         `state.refresh()` clears `error` for real. -->
+    <slot
+      v-if="props.state.error.value"
+      name="error"
+      :error="props.state.error.value"
+      :retry="() => props.state.refresh()"
+      :dismiss="() => props.state.dismissError()"
+    >
+      <NAlert
+        type="error"
+        class="t-crud-page__error"
+        :title="t('admin.crud.fetchError')"
+        closable
+        @close="props.state.dismissError"
+      >
+        <div class="t-crud-page__error-body">
+          <span class="t-crud-page__error-msg">
+            {{ props.state.error.value.message }}
+          </span>
+          <NButton size="small" tertiary @click="() => props.state.refresh()">
+            {{ t('admin.crud.retry') }}
           </NButton>
         </div>
-
-        <!-- ── Advanced panel — collapsible ──
-             Hidden by default, expands below the simple row when user
-             clicks the "Advanced ▾" toggle. Compact grid (no labels,
-             placeholder carries the field name) keeps it visually
-             secondary to the always-on keyword search. -->
-        <NCollapseTransition v-if="hasAdvancedSearch" :show="advancedMode">
-          <NForm
-            class="t-crud-page__search-advanced"
-            label-placement="left"
-            :show-feedback="false"
-            :show-require-mark="false"
-          >
-            <NGrid responsive="screen" item-responsive :x-gap="12" :y-gap="12">
-              <NGi
-                v-for="field in searchFields"
-                :key="field.key"
-                span="24 s:12 m:6"
-              >
-                <NFormItem :show-label="false" :path="field.key">
-                  <component :is="renderSearchField(field)" />
-                </NFormItem>
-              </NGi>
-              <NGi
-                :span="searchButtonSpan"
-                class="t-crud-page__search-actions-cell"
-              >
-                <NSpace justify="end" class="t-crud-page__search-actions">
-                  <NButton type="primary" @click="onApplySearch">
-                    {{ t('admin.crud.search') }}
-                  </NButton>
-                </NSpace>
-              </NGi>
-            </NGrid>
-          </NForm>
-        </NCollapseTransition>
-      </slot>
-    </NCard>
+      </NAlert>
+    </slot>
 
     <!-- List card — soybean's `用户列表 | + 新增 | 批量删除 | 刷新 | 列设置`. -->
     <NCard
@@ -112,7 +72,40 @@
       content-style="padding: 0 16px 16px;"
     >
       <template #header>
-        <span class="t-crud-page__list-title">{{ resolvedTitle }}</span>
+        <div class="t-crud-page__header-left">
+          <span class="t-crud-page__list-title">{{ resolvedTitle }}</span>
+          <!-- Optional help blurb — replaces top-of-page NAlert banners
+               with a discreet (i) icon next to the title. NPopover stays
+               closed until the user hovers/clicks, so power-user notes
+               (e.g. "this is a diagnostic view") don't steal real
+               estate from the data table. -->
+          <NPopover v-if="resolvedTitleHelp" trigger="hover" placement="bottom-start">
+            <template #trigger>
+              <button
+                type="button"
+                class="t-crud-page__help-trigger"
+                :title="resolvedTitleHelpTitle"
+                :aria-label="resolvedTitleHelpTitle"
+              >
+                <TSvgIcon icon="mdi:information-outline" :size="16" />
+              </button>
+            </template>
+            <div class="t-crud-page__help-content">
+              <div v-if="resolvedTitleHelpTitle" class="t-crud-page__help-title">
+                {{ resolvedTitleHelpTitle }}
+              </div>
+              <div class="t-crud-page__help-body">{{ resolvedTitleHelp }}</div>
+            </div>
+          </NPopover>
+          <!-- `#toolbarLeft` lives beside the list title — typical use is
+               a quick filter input (e.g. dictionary/parameter group
+               prefix) that belongs visually with "which slice of the
+               data am I looking at?". Action buttons stay on the right
+               in `#header-extra` via `#toolbarRight`. -->
+          <div v-if="$slots.toolbarLeft" class="t-crud-page__header-filters">
+            <slot name="toolbarLeft" />
+          </div>
+        </div>
       </template>
       <template #header-extra>
         <div class="t-crud-page__actions">
@@ -134,7 +127,6 @@
           <!-- Batch delete moved to the table footer (next to pagination)
                so it surfaces close to the actual row selection.
                See `.t-crud-page__footer` below. -->
-          <slot name="toolbarLeft" />
           <NButton
             tertiary
             size="small"
@@ -220,26 +212,32 @@
         @update:checked-row-keys="onUpdateCheckedRowKeys"
       />
       <!-- Footer row: batch action group on the left, pagination on the right.
-           Selection count is folded INTO the delete button label ("批量删除 (3)")
-           so the action and its target read as one phrase. Clearing the
-           selection is a proper sibling button rather than a text link —
-           same visual weight family as delete, just neutral (default type)
-           so the destructive action stays visually dominant. -->
+           Selection count is folded INTO the delete button label ("删除 (3)")
+           so the action and its target read as one phrase. The delete button
+           is wrapped in NPopconfirm so it always demands a "are you sure?"
+           gesture before invoking the destructive bulk operation — matches
+           the per-row delete confirm flow in TRowActions. -->
       <div class="t-crud-page__footer">
         <div class="t-crud-page__footer-left">
           <template v-if="!batchSelectionEmpty">
-            <NButton
+            <NPopconfirm
               v-if="showBatchDelete"
-              type="error"
-              size="small"
-              ghost
-              @click="onBatchDelete"
+              @positive-click="onBatchDelete"
             >
-              <template #icon>
-                <TSvgIcon icon="mdi:trash-can-outline" :size="14" />
+              <template #trigger>
+                <NButton
+                  type="error"
+                  size="small"
+                  ghost
+                >
+                  <template #icon>
+                    <TSvgIcon icon="mdi:trash-can-outline" :size="14" />
+                  </template>
+                  {{ t('admin.crud.batchDelete') }} ({{ props.state.batchActions.selectedCount.value }})
+                </NButton>
               </template>
-              {{ t('admin.crud.batchDelete') }} ({{ props.state.batchActions.selectedCount.value }})
-            </NButton>
+              {{ batchDeleteConfirmText }}
+            </NPopconfirm>
             <NButton
               size="small"
               @click="props.state.batchActions.clear"
@@ -263,6 +261,7 @@
       :state="formModalState"
       :title="modalTitle"
       :translate="props.translate"
+      :width="formModalWidth"
       @submit="props.state.submit"
     >
       <template #default="{ formData, mode }">
@@ -280,28 +279,21 @@
 </template>
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
-import { computed, h, reactive, ref, useSlots, watch } from 'vue'
+import { computed, h, ref, useSlots } from 'vue'
 import {
+  NAlert,
   NButton,
   NCard,
-  NCollapseTransition,
   NDataTable,
-  NDatePicker,
-  NForm,
-  NFormItem,
-  NGi,
-  NGrid,
-  NInput,
-  NInputNumber,
   NPagination,
-  NSelect,
-  NSpace,
-  NSwitch,
+  NPopconfirm,
+  NPopover,
 } from 'naive-ui'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import TCrudColumnSetting from './TCrudColumnSetting.vue'
 import TBatchActions from './TBatchActions.vue'
 import TFormModal from './TFormModal.vue'
+import TCrudSearch from './TCrudSearch.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { UseBatchActionsReturn } from '../../headless/useBatchActions'
@@ -311,7 +303,6 @@ import { useBreakpoint } from '../../headless/useBreakpoint'
 
 // Exported so external wrappers / higher-order components can reference
 // TCrudPage's Props shape without duplicating the type.
-// eslint-disable-next-line vue/prefer-define-options
 export interface TCrudPageProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
   allColumns: ColumnDef[]
@@ -366,12 +357,36 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
    */
   hideSimpleMode?: boolean
   /**
+   * Pixel width of the form modal opened on Create/Edit/View. Default 560
+   * fits a single-column form with up to ~5 fields without scrolling.
+   * Bump to 760-800 for 2-column forms (6-10 fields) and to 960-1080 for
+   * 3-column forms (11+ fields). The TFormModal auto-falls-back to
+   * fullscreen on viewports narrower than `max(width + 32, 640)`.
+   */
+  formModalWidth?: number
+  /**
    * Width (px) of the right-fixed row-actions column when `#rowActions`
-   * slot is supplied. Default 140 covers the canonical Edit + Delete pair;
-   * pages that surface more buttons (status toggles, custom batch actions)
-   * should bump this to avoid the buttons clipping under the column edge.
+   * slot is supplied. Default 150 fits the canonical strict-2-button
+   * shape `[Edit] [More▾]` introduced in the 2026-05-18 row-actions
+   * refactor (Edit ~52px + 8px gap + More ~62px + 24px cell padding ≈ 146px).
+   * Pages that legitimately surface 3+ inline buttons (rare — prefer
+   * folding into `moreOptions`) should bump this prop locally.
    */
   rowActionsWidth?: number
+  /**
+   * Help blurb shown when the user clicks/hovers the (i) icon next to
+   * the list title. Use for diagnostic / audit / advanced pages that
+   * benefit from a one-liner explaining what the table is and when to
+   * use it. Replaces the older "banner NAlert at the top of the page"
+   * pattern with something less visually noisy. Pass raw text or an
+   * i18n key (auto-resolved via the page namespace).
+   */
+  titleHelp?: string
+  /**
+   * Title for the help popover (defaults to "Tip"). Pass an i18n key
+   * (e.g. `'banner.title'`) or a literal string.
+   */
+  titleHelpTitle?: string
   translate?: (key: string) => string
 }
 
@@ -388,7 +403,10 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
   searchPlaceholder: undefined,
   defaultAdvancedMode: false,
   hideSimpleMode: false,
-  rowActionsWidth: 140,
+  rowActionsWidth: 150,
+  formModalWidth: 560,
+  titleHelp: undefined,
+  titleHelpTitle: undefined,
   translate: undefined,
 })
 
@@ -400,6 +418,13 @@ defineSlots<{
   toolbarRight?: () => unknown
   columnExtra?: () => unknown
   batchActions?: (props: { selectedIds: TId[] }) => unknown
+  /**
+   * Replace the default error banner shown after fetchData rejects. Bind
+   * `error` (the raw Error), `retry` (re-runs the query), and `dismiss`
+   * (clears `state.error` without re-fetching). Default: an NAlert with
+   * the error message + a Retry button.
+   */
+  error?: (props: { error: Error; retry: () => Promise<void>; dismiss: () => void }) => unknown
   form?: (props: { formData: Partial<T> | null; mode: FormModalMode | null }) => unknown
   formFooter?: () => unknown
   rowActions?: (props: { row: T }) => unknown
@@ -431,6 +456,21 @@ function maybeTranslate(value: string | undefined, fallback: string): string {
 
 const resolvedTitle = computed(() => maybeTranslate(props.title, t('admin.crud.list')))
 
+// `titleHelp` accepts an i18n key (page-scoped or absolute) or raw text.
+// We resolve through the same maybeTranslate heuristic the title uses so
+// pages can pass `'banner.body'` and get a localised string back without
+// re-implementing the lookup logic in every consumer.
+const resolvedTitleHelp = computed<string>(() => {
+  const v = props.titleHelp
+  if (!v) return ''
+  return maybeTranslate(v, v)
+})
+const resolvedTitleHelpTitle = computed<string>(() => {
+  const v = props.titleHelpTitle
+  if (!v) return t('admin.common.tip') || 'Tip'
+  return maybeTranslate(v, v)
+})
+
 const showColumnSetting = ref(false)
 const bp = useBreakpoint()
 
@@ -438,19 +478,34 @@ const effectiveRowKey = computed<(row: T) => TId>(
   () => props.rowKey ?? props.state.rowKey,
 )
 
-// --- Template-bound adapters (Vue templates can't host TS casts, so we
-// predefine the few unavoidable variance bridges here and bind them by name).
-const batchActionsState = computed(
-  () => props.state.batchActions as unknown as UseBatchActionsReturn<unknown>,
+// --- Template-bound adapters.
+//
+// Vue templates can't host TS casts, so the few unavoidable variance
+// bridges live here as named expressions bound by `:prop`. Two groups:
+//   1. NDataTable / NCheckboxRowKeys take a `Record<string, unknown>` row
+//      type — wider than our T. We cast once for data + rowKey and the
+//      table internals walk the dataset via index signature.
+//   2. TBatchActions / TFormModal are generic over `unknown` (they don't
+//      carry T through their public surface) — the bridge stays.
+//
+// 0.2.72+ (B1): attempted to drop these via `T extends Record<string, unknown>`,
+// but the constraint cascades 64 typecheck errors across 30+ pages whose
+// DTOs are plain `interface`s (no implicit index signature). Eliminating
+// those would require adding `& Record<string, unknown>` to every DTO in
+// @tnzi/core/services — out of scope here. The casts are kept but
+// consolidated below to a single `castRow` helper instead of repeated
+// `as unknown as ...` chains so the intent reads cleanly.
+function castRow<U>(value: unknown): U {
+  return value as U
+}
+const batchActionsState = computed(() =>
+  castRow<UseBatchActionsReturn<unknown>>(props.state.batchActions),
 )
-const formModalState = computed(
-  () => props.state.formModal as unknown as UseFormModalReturn<unknown>,
+const formModalState = computed(() =>
+  castRow<UseFormModalReturn<unknown>>(props.state.formModal),
 )
-const dataTableRowKey = computed(
-  () =>
-    effectiveRowKey.value as unknown as (
-      row: Record<string, unknown>,
-    ) => string | number,
+const dataTableRowKey = computed(() =>
+  castRow<(row: Record<string, unknown>) => string | number>(effectiveRowKey.value),
 )
 function castSelectedIds(ids: unknown[]): TId[] {
   return ids as TId[]
@@ -462,9 +517,7 @@ function castFormData(data: unknown): Partial<T> | null {
 // NDataTable's `data` prop is typed as RowData[] where RowData is a loose
 // index signature; cast once here to keep the internal T contract while
 // satisfying naive-ui's type surface.
-const dataTableData = computed(
-  () => props.state.items.value as unknown as Record<string, unknown>[],
-)
+const dataTableData = computed(() => castRow<Record<string, unknown>[]>(props.state.items.value))
 
 const dataTableColumns = computed(() => {
   // NDataTable's column type is broad — we let TS infer per-entry and cast
@@ -496,6 +549,7 @@ const dataTableColumns = computed(() => {
       title: maybeTranslate(c.title, c.title),
       width: c.width,
       fixed: c.fixed,
+      ...(c.ellipsis !== undefined ? { ellipsis: c.ellipsis } : {}),
       ...(c.render
         ? {
             render: (row: unknown) => c.render!(row as Record<string, unknown>),
@@ -534,152 +588,9 @@ const modalTitle = computed(() => {
   return t(`admin.crud.${mode}Title`)
 })
 
-// ── Simple search (default mode) ───────────────────────────────────
-// Keyword box bound locally — only commits on Enter / Search click, so
-// users can type without firing every-keystroke fetches. Routes to
-// `state.setSearch(text)` which the bridge converts into the backend's
-// keyword param (consumer responsibility).
-const simpleQuery = ref<string>(props.state.query.value.searchText ?? '')
-function onApplySimpleSearch(): void {
-  props.state.setSearch(simpleQuery.value)
-  void props.state.refresh()
-}
-function onResetSimpleSearch(): void {
-  simpleQuery.value = ''
-  props.state.setSearch('')
-  void props.state.refresh()
-}
-function onClearSimpleSearch(): void {
-  // NInput's built-in clear button calls this; mirror the explicit Reset
-  // so clearing the box actually refreshes the table to "no keyword".
-  onResetSimpleSearch()
-}
-
-// ── Mode toggle ────────────────────────────────────────────────────
-// `false` = simple keyword search row (default).
-// `true`  = multi-field advanced form (only available when `searchFields`
-//           is supplied — toggle button is hidden otherwise).
-// Initial: respect `defaultAdvancedMode` consumer prop; also force-on
-// when `hideSimpleMode` is set so the panel isn't blank.
-const advancedMode = ref(
-  props.hideSimpleMode || (props.defaultAdvancedMode && !!props.searchFields?.length),
-)
-
-/** Whether the Advanced toggle button is reachable (needs both a schema
- *  and a non-locked simple mode). Drives the toggle button's v-if. */
-const hasAdvancedSearch = computed(
-  () => !props.hideSimpleMode && !!props.searchFields?.length,
-)
-
-/** Placeholder for the simple keyword box. Consumer-supplied wins;
- *  otherwise default i18n string. */
-const effectiveSearchPlaceholder = computed(
-  () => props.searchPlaceholder ?? t('admin.crud.searchPlaceholder'),
-)
-
-// ── Multi-field search (advanced mode) ─────────────────────────────
-// `searchModel` is the live form state for `searchFields`. It mirrors
-// the keys of the supplied schema and lives outside `state.query.filters`
-// so the user can type without triggering refetches — filters commit on
-// Search click only (matches soybean's UX).
-const searchModel = reactive<Record<string, unknown>>({})
-
-/**
- * Span string for the button row. Fields are span="24 s:12 m:6" so the
- * grid is 1/2/4 columns wide at xs/s/m+ breakpoints. We want the
- * buttons to share the last row with whatever field cells fit; if the
- * last row is exactly full, the button row starts a fresh row taking
- * up just the right-hand half (mirrors soybean's 6-field UX where
- * "24 m:12" lands the buttons on row3-right).
- *
- * Formula: spanForCols(cellsPerRow) = remainder ? remainder * (24 / cellsPerRow) : (24 / cellsPerRow * (cellsPerRow / 2))
- */
-const searchButtonSpan = computed<string>(() => {
-  const count = props.searchFields?.length ?? 0
-  if (count === 0) return '24'
-  // s: 2 cells / row, m+: 4 cells / row
-  const sUsed = count % 2
-  const mUsed = count % 4
-  const sSpan = sUsed === 0 ? 12 : (2 - sUsed) * 12
-  const mSpan = mUsed === 0 ? 12 : (4 - mUsed) * 6
-  return `24 s:${sSpan} m:${mSpan}`
-})
-watch(
-  () => props.searchFields,
-  (fields) => {
-    if (!fields) return
-    for (const key of Object.keys(searchModel)) {
-      if (!fields.find((f) => f.key === key)) delete searchModel[key]
-    }
-    for (const f of fields) {
-      if (!(f.key in searchModel)) searchModel[f.key] = null
-    }
-  },
-  { immediate: true, deep: false },
-)
-
-function renderSearchField(item: FormSchemaItem): unknown {
-  const value = searchModel[item.key]
-  const onUpdate = (v: unknown) => {
-    searchModel[item.key] = v
-  }
-  const effectiveType = item.typeFn ? item.typeFn(searchModel) : item.type
-  const placeholder = maybeTranslate(item.placeholder ?? item.label, item.label)
-  switch (effectiveType) {
-    case 'text':
-      return h(NInput, {
-        value: (value as string | null) ?? null,
-        placeholder,
-        clearable: true,
-        'onUpdate:value': onUpdate,
-      })
-    case 'textarea':
-      return h(NInput, {
-        value: (value as string | null) ?? null,
-        type: 'textarea',
-        placeholder,
-        clearable: true,
-        'onUpdate:value': onUpdate,
-      })
-    case 'number':
-      return h(NInputNumber, {
-        value: (value as number | null) ?? null,
-        min: item.min,
-        max: item.max,
-        clearable: true,
-        'onUpdate:value': onUpdate,
-      })
-    case 'switch':
-      return h(NSwitch, { value: value as boolean, 'onUpdate:value': onUpdate })
-    case 'select':
-      return h(NSelect, {
-        value: (value as string | number | null) ?? null,
-        options: item.options ?? [],
-        clearable: true,
-        placeholder,
-        'onUpdate:value': onUpdate,
-      })
-    case 'date':
-      return h(NDatePicker, { value: value as number | null, clearable: true, type: 'date', 'onUpdate:value': onUpdate })
-    default:
-      return null
-  }
-}
-
-function onApplySearch(): void {
-  const filters: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(searchModel)) {
-    if (v !== null && v !== undefined && v !== '') filters[k] = v
-  }
-  props.state.setFilters(filters)
-  void props.state.refresh()
-}
-
-function onResetSearch(): void {
-  for (const k of Object.keys(searchModel)) searchModel[k] = null
-  props.state.setFilters({})
-  void props.state.refresh()
-}
+// Simple + advanced search logic was relocated to `TCrudSearch.vue` in
+// 0.2.72+ (B5). TCrudPage now mounts TCrudSearch as a child when the
+// `#search` slot isn't provided, see template above.
 
 function onRefresh(): void {
   void props.state.refresh()
@@ -715,6 +626,19 @@ const batchSelectionEmpty = computed(
   () => props.state.batchActions.selectedCount.value === 0,
 )
 const batchActionSlotProvided = computed(() => !!slots.batchActions)
+
+/** Popconfirm body — uses `confirmBatchDelete` with the `{n}` placeholder
+ *  replaced by the current selection count. Falls back to the per-row
+ *  `confirmDelete` text if the consumer hasn't supplied the new key
+ *  (defensive — every shipped locale has both keys). */
+const batchDeleteConfirmText = computed(() => {
+  const count = props.state.batchActions.selectedCount.value
+  const tpl = t('admin.crud.confirmBatchDelete')
+  if (tpl && tpl !== 'admin.crud.confirmBatchDelete') {
+    return tpl.replace('{n}', String(count))
+  }
+  return t('admin.crud.confirmDelete')
+})
 
 function onBatchDelete(): void {
   const ids = props.state.batchActions.selectedIds.value
@@ -776,6 +700,21 @@ const paginationConfig = computed(() => {
    list card competes for vertical space. */
 .t-crud-page__search-card {
   flex-shrink: 0;
+}
+/* Error banner sits between the search card and the list card. Doesn't
+   shrink so the message stays visible even when the table fills up. */
+.t-crud-page__error {
+  flex-shrink: 0;
+}
+.t-crud-page__error-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.t-crud-page__error-msg {
+  word-break: break-word;
+  flex: 1 1 auto;
 }
 /* List card claims all remaining vertical space + traps overflow so
    the NDataTable inside can use `flex-height` to size its scroll area
@@ -854,62 +793,60 @@ const paginationConfig = computed(() => {
     display: none;
   }
 }
-/* Simple-mode row — horizontally centered cluster:
-     [🔍 keyword input (clearable)]  [Search]  [Advanced (link)]
-   Reset is intentionally omitted — NInput's built-in × clears and
-   refreshes (see `@clear="onClearSimpleSearch"`). */
-.t-crud-page__search-simple {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.t-crud-page__search-simple-input {
-  flex: 0 1 420px;
-  min-width: 240px;
-}
-
-/* Mobile: search input gives up its 240px minimum and stretches to fill
-   the card so the Search + Advanced buttons drop to a second row without
-   the input clipping the card edge. The buttons themselves stay inline. */
-@media (max-width: 640px) {
-  .t-crud-page__search-simple {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-  .t-crud-page__search-simple-input {
-    flex: 1 1 100%;
-    min-width: 0;
-    width: 100%;
-  }
-}
-.t-crud-page__search-toggle :deep(.n-button__content) {
-  color: var(--tnzi-base-text-muted, #6b7280);
-}
-.t-crud-page__search-toggle:hover :deep(.n-button__content) {
-  color: var(--tnzi-primary, #06b6d4);
-}
-.t-crud-page__search-actions-cell {
-  /* Modest right indent so Search button doesn't kiss the card edge. */
-  padding-right: 12px;
-}
-.t-crud-page__search-actions {
-  width: 100%;
-}
-/* Advanced form panel — sits below the simple row, NCollapseTransition
-   handles the height animation. Top margin separates it visually from
-   the always-visible simple row above. */
-.t-crud-page__search-advanced {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--tnzi-border, #e5e7eb);
-}
+/* 0.2.72+ (B5): search-simple / search-advanced / search-toggle /
+   search-actions styles moved to TCrudSearch.vue when the markup
+   was extracted. Vue `<style scoped>` doesn't reach child SFCs, so
+   the rules had to follow the elements. `.t-crud-page__search-card`
+   below is still here because a consumer-supplied `#search` slot
+   renders into TCrudPage's own NCard wrapper. */
 .t-crud-page__list-title {
   font-size: 16px;
   font-weight: 500;
   color: var(--tnzi-base-text);
+}
+.t-crud-page__header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  flex: 1;
+}
+.t-crud-page__header-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.t-crud-page__help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--tnzi-base-text-muted, #888);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.t-crud-page__help-trigger:hover {
+  color: var(--tnzi-primary);
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.08);
+}
+.t-crud-page__help-content {
+  max-width: 320px;
+}
+.t-crud-page__help-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--tnzi-base-text);
+}
+.t-crud-page__help-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tnzi-base-text-muted, #888);
 }
 .t-crud-page__actions {
   display: flex;

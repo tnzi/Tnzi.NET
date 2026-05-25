@@ -30,14 +30,51 @@ public class FeatureService : ApplicationService, IFeatureService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<FeatureDefinitionDto>>> GetDefinitionsAsync()
     {
-        var definitions = await _definitionRepository
+        // Pull the full merged snapshot from IFeatureManager — this includes
+        // both DB-persisted FeatureDefinition rows AND code-level definitions
+        // registered via IFeatureDefinitionProvider implementations (e.g. the
+        // built-in defaults shipped with the application binaries).
+        var dbDefinitions = await _definitionRepository
             .AsQueryable()
             .AsNoTracking()
-            .OrderBy(d => d.Group)
-            .ThenBy(d => d.Name)
             .ToListAsync();
+        var dbByName = dbDefinitions.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
 
-        return Ok(definitions.MapToList<FeatureDefinitionDto>().AsEnumerable());
+        var snapshot = await _featureManager.GetAllAsync();
+
+        var results = new List<FeatureDefinitionDto>();
+
+        // First, project DB rows (carry their real Id + audit fields).
+        foreach (var d in dbDefinitions)
+        {
+            var dto = d.MapTo<FeatureDefinitionDto>();
+            dto.Source = "Database";
+            dto.IsReadOnly = false;
+            results.Add(dto);
+        }
+
+        // Then append any code-level definition that doesn't have a DB row.
+        foreach (var record in snapshot)
+        {
+            if (dbByName.ContainsKey(record.Name)) continue; // DB wins
+            results.Add(new FeatureDefinitionDto
+            {
+                Id = Guid.Empty,
+                Name = record.Name,
+                DisplayName = record.DisplayName,
+                Description = record.Description,
+                DefaultValue = record.DefaultValue,
+                ValueType = record.ValueType,
+                ParentName = record.ParentName,
+                IsEnabled = record.IsEnabled,
+                Group = record.Group,
+                Source = "Code",
+                IsReadOnly = true,
+            });
+        }
+
+        var ordered = results.OrderBy(r => r.Group).ThenBy(r => r.Name).ToList();
+        return Ok(ordered.AsEnumerable());
     }
 
     /// <inheritdoc />

@@ -8,6 +8,8 @@ export interface ChunkUploader {
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { NButton } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
 
 const props = withDefaults(defineProps<{
   uploader: ChunkUploader
@@ -17,6 +19,11 @@ const props = withDefaults(defineProps<{
   chunkSize: 1024 * 1024,
   translate: (key: string) => key,
 })
+
+const fileInputRef = ref<HTMLInputElement | null>(null)
+function triggerFilePicker(): void {
+  fileInputRef.value?.click()
+}
 
 const emit = defineEmits<{
   progress: [percent: number]
@@ -66,11 +73,31 @@ async function onFileChange(event: Event) {
 
 <template>
   <div class="t-chunk-file-upload">
-    <label class="t-chunk-file-upload__field">
-      <input type="file" :disabled="uploading" @change="onFileChange" />
+    <!-- Hidden native input — the browser's default "Choose File / No file
+         chosen" widget is visually inconsistent with the rest of the admin
+         shell. We render an NButton instead and forward its click to the
+         hidden input. The input keeps `display: none` so screen readers
+         still announce the file picker correctly. -->
+    <input
+      ref="fileInputRef"
+      type="file"
+      class="t-chunk-file-upload__native"
+      :disabled="uploading"
+      @change="onFileChange"
+    />
+    <NButton
+      type="primary"
+      size="small"
+      :loading="uploading"
+      :disabled="uploading"
+      @click="triggerFilePicker"
+    >
+      <template #icon>
+        <TSvgIcon icon="mdi:cloud-upload-outline" :size="16" />
+      </template>
       <span v-if="!uploading">{{ props.translate('admin.upload.choose') }}</span>
       <span v-else>{{ props.translate('admin.upload.uploading') }} ({{ progress }}%)</span>
-    </label>
+    </NButton>
     <div v-if="uploading" class="t-chunk-file-upload__bar">
       <div class="t-chunk-file-upload__bar-fill" :style="{ width: progress + '%' }" />
     </div>
@@ -79,30 +106,34 @@ async function onFileChange(event: Event) {
 
 <style scoped>
 .t-chunk-file-upload {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   gap: var(--tnzi-spacing-sm, 8px);
+  min-width: 0;
 }
-
-.t-chunk-file-upload__field {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tnzi-spacing-sm, 8px);
-  color: var(--tnzi-color-text, #333);
-  font-size: var(--tnzi-font-size-base, 14px);
+.t-chunk-file-upload__native {
+  /* Visually hidden but still focusable (Safari requires a non-zero size). */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
-
 .t-chunk-file-upload__bar {
   width: 100%;
+  min-width: 160px;
   height: var(--tnzi-progress-height, 6px);
-  background: var(--tnzi-color-bg-muted, #eee);
+  background: var(--tnzi-layout-bg);
   border-radius: var(--tnzi-radius-sm, 3px);
   overflow: hidden;
 }
-
 .t-chunk-file-upload__bar-fill {
   height: 100%;
-  background: var(--tnzi-color-primary, #1976d2);
+  background: var(--tnzi-primary);
   transition: width 0.2s ease;
 }
 </style>

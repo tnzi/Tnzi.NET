@@ -245,7 +245,16 @@ export class AuthStateManager {
    * only the first call executes the actual refresh, subsequent calls wait for the same result.
    */
   async refreshAccessToken(): Promise<void> {
-    if (!this.refreshToken) return;
+    // Throw (instead of silent return) when no refresh token is available
+    // so callers — particularly HttpClient.refreshTokenFn wrappers — can
+    // distinguish "refreshed successfully" from "could not refresh". A
+    // silent no-op here caused HttpClient to retry the original request
+    // with the same stale access token, get another 401, and short-circuit
+    // out without firing `onUnauthorized` — so the page would stay mounted
+    // while every API call kept failing.
+    if (!this.refreshToken) {
+      throw new Error('No refresh token available');
+    }
 
     // If a refresh is already in progress, wait for it
     if (this._refreshPromise) {

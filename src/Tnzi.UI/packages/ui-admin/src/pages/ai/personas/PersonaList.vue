@@ -14,6 +14,7 @@
         :schema="personaFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
     </template>
     <template #rowActions="{ row }">

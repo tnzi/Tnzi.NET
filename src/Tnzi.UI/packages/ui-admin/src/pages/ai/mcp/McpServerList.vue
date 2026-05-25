@@ -20,24 +20,18 @@
     :state="crud"
     :all-columns="mcpServerColumns"
     :title="title"
+    :title-help="t('banner.body')"
+    :title-help-title="t('banner.title')"
     :translate="t"
+    :form-modal-width="800"
   >
-    <template #header>
-      <div class="mcp-server-list__header">
-        <h2 class="t-crud-page__title">{{ t(title) }}</h2>
-        <p class="mcp-server-list__note">
-          These are <strong>external</strong> MCP servers that Tnzi connects to
-          as a client. Self-hosted MCP server settings (for exposing Tnzi's
-          own tools to external clients) live in <code>appsettings.json</code>
-          and are not editable here.
-        </p>
-      </div>
-    </template>
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="mcpServerFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
       <p v-if="mode === 'edit'" class="mcp-server-list__hint">
         Leave <strong>Auth Token</strong> blank to keep the existing token. Enter
@@ -186,29 +180,10 @@ defineExpose({ onTestConnection, testBusy, testStatus, toCreateDto, toUpdateDto 
 </script>
 
 <style scoped>
-.mcp-server-list__header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.mcp-server-list__note {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--n-text-color-3, #888);
-}
-.mcp-server-list__note code {
-  font-family: var(--n-font-family-mono, monospace);
-  font-size: 0.8rem;
-}
-.t-crud-page__title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
 .mcp-server-list__hint {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
-  color: var(--n-text-color-3, #888);
+  color: var(--tnzi-base-text-muted, #888);
 }
 .mcp-server-list__test {
   display: flex;
@@ -225,6 +200,6 @@ defineExpose({ onTestConnection, testBusy, testStatus, toCreateDto, toUpdateDto 
   opacity: 0.6;
 }
 .mcp-server-list__status[data-status='error'] {
-  color: var(--n-error-color, #d03050);
+  color: var(--tnzi-error, #d03050);
 }
 </style>

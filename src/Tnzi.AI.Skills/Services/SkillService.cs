@@ -261,6 +261,7 @@ public partial class SkillService : ApplicationService, ISkillService
     {
         Check.NotNull(query);
 
+        // ── DB branch ─────────────────────────────────────────────────────
         var queryable = _repository.AsQueryable()
             .WhereIf(e => e.Name.ToLower().Contains(query.Keyword!.ToLower())
                 || (e.Description != null && e.Description.ToLower().Contains(query.Keyword!.ToLower()))
@@ -285,26 +286,106 @@ public partial class SkillService : ApplicationService, ISkillService
             _ => query.SortDesc ? queryable.OrderByDescending(e => e.CreationTime) : queryable.OrderBy(e => e.CreationTime)
         };
 
-        var pagedList = await queryable
-            .Select(e => new SkillSummaryDto
-            {
-                Id = e.Id,
-                Slug = e.Slug,
-                Scope = e.Scope,
-                Name = e.Name,
-                Description = e.Description,
-                WhenToUse = e.WhenToUse,
-                Priority = e.Priority,
-                Version = e.Version,
-                Author = e.Author,
-                Enabled = e.Enabled,
-                Source = SkillSource.Database,
-                CreationTime = e.CreationTime,
-                LastModificationTime = e.LastModificationTime
-            })
-            .CreateAsync(query);
+        // ── Fast path: DB-only (default) ──────────────────────────────────
+        // When IncludeFileSource=false the admin caller sees only the
+        // editable rows in AI_Skill, which preserves the historical paging
+        // semantics. The file-source rows (BuiltIn embedded resources +
+        // workspace SKILL.md + plugin/managed paths) are surfaced when the
+        // caller explicitly opts in, since pulling them through ISkillRegistry
+        // forces an in-memory page slice.
+        if (!query.IncludeFileSource)
+        {
+            var pagedList = await queryable
+                .Select(e => new SkillSummaryDto
+                {
+                    Id = e.Id,
+                    Slug = e.Slug,
+                    Scope = e.Scope,
+                    Name = e.Name,
+                    Description = e.Description,
+                    WhenToUse = e.WhenToUse,
+                    Priority = e.Priority,
+                    Version = e.Version,
+                    Author = e.Author,
+                    Enabled = e.Enabled,
+                    Source = SkillSource.Database,
+                    IsReadOnly = false,
+                    CreationTime = e.CreationTime,
+                    LastModificationTime = e.LastModificationTime
+                })
+                .CreateAsync(query);
+            return Ok(pagedList);
+        }
 
-        return Ok(pagedList);
+        // ── Merged branch ────────────────────────────────────────────────
+        // Pull ALL skills through ISkillRegistry (handles dual-source merge
+        // by slug+scope priority) then materialise to DTOs and filter/sort/
+        // page in memory. The total cost is bounded by the file-source size
+        // (typically tens of skills); we still re-resolve the DB filters
+        // post-merge so paging stays consistent with the DB-only fast path.
+        var allSkills = await _registry.GetAvailableSkillsAsync();
+        // SkillDefinition is identified by Slug + Scope (file-source rows have
+        // no Guid id). To keep the DTO contract `Id: Guid`, we look up the
+        // DB row by slug when available and use its Id; otherwise we deterministically
+        // derive an empty Guid so the front-end can fall back to Slug-keyed rendering.
+        var dbIdBySlug = await _repository.AsQueryable()
+            .Select(e => new { e.Id, e.Slug })
+            .ToListAsync();
+        var dbIdMap = dbIdBySlug
+            .GroupBy(x => x.Slug, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+        var merged = allSkills.Select(s => new SkillSummaryDto
+        {
+            Id = dbIdMap.TryGetValue(s.Slug, out var dbId) ? dbId : Guid.Empty,
+            Slug = s.Slug,
+            Scope = s.Scope,
+            Name = s.Name,
+            Description = s.Description,
+            WhenToUse = s.WhenToUse,
+            Priority = s.Priority,
+            Version = s.Version,
+            Author = s.Author,
+            Enabled = s.Enabled,
+            Source = s.Source,
+            IsReadOnly = s.Source != SkillSource.Database,
+            FilePath = s.FilePath,
+            Tags = s.Tags?.ToList() ?? [],
+            CreationTime = default,
+            LastModificationTime = null,
+        }).AsQueryable();
+
+        // Apply DB-equivalent filters in memory (sortable by IQueryable since
+        // it's a Linq-to-Objects materialised list).
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var kw = query.Keyword.ToLowerInvariant();
+            merged = merged.Where(d =>
+                d.Name.ToLower().Contains(kw)
+                || (d.Description ?? string.Empty).ToLower().Contains(kw)
+                || d.Slug.ToLower().Contains(kw));
+        }
+        if (query.Scope.HasValue)
+            merged = merged.Where(d => d.Scope == query.Scope.Value);
+        if (query.Enabled.HasValue)
+            merged = merged.Where(d => d.Enabled == query.Enabled.Value);
+        if (!string.IsNullOrWhiteSpace(query.Tag))
+        {
+            var tagLower = query.Tag.ToLowerInvariant();
+            merged = merged.Where(d => d.Tags != null && d.Tags.Any(t => t.ToLowerInvariant().Contains(tagLower)));
+        }
+
+        merged = query.SortBy?.ToLowerInvariant() switch
+        {
+            "name" => query.SortDesc ? merged.OrderByDescending(d => d.Name) : merged.OrderBy(d => d.Name),
+            "priority" => query.SortDesc ? merged.OrderByDescending(d => d.Priority) : merged.OrderBy(d => d.Priority),
+            _ => query.SortDesc ? merged.OrderByDescending(d => d.Name) : merged.OrderBy(d => d.Name),
+        };
+
+        var totalCount = merged.Count();
+        var skip = (query.PageIndex - 1) * query.PageSize;
+        var items = merged.Skip(skip).Take(query.PageSize).ToList();
+        var mergedPaged = new PagedList<SkillSummaryDto>(items, query.PageIndex, query.PageSize, totalCount);
+        return Ok((IPagedList<SkillSummaryDto>)mergedPaged);
     }
 
     public async Task<Result<SkillUsageStatsDto>> GetUsageStatsAsync()

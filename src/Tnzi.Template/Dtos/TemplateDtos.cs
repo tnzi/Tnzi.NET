@@ -202,6 +202,14 @@ public class QueryTemplateRequest : PagedQueryDto
     /// 关键词（搜索模板名称或描述）
     /// </summary>
     public string? Keyword { get; set; }
+
+    /// <summary>
+    /// When true the paged result also includes filesystem-backed templates
+    /// (`{TemplateRootPath}/{module}/.../*.cshtml`). File rows carry
+    /// `IsReadOnly=true` and `Source="FileSystem"`. Default false preserves
+    /// the legacy DB-only contract for non-admin callers.
+    /// </summary>
+    public bool IncludeFileSource { get; set; }
 }
 
 /// <summary>
@@ -220,6 +228,35 @@ public class TemplateInfoDto
     public string? Description { get; set; }
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
+
+    /// <summary>Origin of this template row — "Database" or "FileSystem".</summary>
+    public string Source { get; set; } = "Database";
+
+    /// <summary>
+    /// True when this row originates from the filesystem fallback path
+    /// (<c>TemplateOptions.TemplateRootPath</c> / <c>AdditionalSearchPaths</c>).
+    /// Admin UI hides Edit/Delete for read-only rows since the underlying
+    /// .cshtml is shipped with the application binaries.
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>
+    /// Absolute filesystem path of the source template (file-source rows only).
+    /// </summary>
+    public string? FilePath { get; set; }
+
+    /// <summary>
+    /// Subject template (Razor source). Populated for file-source rows so the
+    /// admin view modal can display the actual template body without a
+    /// follow-up getById call. DB rows leave this null on list responses and
+    /// the admin UI lazy-loads it via the entity endpoint.
+    /// </summary>
+    public string? SubjectTemplate { get; set; }
+
+    /// <summary>
+    /// Content template (Razor source). Same lifecycle as SubjectTemplate.
+    /// </summary>
+    public string? ContentTemplate { get; set; }
 }
 
 /// <summary>

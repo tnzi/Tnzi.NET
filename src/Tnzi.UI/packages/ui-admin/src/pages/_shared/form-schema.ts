@@ -1,29 +1,36 @@
+/**
+ * `TFormSchemaRenderer` admin wrapper.
+ *
+ * The renderer (`TSchemaForm`) lives in `@tnzi/ui/components/form`
+ * (sunk in 0.2.x). This admin wrapper:
+ *   - Renames the default export to `TFormSchemaRenderer` so existing
+ *     admin pages (~30 .vue + ~30 *-config.ts files) keep their
+ *     `import TFormSchemaRenderer from '../../_shared/form-schema'`
+ *     paths working unchanged.
+ *   - Accepts an explicit `translate` prop so per-page page-scoped
+ *     translators (e.g. `translatePageKey('ai.agents', k)`) pass straight
+ *     through — falls back to a global-namespace `translatePageKey('', k)`
+ *     resolver when the caller doesn't supply one.
+ *   - Re-exports the `FormSchemaItem` type so config files keep their
+ *     existing `import type { FormSchemaItem } from '_shared/form-schema'`
+ *     paths.
+ *
+ * New code outside the admin shell should import directly from
+ * `@tnzi/ui`:
+ *
+ *   import { TSchemaForm, type FormSchemaItem } from '@tnzi/ui'
+ */
 import { defineComponent, h, type PropType } from 'vue'
-import { NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NDatePicker } from 'naive-ui'
+import { TSchemaForm, type FormSchemaItem } from '@tnzi/ui'
+import { translatePageKey } from './translate'
 
-export type FormSchemaFieldType = 'text' | 'textarea' | 'number' | 'switch' | 'select' | 'date'
+export type { FormSchemaItem, FormSchemaFieldType } from '@tnzi/ui'
 
-export interface FormSchemaItem {
-  key: string
-  label: string
-  type: FormSchemaFieldType
-  // When present, takes precedence over `type` and lets the field switch
-  // its editor based on other model values (e.g. SettingValueType-aware
-  // value editor: text/number/switch/textarea per sibling enum).
-  typeFn?: (model: Record<string, unknown>) => FormSchemaFieldType
-  required?: boolean
-  placeholder?: string
-  options?: Array<{ label: string; value: string | number }>
-  visible?: (model: Record<string, unknown>) => boolean
-  max?: number
-  min?: number
-}
-
-interface Props {
-  schema: FormSchemaItem[]
-  model: Record<string, unknown>
-  readonly: boolean
-}
+// Default admin translator — used only when the caller does NOT supply a
+// `translate` prop. Resolves absolute `admin.*` keys via the shared
+// dictionary; page-scoped callers should pass their own page-namespaced
+// `translate` so `form.x` resolves to `admin.modules.{pageNs}.form.x`.
+const defaultAdminTranslate = (key: string): string => translatePageKey('', key)
 
 const TFormSchemaRenderer = defineComponent({
   name: 'TFormSchemaRenderer',
@@ -31,39 +38,17 @@ const TFormSchemaRenderer = defineComponent({
     schema: { type: Array as PropType<FormSchemaItem[]>, required: true },
     model: { type: Object as PropType<Record<string, unknown>>, required: true },
     readonly: { type: Boolean, default: false },
+    columns: { type: Number, default: 1 },
+    translate: { type: Function as PropType<(key: string) => string>, default: undefined },
   },
-  setup(props: Props) {
-    function renderField(item: FormSchemaItem) {
-      const disabled = props.readonly
-      const value = props.model[item.key]
-      const onUpdate = (v: unknown) => { props.model[item.key] = v }
-      const effectiveType = item.typeFn ? item.typeFn(props.model) : item.type
-      switch (effectiveType) {
-        case 'text':
-          return h(NInput, { value: value as string | null, disabled, placeholder: item.placeholder, 'onUpdate:value': onUpdate })
-        case 'textarea':
-          return h(NInput, { value: value as string | null, disabled, type: 'textarea', placeholder: item.placeholder, 'onUpdate:value': onUpdate })
-        case 'number':
-          return h(NInputNumber, { value: value as number | null, disabled, min: item.min, max: item.max, 'onUpdate:value': onUpdate })
-        case 'switch':
-          return h(NSwitch, { value: value as boolean, disabled, 'onUpdate:value': onUpdate })
-        case 'select':
-          return h(NSelect, { value: value as string | number | null, disabled, options: item.options ?? [], 'onUpdate:value': onUpdate })
-        case 'date':
-          return h(NDatePicker, { value: value as number | null, disabled, type: 'date', 'onUpdate:value': onUpdate })
-      }
-    }
-
+  setup(props) {
     return () =>
-      h(NForm, {}, {
-        default: () =>
-          props.schema
-            .filter((item) => !item.visible || item.visible(props.model))
-            .map((item) =>
-              h(NFormItem, { label: item.label, path: item.key, required: item.required, key: item.key }, {
-                default: () => renderField(item),
-              }),
-            ),
+      h(TSchemaForm, {
+        schema: props.schema,
+        model: props.model,
+        readonly: props.readonly,
+        columns: props.columns,
+        translate: props.translate ?? defaultAdminTranslate,
       })
   },
 })

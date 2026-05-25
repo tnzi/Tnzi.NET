@@ -23,6 +23,7 @@ global using Tnzi.AI.Sandbox.Providers.Kubernetes;
 global using Tnzi.AI.Sandbox.Providers.Local;
 global using Tnzi.AI.Sandbox.VirtualPath;
 global using Tnzi.AI.Services.Interfaces;
+global using Tnzi.EventBus;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.AI.Tools;

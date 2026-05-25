@@ -8,7 +8,7 @@
     <template #toolbarLeft>
       <NInput
         :value="groupPrefix"
-        placeholder="Filter by group prefix"
+        :placeholder="t('admin.shared.placeholder.filterByGroupPrefix')"
         clearable
         style="max-width: 240px"
         @update:value="onGroupPrefixChange"
@@ -19,6 +19,7 @@
         :schema="parameterFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
     </template>
     <template #rowActions="{ row }">

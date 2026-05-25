@@ -31,6 +31,21 @@ public class FunctionModule : FullAuditedEntity<Guid>
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    /// True when this row is owned by code (an
+    /// <see cref="Permissions.IPermissionDefinitionProvider"/> registered it
+    /// at startup). System-managed rows are protected from rename/delete
+    /// through the admin UI — only the declaring module can change them.
+    /// </summary>
+    /// <remarks>
+    /// User-created rows have this flag <c>false</c>. Admin can freely edit
+    /// and delete those. The <c>Auth_FunctionModule.IsSystemManaged</c>
+    /// column is indexed via the regular EF Core column behaviour; no
+    /// dedicated index is needed because every admin query is already
+    /// filtered by name/code or id.
+    /// </remarks>
+    public bool IsSystemManaged { get; set; }
+
+    /// <summary>
     /// 获取或设置 父模块ID
     /// </summary>
     public Guid? ParentId { get; set; }

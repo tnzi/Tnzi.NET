@@ -145,12 +145,17 @@ describe('storage-bridge', () => {
       .rejects.toThrow(/HttpClient.*required/)
   })
 
-  it('versions.restore remains read-only on the audit endpoint', async () => {
+  it('versions.restore reuses the user-side POST /files/{id}/versions/{v}/restore endpoint', async () => {
+    // Audit GET endpoint stays read-only, but the bridge now reuses the
+    // user-facing restore route so the admin UI's per-row "Restore" action
+    // actually works. With no HttpClient injected, the bridge surfaces a
+    // clear error instead of silently throwing the previous "read-only"
+    // message that misled the page.
     const bridge = createStorageBridge({
       fileApi: mockFileApi() as never,
       storageApi: mockStorageApi() as never,
     })
-    await expect(bridge.versions.restore('v1')).rejects.toThrow(/read-only/)
+    await expect(bridge.versions.restore('file-1', 2)).rejects.toThrow(/HttpClient.*required/)
   })
 
   it('chunks.fetch calls GET /admin/storage/audit/chunks with paging params', async () => {

@@ -948,6 +948,17 @@ export interface SkillSummaryDto {
   author?: string | null;
   enabled: boolean;
   source: SkillSource;
+  /**
+   * True when this row originates from a non-database source (file system /
+   * plugin / managed / embedded / project). Admin UI hides Edit/Delete
+   * buttons for read-only rows.
+   */
+  isReadOnly?: boolean;
+  /**
+   * Absolute path of the source SKILL.md (file-source rows only). Null for
+   * database rows.
+   */
+  filePath?: string | null;
   creationTime: string;
   lastModificationTime?: string | null;
 }
@@ -1046,6 +1057,11 @@ export interface SkillQueryDto extends PagedQueryDto {
   tag?: string | null;
   sortBy?: string | null;
   sortDesc?: boolean;
+  /**
+   * When true, file-system / plugin / managed / project / embedded skills
+   * are merged into the paged result. File-source rows carry `isReadOnly=true`.
+   */
+  includeFileSource?: boolean;
 }
 
 /** Skill usage statistics */
@@ -1515,4 +1531,46 @@ export interface McpToolErrorDto {
   errorMessage: string;
   count: number;
   lastOccurred: string;
+}
+
+// ============================================
+// Workspace Agent / Persona (read-only, file-backed)
+// ============================================
+
+/** Workspace-discovered Agent definition (file-backed, read-only) */
+export interface WorkspaceAgentDto {
+  agentId: string;
+  name: string;
+  description?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  toolGroups?: string[] | null;
+  executionMode?: string | null;
+  domains?: string[] | null;
+  roles?: string[] | null;
+  qualityTier?: number | null;
+  filePath: string;
+  /** Where the file was found — "Global" or "Project". */
+  workspaceScope: string;
+  hasPersona: boolean;
+  /** Markdown body of AGENT.md (system instructions, after frontmatter). */
+  instructions?: string | null;
+  /** Markdown body of the sibling PERSONA.md (if present). */
+  personaContent?: string | null;
+  /** Always "Workspace" — drives TSourceBadge. */
+  source: string;
+  /** Always true — workspace agents are file-backed and not editable. */
+  isReadOnly: boolean;
+}
+
+/** Workspace-discovered Persona definition (sourced from PERSONA.md). */
+export interface WorkspacePersonaDto {
+  name: string;
+  tone?: string | null;
+  language?: string | null;
+  agentId: string;
+  filePath: string;
+  workspaceScope: string;
+  source: string;
+  isReadOnly: boolean;
 }

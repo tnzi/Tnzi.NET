@@ -912,3 +912,29 @@ export function useUserProfileApi(client: HttpClient) {
       client.put<UserProfileDto>(base, data),
   };
 }
+
+// ============================================
+// Admin: Workspace Agent / Persona API (read-only)
+// Route: /admin/ai/workspace
+// ============================================
+
+import type { WorkspaceAgentDto, WorkspacePersonaDto } from './types';
+
+/**
+ * Read-only admin access to workspace-discovered Agent + Persona files.
+ * Mirrors `Tnzi.AI/Controllers/Admin/DefaultWorkspaceAgentAdminController`.
+ *
+ * Workspace agents/personas come from AGENT.md / PERSONA.md files on disk
+ * (under `~/.tnzi/agents/` or the project's `.agents/` directory). They
+ * are surfaced read-only because editing should happen on disk; the file
+ * watcher (when enabled in WorkspaceOptions.FileWatchEnabled) hot-reloads.
+ */
+export function useAdminWorkspaceAgentApi(client: HttpClient) {
+  const base = '/admin/ai/workspace';
+  return {
+    listAgents: () =>
+      client.get<WorkspaceAgentDto[]>(`${base}/agents`),
+    listPersonas: () =>
+      client.get<WorkspacePersonaDto[]>(`${base}/personas`),
+  };
+}

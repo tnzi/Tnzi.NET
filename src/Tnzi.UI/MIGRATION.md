@@ -2,6 +2,102 @@
 
 This guide collects breaking changes by version range. Read [CHANGELOG.md](./CHANGELOG.md) alongside.
 
+## `@tnzi/ui-admin` 0.2.70 → unreleased — page consistency overhaul
+
+Custom (non-TCrudPage) pages were rewritten to use the same NCard chrome, theme tokens, and message-helper pattern that TCrudPage pages enforce. **Pure cleanup — no public API additions.** Two opt-in points exist if you extend custom pages:
+
+### New shared helper
+
+`useSafeMessage` is now the canonical way to consume `useMessage()` in a way that doesn't crash when no `NMessageProvider` ancestor is mounted:
+
+```ts
+import { useSafeMessage } from '@tnzi/ui-admin/pages/_shared/safeMessage'
+
+const message = useSafeMessage()
+message.success('saved')  // works whether or not NMessageProvider is installed
+```
+
+The previous in-file try/catch pattern still works — it's just no longer recommended.
+
+### Token migration (mandatory for custom pages)
+
+If you authored a page that referenced any of the following tokens, it was silently falling back to hardcoded `#06B6D4` (cyan) and ignoring user theme color choices. Update to the canonical names:
+
+| Old (broken) | New (canonical) |
+| --- | --- |
+| `--tnzi-primary-color` | `--tnzi-primary` |
+| `--tnzi-primary-color-suppl` | `rgb(var(--tnzi-primary-rgb) / 0.XX)` |
+| `--tnzi-base-border` | `--tnzi-border` |
+| `--tnzi-base-fill` | `--tnzi-layout-bg` |
+| `--tnzi-success-color` / `-warning-color` / `-error-color` | `--tnzi-success` / `-warning` / `-error` |
+| `--tnzi-font-family-mono` | `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace` |
+| `--t-*` (border / surface / muted / danger) | canonical `--tnzi-*` equivalents |
+
+`__tests__/pages/token-consistency.test.ts` enforces this with a static regex check so the banned tokens can't creep back into the codebase.
+
+### Page padding contract
+
+Custom pages **must NOT** apply `padding: 16px` (or any equivalent) to their outer wrapper. `TAdminContent` is the single source of truth for the page-edge gutter (`var(--tnzi-admin-content-padding, 16px)`). Custom pages that added their own padding rendered at 32px (double) and looked out-dented relative to TCrudPage pages — fixed across 9 pages in this batch.
+
+```css
+/* ✗ Don't */
+.t-my-page { padding: 16px; }
+
+/* ✓ Do — let TAdminContent own the gutter */
+.t-my-page {
+  /* layout / flex / grid only; no padding */
+}
+```
+
+## `@tnzi/ui-admin` 0.2.70 → unreleased — responsive overhaul (375px-friendly)
+
+The responsive batch is **additive at desktop widths** — applications that only run on `lg+` viewports see no behavioural change. Below `lg` the chrome rearranges (overflow menus, fullscreen modals, stacked footers) so consumers that previously worked around the layout breakage may want to remove their own overrides.
+
+### No code changes required for these consumers
+
+- Apps that mount only on desktops (≥ 1024px) — the responsive code paths never trigger.
+- Apps that already rely on the auto-collapse mobile drawer.
+- Apps that don't customise the dashboard / login / theme drawer widths.
+
+### Opt-outs (when you want the old behaviour back)
+
+| Behaviour | Old default | New default | Opt-out |
+| --------- | ----------- | ----------- | ------- |
+| `TFormModal` fullscreen on small viewports | Never (fixed 560px, would overflow) | Auto-fullscreen when viewport < `max(width+32, 640)` | `<TFormModal :fullscreen="false" />` |
+| `TAdminHeader` overflow menu | Never (inline row, would clip) | `···` dropdown below 640px | `<TAdminHeader overflow-menu-breakpoint="never" />` |
+| `TAdminHeader` fullscreen button | Always visible | Hidden on touch devices + when Fullscreen API unsupported | No direct opt-in — a non-functional button on touch is intentionally suppressed. |
+| `TAdminShell` mobile drawer ESC dismiss | No-op | ESC closes the drawer | None — this is a pure UX addition. |
+| Tablet sider auto-collapse | Stays open (220px eats 28% of iPad portrait) | Auto-collapses to icon rail when entering `tablet` band | Call `appStore.setSiderCollapse(false)` after mount if you really want it open. |
+| `TDashboardPage` chart row | Fixed 2:1 split at all widths | Stacks vertically below `lg` | Build a custom layout instead of using the prop-driven scaffold. |
+| `TCrudPage` advanced-search grid | 1/2/4 cols (jumped 2→4 at md) | 1/2/3/4 cols across xs/sm/md/l | None — the new ladder is strictly more granular. |
+| `TCrudPage` mobile pagination | NPagination full with size picker | `simple` mode + no size picker below 640 | None — full controls would overflow phone widths. |
+| Touch hit-area (44×44 / 36×36) | Inherited 36×36 desktop sizes | Auto-promotes on `(pointer: coarse)` | Override `.t-admin-header__icon-btn { min-width: 36px; min-height: 36px; }` in your own stylesheet to keep 36×36 on touch. |
+
+### New optional APIs
+
+```vue
+<!-- Force-disable auto fullscreen (legacy 560px modal at every viewport): -->
+<TFormModal :state="modal" title="Edit" :fullscreen="false" />
+
+<!-- Choose a different overflow-menu breakpoint: -->
+<TAdminHeader overflow-menu-breakpoint="sm" />     <!-- folds below 768 -->
+<TAdminHeader overflow-menu-breakpoint="never" />  <!-- always inline -->
+```
+
+### New headless
+
+`useBreakpoint()` is now exported from `@tnzi/ui-admin/headless`:
+
+```ts
+import { useBreakpoint } from '@tnzi/ui-admin'
+
+const bp = useBreakpoint()
+// bp.isXs / isSm / isMd / isLg / isDesktop / isTouch
+// bp.width.value / bp.height.value
+```
+
+Use it in your own pages to mirror the same breakpoint scale the admin shell consumes.
+
 ## `@tnzi/ui-admin` 0.2.58 → 0.2.59 — Phase G layout cards + tab overhaul
 
 ### Breaking — `TabStyle` regained `'slider'`

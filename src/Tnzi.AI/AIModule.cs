@@ -405,6 +405,8 @@ public partial class AIModule : TnziApplicationModule
 
         // Workspace agent provider (file-based AGENT.md discovery)
         services.AddSingleton<IWorkspaceAgentProvider, WorkspaceAgentProvider>();
+        // Admin-facing read-only listing of workspace agents/personas
+        services.AddScoped<IWorkspaceAgentAdminService, WorkspaceAgentAdminService>();
 
         // YAML Agent 定义文件加载与数据库同步
         services.AddSingleton<IAgentDefinitionProvider, YamlAgentDefinitionProvider>();

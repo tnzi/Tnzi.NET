@@ -6,23 +6,23 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 /**
  * Payment Order page config — aligned with PaymentDto (2026-04-14 Plan C unstub).
  *
- * Backend fields (PaymentDto):
- *   id, paymentNo, tradeNo, businessOrderNo, businessType, amount,
- *   currency, status, channelCode, paymentMethod, paidTime, userId,
- *   discountAmount, finalAmount, refundAmount, creationTime
+ * `status` is the PaymentStatus enum (0=Pending / 1=Processing / 2=Succeeded /
+ *  3=Failed / 4=Closed / 5=Cancelled / 6=Expired / 7=Refunding / 8=Refunded).
+ * Backend serialises it as an int — the previous string-keyed map never
+ * matched any row, so the badge silently fell through to the raw number.
  *
- * The page is read-only — payment records are immutable once created.
- * State transitions flow through close/sync admin endpoints.
+ * Page is read-only; state transitions flow through close/sync admin endpoints.
  */
-const ORDER_STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
-  pending:    { type: 'warning', label: 'Pending' },
-  processing: { type: 'info',    label: 'Processing' },
-  paid:       { type: 'success', label: 'Paid' },
-  completed:  { type: 'success', label: 'Completed' },
-  cancelled:  { type: 'default', label: 'Cancelled' },
-  refunded:   { type: 'default', label: 'Refunded' },
-  failed:     { type: 'error',   label: 'Failed' },
-  closed:     { type: 'default', label: 'Closed' },
+const ORDER_STATUS_MAP: Record<number, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label?: string; labelKey?: string }> = {
+  0: { type: 'warning', labelKey: 'admin.shared.status.pending' },
+  1: { type: 'info',    label: 'Processing' },
+  2: { type: 'success', label: 'Succeeded' },
+  3: { type: 'error',   labelKey: 'admin.shared.status.failed' },
+  4: { type: 'default', label: 'Closed' },
+  5: { type: 'default', labelKey: 'admin.shared.status.cancelled' },
+  6: { type: 'default', label: 'Expired' },
+  7: { type: 'info',    label: 'Refunding' },
+  8: { type: 'default', label: 'Refunded' },
 }
 
 export const orderColumns: ColumnDef[] = [
@@ -36,9 +36,12 @@ export const orderColumns: ColumnDef[] = [
     title: 'columns.status',
     width: 130,
     render: (row) => {
-      const raw = String(row.status ?? '').toLowerCase()
-      const m = ORDER_STATUS_MAP[raw] ?? { type: 'default' as const, label: row.status as string ?? '—' }
-      return h(TStatusBadge, { value: raw, type: m.type, label: m.label })
+      const v = typeof row.status === 'number' ? row.status : Number(row.status)
+      const m = ORDER_STATUS_MAP[v]
+      if (m) {
+        return h(TStatusBadge, { value: v, type: m.type, label: m.label, labelKey: m.labelKey })
+      }
+      return h(TStatusBadge, { value: v, type: 'default', label: String(row.status ?? '—') })
     },
   },
   { key: 'paymentMethod',   title: 'columns.paymentMethod' },
@@ -48,15 +51,15 @@ export const orderColumns: ColumnDef[] = [
 ]
 
 export const orderFormSchema: FormSchemaItem[] = [
-  { key: 'paymentNo',       label: 'Payment No',     type: 'text' },
-  { key: 'businessOrderNo', label: 'Business Order', type: 'text' },
-  { key: 'userId',          label: 'Customer ID',    type: 'text' },
-  { key: 'amount',          label: 'Amount',         type: 'number' },
-  { key: 'currency',        label: 'Currency',       type: 'select', options: [
+  { key: 'paymentNo',       labelKey: 'form.paymentNo', label: 'Payment No',     type: 'text' },
+  { key: 'businessOrderNo', labelKey: 'form.businessOrderNo', label: 'Business Order', type: 'text' },
+  { key: 'userId',          labelKey: 'form.userId', label: 'Customer ID',    type: 'text' },
+  { key: 'amount',          labelKey: 'form.amount', label: 'Amount',         type: 'number' },
+  { key: 'currency',        labelKey: 'form.currency', label: 'Currency',       type: 'select', options: [
     { label: 'CNY', value: 'CNY' },
     { label: 'USD', value: 'USD' },
     { label: 'EUR', value: 'EUR' },
   ] },
-  { key: 'status',          label: 'Status',         type: 'text' },
-  { key: 'paymentMethod',   label: 'Method',         type: 'text' },
+  { key: 'status',          labelKey: 'form.status', label: 'Status',         type: 'text' },
+  { key: 'paymentMethod',   labelKey: 'form.paymentMethod', label: 'Method',         type: 'text' },
 ]

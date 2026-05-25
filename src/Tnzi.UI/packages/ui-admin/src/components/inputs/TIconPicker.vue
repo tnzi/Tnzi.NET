@@ -11,6 +11,10 @@
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NInput, NPopover, NEmpty } from 'naive-ui'
+import { translatePageKey } from '../../pages/_shared/translate'
+
+const t = (key: string, fallback: string) =>
+  translatePageKey('', key) || fallback
 
 interface Props {
   value: string
@@ -173,7 +177,7 @@ function clear(): void {
       <NInput
         v-model:value="search"
         size="small"
-        placeholder="Search icons…"
+        :placeholder="t('admin.shared.placeholder.filterIcons', 'Search icons…')"
         class="t-icon-picker__search"
       >
         <template #prefix>
@@ -194,7 +198,7 @@ function clear(): void {
         </button>
         <NEmpty
           v-if="filteredIcons.length === 0"
-          description="No matching icons"
+          :description="t('admin.shared.placeholder.noMatchingIcons', 'No matching icons')"
         />
       </div>
     </div>

@@ -27,8 +27,8 @@
  */
 import { computed, h } from 'vue'
 import type { AdminMenuItem } from '../../stores/useAdminRouteStore'
-import TSvgIcon from '../display/TSvgIcon.vue'
-import TMenuToggler from '../utility/TMenuToggler.vue'
+import { TSvgIcon } from '@tnzi/ui'
+import { TMenuToggler } from '@tnzi/ui'
 import { translatePageKey } from '../../pages/_shared/translate'
 
 function resolveLabel(label: string): string {

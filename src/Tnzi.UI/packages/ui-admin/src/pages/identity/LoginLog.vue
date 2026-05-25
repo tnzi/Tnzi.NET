@@ -4,6 +4,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="loginLogColumns"
+    :search-fields="loginLogSearchFields"
     :title="title"
     :translate="t"
     :show-create="false"
@@ -13,6 +14,7 @@
         :schema="loginLogFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
     </template>
   </TCrudPage>
@@ -24,7 +26,7 @@ import { useCrudPage } from '../../headless/useCrudPage'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { loginLogColumns, loginLogFormSchema } from './login-log-config'
+import { loginLogColumns, loginLogFormSchema, loginLogSearchFields } from './login-log-config'
 import { translatePageKey } from '../_shared/translate'
 import type { LoginLogDto } from '@tnzi/core/services/identity'
 

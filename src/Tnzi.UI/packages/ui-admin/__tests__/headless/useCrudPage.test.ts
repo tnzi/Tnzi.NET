@@ -33,7 +33,10 @@ function createFakeBridge() {
   }
 }
 
-function makeCrud(overrides: Partial<ReturnType<typeof createFakeBridge>> = {}) {
+function makeCrud(
+  overrides: Partial<ReturnType<typeof createFakeBridge>> = {},
+  extraOptions: { retryFetch?: number; retryDelayMs?: number; onError?: (err: Error, op: string) => boolean | void } = {},
+) {
   const bridge = { ...createFakeBridge(), ...overrides }
   const crud = useCrudPage<User>({
     pageId: 'users',
@@ -43,6 +46,10 @@ function makeCrud(overrides: Partial<ReturnType<typeof createFakeBridge>> = {}) 
     createData: bridge.createData,
     updateData: bridge.updateData,
     deleteData: bridge.deleteData,
+    // Default to no retries in tests so existing assertions about call
+    // counts stay stable; tests that need retry behavior pass their own.
+    retryFetch: 0,
+    ...extraOptions,
   })
   return { crud, bridge }
 }
@@ -171,5 +178,99 @@ describe('useCrudPage', () => {
     await crud.refresh().catch(() => {})
     expect(crud.error.value).toBeInstanceOf(Error)
     expect(crud.error.value?.message).toBe('boom')
+  })
+
+  // ── B2 0.2.72+ —— retry / onError / dismissError ──
+
+  it('retries fetchData on transient failure and succeeds before exhausting', async () => {
+    let calls = 0
+    const fetchData = vi.fn(async () => {
+      calls++
+      if (calls < 3) throw new Error('flaky')
+      return { items: sampleUsers, totalCount: 3, pageIndex: 1, pageSize: 20 }
+    })
+    const { crud } = makeCrud({ fetchData: fetchData as any }, { retryFetch: 3, retryDelayMs: 0 })
+    await crud.refresh()
+    expect(fetchData).toHaveBeenCalledTimes(3)
+    expect(crud.error.value).toBeNull()
+    expect(crud.items.value).toHaveLength(3)
+  })
+
+  it('surfaces the error after exhausting all retries', async () => {
+    const fetchData = vi.fn(async () => {
+      throw new Error('always-fails')
+    })
+    const onError = vi.fn()
+    const { crud } = makeCrud(
+      { fetchData: fetchData as any },
+      { retryFetch: 2, retryDelayMs: 0, onError },
+    )
+    await crud.refresh().catch(() => {})
+    expect(fetchData).toHaveBeenCalledTimes(3) // initial + 2 retries
+    expect(crud.error.value?.message).toBe('always-fails')
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0][1]).toBe('fetch')
+  })
+
+  it('onError returning false suppresses the default toast', async () => {
+    let toastCalls = 0
+    const fakeMessage = {
+      error: () => {
+        toastCalls++
+      },
+    }
+    ;(window as unknown as { $message: typeof fakeMessage }).$message = fakeMessage
+
+    const fetchData = vi.fn(async () => {
+      throw new Error('nope')
+    })
+    const onError = vi.fn(() => false as const)
+    const { crud } = makeCrud(
+      { fetchData: fetchData as any },
+      { retryFetch: 0, retryDelayMs: 0, onError },
+    )
+    await crud.refresh().catch(() => {})
+    expect(onError).toHaveBeenCalledOnce()
+    expect(toastCalls).toBe(0)
+    ;(window as unknown as { $message?: unknown }).$message = undefined
+  })
+
+  it('onError fires for write operations (create/update/delete) and they do not retry', async () => {
+    const createData = vi.fn(async () => {
+      throw new Error('create-failed')
+    })
+    const deleteData = vi.fn(async () => {
+      throw new Error('delete-failed')
+    })
+    const onError = vi.fn(() => false as const)
+    const { crud } = makeCrud(
+      { createData: createData as any, deleteData: deleteData as any },
+      { retryFetch: 5, retryDelayMs: 0, onError },
+    )
+    crud.openCreate()
+    crud.formModal.formData.value = { id: '', name: 'x' } as User
+    await crud.submit().catch(() => {})
+    expect(createData).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls.at(-1)?.[1]).toBe('create')
+
+    await crud.handleDelete(['1']).catch(() => {})
+    expect(deleteData).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls.at(-1)?.[1]).toBe('delete')
+  })
+
+  it('dismissError clears the error ref without re-fetching', async () => {
+    const fetchData = vi.fn(async () => {
+      throw new Error('boom')
+    })
+    const { crud, bridge } = makeCrud(
+      { fetchData: fetchData as any },
+      { retryFetch: 0, retryDelayMs: 0 },
+    )
+    await crud.refresh().catch(() => {})
+    expect(crud.error.value?.message).toBe('boom')
+    crud.dismissError()
+    expect(crud.error.value).toBeNull()
+    // No new fetch was triggered.
+    expect(bridge.fetchData).toHaveBeenCalledTimes(1)
   })
 })

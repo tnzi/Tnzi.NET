@@ -54,4 +54,11 @@ public interface ISessionService
     /// </summary>
     /// <returns>会话统计信息</returns>
     Task<Result<SessionStatisticsDto>> GetSessionStatisticsAsync();
+
+    /// <summary>
+    /// 获取活跃用户列表（按最后活跃时间倒序，含会话计数和用户名），用于 admin "活跃用户"下拉
+    /// </summary>
+    /// <param name="top">返回的最大用户数（默认 50）</param>
+    /// <returns>活跃用户摘要列表</returns>
+    Task<Result<IEnumerable<ActiveUserSummaryDto>>> GetActiveUsersAsync(int top = 50);
 }

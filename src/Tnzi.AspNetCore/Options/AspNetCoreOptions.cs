@@ -94,8 +94,9 @@ public class AspNetCoreOptions
 
     /// <summary>
     /// 获取或设置 异常处理选项
+    /// 默认实例化以确保 EnableMetrics=true，让 DefaultDiagnosticsAdminController 在应用未显式配置时仍可用
     /// </summary>
-    public ExceptionHandlingOptions? ExceptionHandling { get; set; }
+    public ExceptionHandlingOptions ExceptionHandling { get; set; } = new();
 
     /// <summary>
     /// 获取或设置 请求追踪选项

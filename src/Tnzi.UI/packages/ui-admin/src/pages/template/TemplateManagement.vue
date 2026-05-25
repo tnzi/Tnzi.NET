@@ -9,24 +9,35 @@
   <TCrudPage
     :state="crud"
     :all-columns="templateColumns"
-    title="Templates"
+    :title="t('title')"
     :translate="t"
+    :form-modal-width="760"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="templateFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
     </template>
 
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t">
-        <template #prepend>
-          <Button size="small" type="info" @click="openPreview(row as TemplateRow)">Preview</Button>
-          <Button size="small" type="default" @click="handleClone(row as TemplateRow)">Clone</Button>
-        </template>
-      </TRowActions>
+      <!-- FileSystem-source templates ship with the binaries and backend
+           rejects edit/delete on them. Hide those actions to avoid 4xx. -->
+      <TRowActions
+        :row="row as TemplateRow"
+        :state="crud"
+        :translate="t"
+        :show-edit="!((row as TemplateRow).isReadOnly)"
+        :show-delete="!((row as TemplateRow).isReadOnly)"
+        :more-options="[
+          { key: 'preview', label: t('actions.preview') },
+          { key: 'clone', label: t('actions.clone') },
+        ]"
+        :on-more-select="onMoreSelect"
+      />
     </template>
   </TCrudPage>
 
@@ -34,25 +45,24 @@
   <Modal
     v-if="previewVisible"
     :show="previewVisible"
-    title="Template Preview"
+    :title="t('previewTitle')"
     style="width: 640px;"
     @update:show="(v: boolean) => { if (!v) previewVisible = false }"
   >
     <div
       v-if="previewContent"
-      class="template-preview-content"
-      style="max-height: 60vh; overflow-y: auto; padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px;"
+      class="t-template-preview__content"
       v-html="previewContent"
     />
-    <p v-else style="color: #999;">No preview content available.</p>
-    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
-      <Button @click="previewVisible = false">Close</Button>
+    <p v-else class="t-template-preview__empty">{{ t('admin.common.noPreview') }}</p>
+    <div class="t-template-preview__footer">
+      <Button @click="previewVisible = false">{{ t('admin.common.close') }}</Button>
     </div>
   </Modal>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { NButton as Button, NModal as Modal } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
@@ -62,7 +72,7 @@ import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { templateColumns, templateFormSchema } from './template-config'
 import { translatePageKey } from '../_shared/translate'
-import type { TemplateInfoDto } from '@tnzi/core/services/template'
+import type { TemplateInfoDto, TemplateEntityDto } from '@tnzi/core/services/template'
 
 type TemplateRow = TemplateInfoDto & { id: string }
 
@@ -71,17 +81,61 @@ const bridge = createTemplateBridge({ client: useAdminClient() })
 const crud = useCrudPage<TemplateInfoDto, string>({
   pageId: 'template.templates',
   columns: templateColumns,
-  rowKey: (r) => r.id,
+  // File-source rows have no DB id (backend returns Guid.Empty); use the
+  // module + name as the row key so selection still works.
+  rowKey: (r) => {
+    const id = String(r.id ?? '')
+    return id && id !== '00000000-0000-0000-0000-000000000000'
+      ? id
+      : `file:${r.module}/${r.category || ''}/${r.templateName}`
+  },
   fetchData: (query) => bridge.templates.fetch(query),
   createData: async (data) => bridge.templates.create(data as Partial<TemplateInfoDto>),
   updateData: async (id, data) => bridge.templates.update(id, data as Partial<TemplateInfoDto>),
   deleteData: async (ids) => bridge.templates.delete(ids),
 })
 
+// TemplateInfoDto (paged list shape) drops the heavy `subjectTemplate` /
+// `contentTemplate` fields. When the form modal opens for view / edit we
+// need to hydrate those from the full TemplateEntityDto via getById so the
+// form schema fields render real content (otherwise the modal looks empty).
+watch(
+  () => [crud.formModal.visible.value, crud.formModal.mode.value] as const,
+  async ([show, mode]) => {
+    if (!show) return
+    if (mode !== 'edit' && mode !== 'view') return
+    const row = crud.formModal.formData.value as (TemplateRow | null)
+    if (!row || !row.id) return
+    // File-source rows have id = Guid.Empty — skip hydration because
+    // there's no DB row to fetch. The form will read whatever info the
+    // list response already populated.
+    if (row.id === '00000000-0000-0000-0000-000000000000') return
+    const merged = row as unknown as Record<string, unknown>
+    if (merged.contentTemplate) return // already hydrated
+    try {
+      const full = await bridge.templates.getById(row.id)
+      if (full && crud.formModal.formData.value) {
+        crud.formModal.formData.value = {
+          ...crud.formModal.formData.value,
+          ...full,
+        } as TemplateInfoDto
+      }
+    } catch {
+      // Network/permission errors leave the row as-is; the form just shows
+      // the partial list fields.
+    }
+  },
+)
+
 
 // Preview dialog state
 const previewVisible = ref(false)
 const previewContent = ref('')
+
+function onMoreSelect(key: string, row: TemplateRow): void {
+  if (key === 'preview') void openPreview(row)
+  else if (key === 'clone') void handleClone(row)
+}
 
 async function openPreview(row: TemplateRow): Promise<void> {
   try {
@@ -107,3 +161,28 @@ onMounted(() => {
 
 const t = (key: string) => translatePageKey('template.templates', key)
 </script>
+
+<style scoped>
+.t-template-preview__content {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--tnzi-border);
+  border-radius: 4px;
+  /* Inherit base text colour so dark mode flips with the rest of the
+     admin shell instead of staying at the previous hardcoded #999. */
+  color: var(--tnzi-base-text);
+  background: var(--tnzi-bg-deep);
+}
+.t-template-preview__empty {
+  color: var(--tnzi-base-text-muted);
+  margin: 0;
+  padding: 24px 8px;
+  text-align: center;
+}
+.t-template-preview__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+</style>

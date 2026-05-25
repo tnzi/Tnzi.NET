@@ -137,4 +137,36 @@ export default tseslint.config(
       'no-unused-expressions': 'off',
     },
   },
+
+  // 0.2.72+ (B4): pages in ui-admin must never import values directly
+  // from `@tnzi/core/services/*` — they go through the matching
+  // bridge under `services/bridges/*-bridge.ts`. Type-only imports
+  // are still allowed because they don't create a runtime dep edge.
+  //
+  // Without this rule the dep-graph drifts back to pages → core for
+  // every quick enum or factory, defeating the bridge abstraction and
+  // making the page-level test mocks (`vi.mock('.../foo-bridge')`)
+  // fail to intercept the real call path.
+  {
+    files: [
+      'packages/ui-admin/src/pages/**/*.vue',
+      'packages/ui-admin/src/pages/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-imports': 'off',
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@tnzi/core/services/*'],
+              message:
+                'Pages must not import services directly. Route through a bridge in `services/bridges/*-bridge.ts`. `import type { ... }` is allowed.',
+              allowTypeImports: true,
+            },
+          ],
+        },
+      ],
+    },
+  },
 )

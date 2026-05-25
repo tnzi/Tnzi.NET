@@ -2,7 +2,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
 
 interface AccessLogRow {
   id?: string
@@ -73,12 +73,20 @@ export const accessLogColumns: ColumnDef<AccessLogRow>[] = [
   },
 ]
 
-// Read-only view schema — form is shown for detail view only, not create/edit
+// Read-only view schema — form is shown for detail view only, not create/edit.
+// Field set mirrors backend AccessLog entity (request/response body are NOT
+// persisted server-side, so we surface the geo + UA fields instead, which the
+// AccessLogMiddleware actually populates).
 export const accessLogFormSchema: FormSchemaItem[] = [
-  { key: 'path',        label: 'Path',        type: 'text' },
-  { key: 'method',      label: 'Method',      type: 'text' },
-  { key: 'statusCode',  label: 'Status Code', type: 'number' },
-  { key: 'responseTime', label: 'Duration',   type: 'number' },
-  { key: 'requestBody', label: 'Payload',     type: 'textarea' },
-  { key: 'responseBody', label: 'Response',   type: 'textarea' },
+  { key: 'method', labelKey: 'form.method', label: 'Method', type: 'text' },
+  { key: 'path', labelKey: 'form.path', label: 'Path', type: 'text' },
+  { key: 'statusCode', labelKey: 'form.statusCode', label: 'Status Code', type: 'number' },
+  { key: 'responseTime', labelKey: 'form.responseTime', label: 'Duration (ms)', type: 'number' },
+  { key: 'userName', labelKey: 'form.userName', label: 'User', type: 'text' },
+  { key: 'ipAddress', labelKey: 'form.ipAddress', label: 'IP Address', type: 'text' },
+  { key: 'ipFullAddress', labelKey: 'form.ipFullAddress', label: 'IP Location', type: 'text' },
+  { key: 'uaBrowser', labelKey: 'form.uaBrowser', label: 'Browser', type: 'text' },
+  { key: 'uaOperatingSystem', labelKey: 'form.uaOperatingSystem', label: 'OS', type: 'text' },
+  { key: 'uaDeviceType', labelKey: 'form.uaDeviceType', label: 'Device Type', type: 'text' },
+  { key: 'userAgent', labelKey: 'form.userAgent', label: 'User Agent', type: 'textarea' },
 ]

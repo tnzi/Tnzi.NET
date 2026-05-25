@@ -74,20 +74,21 @@ describe('NotificationMessage page (Phase 3.26)', () => {
 
 describe('notificationMessageColumns config', () => {
   it('exports columns with required keys', async () => {
+    // Fields aligned with backend NotificationInfo (Tnzi.Notification):
+    // subject / type / status / templateName / recipients / failureReason / retryCount / sentTime.
     const { notificationMessageColumns } = await import('../../src/pages/notification/notification-message-config')
     const keys = notificationMessageColumns.map((c) => c.key)
-    expect(keys).toContain('templateCode')
-    expect(keys).toContain('recipient')
-    expect(keys).toContain('channel')
+    expect(keys).toContain('subject')
+    expect(keys).toContain('type')
     expect(keys).toContain('status')
-    expect(keys).toContain('sentAt')
+    expect(keys).toContain('sentTime')
   })
 
   it('exports formSchema with required fields', async () => {
     const { notificationMessageFormSchema } = await import('../../src/pages/notification/notification-message-config')
     const keys = notificationMessageFormSchema.map((f) => f.key)
-    expect(keys).toContain('templateCode')
-    expect(keys).toContain('recipient')
-    expect(keys).toContain('status')
+    expect(keys).toContain('subject')
+    expect(keys).toContain('content')
+    expect(keys).toContain('failureReason')
   })
 })

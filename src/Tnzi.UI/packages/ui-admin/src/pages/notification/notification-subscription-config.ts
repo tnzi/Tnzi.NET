@@ -25,8 +25,8 @@ export const notificationSubscriptionColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.isEnabled),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },
@@ -36,16 +36,16 @@ export const notificationSubscriptionColumns: ColumnDef[] = [
 ]
 
 export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
-  { key: 'userId',    label: 'User',    type: 'text',   required: true },
-  { key: 'channel',   label: 'Channel', type: 'select', required: true, options: [
+  { key: 'userId',    labelKey: 'form.userId', label: 'User',    type: 'text',   required: true },
+  { key: 'channel',   labelKey: 'form.channel', label: 'Channel', type: 'select', required: true, options: [
     { label: 'Email',   value: 'Email' },
     { label: 'SMS',     value: 'Sms' },
     { label: 'InApp',   value: 'InApp' },
     { label: 'Webhook', value: 'Webhook' },
   ] },
-  { key: 'category',  label: 'Category (optional)', type: 'text' },
-  { key: 'isEnabled', label: 'Enabled', type: 'switch' },
-  { key: 'quietHoursStart',     label: 'Quiet Hours Start (HH:mm:ss UTC)', type: 'text' },
-  { key: 'quietHoursEnd',       label: 'Quiet Hours End (HH:mm:ss UTC)',   type: 'text' },
-  { key: 'maxFrequencyPerHour', label: 'Max Frequency / Hour',             type: 'number' },
+  { key: 'category',  labelKey: 'form.category', label: 'Category (optional)', type: 'text' },
+  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
+  { key: 'quietHoursStart',     labelKey: 'form.quietHoursStart', label: 'Quiet Hours Start (HH:mm:ss UTC)', type: 'text' },
+  { key: 'quietHoursEnd',       labelKey: 'form.quietHoursEnd', label: 'Quiet Hours End (HH:mm:ss UTC)',   type: 'text' },
+  { key: 'maxFrequencyPerHour', labelKey: 'form.maxFrequencyPerHour', label: 'Max Frequency / Hour',             type: 'number' },
 ]

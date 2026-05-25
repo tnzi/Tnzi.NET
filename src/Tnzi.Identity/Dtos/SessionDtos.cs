@@ -89,3 +89,29 @@ public class DeviceStatItem
     /// </summary>
     public int Count { get; set; }
 }
+
+/// <summary>
+/// 活跃用户摘要 DTO — 用于会话管理页面的"活跃用户"下拉，避免暴露完整 user list
+/// </summary>
+public class ActiveUserSummaryDto
+{
+    /// <summary>
+    /// 用户ID
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 用户名
+    /// </summary>
+    public string? UserName { get; set; }
+
+    /// <summary>
+    /// 该用户的活跃会话数量（未撤销）
+    /// </summary>
+    public int SessionCount { get; set; }
+
+    /// <summary>
+    /// 该用户最后一次活动时间（取所有活跃会话的最大值）
+    /// </summary>
+    public DateTime LastActivityTime { get; set; }
+}

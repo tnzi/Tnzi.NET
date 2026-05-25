@@ -34,7 +34,7 @@ import type {
 } from '@tnzi/core/services/template'
 import type { PagedList } from '@tnzi/core/types'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest } from '../_mappers'
+import { mapQueryToListRequest, pagedResult } from '../_mappers'
 
 /** Server-side pinned module name for notification templates. */
 const NOTIFICATION_TEMPLATE_BASE = '/admin/notification-templates'
@@ -55,16 +55,41 @@ export interface NotificationMessageContract extends BridgeCrudContract<Notifica
   send(id: string): Promise<void>
 }
 
-/** templates sub-contract — full CRUD against /admin/notification-templates plus preview. */
+/** Request shape for template preview / test-send actions. */
+export interface NotificationTemplatePreviewRequest {
+  templateName?: string | null
+  type?: number
+  subject?: string | null
+  content?: string | null
+  variables?: Record<string, unknown> | null
+  /** Used only by sendTest — leave empty for preview-only. */
+  recipientAddress?: string | null
+}
+
+/** Rendered preview response (subject + content + isHtml flag). */
+export interface NotificationTemplatePreviewResult {
+  subject?: string | null
+  content: string
+  /** True when `content` is HTML and should be injected with v-html;
+   *  false when it's plain text and must be escaped for safe display. */
+  isHtml: boolean
+}
+
+/** templates sub-contract — full CRUD against /admin/notification-templates plus preview + test-send. */
 export interface NotificationTemplateContract extends BridgeCrudContract<TemplateInfoDto> {
   /**
-   * Preview notification rendering.
-   * Proxies to api.preview() with a stub CreateNotificationRequest.
-   * Returns the rendered content string.
-   * NOTE: The backend preview endpoint requires a full CreateNotificationRequest,
-   * not a template id + variables. This method synthesizes a minimal request.
+   * Preview notification rendering. Sends a CreateNotificationRequest to
+   * /admin/notifications/preview with the template name + variables; the
+   * backend renders the template via ITemplateRenderService and returns
+   * the materialized subject + content without persisting anything.
    */
-  preview(id: string, variables?: Record<string, unknown>): Promise<string>
+  preview(request: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult>
+  /**
+   * Send a test notification using the template. Creates and dispatches
+   * a real notification (POST /admin/notifications/create-and-send) to
+   * the supplied recipient — use with throwaway addresses only.
+   */
+  sendTest(request: NotificationTemplatePreviewRequest): Promise<void>
 }
 
 export interface NotificationBridge {
@@ -107,7 +132,8 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         create: backendGapReject('templates.create'),
         update: backendGapReject('templates.update'),
         delete: backendGapReject('templates.delete'),
-        preview: backendGapReject('templates.preview'),
+        preview: backendGapReject('templates.preview') as never,
+        sendTest: backendGapReject('templates.sendTest'),
       },
       subscriptions: {
         fetch: backendGapReject('subscriptions.fetch'),
@@ -127,12 +153,12 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
     const result = unwrap<{ items: NotificationInfo[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await api.query(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const messages: NotificationMessageContract = {
@@ -154,16 +180,16 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
   const templates: NotificationTemplateContract = client
     ? {
         fetch: async (query: CrudPageQuery): Promise<CrudPageResult<TemplateInfoDto>> => {
-          const params = mapQueryToListRequest(query) as unknown as TemplateQueryDto
+          const params = { ...mapQueryToListRequest(query), includeFileSource: true } as unknown as TemplateQueryDto
           const result = unwrap<PagedList<TemplateInfoDto>>(
             await client.get<PagedList<TemplateInfoDto>>(NOTIFICATION_TEMPLATE_BASE, { params }),
           )
-          return {
+          return pagedResult({
             items: result.items ?? [],
             totalCount: result.totalCount ?? 0,
             pageIndex: result.pageIndex ?? query.pageIndex,
             pageSize: result.pageSize ?? query.pageSize,
-          }
+          })
         },
         create: async (data) => {
           const payload = data as unknown as CreateTemplateDto
@@ -189,21 +215,43 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
           }
           await client.delete(`${NOTIFICATION_TEMPLATE_BASE}/batch`, { body: ids.map(String) })
         },
-        // Preview proxies to api.preview() with a minimal synthesized request
-        // because the dedicated preview route on /admin/templates takes raw
-        // content + model, and the notification admin page only surfaces a
-        // "preview rendered output" button for quick smoke-testing.
-        preview: async (_id: string, variables?: Record<string, unknown>): Promise<string> => {
+        // Preview hits POST /admin/notifications/preview which renders the
+        // template via ITemplateRenderService without creating or sending a
+        // notification. Page passes templateName + variables; the backend
+        // looks up the template by name + module="Notification".
+        preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
           const result = unwrap(
             await api.preview({
-              type: 1, // Email as default channel
-              subject: 'Preview',
-              content: '',
+              type: req.type ?? 1,
+              subject: req.subject ?? 'Preview',
+              content: req.content ?? '',
+              templateName: req.templateName ?? undefined,
               recipients: [],
-              templateVariables: variables,
+              templateVariables: req.variables ?? undefined,
             }),
           )
-          return (result as { content: string }).content ?? ''
+          return {
+            subject: (result as { subject?: string | null }).subject ?? null,
+            content: (result as { content?: string }).content ?? '',
+            isHtml: (result as { isHtml?: boolean }).isHtml ?? false,
+          }
+        },
+        // Test-send creates and dispatches a real notification — use a
+        // throwaway recipient address. Pin templateName + variables on the
+        // CreateNotificationRequest so the backend renders + delivers
+        // exactly the template the admin clicked.
+        sendTest: async (req: NotificationTemplatePreviewRequest): Promise<void> => {
+          if (!req.recipientAddress) {
+            throw new Error('sendTest: recipientAddress is required.')
+          }
+          await api.createAndSend({
+            type: req.type ?? 1,
+            subject: req.subject ?? 'Test Send',
+            content: req.content ?? '',
+            templateName: req.templateName ?? undefined,
+            templateVariables: req.variables ?? undefined,
+            recipients: [{ address: req.recipientAddress }],
+          })
         },
       }
     : {
@@ -211,17 +259,35 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         create: backendGapReject('templates.create — no HttpClient (deps.client) provided'),
         update: backendGapReject('templates.update — no HttpClient (deps.client) provided'),
         delete: backendGapReject('templates.delete — no HttpClient (deps.client) provided'),
-        preview: async (_id: string, variables?: Record<string, unknown>): Promise<string> => {
+        preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
           const result = unwrap(
             await api.preview({
-              type: 1,
-              subject: 'Preview',
-              content: '',
+              type: req.type ?? 1,
+              subject: req.subject ?? 'Preview',
+              content: req.content ?? '',
+              templateName: req.templateName ?? undefined,
               recipients: [],
-              templateVariables: variables,
+              templateVariables: req.variables ?? undefined,
             }),
           )
-          return (result as { content: string }).content ?? ''
+          return {
+            subject: (result as { subject?: string | null }).subject ?? null,
+            content: (result as { content?: string }).content ?? '',
+            isHtml: (result as { isHtml?: boolean }).isHtml ?? false,
+          }
+        },
+        sendTest: async (req: NotificationTemplatePreviewRequest): Promise<void> => {
+          if (!req.recipientAddress) {
+            throw new Error('sendTest: recipientAddress is required.')
+          }
+          await api.createAndSend({
+            type: req.type ?? 1,
+            subject: req.subject ?? 'Test Send',
+            content: req.content ?? '',
+            templateName: req.templateName ?? undefined,
+            templateVariables: req.variables ?? undefined,
+            recipients: [{ address: req.recipientAddress }],
+          })
         },
       }
 
@@ -252,12 +318,12 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
           const result = unwrap<{ items: NotificationPreferenceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
             await prefApi.getPagedList(params),
           )
-          return {
+          return pagedResult({
             items: result.items ?? [],
             totalCount: result.totalCount ?? 0,
             pageIndex: result.pageIndex ?? query.pageIndex,
             pageSize: result.pageSize ?? query.pageSize,
-          }
+          })
         },
         create: async (data) => {
           const input = data as unknown as NotificationPreferenceDto & { userId: string }

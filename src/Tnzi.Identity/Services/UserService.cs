@@ -195,6 +195,21 @@ public class UserService : ApplicationService, IUserService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // Snapshot current role IDs BEFORE deletion so the cache-invalidation
+        // event has the full removed list. We map role-names → IDs via
+        // RoleManager — `UserManager.GetRolesAsync` returns names only.
+        // Defensive null coalesce: mocked UserManagers in tests may return
+        // null from GetRolesAsync when not stubbed (real ASP.NET Identity
+        // returns an empty IList<string>, never null, but Moq's loose mocks
+        // default to null for reference types).
+        var roleNamesBeforeDelete = await _userManager.GetRolesAsync(user) ?? Array.Empty<string>();
+        var roleIdsBeforeDelete = roleNamesBeforeDelete.Count > 0
+            ? await _roleManager.Roles
+                .Where(r => roleNamesBeforeDelete.Contains(r.Name!))
+                .Select(r => r.Id)
+                .ToListAsync()
+            : new List<Guid>();
+
         var result = await _userManager.DeleteAsync(user);
         if (!result.Succeeded)
         {
@@ -212,6 +227,16 @@ public class UserService : ApplicationService, IUserService
         }
 
         LogInformation("User deleted: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
+
+        // Publish role-membership removal so downstream caches drop this
+        // user's entry. `UserDeleted` change-type tells audit consumers
+        // this isn't an admin "unassign", it's an account removal.
+        await PublishUserRolesChangedAsync(
+            user,
+            addedRoleIds: new List<Guid>(),
+            removedRoleIds: roleIdsBeforeDelete,
+            changeType: UserRolesChangeType.UserDeleted);
+
         return Ok("User deleted successfully");
     }
 
@@ -564,6 +589,16 @@ public class UserService : ApplicationService, IUserService
         // 但我们已经优化了批量查询
         foreach (var user in users)
         {
+            // Snapshot roles BEFORE delete so the cache-invalidation event
+            // covers each user's full role set (see DeleteAsync for context).
+            var roleNamesBeforeDelete = await _userManager.GetRolesAsync(user);
+            var roleIdsBeforeDelete = roleNamesBeforeDelete.Count > 0
+                ? await _roleManager.Roles
+                    .Where(r => roleNamesBeforeDelete.Contains(r.Name!))
+                    .Select(r => r.Id)
+                    .ToListAsync()
+                : new List<Guid>();
+
             var result = await _userManager.DeleteAsync(user);
             if (!result.Succeeded)
             {
@@ -579,6 +614,13 @@ public class UserService : ApplicationService, IUserService
                 var cacheKey = CacheKeys.Identity.User(user.Id);
                 await _cache.RemoveAsync(cacheKey);
             }
+
+            // Publish per-user (consumers expect one event per affected user).
+            await PublishUserRolesChangedAsync(
+                user,
+                addedRoleIds: new List<Guid>(),
+                removedRoleIds: roleIdsBeforeDelete,
+                changeType: UserRolesChangeType.UserDeleted);
         }
 
         LogInformation("Batch deleted {Count} users", users.Count);
@@ -611,6 +653,17 @@ public class UserService : ApplicationService, IUserService
 
         LogInformation("Roles assigned to user: {UserId}, Roles: {RoleNames}",
             userId, string.Join(", ", roles.Select(r => r.Name)));
+
+        // Tell downstream consumers (Authorization cache, audit log) the
+        // user's role set changed. Without this signal the Authorization
+        // module's FunctionAuthCache (30 min TTL) would keep handing out
+        // permissions derived from the old role list.
+        await PublishUserRolesChangedAsync(
+            user,
+            addedRoleIds: roles.Select(r => r.Id).ToList(),
+            removedRoleIds: new List<Guid>(),
+            changeType: UserRolesChangeType.Assigned);
+
         return Ok("Roles assigned successfully");
     }
 
@@ -640,7 +693,48 @@ public class UserService : ApplicationService, IUserService
 
         LogInformation("Roles removed from user: {UserId}, Roles: {RoleNames}",
             userId, string.Join(", ", roles.Select(r => r.Name)));
+
+        // Critical: removal must publish (more so than assignment) — a stale
+        // cache after a revocation is a permission-retention security gap.
+        await PublishUserRolesChangedAsync(
+            user,
+            addedRoleIds: new List<Guid>(),
+            removedRoleIds: roles.Select(r => r.Id).ToList(),
+            changeType: UserRolesChangeType.Removed);
+
         return Ok("Roles removed successfully");
+    }
+
+    /// <summary>
+    /// Publish <see cref="UserRolesChangedEvent"/>. Auxiliary — failures here
+    /// must not break the main role-change flow (matches the framework's
+    /// event-handler convention: catch + log warning, never bubble).
+    /// </summary>
+    private async Task PublishUserRolesChangedAsync(
+        User user,
+        List<Guid> addedRoleIds,
+        List<Guid> removedRoleIds,
+        UserRolesChangeType changeType)
+    {
+        if (EventBus == null) return;
+        try
+        {
+            await EventBus.PublishAsync(new UserRolesChangedEvent
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                AddedRoleIds = addedRoleIds,
+                RemovedRoleIds = removedRoleIds,
+                ChangeType = changeType,
+                ChangedTime = DateTime.UtcNow,
+                ChangedBy = CurrentUser?.Id,
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex,
+                "Failed to publish UserRolesChangedEvent for user {UserId}", user.Id);
+        }
     }
 
     public async Task<Result<UserStatisticsDto>> GetStatisticsAsync(Guid? organizationId = null, Guid? roleId = null)

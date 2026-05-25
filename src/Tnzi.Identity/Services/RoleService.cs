@@ -147,6 +147,15 @@ public class RoleService : ApplicationService, IRoleService
             return Fail<RoleDto>("System role cannot be renamed", 403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
         }
 
+        // Capture rename diagnostic — populated on the published event only
+        // when the name *actually* changed (case-insensitive). Authorization
+        // subscribes to RoleUpdatedEvent and warns when a renamed role is
+        // referenced by Authorization.SuperAdminRoles (config-by-name → DB
+        // rename is the canonical "I just locked myself out" footgun).
+        var previousName = !string.Equals(role.Name, input.Name, StringComparison.OrdinalIgnoreCase)
+            ? role.Name
+            : null;
+
         role.Name = input.Name;
         role.Description = input.Description;
 
@@ -168,6 +177,7 @@ public class RoleService : ApplicationService, IRoleService
             {
                 RoleId = role.Id,
                 RoleName = role.Name!,
+                PreviousName = previousName,
                 Description = role.Description,
                 UpdatedTime = DateTime.UtcNow
             }, cancellationToken: default);

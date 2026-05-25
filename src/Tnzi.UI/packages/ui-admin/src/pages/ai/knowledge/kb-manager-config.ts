@@ -22,9 +22,9 @@ export const kbColumns: ColumnDef[] = [
 ]
 
 export const kbFormSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'Name', type: 'text', required: true },
-  { key: 'description', label: 'Description', type: 'textarea' },
-  { key: 'embeddingModel', label: 'Embedding Model', type: 'text' },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
+  { key: 'embeddingModel', labelKey: 'form.embeddingModel', label: 'Embedding Model', type: 'text' },
 ]
 
 /**

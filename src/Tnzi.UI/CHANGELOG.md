@@ -2,6 +2,111 @@
 
 All notable changes to the `@tnzi/*` frontend packages are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [unreleased] — `@tnzi/ui-admin` page-consistency overhaul
+
+Follow-up to the responsive batch — user reported that custom pages drift from the standard NCard / token vocabulary that TCrudPage pages enforce: "用量统计页面没有白色背景容器 / 评测页面的容器似乎不是同一风格,外边距偏大". Comprehensive audit found 15 custom (non-TCrudPage) pages with five categories of drift; this commit set unifies all five.
+
+**Fixed — `@tnzi/ui-admin` P0 visual breakage**
+
+- `UsageDashboard` rewritten in `TDashboardPage` style: filter NCard + gradient KPI tiles + chart NCards. Was previously a flat `<div>+<section>` page on the grey layout background with `#fafafa` stat cells and raw HTML inputs that ignored the theme entirely.
+- `EvalViewer` outer `padding: 16px` removed — it duplicated `TAdminContent`'s own 16px so the page sat at 32px from the viewport edge (user-reported "外边距偏大"). Modal NModal `style="width: 560px"` swapped for `TFormModal` so it auto-fullscreens on phones.
+
+**Fixed — `@tnzi/ui-admin` systematic token migration (12 files)**
+
+Previous pages referenced tokens that didn't exist in `@tnzi/ui/styles/variables.css` and fell back to hardcoded `#06B6D4` cyan — they never followed the user's chosen primary color. Replaced:
+
+| Old (broken) | New (canonical) |
+| --- | --- |
+| `--tnzi-primary-color` | `--tnzi-primary` |
+| `--tnzi-primary-color-suppl, rgba(6,182,212,0.0X)` | `rgb(var(--tnzi-primary-rgb) / 0.0X)` |
+| `--tnzi-base-border` | `--tnzi-border` |
+| `--tnzi-base-fill` | `--tnzi-layout-bg` |
+| `--tnzi-success-color` / `-warning-color` / `-error-color` | `--tnzi-success` / `-warning` / `-error` |
+| `--tnzi-font-family-mono` | `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace` (no token shipped) |
+| `--t-border` / `--t-surface` / `--t-muted` / `--t-danger` | canonical equivalents |
+
+Files touched: AgentDetail, RunMonitor, RunViewer, EvalViewer, EntityRole, Permission, RoleFunction, OrganizationManagement, TAuditTimeline, WorkflowEditor, StorageFile, TChartPanel.
+
+**Refactored — `useSafeMessage` helper (10 pages)**
+
+Previously 10 pages copy-pasted the same 5-line block to defend against missing `NMessageProvider`:
+
+```ts
+let message: { success(...): void; error(...): void }
+try { message = useMessage() } catch { message = { success: () => {}, error: () => {} } }
+```
+
+Centralised into `src/pages/_shared/safeMessage.ts` returning the full naive-ui `MessageApi` shape with all methods as noop when no provider is mounted. Pages now do `const message = useSafeMessage()`.
+
+**Fixed — double padding removed across 9 pages**
+
+`TAdminContent` already applies `var(--tnzi-admin-content-padding, 16px)` to its root. Pages that added their own `.t-xx-page { padding: 16px; }` rendered at 32px from the viewport — visibly out-dented relative to TCrudPage pages. Removed from: AgentDetail, EvalViewer, RunViewer, EntityRole, Permission, RoleFunction, OrganizationManagement, SessionManagement, StorageFile.
+
+**Refactored — NCard wrap for detail panels**
+
+- `AgentDetail` 4-quadrant `<section>` blocks → `<NCard size="small" :bordered="false">` with box-shadow + radius parity with TCrudPage list-card.
+- `RunMonitor` detail `<section>` → `<NCard>` + cancel button switched from raw `<button>` to `<NButton type="error" ghost>`.
+
+**Polished**
+
+- `OrganizationManagement` + `StorageFile` modals: hardcoded `style="width: 500px"` / `"460px"` → computed style binding that caps at `min(propWidth, 95vw)` and switches to 100vw below sm.
+- `RunMonitor` + `WorkflowEditor`: `rem` units → `px` (project convention).
+
+**Tests**
+
+- New `__tests__/pages/safeMessage.test.ts` — verifies API shape + noop safety (2 tests).
+- New `__tests__/pages/token-consistency.test.ts` — static regex check across all page .vue files prevents the banned tokens from creeping back (14 tests, one per banned token).
+- Updated `__tests__/integration/UsageDashboard.test.ts` — mocks `@tnzi/ui` `useTheme` because the rewrite now wraps `TDashboardPage` → `useEcharts`.
+- Suite now: **703 pass** (687 → 703, no regression).
+
+## [unreleased] — `@tnzi/ui-admin` responsive overhaul (375px-friendly)
+
+User-driven full audit of cross-resolution behaviour. Found 20 issues across the shell, layout chrome, CRUD widgets, dashboard scaffold, and login page; six broke layout outright on phones / iPad portrait, the rest left UX gaps below `lg`. All fixed in one batch.
+
+**Added — `@tnzi/ui-admin`**
+
+- `useBreakpoint` headless: `xs/sm/md/lg/desktop` band refs + `isTouch` probe + reactive `width/height`. Wraps `@vueuse/core` with Tailwind breakpoints and adds touch detection via `matchMedia('(pointer: coarse)')`. Used by every responsive fix below so future components don't reinvent the wiring.
+
+**Fixed — `@tnzi/ui-admin` P0 breakage**
+
+- `TFormModal` width auto-caps at `min(propWidth, 95vw)`; auto-switches to fullscreen layout on viewports narrower than `max(width+32, 640)`. New `fullscreen` prop overrides auto-detect.
+- `TGlobalSearch` width caps at `min(630, 95vw)`; fullscreens below 660px.
+- `TThemeDrawer` width steps `420/360/100vw` across desktop/sm/xs; preset + layout grids drop to 2 cols on xs so the 3×96 layout cards stop overflowing the drawer.
+- `TDashboardPage` swaps fixed `:cols` for `responsive="screen"` + `item-responsive`; KPI ladder picks 1/2/4 (4 cards), 1/3 (3 cards), 1/2 (2 cards) across xs/sm/md+; chart row stacks below `lg` so the pie isn't squashed into ⅓ of a phone screen.
+- `TAdminShell` mobile drawer width clamps to `viewport-gutter` (iPhone SE-friendly); ESC dismisses the open drawer; the drawer now carries `role="dialog"` + `aria-modal`.
+- `TCrudPage` simple-search row stacks vertically below 640px so the input no longer fights with the Search / Advanced buttons for the same line.
+
+**Fixed — `@tnzi/ui-admin` P1 UX gaps**
+
+- `TAdminHeader` collapses the right-side action buttons into a single `···` dropdown below 640px (configurable via `overflowMenuBreakpoint`); fullscreen button hides when the Fullscreen API is unsupported OR the device has a coarse pointer.
+- `TAdminTabs` tab title capped 220px desktop / 140px mobile with ellipsis + native title tooltip; touch long-press (500ms) opens the same context menu as right-click; close button hit area grows to 24×24 on coarse pointers.
+- `TCrudPage` pagination switches to NPagination simple mode + drops size picker below `sm`; footer stacks batch actions + pagination on mobile; list-card action toolbar becomes a horizontal scroll strip (instead of wrapping into a 2-row card header).
+- `THeaderBanner` greeting / subtitle / time font sizes step down below 640.
+- `TLoginPage` card width steps `400/360/min(340,calc(100vw-64px))` across `sm/xs` so iPhone 14 (390px) no longer falls into the old 400 → 300 cliff.
+
+**Fixed — `@tnzi/ui-admin` P2 polish**
+
+- `variables.css`: stepped responsive tokens — header / tab heights + content padding shrink at 480/767/1023.
+- `polish.css`: `pointer: coarse` media query bumps icon-button hit area to 44×44 (header / avatar) and 36×36 (tab actions) so touch users meet HIG / Material guidelines without altering desktop density.
+- `useAdminAppStore`: new tablet (768-1023) watcher auto-collapses the sider so the 220px column doesn't eat 28% of an iPad portrait viewport; restores on transition back to desktop.
+- `TCrudPage` advanced-search grid span ladder upgraded from 1/2/4 to 1/2/3/4 across xs/sm/md/l so 768-1023 stops jumping straight to 4 cols with cramped inputs; matching `searchButtonSpan` recalculation.
+- `TAdminUserAvatar` name hides below 640px (icon + native title tooltip keep the affordance discoverable); 160px max-width otherwise prevents long display names from crowding the header.
+
+**Tests — `@tnzi/ui-admin`**
+
+- 6 new `useBreakpoint` unit tests (xs/sm/md/lg/desktop bands + touch probe + width reactivity).
+- 10 new component integration tests covering `TFormModal` / `TGlobalSearch` / `TAdminHeader` / `TDashboardPage` / `TAdminUserAvatar` responsive paths.
+- Suite now: 687 pass (was 671). No regressions in existing tests.
+
+**Migration**
+
+Existing consumers are mostly unaffected — the changes are additive or behave identically at desktop widths. Two opt-out flags let callers restore legacy behaviour:
+
+- `<TFormModal :fullscreen="false" />` forces never-fullscreen (auto-detect was the old behaviour but with the original 560px width on all viewports).
+- `<TAdminHeader overflow-menu-breakpoint="never" />` keeps the inline button row at every viewport.
+
+See [MIGRATION.md](./MIGRATION.md) for the full opt-out catalog.
+
 ## [0.2.70] — 2026-05-16 (`@tnzi/ui-admin` revert Phase H3 Suspense — page render regression)
 
 User reported "click a sidebar menu and the page is invisible".

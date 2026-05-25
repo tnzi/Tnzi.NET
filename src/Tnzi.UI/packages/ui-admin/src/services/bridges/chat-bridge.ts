@@ -32,7 +32,7 @@ import {
   ChatSessionStatus,
 } from '@tnzi/core/services/chat'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest } from '../_mappers'
+import { mapQueryToListRequest, pagedResult } from '../_mappers'
 
 type HttpClient = Parameters<typeof useChatAdminApi>[0]
 
@@ -105,12 +105,12 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
     const result = unwrap<{ items: MessageListItemDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await api.query(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const messages: ChatMessageContract = {
@@ -136,12 +136,12 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
           const result = unwrap<{ items: ChatSessionListItemDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
             await sessionApi.getList(params),
           )
-          return {
+          return pagedResult({
             items: result.items ?? [],
             totalCount: result.totalCount ?? 0,
             pageIndex: result.pageIndex ?? query.pageIndex,
             pageSize: result.pageSize ?? query.pageSize,
-          }
+          })
         },
         create: async (data) => {
           const payload = data as unknown as CreateChatSessionDto

@@ -22,6 +22,14 @@ vi.mock('../../src/services/bridges/audit-bridge', () => ({
       })),
     },
   }),
+  // 0.2.72+ (B4): the bridge now re-exports `AuditResultType` so pages
+  // can read the enum value without reaching into
+  // `@tnzi/core/services/audit`. Mirror that surface in the mock.
+  AuditResultType: {
+    Success: 1,
+    Failed: 2,
+    Warning: 3,
+  },
 }))
 
 describe('AuditOperation page (Tier 2: timeline view)', () => {

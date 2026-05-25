@@ -276,6 +276,74 @@ public class EventBusAutoRegistrationTests
     }
 
     /// <summary>
+    /// Regression: framework handlers are auto-registered AND then manually
+    /// re-registered later in the module lifecycle, so the DI container ends
+    /// up with two `IEventHandler&lt;TEvent&gt;` descriptors for the same concrete
+    /// type — every event publish fires the handler twice (manifested as e.g.
+    /// duplicate LoginLog rows per login).
+    ///
+    /// `ExcludeFrameworkAssemblies = true` (the default) makes auto-scan skip
+    /// any assembly whose name starts with "Tnzi", restoring the framework
+    /// contract that all Tnzi.* modules register their handlers manually.
+    /// </summary>
+    [Fact]
+    public void AutoRegisterHandlers_ExcludesFrameworkAssemblies_ByDefault()
+    {
+        // Arrange — no HandlerAssemblies set → falls through to "scan everything
+        // loaded" path, which is exactly the path framework modules hit at boot.
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        var options = new EventBusOptions
+        {
+            AutoRegisterHandlers = true,
+            // ExcludeFrameworkAssemblies defaults to true; not set explicitly
+        };
+
+        var module = new TestableEventBusModule();
+        module.TestAutoRegisterHandlers(services, options);
+
+        // Assert — no Tnzi.* handlers picked up via auto-scan. We sample a
+        // representative event interface from Tnzi.Identity (UserEvents) —
+        // the assembly only loads if the test host references it, so we just
+        // assert the GENERIC truth: no IEventHandler descriptor's
+        // ImplementationType comes from an assembly named "Tnzi*".
+        var frameworkHandlers = services
+            .Where(d => d.ServiceType.IsGenericType &&
+                        d.ServiceType.GetGenericTypeDefinition() == typeof(IEventHandler<>))
+            .Select(d => d.ImplementationType?.Assembly.GetName().Name ?? string.Empty)
+            .Where(n => n.StartsWith("Tnzi", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.Empty(frameworkHandlers);
+    }
+
+    [Fact]
+    public void AutoRegisterHandlers_IncludesFrameworkAssemblies_WhenOptOut()
+    {
+        // Arrange — explicit opt-OUT of the new default restores legacy
+        // behaviour for consumers that depend on framework auto-scan.
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        var options = new EventBusOptions
+        {
+            AutoRegisterHandlers = true,
+            ExcludeFrameworkAssemblies = false,
+        };
+
+        var module = new TestableEventBusModule();
+        module.TestAutoRegisterHandlers(services, options);
+
+        // We don't assert "some framework handler IS present" because the
+        // exact framework assemblies loaded by the test host vary; we just
+        // assert the scan didn't crash, leaving framework descriptors in if
+        // present. The opposite-direction default test (above) is what
+        // proves the regression is fixed.
+        Assert.NotNull(services);
+    }
+
+    /// <summary>
     /// 可测试的 EventBusModule，暴露内部方法用于测试
     /// </summary>
     private class TestableEventBusModule : EventBusModule

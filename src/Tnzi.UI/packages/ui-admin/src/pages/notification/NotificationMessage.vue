@@ -15,6 +15,7 @@
     :title="title"
     :translate="t"
     :show-create="false"
+    :form-modal-width="760"
   >
     <template #batchActions="{ selectedIds }">
       <NPopconfirm @positive-click="() => batchResend(selectedIds)">
@@ -37,6 +38,8 @@
         :schema="notificationMessageFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
     </template>
     <template #rowActions="{ row }">

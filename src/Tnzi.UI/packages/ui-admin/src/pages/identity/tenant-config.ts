@@ -2,15 +2,32 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
+
+/**
+ * Tenant search fields — align with backend `TenantQueryDto`:
+ * `keyword` (free text on name/code) + `isEnabled` (true/false filter).
+ */
+export const tenantSearchFields: FormSchemaItem[] = [
+  { key: 'keyword', labelKey: 'form.keyword', label: 'Keyword', type: 'text', placeholder: 'columns.name' },
+  {
+    key: 'isEnabled',
+    labelKey: 'form.isEnabled', label: 'Enabled',
+    type: 'select',
+    options: [
+      { label: 'Enabled', value: 'true' },
+      { label: 'Disabled', value: 'false' },
+    ],
+  },
+]
 
 export interface TenantRow {
   id?: string
   name?: string
   code?: string
-  status?: 'active' | 'suspended' | 'inactive'
-  plan?: 'free' | 'pro' | 'enterprise'
-  memberCount?: number
+  isEnabled?: boolean
+  expiredAt?: string
+  remark?: string
   creationTime?: string
 }
 
@@ -18,34 +35,25 @@ export const tenantColumns: ColumnDef<TenantRow>[] = [
   { key: 'name', title: 'columns.name', width: 200, fixed: 'left' },
   { key: 'code', title: 'columns.code', width: 160 },
   {
-    key: 'plan',
-    title: 'columns.plan',
-    width: 120,
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
     render: (row) =>
       h(TStatusBadge, {
-        value: row.plan ?? 'free',
+        value: row.isEnabled ?? false,
         mapping: {
-          free: { type: 'default', label: 'Free' },
-          pro: { type: 'info', label: 'Pro' },
-          enterprise: { type: 'warning', label: 'Enterprise' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },
   {
-    key: 'status',
-    title: 'columns.status',
-    width: 120,
-    render: (row) =>
-      h(TStatusBadge, {
-        value: row.status ?? 'inactive',
-        mapping: {
-          active: { type: 'success', label: 'Active' },
-          suspended: { type: 'error', label: 'Suspended' },
-          inactive: { type: 'default', label: 'Inactive' },
-        },
-      }),
+    key: 'expiredAt',
+    title: 'columns.expiredAt',
+    width: 160,
+    render: (row) => h(TRelativeTime, { value: row.expiredAt }),
   },
-  { key: 'memberCount', title: 'columns.memberCount', width: 100 },
+  { key: 'remark', title: 'columns.remark' },
   {
     key: 'creationTime',
     title: 'columns.creationTime',
@@ -56,26 +64,9 @@ export const tenantColumns: ColumnDef<TenantRow>[] = [
 ]
 
 export const tenantFormSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'Tenant Name', type: 'text', required: true },
-  { key: 'code', label: 'Code', type: 'text', required: true },
-  {
-    key: 'plan',
-    label: 'Subscription Plan',
-    type: 'select',
-    options: [
-      { label: 'Free', value: 'free' },
-      { label: 'Pro', value: 'pro' },
-      { label: 'Enterprise', value: 'enterprise' },
-    ],
-  },
-  {
-    key: 'status',
-    label: 'Status',
-    type: 'select',
-    options: [
-      { label: 'Active', value: 'active' },
-      { label: 'Suspended', value: 'suspended' },
-      { label: 'Inactive', value: 'inactive' },
-    ],
-  },
+  { key: 'name', labelKey: 'form.name', label: 'Tenant Name', type: 'text', required: true },
+  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text', required: true },
+  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
+  { key: 'expiredAt', labelKey: 'form.expiredAt', label: 'Expires At', type: 'date' },
+  { key: 'remark', labelKey: 'form.remark', label: 'Remark', type: 'textarea' },
 ]

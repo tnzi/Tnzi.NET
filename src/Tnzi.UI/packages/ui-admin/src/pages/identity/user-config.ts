@@ -2,25 +2,33 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
 
 /**
- * soybean-style search panel. Each entry maps to one cell in the
- * 4-column NGrid form. Values commit to `state.query.filters` on
- * Search click. Backend filter contract: free-text per field.
+ * User search fields — align with backend `UserListQueryDto`:
+ * `keyword` (free text on userName/email/phoneNumber) + structured filters
+ * `isLockedOut` / `isEmailConfirmed`.
+ * Earlier per-field free-text inputs (userName/displayName/email/phone)
+ * never matched backend bindings and were silently dropped.
  */
 export const userSearchFields: FormSchemaItem[] = [
-  { key: 'userName', label: 'columns.username', type: 'text', placeholder: 'columns.username' },
-  { key: 'displayName', label: 'columns.displayName', type: 'text', placeholder: 'columns.displayName' },
-  { key: 'email', label: 'columns.email', type: 'text', placeholder: 'columns.email' },
-  { key: 'phoneNumber', label: 'columns.phoneNumber', type: 'text', placeholder: 'columns.phoneNumber' },
+  { key: 'keyword', labelKey: 'form.keyword', label: 'Keyword', type: 'text', placeholder: 'form.keywordHint' },
   {
-    key: 'isEnabled',
-    label: 'columns.status',
+    key: 'isLockedOut',
+    labelKey: 'form.isLockedOut', label: 'Lock Status',
     type: 'select',
     options: [
-      { label: 'Enabled', value: 'true' },
-      { label: 'Disabled', value: 'false' },
+      { label: 'Locked', value: 'true' },
+      { label: 'Unlocked', value: 'false' },
+    ],
+  },
+  {
+    key: 'isEmailConfirmed',
+    labelKey: 'form.isEmailConfirmed', label: 'Email Confirmed',
+    type: 'select',
+    options: [
+      { label: 'Confirmed', value: 'true' },
+      { label: 'Unconfirmed', value: 'false' },
     ],
   },
 ]
@@ -30,50 +38,59 @@ export interface UserRow {
   userName?: string
   email?: string
   phoneNumber?: string
-  displayName?: string
-  isEnabled?: boolean
+  organizationName?: string
   isLockedOut?: boolean
-  lastLoginTime?: string
+  isEmailConfirmed?: boolean
+  twoFactorEnabled?: boolean
+  roles?: string[]
   creationTime?: string
 }
 
 export const userColumns: ColumnDef<UserRow>[] = [
-  { key: 'userName', title: 'columns.username', width: 160, fixed: 'left' },
-  { key: 'displayName', title: 'columns.displayName', width: 160 },
+  { key: 'userName', title: 'columns.userName', width: 160, fixed: 'left' },
   { key: 'email', title: 'columns.email', width: 220 },
   { key: 'phoneNumber', title: 'columns.phoneNumber', width: 140 },
+  { key: 'organizationName', title: 'columns.organizationName', width: 160 },
   {
-    key: 'isEnabled',
-    title: 'columns.status',
-    width: 110,
+    key: 'isLockedOut',
+    title: 'columns.isLockedOut',
+    width: 100,
+    render: (row) =>
+      row.isLockedOut
+        ? h(TStatusBadge, { value: true, type: 'error', labelKey: 'admin.shared.status.locked' })
+        : h(TStatusBadge, { value: false, type: 'success', labelKey: 'admin.shared.status.active' }),
+  },
+  {
+    key: 'isEmailConfirmed',
+    title: 'columns.isEmailConfirmed',
+    width: 130,
     render: (row) =>
       h(TStatusBadge, {
-        value: row.isEnabled ?? false,
+        value: row.isEmailConfirmed ?? false,
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.confirmed' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.unconfirmed' },
         },
       }),
   },
   {
-    key: 'isLockedOut',
-    title: 'columns.lock',
-    width: 80,
+    key: 'twoFactorEnabled',
+    title: 'columns.twoFactorEnabled',
+    width: 110,
     render: (row) =>
-      row.isLockedOut
-        ? h(TStatusBadge, { value: true, type: 'warning', label: 'Locked' })
-        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—'),
-  },
-  {
-    key: 'lastLoginTime',
-    title: 'columns.lastLogin',
-    width: 140,
-    render: (row) => h(TRelativeTime, { value: row.lastLoginTime }),
+      h(TStatusBadge, {
+        value: row.twoFactorEnabled ?? false,
+        mapping: {
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'default', labelKey: 'admin.shared.status.disabled' },
+        },
+      }),
   },
   {
     key: 'creationTime',
-    title: 'columns.created',
+    title: 'columns.creationTime',
     width: 140,
+    fixed: 'right',
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },
 ]

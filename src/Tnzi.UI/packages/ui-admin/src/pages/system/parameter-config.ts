@@ -1,19 +1,49 @@
 /**
- * Parameter config — Phase 3 Task 3.14.
+ * Parameter config — same backend as Dictionary (`/admin/settings`, SettingDto)
+ * but the UI surface is the typed-parameter view: every row has a `valueType`
+ * (SettingValueType enum) and the value editor switches input shape on it.
  *
- * PLAN DEVIATION: The plan expected a ParameterService from @tnzi/core/services/system.
- * No such service exists. System settings (key/value pairs via useAdminSettingApi)
- * cover the "parameter" concept. Field names match real SettingDto backend fields.
- * valueType maps to the SettingValueType enum (0=String, 1=Integer, 2=Boolean, 3=Json).
+ * `valueType` is rendered as a human label rather than the raw int.
+ * SettingValueType: 0=String, 1=Integer, 2=Boolean, 3=Json.
  */
+import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 
-export const parameterColumns: ColumnDef[] = [
-  { key: 'key',         title: 'columns.key' },
-  { key: 'value',       title: 'columns.value' },
-  { key: 'valueType',   title: 'columns.valueType' },
-  { key: 'group',       title: 'columns.group' },
+interface ParameterRow {
+  id?: string
+  key?: string
+  value?: string
+  valueType?: number
+  group?: string
+  description?: string
+}
+
+function valueTypeLabel(v?: number): string {
+  switch (v) {
+    case 0: return 'String'
+    case 1: return 'Integer'
+    case 2: return 'Boolean'
+    case 3: return 'JSON'
+    default: return '—'
+  }
+}
+
+export const parameterColumns: ColumnDef<ParameterRow>[] = [
+  { key: 'key', title: 'columns.key', width: 240, fixed: 'left' },
+  { key: 'value', title: 'columns.value' },
+  {
+    key: 'valueType',
+    title: 'columns.valueType',
+    width: 110,
+    render: (row) =>
+      h(
+        'span',
+        { style: 'font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px' },
+        valueTypeLabel(row.valueType),
+      ),
+  },
+  { key: 'group', title: 'columns.group', width: 160 },
   { key: 'description', title: 'columns.description', visible: false },
 ]
 
@@ -30,14 +60,20 @@ function valueEditorType(model: Record<string, unknown>): 'text' | 'number' | 's
 }
 
 export const parameterFormSchema: FormSchemaItem[] = [
-  { key: 'key',         label: 'Key',         type: 'text',   required: true },
-  { key: 'valueType',   label: 'Type',         type: 'select', options: [
-    { label: 'String',  value: 0 },
-    { label: 'Integer', value: 1 },
-    { label: 'Boolean', value: 2 },
-    { label: 'JSON',    value: 3 },
-  ] },
-  { key: 'value',       label: 'Value',        type: 'text',   required: true, typeFn: valueEditorType },
-  { key: 'group',       label: 'Group',        type: 'text' },
-  { key: 'description', label: 'Description',  type: 'textarea' },
+  { key: 'key', labelKey: 'form.key', label: 'Key', type: 'text', required: true },
+  {
+    key: 'valueType',
+    labelKey: 'form.valueType', label: 'Type',
+    type: 'select',
+    required: true,
+    options: [
+      { label: 'String', value: 0 },
+      { label: 'Integer', value: 1 },
+      { label: 'Boolean', value: 2 },
+      { label: 'JSON', value: 3 },
+    ],
+  },
+  { key: 'value', labelKey: 'form.value', label: 'Value', type: 'text', required: true, typeFn: valueEditorType },
+  { key: 'group', labelKey: 'form.group', label: 'Group', type: 'text' },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
 ]

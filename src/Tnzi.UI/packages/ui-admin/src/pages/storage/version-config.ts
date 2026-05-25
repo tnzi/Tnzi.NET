@@ -13,10 +13,10 @@ export const versionColumns: ColumnDef[] = [
 ]
 
 export const versionFormSchema: FormSchemaItem[] = [
-  { key: 'fileId',       label: 'File ID',     type: 'text' },
-  { key: 'version',      label: 'Version',     type: 'number' },
-  { key: 'path',         label: 'Path',        type: 'text' },
-  { key: 'size',         label: 'Size',        type: 'number' },
-  { key: 'md5Hash',      label: 'MD5',         type: 'text' },
-  { key: 'description',  label: 'Note',        type: 'textarea' },
+  { key: 'fileId',       labelKey: 'form.fileId', label: 'File ID',     type: 'text' },
+  { key: 'version',      labelKey: 'form.version', label: 'Version',     type: 'number' },
+  { key: 'path',         labelKey: 'form.path', label: 'Path',        type: 'text' },
+  { key: 'size',         labelKey: 'form.size', label: 'Size',        type: 'number' },
+  { key: 'md5Hash',      labelKey: 'form.md5Hash', label: 'MD5',         type: 'text' },
+  { key: 'description',  labelKey: 'form.description', label: 'Note',        type: 'textarea' },
 ]

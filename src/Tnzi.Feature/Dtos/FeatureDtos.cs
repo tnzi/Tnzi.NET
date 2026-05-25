@@ -51,6 +51,20 @@ public class FeatureDefinitionDto
     /// Feature group
     /// </summary>
     public string? Group { get; set; }
+
+    /// <summary>
+    /// Origin of this feature row — "Database" (editable, persisted as
+    /// <see cref="FeatureDefinition"/>) or "Code" (defined statically by
+    /// an <c>IFeatureDefinitionProvider</c> implementation, not editable).
+    /// </summary>
+    public string Source { get; set; } = "Database";
+
+    /// <summary>
+    /// True for code-defined definitions that ship with the application
+    /// binaries. Admin UI hides Edit/Delete for these rows; values can still
+    /// be overridden via the FeatureValue endpoints (DB always wins).
+    /// </summary>
+    public bool IsReadOnly { get; set; }
 }
 
 /// <summary>

@@ -2,6 +2,16 @@
 // Remaining pages (authorization/system/...) are rewritten incrementally in Phase 3.
 export { default as UserManagement } from './identity/UserManagement.vue'
 
+// Translation helpers — host apps build their own `t()` against the same
+// resolver the framework's pages use. Picks up consumer-supplied messages
+// registered via `useAdminAppStore.extendLocaleMessages`.
+export {
+  translatePageKey,
+  makePageTranslator,
+  interpolate,
+  maybeTranslate,
+} from './_shared/translate'
+
 // Phase I.7.1: login page route component + 5 modules + composable.
 // Consumers can import `{ TnziAdminLoginPage }` to register the route
 // themselves, or override individual modules via the `moduleComponents`

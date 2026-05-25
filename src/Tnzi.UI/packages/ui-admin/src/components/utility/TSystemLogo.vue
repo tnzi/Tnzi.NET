@@ -9,7 +9,7 @@
  *   - `stacked`: icon above text (used in login page brand-head)
  */
 import { computed } from 'vue'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import TBrandMark from './TBrandMark.vue'
 
 export type TSystemLogoLayout = 'full' | 'icon-only' | 'stacked'

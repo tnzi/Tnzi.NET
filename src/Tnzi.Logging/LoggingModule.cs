@@ -128,6 +128,10 @@ public class LoggingModule : TnziInfrastructureModule
         Log.Logger = loggerConfig.CreateLogger();
         context.Services.AddSerilog();
 
+        // Read-only admin access to the on-disk log files. Powers the
+        // `admin/logs/*` controller exposed by Tnzi.AspNetCore.
+        context.Services.AddSingleton<Services.Interfaces.ILogFileService, Services.LogFileService>();
+
         return Task.CompletedTask;
     }
 

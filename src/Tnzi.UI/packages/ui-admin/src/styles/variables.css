@@ -102,11 +102,34 @@
   --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.6);
 }
 
-/* Mobile compact tokens */
-@media (max-width: 768px) {
+/* Responsive token steps. The admin shell consumes these tokens for
+   header/tab heights and content padding so a single override here
+   ripples across every layout component without per-file media queries.
+
+   Breakpoint plan (mirrors Tailwind):
+     xs  <  640  — phones in portrait, tightest paddings
+     sm  640-767 — phablets, slightly looser
+     md  768-1023 — tablets, content padding ramps back up
+     lg+ ≥ 1024  — desktops, baseline tokens above
+
+   Heights step down on phones because the header chrome competes with
+   the URL bar / status bar for vertical space. */
+@media (max-width: 1023px) {
+  :root {
+    --tnzi-admin-content-padding: 14px;
+  }
+}
+@media (max-width: 767px) {
   :root {
     --tnzi-admin-header-height: 52px;
     --tnzi-admin-tab-height: 40px;
     --tnzi-admin-content-padding: var(--tnzi-admin-content-padding-mobile);
+  }
+}
+@media (max-width: 480px) {
+  :root {
+    --tnzi-admin-header-height: 48px;
+    --tnzi-admin-tab-height: 38px;
+    --tnzi-admin-content-padding: 8px;
   }
 }

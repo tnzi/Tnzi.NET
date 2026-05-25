@@ -64,18 +64,61 @@
 
         <!-- Right: file list -->
         <section class="t-storage-file-page__main">
-          <header class="t-storage-file-page__main-header">
-            <div>
+          <!--
+            Single-line compact toolbar: scope label + count tag on the
+            left, search controls in the middle, folder actions on the
+            right. Wraps to multiple lines below 1024px so phones still
+            get the same buttons without horizontal scroll.
+          -->
+          <header class="t-storage-file-page__toolbar">
+            <div class="t-storage-file-page__scope">
               <h3 class="t-storage-file-page__scope-title">{{ scopeLabel }}</h3>
-              <span class="t-storage-file-page__scope-hint">
+              <NTag size="small" round :bordered="false" type="info">
                 {{ t('fileCount', { n: totalFiles }) }}
-              </span>
+              </NTag>
             </div>
-            <NSpace v-if="selectedFolderId" size="small">
-              <NButton size="small" @click="openCreateFolder(selectedFolderId)">
+
+            <div class="t-storage-file-page__filters">
+              <NInput
+                v-model:value="search.originalName"
+                :placeholder="t('search.originalName')"
+                size="small"
+                clearable
+                class="t-storage-file-page__filter-name"
+                @change="applyFilters"
+              />
+              <NSelect
+                v-model:value="search.contentType"
+                :options="contentTypeOptions"
+                :placeholder="t('search.contentType')"
+                size="small"
+                clearable
+                class="t-storage-file-page__filter-type"
+                @update:value="applyFilters"
+              />
+              <NButton size="small" type="primary" @click="applyFilters">
+                <template #icon>
+                  <TSvgIcon icon="mdi:magnify" :size="14" />
+                </template>
+                {{ t('search.search') }}
+              </NButton>
+            </div>
+
+            <NSpace
+              v-if="selectedFolderId"
+              size="small"
+              class="t-storage-file-page__folder-actions"
+            >
+              <NButton size="small" tertiary @click="openCreateFolder(selectedFolderId)">
+                <template #icon>
+                  <TSvgIcon icon="mdi:folder-plus-outline" :size="14" />
+                </template>
                 {{ t('newSubFolder') }}
               </NButton>
-              <NButton size="small" @click="openRenameFolder">
+              <NButton size="small" tertiary @click="openRenameFolder">
+                <template #icon>
+                  <TSvgIcon icon="mdi:pencil-outline" :size="14" />
+                </template>
                 {{ t('renameFolder') }}
               </NButton>
               <NPopconfirm
@@ -90,6 +133,9 @@
                     :disabled="!canDeleteSelectedFolder"
                     :title="canDeleteSelectedFolder ? '' : t('cannotDeleteNonEmpty')"
                   >
+                    <template #icon>
+                      <TSvgIcon icon="mdi:trash-can-outline" :size="14" />
+                    </template>
                     {{ t('deleteFolder') }}
                   </NButton>
                 </template>
@@ -97,27 +143,6 @@
               </NPopconfirm>
             </NSpace>
           </header>
-
-          <div class="t-storage-file-page__search">
-            <NInput
-              v-model:value="search.originalName"
-              :placeholder="t('search.originalName')"
-              size="small"
-              clearable
-              @change="applyFilters"
-            />
-            <NSelect
-              v-model:value="search.contentType"
-              :options="contentTypeOptions"
-              :placeholder="t('search.contentType')"
-              size="small"
-              clearable
-              @update:value="applyFilters"
-            />
-            <NButton size="small" type="primary" @click="applyFilters">
-              {{ t('search.search') }}
-            </NButton>
-          </div>
 
           <div v-if="selectedIds.length" class="t-storage-file-page__batch">
             <span>{{ t('selected', { n: selectedIds.length }) }}</span>
@@ -149,29 +174,34 @@
             </NPopconfirm>
           </div>
 
-          <NSpin :show="filesLoading">
+          <NSpin :show="filesLoading" class="t-storage-file-page__table-spin">
             <NDataTable
+              class="t-storage-file-page__table"
               :data="files"
               :columns="columns"
               :row-key="(r: FileRecordDto) => r.id"
               :checked-row-keys="selectedIds"
               size="small"
               :bordered="false"
-              :max-height="540"
+              :flex-height="true"
+              :pagination="false"
               @update:checked-row-keys="(keys: Array<string | number>) => selectedIds = keys.map(String)"
             />
-            <div class="t-storage-file-page__pagination">
-              <NPagination
-                v-model:page="pageIndex"
-                :item-count="totalFiles"
-                :page-size="pageSize"
-                :page-sizes="[20, 50, 100]"
-                show-size-picker
-                @update:page="loadFiles"
-                @update:page-size="onPageSizeChange"
-              />
-            </div>
           </NSpin>
+          <!-- Pagination lives outside NSpin so it stays pinned to the main
+               section's bottom even while the table area is loading. Matches
+               TCrudPage's footer-row pattern. -->
+          <div class="t-storage-file-page__pagination">
+            <NPagination
+              v-model:page="pageIndex"
+              :item-count="totalFiles"
+              :page-size="pageSize"
+              :page-sizes="[20, 50, 100]"
+              show-size-picker
+              @update:page="loadFiles"
+              @update:page-size="onPageSizeChange"
+            />
+          </div>
         </section>
       </div>
     </NCard>
@@ -181,7 +211,7 @@
       v-model:show="folderModal.show"
       :title="folderModal.mode === 'rename' ? t('renameFolder') : t('newFolder')"
       preset="card"
-      style="width: 460px"
+      :style="folderModalStyle"
     >
       <NForm label-placement="left" label-width="100px">
         <NFormItem :label="t('folderFields.name')" required>
@@ -216,9 +246,12 @@ import { computed, h, reactive, ref, onMounted } from 'vue'
 import type { TreeOption, DataTableColumns } from 'naive-ui'
 import {
   NCard, NSpace, NButton, NTree, NInput, NSelect, NSpin, NDataTable, NPagination,
-  NModal, NForm, NFormItem, NInputNumber, NPopconfirm, useMessage,
+  NModal, NForm, NFormItem, NInputNumber, NPopconfirm, NTag,
 } from 'naive-ui'
+import { useSafeMessage } from '../_shared/safeMessage'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChunkFileUpload from '../../components/data/TChunkFileUpload.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
@@ -229,12 +262,17 @@ type Scope = 'all' | 'unfiled' | 'folder'
 const bridge = createStorageBridge({ client: useAdminClient() })
 const t = makePageTranslator('storage.files')
 
-let message: { success(s: string): void; error(s: string): void }
-try {
-  message = useMessage()
-} catch {
-  message = { success: () => {}, error: () => {} }
-}
+const message = useSafeMessage()
+const bp = useBreakpoint()
+
+// Folder modal width — phone fullscreen, desktop fixed 460. Avoids the
+// useFormModal refactor since folderModal carries `mode` + `parentId`
+// metadata alongside the form payload.
+const folderModalStyle = computed(() =>
+  bp.isSm.value
+    ? { width: '100vw', maxWidth: '100vw' }
+    : { width: 'min(460px, 95vw)' },
+)
 
 // ---- State ----------------------------------------------------------------
 
@@ -365,7 +403,16 @@ const columns = computed<DataTableColumns<FileRecordDto>>(() => [
     render: (row) => formatSize(row.size),
   },
   { key: 'contentType', title: t('columns.contentType'), width: 160, ellipsis: { tooltip: true } },
-  { key: 'creatorName', title: t('columns.creatorName'), width: 140 },
+  // `creatorName` is NOT on the backend `FileRecord` (only creatorId), so the
+  // column used to be blank everywhere. Show `provider` + `referenceCount`
+  // instead — both are useful for admins inspecting storage health.
+  { key: 'provider', title: t('columns.provider'), width: 100 },
+  {
+    key: 'referenceCount',
+    title: t('columns.referenceCount'),
+    width: 110,
+    render: (row) => String(row.referenceCount ?? 0),
+  },
   {
     key: 'creationTime',
     title: t('columns.creationTime'),
@@ -586,16 +633,19 @@ onMounted(async () => {
 
 <style scoped>
 .t-storage-file-page {
-  padding: 16px;
+  /* no padding — owned by TAdminContent */
 }
 .t-storage-file-page__layout {
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 16px;
-  min-height: 540px;
+  /* No min-height: card-level flex-fill (from global polish rule) gives
+     the layout a definite height; grid items inherit it. */
+  flex: 1;
+  min-height: 0;
 }
 .t-storage-file-page__tree {
-  border-right: 1px solid var(--tnzi-base-border, #efeff5);
+  border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
 }
 .t-storage-file-page__root-list {
@@ -614,18 +664,18 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 .t-storage-file-page__root-item:hover {
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
 }
 .t-storage-file-page__root-item.is-active {
-  background: var(--tnzi-primary-color-suppl, rgba(6, 182, 212, 0.12));
-  color: var(--tnzi-primary-color, #06B6D4);
+  background: rgb(var(--tnzi-primary-rgb) / 0.12);
+  color: var(--tnzi-primary);
 }
 .t-storage-file-page__root-icon {
   font-size: 14px;
 }
 .t-storage-file-page__tree-divider {
   height: 1px;
-  background: var(--tnzi-base-border, #efeff5);
+  background: var(--tnzi-border);
   margin: 8px 0;
 }
 .t-storage-file-page__naive-tree {
@@ -633,42 +683,80 @@ onMounted(async () => {
   overflow: auto;
 }
 .t-storage-file-page__empty {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 16px 8px;
   font-size: 13px;
 }
 .t-storage-file-page__main {
   padding: 0 4px;
-}
-.t-storage-file-page__main-header {
+  /* flex column so the table area can grow and pagination can pin to
+     the bottom. min-height: 0 lets the flex children actually shrink. */
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  gap: 16px;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Wrapper around NSpin → NDataTable. NSpin defaults to inline-block,
+   so we need to coax it into a flex column too — and reach into its
+   internal `.n-spin-container`/`.n-spin-content` (which it uses for
+   the overlay + content layering) so the table inside actually has a
+   definite height for `flex-height` to read. */
+.t-storage-file-page__table-spin {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-storage-file-page__table-spin :deep(.n-spin-container),
+.t-storage-file-page__table-spin :deep(.n-spin-content) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-storage-file-page__table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Compact single-row toolbar — scope on the left, filters in the
+   middle (growing to consume slack), folder actions on the right.
+   Total height ~36-40px instead of the previous 150px header+search
+   stack. Wraps cleanly under 1024px. */
+.t-storage-file-page__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.t-storage-file-page__scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  /* Push filters + folder-actions to the right edge of the toolbar. */
+  margin-right: auto;
 }
 .t-storage-file-page__scope-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
 }
-.t-storage-file-page__scope-hint {
-  font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
-}
-.t-storage-file-page__search {
+.t-storage-file-page__filters {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
   align-items: center;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
 }
-.t-storage-file-page__search > :nth-child(1) {
-  flex: 1;
-  min-width: 200px;
-}
-.t-storage-file-page__search > :nth-child(2) {
+.t-storage-file-page__filter-name {
   width: 200px;
+}
+.t-storage-file-page__filter-type {
+  width: 160px;
+}
+.t-storage-file-page__folder-actions {
+  flex-shrink: 0;
 }
 .t-storage-file-page__batch {
   display: flex;
@@ -677,13 +765,14 @@ onMounted(async () => {
   flex-wrap: wrap;
   margin-bottom: 8px;
   padding: 8px 12px;
-  background: var(--tnzi-primary-color-suppl, rgba(6, 182, 212, 0.06));
+  background: rgb(var(--tnzi-primary-rgb) / 0.06);
   border-radius: var(--tnzi-admin-radius-md, 4px);
   font-size: 13px;
 }
 .t-storage-file-page__pagination {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
-  margin-top: 12px;
+  padding: 12px 4px 4px;
 }
 </style>

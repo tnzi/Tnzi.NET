@@ -1,12 +1,23 @@
 using Tnzi.AI;
+using Tnzi.AI.Sandbox.Events;
+using Tnzi.AI.Sandbox.Events.Handlers;
+using Tnzi.AI.Sandbox.Quota;
 using Tnzi.AI.Sandbox.Tools;
+using Tnzi.Audit;
 
 namespace Tnzi.AI.Sandbox;
 
 /// <summary>
 /// 沙箱执行环境模块 — 提供 Local/Docker/Kubernetes 三层沙箱
 /// </summary>
+/// <remarks>
+/// <c>[OptionalDependsOn(AuditModule)]</c> ensures audit infrastructure loads
+/// first when present, so the <c>SandboxCommandAuditHandler</c> can resolve
+/// <c>IAuditSender</c>; if the audit module is not loaded the handler degrades
+/// gracefully (no-op) because the dependency is constructor-optional.
+/// </remarks>
 [DependsOn(typeof(AIModule))]
+[OptionalDependsOn(typeof(AuditModule))]
 public class SandboxModule : TnziApplicationModule
 {
     public override int LoadOrder => 57;
@@ -44,6 +55,9 @@ public class SandboxModule : TnziApplicationModule
                 break;
         }
 
+        // Thread-scoped resource quota (cache-backed, no DB persistence)
+        context.Services.AddSingleton<IThreadResourceQuota, ThreadResourceQuotaService>();
+
         // Tools
         context.Services.AddScoped<SandboxTools>();
 
@@ -51,14 +65,26 @@ public class SandboxModule : TnziApplicationModule
         context.Services.AddScoped<IAiMiddleware, ThreadDataMiddleware>();
         context.Services.AddScoped<IAiMiddleware, SandboxMiddleware>();
 
+        // Events — sandbox command execution audit (uses optional IAuditSender)
+        context.Services.AddEventHandler<SandboxCommandExecutedEvent, SandboxCommandAuditHandler>();
+
         return Task.CompletedTask;
     }
 
-    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
         var logger = context.ServiceProvider.GetRequiredService<ILogger<SandboxModule>>();
         AIToolRegistration.ScanAndRegisterAITools(context.ServiceProvider, typeof(SandboxModule).Assembly, logger);
-        return Task.CompletedTask;
+
+        // Populate the shared skill resource root once at startup so that
+        // ThreadDataMiddleware can symlink each thread to it rather than
+        // copying every skill's files for every new thread.
+        var skillStore = context.ServiceProvider.GetService<ISkillStore>();
+        var options = context.ServiceProvider.GetRequiredService<IOptions<SandboxModuleOptions>>().Value;
+        if (skillStore != null && options.Enabled && !string.IsNullOrWhiteSpace(options.DataRoot))
+        {
+            await SharedSkillExtractor.ExtractAsync(skillStore, options.DataRoot, logger);
+        }
     }
 
     private static void RegisterDockerHttpClient(ServiceConfigurationContext context)

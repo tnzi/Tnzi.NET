@@ -90,7 +90,7 @@
 import { computed, ref, watch } from 'vue'
 import { NPopover, NCheckbox, NDivider } from 'naive-ui'
 import { VueDraggable } from 'vue-draggable-plus'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import { useColumnSettings, type ColumnDef } from '../../headless/useColumnSettings'
 
 type ColumnSettings = ReturnType<typeof useColumnSettings>

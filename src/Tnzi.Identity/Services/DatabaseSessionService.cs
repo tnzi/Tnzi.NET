@@ -7,11 +7,16 @@ namespace Tnzi.Identity.Services;
 public class DatabaseSessionService : ApplicationService, ISessionService
 {
     private readonly IRepository<UserSession, Guid> _repository;
+    private readonly IRepository<User, Guid>? _userRepository;
 
     public DatabaseSessionService(IRepository<UserSession, Guid> repository, IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
+        // Optional — only needed by GetActiveUsersAsync, resolved lazily so
+        // existing call paths and tests that don't register the user repository
+        // still construct the service successfully.
+        _userRepository = serviceProvider.GetService<IRepository<User, Guid>>();
     }
 
     /// <inheritdoc />
@@ -176,6 +181,64 @@ public class DatabaseSessionService : ApplicationService, ISessionService
         };
 
         return Ok(statistics);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IEnumerable<ActiveUserSummaryDto>>> GetActiveUsersAsync(int top = 50)
+    {
+        if (top <= 0) top = 50;
+        if (top > 500) top = 500;
+
+        // Step 1: GROUP BY on UserSession to get top-N userIds + per-user aggregates.
+        // Single-column join key keeps the GROUP BY index-friendly across providers.
+        var aggregates = await _repository
+            .Where(us => !us.IsRevoked)
+            .GroupBy(us => us.UserId)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                SessionCount = g.Count(),
+                LastActivityTime = g.Max(us => us.LastActivityTime),
+            })
+            .OrderByDescending(x => x.LastActivityTime)
+            .Take(top)
+            .ToListAsync();
+
+        if (aggregates.Count == 0)
+        {
+            return Ok<IEnumerable<ActiveUserSummaryDto>>(Array.Empty<ActiveUserSummaryDto>());
+        }
+
+        // Step 2: batch-fetch usernames for those userIds. Done in a separate
+        // query (not a JOIN) so that the GROUP BY plan stays clean and the
+        // User table's soft-delete filter does not silently drop active-user
+        // rows for soft-deleted accounts (we still surface them as null name).
+        var userIds = aggregates.Select(a => a.UserId).ToList();
+        Dictionary<Guid, string?> nameMap;
+        if (_userRepository != null)
+        {
+            var users = await _userRepository
+                .Where(u => userIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.UserName })
+                .ToListAsync();
+            nameMap = users.ToDictionary(u => u.Id, u => u.UserName);
+        }
+        else
+        {
+            nameMap = new Dictionary<Guid, string?>();
+        }
+
+        var result = aggregates
+            .Select(a => new ActiveUserSummaryDto
+            {
+                UserId = a.UserId,
+                UserName = nameMap.GetValueOrDefault(a.UserId),
+                SessionCount = a.SessionCount,
+                LastActivityTime = a.LastActivityTime,
+            })
+            .ToList();
+
+        return Ok<IEnumerable<ActiveUserSummaryDto>>(result);
     }
 }
 

@@ -12,12 +12,15 @@
     :all-columns="skillColumns"
     :title="title"
     :translate="t"
+    :form-modal-width="760"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="skillFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
       />
     </template>
     <template #rowActions="{ row }">
@@ -48,7 +51,13 @@ const bridge = createAiBridge({ client: useAdminClient() })
 const crud = useCrudPage<SkillSummaryDto>({
   pageId: 'ai.skills',
   columns: skillColumns,
-  rowKey: (s) => s.id,
+  // File-source skills have no DB row → backend returns Guid.Empty for `id`;
+  // fall back to slug so v-model:checked-row-keys + dataTable selection still
+  // produces unique keys (slug is unique within scope).
+  rowKey: (s) => {
+    const id = String(s.id ?? '')
+    return id && id !== '00000000-0000-0000-0000-000000000000' ? id : `slug:${s.slug}`
+  },
   fetchData: (query) => bridge.skills.fetch(query),
   createData: (data) => bridge.skills.create(data as CreateSkillDto),
   updateData: (id, data) => bridge.skills.update(String(id), data as UpdateSkillDto),

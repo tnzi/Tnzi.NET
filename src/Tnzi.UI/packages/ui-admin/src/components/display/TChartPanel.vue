@@ -55,7 +55,7 @@ const ChartImpl = defineAsyncComponent(() => import('./TChartPanelImpl.vue'))
 
 <style scoped>
 .t-chart-panel--noop {
-  border: 1px dashed var(--tnzi-base-border, #e0e0e6);
+  border: 1px dashed var(--tnzi-border);
   border-radius: 4px;
   opacity: 0.5;
 }

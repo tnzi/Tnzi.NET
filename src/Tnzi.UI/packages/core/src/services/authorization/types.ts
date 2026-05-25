@@ -13,6 +13,13 @@ export interface FunctionModuleDto {
   order: number
   isEnabled: boolean
   parentId?: string
+  /**
+   * True when the row is owned by an `IPermissionDefinitionProvider`
+   * in code. Admin UI must show a "system" badge and disable the
+   * Code / Name / ParentId edit fields. The IsEnabled toggle remains
+   * editable so ops can disable a permission without redeploying.
+   */
+  isSystemManaged?: boolean
 }
 
 export interface CreateFunctionModuleDto {
@@ -41,6 +48,12 @@ export interface ModuleFunctionDto {
   moduleId: string
   isEnabled: boolean
   order: number
+  /**
+   * True when this permission point was seeded from an
+   * `IPermissionDefinitionProvider`. Admin UI surfaces it as read-only
+   * (only IsEnabled is editable on system-managed rows).
+   */
+  isSystemManaged?: boolean
 }
 
 // ─── RoleFunction ─────────────────────────────────────────────────────────────
@@ -71,6 +84,43 @@ export interface RoleFunctionQueryDto {
   roleId?: string
   functionId?: string
   isEnabled?: boolean
+}
+
+// ─── Role permission comparison / clone ──────────────────────────────────────
+
+/**
+ * Per-function entry in `PermissionComparisonDto`. The flags mark which of
+ * the two compared roles owns the permission. A row is `onlyInRoleA` when
+ * `inRoleA && !inRoleB`, `onlyInRoleB` when the reverse, and `common` when
+ * both are true. The view can derive that without an extra field.
+ */
+export interface PermissionDifferenceDto {
+  functionId: string
+  functionCode: string
+  functionName: string
+  moduleId: string
+  moduleName?: string | null
+  inRoleA: boolean
+  inRoleB: boolean
+}
+
+/** Result of `GET /admin/role-functions/compare?roleId1=...&roleId2=...`. */
+export interface PermissionComparisonDto {
+  roleAId: string
+  roleAName: string
+  roleBId: string
+  roleBName: string
+  /** Functions owned by A but not by B. */
+  onlyInRoleA: PermissionDifferenceDto[]
+  /** Functions owned by B but not by A. */
+  onlyInRoleB: PermissionDifferenceDto[]
+  /** Functions present in both roles. */
+  common: PermissionDifferenceDto[]
+}
+
+/** Body of `POST /admin/role-functions/role/{roleId}/clone`. */
+export interface CloneRolePermissionsRequest {
+  sourceRoleId: string
 }
 
 // ─── EntityInfo (data-auth entity registry) ───────────────────────────────────

@@ -1,3 +1,6 @@
+using Tnzi.AI.Sandbox.Security;
+using Tnzi.AI.Security;
+
 namespace Tnzi.AI.Sandbox.Providers.Local;
 
 public class LocalSandbox : ISandbox
@@ -9,7 +12,9 @@ public class LocalSandbox : ISandbox
     private readonly string _normalizedWorkspacePath;
     private readonly TimeSpan _commandTimeout;
     private readonly long _maxOutputSize;
-    private readonly HashSet<string> _deniedCommands;
+    private readonly IReadOnlyCollection<string> _deniedCommands;
+    private readonly IReadOnlyCollection<string> _deniedCommandPrefixes;
+    private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private readonly List<string> _environmentBlacklist;
     private readonly IReadOnlyDictionary<string, string>? _environmentOverrides;
     private readonly object _outputLock = new();
@@ -19,14 +24,18 @@ public class LocalSandbox : ISandbox
     public LocalSandbox(string id, string workspacePath, TimeSpan commandTimeout,
         long maxOutputSize, IEnumerable<string>? deniedCommands = null,
         IEnumerable<string>? environmentBlacklist = null,
-        IReadOnlyDictionary<string, string>? environmentOverrides = null)
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        IEnumerable<string>? deniedCommandPrefixes = null,
+        IShellCommandAnalyzer? commandAnalyzer = null)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _workspacePath = Check.NotNullOrWhiteSpace(workspacePath);
         _normalizedWorkspacePath = Path.GetFullPath(workspacePath);
         _commandTimeout = commandTimeout;
         _maxOutputSize = maxOutputSize;
-        _deniedCommands = new HashSet<string>(deniedCommands ?? [], StringComparer.OrdinalIgnoreCase);
+        _deniedCommands = (deniedCommands ?? []).ToArray();
+        _deniedCommandPrefixes = (deniedCommandPrefixes ?? []).ToArray();
+        _commandAnalyzer = commandAnalyzer;
         _environmentBlacklist = (environmentBlacklist ?? []).ToList();
         _environmentOverrides = environmentOverrides;
     }
@@ -35,11 +44,8 @@ public class LocalSandbox : ISandbox
     {
         Check.NotNullOrWhiteSpace(command);
 
-        foreach (var denied in _deniedCommands)
-        {
-            if (command.Contains(denied, StringComparison.OrdinalIgnoreCase))
-                return new CommandResult(-1, "", $"Command denied: contains blocked pattern '{denied}'");
-        }
+        if (DeniedCommandMatcher.IsDenied(_commandAnalyzer, command, _deniedCommands, _deniedCommandPrefixes, out var reason))
+            return new CommandResult(-1, "", $"Command denied: {reason}");
 
         var isWindows = OperatingSystem.IsWindows();
         var psi = new ProcessStartInfo

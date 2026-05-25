@@ -363,6 +363,18 @@ export interface DeviceStatItem {
   count: number;
 }
 
+/**
+ * Active user summary — backs the admin "active users" picker on the session
+ * management page. Lets admins discover who is currently signed in without
+ * exposing a full user list.
+ */
+export interface ActiveUserSummaryDto {
+  userId: string;
+  userName?: string | null;
+  sessionCount: number;
+  lastActivityTime: Date | string;
+}
+
 // ============================================
 // Organization Types
 // ============================================

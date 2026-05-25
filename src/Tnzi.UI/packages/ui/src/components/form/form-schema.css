@@ -1,0 +1,111 @@
+/**
+ * `.t-form-schema--compact` — global compact overrides for the naive-ui
+ * NForm/NFormItem rendered by `TSchemaForm` in admin / CRUD modal forms.
+ *
+ * Why global (not scoped):
+ *   - NFormItem injects its label/feedback DOM into the form's internal
+ *     template; scoped attribute hashes do NOT propagate to those children
+ *     when the renderer uses `h()` to instantiate the components.
+ *   - Modal hosts typically teleport to <body>, escaping any parent's
+ *     scoped CSS context anyway.
+ *
+ * Why a marker class (not a global `.n-form-item` override):
+ *   - Other surfaces (e.g. a global search drawer, theme settings drawer)
+ *     also use NFormItem and rely on naive-ui's default spacing.
+ *   - Scoping all overrides under `.t-form-schema--compact` keeps the
+ *     compact rhythm contained to schema-driven modal forms.
+ *
+ * What it tightens (defaults → compact):
+ *   - Label padding-bottom    8px      →  2px
+ *   - Label font-size         14px     →  13px
+ *   - Label line-height       (varies) →  1.4
+ *   - Feedback min-height     24px     →  16px (still enough for one-line)
+ *   - Feedback padding-top    4px      →  2px
+ *   - Item margin-bottom      18px     →  4px  (12px field rhythm via
+ *                                                feedback block instead)
+ *
+ * Net effect:
+ *   Per-field row: ~84px → ~58px (multi-col, label-top mode)
+ *                  ~72px → ~52px (single-col, label-left mode)
+ *
+ * Validation still works:
+ *   `required` markers (`*`) render in the label as usual.
+ *   `rule` errors surface in the (smaller) feedback block.
+ */
+.t-form-schema--compact .n-form-item {
+  margin-bottom: 4px;
+}
+
+.t-form-schema--compact .n-form-item-label {
+  padding: 0 0 2px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  height: auto;
+  min-height: 0;
+}
+
+.t-form-schema--compact .n-form-item-blank {
+  min-height: 0;
+}
+
+.t-form-schema--compact .n-form-item-feedback-wrapper {
+  min-height: 16px;
+}
+
+.t-form-schema--compact .n-form-item-feedback {
+  padding-top: 2px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+/* Cap textarea height so a large field value (multi-KB template body)
+   can't blow past the modal viewport. naive-ui's `autosize: { maxRows }`
+   sometimes fails to clamp height in modal/readonly contexts — a hard
+   CSS max-height + internal scroll is the reliable belt-and-braces. */
+.t-form-schema--compact textarea {
+  max-height: 320px !important;
+  overflow: auto !important;
+}
+.t-form-schema--compact .n-input.n-input--textarea {
+  max-height: 360px;
+}
+
+/* View-mode (readonly) readability: when a non-editable form modal is open
+   the text-style fields use the native `readonly` attribute (renderField in
+   TSchemaForm.ts) — that already keeps text colour normal. Non-text widgets
+   (select / switch / date / radio) have no `readonly` prop and fall back to
+   `disabled`, which naive-ui renders with a muted ~0.3 alpha. These rules
+   restore full opacity + text colour so the rendered content reads the same
+   in view mode as in edit mode — only the affordances (caret, hover ring,
+   click toggle) are suppressed. */
+.t-form-schema--compact .n-base-selection--disabled,
+.t-form-schema--compact .n-select--disabled .n-base-selection-input,
+.t-form-schema--compact .n-select--disabled .n-base-selection-tags,
+.t-form-schema--compact .n-base-selection--disabled .n-base-selection-label,
+.t-form-schema--compact .n-input--readonly,
+.t-form-schema--compact .n-date-picker--disabled .n-input,
+.t-form-schema--compact .n-switch--disabled .n-switch__rail {
+  opacity: 1 !important;
+}
+.t-form-schema--compact .n-input--readonly .n-input__input-el,
+.t-form-schema--compact .n-input--readonly .n-input__textarea-el,
+.t-form-schema--compact .n-input--readonly .n-input__placeholder,
+.t-form-schema--compact .n-base-selection--disabled .n-base-selection-label__input,
+.t-form-schema--compact .n-base-selection--disabled .n-base-selection-input__content {
+  color: var(--tnzi-base-text, #333) !important;
+  -webkit-text-fill-color: var(--tnzi-base-text, #333) !important;
+}
+/* Readonly textareas (long template body) keep a subtle background so the
+   block stands apart visually from the labels above, but text stays full
+   contrast. */
+.t-form-schema--compact .n-input--readonly .n-input__textarea-el {
+  background: var(--tnzi-bg-deep, #f6f8fa) !important;
+}
+
+/* label-placement="left" branch — the label cell uses a side-padding
+   instead of a bottom-padding. Pull both label horizontal padding
+   and the vertical alignment so the label sits flush with the input. */
+.t-form-schema--compact .n-form-item.n-form-item--label-placement-left
+  .n-form-item-label {
+  padding: 0 12px 0 0;
+}

@@ -1,27 +1,33 @@
 <template>
-  <div>
-    <NAlert :type="'info'" :title="t('banner.title')" closable style="margin: 16px 16px 0">
-      {{ t('banner.body') }}
-    </NAlert>
-    <TCrudPage
-      :state="crud"
-      :all-columns="chunkColumns"
-      :title="title"
-      :translate="t"
-    >
-      <template #form="{ formData, mode }">
-        <TFormSchemaRenderer
-          :schema="chunkFormSchema"
-          :model="(formData ?? {}) as Record<string, unknown>"
-          :readonly="mode === 'view'"
-        />
-      </template>
-    </TCrudPage>
-  </div>
+  <!-- Phase J overhaul (2026-05-18): removed the top-of-page NAlert banner.
+       Diagnostic context lives in the (i) popover next to the title now —
+       see TCrudPage `titleHelp` prop. The banner was always-visible chrome
+       that pushed the data table down on every visit; the popover is just
+       as discoverable on hover/click and stays out of the way otherwise. -->
+  <!-- Read-only diagnostics view: hide create/delete buttons because chunks
+       are owned by the upload lifecycle. -->
+  <TCrudPage
+    :state="crud"
+    :all-columns="chunkColumns"
+    :title="title"
+    :title-help="t('banner.body')"
+    :title-help-title="t('banner.title')"
+    :translate="t"
+    :show-create="false"
+    :show-batch-delete="false"
+  >
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="chunkFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+        :translate="t"
+      />
+    </template>
+  </TCrudPage>
 </template>
 
 <script setup lang="ts">
-import { NAlert } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { createStorageBridge, type FileChunkAuditDto } from '../../services/bridges/storage-bridge'
@@ -42,9 +48,10 @@ const crud = useCrudPage<FileChunkAuditDto>({
   columns: chunkColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.chunks.fetch(query),
+  // Chunks are owned by the upload lifecycle — no admin write surface.
   createData: readOnlyFn,
   updateData: readOnlyFn,
-  deleteData: (ids) => bridge.chunks.delete(ids.map(String)),
+  deleteData: readOnlyFn,
 })
 
 

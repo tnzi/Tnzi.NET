@@ -1,23 +1,48 @@
 <template>
   <TCrudPage
     :state="crud"
-    :all-columns="functionModuleColumns"
+    :all-columns="columns"
     :title="title"
     :translate="t"
   >
     <template #form="{ formData, mode }">
+      <!--
+        System-managed rows: the backend rejects Code/Name/Description/
+        ParentId changes (would be reverted by the seeder on next startup
+        anyway). Lock those fields in the UI so admins don't waste time
+        editing and bouncing off the API. Order + IsEnabled stay editable
+        for legitimate ops use (e.g. emergency-disable a code-declared
+        permission without redeploying).
+      -->
+      <NAlert
+        v-if="(formData as Row)?.isSystemManaged"
+        :show-icon="false"
+        type="info"
+        style="margin-bottom: 12px"
+      >
+        {{ t('systemManagedHint') }}
+      </NAlert>
       <NForm :disabled="mode === 'view'" label-placement="left" label-width="140px">
         <NFormItem :label="t('form.code')" required>
-          <NInput :value="(formData as Row)?.code ?? ''" @update:value="(v: string) => set('code', v)" />
+          <NInput
+            :value="(formData as Row)?.code ?? ''"
+            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
+            @update:value="(v: string) => set('code', v)"
+          />
         </NFormItem>
         <NFormItem :label="t('form.name')" required>
-          <NInput :value="(formData as Row)?.name ?? ''" @update:value="(v: string) => set('name', v)" />
+          <NInput
+            :value="(formData as Row)?.name ?? ''"
+            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
+            @update:value="(v: string) => set('name', v)"
+          />
         </NFormItem>
         <NFormItem :label="t('form.parentId')">
           <NSelect
             :value="(formData as Row)?.parentId ?? null"
             :options="parentOptions"
             :placeholder="t('form.parentIdPlaceholder')"
+            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
             clearable
             filterable
             @update:value="(v: string | null) => set('parentId', v ?? undefined)"
@@ -26,45 +51,219 @@
         <NFormItem :label="t('form.order')">
           <NInputNumber :value="(formData as Row)?.order ?? 0" :min="0" @update:value="(v: number | null) => set('order', v ?? 0)" />
         </NFormItem>
-        <NFormItem :label="t('form.isEnabled')">
-          <NSwitch :value="(formData as Row)?.isEnabled ?? true" @update:value="(v: boolean) => set('isEnabled', v)" />
+        <NFormItem :label="t('form.description')">
+          <NInput
+            type="textarea"
+            :rows="2"
+            :value="(formData as Row)?.description ?? ''"
+            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
+            @update:value="(v: string) => set('description', v)"
+          />
         </NFormItem>
       </NForm>
     </template>
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t" />
+      <!--
+        Strict 2-button surface: [Edit] [More▾]. Enable/Disable lives inside
+        More because the backend exposes them as dedicated endpoints
+        (PUT /admin/modules/{id}/enable|disable, cascading to children).
+        The auto-injected Delete entry stays at the bottom of the More menu.
+      -->
+      <TRowActions
+        :row="(row as Row)"
+        :state="crud"
+        :translate="t"
+        :more-options="moreOptionsFor"
+        :on-more-select="onMoreSelect"
+      />
     </template>
   </TCrudPage>
+
+  <!--
+    Cascade-disable confirmation modal — opened by the row More menu's
+    "Disable" entry. The bridge computes the impact (descendant module
+    count + total affected functions) so the admin sees the blast radius
+    before clicking through. Permission cascade is enforced server-side;
+    this is purely a UX guardrail to prevent surprise outages.
+  -->
+  <NModal
+    v-model:show="cascadeModal.show"
+    :title="t('cascade.title')"
+    preset="card"
+    style="width: 520px"
+  >
+    <NSpin :show="cascadeModal.loading">
+      <div class="t-fm-page__cascade-body">
+        <template v-if="cascadeModal.preview">
+          <p class="t-fm-page__cascade-summary">
+            {{ t('cascade.summary', { module: cascadeModal.preview.rootModuleName }) }}
+          </p>
+          <ul class="t-fm-page__cascade-counts">
+            <li>
+              <TSvgIcon icon="mdi:folder-multiple-outline" :size="14" />
+              <strong>{{ cascadeModal.preview.descendantModuleCount }}</strong>
+              <span>{{ t('cascade.descendantModules', { n: cascadeModal.preview.descendantModuleCount }) }}</span>
+            </li>
+            <li>
+              <TSvgIcon icon="mdi:key-outline" :size="14" />
+              <strong>{{ cascadeModal.preview.affectedFunctionCount }}</strong>
+              <span>{{ t('cascade.affectedFunctions', { n: cascadeModal.preview.affectedFunctionCount }) }}</span>
+            </li>
+          </ul>
+          <details
+            v-if="cascadeModal.preview.descendantModuleCount > 0"
+            class="t-fm-page__cascade-details"
+          >
+            <summary>{{ t('cascade.descendantsHeader') }}</summary>
+            <ul class="t-fm-page__cascade-mod-list">
+              <li v-for="m in cascadeModal.preview.descendantModules" :key="m.id">
+                <span class="t-fm-page__cascade-mod-name">{{ m.name }}</span>
+                <code class="t-fm-page__cascade-mod-code">{{ m.code }}</code>
+              </li>
+            </ul>
+          </details>
+          <NAlert type="warning" :show-icon="false" :bordered="false">
+            {{ t('cascade.warning') }}
+          </NAlert>
+        </template>
+        <p v-else-if="cascadeModal.loading" class="t-fm-page__cascade-loading">
+          {{ t('cascade.loading') }}
+        </p>
+      </div>
+    </NSpin>
+    <template #footer>
+      <div style="display: flex; justify-content: flex-end; gap: 8px">
+        <NButton @click="cascadeModal.show = false">{{ t('cascade.cancel') }}</NButton>
+        <NButton
+          type="error"
+          :loading="cascadeModal.submitting"
+          :disabled="!cascadeModal.preview || cascadeModal.loading"
+          @click="confirmCascadeDisable"
+        >
+          {{ t('cascade.confirm') }}
+        </NButton>
+      </div>
+    </template>
+  </NModal>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
-import { NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect } from 'naive-ui'
+import { computed, h, reactive, ref, onMounted } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NForm,
+  NFormItem,
+  NInput,
+  NInputNumber,
+  NModal,
+  NSelect,
+  NSpin,
+} from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
+import {
+  createAuthorizationBridge,
+  type ModuleCascadePreview,
+} from '../../services/bridges/authorization-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { functionModuleColumns } from './function-module-config'
-import { translatePageKey } from '../_shared/translate'
+import { interpolate, translatePageKey } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safeMessage'
+import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FunctionModuleDto } from '@tnzi/core/services/authorization'
+import type { FunctionModuleRow } from './function-module-config'
 
-interface Row {
-  id?: string
-  code?: string
-  name?: string
-  parentId?: string
-  order?: number
-  isEnabled?: boolean
-}
+type Row = FunctionModuleRow
 
 const title = 'title'
 const bridge = createAuthorizationBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('authorization.functionModules', key)
+const t = (key: string, params?: Record<string, unknown>) =>
+  interpolate(translatePageKey('authorization.functionModules', key), params)
+const message = useSafeMessage()
+
+// Build lookup for parentId → parent module (used by both parentName column
+// and the parent picker). Loaded once on mount + after CRUD writes so the
+// picker reflects fresh state.
+const allModules = ref<FunctionModuleDto[]>([])
+const moduleById = computed(() => {
+  const m = new Map<string, FunctionModuleDto>()
+  for (const x of allModules.value) m.set(x.id, x)
+  return m
+})
+
+async function loadModuleOptions(): Promise<void> {
+  try {
+    allModules.value = await bridge.functionModules.getAll()
+  } catch {
+    allModules.value = []
+  }
+}
+
+// Columns defined here (not in config.ts) so the parentName cell can resolve
+// the parent module via the in-memory lookup — backend's GetModulesAsync
+// doesn't .Include(Parent), so a plain `row.parentName` field would always
+// be empty. Render functions close over the `moduleById` ref, so the cell
+// re-renders when the modules list refreshes.
+const columns: ColumnDef<Row>[] = [
+  {
+    key: 'name',
+    title: 'columns.name',
+    width: 240,
+    fixed: 'left',
+    // System-managed rows get a small badge next to the name so admins
+    // see at a glance that these are code-owned (and the Edit form will
+    // be partly read-only). Cheap visual cue beats a separate column.
+    render: (row) =>
+      h('span', { style: 'display: inline-flex; align-items: center; gap: 6px' }, [
+        row.name ?? '',
+        row.isSystemManaged
+          ? h(
+              TStatusBadge,
+              {
+                value: 'system',
+                mapping: {
+                  system: { type: 'info', labelKey: 'admin.shared.status.system' },
+                },
+              },
+            )
+          : null,
+      ]),
+  },
+  { key: 'code', title: 'columns.code', width: 200 },
+  {
+    key: 'parentName',
+    title: 'columns.parentName',
+    width: 180,
+    render: (row) => {
+      if (!row.parentId) return h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—')
+      const p = moduleById.value.get(row.parentId)
+      return p?.name ?? row.parentId
+    },
+  },
+  { key: 'description', title: 'columns.description', ellipsis: { tooltip: true } },
+  { key: 'order', title: 'columns.order', width: 80 },
+  {
+    key: 'isEnabled',
+    title: 'columns.isEnabled',
+    width: 110,
+    fixed: 'right',
+    render: (row) =>
+      h(TStatusBadge, {
+        value: row.isEnabled ?? false,
+        mapping: {
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
+        },
+      }),
+  },
+]
 
 const crud = useCrudPage<Row>({
   pageId: 'authorization.functionModules',
-  columns: functionModuleColumns,
+  columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (query) => bridge.functionModules.fetch(query),
   createData: async (data) => {
@@ -85,25 +284,9 @@ const crud = useCrudPage<Row>({
 
 crud.refresh().catch(() => undefined)
 
-// Indented `name` options for the parent picker. Excludes the row being
-// edited (and its descendants) to prevent cycles — the simple version below
-// excludes self only; a full descendant check is overkill for typical
-// module trees (<50 nodes) and the backend rejects cycles anyway.
-const allModules = ref<FunctionModuleDto[]>([])
 const editingId = computed(() => (crud.formModal.formData.value as Row | null)?.id)
 
-async function loadModuleOptions(): Promise<void> {
-  try {
-    allModules.value = await bridge.functionModules.getAll()
-  } catch {
-    allModules.value = []
-  }
-}
-
 const parentOptions = computed(() => {
-  // Build name with `code` suffix for disambiguation; indent by depth from parentId chain.
-  const byId = new Map<string, FunctionModuleDto>()
-  for (const m of allModules.value) byId.set(m.id, m)
   /**
    * Walk the parent chain, counting hops. Uses a `visited` set so a cyclic
    * chain (corrupted data) terminates instead of looping forever — depth
@@ -113,12 +296,12 @@ const parentOptions = computed(() => {
     if (!id) return 0
     const visited = new Set<string>()
     let d = 0
-    let cur = byId.get(id)
+    let cur = moduleById.value.get(id)
     while (cur?.parentId) {
       if (visited.has(cur.parentId)) break
       visited.add(cur.parentId)
       d += 1
-      cur = byId.get(cur.parentId)
+      cur = moduleById.value.get(cur.parentId)
       if (d > 32) break // hard safety net for unreasonably deep trees
     }
     return d
@@ -138,7 +321,163 @@ function set(key: keyof Row, value: unknown): void {
   ;(crud.formModal.formData.value as unknown as Record<string, unknown>)[key as string] = value
 }
 
+// Row actions: Enable/Disable via the backend's dedicated cascading endpoints.
+function moreOptionsFor(row: Row) {
+  return [
+    row.isEnabled
+      ? { key: 'disable', label: t('actions.disable') }
+      : { key: 'enable', label: t('actions.enable') },
+  ]
+}
+
+async function withRefresh(action: () => Promise<void>, successKey: string): Promise<void> {
+  try {
+    await action()
+    message.success(t(successKey))
+    await crud.refresh()
+    await loadModuleOptions()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+function onMoreSelect(key: string, row: Row): void {
+  if (!row.id) return
+  if (key === 'enable') {
+    // Enabling is purely additive — no cascade modal needed.
+    void withRefresh(() => bridge.functionModules.enable(row.id!), 'actions.enableSuccess')
+  } else if (key === 'disable') {
+    void openCascadeModal(row.id)
+  }
+}
+
+// ─── Cascade-disable modal ─────────────────────────────────────────────────
+// Disabling a parent module flips every descendant module + all their
+// functions off in one transaction. The bridge's `previewCascade` walks
+// the cached module tree and returns the impact counts — we render them
+// in a confirmation modal so the admin can see what they're about to do.
+const cascadeModal = reactive({
+  show: false,
+  loading: false,
+  submitting: false,
+  targetId: '' as string,
+  preview: null as ModuleCascadePreview | null,
+})
+
+async function openCascadeModal(moduleId: string): Promise<void> {
+  cascadeModal.show = true
+  cascadeModal.loading = true
+  cascadeModal.targetId = moduleId
+  cascadeModal.preview = null
+  try {
+    cascadeModal.preview = await bridge.functionModules.previewCascade(moduleId)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    cascadeModal.show = false
+  } finally {
+    cascadeModal.loading = false
+  }
+}
+
+async function confirmCascadeDisable(): Promise<void> {
+  const id = cascadeModal.targetId
+  if (!id) return
+  cascadeModal.submitting = true
+  try {
+    await bridge.functionModules.disable(id)
+    message.success(t('actions.disableSuccess'))
+    cascadeModal.show = false
+    await crud.refresh()
+    await loadModuleOptions()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    cascadeModal.submitting = false
+  }
+}
+
 onMounted(() => {
   void loadModuleOptions()
 })
 </script>
+
+<style scoped>
+.t-fm-page__cascade-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 80px;
+}
+.t-fm-page__cascade-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--tnzi-base-text);
+}
+.t-fm-page__cascade-counts {
+  list-style: none;
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--tnzi-layout-bg);
+  border-radius: var(--tnzi-admin-radius-md, 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.t-fm-page__cascade-counts > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--tnzi-base-text);
+}
+.t-fm-page__cascade-counts strong {
+  color: var(--tnzi-warning);
+  font-size: 16px;
+  min-width: 28px;
+}
+.t-fm-page__cascade-details {
+  font-size: 12px;
+}
+.t-fm-page__cascade-details summary {
+  cursor: pointer;
+  color: var(--tnzi-base-text-muted);
+  user-select: none;
+}
+.t-fm-page__cascade-details summary:hover {
+  color: var(--tnzi-primary);
+}
+.t-fm-page__cascade-mod-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.t-fm-page__cascade-mod-list > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--tnzi-layout-bg);
+  border-radius: 4px;
+}
+.t-fm-page__cascade-mod-name {
+  font-size: 12px;
+  color: var(--tnzi-base-text);
+}
+.t-fm-page__cascade-mod-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted);
+}
+.t-fm-page__cascade-loading {
+  text-align: center;
+  color: var(--tnzi-base-text-muted);
+  font-size: 13px;
+  padding: 24px 8px;
+  margin: 0;
+}
+</style>

@@ -43,6 +43,7 @@ global using Tnzi.EFCore.Internal;
 global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
 global using Tnzi.Identity;
+global using Tnzi.Identity.Events;
 global using Tnzi.Identity.Services;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;

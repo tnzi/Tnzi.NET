@@ -16,8 +16,9 @@
 import { computed } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import TAdminBreadcrumb, { type TAdminBreadcrumbItem } from './TAdminBreadcrumb.vue'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
 import { DEFAULT_ROUTE_ICONS } from '../../router/routeIcons'
+import { translatePageKey } from '../../pages/_shared/translate'
 
 interface Props {
   /** Show the route icon beside each crumb label. Default `true`. */
@@ -62,6 +63,10 @@ function resolveLabel(r: RouteLocationNormalizedLoaded['matched'][number]): stri
     // dotted-i18n strings in the breadcrumb.
     if (translated && translated !== raw) return translated
   }
+  // Bundled-locale fallback so breadcrumb labels localise without the
+  // consumer wiring `translate`. Mirrors TAdminTabs.renderTitle.
+  const bundled = translatePageKey('', raw)
+  if (bundled && bundled !== raw) return bundled
   return humanise(raw)
 }
 

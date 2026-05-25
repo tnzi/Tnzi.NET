@@ -92,6 +92,18 @@ public class DefaultSessionAdminController : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 获取当前活跃用户列表（按最后活跃时间倒序），用于 admin 会话页的"活跃用户"下拉
+    /// </summary>
+    /// <param name="top">返回的最大用户数（默认 50，上限 500）</param>
+    /// <returns>活跃用户摘要列表（含 userName + sessionCount + lastActivityTime）</returns>
+    [HttpGet("active-users")]
+    public virtual async Task<ApiResult<IEnumerable<ActiveUserSummaryDto>>> GetActiveUsers([FromQuery] int top = 50)
+    {
+        var result = await SessionService.GetActiveUsersAsync(top);
+        return result.ToApiResult();
+    }
+
     // 注意：会话管理不是CRUD操作，不提供钩子方法
     // 如需扩展，请使用重写方法
 }

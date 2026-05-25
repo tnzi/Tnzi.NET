@@ -53,6 +53,22 @@ public class EventBusOptions
     public List<string> HandlerAssemblies { get; set; } = new();
 
     /// <summary>
+    /// 获取或设置 自动扫描是否排除框架程序集（以 "Tnzi" 开头，默认 true）。
+    ///
+    /// 框架要求所有 Tnzi.* 程序集**手动注册** event handlers（参见
+    /// `Tnzi/CLAUDE.md` Module Patterns）。如果同时被 auto-scan 扫到，
+    /// EventBusModule (LoadOrder=110) 比应用模块 (LoadOrder >= 300) 先
+    /// 跑，IsAlreadyRegistered 检查时手动注册还未发生，handler 通过
+    /// `TryAddEnumerable` 注册一次；随后应用模块通过 `AddScoped` 又注册
+    /// 一次。结果同一 handler 在 DI 容器里出现两个 descriptor，每次事件
+    /// 发布触发两次执行 — 例如 `UserLoggedInEventHandler` 写两条登录日志。
+    ///
+    /// 设为 false 可恢复旧行为（同时扫描框架与应用程序集）。仅当 consumer
+    /// 显式指定了 `HandlerAssemblies` 时本选项不生效（认为是显式选择）。
+    /// </summary>
+    public bool ExcludeFrameworkAssemblies { get; set; } = true;
+
+    /// <summary>
     /// 获取或设置 自动注册的处理器默认生命周期（默认 Scoped）
     /// 可通过 EventHandlerLifetimeAttribute 特性覆盖单个处理器的生命周期
     /// </summary>

@@ -39,6 +39,18 @@
       "types": "./dist/presets/index.d.ts",
       "import": "./dist/presets.js"
     },
+    "./locales": {
+      "types": "./dist/locales/index.d.ts",
+      "import": "./dist/locales/index.js"
+    },
+    "./locales/en": {
+      "types": "./dist/locales/en.d.ts",
+      "import": "./dist/locales/en.js"
+    },
+    "./locales/zh-cn": {
+      "types": "./dist/locales/zh-cn.d.ts",
+      "import": "./dist/locales/zh-cn.js"
+    },
     "./style.css": "./dist/style.css"
   },
   "publishConfig": {
@@ -61,32 +73,45 @@
   },
   "dependencies": {
     "@iconify/vue": "^5.0.0",
-    "@tnzi/core": "workspace:*",
-    "@tnzi/ui": "workspace:*",
-    "@tnzi/ui-ai": "workspace:*",
     "@vueuse/core": "^11.0.0",
     "echarts": "^5.5.0",
+    "pinia-plugin-persistedstate": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@tnzi/core": "workspace:^",
+    "@tnzi/ui": "workspace:^",
+    "@tnzi/ui-ai": "workspace:^",
     "naive-ui": "^2.40.0",
     "pinia": "^3.0.0",
-    "pinia-plugin-persistedstate": "^4.0.0",
     "vue": "^3.5.0",
     "vue-draggable-plus": "^0.6.0",
     "vue-router": "^4.5.0"
   },
+  "peerDependenciesMeta": {
+    "@tnzi/ui-ai": {
+      "optional": true
+    },
+    "vue-draggable-plus": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@tnzi/core": "workspace:*",
+    "@tnzi/ui": "workspace:*",
+    "@tnzi/ui-ai": "workspace:*",
     "@vitejs/plugin-vue": "^5.0.0",
     "@vue/test-utils": "^2.4.6",
     "happy-dom": "^15.11.7",
+    "naive-ui": "^2.40.0",
     "typescript": "^5.9.3",
     "unocss": "^66.6.8",
     "vite": "^5.4.0",
     "vite-plugin-dts": "^3.9.0",
     "vitest": "^3.0.0",
+    "vue": "^3.5.0",
+    "vue-draggable-plus": "^0.6.0",
+    "vue-router": "^4.5.0",
     "vue-tsc": "^2.0.0"
-  },
-  "peerDependencies": {
-    "pinia": "^3.0.0",
-    "vue": "^3.5.0"
   },
   "keywords": [
     "tnzi",

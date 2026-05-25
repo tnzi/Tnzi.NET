@@ -34,6 +34,7 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'identity.gdpr': 'mdi:shield-account-outline',
   'identity.organizations': 'mdi:office-building-outline',
   'identity.sessions': 'mdi:account-clock-outline',
+  'identity.loginSecurity': 'mdi:shield-account-outline',
 
   // ── Authorization sub-routes ────────────────────────────────────
   'authorization.functionModules': 'mdi:view-grid-outline',
@@ -48,6 +49,12 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'system.accessLogs': 'mdi:eye-outline',
   'system.scheduledJobs': 'mdi:clock-outline',
   'system.features': 'mdi:toggle-switch-outline',
+  'system.logFiles': 'mdi:text-box-search-outline',
+  'system.diagnostics': 'mdi:stethoscope',
+  'system.performance': 'mdi:speedometer',
+  'system.localization': 'mdi:translate',
+  'system.signalr': 'mdi:broadcast',
+  'system.health': 'mdi:heart-pulse',
 
   // ── Storage sub-routes ──────────────────────────────────────────
   'storage.files': 'mdi:file-outline',
@@ -71,6 +78,9 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'payment.orders': 'mdi:cart-outline',
   'payment.subscriptions': 'mdi:credit-card-clock-outline',
   'payment.refunds': 'mdi:cash-refund',
+  'payment.statistics': 'mdi:chart-line',
+  'payment.invoices': 'mdi:file-document-outline',
+  'payment.promotions': 'mdi:ticket-percent-outline',
 
   // ── AI sub-routes ───────────────────────────────────────────────
   'ai.agents': 'mdi:robot-outline',
@@ -85,6 +95,11 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'ai.personas': 'mdi:account-tie-outline',
   'ai.evaluations': 'mdi:test-tube',
   'ai.threads': 'mdi:chat-processing-outline',
+  'ai.workspaceAgents': 'mdi:folder-account-outline',
+  'ai.channels': 'mdi:connection',
+  'ai.devices': 'mdi:devices',
+  'ai.permissions': 'mdi:shield-key-outline',
+  'ai.sandbox': 'mdi:cube-outline',
 
   // ── Template sub-routes ─────────────────────────────────────────
   'template.templates': 'mdi:file-document-outline',

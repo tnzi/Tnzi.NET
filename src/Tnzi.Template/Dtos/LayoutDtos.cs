@@ -70,6 +70,9 @@ public class QueryLayoutRequest : PagedQueryDto
     public bool? IsActive { get; set; }
     public bool? IsDefault { get; set; }
     public string? Keyword { get; set; }
+
+    /// <summary>Include filesystem-backed layouts in the paged result.</summary>
+    public bool IncludeFileSource { get; set; }
 }
 
 /// <summary>
@@ -86,6 +89,15 @@ public class LayoutInfoDto
     public string? Description { get; set; }
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
+
+    /// <summary>Origin of this layout row — "Database" or "FileSystem".</summary>
+    public string Source { get; set; } = "Database";
+
+    /// <summary>True for filesystem-fallback rows (shipped with binaries, not editable).</summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>Absolute filesystem path of the source layout (file-source rows only).</summary>
+    public string? FilePath { get; set; }
 }
 
 /// <summary>

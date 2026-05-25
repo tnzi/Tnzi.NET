@@ -64,6 +64,27 @@ public class SystemModule : TnziApplicationModule
         services.AddSingleton<IAccessLogConsumer>(accessLogSender);
         services.AddHostedService<AccessLogBackgroundService>();
 
+        // SettingConfigurationSource: 把 host builder 阶段注册的 source 暴露成 DI singleton，
+        // 让 OnApplicationInitializationAsync 拿同一实例 attach IServiceProvider + 触发首次 reload。
+        // 应用未调 builder.Configuration.AddTnziSettings() 时, source 为 null, handler/IOptionsMonitor 自动 no-op。
+        var settingSource = context.Configuration.GetTnziSettingsSource();
+        if (settingSource != null)
+        {
+            services.AddSingleton(settingSource);
+            services.AddEventHandler<SettingChangedEvent, SettingChangedEventHandler>();
+        }
+
         return Task.CompletedTask;
+    }
+
+    public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        // SettingConfigurationSource 在 host build 阶段创建时未持有 IServiceProvider；
+        // 此刻 DI 已 ready，attach root provider 让 source 首次从 DB pull 配置 + IOptionsMonitor 拿到 DB 值。
+        var source = context.ServiceProvider.GetService<SettingConfigurationSource>();
+        if (source != null)
+        {
+            await source.AttachAsync(context.ServiceProvider);
+        }
     }
 }

@@ -254,16 +254,30 @@ public class EventBusModule : TnziInfrastructureModule
         }
         else
         {
-            // 扫描所有已加载的非系统程序集
-            // 注意：框架程序集（Tnzi.*）也会被扫描，但会输出警告提醒使用手动注册
+            // 扫描所有已加载的非系统程序集。
+            // 框架程序集（Tnzi.*）默认被排除：framework rule 要求所有
+            // Tnzi.* handler 必须 manual register via `AddEventHandler<TEvent, THandler>()`。
+            // 若同时被 auto-scan 扫到，由于 EventBusModule 比应用模块先跑，
+            // IsAlreadyRegistered 在 auto-scan 时还看不到后续的手动注册，
+            // 结果同一 handler 在 DI 出现两条 descriptor → 一次事件被调用两次。
+            // 用 `EventBus.ExcludeFrameworkAssemblies = false` 可恢复旧行为。
             return AppDomain.CurrentDomain.GetAssemblies()
                 .Where(a =>
                 {
                     var name = a.GetName().Name ?? "";
-                    return !a.IsDynamic &&
-                           !name.StartsWith("System", StringComparison.OrdinalIgnoreCase) &&
-                           !name.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase) &&
-                           !name.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase);
+                    if (a.IsDynamic ||
+                        name.StartsWith("System", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                    if (options.ExcludeFrameworkAssemblies &&
+                        name.StartsWith("Tnzi", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                    return true;
                 })
                 .ToArray();
         }

@@ -2,14 +2,39 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TRelativeTime from '../../components/display/TRelativeTime.vue'
+import { TRelativeTime } from '@tnzi/ui'
+
+/**
+ * Role search fields — align with backend `RoleListQueryDto`:
+ * `keyword` (free text on name/description) + `isSystem` + `isDefault`.
+ */
+export const roleSearchFields: FormSchemaItem[] = [
+  { key: 'keyword', labelKey: 'form.keyword', label: 'Keyword', type: 'text', placeholder: 'columns.name' },
+  {
+    key: 'isDefault',
+    labelKey: 'form.isDefault', label: 'Default',
+    type: 'select',
+    options: [
+      { label: 'Default', value: 'true' },
+      { label: 'Custom', value: 'false' },
+    ],
+  },
+  {
+    key: 'isSystem',
+    labelKey: 'form.isSystem', label: 'System',
+    type: 'select',
+    options: [
+      { label: 'System', value: 'true' },
+      { label: 'User', value: 'false' },
+    ],
+  },
+]
 
 export interface RoleRow {
   id?: string
   name?: string
-  code?: string
+  normalizedName?: string
   description?: string
-  enabled?: boolean
   isDefault?: boolean
   isSystem?: boolean
   creationTime?: string
@@ -17,18 +42,17 @@ export interface RoleRow {
 
 export const roleColumns: ColumnDef<RoleRow>[] = [
   { key: 'name', title: 'columns.name', width: 200, fixed: 'left' },
-  { key: 'code', title: 'columns.code', width: 160 },
   { key: 'description', title: 'columns.description' },
   {
-    key: 'enabled',
-    title: 'columns.enabled',
+    key: 'isDefault',
+    title: 'columns.isDefault',
     width: 110,
     render: (row) =>
       h(TStatusBadge, {
-        value: row.enabled ?? false,
+        value: row.isDefault ?? false,
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'info', labelKey: 'admin.shared.status.default' },
+          false: { type: 'default', labelKey: 'admin.shared.status.custom' },
         },
       }),
   },
@@ -37,9 +61,13 @@ export const roleColumns: ColumnDef<RoleRow>[] = [
     title: 'columns.isSystem',
     width: 110,
     render: (row) =>
-      row.isSystem
-        ? h(TStatusBadge, { value: 'system', type: 'info', label: 'System' })
-        : h(TStatusBadge, { value: 'custom', type: 'default', label: 'Custom' }),
+      h(TStatusBadge, {
+        value: row.isSystem ?? false,
+        mapping: {
+          true: { type: 'warning', labelKey: 'admin.shared.status.system' },
+          false: { type: 'default', labelKey: 'admin.shared.status.user' },
+        },
+      }),
   },
   {
     key: 'creationTime',
@@ -51,9 +79,7 @@ export const roleColumns: ColumnDef<RoleRow>[] = [
 ]
 
 export const roleFormSchema: FormSchemaItem[] = [
-  { key: 'name',        label: 'Role Name',   type: 'text',     required: true },
-  { key: 'code',        label: 'Code',        type: 'text',     required: true },
-  { key: 'description', label: 'Description', type: 'textarea' },
-  { key: 'enabled',     label: 'Enabled',     type: 'switch' },
-  { key: 'isDefault',   label: 'Default Role', type: 'switch' },
+  { key: 'name', labelKey: 'form.name', label: 'Role Name', type: 'text', required: true },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
+  { key: 'isDefault', labelKey: 'form.isDefault', label: 'Default Role', type: 'switch' },
 ]

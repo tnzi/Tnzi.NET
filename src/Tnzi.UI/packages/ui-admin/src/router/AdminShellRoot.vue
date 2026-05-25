@@ -14,9 +14,10 @@
  * their own component; the route table replacement logic in
  * {@link createTnziUiAdmin} treats consumer-supplied routes as authoritative.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NConfigProvider, type GlobalThemeOverrides } from 'naive-ui'
+import { NConfigProvider, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import TAdminShell from '../components/layout/TAdminShell.vue'
 import TAdminAutoBreadcrumb from '../components/layout/TAdminAutoBreadcrumb.vue'
 import TAdminUserAvatar from '../components/layout/TAdminUserAvatar.vue'
@@ -55,6 +56,22 @@ const naiveOverrides = computed<GlobalThemeOverrides>(() => {
     },
   }
 })
+
+/**
+ * Defensive dark-theme binding — when consumers wrap their top-level
+ * `<App>` with `<NConfigProvider :theme="...">` (the Acme pattern),
+ * Naive UI's inner providers inherit the theme automatically and this
+ * binding is redundant. When they DON'T (the bare-bones "drop ui-admin
+ * in and go" pattern), NConfigProvider here has `theme: undefined`
+ * which forces every NCard / NInput / NDataTable inside the admin
+ * shell to render with the light palette — even when `<html class="dark">`
+ * is set. Reading `THEME_CONTEXT_KEY` (provided by `createTnziUi()`)
+ * and applying `darkTheme` ourselves makes the admin shell self-sufficient
+ * without breaking the Acme inheritance flow (consumers' outer provider
+ * still wins for any token they explicitly override).
+ */
+const themeCtx = inject<ThemeContext | undefined>(THEME_CONTEXT_KEY, undefined)
+const naiveTheme = computed(() => (themeCtx?.isDark.value ? darkTheme : null))
 // Phase I.7.6: reuse the login-page brand config for the sidebar's
 // header logo + title. Both surfaces want the same brand identity, and
 // consumers already configured this for the login page.
@@ -123,6 +140,15 @@ function onLocaleChange(locale: 'en' | 'zh-cn'): void {
 }
 
 /**
+ * Default fallback for the avatar's "User Center" menu item — pushes the
+ * built-in `/admin/user-center` route. Consumers can still override by
+ * passing `defineAdminApp({ login: { user: { onUserCenter } } })`.
+ */
+function goUserCenter(): void {
+  router.push({ name: 'user-center' }).catch(() => undefined)
+}
+
+/**
  * Default translator for the bundled drawer / shell components. Looks up
  * dotted keys against the `@tnzi/ui-admin/locales/{en,zh-cn}` packs;
  * returns the raw key on miss so consumers can see exactly which keys
@@ -148,7 +174,7 @@ function defaultTranslate(key: string, fallback?: string): string {
 </script>
 
 <template>
-  <NConfigProvider :theme-overrides="naiveOverrides" inline-theme-disabled>
+  <NConfigProvider :theme="naiveTheme" :theme-overrides="naiveOverrides" inline-theme-disabled>
     <TAdminShell
       :title="loginConfig.brand ?? 'Tnzi Admin'"
       :sider="{ brand: loginConfig.brand, brandIcon: loginConfig.brandIcon }"
@@ -172,7 +198,7 @@ function defaultTranslate(key: string, fallback?: string): string {
       <TAdminUserAvatar
         :user-name="loginConfig.user?.userName"
         :avatar-icon="loginConfig.user?.avatarIcon"
-        :on-user-center="loginConfig.user?.onUserCenter"
+        :on-user-center="loginConfig.user?.onUserCenter ?? goUserCenter"
         :on-logout="loginConfig.user?.onLogout"
         :signed-in="loginConfig.user?.signedIn ?? true"
         :on-sign-in="loginConfig.user?.onSignIn"

@@ -88,6 +88,8 @@ vi.mock('../../src/services/bridges/identity-bridge', () => ({
 }))
 vi.mock('../../src/services/bridges/audit-bridge', () => ({
   createAuditBridge: () => ({ logs: mkCrud(), operations: mkCrud() }),
+  // 0.2.72+ (B4) re-export mirror — see audit-bridge.ts.
+  AuditResultType: { Success: 1, Failed: 2, Warning: 3 },
 }))
 vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({

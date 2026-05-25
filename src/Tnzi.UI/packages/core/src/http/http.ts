@@ -378,11 +378,20 @@ export class HttpClient {
       // Handle 401 with auto-refresh (only if not already a retry after refresh)
       if (lastResult.code === 401 && !isRetryAfterRefresh) {
         const refreshResult = await this.tryRefreshAndRetry<T>(config);
-        if (refreshResult) {
+        if (refreshResult && refreshResult.code !== 401) {
           return refreshResult;
         }
-        // Refresh not available or failed — return the 401 result
-        return lastResult;
+        // Either refresh threw (refreshTokenFn rejected → tryRefreshAndRetry
+        // already called notifyUnauthorized), or refresh "succeeded" but the
+        // retry still 401'd (stale token / backend revoked session).
+        // In the second case we must notify here too — otherwise the only
+        // signal the consumer's session-expired handler ever sees is the
+        // first scenario, and a backend-side revoke would leave the user
+        // stuck on an API-error loop without redirect.
+        if (refreshResult?.code === 401) {
+          this.notifyUnauthorized();
+        }
+        return refreshResult ?? lastResult;
       }
 
       // Check if we should retry on other status codes

@@ -49,6 +49,14 @@
                 </span>
               </div>
               <NSpace>
+                <NButton size="small" :disabled="treeLoading" @click="openCompareModal">
+                  <template #icon><TSvgIcon icon="mdi:compare-horizontal" :size="14" /></template>
+                  {{ t('compare.button') }}
+                </NButton>
+                <NButton size="small" :disabled="treeLoading" @click="openCloneModal">
+                  <template #icon><TSvgIcon icon="mdi:content-copy" :size="14" /></template>
+                  {{ t('clone.button') }}
+                </NButton>
                 <NButton size="small" :disabled="treeLoading" @click="reset">
                   {{ t('reset') }}
                 </NButton>
@@ -97,22 +105,142 @@
         </section>
       </div>
     </NCard>
+
+    <!--
+      Compare-roles modal — three-column read-only diff.
+      Source role A is fixed to the currently-selected role; admin picks
+      role B from a select populated from the role catalogue. The compare
+      result comes from the backend (PermissionComparisonDto).
+    -->
+    <NModal
+      v-model:show="compareModal.show"
+      :title="t('compare.title')"
+      preset="card"
+      style="width: min(1080px, 96vw)"
+    >
+      <div class="t-role-func-page__compare-picker">
+        <div class="t-role-func-page__compare-pair">
+          <span class="t-role-func-page__compare-label">{{ t('compare.roleA') }}:</span>
+          <NTag :bordered="false">{{ selectedRole?.name ?? '—' }}</NTag>
+        </div>
+        <div class="t-role-func-page__compare-pair">
+          <span class="t-role-func-page__compare-label">{{ t('compare.roleB') }}:</span>
+          <NSelect
+            v-model:value="compareModal.targetRoleId"
+            :options="otherRoleOptions"
+            :placeholder="t('compare.pickRole')"
+            filterable
+            clearable
+            size="small"
+            style="width: 280px"
+          />
+          <NButton
+            type="primary"
+            size="small"
+            :disabled="!compareModal.targetRoleId"
+            :loading="compareModal.loading"
+            @click="runCompare"
+          >
+            {{ t('compare.run') }}
+          </NButton>
+        </div>
+      </div>
+
+      <NSpin :show="compareModal.loading">
+        <div v-if="compareModal.result" class="t-role-func-page__compare-grid">
+          <section
+            v-for="bucket in compareBuckets"
+            :key="bucket.id"
+            class="t-role-func-page__compare-bucket"
+          >
+            <header class="t-role-func-page__compare-bucket-header">
+              <h4 class="t-role-func-page__compare-bucket-title">{{ bucket.title }}</h4>
+              <NTag size="tiny" :bordered="false" :type="bucket.tone">
+                {{ bucket.rows.length }}
+              </NTag>
+            </header>
+            <div v-if="!bucket.rows.length" class="t-role-func-page__compare-empty">
+              {{ t('compare.empty') }}
+            </div>
+            <ul v-else class="t-role-func-page__compare-list">
+              <li v-for="row in bucket.rows" :key="row.functionId">
+                <div class="t-role-func-page__compare-fn-name">{{ row.functionName }}</div>
+                <code class="t-role-func-page__compare-fn-code">{{ row.functionCode }}</code>
+                <div v-if="row.moduleName" class="t-role-func-page__compare-fn-module">
+                  {{ row.moduleName }}
+                </div>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </NSpin>
+
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end">
+          <NButton @click="compareModal.show = false">{{ t('compare.close') }}</NButton>
+        </div>
+      </template>
+    </NModal>
+
+    <!--
+      Clone-from-role modal — picks a source role, calls the backend
+      clone endpoint, and refreshes the current role's assignment set.
+      Idempotent on the backend (Existing assignments are not duplicated).
+    -->
+    <NModal
+      v-model:show="cloneModal.show"
+      :title="t('clone.title')"
+      preset="card"
+      style="width: 480px"
+    >
+      <NForm label-placement="top" :show-feedback="false">
+        <NFormItem :label="t('clone.sourceRole')" required>
+          <NSelect
+            v-model:value="cloneModal.sourceRoleId"
+            :options="otherRoleOptions"
+            :placeholder="t('clone.pickSource')"
+            filterable
+            clearable
+          />
+        </NFormItem>
+        <p class="t-role-func-page__hint">{{ t('clone.hint') }}</p>
+      </NForm>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 8px">
+          <NButton @click="cloneModal.show = false">{{ t('compare.close') }}</NButton>
+          <NButton
+            type="primary"
+            :loading="cloneModal.saving"
+            :disabled="!cloneModal.sourceRoleId"
+            @click="runClone"
+          >
+            {{ t('clone.confirm') }}
+          </NButton>
+        </div>
+      </template>
+    </NModal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref, onMounted } from 'vue'
-import type { TreeOption } from 'naive-ui'
+import { computed, h, reactive, ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import type { SelectOption, TreeOption } from 'naive-ui'
 import {
-  NCard, NSpace, NButton, NTree, NInput, NSpin, NTag, NPopconfirm, useMessage,
+  NCard, NSpace, NButton, NTree, NInput, NSpin, NTag, NPopconfirm,
+  NModal, NForm, NFormItem, NSelect,
 } from 'naive-ui'
+import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
+import { TSvgIcon } from '@tnzi/ui'
 import type {
   FunctionModuleDto,
   ModuleFunctionDto,
+  PermissionComparisonDto,
+  PermissionDifferenceDto,
 } from '@tnzi/core/services/authorization'
 import type { RoleDto } from '@tnzi/core/services/identity'
 
@@ -123,12 +251,7 @@ const authBridge = createAuthorizationBridge({ client })
 const idBridge = createIdentityBridge({ client })
 const t = makePageTranslator('authorization.roleFunctions')
 
-let message: { success(s: string): void; error(s: string): void }
-try {
-  message = useMessage()
-} catch {
-  message = { success: () => {}, error: () => {} }
-}
+const message = useSafeMessage()
 
 const roles = ref<Role[]>([])
 const modules = ref<FunctionModuleDto[]>([])
@@ -357,14 +480,129 @@ async function handleClear(): Promise<void> {
   }
 }
 
-onMounted(() => {
-  void loadAll()
+// ─── Compare / Clone roles ────────────────────────────────────────────────
+// Both modals share the role catalogue (the same `roles.value` that powers
+// the left rail). We expose a "other roles" computed so the source/target
+// dropdowns can't accidentally pick the currently-selected role.
+
+const otherRoleOptions = computed<SelectOption[]>(() =>
+  roles.value
+    .filter((r) => r.id !== selectedRoleId.value)
+    .map((r) => ({ value: r.id, label: r.name })),
+)
+
+const compareModal = reactive({
+  show: false,
+  loading: false,
+  targetRoleId: null as string | null,
+  result: null as PermissionComparisonDto | null,
+})
+
+const compareBuckets = computed(() => {
+  const r = compareModal.result
+  if (!r) return []
+  const roleAName = selectedRole.value?.name ?? '—'
+  const roleBName = roles.value.find((x) => x.id === compareModal.targetRoleId)?.name ?? '—'
+  return [
+    {
+      id: 'onlyInA',
+      title: t('compare.onlyInA', { role: roleAName }),
+      tone: 'info' as const,
+      rows: r.onlyInRoleA ?? [],
+    },
+    {
+      id: 'onlyInB',
+      title: t('compare.onlyInB', { role: roleBName }),
+      tone: 'warning' as const,
+      rows: r.onlyInRoleB ?? [],
+    },
+    {
+      id: 'common',
+      title: t('compare.common'),
+      tone: 'success' as const,
+      rows: r.common ?? [],
+    },
+  ] as Array<{
+    id: string
+    title: string
+    tone: 'info' | 'warning' | 'success'
+    rows: PermissionDifferenceDto[]
+  }>
+})
+
+function openCompareModal(): void {
+  compareModal.show = true
+  compareModal.targetRoleId = null
+  compareModal.result = null
+}
+
+async function runCompare(): Promise<void> {
+  const target = compareModal.targetRoleId
+  if (!target || !selectedRoleId.value) return
+  compareModal.loading = true
+  try {
+    compareModal.result = await authBridge.roleFunctions.compare(
+      selectedRoleId.value,
+      target,
+    )
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    compareModal.result = null
+  } finally {
+    compareModal.loading = false
+  }
+}
+
+const cloneModal = reactive({
+  show: false,
+  saving: false,
+  sourceRoleId: null as string | null,
+})
+
+function openCloneModal(): void {
+  cloneModal.show = true
+  cloneModal.sourceRoleId = null
+}
+
+async function runClone(): Promise<void> {
+  const source = cloneModal.sourceRoleId
+  if (!source || !selectedRoleId.value) return
+  if (source === selectedRoleId.value) {
+    message.warning(t('clone.sameRoleError'))
+    return
+  }
+  cloneModal.saving = true
+  try {
+    const count = await authBridge.roleFunctions.clone(selectedRoleId.value, source)
+    message.success(t('clone.success', { n: count }))
+    cloneModal.show = false
+    // Refetch assignments so the tree reflects the merged permissions.
+    await loadAssignedForRole(selectedRoleId.value)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    cloneModal.saving = false
+  }
+}
+
+// Pre-select role from `?roleId=` query — used by RoleManagement detail
+// drawer's "Open Permission Editor" deep-link. Wait for the role list to
+// load before selecting so the active highlight + tree render in one paint.
+const route = useRoute()
+
+onMounted(async () => {
+  await loadAll()
+  const queryRoleId = typeof route.query.roleId === 'string' ? route.query.roleId : null
+  if (queryRoleId && roles.value.some((r) => r.id === queryRoleId)) {
+    selectedRoleId.value = queryRoleId
+    await loadAssignedForRole(queryRoleId)
+  }
 })
 </script>
 
 <style scoped>
 .t-role-func-page {
-  padding: 16px;
+  /* no padding — owned by TAdminContent */
 }
 .t-role-func-page__layout {
   display: grid;
@@ -373,7 +611,7 @@ onMounted(() => {
   min-height: 520px;
 }
 .t-role-func-page__roles {
-  border-right: 1px solid var(--tnzi-base-border, #efeff5);
+  border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
 }
 .t-role-func-page__role-list {
@@ -391,30 +629,30 @@ onMounted(() => {
   transition: background-color 0.15s;
 }
 .t-role-func-page__role-item:hover {
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
 }
 .t-role-func-page__role-item.is-active {
-  background: var(--tnzi-primary-color-suppl, rgba(6, 182, 212, 0.12));
-  color: var(--tnzi-primary-color, #06B6D4);
+  background: rgb(var(--tnzi-primary-rgb) / 0.12);
+  color: var(--tnzi-primary);
 }
 .t-role-func-page__role-name {
   font-weight: 500;
   font-size: 14px;
 }
 .t-role-func-page__role-code {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-role-func-page__role-item.is-active .t-role-func-page__role-code {
-  color: var(--tnzi-primary-color, #06B6D4);
+  color: var(--tnzi-primary);
   opacity: 0.7;
 }
 .t-role-func-page__tree {
   padding: 0 4px;
 }
 .t-role-func-page__placeholder {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 60px 16px;
 }
@@ -431,7 +669,7 @@ onMounted(() => {
   font-size: 18px;
 }
 .t-role-func-page__assigned-count {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   font-size: 12px;
 }
 .t-role-func-page__naive-tree {
@@ -439,18 +677,110 @@ onMounted(() => {
   overflow: auto;
 }
 .t-role-func-page__empty {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 24px 8px;
   font-size: 13px;
 }
 :deep(.t-role-func-page__fn-code) {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   margin-left: 8px;
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+/* Compare modal — three columns side by side on desktop, single column
+   on phones. Each column lists the functions in that bucket as compact
+   tiles (name + monospaced code + optional module hint). */
+.t-role-func-page__compare-picker {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--tnzi-border);
+}
+.t-role-func-page__compare-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.t-role-func-page__compare-label {
+  font-size: 13px;
+  color: var(--tnzi-base-text-muted);
+}
+.t-role-func-page__compare-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .t-role-func-page__compare-grid { grid-template-columns: 1fr; }
+}
+.t-role-func-page__compare-bucket {
+  background: var(--tnzi-layout-bg);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  padding: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.t-role-func-page__compare-bucket-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.t-role-func-page__compare-bucket-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+.t-role-func-page__compare-empty {
+  color: var(--tnzi-base-text-muted);
+  text-align: center;
+  padding: 24px 8px;
+  font-size: 12px;
+}
+.t-role-func-page__compare-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.t-role-func-page__compare-list > li {
+  padding: 8px 10px;
+  background: var(--tnzi-container-bg);
+  border-radius: 4px;
+  border: 1px solid var(--tnzi-border);
+}
+.t-role-func-page__compare-fn-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tnzi-base-text);
+}
+.t-role-func-page__compare-fn-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted);
+  display: block;
+  margin-top: 2px;
+}
+.t-role-func-page__compare-fn-module {
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted);
+  margin-top: 2px;
+}
+.t-role-func-page__hint {
+  margin: 0 0 12px;
+  color: var(--tnzi-base-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

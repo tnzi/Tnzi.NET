@@ -253,14 +253,111 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
                 (l.Description != null && l.Description.ToLower().Contains(keyword)));
         }
 
-        var pagedList = await query
+        if (!request.IncludeFileSource)
+        {
+            var pagedList = await query
+                .OrderBy(l => l.Module)
+                .ThenBy(l => l.Category)
+                .ThenBy(l => l.LayoutName)
+                .ProjectTo<Layout, LayoutInfoDto>()
+                .CreateAsync(request, cancellationToken);
+            return Ok(pagedList);
+        }
+
+        // Merged DB + filesystem branch — analogous to TemplateStoreService.
+        var dbItems = await query
             .OrderBy(l => l.Module)
             .ThenBy(l => l.Category)
             .ThenBy(l => l.LayoutName)
             .ProjectTo<Layout, LayoutInfoDto>()
-            .CreateAsync(request, cancellationToken);
+            .ToListAsync(cancellationToken);
+        foreach (var item in dbItems)
+        {
+            item.Source = "Database";
+            item.IsReadOnly = false;
+        }
+        var fileItems = ScanFileSystemLayouts(request);
+        var seen = new HashSet<string>(
+            dbItems.Select(d => $"{d.Module}::{d.Category}::{d.LayoutName}"),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var fi in fileItems)
+        {
+            var key = $"{fi.Module}::{fi.Category}::{fi.LayoutName}";
+            if (seen.Add(key)) dbItems.Add(fi);
+        }
+        var ordered = dbItems
+            .OrderBy(d => d.Module)
+            .ThenBy(d => d.Category)
+            .ThenBy(d => d.LayoutName)
+            .ToList();
+        var total = ordered.Count;
+        var skip = (request.PageIndex - 1) * request.PageSize;
+        var pageItems = ordered.Skip(skip).Take(request.PageSize).ToList();
+        return Ok((IPagedList<LayoutInfoDto>)new PagedList<LayoutInfoDto>(pageItems, request.PageIndex, request.PageSize, total));
+    }
 
-        return Ok(pagedList);
+    /// <summary>
+    /// Scan the configured search roots for filesystem-backed layouts under
+    /// `Layouts/{module}/.../*.cshtml`. The layout root mirrors the template
+    /// root convention — both honour the same TemplateOptions paths.
+    /// </summary>
+    private List<LayoutInfoDto> ScanFileSystemLayouts(QueryLayoutRequest request)
+    {
+        var results = new List<LayoutInfoDto>();
+        if (_templateOptions == null || !_templateOptions.EnableFileSystemTemplates)
+            return results;
+        try
+        {
+            // Layouts conventionally live under a sibling `Layouts/` directory
+            // (TemplateOptions doesn't ship a separate LayoutRootPath — the
+            // current convention reuses the template root extended with the
+            // "Layouts" subfolder).
+            var extension = _templateOptions.TemplateExtension ?? ".cshtml";
+            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
+            var keyword = request.Keyword?.ToLowerInvariant();
+            foreach (var searchRoot in searchRoots)
+            {
+                var layoutsRoot = Path.Combine(searchRoot, "Layouts");
+                if (!Directory.Exists(layoutsRoot)) continue;
+                foreach (var path in Directory.EnumerateFiles(layoutsRoot, "*" + extension, SearchOption.AllDirectories))
+                {
+                    var relPath = Path.GetRelativePath(layoutsRoot, path);
+                    var parts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (parts.Length < 2) continue;
+                    var fileModule = parts[0];
+                    var fileCategory = parts.Length >= 3
+                        ? string.Join('/', parts.Skip(1).Take(parts.Length - 2))
+                        : string.Empty;
+                    var fileName = Path.GetFileNameWithoutExtension(parts[^1]);
+                    if (!string.IsNullOrWhiteSpace(request.Module) && !string.Equals(fileModule, request.Module, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!string.IsNullOrWhiteSpace(request.Category) && !string.Equals(fileCategory, request.Category, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!string.IsNullOrWhiteSpace(keyword) && !fileName.ToLowerInvariant().Contains(keyword))
+                        continue;
+                    var fi = new FileInfo(path);
+                    results.Add(new LayoutInfoDto
+                    {
+                        Id = Guid.Empty,
+                        LayoutName = fileName,
+                        Module = fileModule,
+                        Category = fileCategory,
+                        IsActive = true,
+                        IsDefault = false,
+                        Source = "FileSystem",
+                        IsReadOnly = true,
+                        FilePath = path,
+                        CreationTime = fi.CreationTimeUtc,
+                        LastModificationTime = fi.LastWriteTimeUtc,
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "ScanFileSystemLayouts failed");
+        }
+        return results;
     }
 
     /// <summary>

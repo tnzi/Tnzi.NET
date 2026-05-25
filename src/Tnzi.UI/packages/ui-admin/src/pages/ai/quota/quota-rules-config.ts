@@ -40,8 +40,8 @@ export const quotaColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.isEnabled),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },
@@ -49,11 +49,11 @@ export const quotaColumns: ColumnDef[] = [
 ]
 
 export const quotaFormSchema: FormSchemaItem[] = [
-  { key: 'userId', label: 'User ID', type: 'text', required: true, placeholder: 'Target user UUID' },
-  { key: 'dailyTokenLimit', label: 'Daily Token Limit', type: 'number', min: 0, required: true },
-  { key: 'monthlyTokenLimit', label: 'Monthly Token Limit', type: 'number', min: 0, required: true },
-  { key: 'warningThreshold', label: 'Warning Threshold (0-1)', type: 'number', min: 0, max: 1 },
-  { key: 'criticalThreshold', label: 'Critical Threshold (0-1)', type: 'number', min: 0, max: 1 },
+  { key: 'userId', labelKey: 'form.userId', label: 'User ID', type: 'text', required: true, placeholder: 'Target user UUID' },
+  { key: 'dailyTokenLimit', labelKey: 'form.dailyTokenLimit', label: 'Daily Token Limit', type: 'number', min: 0, required: true },
+  { key: 'monthlyTokenLimit', labelKey: 'form.monthlyTokenLimit', label: 'Monthly Token Limit', type: 'number', min: 0, required: true },
+  { key: 'warningThreshold', labelKey: 'form.warningThreshold', label: 'Warning Threshold (0-1)', type: 'number', min: 0, max: 1 },
+  { key: 'criticalThreshold', labelKey: 'form.criticalThreshold', label: 'Critical Threshold (0-1)', type: 'number', min: 0, max: 1 },
 ]
 
 /**

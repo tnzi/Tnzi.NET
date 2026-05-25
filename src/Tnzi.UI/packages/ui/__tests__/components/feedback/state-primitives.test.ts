@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TEmpty from '../../../src/components/feedback/TEmpty.vue'
 import TResult from '../../../src/components/feedback/TResult.vue'
-import TSkeleton from '../../../src/components/feedback/TSkeleton.vue'
 
 describe('TEmpty', () => {
   it('renders default description', () => {
@@ -57,39 +56,5 @@ describe('TResult', () => {
   })
 })
 
-describe('TSkeleton', () => {
-  it('renders with default type text', () => {
-    const wrapper = mount(TSkeleton)
-    expect(wrapper.find('.t-skeleton--text').exists()).toBe(true)
-  })
-  it('renders rect type', () => {
-    const wrapper = mount(TSkeleton, { props: { type: 'rect' } })
-    expect(wrapper.find('.t-skeleton--rect').exists()).toBe(true)
-  })
-  it('renders circle type', () => {
-    const wrapper = mount(TSkeleton, { props: { type: 'circle' } })
-    expect(wrapper.find('.t-skeleton--circle').exists()).toBe(true)
-  })
-  it('renders multiple rows for text type', () => {
-    const wrapper = mount(TSkeleton, { props: { rows: 3 } })
-    expect(wrapper.findAll('.t-skeleton__row')).toHaveLength(3)
-  })
-  it('applies custom width', () => {
-    const wrapper = mount(TSkeleton, { props: { width: '200px' } })
-    const el = wrapper.find('.t-skeleton')
-    expect(el.attributes('style')).toContain('width: 200px')
-  })
-  it('applies custom height', () => {
-    const wrapper = mount(TSkeleton, { props: { height: '40px' } })
-    const el = wrapper.find('.t-skeleton')
-    expect(el.attributes('style')).toContain('height: 40px')
-  })
-  it('animation class applied by default', () => {
-    const wrapper = mount(TSkeleton)
-    expect(wrapper.find('.t-skeleton--animated').exists()).toBe(true)
-  })
-  it('animation can be disabled', () => {
-    const wrapper = mount(TSkeleton, { props: { animated: false } })
-    expect(wrapper.find('.t-skeleton--animated').exists()).toBe(false)
-  })
-})
+// TSkeleton tests moved to __tests__/components/display/TSkeleton.test.ts
+// when the component was relocated in 0.2.71+ (C2 sink).

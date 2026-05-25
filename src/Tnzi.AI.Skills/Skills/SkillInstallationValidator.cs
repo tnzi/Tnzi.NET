@@ -31,7 +31,11 @@ public static partial class SkillInstallationValidator
         "tool-whitelist", "tool-blacklist", "allowed-tools", "denied-tools",
         "model", "provider", "reasoning-effort", "execution-context",
         "internal", "license", "homepage", "keywords", "category",
-        "paths"
+        "paths",
+        // Routing-signal hint (Phase 3.2). All three casing styles are
+        // accepted so frontmatter authors can pick whichever matches the
+        // rest of their YAML conventions.
+        "when-to-use", "whenToUse", "when_to_use"
     };
 
     [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*$")]

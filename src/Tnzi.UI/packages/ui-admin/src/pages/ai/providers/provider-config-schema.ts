@@ -35,8 +35,8 @@ export const providerColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.isEnabled),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },

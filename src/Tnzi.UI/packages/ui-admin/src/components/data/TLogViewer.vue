@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
+import { translatePageKey } from '../../pages/_shared/translate'
 
 export interface LogEntry {
   level: 'error' | 'warn' | 'info' | 'debug'
@@ -12,6 +13,9 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+
+const t = (key: string, fallback: string) =>
+  translatePageKey('', key) || fallback
 
 const buffer = ref<LogEntry[]>([...props.entries])
 const level = ref<'all' | LogEntry['level']>('all')
@@ -66,24 +70,24 @@ defineExpose({ append, clear, setLevel, setFilter })
   <div class="t-log-viewer">
     <div class="t-log-viewer__toolbar">
       <select v-model="level" class="t-log-viewer__level" aria-label="Log level filter">
-        <option value="all">All levels</option>
-        <option value="error">Error</option>
-        <option value="warn">Warn</option>
-        <option value="info">Info</option>
-        <option value="debug">Debug</option>
+        <option value="all">{{ t('admin.shared.logViewer.allLevels', 'All levels') }}</option>
+        <option value="error">{{ t('admin.shared.logViewer.error', 'Error') }}</option>
+        <option value="warn">{{ t('admin.shared.logViewer.warn', 'Warn') }}</option>
+        <option value="info">{{ t('admin.shared.logViewer.info', 'Info') }}</option>
+        <option value="debug">{{ t('admin.shared.logViewer.debug', 'Debug') }}</option>
       </select>
       <input
         v-model="filter"
         class="t-log-viewer__filter"
         type="text"
-        placeholder="Filter text..."
+        :placeholder="t('admin.shared.placeholder.filterText', 'Filter text...')"
         aria-label="Log text filter"
       />
       <label class="t-log-viewer__auto-scroll">
         <input type="checkbox" v-model="autoScroll" />
-        Auto-scroll
+        {{ t('admin.shared.logViewer.autoScroll', 'Auto-scroll') }}
       </label>
-      <button type="button" class="t-log-viewer__clear" @click="clear">Clear</button>
+      <button type="button" class="t-log-viewer__clear" @click="clear">{{ t('admin.common.clear', 'Clear') }}</button>
     </div>
     <ul ref="listRef" class="t-log-viewer__list">
       <li

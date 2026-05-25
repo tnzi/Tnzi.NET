@@ -33,7 +33,7 @@ import {
   type LayoutQueryDto,
 } from '@tnzi/core/services/template'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest } from '../_mappers'
+import { mapQueryToListRequest, pagedResult } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminTemplateApi>[0]
 
@@ -47,6 +47,12 @@ export interface TemplateBridgeDeps {
 
 /** templates sub-contract with render + clone actions */
 export interface TemplateBridgeTemplateContract extends BridgeCrudContract<TemplateInfoDto> {
+  /**
+   * Hydrate a list row to its full TemplateEntityDto. Use this when a
+   * page needs the heavy text fields (`subjectTemplate`/`contentTemplate`)
+   * that paged-list responses strip for transport efficiency.
+   */
+  getById(id: string): Promise<TemplateEntityDto>
   /**
    * Render a template with given variables.
    * Fetches the template by ID, then calls the preview endpoint.
@@ -85,6 +91,7 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
     return {
       templates: {
         fetch: noFetch as never,
+        getById: backendGapReject('templates.getById'),
         create: backendGapReject('templates.create'),
         update: backendGapReject('templates.update'),
         delete: backendGapReject('templates.delete'),
@@ -107,20 +114,30 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
   // ---- templates sub-contract ----
 
   async function fetchTemplates(query: CrudPageQuery): Promise<CrudPageResult<TemplateInfoDto>> {
-    const params = mapQueryToListRequest(query) as unknown as TemplateQueryDto
+    const params = { ...mapQueryToListRequest(query), includeFileSource: true } as unknown as TemplateQueryDto
     const result = unwrap<{ items: TemplateInfoDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await ta.getList(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const templates: TemplateBridgeTemplateContract = {
     fetch: fetchTemplates,
+    /**
+     * Hydrate a list row to its full TemplateEntityDto — surfaces the
+     * heavy `subjectTemplate` / `contentTemplate` / `metadata` fields the
+     * paged list endpoint strips. Pages use this on open-for-view/edit so
+     * the form modal renders real template body, not just the metadata
+     * shape returned by `fetch`.
+     */
+    getById: async (id: string): Promise<TemplateEntityDto> => {
+      return unwrap<TemplateEntityDto>(await ta.getById(id))
+    },
     create: async (data: Partial<TemplateInfoDto>) => {
       return unwrap<TemplateInfoDto>(await ta.create(data as never))
     },
@@ -153,16 +170,16 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
   // ---- layouts sub-contract ----
 
   async function fetchLayouts(query: CrudPageQuery): Promise<CrudPageResult<LayoutInfoDto>> {
-    const params = mapQueryToListRequest(query) as unknown as LayoutQueryDto
+    const params = { ...mapQueryToListRequest(query), includeFileSource: true } as unknown as LayoutQueryDto
     const result = unwrap<{ items: LayoutInfoDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await la.getList(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const layouts: BridgeCrudContract<LayoutInfoDto> = {

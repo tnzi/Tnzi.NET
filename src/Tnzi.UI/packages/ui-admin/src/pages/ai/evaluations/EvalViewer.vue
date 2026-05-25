@@ -4,7 +4,7 @@
       <template #header-extra>
         <NSpace>
           <NButton size="small" @click="refresh">{{ t('refresh') }}</NButton>
-          <NButton size="small" type="primary" @click="newRunModal.show = true">
+          <NButton size="small" type="primary" @click="openNewRunModal">
             {{ t('newRun') }}
           </NButton>
         </NSpace>
@@ -92,45 +92,75 @@
       </div>
     </NCard>
 
-    <!-- New run modal (kept simple — wraps the legacy create-and-run flow) -->
-    <NModal v-model:show="newRunModal.show" :title="t('newRun')" preset="card" style="width: 560px">
-      <NForm label-placement="left" label-width="120px">
-        <NFormItem :label="t('form.agentId')" required>
-          <NInput v-model:value="newRunModal.agentId" placeholder="GUID" />
-        </NFormItem>
-        <NFormItem :label="t('form.versionNumber')">
-          <NInputNumber v-model:value="newRunModal.versionNumber" :min="1" clearable />
-        </NFormItem>
-        <NFormItem :label="t('form.caseInput')" required>
-          <NInput v-model:value="newRunModal.caseInput" type="textarea" :rows="3" />
-        </NFormItem>
-        <NFormItem :label="t('form.caseExpected')">
-          <NInput v-model:value="newRunModal.caseExpected" type="textarea" :rows="2" />
-        </NFormItem>
-      </NForm>
+    <!-- New run modal — uses TFormModal so width auto-adapts on
+         narrow viewports (Phase 1 responsive). -->
+    <TFormModal
+      :state="newRunModal as unknown as UseFormModalReturn<unknown>"
+      :title="t('newRun')"
+      :width="560"
+      :translate="t"
+      @submit="submitNewRun"
+    >
+      <template #default="{ formData }">
+        <NForm v-if="formData" label-placement="left" label-width="120px">
+          <NFormItem :label="t('form.agentId')" required>
+            <NInput
+              :value="(formData as NewRunForm).agentId"
+              :placeholder="t('admin.shared.placeholder.guid')"
+              @update:value="(v: string) => ((formData as NewRunForm).agentId = v)"
+            />
+          </NFormItem>
+          <NFormItem :label="t('form.versionNumber')">
+            <NInputNumber
+              :value="(formData as NewRunForm).versionNumber"
+              :min="1"
+              clearable
+              @update:value="(v: number | null) => ((formData as NewRunForm).versionNumber = v)"
+            />
+          </NFormItem>
+          <NFormItem :label="t('form.caseInput')" required>
+            <NInput
+              :value="(formData as NewRunForm).caseInput"
+              type="textarea"
+              :rows="3"
+              @update:value="(v: string) => ((formData as NewRunForm).caseInput = v)"
+            />
+          </NFormItem>
+          <NFormItem :label="t('form.caseExpected')">
+            <NInput
+              :value="(formData as NewRunForm).caseExpected"
+              type="textarea"
+              :rows="2"
+              @update:value="(v: string) => ((formData as NewRunForm).caseExpected = v)"
+            />
+          </NFormItem>
+        </NForm>
+      </template>
       <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
-          <NButton @click="newRunModal.show = false">{{ t('form.cancel') }}</NButton>
+        <div class="t-eval-page__modal-footer">
+          <NButton @click="newRunModal.close">{{ t('form.cancel') }}</NButton>
           <NButton
             type="primary"
             :loading="creating"
-            :disabled="!newRunModal.agentId || !newRunModal.caseInput.trim()"
+            :disabled="!newRunFormValid"
             @click="submitNewRun"
           >
             {{ t('form.runNow') }}
           </NButton>
         </div>
       </template>
-    </NModal>
+    </TFormModal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import {
-  NCard, NSpace, NButton, NSpin, NTag, NModal, NForm, NFormItem, NInput, NInputNumber,
-  useMessage,
+  NCard, NSpace, NButton, NSpin, NTag, NForm, NFormItem, NInput, NInputNumber,
 } from 'naive-ui'
+import { useSafeMessage } from '../../_shared/safeMessage'
+import { useFormModal, type UseFormModalReturn } from '../../../headless/useFormModal'
+import TFormModal from '../../../components/crud/TFormModal.vue'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { translatePageKey } from '../../_shared/translate'
@@ -140,15 +170,17 @@ import type {
   EvaluationRunDetailDto,
 } from '@tnzi/core/services/ai'
 
+interface NewRunForm {
+  agentId: string
+  versionNumber: number | null
+  caseInput: string
+  caseExpected: string
+}
+
 const bridge = createAiBridge({ client: useAdminClient() })
 const t = (key: string) => translatePageKey('ai.evaluations', key)
 
-let message: { success(s: string): void; error(s: string): void }
-try {
-  message = useMessage()
-} catch {
-  message = { success: () => {}, error: () => {} }
-}
+const message = useSafeMessage()
 
 const runs = ref<EvaluationRunDto[]>([])
 const listLoading = ref(false)
@@ -158,12 +190,21 @@ const leftDetail = ref<EvaluationRunDetailDto | null>(null)
 const rightDetail = ref<EvaluationRunDetailDto | null>(null)
 const creating = ref(false)
 
-const newRunModal = reactive({
-  show: false,
-  agentId: '',
-  versionNumber: null as number | null,
-  caseInput: '',
-  caseExpected: '',
+const newRunModal = useFormModal<NewRunForm>()
+
+function openNewRunModal(): void {
+  newRunModal.open('create', {
+    agentId: '',
+    versionNumber: null,
+    caseInput: '',
+    caseExpected: '',
+  })
+}
+
+const newRunFormValid = computed<boolean>(() => {
+  const f = newRunModal.formData.value
+  if (!f) return false
+  return !!f.agentId && f.caseInput.trim().length > 0
 })
 
 function passRatio(r: EvaluationRunDto): number {
@@ -261,23 +302,23 @@ watch(rightId, async (id) => {
 })
 
 async function submitNewRun(): Promise<void> {
+  const form = newRunModal.formData.value
+  if (!form || !newRunFormValid.value) return
   creating.value = true
   try {
     const dto: CreateEvaluationRunDto = {
-      agentId: newRunModal.agentId,
-      versionNumber: newRunModal.versionNumber,
+      agentId: form.agentId,
+      versionNumber: form.versionNumber,
       cases: [
         {
-          input: newRunModal.caseInput.trim(),
-          expectedOutput: newRunModal.caseExpected.trim() || null,
+          input: form.caseInput.trim(),
+          expectedOutput: form.caseExpected.trim() || null,
         },
       ],
     }
     const created = await bridge.evaluations.create(dto)
     message.success(t('createSuccess'))
-    newRunModal.show = false
-    newRunModal.caseInput = ''
-    newRunModal.caseExpected = ''
+    newRunModal.close()
     await loadList()
     // Auto-pick the freshly created run on the left.
     leftId.value = (created as EvaluationRunDto).id
@@ -298,13 +339,19 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* TAdminContent supplies the 16px page padding; local 16px doubled it. */
 .t-eval-page {
-  padding: 16px;
+  /* no padding — owned by TAdminContent */
+}
+.t-eval-page__modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .t-eval-page__note {
   margin: 0 0 12px;
   font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-eval-page__layout {
   display: grid;
@@ -313,7 +360,7 @@ onMounted(() => {
   min-height: 520px;
 }
 .t-eval-page__list {
-  border-right: 1px solid var(--tnzi-base-border, #efeff5);
+  border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
 }
 .t-eval-page__list-header {
@@ -324,7 +371,7 @@ onMounted(() => {
 }
 .t-eval-page__hint {
   font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-eval-page__run-list {
   list-style: none;
@@ -342,16 +389,16 @@ onMounted(() => {
   transition: background-color 0.15s, border-color 0.15s;
 }
 .t-eval-page__run-item:hover {
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
 }
 .t-eval-page__run-item.is-selected {
-  background: var(--tnzi-primary-color-suppl, rgba(6, 182, 212, 0.08));
+  background: rgb(var(--tnzi-primary-rgb) / 0.08);
 }
 .t-eval-page__run-item.is-left {
-  border-color: var(--tnzi-primary-color, #06B6D4);
+  border-color: var(--tnzi-primary);
 }
 .t-eval-page__run-item.is-right {
-  border-color: var(--tnzi-warning-color, #F0A020);
+  border-color: var(--tnzi-warning);
 }
 .t-eval-page__run-row {
   display: flex;
@@ -364,23 +411,23 @@ onMounted(() => {
   font-size: 14px;
 }
 .t-eval-page__score[data-pass="true"] {
-  color: var(--tnzi-success-color, #18A058);
+  color: var(--tnzi-success);
 }
 .t-eval-page__score[data-pass="false"] {
-  color: var(--tnzi-error-color, #D03050);
+  color: var(--tnzi-error);
 }
 .t-eval-page__run-meta {
   font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   display: flex;
   justify-content: space-between;
 }
 .t-eval-page__run-meta code {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .t-eval-page__run-time {
   font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   margin-top: 2px;
 }
 .t-eval-page__detail {
@@ -388,7 +435,7 @@ onMounted(() => {
 }
 .t-eval-page__placeholder,
 .t-eval-page__empty {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
   padding: 40px 16px;
   font-size: 13px;
@@ -399,7 +446,7 @@ onMounted(() => {
   gap: 12px;
 }
 .t-eval-page__diff-col {
-  border: 1px solid var(--tnzi-base-border, #efeff5);
+  border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 4px);
   padding: 12px;
   min-height: 480px;
@@ -411,7 +458,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--tnzi-base-border, #efeff5);
+  border-bottom: 1px solid var(--tnzi-border);
   margin-bottom: 8px;
 }
 .t-eval-page__col-label {
@@ -426,22 +473,22 @@ onMounted(() => {
   color: white;
 }
 .t-eval-page__col-label.is-left {
-  background: var(--tnzi-primary-color, #06B6D4);
+  background: var(--tnzi-primary);
 }
 .t-eval-page__col-label.is-right {
-  background: var(--tnzi-warning-color, #F0A020);
+  background: var(--tnzi-warning);
 }
 .t-eval-page__col-score {
   margin-left: 8px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   font-size: 12px;
 }
 .t-eval-page__results {
   flex: 1;
   margin: 0;
   font-size: 12px;
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
-  background: var(--tnzi-base-fill, #f5f5f7);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--tnzi-layout-bg);
   padding: 8px;
   border-radius: 4px;
   overflow: auto;

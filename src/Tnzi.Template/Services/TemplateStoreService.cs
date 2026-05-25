@@ -276,14 +276,160 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
                 (t.Description != null && t.Description.ToLower().Contains(keyword)));
         }
 
-        var pagedList = await query
+        // ── Fast path: DB-only (default) ──────────────────────────────────
+        // When IncludeFileSource=false the admin caller sees only the
+        // editable templates in Template_Template. The filesystem rows
+        // (Templates/{module}/.../*.cshtml shipped with the binaries) are
+        // exposed only on opt-in because they're not editable through admin.
+        if (!request.IncludeFileSource)
+        {
+            var pagedList = await query
+                .OrderBy(t => t.Module)
+                .ThenBy(t => t.Category)
+                .ThenBy(t => t.TemplateName)
+                .ProjectTo<TemplateEntity, TemplateInfoDto>()
+                .CreateAsync(request, cancellationToken);
+            return Ok(pagedList);
+        }
+
+        // ── Merged branch: DB + filesystem ───────────────────────────────
+        var dbItems = await query
             .OrderBy(t => t.Module)
             .ThenBy(t => t.Category)
             .ThenBy(t => t.TemplateName)
             .ProjectTo<TemplateEntity, TemplateInfoDto>()
-            .CreateAsync(request, cancellationToken);
+            .ToListAsync(cancellationToken);
+        foreach (var item in dbItems)
+        {
+            item.Source = "Database";
+            item.IsReadOnly = false;
+        }
 
-        return Ok(pagedList);
+        var fileItems = await ScanFileSystemTemplatesAsync(request, cancellationToken);
+        // De-duplicate by (Module, Category, TemplateName) — DB wins because
+        // those rows are editable and represent the canonical override.
+        var seen = new HashSet<string>(
+            dbItems.Select(d => $"{d.Module}::{d.Category}::{d.TemplateName}"),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var fi in fileItems)
+        {
+            var key = $"{fi.Module}::{fi.Category}::{fi.TemplateName}";
+            if (seen.Add(key)) dbItems.Add(fi);
+        }
+
+        // Final in-memory ordering + paging (DB rows already came sorted; the
+        // file rows we appended need a unified pass to stay deterministic).
+        var ordered = dbItems
+            .OrderBy(d => d.Module)
+            .ThenBy(d => d.Category)
+            .ThenBy(d => d.TemplateName)
+            .ToList();
+        var total = ordered.Count;
+        var skip = (request.PageIndex - 1) * request.PageSize;
+        var pageItems = ordered.Skip(skip).Take(request.PageSize).ToList();
+        return Ok((IPagedList<TemplateInfoDto>)new PagedList<TemplateInfoDto>(pageItems, request.PageIndex, request.PageSize, total));
+    }
+
+    /// <summary>
+    /// Scan the configured search roots for `.cshtml` templates and project
+    /// them into <see cref="TemplateInfoDto"/> entries. Honours
+    /// <c>request.Module</c> / <c>Category</c> / <c>Keyword</c> filters so
+    /// the merged result obeys the same predicates as the DB branch.
+    ///
+    /// File-source rows also surface `SubjectTemplate` + `ContentTemplate`
+    /// inline (via <see cref="TemplateFileParser"/>) so the admin view
+    /// modal can render the template body without a follow-up call —
+    /// file-source rows have no DB id so they can't be hydrated via
+    /// `getById`. Template count is bounded by how many .cshtml files
+    /// the host ships, so reading them all on list is acceptable.
+    /// </summary>
+    private async Task<List<TemplateInfoDto>> ScanFileSystemTemplatesAsync(QueryTemplateRequest request, CancellationToken cancellationToken)
+    {
+        var results = new List<TemplateInfoDto>();
+        if (_templateOptions == null || !_templateOptions.EnableFileSystemTemplates)
+            return results;
+        try
+        {
+            var root = _templateOptions.TemplateRootPath ?? "Templates";
+            var extension = _templateOptions.TemplateExtension ?? ".cshtml";
+            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
+            var keyword = request.Keyword?.ToLowerInvariant();
+            foreach (var searchRoot in searchRoots)
+            {
+                if (cancellationToken.IsCancellationRequested) break;
+                var rootedTemplates = Path.IsPathRooted(root)
+                    ? root
+                    : Path.Combine(searchRoot, root);
+                if (!Directory.Exists(rootedTemplates)) continue;
+                foreach (var path in Directory.EnumerateFiles(rootedTemplates, "*" + extension, SearchOption.AllDirectories))
+                {
+                    if (cancellationToken.IsCancellationRequested) break;
+                    var relPath = Path.GetRelativePath(rootedTemplates, path);
+                    var parts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (parts.Length < 2) continue; // Must be at least Module/file.cshtml
+                    var fileModule = parts[0];
+                    var fileCategory = parts.Length >= 3
+                        ? string.Join('/', parts.Skip(1).Take(parts.Length - 2))
+                        : string.Empty;
+                    var fileName = Path.GetFileNameWithoutExtension(parts[^1]);
+                    if (!string.IsNullOrWhiteSpace(request.Module) && !string.Equals(fileModule, request.Module, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!string.IsNullOrWhiteSpace(request.Category) && !string.Equals(fileCategory, request.Category, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!string.IsNullOrWhiteSpace(keyword) && !fileName.ToLowerInvariant().Contains(keyword))
+                        continue;
+                    var fi = new FileInfo(path);
+                    // Read the actual template content so the admin view modal
+                    // can render Subject + Content fields. Parser returns null
+                    // for files without YAML frontmatter — we fall back to
+                    // the raw file content in that case.
+                    string? subjectTemplate = null;
+                    string? contentTemplate = null;
+                    try
+                    {
+                        if (_templateFileParser != null)
+                        {
+                            var parsed = await _templateFileParser.ParseTemplateFileAsync(path, cancellationToken);
+                            if (parsed != null)
+                            {
+                                subjectTemplate = parsed.SubjectTemplate;
+                                contentTemplate = parsed.ContentTemplate;
+                            }
+                        }
+                        if (string.IsNullOrEmpty(contentTemplate))
+                        {
+                            contentTemplate = await File.ReadAllTextAsync(path, cancellationToken);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogDebug(ex, "ScanFileSystemTemplates: could not read content for {Path}", path);
+                    }
+                    results.Add(new TemplateInfoDto
+                    {
+                        Id = Guid.Empty,
+                        TemplateName = fileName,
+                        Module = fileModule,
+                        Category = fileCategory,
+                        Version = 1,
+                        Type = TemplateType.Email,
+                        IsActive = true,
+                        Source = "FileSystem",
+                        IsReadOnly = true,
+                        FilePath = path,
+                        SubjectTemplate = subjectTemplate,
+                        ContentTemplate = contentTemplate,
+                        CreationTime = fi.CreationTimeUtc,
+                        LastModificationTime = fi.LastWriteTimeUtc,
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "ScanFileSystemTemplates failed");
+        }
+        return results;
     }
 
     public async Task<Result<string>> ExportTemplatesAsync(string? module = null, string? category = null, CancellationToken cancellationToken = default)

@@ -15,7 +15,8 @@
 import { computed, h } from 'vue'
 import { NDropdown, NButton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TSvgIcon } from '@tnzi/ui'
+import { translatePageKey } from '../../pages/_shared/translate'
 
 interface Props {
   /** Display name shown next to the avatar. */
@@ -47,7 +48,13 @@ const props = withDefaults(defineProps<Props>(), {
 const dialog = useDialog()
 
 function t(key: string, fallback: string): string {
-  return props.translate ? props.translate(key, fallback) : fallback
+  if (props.translate) return props.translate(key, fallback)
+  // Bundled-locale fallback so the user-avatar dropdown localises out of
+  // the box. `translatePageKey('', absoluteKey)` resolves `admin.*` keys
+  // against the active locale and humanises misses.
+  const bundled = translatePageKey('', key)
+  if (bundled && bundled !== key) return bundled
+  return fallback
 }
 
 const options = computed<DropdownOption[]>(() => [
@@ -78,8 +85,8 @@ function confirmLogout(): void {
   dialog.info({
     title: t('admin.user.tip', 'Confirm'),
     content: t('admin.user.logoutConfirm', 'Are you sure you want to log out?'),
-    positiveText: t('common.confirm', 'Confirm'),
-    negativeText: t('common.cancel', 'Cancel'),
+    positiveText: t('admin.common.confirm', 'Confirm'),
+    negativeText: t('admin.common.cancel', 'Cancel'),
     onPositiveClick: () => {
       void props.onLogout?.()
     },
@@ -98,7 +105,7 @@ function confirmLogout(): void {
     :options="options"
     @select="handleSelect"
   >
-    <button class="t-admin-user-avatar" type="button">
+    <button class="t-admin-user-avatar" type="button" :title="userName">
       <TSvgIcon :icon="avatarIcon" :size="22" class="t-admin-user-avatar__icon" />
       <span class="t-admin-user-avatar__name">{{ userName }}</span>
     </button>
@@ -126,5 +133,22 @@ function confirmLogout(): void {
 }
 .t-admin-user-avatar__icon {
   color: var(--tnzi-primary);
+}
+.t-admin-user-avatar__name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Mobile: drop the textual name so a long display name doesn't crowd
+   out the language switcher + notification slot. Avatar icon + native
+   title tooltip keep the affordance discoverable. */
+@media (max-width: 640px) {
+  .t-admin-user-avatar__name {
+    display: none;
+  }
+  .t-admin-user-avatar {
+    padding: 0 4px;
+  }
 }
 </style>

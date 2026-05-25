@@ -18,6 +18,11 @@ public class AISkillsModule : TnziApplicationModule
         // 注册技能系统
         services.AddScoped<ISkillLoadTracker, SkillLoadTracker>();
         services.AddSingleton<FileSystemSkillStore>();
+        // Expose FileSystemSkillStore as the default ISkillStore so that
+        // singleton consumers (SandboxModule startup, ThreadDataMiddleware
+        // optional injection) can resolve it. DatabaseSkillStore is scoped
+        // and not suitable as a singleton default.
+        services.AddSingleton<ISkillStore>(sp => sp.GetRequiredService<FileSystemSkillStore>());
         services.TryAddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
         services.TryAddSingleton<ISkillConstraintEnforcer, SkillConstraintEnforcer>();
         services.TryAddSingleton<ISkillRequirementsValidator, SkillRequirementsValidator>();

@@ -6,3 +6,9 @@ export { default as WorkflowControls } from './WorkflowControls.vue';
 export { default as WorkflowPanel } from './WorkflowPanel.vue';
 export { default as WorkflowToolbar } from './WorkflowToolbar.vue';
 export { default as WorkflowMinimap } from './WorkflowMinimap.vue';
+
+// Re-export @vue-flow primitives so consumers writing custom node templates
+// against WorkflowCanvas's `#node-<type>` slots can register handles without
+// needing a direct `@vue-flow/core` dependency.
+export { Handle, Position } from '@vue-flow/core';
+export type { NodeProps, EdgeProps, Connection, NodeChange, EdgeChange } from '@vue-flow/core';

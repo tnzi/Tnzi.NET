@@ -28,7 +28,27 @@ function humanise(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-function resolveI18nKey(key: string, locale: 'en' | 'zh-cn'): string {
+/**
+ * Walk a dotted path through a messages tree, returning the string leaf or
+ * undefined if any segment is missing / not a string.
+ */
+function lookupMessage(messages: Record<string, unknown>, path: string): string | undefined {
+  let node: unknown = messages
+  for (const part of path.split('.')) {
+    if (typeof node === 'object' && node !== null && part in (node as Record<string, unknown>)) {
+      node = (node as Record<string, unknown>)[part]
+    } else {
+      return undefined
+    }
+  }
+  return typeof node === 'string' ? node : undefined
+}
+
+function resolveI18nKey(
+  key: string,
+  locale: 'en' | 'zh-cn',
+  overrides?: Record<string, unknown>,
+): string {
   if (!key) return key
   // Bare labels (not dotted i18n keys) — return as-is.
   if (!key.startsWith('admin.') && !key.startsWith('tnzi.admin.')) {
@@ -36,20 +56,21 @@ function resolveI18nKey(key: string, locale: 'en' | 'zh-cn'): string {
   }
   // Strip optional `tnzi.` prefix — bundled locales are rooted at `admin.*`.
   const normalized = key.startsWith('tnzi.') ? key.slice(5) : key
-  const messages = (locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
-  let node: unknown = messages
-  for (const part of normalized.split('.')) {
-    if (typeof node === 'object' && node !== null && part in (node as Record<string, unknown>)) {
-      node = (node as Record<string, unknown>)[part]
-    } else {
-      // Phase I.7.10: missing-key fallback — humanise the last segment so
-      // users never see raw `tnzi.admin.…` strings in the sidebar / tabs /
-      // breadcrumb (mirrors the same fallback in `TAdminAutoBreadcrumb` and
-      // `TAdminTabs.renderTitle`).
-      return humanise(key)
-    }
+  // Consumer-supplied overrides win — host apps register their own
+  // `admin.modules.{module}.…` keys via `useAdminAppStore.extendLocaleMessages`
+  // and we look those up before the bundled framework dictionary.
+  if (overrides) {
+    const hit = lookupMessage(overrides, normalized)
+    if (hit !== undefined) return hit
   }
-  return typeof node === 'string' ? node : humanise(key)
+  const messages = (locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
+  const hit = lookupMessage(messages, normalized)
+  if (hit !== undefined) return hit
+  // Phase I.7.10: missing-key fallback — humanise the last segment so
+  // users never see raw `tnzi.admin.…` strings in the sidebar / tabs /
+  // breadcrumb (mirrors the same fallback in `TAdminAutoBreadcrumb` and
+  // `TAdminTabs.renderTitle`).
+  return humanise(key)
 }
 
 export interface AdminRouteMeta {
@@ -106,6 +127,13 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   const menus = computed<AdminMenuItem[]>(() => {
     const appStore = useAdminAppStore()
     const locale = appStore.locale
+    // Host-app messages registered via `extendLocaleMessages`. Passed
+    // through to `resolveI18nKey` so consumer-owned route titles
+    // (e.g. `tnzi.admin.modules.acme.blog.posts.title`) resolve in the
+    // active locale instead of humanising to English.
+    const overrides = appStore.messageOverrides?.[locale] as
+      | Record<string, unknown>
+      | undefined
     /**
      * Build absolute paths during the tree walk. vue-router stores child
      * `route.path` as relative ("users") so a naive copy produces unrouteable
@@ -129,7 +157,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
         route.meta?.icon ?? DEFAULT_ROUTE_ICONS[route.name]
       const item: AdminMenuItem = {
         key: route.name,
-        label: resolveI18nKey(rawTitle, locale),
+        label: resolveI18nKey(rawTitle, locale, overrides),
         i18nKey: route.meta?.i18nKey,
         icon: resolvedIcon,
         path: absolutePath,

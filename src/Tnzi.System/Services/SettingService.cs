@@ -180,6 +180,8 @@ public class SettingService : ApplicationService, ISettingService
         // 缓存清理在事务提交后执行，避免事务回滚时缓存已被清理
         await _cache.RemoveAsync($"Setting:{key}");
 
+        await PublishSettingChangedAsync(key, SettingScope.Global, null, value, isRemoval: false);
+
         LogInformation("Setting updated: {Key}", key);
         return Ok("Setting updated successfully");
     }
@@ -247,6 +249,9 @@ public class SettingService : ApplicationService, ISettingService
         setting.IsSystem = false;
 
         await _settingRepository.InsertAsync(setting);
+
+        await PublishSettingChangedAsync(setting.Key, setting.Scope, setting.ScopeId, setting.Value, isRemoval: false);
+
         LogInformation("Setting created: {Key}", input.Key);
         return Ok(setting.MapTo<SettingDto>(), "Setting created successfully");
     }
@@ -269,6 +274,8 @@ public class SettingService : ApplicationService, ISettingService
         // 清理缓存
         await _cache.RemoveAsync($"Setting:{setting.Key}");
 
+        await PublishSettingChangedAsync(setting.Key, setting.Scope, setting.ScopeId, setting.Value, isRemoval: false);
+
         LogInformation("Setting updated: {Key}", setting.Key);
         var dto = setting.MapTo<SettingDto>();
         if (dto.IsEncrypted)
@@ -290,6 +297,8 @@ public class SettingService : ApplicationService, ISettingService
 
         // 清理缓存
         await _cache.RemoveAsync($"Setting:{setting.Key}");
+
+        await PublishSettingChangedAsync(setting.Key, setting.Scope, setting.ScopeId, null, isRemoval: true);
 
         LogInformation("Setting deleted: {Key}", setting.Key);
         return Ok("Setting deleted successfully");
@@ -322,6 +331,11 @@ public class SettingService : ApplicationService, ISettingService
         foreach (var key in settingKeys)
         {
             await _cache.RemoveAsync($"Setting:{key}");
+        }
+
+        foreach (var s in settings)
+        {
+            await PublishSettingChangedAsync(s.Key, s.Scope, s.ScopeId, null, isRemoval: true);
         }
 
         LogInformation("Batch deleted {Count} settings", count);
@@ -406,6 +420,8 @@ public class SettingService : ApplicationService, ISettingService
         // 缓存清理在事务提交后执行
         await _cache.RemoveAsync($"Setting:{key}");
 
+        await PublishSettingChangedAsync(key, scope, scopeId, value, isRemoval: false);
+
         return Ok("Setting updated successfully");
     }
 
@@ -454,6 +470,9 @@ public class SettingService : ApplicationService, ISettingService
 
         // 缓存清理在事务提交后执行
         await _cache.RemoveAsync($"Setting:{key}");
+
+        // 加密配置不进 IConfiguration dict（Provider 已过滤 IsEncrypted），事件仍发出供其他订阅者使用
+        await PublishSettingChangedAsync(key, SettingScope.Global, null, encryptedValue, isRemoval: false);
 
         LogInformation("Encrypted setting updated: {Key}", key);
         return Ok("Encrypted setting saved successfully");
@@ -550,5 +569,31 @@ public class SettingService : ApplicationService, ISettingService
         if (uptime.TotalHours >= 1)
             return $"{uptime.Hours}h {uptime.Minutes}m {uptime.Seconds}s";
         return $"{uptime.Minutes}m {uptime.Seconds}s";
+    }
+
+    /// <summary>
+    /// Publish a SettingChangedEvent. EventBus is optional (apps without EventBusModule loaded),
+    /// failures are swallowed so config writes never block on event delivery.
+    /// </summary>
+    private async Task PublishSettingChangedAsync(string key, SettingScope scope, string? scopeId, string? newValue, bool isRemoval)
+    {
+        if (EventBus == null)
+            return;
+
+        try
+        {
+            await EventBus.PublishAsync(new SettingChangedEvent
+            {
+                Key = key,
+                Scope = scope,
+                ScopeId = scopeId,
+                NewValue = newValue,
+                IsRemoval = isRemoval
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish SettingChangedEvent for key {Key}", key);
+        }
     }
 }

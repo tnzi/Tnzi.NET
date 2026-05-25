@@ -526,6 +526,32 @@ describe('HttpClient', () => {
       expect(refreshFn).toHaveBeenCalledTimes(1); // Only one refresh attempt
       expect(result.succeeded).toBe(false);
     });
+
+    it('should call onUnauthorized when refresh succeeds but retry still 401s', async () => {
+      // Scenario: backend gave us a "new" token (or the same one) via
+      // refreshTokenFn but it's still rejected by the protected endpoint
+      // — e.g. session was server-side revoked, stale token returned, or
+      // clock skew. Before the fix, the inner executeWithRetry returned
+      // the 401 result and the outer caller never invoked onUnauthorized,
+      // so the consumer's session-expired handler (router push to /login,
+      // toast, etc.) never fired and the page sat in an API-error loop.
+      const refreshFn = vi.fn().mockResolvedValue('still-stale-token');
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: refreshFn,
+        onUnauthorized,
+      });
+
+      // Original 401 → refresh "succeeds" → retry 401 → MUST notify.
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      const result = await c.get('/protected');
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(401);
+    });
   });
 
   // ------------------------------------------

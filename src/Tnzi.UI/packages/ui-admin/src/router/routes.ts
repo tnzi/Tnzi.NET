@@ -44,6 +44,13 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, title: 'Admin' },
     children: [
       // ── Workbench (default landing page) ─────────────────────
+      // Default `meta.order` values on top-level modules (step 10 leaves
+      // room for consumer-injected entries). Workbench sits at 0 so it
+      // always lands first; consumer modules registered via `addModules`
+      // with `meta.order` in 1..99 slot between Workbench and Identity,
+      // and 200+ for after the last framework module — no consumer
+      // mutation required. Override per-route via
+      // `defineAdminApp({ routeOrders: { 'workbench': 5 } })`.
       {
         path: 'workbench',
         name: 'workbench',
@@ -53,6 +60,21 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           permission: 'workbench.view',
           keepAlive: true,
           fixedIndexInTab: 0,
+          order: 0,
+        },
+      },
+
+      // ── User Center (self-service profile) ───────────────────
+      // No permission needed — any authenticated user can manage their
+      // own profile. Hidden from sidebar menus (not in module catalogue)
+      // and reached via the avatar dropdown's "User Center" item.
+      {
+        path: 'user-center',
+        name: 'user-center',
+        component: () => import('../pages/account/UserCenter.vue'),
+        meta: {
+          title: 'tnzi.admin.modules.account.userCenter.title',
+          hideInMenu: true,
         },
       },
 
@@ -60,7 +82,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'identity',
         name: 'identity',
-        meta: { title: 'tnzi.admin.modules.identity.label', permission: 'identity.view' },
+        meta: { title: 'tnzi.admin.modules.identity.label', permission: 'identity.view', order: 100 },
         children: [
           {
             path: 'users',
@@ -102,16 +124,11 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
-          {
-            path: 'gdpr',
-            name: 'identity.gdpr',
-            component: () => import('../pages/identity/GdprRequests.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.identity.gdpr.title',
-              permission: 'identity.gdpr.view',
-              keepAlive: true,
-            },
-          },
+          // GDPR admin route is intentionally NOT registered by default — the
+          // backend has no admin-by-id GDPR endpoints yet (identity-bridge stubs
+          // `gdpr.*` to reject with "not supported until admin endpoints land").
+          // Consumers can re-add the route by registering it themselves once
+          // the backend ships `DefaultGdprAdminController`.
           {
             path: 'organizations',
             name: 'identity.organizations',
@@ -132,6 +149,16 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            path: 'login-security',
+            name: 'identity.loginSecurity',
+            component: () => import('../pages/identity/LoginSecurity.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.identity.loginSecurity.title',
+              permission: 'identity.loginSecurity.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 
@@ -139,7 +166,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'authorization',
         name: 'authorization',
-        meta: { title: 'tnzi.admin.modules.authorization.label', permission: 'authorization.view' },
+        meta: { title: 'tnzi.admin.modules.authorization.label', permission: 'authorization.view', order: 110 },
         children: [
           {
             path: 'function-modules',
@@ -188,7 +215,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'system',
         name: 'system',
-        meta: { title: 'tnzi.admin.modules.system.label', permission: 'system.view' },
+        meta: { title: 'tnzi.admin.modules.system.label', permission: 'system.view', order: 120 },
         children: [
           {
             path: 'menus',
@@ -250,6 +277,66 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            path: 'log-files',
+            name: 'system.logFiles',
+            component: () => import('../pages/system/LogViewer.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.system.logFiles.title',
+              permission: 'system.log.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'diagnostics',
+            name: 'system.diagnostics',
+            component: () => import('../pages/system/Diagnostics.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.system.diagnostics.title',
+              permission: 'system.diagnostics.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'performance',
+            name: 'system.performance',
+            component: () => import('../pages/system/Performance.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.system.performance.title',
+              permission: 'system.performance.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'localization',
+            name: 'system.localization',
+            component: () => import('../pages/system/LocalizationMissing.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.system.localization.title',
+              permission: 'system.localization.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'signalr',
+            name: 'system.signalr',
+            component: () => import('../pages/system/SignalRMonitor.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.system.signalr.title',
+              permission: 'system.signalr.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'health',
+            name: 'system.health',
+            component: () => import('../pages/system/HealthChecks.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.system.health.title',
+              permission: 'system.health.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 
@@ -257,7 +344,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'storage',
         name: 'storage',
-        meta: { title: 'tnzi.admin.modules.storage.label', permission: 'storage.view' },
+        meta: { title: 'tnzi.admin.modules.storage.label', permission: 'storage.view', order: 160 },
         children: [
           {
             path: 'files',
@@ -296,7 +383,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'audit',
         name: 'audit',
-        meta: { title: 'tnzi.admin.modules.audit.label', permission: 'audit.view' },
+        meta: { title: 'tnzi.admin.modules.audit.label', permission: 'audit.view', order: 130 },
         children: [
           {
             path: 'logs',
@@ -325,7 +412,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'notification',
         name: 'notification',
-        meta: { title: 'tnzi.admin.modules.notification.label', permission: 'notification.view' },
+        meta: { title: 'tnzi.admin.modules.notification.label', permission: 'notification.view', order: 170 },
         children: [
           {
             path: 'templates',
@@ -364,7 +451,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'chat',
         name: 'chat',
-        meta: { title: 'tnzi.admin.modules.chat.label', permission: 'chat.view' },
+        meta: { title: 'tnzi.admin.modules.chat.label', permission: 'chat.view', order: 140 },
         children: [
           {
             path: 'sessions',
@@ -393,7 +480,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'payment',
         name: 'payment',
-        meta: { title: 'tnzi.admin.modules.payment.label', permission: 'payment.view' },
+        meta: { title: 'tnzi.admin.modules.payment.label', permission: 'payment.view', order: 180 },
         children: [
           {
             path: 'orders',
@@ -425,6 +512,36 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            path: 'statistics',
+            name: 'payment.statistics',
+            component: () => import('../pages/payment/PaymentStatistics.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.payment.statistics.title',
+              permission: 'payment.statistics.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'invoices',
+            name: 'payment.invoices',
+            component: () => import('../pages/payment/PaymentInvoice.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.payment.invoices.title',
+              permission: 'payment.invoice.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'promotions',
+            name: 'payment.promotions',
+            component: () => import('../pages/payment/PaymentPromotion.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.payment.promotions.title',
+              permission: 'payment.promotion.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 
@@ -442,7 +559,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'ai',
         name: 'ai',
-        meta: { title: 'tnzi.admin.modules.ai.label', permission: 'ai.view' },
+        meta: { title: 'tnzi.admin.modules.ai.label', permission: 'ai.view', order: 150 },
         children: [
           // ── 1. Configuration ──
           {
@@ -514,7 +631,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'workflows',
             name: 'ai.workflows',
-            component: () => import('../pages/ai/workflows/WorkflowEditor.vue'),
+            component: () => import('../pages/ai/workflows/WorkflowList.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.workflows.title',
               permission: 'ai.workflow.view',
@@ -522,7 +639,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
           {
-            path: 'workflows/:id',
+            path: 'workflows/:id/edit',
             name: 'ai.workflows.editor',
             component: () => import('../pages/ai/workflows/WorkflowEditor.vue'),
             props: true,
@@ -575,8 +692,59 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            path: 'workspace-agents',
+            name: 'ai.workspaceAgents',
+            component: () => import('../pages/ai/workspace/WorkspaceAgentList.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.workspaceAgents.title',
+              permission: 'ai.agent.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'channels',
+            name: 'ai.channels',
+            component: () => import('../pages/ai/channels/ChannelList.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.channels.title',
+              permission: 'ai.channels.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'devices',
+            name: 'ai.devices',
+            component: () => import('../pages/ai/devices/DeviceList.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.devices.title',
+              permission: 'ai.devices.view',
+              keepAlive: true,
+            },
+          },
+
+          {
+            path: 'sandbox',
+            name: 'ai.sandbox',
+            component: () => import('../pages/ai/sandbox/SandboxStatus.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.sandbox.title',
+              permission: 'ai.sandbox.view',
+              keepAlive: true,
+            },
+          },
 
           // ── 4. Governance ──
+          {
+            path: 'permissions',
+            name: 'ai.permissions',
+            component: () => import('../pages/ai/permissions/PermissionRules.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.permissions.title',
+              permission: 'ai.permissions.view',
+              keepAlive: true,
+            },
+          },
           {
             path: 'quota',
             name: 'ai.quota',
@@ -614,7 +782,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'template',
         name: 'template',
-        meta: { title: 'tnzi.admin.modules.template.label', permission: 'template.view' },
+        meta: { title: 'tnzi.admin.modules.template.label', permission: 'template.view', order: 190 },
         children: [
           {
             path: 'templates',

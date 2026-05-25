@@ -35,7 +35,7 @@ import {
   type SubscriptionQueryDto,
 } from '@tnzi/core/services/payment'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest } from '../_mappers'
+import { mapQueryToListRequest, pagedResult } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminPaymentApi>[0]
 
@@ -133,12 +133,12 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
     const result = unwrap<{ items: PaymentDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await pa.getList(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const orders: PaymentOrderContract = {
@@ -159,12 +159,12 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
     const result = unwrap<{ items: SubscriptionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await sa.getList(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const subscriptions: PaymentSubscriptionContract = {
@@ -184,12 +184,12 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
     const result = unwrap<{ items: RefundDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await ra.getList(params),
     )
-    return {
+    return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
       pageIndex: result.pageIndex ?? query.pageIndex,
       pageSize: result.pageSize ?? query.pageSize,
-    }
+    })
   }
 
   const refunds: PaymentRefundContract = {

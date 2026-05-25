@@ -26,6 +26,7 @@
         :schema="kbFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :translate="t"
       />
       <div v-if="mode === 'edit' && (formData as Record<string, unknown>)?.id" class="kb-reindex">
         <button
@@ -118,6 +119,6 @@ defineExpose({ onReindex, reindexBusy, reindexStatus })
   opacity: 0.6;
 }
 .kb-reindex__status[data-status='error'] {
-  color: var(--n-error-color, #d03050);
+  color: var(--tnzi-error, #d03050);
 }
 </style>

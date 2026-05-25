@@ -154,6 +154,161 @@ describe('defineAdminApp', () => {
     expect(() => instance.uninstall()).not.toThrow()
   })
 
+  it('hideRoutes marks the matching sub-menu meta.hideInMenu without touching others', () => {
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      hideRoutes: ['identity.tenants'],
+    })
+    const admin = findAdminRoute(routes)
+    const identity = admin?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'identity',
+    )
+    expect(identity).toBeTruthy()
+    const tenants = identity?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'identity.tenants',
+    )
+    const users = identity?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'identity.users',
+    )
+    expect(tenants).toBeTruthy()
+    expect(users).toBeTruthy()
+    expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBe(true)
+    // Sibling sub-menus are untouched.
+    expect((users!.meta as Record<string, unknown>).hideInMenu).toBeFalsy()
+  })
+
+  it('hideRoutes drops the matched entry from the rendered menu tree', () => {
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+
+    const { install } = defineAdminApp({
+      client: dummyClient,
+      hideRoutes: ['identity.tenants'],
+    })
+    install(app, pinia)
+
+    const routeStore = useAdminRouteStore()
+    const identityMenu = routeStore.menus.find((m) => m.key === 'identity')
+    expect(identityMenu).toBeTruthy()
+    const childKeys = (identityMenu!.children ?? []).map((c) => c.key)
+    expect(childKeys).not.toContain('identity.tenants')
+    // Sibling entries still render — we only hide the targeted route.
+    expect(childKeys).toContain('identity.users')
+  })
+
+  it('hideRoutes is case-sensitive on exact route.name match', () => {
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      // Wrong case — should NOT hide anything.
+      hideRoutes: ['Identity.Tenants'],
+    })
+    const admin = findAdminRoute(routes)
+    const identity = admin?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'identity',
+    )
+    const tenants = identity?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'identity.tenants',
+    )
+    expect(tenants).toBeTruthy()
+    expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBeFalsy()
+  })
+
+  it('hideRoutes works alongside hideModules without conflict', () => {
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      hideModules: ['payment'],
+      hideRoutes: ['identity.tenants', 'system.signalr'],
+    })
+    const admin = findAdminRoute(routes)
+    const childNames = namesOfChildren(admin)
+    // hideModules still strips the module entirely.
+    expect(childNames).not.toContain('payment')
+    // hideRoutes targets survive at the route table level.
+    expect(childNames).toContain('identity')
+    expect(childNames).toContain('system')
+    const identity = admin?.children?.find((c) => c.name === 'identity')
+    const system = admin?.children?.find((c) => c.name === 'system')
+    const tenants = identity?.children?.find((c) => c.name === 'identity.tenants')
+    const signalr = system?.children?.find((c) => c.name === 'system.signalr')
+    expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBe(true)
+    expect((signalr!.meta as Record<string, unknown>).hideInMenu).toBe(true)
+  })
+
+  it('framework built-in routes ship with default meta.order', () => {
+    const { routes } = defineAdminApp({ client: dummyClient })
+    const admin = findAdminRoute(routes)
+    const childByName = (name: string) =>
+      admin?.children?.find((c) => typeof c.name === 'string' && c.name === name)
+    const metaOrder = (name: string): number | undefined => {
+      const route = childByName(name)
+      return (route?.meta as Record<string, unknown> | undefined)?.order as number | undefined
+    }
+    expect(metaOrder('workbench')).toBe(0)
+    expect(metaOrder('identity')).toBe(100)
+    expect(metaOrder('authorization')).toBe(110)
+    expect(metaOrder('system')).toBe(120)
+    expect(metaOrder('audit')).toBe(130)
+    expect(metaOrder('chat')).toBe(140)
+    expect(metaOrder('ai')).toBe(150)
+    expect(metaOrder('storage')).toBe(160)
+    expect(metaOrder('notification')).toBe(170)
+    expect(metaOrder('payment')).toBe(180)
+    expect(metaOrder('template')).toBe(190)
+  })
+
+  it('routeOrders overrides the default order of a framework route', () => {
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      routeOrders: { workbench: 5 },
+    })
+    const admin = findAdminRoute(routes)
+    const workbench = admin?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'workbench',
+    )
+    expect(workbench).toBeTruthy()
+    expect((workbench!.meta as Record<string, unknown>).order).toBe(5)
+  })
+
+  it('routeOrders does not affect routes not listed in it', () => {
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      routeOrders: { workbench: 5 },
+    })
+    const admin = findAdminRoute(routes)
+    const identity = admin?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'identity',
+    )
+    expect(identity).toBeTruthy()
+    // identity stays at its framework default (100).
+    expect((identity!.meta as Record<string, unknown>).order).toBe(100)
+  })
+
+  it('routeOrders works alongside hideRoutes and hideModules', () => {
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      hideModules: ['payment'],
+      hideRoutes: ['identity.tenants'],
+      routeOrders: { workbench: 5, authorization: 95 },
+    })
+    const admin = findAdminRoute(routes)
+    const childNames = namesOfChildren(admin)
+    // hideModules still strips payment.
+    expect(childNames).not.toContain('payment')
+    // hideRoutes still flips meta.hideInMenu on the target.
+    const identity = admin?.children?.find((c) => c.name === 'identity')
+    const tenants = identity?.children?.find((c) => c.name === 'identity.tenants')
+    expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBe(true)
+    // routeOrders applies its overrides to the same tree.
+    const workbench = admin?.children?.find((c) => c.name === 'workbench')
+    const authorization = admin?.children?.find((c) => c.name === 'authorization')
+    expect((workbench!.meta as Record<string, unknown>).order).toBe(5)
+    expect((authorization!.meta as Record<string, unknown>).order).toBe(95)
+    // Untouched framework default remains intact.
+    expect((identity!.meta as Record<string, unknown>).order).toBe(100)
+  })
+
   it('normalizes module names case-insensitively for hideModules', () => {
     const { routes: hideLower } = defineAdminApp({
       client: dummyClient,
@@ -166,5 +321,138 @@ describe('defineAdminApp', () => {
     expect(namesOfChildren(findAdminRoute(hideLower))).toEqual(
       namesOfChildren(findAdminRoute(hideUpper)),
     )
+  })
+
+  describe('basePath', () => {
+    function findByName(routes: RouteRecordRaw[], name: string): RouteRecordRaw | undefined {
+      return routes.find((r) => r.name === name)
+    }
+
+    it('defaults to /admin so existing consumers keep working', () => {
+      const { routes } = defineAdminApp({ client: dummyClient })
+      const adminRoot = findByName(routes, 'admin-root')
+      const login = findByName(routes, 'login')
+      const forbidden = findByName(routes, 'forbidden')
+      expect(adminRoot?.path).toBe('/admin')
+      // Login keeps its path-param shape and is NOT prefixed under the default.
+      expect(login?.path).toBe(
+        '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
+      )
+      expect(forbidden?.path).toBe('/403')
+    })
+
+    it('basePath="/console" prefixes admin-root and login', () => {
+      const { routes } = defineAdminApp({ client: dummyClient, basePath: '/console' })
+      const adminRoot = findByName(routes, 'admin-root')
+      const login = findByName(routes, 'login')
+      const forbidden = findByName(routes, 'forbidden')
+      expect(adminRoot?.path).toBe('/console')
+      expect(typeof login?.path).toBe('string')
+      expect(login?.path as string).toContain('/console/login')
+      // The original path-param shape is preserved after the prefix.
+      expect((login?.path as string).startsWith('/console/login/:module(')).toBe(true)
+      expect(forbidden?.path).toBe('/console/403')
+    })
+
+    it('basePath="/" deploys at domain root without producing //login', () => {
+      const { routes } = defineAdminApp({ client: dummyClient, basePath: '/' })
+      const adminRoot = findByName(routes, 'admin-root')
+      const login = findByName(routes, 'login')
+      const forbidden = findByName(routes, 'forbidden')
+      expect(adminRoot?.path).toBe('/')
+      // Login at root must keep its original shape — no leading "//".
+      expect(login?.path).toBe(
+        '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
+      )
+      expect((login?.path as string).startsWith('//')).toBe(false)
+      expect(forbidden?.path).toBe('/403')
+    })
+
+    it('basePath normalizes input variants to /admin', () => {
+      const variants = ['admin', '/admin', '/admin/', ' admin ', '']
+      const reference = defineAdminApp({ client: dummyClient }).routes
+      const refAdmin = findByName(reference, 'admin-root')?.path
+      const refLogin = findByName(reference, 'login')?.path
+      const refForbidden = findByName(reference, 'forbidden')?.path
+      for (const v of variants) {
+        const { routes } = defineAdminApp({ client: dummyClient, basePath: v })
+        expect(findByName(routes, 'admin-root')?.path).toBe(refAdmin)
+        expect(findByName(routes, 'login')?.path).toBe(refLogin)
+        expect(findByName(routes, 'forbidden')?.path).toBe(refForbidden)
+      }
+    })
+
+    it('basePath normalizes "/console/" → "/console"', () => {
+      const a = defineAdminApp({ client: dummyClient, basePath: '/console/' }).routes
+      const b = defineAdminApp({ client: dummyClient, basePath: 'console' }).routes
+      expect(findByName(a, 'admin-root')?.path).toBe('/console')
+      expect(findByName(b, 'admin-root')?.path).toBe('/console')
+      expect(findByName(a, 'login')?.path).toBe(findByName(b, 'login')?.path)
+    })
+
+    it('basePath works alongside hideRoutes / hideModules / routeOrders', () => {
+      const { routes } = defineAdminApp({
+        client: dummyClient,
+        basePath: '/console',
+        hideModules: ['payment'],
+        hideRoutes: ['identity.tenants'],
+        routeOrders: { workbench: 5, authorization: 95 },
+      })
+      const adminRoot = findByName(routes, 'admin-root')
+      expect(adminRoot?.path).toBe('/console')
+      const childNames = namesOfChildren(adminRoot)
+      // hideModules still strips payment under the rewritten root.
+      expect(childNames).not.toContain('payment')
+      expect(childNames).toContain('identity')
+      // hideRoutes flag still flips on a deep child.
+      const identity = adminRoot?.children?.find((c) => c.name === 'identity')
+      const tenants = identity?.children?.find((c) => c.name === 'identity.tenants')
+      expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBe(true)
+      // routeOrders overrides land on the prefixed tree.
+      const workbench = adminRoot?.children?.find((c) => c.name === 'workbench')
+      const authorization = adminRoot?.children?.find((c) => c.name === 'authorization')
+      expect((workbench!.meta as Record<string, unknown>).order).toBe(5)
+      expect((authorization!.meta as Record<string, unknown>).order).toBe(95)
+    })
+
+    it('install seeds the route store with paths under basePath', () => {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+
+      const { install } = defineAdminApp({
+        client: dummyClient,
+        basePath: '/console',
+      })
+      install(app, pinia)
+
+      const routeStore = useAdminRouteStore()
+      const identity = routeStore.authRoutes.find((r) => r.name === 'identity')
+      expect(identity).toBeTruthy()
+      // Top-level menu entry sits under /console.
+      expect(identity!.path).toBe('/console/identity')
+      const users = identity!.children?.find((c) => c.name === 'identity.users')
+      expect(users?.path).toBe('/console/identity/users')
+    })
+
+    it('install seeds the route store with no prefix when basePath="/"', () => {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+
+      const { install } = defineAdminApp({
+        client: dummyClient,
+        basePath: '/',
+      })
+      install(app, pinia)
+
+      const routeStore = useAdminRouteStore()
+      const identity = routeStore.authRoutes.find((r) => r.name === 'identity')
+      expect(identity?.path).toBe('/identity')
+      const users = identity!.children?.find((c) => c.name === 'identity.users')
+      expect(users?.path).toBe('/identity/users')
+    })
   })
 })

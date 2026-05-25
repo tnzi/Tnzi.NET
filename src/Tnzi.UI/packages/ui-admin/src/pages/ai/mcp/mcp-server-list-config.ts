@@ -45,8 +45,8 @@ export const mcpServerColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.isEnabled),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },
@@ -73,35 +73,35 @@ export const mcpAuthTypeOptions: Array<{ label: string; value: string }> = [
  * predicate (form-schema.ts line 56).
  */
 export const mcpServerFormSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'Name', type: 'text', required: true },
-  { key: 'serverUrl', label: 'Server URL', type: 'text', required: true, placeholder: 'https://... or stdio://...' },
-  { key: 'transport', label: 'Transport', type: 'select', options: mcpTransportOptions, required: true },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'serverUrl', labelKey: 'form.serverUrl', label: 'Server URL', type: 'text', required: true, placeholder: 'https://... or stdio://...' },
+  { key: 'transport', labelKey: 'form.transport', label: 'Transport', type: 'select', options: mcpTransportOptions, required: true },
   {
     key: 'command',
-    label: 'Command (stdio only)',
+    labelKey: 'form.command', label: 'Command (stdio only)',
     type: 'text',
     placeholder: 'e.g. node ./mcp-server.js',
     visible: (model) => (model.transport as string | undefined) === 'stdio',
   },
   {
     key: 'arguments',
-    label: 'Arguments',
+    labelKey: 'form.arguments', label: 'Arguments',
     type: 'textarea',
     placeholder: 'One argument per line. Stored verbatim — JSON literals also accepted.',
   },
-  { key: 'authType', label: 'Auth Type', type: 'select', options: mcpAuthTypeOptions },
+  { key: 'authType', labelKey: 'form.authType', label: 'Auth Type', type: 'select', options: mcpAuthTypeOptions },
   {
     key: 'authToken',
-    label: 'Auth Token',
+    labelKey: 'form.authToken', label: 'Auth Token',
     type: 'text',
     placeholder: 'Leave blank on edit to keep existing token',
   },
-  { key: 'priority', label: 'Priority', type: 'number', min: 0 },
-  { key: 'isEnabled', label: 'Enabled', type: 'switch' },
-  { key: 'description', label: 'Description', type: 'textarea' },
+  { key: 'priority', labelKey: 'form.priority', label: 'Priority', type: 'number', min: 0 },
+  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
   {
     key: 'tags',
-    label: 'Tags',
+    labelKey: 'form.tags', label: 'Tags',
     type: 'textarea',
     placeholder: 'One tag per line. Stored verbatim.',
   },

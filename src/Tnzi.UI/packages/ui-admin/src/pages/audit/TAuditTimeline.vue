@@ -114,10 +114,14 @@
 import { computed, ref, onMounted } from 'vue'
 import {
   NCard, NInput, NSelect, NDatePicker, NButton, NSpin, NTimeline, NTimelineItem,
-  NTag, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, useMessage,
+  NTag, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem,
 } from 'naive-ui'
-import type { AuditOperationDto } from '@tnzi/core/services/audit'
-import { AuditResultType } from '@tnzi/core/services/audit'
+import { useSafeMessage } from '../_shared/safeMessage'
+// 0.2.72+ (B4): Re-routed through the bridge so the page stays clean
+// under the `no-restricted-imports` guard against direct
+// `@tnzi/core/services/*` value imports from `pages/**`.
+import type { AuditOperationDto } from '../../services/bridges/audit-bridge'
+import { AuditResultType } from '../../services/bridges/audit-bridge'
 import type { CrudPageQuery, CrudPageResult } from '../../services/types'
 
 interface Props {
@@ -132,12 +136,7 @@ interface Props {
 const props = defineProps<Props>()
 const t = props.translate
 
-let message: { error(s: string): void }
-try {
-  message = useMessage()
-} catch {
-  message = { error: () => {} }
-}
+const message = useSafeMessage()
 
 interface Filters {
   userName?: string
@@ -301,8 +300,8 @@ onMounted(() => {
 .t-audit-timeline__day-title {
   margin: 0 0 12px;
   font-size: 13px;
-  color: var(--tnzi-base-text-muted, #888);
-  border-bottom: 1px solid var(--tnzi-base-border, #efeff5);
+  color: var(--tnzi-base-text-muted);
+  border-bottom: 1px solid var(--tnzi-border);
   padding-bottom: 6px;
 }
 .t-audit-timeline__item-header {
@@ -312,15 +311,15 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .t-audit-timeline__action {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
 }
 .t-audit-timeline__elapsed {
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   font-size: 12px;
 }
 .t-audit-timeline__item-body {
   font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   margin-top: 4px;
   display: flex;
   gap: 12px;
@@ -328,10 +327,10 @@ onMounted(() => {
   cursor: pointer;
 }
 .t-audit-timeline__item-body:hover {
-  color: var(--tnzi-primary-color, #06B6D4);
+  color: var(--tnzi-primary);
 }
 .t-audit-timeline__route {
-  font-family: var(--tnzi-font-family-mono, ui-monospace, monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   word-break: break-all;
 }
@@ -344,7 +343,7 @@ onMounted(() => {
 }
 .t-audit-timeline__empty {
   text-align: center;
-  color: var(--tnzi-base-text-muted, #888);
+  color: var(--tnzi-base-text-muted);
   padding: 60px 0;
 }
 .t-audit-timeline__details {
@@ -352,12 +351,12 @@ onMounted(() => {
 }
 .t-audit-timeline__details summary {
   cursor: pointer;
-  color: var(--tnzi-primary-color, #06B6D4);
+  color: var(--tnzi-primary);
   font-size: 13px;
   margin-bottom: 4px;
 }
 .t-audit-timeline__details pre {
-  background: var(--tnzi-base-fill, #f5f5f7);
+  background: var(--tnzi-layout-bg);
   padding: 8px;
   border-radius: 4px;
   font-size: 12px;

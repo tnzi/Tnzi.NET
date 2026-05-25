@@ -66,21 +66,22 @@ describe('NotificationTemplate page (Phase 3.25)', () => {
 
 describe('notificationTemplateColumns config', () => {
   it('exports columns with required keys', async () => {
+    // Fields aligned with backend TemplateInfoDto (Tnzi.Template):
+    // templateName / category / description / defaultLayoutName / isActive / source.
     const { notificationTemplateColumns } = await import('../../src/pages/notification/notification-template-config')
     const keys = notificationTemplateColumns.map((c) => c.key)
-    expect(keys).toContain('code')
-    expect(keys).toContain('name')
-    expect(keys).toContain('channel')
-    expect(keys).toContain('locale')
-    expect(keys).toContain('enabled')
+    expect(keys).toContain('templateName')
+    expect(keys).toContain('category')
+    expect(keys).toContain('isActive')
+    expect(keys).toContain('source')
   })
 
   it('exports formSchema with required fields', async () => {
     const { notificationTemplateFormSchema } = await import('../../src/pages/notification/notification-template-config')
     const keys = notificationTemplateFormSchema.map((f) => f.key)
-    expect(keys).toContain('code')
-    expect(keys).toContain('name')
-    expect(keys).toContain('body')
-    expect(keys).toContain('enabled')
+    expect(keys).toContain('templateName')
+    expect(keys).toContain('category')
+    expect(keys).toContain('contentTemplate')
+    expect(keys).toContain('isActive')
   })
 })

@@ -43,14 +43,16 @@ function onClear(): void {
   align-items: center;
   gap: var(--tnzi-spacing-md, 12px);
   padding: var(--tnzi-spacing-sm, 8px) var(--tnzi-spacing-md, 12px);
-  background: var(--tnzi-color-info-bg, #f0f7ff);
-  border: 1px solid var(--tnzi-color-info-border, #d6e4ff);
+  /* Info-tinted surface — derived from --tnzi-info-rgb so it stays
+     legible on both light and dark themes (no separate token needed). */
+  background: rgb(var(--tnzi-info-rgb, 32 128 240) / 0.08);
+  border: 1px solid rgb(var(--tnzi-info-rgb, 32 128 240) / 0.24);
   border-radius: var(--tnzi-admin-radius-sm, 4px);
 }
 
 .t-batch-actions__count {
   font-weight: 600;
-  color: var(--tnzi-color-text, inherit);
+  color: var(--tnzi-base-text);
 }
 
 .t-batch-actions__content {
@@ -64,7 +66,7 @@ function onClear(): void {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--tnzi-color-primary, #2080f0);
+  color: var(--tnzi-primary);
   padding: 0;
   font: inherit;
 }

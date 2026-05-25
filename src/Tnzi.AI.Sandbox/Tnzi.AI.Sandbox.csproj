@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
+    <ProjectReference Include="..\Tnzi.Audit\Tnzi.Audit.csproj" />
   </ItemGroup>
 
 </Project>

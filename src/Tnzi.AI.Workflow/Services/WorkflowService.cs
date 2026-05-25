@@ -42,8 +42,20 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
     public async Task<Result<WorkflowDefinitionDto>> CreateAsync(CreateWorkflowDefinitionDto input)
     {
         Check.NotNull(input);
-        var entity = input.MapTo<WorkflowDefinition>();
-        entity.Steps = JsonSerializer.Serialize(input.Steps, TnziJsonDefaults.Options);
+        // Construct the entity directly — Mapster can't auto-convert
+        // `Steps: List<WorkflowStepDto>` (DTO) to `Steps: string` (entity
+        // JSON column) and throws `InvalidCastException` during MapTo.
+        // Manual construction keeps the dto/entity column mismatch
+        // explicit and avoids registering a custom mapping config just
+        // for this one field.
+        var entity = new WorkflowDefinition
+        {
+            Name = input.Name,
+            Description = input.Description,
+            ExecutionMode = input.ExecutionMode,
+            IsEnabled = input.IsEnabled,
+            Steps = JsonSerializer.Serialize(input.Steps ?? new List<WorkflowStepDto>(), TnziJsonDefaults.Options),
+        };
         await _repository.InsertAsync(entity);
         return Ok(MapToDto(entity));
     }
@@ -125,17 +137,45 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
             .WhereIf(w => w.ExecutionMode == query.ExecutionMode!.Value, query.ExecutionMode.HasValue)
             .OrderByDescending(w => w.CreationTime);
 
-        var pagedList = await queryable.ProjectTo<WorkflowDefinition, WorkflowDefinitionDto>().CreateAsync(query);
-        return Ok(pagedList);
+        // Steps is stored as a JSON string on the entity but exposed as
+        // List<WorkflowStepDto> on the DTO. Mapster's `ProjectTo` runs at
+        // the EF Core SQL projection layer and can't deserialize JSON
+        // strings into typed collections — which made GetListAsync throw
+        // a 500 in production. Page the entities first (efficient SQL),
+        // then map row-by-row through MapToDto where the JSON
+        // deserialization can happen safely in-memory.
+        var pagedEntities = await queryable.CreateAsync(query);
+        var dtos = pagedEntities.Items.Select(MapToDto).ToList();
+        var pagedList = new PagedList<WorkflowDefinitionDto>(
+            dtos,
+            pagedEntities.PageIndex,
+            pagedEntities.PageSize,
+            pagedEntities.TotalCount);
+        return Ok<IPagedList<WorkflowDefinitionDto>>(pagedList);
     }
 
     private static WorkflowDefinitionDto MapToDto(WorkflowDefinition entity)
     {
-        var dto = entity.MapTo<WorkflowDefinitionDto>();
-        dto.Steps = string.IsNullOrWhiteSpace(entity.Steps)
-            ? new List<WorkflowStepDto>()
-            : JsonSerializer.Deserialize<List<WorkflowStepDto>>(entity.Steps, TnziJsonDefaults.Options) ?? new();
-        return dto;
+        // Manual construction — Mapster's `entity.MapTo<WorkflowDefinitionDto>()`
+        // throws InvalidCastException trying to convert the entity's
+        // `Steps: string` (JSON column) into the DTO's
+        // `Steps: List<WorkflowStepDto>`. Even though we overwrite the
+        // `Steps` field immediately after MapTo, the cast happens during
+        // the mapping pass itself. Build the DTO field-by-field so the
+        // string → list deserialization is explicit and isolated.
+        return new WorkflowDefinitionDto
+        {
+            Id = entity.Id,
+            Name = entity.Name,
+            Description = entity.Description,
+            ExecutionMode = entity.ExecutionMode,
+            IsEnabled = entity.IsEnabled,
+            CreationTime = entity.CreationTime,
+            LastModificationTime = entity.LastModificationTime,
+            Steps = string.IsNullOrWhiteSpace(entity.Steps)
+                ? new List<WorkflowStepDto>()
+                : JsonSerializer.Deserialize<List<WorkflowStepDto>>(entity.Steps, TnziJsonDefaults.Options) ?? new(),
+        };
     }
 
     private static WorkflowGraph BuildWorkflowGraph(WorkflowDefinition workflowDef)

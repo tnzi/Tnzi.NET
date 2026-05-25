@@ -93,6 +93,190 @@ body *::-webkit-scrollbar-thumb:active {
   overflow-x: hidden;
 }
 
+/* ── Auto fill the available height for single-card pages ──
+ * Most admin pages wrap a single `<NCard>` inside the t-page-scroll
+ * container. With NCard defaulting to `height: auto`, short content
+ * leaves a page-background gap between the card's bottom border and
+ * the footer that reads as a visual bug.
+ *
+ * `:only-child` scopes the rule to genuinely single-card pages
+ * (Organization, Permission, StorageFile, EntityRole, RoleFunction,
+ * Sessions, Run/Eval viewers, …) and skips multi-card stacked
+ * dashboards (Workbench, UsageDashboard, AgentDetail) that manage
+ * their own block flow.
+ *
+ * The flex column + `flex:1` on `.n-card-content` lets pages with
+ * internal grid/flex layouts (OrganizationManagement) stretch their
+ * inner regions to the card height without each page repeating the
+ * Naive-UI specific selector. Pages that just render a NForm /
+ * NDataTable inside the card still benefit — the card background
+ * fills to the footer, and the inner content stays top-aligned by
+ * the normal flex-column flow.
+ *
+ * Note: Naive UI's NCard uses hyphenated `.n-card-content` (not BEM
+ * `__content`) for the body slot — easy to get wrong. */
+.t-page-scroll > .n-card:only-child {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.t-page-scroll > .n-card:only-child > .n-card-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Stacked page root (fills TAdminContent height) ──
+ * Apply to a page's root `<div>` to get the same vertical-flex shell that
+ * TCrudPage uses internally — a height-100% flex column that lets the
+ * table-card grow to claim the residual height. Use together with
+ * `.t-table-card` on the NCard that contains the primary NDataTable.
+ *
+ * Pages with stacked KPIs / header + ONE primary table should use this.
+ * Pages with multiple stacked tables OR mixed long content should keep
+ * using `.t-page-scroll` (scroll the whole page).
+ *
+ * Usage:
+ *   <div class="t-foo-page t-stack-page">
+ *     <div class="t-foo-page__header">…</div>
+ *     <div class="t-foo-page__kpis">…</div>
+ *     <NCard class="t-table-card" :title="…">
+ *       <NDataTable :flex-height="true" … />
+ *     </NCard>
+ *   </div>
+ */
+.t-stack-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── Table-card (primary NDataTable wrapper) ──
+ * Apply to the NCard that holds the page's primary NDataTable. The card
+ * claims the residual height of its flex parent, and the NDataTable
+ * inside (when given `:flex-height="true"`) sizes its scrollable body so
+ * the built-in pagination footer stays anchored at the card's bottom.
+ *
+ * Naive UI's content slot class is `.n-card-content` (dash, NOT BEM
+ * `.n-card__content`) — easy to typo. */
+.t-table-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-table-card > .n-card-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-table-card .n-data-table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── Tabbed table page ──
+ * Apply to NTabs when the tab pane bodies contain primary data tables
+ * (Diagnostics, the post-2026-05-20 Performance redesign). The tabs
+ * widget claims the residual height, each pane is a flex column, and
+ * the NDataTable inside each pane uses `flex-height` to size correctly.
+ *
+ * Usage:
+ *   <div class="t-foo-page t-stack-page">
+ *     <header>…</header>
+ *     <NTabs class="t-table-tabs" type="line" animated>
+ *       <NTabPane name="a">
+ *         <div class="t-table-tabs__pane">  ← required wrapper
+ *           <div class="t-table-tabs__toolbar">…</div>
+ *           <NDataTable :flex-height="true" … />
+ *         </div>
+ *       </NTabPane>
+ *     </NTabs>
+ *   </div>
+ */
+.t-table-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--tnzi-container-bg);
+  border: 1px solid var(--tnzi-border);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  padding: 0 16px 16px;
+}
+.t-table-tabs > .n-tabs-nav {
+  flex-shrink: 0;
+}
+.t-table-tabs > .n-tabs-pane-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-table-tabs .n-tab-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-table-tabs__pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-table-tabs__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin-bottom: 12px;
+}
+.t-table-tabs__pane .n-data-table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── Reading-width caps for form-centric pages ──
+ *
+ * Wide viewports (≥1440px) make a single NInput grow to ~600-1000px, which
+ * is wasted horizontal motion and reads as visually loose. Form/settings
+ * pages opt in by adding ONE utility class to their top layout container;
+ * the container then maxes out at a sensible reading width and centers
+ * horizontally. Below the cap it acts like `width: 100%`, so phones and
+ * tablets still see the full grid.
+ *
+ * Usage:
+ *   <div class="t-form-page">        ← caps at 1080 (sidebar-nav + form)
+ *     <aside>...nav...</aside>
+ *     <section>...form...</section>
+ *   </div>
+ *
+ *   <div class="t-narrow-page">      ← caps at 720 (single-column long form)
+ *     <NForm>...</NForm>
+ *   </div>
+ *
+ * Pages that are NOT form-centric (list pages, dashboards, canvases) leave
+ * the class off so they keep using the full content width. */
+.t-form-page {
+  width: 100%;
+  max-width: 1080px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.t-narrow-page {
+  width: 100%;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* ── Navigation menus — fully hidden scrollbar (no gutter) ──
  * The sidebar / mix rail / vertical-mix sub-sider all carry their own
  * brand identity; an even-5px gutter cuts into the icon column on
@@ -138,6 +322,33 @@ body *::-webkit-scrollbar-thumb:active {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ===== Touch-device tap-target tuning =====
+ *
+ * `@media (pointer: coarse)` resolves to true on phones, tablets, and
+ * most touch-screen laptops. Apple's HIG and Google's Material Design
+ * both recommend at minimum 44×44 / 48×48 touch targets. Our default
+ * 36×36 icon buttons read fine with a mouse but are uncomfortably
+ * small with a thumb — bump them on coarse pointers only so desktop
+ * density doesn't suffer.
+ *
+ * Components opt in by using `.t-admin-header__icon-btn`,
+ * `.t-admin-user-avatar`, or other shared classes. New components
+ * should reuse one of these so the touch-friendly sizing comes for
+ * free.
+ */
+@media (pointer: coarse) {
+  .t-admin-header__icon-btn,
+  .t-admin-user-avatar {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .t-admin-tabs__reload,
+  .t-admin-tabs__action {
+    min-width: 36px;
+    min-height: 36px;
   }
 }
 

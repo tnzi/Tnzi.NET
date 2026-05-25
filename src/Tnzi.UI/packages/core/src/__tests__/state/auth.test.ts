@@ -293,6 +293,18 @@ describe('AuthStateManager', () => {
   // User getters fallback to user object
   // ------------------------------------------
 
+  describe('refreshAccessToken', () => {
+    it('throws when no refresh token is set', async () => {
+      // Previously this returned silently, which caused HttpClient's
+      // refreshTokenFn wrapper to "succeed" with the stale access token
+      // and skip the onUnauthorized callback. Throwing instead lets
+      // callers distinguish "refresh worked" from "no refresh available"
+      // so the consumer's session-expired handler actually fires.
+      expect(auth.refreshToken).toBeNull();
+      await expect(auth.refreshAccessToken()).rejects.toThrow(/no refresh token/i);
+    });
+  });
+
   describe('roles/permissions fallback', () => {
     it('userRoles should fallback to user.roles when roles is empty', () => {
       auth.user = {

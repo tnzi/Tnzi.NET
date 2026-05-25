@@ -2,6 +2,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+import { TSourceBadge } from '@tnzi/ui'
 
 /**
  * Phase 5 Task 5.7 — SkillList page config (sibling of SkillList.vue).
@@ -15,10 +16,10 @@ import TStatusBadge from '../../../components/display/TStatusBadge.vue'
  * Note: backend uses `enabled` (not `isEnabled`) on skill DTOs.
  */
 export const skillColumns: ColumnDef[] = [
-  { key: 'name', title: 'columns.name' },
-  { key: 'slug', title: 'columns.slug' },
-  { key: 'scope', title: 'columns.scope' },
-  { key: 'description', title: 'columns.description' },
+  { key: 'name', title: 'columns.name', width: 180 },
+  { key: 'slug', title: 'columns.slug', width: 160 },
+  { key: 'scope', title: 'columns.scope', width: 100 },
+  { key: 'description', title: 'columns.description', ellipsis: { tooltip: true } },
   { key: 'priority', title: 'columns.priority', visible: false },
   { key: 'version', title: 'columns.version', visible: false },
   { key: 'author', title: 'columns.author', visible: false },
@@ -30,12 +31,22 @@ export const skillColumns: ColumnDef[] = [
       h(TStatusBadge, {
         value: Boolean(row.enabled),
         mapping: {
-          true: { type: 'success', label: 'Enabled' },
-          false: { type: 'warning', label: 'Disabled' },
+          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
         },
       }),
   },
-  { key: 'source', title: 'columns.source', visible: false },
+  {
+    key: 'source',
+    title: 'columns.source',
+    width: 110,
+    render: (row) =>
+      h(TSourceBadge, {
+        // SkillSource enum is serialised as numeric (System.Text.Json default);
+        // TSourceBadge accepts number | string and maps ordinals correctly.
+        value: (row.source ?? 1) as number | string,
+      }),
+  },
   { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
 ]
 
@@ -46,16 +57,16 @@ export const skillScopeOptions: Array<{ label: string; value: string }> = [
 ]
 
 export const skillFormSchema: FormSchemaItem[] = [
-  { key: 'slug', label: 'Slug', type: 'text', required: true },
-  { key: 'name', label: 'Name', type: 'text', required: true },
-  { key: 'scope', label: 'Scope', type: 'select', options: skillScopeOptions },
-  { key: 'description', label: 'Description', type: 'textarea' },
-  { key: 'whenToUse', label: 'When To Use', type: 'textarea' },
-  { key: 'content', label: 'Skill Content', type: 'textarea', required: true },
-  { key: 'priority', label: 'Priority', type: 'number', min: 0, max: 1000 },
-  { key: 'version', label: 'Version', type: 'text' },
-  { key: 'author', label: 'Author', type: 'text' },
-  { key: 'enabled', label: 'Enabled', type: 'switch' },
+  { key: 'slug', labelKey: 'form.slug', label: 'Slug', type: 'text', required: true },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'scope', labelKey: 'form.scope', label: 'Scope', type: 'select', options: skillScopeOptions },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
+  { key: 'whenToUse', labelKey: 'form.whenToUse', label: 'When To Use', type: 'textarea' },
+  { key: 'content', labelKey: 'form.content', label: 'Skill Content', type: 'textarea', required: true },
+  { key: 'priority', labelKey: 'form.priority', label: 'Priority', type: 'number', min: 0, max: 1000 },
+  { key: 'version', labelKey: 'form.version', label: 'Version', type: 'text' },
+  { key: 'author', labelKey: 'form.author', label: 'Author', type: 'text' },
+  { key: 'enabled', labelKey: 'form.enabled', label: 'Enabled', type: 'switch' },
 ]
 
 /**

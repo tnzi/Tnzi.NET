@@ -3,15 +3,21 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 
-const SUBSCRIPTION_STATUS_MAP: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
-  active:    { type: 'success', label: 'Active' },
-  trialing:  { type: 'info',    label: 'Trialing' },
-  pastDue:   { type: 'warning', label: 'Past Due' },
-  past_due:  { type: 'warning', label: 'Past Due' },
-  paused:    { type: 'warning', label: 'Paused' },
-  cancelled: { type: 'default', label: 'Cancelled' },
-  expired:   { type: 'default', label: 'Expired' },
-  ended:     { type: 'default', label: 'Ended' },
+/**
+ * SubscriptionStatus enum: 0=Pending / 1=Trial / 2=Active /
+ *   3=PendingRenewal / 4=Paused / 5=Cancelled / 6=Expired.
+ * Backend serialises as int — the previous string-keyed map ('active' /
+ * 'trialing' / 'pastDue' / 'ended') never matched any row, leaving the
+ * badge with the raw number visible.
+ */
+const SUBSCRIPTION_STATUS_MAP: Record<number, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label?: string; labelKey?: string }> = {
+  0: { type: 'warning', labelKey: 'admin.shared.status.pending' },
+  1: { type: 'info',    label: 'Trial' },
+  2: { type: 'success', labelKey: 'admin.shared.status.active' },
+  3: { type: 'warning', label: 'Pending Renewal' },
+  4: { type: 'warning', label: 'Paused' },
+  5: { type: 'default', labelKey: 'admin.shared.status.cancelled' },
+  6: { type: 'default', label: 'Expired' },
 }
 
 /**
@@ -34,9 +40,12 @@ export const paymentSubscriptionColumns: ColumnDef[] = [
     title: 'columns.status',
     width: 130,
     render: (row) => {
-      const raw = String(row.status ?? '').toLowerCase()
-      const m = SUBSCRIPTION_STATUS_MAP[raw] ?? { type: 'default' as const, label: row.status as string ?? '—' }
-      return h(TStatusBadge, { value: raw, type: m.type, label: m.label })
+      const v = typeof row.status === 'number' ? row.status : Number(row.status)
+      const m = SUBSCRIPTION_STATUS_MAP[v]
+      if (m) {
+        return h(TStatusBadge, { value: v, type: m.type, label: m.label, labelKey: m.labelKey })
+      }
+      return h(TStatusBadge, { value: v, type: 'default', label: String(row.status ?? '—') })
     },
   },
   { key: 'cycleType',       title: 'columns.cycleType' },
@@ -48,14 +57,14 @@ export const paymentSubscriptionColumns: ColumnDef[] = [
 ]
 
 export const paymentSubscriptionFormSchema: FormSchemaItem[] = [
-  { key: 'userId',    label: 'Customer',   type: 'text',   required: true },
-  { key: 'planId',    label: 'Plan ID',    type: 'text',   required: true },
-  { key: 'planName',  label: 'Plan Name',  type: 'text' },
-  { key: 'cycleType', label: 'Cycle Type', type: 'select', options: [
+  { key: 'userId',    labelKey: 'form.userId', label: 'Customer',   type: 'text',   required: true },
+  { key: 'planId',    labelKey: 'form.planId', label: 'Plan ID',    type: 'text',   required: true },
+  { key: 'planName',  labelKey: 'form.planName', label: 'Plan Name',  type: 'text' },
+  { key: 'cycleType', labelKey: 'form.cycleType', label: 'Cycle Type', type: 'select', options: [
     { label: 'Daily',   value: 'Daily' },
     { label: 'Weekly',  value: 'Weekly' },
     { label: 'Monthly', value: 'Monthly' },
     { label: 'Yearly',  value: 'Yearly' },
   ] },
-  { key: 'status',    label: 'Status',     type: 'text' },
+  { key: 'status',    labelKey: 'form.status', label: 'Status',     type: 'text' },
 ]

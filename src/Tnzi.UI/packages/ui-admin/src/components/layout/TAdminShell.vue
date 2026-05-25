@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, h, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, h, inject, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 import { NMenu, type MenuOption } from 'naive-ui'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
@@ -15,8 +15,8 @@ import TAdminWatermark from './TAdminWatermark.vue'
 import TGlobalSearch from './TGlobalSearch.vue'
 import TAdminUserAvatar from './TAdminUserAvatar.vue'
 import TBackTop from '../utility/TBackTop.vue'
-import TPinToggler from '../utility/TPinToggler.vue'
-import TSvgIcon from '../display/TSvgIcon.vue'
+import { TPinToggler } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
 import type { TAdminFooterLink } from './TAdminFooter.vue'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import {
@@ -30,7 +30,7 @@ import {
 } from '../../stores/useAdminRouteStore'
 import type { AdminTab } from '../../stores/useAdminTabStore'
 import { useAdminMenuContext } from '../../headless/useAdminMenuContext'
-import { useBreakpoint } from '../../headless/useBreakpoint'
+import { useAdminShellLayout } from '../../headless/useAdminShellLayout'
 
 interface SiderConfig {
   visible?: boolean
@@ -133,19 +133,6 @@ const emit = defineEmits<{
 const appStore = useAdminAppStore()
 const themeStore = useAdminThemeStore()
 const routeStore = useAdminRouteStore()
-const bp = useBreakpoint()
-
-/**
- * Mobile drawer width — caps the user-supplied `sider.width` (or fallback
- * 260) at `viewport - 40` so the drawer never covers the close affordance
- * gap. Below 360px viewport the cap falls to 88vw (iPhone SE friendly).
- */
-const mobileDrawerWidth = computed<number>(() => {
-  const requested = props.sider?.width ?? 260
-  const viewport = bp.width.value || 1024
-  const minGutter = viewport < 360 ? viewport * 0.12 : 40
-  return Math.max(240, Math.min(requested, viewport - minGutter))
-})
 
 // Phase B: optionally consume the @tnzi/ui theme context to detect dark mode
 // (used to gate invertSider — see siderInverted below). Tests that mount
@@ -198,174 +185,40 @@ const menuCtx = useAdminMenuContext({
   autoSelectSecondLevel: computed(() => themeStore.autoSelectFirstMenu),
 })
 
-const effectiveMode = computed<AdminLayoutMode>(() => {
-  const requested = props.mode ?? themeStore.layoutMode
-  // Mobile is always vertical drawer-based regardless of desktop preference.
-  return appStore.isMobile ? 'vertical' : requested
+// 0.2.72+ (B5): the 16 layout-mode derivations + mobile drawer width +
+// drawerOpen were sunk to `useAdminShellLayout` so the layout decisions
+// can be unit-tested in isolation from the SFC. Destructure into the
+// flat var names the template already uses to avoid touching the
+// 400-line template below.
+const {
+  effectiveMode,
+  siderInverted,
+  topMenuVariant,
+  showMainSider,
+  siderItems,
+  topItems,
+  topActiveKey,
+  shouldRenderHeaderLogo,
+  showSubSider,
+  sidebarPresentationMode,
+  primarySiderWidth,
+  subSiderWidth,
+  tabsVisible,
+  footerVisible,
+  headerVisible,
+  resolvedTransition,
+  mobileDrawerWidth,
+  drawerOpen,
+} = useAdminShellLayout({
+  mode: toRef(props, 'mode'),
+  sider: toRef(props, 'sider'),
+  header: toRef(props, 'header'),
+  tabs: toRef(props, 'tabs'),
+  footer: toRef(props, 'footer'),
+  content: toRef(props, 'content'),
+  isDark,
+  menuCtx,
 })
-
-// invertSider only takes effect under light mode + a vertical layout, mirroring
-// soybean's `darkMenu = !darkMode && layout.includes('vertical')`. The drawer
-// switch can be toggled in any mode but the visual flip is gated here.
-const VERTICAL_INVERT_MODES: AdminLayoutMode[] = ['vertical', 'vertical-mix']
-const siderInverted = computed(() =>
-  themeStore.invertSider &&
-  !isDark.value &&
-  VERTICAL_INVERT_MODES.includes(effectiveMode.value),
-)
-
-/** Modes that surface the menu in the top header bar. */
-const HORIZONTAL_HOSTED_MODES: AdminLayoutMode[] = [
-  'horizontal',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
-  'top-hybrid-header-first',
-]
-/** Modes that render a primary sidebar. */
-const SIDER_HOSTED_MODES: AdminLayoutMode[] = [
-  'vertical',
-  'vertical-mix',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
-  'top-hybrid-header-first',
-]
-
-const topMenuVariant = computed<'full' | 'first-level' | null>(() => {
-  if (!HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) return null
-  return effectiveMode.value === 'horizontal' ? 'full' : 'first-level'
-})
-
-const showMainSider = computed<boolean>(() => {
-  if (props.sider.visible === false) return false
-  if (appStore.isMobile) return false
-  if (!SIDER_HOSTED_MODES.includes(effectiveMode.value)) return false
-  // Phase E: top-hybrid-header-first hides the sider when the active
-  // 1st level item has no children (the menu lives entirely in the
-  // header bar). soybean does the same via `siderVisible = !isTop... ||
-  // isActiveFirstLevelMenuHasChildren`.
-  if (effectiveMode.value === 'top-hybrid-header-first') {
-    return menuCtx.isActiveFirstLevelMenuHasChildren.value
-  }
-  return true
-})
-
-// Phase E — what the sider should render in each layout mode.
-// vertical / vertical-mix → full menu tree (default behaviour)
-// vertical-hybrid-header-first → children of the active 1st level (top
-//   hosts the 1st level; sider hosts the rest)
-// top-hybrid-sidebar-first → 1st level items only (sider acts as an
-//   icon rail; top hosts the children)
-// top-hybrid-header-first → children of the active 1st level (top hosts
-//   the 1st level; sider hosts a normal vertical menu of the children)
-const siderItems = computed<AdminMenuItem[] | undefined>(() => {
-  switch (effectiveMode.value) {
-    case 'vertical-hybrid-header-first':
-    case 'top-hybrid-header-first':
-      return menuCtx.secondLevelMenus.value
-    case 'top-hybrid-sidebar-first':
-      return menuCtx.firstLevelMenus.value
-    case 'vertical':
-    case 'vertical-mix':
-    default:
-      return undefined
-  }
-})
-
-// Phase E — what the top menu should render in each layout mode.
-// horizontal → full tree (default)
-// vertical-hybrid-header-first → 1st level only
-// top-hybrid-header-first → 1st level only
-// top-hybrid-sidebar-first → children of the active 1st level (2nd level)
-const topItems = computed<AdminMenuItem[] | undefined>(() => {
-  if (effectiveMode.value === 'top-hybrid-sidebar-first') {
-    return menuCtx.secondLevelMenus.value
-  }
-  return undefined
-})
-
-// Phase E — active key for the top menu (so the top selection follows
-// menuCtx instead of tabStore for hybrid layouts).
-const topActiveKey = computed<string | undefined>(() => {
-  if (effectiveMode.value === 'top-hybrid-sidebar-first') {
-    return menuCtx.activeSecondLevelMenuKey.value || undefined
-  }
-  if (HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) {
-    return menuCtx.activeFirstLevelMenuKey.value || undefined
-  }
-  return undefined
-})
-
-/** Phase H3 B3: render the brand logo in the header for layout modes
- *  where the sider doesn't have its own header logo. horizontal mode
- *  has no sider; top-hybrid-* keep a sider but it's compact / context-
- *  dependent, so the brand belongs in the header. vertical /
- *  vertical-mix / vertical-hybrid-header-first keep it in the sider. */
-const shouldRenderHeaderLogo = computed<boolean>(() => {
-  return (
-    effectiveMode.value === 'horizontal' ||
-    effectiveMode.value === 'top-hybrid-sidebar-first' ||
-    effectiveMode.value === 'top-hybrid-header-first'
-  )
-})
-
-const showSubSider = computed<boolean>(
-  () => effectiveMode.value === 'vertical-mix' && !appStore.isMobile,
-)
-
-const sidebarPresentationMode = computed<'vertical' | 'vertical-mix'>(() =>
-  effectiveMode.value === 'vertical-mix' ? 'vertical-mix' : 'vertical',
-)
-
-/**
-/* Width of the primary sider, accounting for the 4-tier system:
- * - vertical-mix expanded → mixSiderWidth (90px, narrow first-level rail)
- * - vertical-mix collapsed → mixCollapsedWidth (64px, icon-only rail)
- * - other hosted modes, collapsed → siderCollapsedWidth (64px)
- * - other hosted modes, expanded → siderWidth (220px)
- * Consumer-provided `sider.width` always wins for testability.
- *
- * Soybean parity: in mix mode the rail also shrinks when collapsed —
- * previously we held it at 90px even when `appStore.siderCollapse=true`,
- * which made the icon-only rail look too wide (the user-reported bug). */
-const primarySiderWidth = computed<number>(() => {
-  if (effectiveMode.value === 'vertical-mix') {
-    return appStore.siderCollapse
-      ? (props.sider.collapsedWidth ?? themeStore.mixCollapsedWidth)
-      : (props.sider.width ?? themeStore.mixSiderWidth)
-  }
-  return appStore.siderCollapse
-    ? (props.sider.collapsedWidth ?? themeStore.siderCollapsedWidth)
-    : (props.sider.width ?? themeStore.siderWidth)
-})
-
-/** Width of the sub-sider in vertical-mix mode (matches soybean's mixChildMenuWidth). */
-const subSiderWidth = computed<number>(
-  () => props.sider.subWidth ?? themeStore.mixChildMenuWidth,
-)
-
-const tabsVisible = computed<boolean>(
-  () => props.tabs.visible !== false && themeStore.tabVisible,
-)
-const footerVisible = computed<boolean>(
-  () => props.footer.visible !== false && themeStore.footerVisible,
-)
-const headerVisible = computed<boolean>(() => {
-  // Phase C: in horizontal/hybrid layouts the header hosts the menu —
-  // hiding it strands the user with no way to navigate. Force visible.
-  // Mirrors soybean's behaviour where the "show header" toggle is a no-op
-  // in those modes (and the toggle is disabled in their drawer).
-  if (HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) return true
-  return props.header.visible !== false && themeStore.headerVisible
-})
-
-const resolvedTransition = computed(
-  // When `pageAnimate` is off, force `none` so TAdminContent disables
-  // its Transition wrapper. Otherwise pass through the prop / store
-  // selection.
-  () => (themeStore.pageAnimate
-    ? (props.content.transition ?? themeStore.pageTransition)
-    : 'none'),
-)
 
 function onMenuSelect(menu: AdminMenuItem): void {
   emit('menuSelect', menu)
@@ -605,9 +458,8 @@ function onMixMouseleave(): void {
   }
 }
 
-const drawerOpen = computed<boolean>(
-  () => appStore.isMobile && !appStore.siderCollapse,
-)
+// `drawerOpen` is now provided by `useAdminShellLayout` (see destructure
+// above). Kept for backward-compat with the template's usage.
 </script>
 
 <template>

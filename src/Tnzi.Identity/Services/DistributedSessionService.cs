@@ -341,6 +341,67 @@ public class DistributedSessionService : ApplicationService, ISessionService
         return Ok(new SessionStatisticsDto());
     }
 
+    /// <inheritdoc />
+    public async Task<Result<IEnumerable<ActiveUserSummaryDto>>> GetActiveUsersAsync(int top = 50)
+    {
+        if (top <= 0) top = 50;
+        if (top > 500) top = 500;
+
+        // Same rationale as GetSessionStatisticsAsync — Redis can't aggregate
+        // efficiently, so we fall back to the DB audit log when present.
+        if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
+        {
+            var aggregates = await _repository
+                .Where(us => !us.IsRevoked)
+                .GroupBy(us => us.UserId)
+                .Select(g => new
+                {
+                    UserId = g.Key,
+                    SessionCount = g.Count(),
+                    LastActivityTime = g.Max(us => us.LastActivityTime),
+                })
+                .OrderByDescending(x => x.LastActivityTime)
+                .Take(top)
+                .ToListAsync();
+
+            if (aggregates.Count == 0)
+            {
+                return Ok<IEnumerable<ActiveUserSummaryDto>>(Array.Empty<ActiveUserSummaryDto>());
+            }
+
+            var userIds = aggregates.Select(a => a.UserId).ToList();
+            var userRepository = ServiceProvider?.GetService<IRepository<User, Guid>>();
+            Dictionary<Guid, string?> nameMap;
+            if (userRepository != null)
+            {
+                var users = await userRepository
+                    .Where(u => userIds.Contains(u.Id))
+                    .Select(u => new { u.Id, u.UserName })
+                    .ToListAsync();
+                nameMap = users.ToDictionary(u => u.Id, u => u.UserName);
+            }
+            else
+            {
+                nameMap = new Dictionary<Guid, string?>();
+            }
+
+            var result = aggregates
+                .Select(a => new ActiveUserSummaryDto
+                {
+                    UserId = a.UserId,
+                    UserName = nameMap.GetValueOrDefault(a.UserId),
+                    SessionCount = a.SessionCount,
+                    LastActivityTime = a.LastActivityTime,
+                })
+                .ToList();
+
+            return Ok<IEnumerable<ActiveUserSummaryDto>>(result);
+        }
+
+        LogWarning("Active user list is not available in Redis mode without KeepDatabaseAuditLog enabled.");
+        return Ok<IEnumerable<ActiveUserSummaryDto>>(Array.Empty<ActiveUserSummaryDto>());
+    }
+
     #region Redis 操作辅助方法
 
     private string GetSessionKey(Guid sessionId) => $"{_sessionOptions.RedisKeyPrefix}:{sessionId}";

@@ -39,5 +39,19 @@ public class ModuleFunction : FullAuditedEntity<Guid>
     /// 获取或设置 排序号
     /// </summary>
     public int Order { get; set; }
+
+    /// <summary>
+    /// True when this row was seeded from an
+    /// <see cref="Permissions.IPermissionDefinitionProvider"/>. Admin UI
+    /// must show this as a read-only row and prevent code/delete edits —
+    /// only re-seeding via code can change the contract.
+    /// </summary>
+    /// <remarks>
+    /// The flag is *not* used by the permission check itself; it only
+    /// gates admin-side mutations. <c>IsEnabled</c> remains
+    /// admin-controllable on system-managed rows (deploy may need to
+    /// temporarily disable a permission without redeploying code).
+    /// </remarks>
+    public bool IsSystemManaged { get; set; }
 }
 
