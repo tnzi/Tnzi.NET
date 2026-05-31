@@ -19,9 +19,21 @@ public class SuggestionServiceTests
         var opts = Microsoft.Extensions.Options.Options.Create(options ?? new SuggestionOptions { AutoGenerate = true });
         return new SuggestionService(
             _aiUtility.Object,
-            _threadService.Object,
+            BuildScopeFactory(),
             opts,
             NullLogger<SuggestionService>.Instance);
+    }
+
+    /// <summary>
+    /// Builds a real IServiceScopeFactory whose scopes resolve the mocked IAgentThreadInternalService.
+    /// SuggestionService reads message history through a fresh scope (DbContext isolation), so the
+    /// thread service must be reachable via the scope's provider rather than a captured field.
+    /// </summary>
+    private IServiceScopeFactory BuildScopeFactory()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => _threadService.Object);
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
     private static List<ChatMessage> CreateMessages(params (ChatRole role, string content)[] msgs)
@@ -186,5 +198,42 @@ public class SuggestionServiceTests
             It.IsAny<string>(), It.IsAny<string>(),
             It.Is<AiUtilityCallOptions?>(o => o != null && o.Model == "gpt-4o-mini"),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_LoadsHistoryThroughScopeResolvedService()
+    {
+        // Arrange — register the thread service ONLY in a scope, never as a constructor field, so
+        // a successful load proves SuggestionService resolves it from an isolated DI scope.
+        var threadId = Guid.NewGuid();
+        _threadService.Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateMessages((ChatRole.User, "Hello")));
+        _aiUtility.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("[\"Q1?\"]");
+
+        var service = CreateService();
+
+        // Act
+        var suggestions = await service.GenerateAsync(threadId);
+
+        // Assert
+        Assert.Single(suggestions);
+        _threadService.Verify(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_HistoryLoadThrowsConcurrency_ReturnsEmpty()
+    {
+        // Arrange — the exact exception class the fix targets must be swallowed, not propagated.
+        _threadService.Setup(s => s.GetMessageHistoryAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("A second operation was started on this context instance"));
+
+        var service = CreateService();
+
+        // Act
+        var suggestions = await service.GenerateAsync(Guid.NewGuid());
+
+        // Assert
+        Assert.Empty(suggestions);
     }
 }

@@ -52,31 +52,39 @@ public class ChannelsModule : TnziApplicationModule
             services.AddSingleton<IChannelAdapter, TelegramChannelAdapter>();
         }
 
-        // Feishu 适配器
+        // Feishu 适配器（同时暴露为 IInboundWebhookAdapter 供 Webhook 控制器使用，单例同实例）
         if (options.Feishu.Enabled)
         {
-            services.AddSingleton<IChannelAdapter, FeishuChannelAdapter>();
+            services.AddSingleton<FeishuChannelAdapter>();
+            services.AddSingleton<IChannelAdapter>(sp => sp.GetRequiredService<FeishuChannelAdapter>());
+            services.AddSingleton<IInboundWebhookAdapter>(sp => sp.GetRequiredService<FeishuChannelAdapter>());
         }
 
         // Slack 适配器
         if (options.Slack.Enabled)
         {
             services.AddHttpClient("Tnzi.AI.Slack");
-            services.AddSingleton<IChannelAdapter, SlackChannelAdapter>();
+            services.AddSingleton<SlackChannelAdapter>();
+            services.AddSingleton<IChannelAdapter>(sp => sp.GetRequiredService<SlackChannelAdapter>());
+            services.AddSingleton<IInboundWebhookAdapter>(sp => sp.GetRequiredService<SlackChannelAdapter>());
         }
 
         // Discord 适配器
         if (options.Discord.Enabled)
         {
             services.AddHttpClient("Tnzi.AI.Discord");
-            services.AddSingleton<IChannelAdapter, DiscordChannelAdapter>();
+            services.AddSingleton<DiscordChannelAdapter>();
+            services.AddSingleton<IChannelAdapter>(sp => sp.GetRequiredService<DiscordChannelAdapter>());
+            services.AddSingleton<IInboundWebhookAdapter>(sp => sp.GetRequiredService<DiscordChannelAdapter>());
         }
 
         // 钉钉适配器
         if (options.Dingtalk.Enabled)
         {
             services.AddHttpClient("Tnzi.AI.Dingtalk");
-            services.AddSingleton<IChannelAdapter, DingtalkChannelAdapter>();
+            services.AddSingleton<DingtalkChannelAdapter>();
+            services.AddSingleton<IChannelAdapter>(sp => sp.GetRequiredService<DingtalkChannelAdapter>());
+            services.AddSingleton<IInboundWebhookAdapter>(sp => sp.GetRequiredService<DingtalkChannelAdapter>());
         }
 
         // HostedService — 绑定 Manager + Adapters 生命周期
@@ -86,6 +94,7 @@ public class ChannelsModule : TnziApplicationModule
         var gatewayOptions = context.Configuration.GetSection("AI:Channels:Gateway").Get<GatewayOptions>() ?? new();
         if (gatewayOptions.Enabled)
         {
+
             // 从配置构建绑定规则
             var bindingRules = gatewayOptions.BindingRules?.Select(r => new SessionBindingRule
             {
@@ -115,6 +124,13 @@ public class ChannelsModule : TnziApplicationModule
         var options = context.ServiceProvider.GetRequiredService<IOptions<ChannelsModuleOptions>>().Value;
         if (options.Gateway.Enabled)
         {
+            // 当 Gateway 接受匿名连接时，发出醒目的启动告警（生产环境应启用认证）
+            if (!options.Gateway.RequireAuthentication)
+            {
+                context.ServiceProvider.GetRequiredService<ILogger<ChannelsModule>>().LogWarning(
+                    "Gateway accepts anonymous WebSocket connections; set AI:Channels:Gateway:RequireAuthentication=true for production");
+            }
+
             app.UseGatewayWebSocket(options.Gateway.Path);
         }
 

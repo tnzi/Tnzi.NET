@@ -183,7 +183,10 @@ public class AgentVersionRouter : IAgentVersionRouter
             CostTier = snapshot.CostTier,
             Source = original.Source,
             DefinitionHash = original.DefinitionHash,
-            PersonaId = original.PersonaId
+            // Snapshot wins so A/B-routed variants can diverge persona.
+            // Falls back to original.PersonaId for snapshots taken before the
+            // PersonaId field existed (legacy AgentConfigSnapshot rows).
+            PersonaId = snapshot.PersonaId ?? original.PersonaId
         };
     }
 }

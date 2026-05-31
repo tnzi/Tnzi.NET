@@ -218,6 +218,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../../plugin/client'
 import {
   createPermissionBridge,
@@ -247,6 +248,7 @@ function behaviorTone(b: PermissionBehavior): 'success' | 'warning' | 'error' {
     case 0: return 'success'
     case 1: return 'warning'
     case 2: return 'error'
+    default: return 'error'
   }
 }
 function behaviorLabel(b: PermissionBehavior): string {
@@ -254,6 +256,7 @@ function behaviorLabel(b: PermissionBehavior): string {
     case 0: return t('behavior.allow')
     case 1: return t('behavior.ask')
     case 2: return t('behavior.deny')
+    default: return String(b)
   }
 }
 function scopeLabel(s: ToolPermissionScope): string {
@@ -265,11 +268,6 @@ function scopeLabel(s: ToolPermissionScope): string {
     default: return String(s)
   }
 }
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
-}
-
 const persistedColumns: DataTableColumns<PersistedPermissionRuleDto> = [
   {
     title: () => t('cols.behavior'),

@@ -76,6 +76,10 @@ public class AspNetCoreModule : TnziFrameworkModule
 
         context.Services.AddHttpContextAccessor();
 
+        // 注册关闭钩子：在主机优雅关闭阶段确定性地异步执行模块 OnApplicationShutdownAsync，
+        // 不再仅依赖 DI 容器释放时的 sync-over-async Dispose 兜底路径（ShutdownAsync 幂等，重复触发安全）
+        context.Services.AddHostedService<TnziShutdownHostedService>();
+
         // 注册 Web 层工具服务（IP 定位、UserAgent 解析）
         if (!context.Services.Any(s => s.ServiceType == typeof(IIpLocatorService)))
         {

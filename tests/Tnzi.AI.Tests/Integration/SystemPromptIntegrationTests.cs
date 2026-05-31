@@ -12,14 +12,14 @@ public class SystemPromptIntegrationTests
     /// 验证 SystemPromptTemplateBuilder 生成的完整 prompt 可作为 ChatMessage 注入
     /// </summary>
     [Fact]
-    public void FullPrompt_CanBeUsedAsChatMessage()
+    public async Task FullPrompt_CanBeUsedAsChatMessage()
     {
         var builder = new SystemPromptTemplateBuilder();
         builder.AddSection(SystemPromptTemplateBuilder.Tags.Soul, "You are Tnzi, a helpful AI assistant.", order: 0);
         builder.AddSection(SystemPromptTemplateBuilder.Tags.Instructions, "Always respond in English.", order: 30);
         builder.AddSection(SystemPromptTemplateBuilder.Tags.CurrentDate, DateTime.UtcNow.ToString("yyyy-MM-dd"), order: 120);
 
-        var prompt = builder.Build();
+        var prompt = await builder.BuildAsync();
 
         var message = new ChatMessage(ChatRole.System, prompt);
         message.Role.ShouldBe(ChatRole.System);
@@ -32,7 +32,7 @@ public class SystemPromptIntegrationTests
     /// 验证 SubAgentRegistry 的 general-purpose 定义可生成 orchestration section
     /// </summary>
     [Fact]
-    public void SubAgentRegistry_CanGenerateOrchestrationSection()
+    public async Task SubAgentRegistry_CanGenerateOrchestrationSection()
     {
         var registry = new SubAgentRegistry();
         var types = registry.GetAll();
@@ -47,7 +47,7 @@ public class SystemPromptIntegrationTests
         var builder = new SystemPromptTemplateBuilder();
         builder.AddSection(SystemPromptTemplateBuilder.Tags.SubAgentOrchestration, sb.ToString().TrimEnd(), order: 70);
 
-        var prompt = builder.Build();
+        var prompt = await builder.BuildAsync();
         prompt.ShouldContain("<sub_agent_orchestration>");
         prompt.ShouldContain("general-purpose");
         prompt.ShouldContain("bash");

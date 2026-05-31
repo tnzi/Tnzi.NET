@@ -151,20 +151,11 @@ public class LocalDeviceNode : IDeviceNode
         }
     }
 
-    private static DeviceCommandResult HandleNotification(DeviceCommand command)
+    private static DeviceCommandResult HandleNotification(DeviceCommand _)
     {
-        var title = "Notification";
-        var body = "No body";
-
-        if (command.Parameters.HasValue)
-        {
-            if (command.Parameters.Value.TryGetProperty("title", out var titleProp))
-                title = titleProp.GetString() ?? title;
-            if (command.Parameters.Value.TryGetProperty("body", out var bodyProp))
-                body = bodyProp.GetString() ?? body;
-        }
-
-        return DeviceCommandResult.Ok($"Notification sent: {title} — {body}");
+        // The local server node runs headless — there is no desktop session to send a toast/notification to.
+        // Return an honest failure rather than silently pretending to succeed.
+        return DeviceCommandResult.Fail("Notification not supported on the local server node (headless environment)");
     }
 
     private static DevicePlatform DetectPlatform()

@@ -90,6 +90,7 @@ public class RagPipelineIntegrationTests : IDisposable
             _embeddingServiceMock.Object,
             _chunkRepoMock.Object,
             _kbRepoMock.Object,
+            Mock.Of<IGraphExtractor>(),
             options,
             serviceProvider);
 

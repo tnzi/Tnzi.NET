@@ -1,268 +1,159 @@
 /**
  * @tnzi/ui/stores/user
  *
- * User preferences and profile store using Pinia defineStore directly.
- * Manages user profile data, UI preferences, recent items, and favorites.
+ * User preferences and profile store — thin Pinia wrapper delegating to core
+ * UserStateManager. All business logic (HTTP fetch, persistence, preferences)
+ * lives in UserStateManager; this store only proxies reactive state.
  */
 
-import { defineStore } from 'pinia';
 import { computed } from 'vue';
-import type {
-  UserState,
-  UserPreferences,
-  UserTheme,
-  RecentItem,
-} from '@tnzi/core/state';
-import { defaultUserPreferences } from '@tnzi/core/state';
+import { defineStore } from 'pinia';
+import { UserStateManager } from '@tnzi/core/state';
+import type { StateDeps, UserPreferences, UserTheme, RecentItem } from '@tnzi/core/state';
+import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
 import type { UserDto, UpdateUserDto } from '@tnzi/core/services/identity';
-import { useProfileApi } from '@tnzi/core/services/identity';
 import { getStoreHttpClient, getStoreStorage } from '../factory';
-import { applyThemeToDOM, applyLanguageToDOM } from '../../utils/naive-helpers';
+import { createThemeAdapter } from '../../adapters/theme';
 
 // ============================================
-// Storage Keys & Constants
+// UserStateManager Singleton
 // ============================================
 
-const STORAGE_KEY = 'user_data';
-const MAX_RECENT_ITEMS = 20;
-const MAX_FAVORITES = 10;
+let _manager: UserStateManager | null = null;
+
+function getManager(): UserStateManager {
+  if (!_manager) {
+    const deps: StateDeps = {
+      httpClient: getStoreHttpClient(),
+      storage: getStoreStorage() ?? createLocalStorageAdapter(),
+      theme: createThemeAdapter(),
+    };
+    _manager = new UserStateManager(deps);
+  }
+  return _manager;
+}
 
 // ============================================
 // User Store Definition
 // ============================================
 
-const defaultState = (): UserState => ({
-  currentUser: null,
-  preferences: { ...defaultUserPreferences },
-  recentItems: [],
-  favorites: [],
-  isLoading: false,
-  error: null,
+export const useUserStore = defineStore('user', () => {
+  const m = computed(() => getManager());
+
+  // --- Reactive state (proxied from manager) ---
+  const currentUser = computed(() => m.value.currentUser);
+  const preferences = computed(() => m.value.preferences);
+  const recentItems = computed(() => m.value.recentItems);
+  const favorites = computed(() => m.value.favorites);
+  const isLoading = computed(() => m.value.isLoading);
+  const error = computed(() => m.value.error);
+
+  // --- Getters ---
+  const isLoaded = computed(() => m.value.isLoaded);
+  const isAuthenticated = computed(() => m.value.isAuthenticated);
+  // Store keeps the 'Guest' fallback for an empty display name (public API).
+  const displayName = computed(() => m.value.displayName || 'Guest');
+  const userName = computed(() => m.value.userName);
+  const avatar = computed(() => m.value.avatar);
+  const email = computed(() => m.value.email);
+  const roles = computed(() => m.value.roles);
+  const theme = computed(() => m.value.theme);
+  const language = computed(() => m.value.language);
+  const recentItemsCount = computed(() => m.value.recentItemsCount);
+  const favoritesCount = computed(() => m.value.favoritesCount);
+
+  // --- Profile actions (delegate to manager) ---
+  async function fetchCurrentUser(): Promise<void> {
+    return getManager().fetchCurrentUser();
+  }
+
+  async function updateProfile(data: UpdateUserDto): Promise<UserDto> {
+    return getManager().updateProfile(data);
+  }
+
+  // --- Preferences actions ---
+  async function updatePreferences(prefs: Partial<UserPreferences>): Promise<void> {
+    getManager().updatePreferences(prefs);
+  }
+
+  function resetPreferences(): void {
+    getManager().resetPreferences();
+  }
+
+  function setTheme(t: UserTheme): void {
+    getManager().setTheme(t);
+  }
+
+  function setLanguage(lang: string): void {
+    getManager().setLanguage(lang as UserPreferences['language']);
+  }
+
+  // --- Recent items actions ---
+  function addRecentItem(item: Omit<RecentItem, 'accessedAt'>): void {
+    getManager().addRecentItem(item);
+  }
+
+  function removeRecentItem(id: string): void {
+    getManager().removeRecentItem(id);
+  }
+
+  function clearRecentItems(): void {
+    getManager().clearRecentItems();
+  }
+
+  // --- Favorites actions ---
+  function addFavorite(item: Omit<RecentItem, 'accessedAt'>): void {
+    getManager().addFavorite(item);
+  }
+
+  function removeFavorite(id: string): void {
+    getManager().removeFavorite(id);
+  }
+
+  function isFavorite(id: string): boolean {
+    return getManager().isFavorite(id);
+  }
+
+  // --- Persistence actions ---
+  async function loadPersistedData(): Promise<void> {
+    getManager().loadPersistedData();
+  }
+
+  function persistData(): void {
+    getManager().persistData();
+  }
+
+  return {
+    // State
+    currentUser, preferences, recentItems, favorites, isLoading, error,
+    // Getters
+    isLoaded, isAuthenticated, displayName, userName, avatar, email, roles,
+    theme, language, recentItemsCount, favoritesCount,
+    // Profile actions
+    fetchCurrentUser, updateProfile,
+    // Preferences actions
+    updatePreferences, resetPreferences, setTheme, setLanguage,
+    // Recent items actions
+    addRecentItem, removeRecentItem, clearRecentItems,
+    // Favorites actions
+    addFavorite, removeFavorite, isFavorite,
+    // Persistence actions
+    loadPersistedData, persistData,
+  };
 });
 
-export const useUserStore = defineStore('user', {
-  state: defaultState,
+// ============================================
+// Runtime Reset
+// ============================================
 
-  getters: {
-    isLoaded: (state): boolean => state.currentUser !== null,
-
-    isAuthenticated: (state): boolean => state.currentUser !== null,
-
-    displayName: (state): string => {
-      if (!state.currentUser) return 'Guest';
-      return state.currentUser.nickname ?? state.currentUser.userName ?? 'Guest';
-    },
-
-    userName: (state): string => state.currentUser?.userName ?? '',
-
-    avatar: (state): string | null => state.currentUser?.avatar ?? null,
-
-    email: (state): string | null => state.currentUser?.email ?? null,
-
-    roles: (state): string[] => state.currentUser?.roles ?? [],
-
-    theme: (state): UserTheme => state.preferences.theme,
-
-    language: (state): string => state.preferences.language,
-
-    recentItemsCount: (state): number => state.recentItems.length,
-
-    favoritesCount: (state): number => state.favorites.length,
-  },
-
-  actions: {
-    // ---- Profile actions ----
-
-    async fetchCurrentUser(): Promise<void> {
-      this.isLoading = true;
-      this.error = null;
-
-      try {
-        const client = getStoreHttpClient();
-        const api = useProfileApi(client);
-        const result = await api.get();
-        if (result.succeeded && result.data) {
-          this.currentUser = result.data;
-        }
-      } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Failed to fetch user';
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
-    },
-
-    async updateProfile(data: UpdateUserDto): Promise<UserDto> {
-      if (!this.isAuthenticated) {
-        throw new Error('Not authenticated');
-      }
-
-      this.isLoading = true;
-      this.error = null;
-
-      try {
-        const client = getStoreHttpClient();
-        const api = useProfileApi(client);
-        const result = await api.update(data);
-        if (result.succeeded && result.data) {
-          this.currentUser = result.data;
-          return result.data;
-        }
-        throw new Error('Update failed');
-      } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Update failed';
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
-    },
-
-    // ---- Preferences actions ----
-
-    async updatePreferences(preferences: Partial<UserPreferences>): Promise<void> {
-      this.preferences = { ...this.preferences, ...preferences };
-
-      if (preferences.theme !== undefined) {
-        this.applyTheme(this.preferences.theme);
-      }
-      if (preferences.language !== undefined) {
-        this.applyLanguage(this.preferences.language);
-      }
-
-      this.persistData();
-    },
-
-    resetPreferences(): void {
-      this.preferences = { ...defaultUserPreferences };
-      this.applyTheme(this.preferences.theme);
-      this.applyLanguage(this.preferences.language);
-      this.persistData();
-    },
-
-    setTheme(theme: UserTheme): void {
-      this.preferences.theme = theme;
-      this.applyTheme(theme);
-      this.persistData();
-    },
-
-    setLanguage(language: string): void {
-      this.preferences.language = language as UserPreferences['language'];
-      this.applyLanguage(language);
-      this.persistData();
-    },
-
-    // ---- Recent items actions ----
-
-    addRecentItem(item: Omit<RecentItem, 'accessedAt'>): void {
-      const newItem: RecentItem = {
-        ...item,
-        accessedAt: new Date(),
-      };
-
-      // Remove existing item with same ID
-      this.recentItems = this.recentItems.filter((i: RecentItem) => i.id !== item.id);
-
-      // Add new item at beginning
-      this.recentItems = [newItem, ...this.recentItems];
-
-      // Trim to max count
-      if (this.recentItems.length > MAX_RECENT_ITEMS) {
-        this.recentItems = this.recentItems.slice(0, MAX_RECENT_ITEMS);
-      }
-
-      this.persistData();
-    },
-
-    removeRecentItem(id: string): void {
-      this.recentItems = this.recentItems.filter((i: RecentItem) => i.id !== id);
-      this.persistData();
-    },
-
-    clearRecentItems(): void {
-      this.recentItems = [];
-      this.persistData();
-    },
-
-    // ---- Favorites actions ----
-
-    addFavorite(item: Omit<RecentItem, 'accessedAt'>): void {
-      if (this.favorites.some((f: RecentItem) => f.id === item.id)) {
-        return;
-      }
-
-      const newItem: RecentItem = {
-        ...item,
-        accessedAt: new Date(),
-      };
-
-      this.favorites = [newItem, ...this.favorites];
-
-      if (this.favorites.length > MAX_FAVORITES) {
-        this.favorites = this.favorites.slice(0, MAX_FAVORITES);
-      }
-
-      this.persistData();
-    },
-
-    removeFavorite(id: string): void {
-      this.favorites = this.favorites.filter((i: RecentItem) => i.id !== id);
-      this.persistData();
-    },
-
-    isFavorite(id: string): boolean {
-      return this.favorites.some((f: RecentItem) => f.id === id);
-    },
-
-    // ---- Persistence actions ----
-
-    async loadPersistedData(): Promise<void> {
-      const storage = getStoreStorage();
-      if (!storage) return;
-
-      const data = storage.get<{
-        preferences?: UserPreferences;
-        recentItems?: RecentItem[];
-        favorites?: RecentItem[];
-      }>(STORAGE_KEY);
-
-      if (data) {
-        if (data.preferences) {
-          this.preferences = { ...defaultUserPreferences, ...data.preferences };
-        }
-        if (data.recentItems) {
-          this.recentItems = data.recentItems;
-        }
-        if (data.favorites) {
-          this.favorites = data.favorites;
-        }
-      }
-
-      this.applyTheme(this.preferences.theme);
-      this.applyLanguage(this.preferences.language);
-    },
-
-    persistData(): void {
-      const storage = getStoreStorage();
-      if (!storage) return;
-
-      storage.set(STORAGE_KEY, {
-        preferences: this.preferences,
-        recentItems: this.recentItems,
-        favorites: this.favorites,
-      });
-    },
-
-    // ---- Internal helpers ----
-
-    applyTheme(theme: UserTheme): void {
-      applyThemeToDOM(theme);
-    },
-
-    applyLanguage(language: string): void {
-      applyLanguageToDOM(language);
-    },
-  },
-});
+/**
+ * Reset user runtime to uninitialized state.
+ * Nulls the internal UserStateManager singleton.
+ * Useful for SSR isolation or test teardown.
+ */
+export function resetUserRuntime(): void {
+  _manager = null;
+}
 
 // ============================================
 // Composable Wrapper

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { UserStateManager, createInitialUserState } from '../../state/user';
+import { defaultUserPreferences } from '../../state/types/user';
 import type { StateDeps } from '../../state/types';
 import type { HttpClient } from '../../http/http';
 import type { StorageAdapter } from '../../adapters/storage';
@@ -119,6 +120,18 @@ describe('UserStateManager', () => {
     it('isLoaded should be true when user is set', () => {
       user.currentUser = mockUser as any;
       expect(user.isLoaded).toBe(true);
+    });
+
+    it('isAuthenticated mirrors presence of currentUser', () => {
+      expect(user.isAuthenticated).toBe(false);
+      user.currentUser = mockUser as any;
+      expect(user.isAuthenticated).toBe(true);
+    });
+
+    it('roles returns currentUser roles or empty array', () => {
+      expect(user.roles).toEqual([]);
+      user.currentUser = mockUser as any;
+      expect(user.roles).toEqual(['admin']);
     });
 
     it('displayName should be empty when no user', () => {
@@ -295,6 +308,26 @@ describe('UserStateManager', () => {
       user.updatePreferences({ language: 'en-US' });
       user.resetPreferences();
       expect(user.preferences.theme).toBe('system');
+    });
+
+    it('resetPreferences should re-apply the default theme via theme adapter', () => {
+      const mockTheme = { applyTheme: vi.fn(), getResolvedTheme: vi.fn(), onSystemThemeChange: vi.fn() };
+      const userWithTheme = new UserStateManager(createDeps({ theme: mockTheme }));
+      userWithTheme.resetPreferences();
+      expect(mockTheme.applyTheme).toHaveBeenCalledWith(defaultUserPreferences.theme);
+    });
+
+    it('setTheme delegates to updatePreferences (applies theme + persists)', () => {
+      const mockTheme = { applyTheme: vi.fn(), getResolvedTheme: vi.fn(), onSystemThemeChange: vi.fn() };
+      const userWithTheme = new UserStateManager(createDeps({ theme: mockTheme }));
+      userWithTheme.setTheme('dark');
+      expect(userWithTheme.preferences.theme).toBe('dark');
+      expect(mockTheme.applyTheme).toHaveBeenCalledWith('dark');
+    });
+
+    it('setLanguage updates the language preference', () => {
+      user.setLanguage('en-US');
+      expect(user.preferences.language).toBe('en-US');
     });
   });
 

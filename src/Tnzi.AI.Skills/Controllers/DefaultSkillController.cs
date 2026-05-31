@@ -60,11 +60,14 @@ public class DefaultSkillController : ApiControllerBase
     }
 
     /// <summary>
-    /// 创建自定义技能
+    /// 创建用户个人技能（强制 Scope=User，自助服务端点不允许创建租户/系统级技能）
     /// </summary>
     [HttpPost]
     public virtual async Task<ApiResult<SkillDetailDto>> Create([FromBody] CreateSkillDto input)
     {
+        // Self-service endpoint: always create as User scope regardless of what the caller sends.
+        // Tenant/System scope creation must go through the admin endpoint with appropriate permissions.
+        input.Scope = SkillScope.User;
         var result = await SkillService.CreateAsync(input);
         return result.ToApiResult();
     }

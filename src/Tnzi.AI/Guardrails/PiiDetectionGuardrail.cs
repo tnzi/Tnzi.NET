@@ -1,12 +1,12 @@
-
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
 /// PII（个人身份信息）检测 Guardrail — 基于正则匹配检测常见 PII 模式
 /// </summary>
 /// <remarks>
-/// 检测邮箱、电话号码、身份证号等常见 PII 模式。
-/// 默认行为为拒绝包含 PII 的输入，可通过配置切换为脱敏模式。
+/// Detects common PII patterns (email, phone, ID card, credit card) by regex.
+/// This guardrail is reject-only: when PII is detected the input is REJECTED
+/// and the user sees an error message. There is no redaction/sanitize-then-allow mode.
 /// </remarks>
 public partial class PiiDetectionGuardrail : IInputGuardrail, IGuardrailProvider
 {

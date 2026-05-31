@@ -14,7 +14,7 @@ namespace Tnzi.AI.Channels.Adapters.Discord;
 /// - 文件上传: multipart/form-data
 /// - 事件接收通过 Webhook/Gateway 由 Controller 调用 HandleEventAsync
 /// </remarks>
-public class DiscordChannelAdapter : IChannelAdapter
+public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
     private const string BaseUrl = "https://discord.com/api/v10";
 
@@ -168,20 +168,68 @@ public class DiscordChannelAdapter : IChannelAdapter
                 return false;
             }
 
-            // Ed25519 signature verification
-            // .NET 10 does not natively support Ed25519. Reject unverified requests as a security precaution.
-            // To enable full Discord webhook verification, add the NSec.Cryptography NuGet package
-            // and implement Ed25519.Verify(publicKeyBytes, messageBytes, signatureBytes).
-            _logger.LogWarning("Discord Ed25519 signature verification is not implemented. " +
-                "Add NSec.Cryptography NuGet package for full webhook security. " +
-                "Rejecting request as a security precaution.");
-            return false;
+            // Ed25519 signature verification via NSec.Cryptography (libsodium-backed).
+            // Discord signs (timestamp + rawBody) with the application's Ed25519 private key;
+            // we verify with the configured hex-encoded public key.
+            var algorithm = NSec.Cryptography.SignatureAlgorithm.Ed25519;
+            var publicKey = NSec.Cryptography.PublicKey.Import(
+                algorithm, publicKeyBytes, NSec.Cryptography.KeyBlobFormat.RawPublicKey);
+
+            return algorithm.Verify(publicKey, messageBytes, signatureBytes);
         }
         catch (FormatException ex)
         {
             _logger.LogDebug(ex, "Invalid hex encoding in Discord signature or public key");
             return false;
         }
+        catch (Exception ex)
+        {
+            // NSec throws on malformed key material; treat any verification failure as rejection.
+            _logger.LogDebug(ex, "Discord Ed25519 signature verification failed");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public string Platform => Name;
+
+    /// <inheritdoc />
+    public async Task<WebhookProcessResult> ProcessWebhookAsync(
+        string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
+    {
+        // Discord 要求：先验签（包括 PING 在内的所有请求），失败一律拒绝。
+        if (!string.IsNullOrWhiteSpace(_options.PublicKey))
+        {
+            if (!ValidateDiscordSignature(rawBody, new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase)))
+            {
+                return WebhookProcessResult.Rejected("Invalid Discord Ed25519 signature");
+            }
+        }
+        else
+        {
+            // 未配置 PublicKey 无法验签 — 拒绝（外部回调必须可验证）。
+            _logger.LogWarning("Discord PublicKey is not configured; rejecting unverifiable webhook");
+            return WebhookProcessResult.Rejected("Discord PublicKey not configured");
+        }
+
+        // 验签通过后再处理 Interactions PING（type=1）→ PONG（type=1）。
+        if (IsPing(rawBody))
+        {
+            return WebhookProcessResult.Challenge("{\"type\":1}");
+        }
+
+        await HandleEventCoreAsync(rawBody, ct);
+        return WebhookProcessResult.Accepted();
+    }
+
+    private static bool IsPing(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.Number && t.GetInt32() == 1;
+        }
+        catch (JsonException) { return false; }
     }
 
     private async Task HandleEventCoreAsync(string eventJson, CancellationToken ct)

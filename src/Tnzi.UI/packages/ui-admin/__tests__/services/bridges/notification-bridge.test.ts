@@ -131,12 +131,15 @@ describe('notification-bridge', () => {
     await expect(bridge.templates.create({})).rejects.toThrow()
   })
 
-  it('templates.preview calls notificationApi.preview and returns content string', async () => {
+  it('templates.preview calls notificationApi.preview and returns a rendered result', async () => {
     const notificationApi = mockNotificationApi()
     const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
-    const result = await bridge.templates.preview('tpl1', { name: 'World' })
+    const result = await bridge.templates.preview({ templateName: 'tpl1', variables: { name: 'World' } })
     expect(notificationApi.preview).toHaveBeenCalled()
-    expect(typeof result).toBe('string')
+    // Bridge contract returns a structured NotificationTemplatePreviewResult
+    // ({ subject?, content: string, isHtml }), not a bare string.
+    expect(typeof result.content).toBe('string')
+    expect(typeof result.isHtml).toBe('boolean')
   })
 
   // ---- subscriptions sub-contract (backend gap — stubs reject) ----

@@ -13,27 +13,27 @@
     },
     "./components": {
       "types": "./dist/components/index.d.ts",
-      "import": "./dist/components/index.js"
+      "import": "./dist/components.js"
     },
     "./stores": {
       "types": "./dist/stores/index.d.ts",
-      "import": "./dist/stores/index.js"
+      "import": "./dist/stores.js"
     },
     "./adapters/*": {
       "types": "./dist/adapters/*.d.ts",
-      "import": "./dist/adapters/*/index.js"
+      "import": "./dist/adapters/*.js"
     },
     "./composables": {
       "types": "./dist/composables/index.d.ts",
-      "import": "./dist/composables/index.js"
+      "import": "./dist/composables.js"
     },
     "./utils": {
       "types": "./dist/utils/index.d.ts",
-      "import": "./dist/utils/index.js"
+      "import": "./dist/utils.js"
     },
     "./resolvers": {
       "types": "./dist/resolvers/index.d.ts",
-      "import": "./dist/resolvers/index.js"
+      "import": "./dist/resolvers.js"
     },
     "./theme/presets/*": {
       "import": "./src/theme/presets/*.json"

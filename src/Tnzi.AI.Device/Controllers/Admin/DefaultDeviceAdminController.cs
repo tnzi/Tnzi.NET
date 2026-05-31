@@ -43,34 +43,34 @@ public class DefaultDeviceAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 获取待审批的配对请求
+    /// 获取待审批的配对请求 — Code 已从响应中移除
     /// </summary>
     [HttpGet("pairing")]
-    public virtual async Task<ApiResult<IReadOnlyList<PairingRequest>>> GetPendingPairings(CancellationToken cancellationToken = default)
+    public virtual async Task<ApiResult<IReadOnlyList<PendingPairingRequestDto>>> GetPendingPairings(CancellationToken cancellationToken = default)
     {
         var requests = await _pairingService.GetPendingRequestsAsync(cancellationToken);
-        return ApiResult<IReadOnlyList<PairingRequest>>.Ok(requests);
+        return ApiResult<IReadOnlyList<PendingPairingRequestDto>>.Ok(requests);
     }
 
     /// <summary>
-    /// 批准配对请求
+    /// 批准配对请求（通过公开的 requestId，而非秘密 Code）
     /// </summary>
     [HttpPost("pairing/{requestId}/approve")]
     public virtual async Task<ApiResult<DevicePairingInfo>> ApprovePairing(string requestId, CancellationToken cancellationToken = default)
     {
-        var result = await _pairingService.ApprovePairingAsync(requestId, cancellationToken);
+        var result = await _pairingService.ApprovePairingByIdAsync(requestId, cancellationToken);
         return result != null
             ? ApiResult<DevicePairingInfo>.Ok(result)
             : ApiResult<DevicePairingInfo>.Error("Pairing request not found or expired.", 404);
     }
 
     /// <summary>
-    /// 拒绝配对请求
+    /// 拒绝配对请求（通过公开的 requestId，而非秘密 Code）
     /// </summary>
     [HttpPost("pairing/{requestId}/reject")]
     public virtual async Task<ApiResult> RejectPairing(string requestId, CancellationToken cancellationToken = default)
     {
-        var success = await _pairingService.RejectPairingAsync(requestId, cancellationToken);
+        var success = await _pairingService.RejectPairingByIdAsync(requestId, cancellationToken);
         return success
             ? ApiResult.Ok()
             : ApiResult.Error("Pairing request not found or expired.", 404);
@@ -86,25 +86,4 @@ public class DefaultDeviceAdminController : ApiAdminControllerBase
         _registry.Unregister(nodeId);
         return ApiResult.Ok();
     }
-}
-
-/// <summary>
-/// 设备节点 DTO
-/// </summary>
-public class DeviceNodeDto
-{
-    /// <summary>节点 ID</summary>
-    public string NodeId { get; init; } = string.Empty;
-
-    /// <summary>设备名称</summary>
-    public string Name { get; init; } = string.Empty;
-
-    /// <summary>设备平台</summary>
-    public DevicePlatform Platform { get; init; }
-
-    /// <summary>连接状态</summary>
-    public DeviceConnectionState State { get; init; }
-
-    /// <summary>能力列表（capability family 名称）</summary>
-    public List<string> Capabilities { get; init; } = new();
 }

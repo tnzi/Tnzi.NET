@@ -54,8 +54,9 @@ import {
   type TotpSetupDto,
 } from '@tnzi/core/services/identity'
 import { createPagedList } from '@tnzi/core'
-import type { ApiResult, PagedList } from '@tnzi/core'
+import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
+import { unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
 
 // HttpClient type derived from the factory signature so we don't need a separate import.
 type HttpClient = Parameters<typeof useAdminUserApi>[0]
@@ -257,25 +258,6 @@ export interface IdentityBridge {
     /** Disable TOTP only (leaves other 2FA providers untouched). */
     disableTotp(): Promise<void>
   }
-}
-
-function mapQuery(q: CrudPageQuery): Record<string, unknown> {
-  return {
-    pageIndex: q.pageIndex,
-    pageSize: q.pageSize,
-    keyword: q.searchText || undefined,
-    sortBy: q.sortField,
-    sortOrder: q.sortOrder ?? undefined,
-    ...q.filters,
-  }
-}
-
-function unwrap<T>(res: ApiResult<T> | T): T {
-  // HttpClient methods return ApiResult<T>; test mocks may return the payload directly.
-  if (res && typeof res === 'object' && 'data' in (res as object) && 'succeeded' in (res as object)) {
-    return (res as ApiResult<T>).data
-  }
-  return res as T
 }
 
 function toCrudResult<T>(p: PagedList<T> | null | undefined): CrudPageResult<T> {

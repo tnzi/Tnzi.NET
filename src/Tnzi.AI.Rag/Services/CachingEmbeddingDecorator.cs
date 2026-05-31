@@ -19,7 +19,7 @@ public class CachingEmbeddingDecorator : IEmbeddingService
     public const string InnerServiceKey = "tnzi:embedding:inner";
 
     private readonly IEmbeddingService _inner;
-    private readonly Tnzi.Caching.ICache? _cache;
+    private readonly ICache? _cache;
     private readonly AIRagOptions _options;
     private readonly ILogger<CachingEmbeddingDecorator> _logger;
     private readonly ICurrentTenant? _currentTenant;
@@ -33,7 +33,7 @@ public class CachingEmbeddingDecorator : IEmbeddingService
         [FromKeyedServices(InnerServiceKey)] IEmbeddingService inner,
         ILogger<CachingEmbeddingDecorator> logger,
         IOptions<AIRagOptions> options,
-        Tnzi.Caching.ICache? cache = null,
+        ICache? cache = null,
         ICurrentTenant? currentTenant = null)
     {
         _inner = Check.NotNull(inner);

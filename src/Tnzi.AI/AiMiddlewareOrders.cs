@@ -1,7 +1,7 @@
 namespace Tnzi.AI;
 
 /// <summary>
-/// AI 中间件执行顺序常量 — 数值越小越先执行（共 24 个槽位）
+/// AI 中间件执行顺序常量 — 数值越小越先执行（共 23 个槽位）
 /// </summary>
 /// <remarks>
 /// <para>
@@ -9,7 +9,7 @@ namespace Tnzi.AI;
 ///  50  ThreadData → 55 Sandbox → 60 FileUpload → 80 Thinking
 /// → 100 Retry → 200 InputGuardrail → 250 Quota → 300 History → 350 Summarization
 /// → 400 ContextInjection → 420 Todo → 450 SkillConstraint → 460 PromptCaching → 500 UsageLogging
-/// → 550 SubAgentLimit → 630 ViewImage → 640 DeferredToolFilter
+/// → 550 SubAgentLimit → 630 ViewImage
 /// → 650 LoopDetection → 655 ToolGuardrail → 660 ToolErrorRecovery
 /// → [700 Core Execution]
 /// → 800 OutputGuardrail → 900 Title → 950 Memory → 999 Clarification
@@ -72,9 +72,6 @@ public static class AiMiddlewareOrders
 
     /// <summary>图片查看处理 (Phase 2)</summary>
     public const int ViewImage = 630;
-
-    /// <summary>延迟工具过滤 (Phase 1)</summary>
-    public const int DeferredToolFilter = 640;
 
     /// <summary>循环检测 (Phase 1)</summary>
     public const int LoopDetection = 650;

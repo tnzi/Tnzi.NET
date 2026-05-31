@@ -99,10 +99,7 @@ public class ToolScanner : IToolScanner
                 Aliases = funcAttr.Aliases != null
                     ? funcAttr.Aliases.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     : [],
-                ShouldDefer = funcAttr.ShouldDefer,
-                AlwaysLoad = funcAttr.AlwaysLoad,
                 Priority = funcAttr.Priority,
-                ServerHint = funcAttr.ServerHint,
                 InterruptBehavior = funcAttr.InterruptBehavior
             };
 

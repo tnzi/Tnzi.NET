@@ -196,10 +196,3 @@ export function useStore(): StoreFactory {
 export function resetStoreAdapter(): void {
   _active = null;
 }
-
-/** @deprecated Use `setStoreAdapter` instead */
-export const setStoreFactory = setStoreAdapter;
-/** @deprecated Use `useStore` instead */
-export const useStoreFactory = useStore;
-/** @deprecated Use `resetStoreAdapter` instead */
-export const resetStoreRuntime = resetStoreAdapter;

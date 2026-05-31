@@ -1,6 +1,3 @@
-using Tnzi.AI.Dtos;
-using Tnzi.Results;
-
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>

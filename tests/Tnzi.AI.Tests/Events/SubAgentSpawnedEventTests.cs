@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+
 namespace Tnzi.AI.Tests.Events;
 
 /// <summary>
@@ -5,6 +7,11 @@ namespace Tnzi.AI.Tests.Events;
 /// </summary>
 public class SubAgentSpawnedEventTests
 {
+    private static IOptionsMonitor<SubAgentOptions> DefaultOptions()
+    {
+        return new ConstantSubAgentOptionsMonitor(new SubAgentOptions());
+    }
+
     private static SubAgentExecutionService CreateService(
         IAgentResolver resolver,
         IRunStore runStore,
@@ -26,7 +33,8 @@ public class SubAgentSpawnedEventTests
             new AgentExecutionContextAccessor(),
             provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SubAgentExecutionService>.Instance,
-            provider);
+            provider,
+            DefaultOptions());
     }
 
     private static IAgentResolver CreateResolver(Guid? agentId = null)
@@ -53,6 +61,10 @@ public class SubAgentSpawnedEventTests
                 if (threadId.HasValue) run.ThreadId = threadId;
                 return run;
             });
+        runStore.Setup(x => x.CountDescendantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+        runStore.Setup(x => x.GetParentRunIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
         return runStore.Object;
     }
 
@@ -93,7 +105,8 @@ public class SubAgentSpawnedEventTests
             new AgentExecutionContextAccessor(),
             provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SubAgentExecutionService>.Instance,
-            provider);
+            provider,
+            DefaultOptions());
 
         var result = await service.SpawnAsync(new SpawnAgentRunInput
         {
@@ -178,7 +191,8 @@ public class SubAgentSpawnedEventTests
             executionContext,
             provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SubAgentExecutionService>.Instance,
-            provider);
+            provider,
+            DefaultOptions());
 
         var result = await service.SpawnAsync(new SpawnAgentRunInput
         {
@@ -190,5 +204,12 @@ public class SubAgentSpawnedEventTests
         capturedEvent.ShouldNotBeNull();
         capturedEvent.ChildRunId.ShouldBe(childRunId);
         capturedEvent.ParentRunId.ShouldBe(parentRunId);
+    }
+
+    private sealed class ConstantSubAgentOptionsMonitor(SubAgentOptions value) : IOptionsMonitor<SubAgentOptions>
+    {
+        public SubAgentOptions CurrentValue => value;
+        public SubAgentOptions Get(string? name) => value;
+        public IDisposable? OnChange(Action<SubAgentOptions, string?> listener) => null;
     }
 }

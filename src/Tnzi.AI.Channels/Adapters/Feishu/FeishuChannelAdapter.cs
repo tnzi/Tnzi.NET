@@ -15,7 +15,7 @@ namespace Tnzi.AI.Channels.Adapters.Feishu;
 /// 3. Agent 处理 → 返回结果
 /// 4. 飞书 .NET 生态较弱，直接使用 HTTP API 比依赖第三方 SDK 更可靠。
 /// </remarks>
-public class FeishuChannelAdapter : IChannelAdapter
+public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
     private const string BaseUrl = "https://open.feishu.cn/open-apis";
     private const string HeaderTimestamp = "X-Lark-Request-Timestamp";
@@ -163,6 +163,69 @@ public class FeishuChannelAdapter : IChannelAdapter
         }
 
         return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
+    }
+
+    /// <inheritdoc />
+    public string Platform => Name;
+
+    /// <inheritdoc />
+    public async Task<WebhookProcessResult> ProcessWebhookAsync(
+        string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
+    {
+        // 验签：配置了 EncryptKey 时强制校验 X-Lark-Signature（SHA256(timestamp+nonce+key+body)）+ 时间窗。
+        // 注：本适配器处理已解密的 JSON（plaintext / 已由前置网关解密）；若启用了"事件加密"
+        // （body 为 {"encrypt":"..."}），需在前置层先用 EncryptKey 做 AES 解密后再转发。
+        if (!string.IsNullOrWhiteSpace(_options.EncryptKey))
+        {
+            if (!ValidateFeishuSignature(rawBody, new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase)))
+            {
+                return WebhookProcessResult.Rejected("Invalid Feishu signature");
+            }
+        }
+
+        // URL 验证握手（url_verification）：校验 token（若配置）后原样回显 challenge。
+        if (TryGetFeishuChallenge(rawBody, out var challenge, out var tokenMatches))
+        {
+            if (!tokenMatches)
+            {
+                return WebhookProcessResult.Rejected("Feishu verification token mismatch");
+            }
+            return WebhookProcessResult.Challenge(JsonSerializer.Serialize(new { challenge }));
+        }
+
+        await HandleEventCoreAsync(rawBody, ct);
+        return WebhookProcessResult.Accepted();
+    }
+
+    private bool TryGetFeishuChallenge(string body, out string? challenge, out bool tokenMatches)
+    {
+        challenge = null;
+        tokenMatches = true;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("challenge", out var chEl))
+            {
+                return false;
+            }
+
+            challenge = chEl.GetString();
+            if (challenge == null) return false;
+
+            // 若配置了 VerificationToken，则校验握手中的 token。
+            if (!string.IsNullOrWhiteSpace(_options.VerificationToken) &&
+                root.TryGetProperty("token", out var tokenEl))
+            {
+                var token = tokenEl.GetString();
+                tokenMatches = string.Equals(token, _options.VerificationToken, StringComparison.Ordinal);
+            }
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private async Task HandleEventCoreAsync(string eventJson, CancellationToken ct)

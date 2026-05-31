@@ -62,7 +62,7 @@ function handleClick(tab: ITabItem) {
 }
 
 .t-tabbar__item.active {
-  color: var(--n-primary-color, #18a058);
+  color: var(--n-primary-color, #0d9488);
 }
 
 .t-tabbar__item.disabled {

@@ -1,5 +1,4 @@
 using Tnzi.AI.Mcp.Dtos;
-using Tnzi.AI.Mcp.Services.Interfaces;
 
 namespace Tnzi.AI.Mcp.Services;
 

@@ -118,7 +118,9 @@ public partial class McpServerHost
         finally
         {
             sw.Stop();
-            await _security.AuditLogAsync(toolName, agentId, sw.ElapsedMilliseconds, isSuccess, errorMessage, CancellationToken.None);
+            await _security.AuditLogAsync(
+                toolName, agentId, sw.ElapsedMilliseconds, isSuccess, errorMessage,
+                callerApiKeyId: GetCallerHash(), ct: CancellationToken.None);
         }
     }
 }

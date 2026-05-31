@@ -35,6 +35,8 @@ export { default as TFollowUpList } from './TFollowUpList.vue';
 export type { FollowUpItem } from './TFollowUpList.vue';
 export { default as TUpgradeBanner } from './TUpgradeBanner.vue';
 export { default as TThreadComposer } from './TThreadComposer.vue';
+export type { ComposerAction } from './composer-types';
+export { DEFAULT_COMPOSER_ACCEPT } from './composer-types';
 export { default as TPopoverMenu } from './TPopoverMenu.vue';
 export { default as TMessageActions } from './TMessageActions.vue';
 export type { MessageAction } from './TMessageActions.vue';

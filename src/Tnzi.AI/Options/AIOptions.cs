@@ -135,16 +135,6 @@ public class AIOptions
     public WorkspaceOptions Workspace { get; set; } = new();
 
     /// <summary>
-    /// 工具调用循环检测配置
-    /// </summary>
-    public LoopDetectionOptions LoopDetection { get; set; } = new();
-
-    /// <summary>
-    /// 子 Agent 并发限制配置
-    /// </summary>
-    public SubAgentOptions SubAgent { get; set; } = new();
-
-    /// <summary>
     /// 工具结果预算配置
     /// </summary>
     public ToolResultBudgetOptions ToolResultBudget { get; set; } = new();
@@ -161,14 +151,4 @@ public class AIOptions
     /// 控制长对话的自动摘要压缩，在消息 token 超过阈值时触发 LLM 摘要替换旧消息。
     /// </remarks>
     public SummarizationOptions Summarization { get; set; } = new();
-
-    /// <summary>
-    /// 后续建议生成配置
-    /// </summary>
-    public SuggestionOptions Suggestions { get; set; } = new();
-
-    /// <summary>
-    /// Todo/计划模式配置
-    /// </summary>
-    public TodoOptions Todo { get; set; } = new();
 }

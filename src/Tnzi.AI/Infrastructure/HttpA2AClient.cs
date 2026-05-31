@@ -6,6 +6,9 @@ namespace Tnzi.AI.Infrastructure;
 [ExperimentalApi(Reason = "A2A protocol is in preview")]
 public class HttpA2AClient : IA2AClient
 {
+    /// <summary>Named HttpClient registered in AIModule with AllowAutoRedirect = false.</summary>
+    internal const string HttpClientName = "Tnzi.AI.A2A";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HttpA2AClient> _logger;
 
@@ -27,12 +30,26 @@ public class HttpA2AClient : IA2AClient
     {
         Check.NotNullOrWhiteSpace(endpoint);
 
-        var client = _httpClientFactory.CreateClient();
         var url = BuildUrl(endpoint, ".well-known/agent-card");
 
+        var blockReason = await EgressGuard.CheckAsync(url, ct);
+        if (blockReason != null)
+        {
+            _logger.LogWarning("A2A discover blocked by egress guard: {Reason}", blockReason);
+            throw new InvalidOperationException($"A2A request blocked: {blockReason}");
+        }
+
+        var client = _httpClientFactory.CreateClient(HttpClientName);
         _logger.LogDebug("Discovering agent card at {Url}", url);
 
         var response = await client.GetAsync(url, ct);
+
+        if (IsRedirect(response.StatusCode))
+        {
+            _logger.LogWarning("A2A discover received redirect {StatusCode} — redirect following is disabled to prevent SSRF", (int)response.StatusCode);
+            throw new InvalidOperationException($"A2A discover received unexpected redirect ({(int)response.StatusCode}). Redirect following is disabled.");
+        }
+
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -47,9 +64,16 @@ public class HttpA2AClient : IA2AClient
         Check.NotNullOrWhiteSpace(endpoint);
         Check.NotNull(request);
 
-        var client = _httpClientFactory.CreateClient();
         var url = BuildUrl(endpoint, "tasks");
 
+        var blockReason = await EgressGuard.CheckAsync(url, ct);
+        if (blockReason != null)
+        {
+            _logger.LogWarning("A2A send-task blocked by egress guard: {Reason}", blockReason);
+            return new A2AResponse { TaskId = request.TaskId, Status = "failed", Error = $"A2A request blocked: {blockReason}" };
+        }
+
+        var client = _httpClientFactory.CreateClient(HttpClientName);
         _logger.LogDebug("Sending task {TaskId} to {Url}", request.TaskId, url);
 
         var content = new StringContent(
@@ -58,6 +82,13 @@ public class HttpA2AClient : IA2AClient
             "application/json");
 
         var response = await client.PostAsync(url, content, ct);
+
+        if (IsRedirect(response.StatusCode))
+        {
+            _logger.LogWarning("A2A send-task received redirect {StatusCode} — treating as failure to prevent SSRF", (int)response.StatusCode);
+            return new A2AResponse { TaskId = request.TaskId, Status = "failed", Error = $"A2A request received unexpected redirect ({(int)response.StatusCode}). Redirect following is disabled." };
+        }
+
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -72,12 +103,26 @@ public class HttpA2AClient : IA2AClient
         Check.NotNullOrWhiteSpace(endpoint);
         Check.NotNullOrWhiteSpace(taskId);
 
-        var client = _httpClientFactory.CreateClient();
         var url = BuildUrl(endpoint, $"tasks/{taskId}");
 
+        var blockReason = await EgressGuard.CheckAsync(url, ct);
+        if (blockReason != null)
+        {
+            _logger.LogWarning("A2A get-task-status blocked by egress guard: {Reason}", blockReason);
+            return new A2AResponse { TaskId = taskId, Status = "failed", Error = $"A2A request blocked: {blockReason}" };
+        }
+
+        var client = _httpClientFactory.CreateClient(HttpClientName);
         _logger.LogDebug("Getting task status for {TaskId} from {Url}", taskId, url);
 
         var response = await client.GetAsync(url, ct);
+
+        if (IsRedirect(response.StatusCode))
+        {
+            _logger.LogWarning("A2A get-task-status received redirect {StatusCode} — treating as failure to prevent SSRF", (int)response.StatusCode);
+            return new A2AResponse { TaskId = taskId, Status = "failed", Error = $"A2A request received unexpected redirect ({(int)response.StatusCode}). Redirect following is disabled." };
+        }
+
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -86,12 +131,24 @@ public class HttpA2AClient : IA2AClient
         return result ?? throw new InvalidOperationException("Failed to deserialize A2A response.");
     }
 
+    private static bool IsRedirect(System.Net.HttpStatusCode statusCode)
+        => (int)statusCode is >= 300 and <= 399;
+
     /// <summary>
-    /// 构建完整 URL — 确保 endpoint 以 / 结尾并拼接 path
+    /// 构建完整 URL — 确保 endpoint 以 / 结尾并拼接 path，并拒绝非 http/https 协议
     /// </summary>
     private static string BuildUrl(string endpoint, string path)
     {
-        var baseUrl = endpoint.TrimEnd('/');
-        return $"{baseUrl}/{path}";
+        var trimmed = endpoint.TrimEnd('/');
+
+        // Reject non-http(s) schemes early, before DNS resolution
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            && !string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Scheme '{uri.Scheme}' is not allowed in A2A endpoint. Only http and https are permitted.", nameof(endpoint));
+        }
+
+        return $"{trimmed}/{path}";
     }
 }

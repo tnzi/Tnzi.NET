@@ -128,12 +128,24 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
     private GuardrailRequest BuildGuardrailRequest(ToolExecutionContext context)
     {
         var request = _executionContextAccessor?.CurrentRequest;
+        var toolInput = context.Arguments?.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value ?? (object)"null");
+
+        // When InspectToolArguments is enabled, serialize the tool args as Content so
+        // content-based IGuardrailProvider implementations (PII, MaxLength, LLM-Judge) can
+        // inspect the actual argument values.  Default-off avoids breaking large payloads.
+        string? contentForInspection = null;
+        if (_options.Value.Guardrails.InspectToolArguments && toolInput?.Count > 0)
+        {
+            contentForInspection = System.Text.Json.JsonSerializer.Serialize(toolInput);
+        }
+
         return new GuardrailRequest
         {
             ToolName = context.ToolName,
-            ToolInput = context.Arguments?.ToDictionary(
-                kvp => kvp.Key,
-                kvp => kvp.Value ?? (object)"null"),
+            ToolInput = toolInput,
+            Content = contentForInspection,
             AgentId = request?.AgentId,
             ThreadId = request?.ThreadId
         };

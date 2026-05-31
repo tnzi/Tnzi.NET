@@ -33,7 +33,7 @@ import {
   type PermissionComparisonDto,
 } from '@tnzi/core/services/authorization'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { pageArray, pagedResult } from '../_mappers'
+import { pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminFunctionModuleApi>[0]
@@ -150,13 +150,6 @@ export interface AuthorizationBridge {
       filter?: string
     }): Promise<void>
   }
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): AuthorizationBridge {

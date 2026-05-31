@@ -13,6 +13,7 @@ public partial class McpServerHost : IMcpServerHost
     private readonly IOptions<McpServerOptions> _options;
     private readonly ILogger<McpServerHost> _logger;
     private readonly McpServerSecurityMiddleware _security;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     // 已注册的 Agent 工具
     private readonly ConcurrentDictionary<Guid, AgentToolRegistration> _agentTools = new();
@@ -27,13 +28,21 @@ public partial class McpServerHost : IMcpServerHost
         IServiceProvider serviceProvider,
         IOptions<McpServerOptions> options,
         ILogger<McpServerHost> logger,
-        McpServerSecurityMiddleware security)
+        McpServerSecurityMiddleware security,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
         _security = Check.NotNull(security);
+        _httpContextAccessor = httpContextAccessor;
     }
+
+    /// <summary>
+    /// 从当前 HTTP 请求上下文中读取调用方哈希摘要（由 <see cref="McpServerHttpSecurityMiddleware"/> 存入）。
+    /// </summary>
+    private string? GetCallerHash() =>
+        _httpContextAccessor?.HttpContext?.Items[McpServerSecurityMiddleware.CallerHashItemKey] as string;
 
     /// <inheritdoc />
     public IReadOnlyList<string> GetCustomToolNames() => [.. _customTools.Keys];
@@ -273,7 +282,8 @@ public partial class McpServerHost : IMcpServerHost
             {
                 sw.Stop();
                 await _security.AuditLogAsync(
-                    capturedName, agentId: null, sw.ElapsedMilliseconds, isSuccess, errorMessage, CancellationToken.None);
+                    capturedName, agentId: null, sw.ElapsedMilliseconds, isSuccess, errorMessage,
+                    callerApiKeyId: GetCallerHash(), ct: CancellationToken.None);
             }
         };
 
@@ -325,19 +335,29 @@ public partial class McpServerHost : IMcpServerHost
                 sw.ElapsedMilliseconds,
                 isSuccess,
                 errorMessage,
-                cancellationToken);
+                callerApiKeyId: GetCallerHash(),
+                ct: cancellationToken);
         }
     }
 
-    private Task<AgentToolMatch?> ResolveAgentToolAsync(string toolName, CancellationToken cancellationToken)
+    private async Task<AgentToolMatch?> ResolveAgentToolAsync(string toolName, CancellationToken cancellationToken)
     {
         // 优先从缓存查找（BuildToolsAsync 时已填充）
         if (_agentToolNameMap.TryGetValue(toolName, out var cachedAgentId))
         {
-            return Task.FromResult<AgentToolMatch?>(new AgentToolMatch(cachedAgentId, toolName));
+            return new AgentToolMatch(cachedAgentId, toolName);
         }
 
-        return Task.FromResult<AgentToolMatch?>(null);
+        // Cold-cache path: name-map not yet populated (no prior ListToolsAsync call).
+        // Lazily build the tool list to populate _agentToolNameMap, then retry.
+        await BuildToolsAsync(cancellationToken);
+
+        if (_agentToolNameMap.TryGetValue(toolName, out var resolvedAgentId))
+        {
+            return new AgentToolMatch(resolvedAgentId, toolName);
+        }
+
+        return null;
     }
 
     private static string ExtractMessage(IDictionary<string, JsonElement>? arguments)

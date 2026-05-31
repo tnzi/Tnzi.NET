@@ -17,20 +17,40 @@ namespace Tnzi.AI.Rag.VectorStore;
 public class PgVectorStore : IVectorStore
 {
     private readonly ILogger<PgVectorStore> _logger;
+    private readonly IServiceProvider _serviceProvider;
     private readonly string _connectionString;
     private readonly string _chunkTable;
     private readonly string _knowledgeBaseTable;
 
-    public PgVectorStore(IConfiguration configuration, IOptions<AIRagOptions> options, ILogger<PgVectorStore> logger)
+    public PgVectorStore(
+        IConfiguration configuration,
+        IOptions<AIRagOptions> options,
+        ILogger<PgVectorStore> logger,
+        IServiceProvider serviceProvider)
     {
         Check.NotNull(configuration);
         _logger = Check.NotNull(logger);
-        _connectionString = configuration.GetConnectionString("Default")
-            ?? throw new InvalidOperationException("Connection string 'Default' not found for PgVectorStore");
+        _serviceProvider = Check.NotNull(serviceProvider);
+        _connectionString = RagConnectionStringResolver.Resolve(configuration, nameof(PgVectorStore));
 
         var prefix = Check.NotNull(options).Value.TableNamePrefix;
         _chunkTable = $"{prefix}_DocumentChunk";
         _knowledgeBaseTable = $"{prefix}_KnowledgeBase";
+    }
+
+    /// <summary>
+    /// 解析当前租户 ID。
+    /// <para>
+    /// PgVectorStore 注册为 Singleton，而 <c>ICurrentTenant</c> 是 Scoped，不能在构造时持有引用
+    /// （captive dependency）。通过根 <c>IServiceProvider</c> 创建 scope 动态解析；
+    /// <c>CurrentTenant</c> 的 tenant 来源（AsyncLocal 覆盖 + IHttpContextAccessor 驱动的 ICurrentUser）
+    /// 均跨 scope 流动，故新建 scope 仍能读到当前请求的租户。与 HangfireBackgroundJobManager 一致。
+    /// </para>
+    /// </summary>
+    private Guid? ResolveTenantId()
+    {
+        using var scope = _serviceProvider.CreateScope();
+        return scope.ServiceProvider.GetService<ICurrentTenant>()?.Id;
     }
 
     /// <inheritdoc />
@@ -80,24 +100,9 @@ public class PgVectorStore : IVectorStore
             ? " AND " + string.Join(" AND ", metadataConditions)
             : "";
 
-        var sql = knowledgeBaseId.HasValue
-            ? $"""
-              SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId", "ChunkIndex", "Metadata", "ParentChunkId",
-                     1 - ("Embedding" <=> @query::vector) AS score
-              FROM "{_chunkTable}"
-              WHERE "KnowledgeBaseId" = @kbId{extraWhere}
-              ORDER BY "Embedding" <=> @query::vector
-              LIMIT @topK
-              """
-            : $"""
-              SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId", c."ChunkIndex", c."Metadata", c."ParentChunkId",
-                     1 - (c."Embedding" <=> @query::vector) AS score
-              FROM "{_chunkTable}" c
-              INNER JOIN "{_knowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"
-              WHERE kb."IsEnabled" = true AND kb."IsDeleted" = false{extraWhere.Replace("\"Metadata\"", "c.\"Metadata\"")}
-              ORDER BY c."Embedding" <=> @query::vector
-              LIMIT @topK
-              """;
+        // 多租户隔离：仅当存在非空租户上下文时追加 TenantId 谓词（单租户 / host 不追加，见 RagTenantSqlFilter）
+        var tenantId = ResolveTenantId();
+        var sql = BuildSearchSql(_chunkTable, _knowledgeBaseTable, knowledgeBaseId.HasValue, extraWhere, tenantId);
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         cmd.Parameters.Add(new NpgsqlParameter("query", NpgsqlDbType.Varchar) { Value = vectorString });
@@ -107,6 +112,8 @@ public class PgVectorStore : IVectorStore
         {
             cmd.Parameters.Add(new NpgsqlParameter("kbId", NpgsqlDbType.Uuid) { Value = knowledgeBaseId.Value });
         }
+
+        RagTenantSqlFilter.AddParameter(cmd, tenantId);
 
         foreach (var param in metadataParams)
         {
@@ -199,6 +206,42 @@ public class PgVectorStore : IVectorStore
 
         _logger.LogDebug("Upserted chunk {ChunkId} for document {DocumentId} in knowledge base {KnowledgeBaseId}",
             chunkId, documentId, knowledgeBaseId);
+    }
+
+    /// <summary>
+    /// 组合向量搜索 SQL —— 提取为静态方法以便对租户谓词的有无进行单元测试（无需真实 pgvector）。
+    /// </summary>
+    /// <param name="chunkTable">chunk 表名（已含前缀，不含引号）</param>
+    /// <param name="knowledgeBaseTable">knowledge base 表名（已含前缀，不含引号）</param>
+    /// <param name="hasKnowledgeBaseId">是否按指定知识库过滤（单表查询）</param>
+    /// <param name="extraWhere">metadata 过滤片段（针对非 join 查询的 <c>"Metadata"</c> 列）</param>
+    /// <param name="tenantId">当前租户 ID；null 时不追加租户谓词</param>
+    public static string BuildSearchSql(
+        string chunkTable, string knowledgeBaseTable, bool hasKnowledgeBaseId, string extraWhere, Guid? tenantId)
+    {
+        if (hasKnowledgeBaseId)
+        {
+            var tenantPredicate = RagTenantSqlFilter.BuildPredicate(tenantId, columnQualifier: "");
+            return $"""
+              SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId", "ChunkIndex", "Metadata", "ParentChunkId",
+                     1 - ("Embedding" <=> @query::vector) AS score
+              FROM "{chunkTable}"
+              WHERE "KnowledgeBaseId" = @kbId{extraWhere}{tenantPredicate}
+              ORDER BY "Embedding" <=> @query::vector
+              LIMIT @topK
+              """;
+        }
+
+        var joinTenantPredicate = RagTenantSqlFilter.BuildPredicate(tenantId, columnQualifier: "c.");
+        return $"""
+              SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId", c."ChunkIndex", c."Metadata", c."ParentChunkId",
+                     1 - (c."Embedding" <=> @query::vector) AS score
+              FROM "{chunkTable}" c
+              INNER JOIN "{knowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"
+              WHERE kb."IsEnabled" = true AND kb."IsDeleted" = false{extraWhere.Replace("\"Metadata\"", "c.\"Metadata\"")}{joinTenantPredicate}
+              ORDER BY c."Embedding" <=> @query::vector
+              LIMIT @topK
+              """;
     }
 
     /// <summary>

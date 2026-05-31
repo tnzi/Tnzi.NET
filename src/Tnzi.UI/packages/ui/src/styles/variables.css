@@ -10,21 +10,21 @@
  */
 
 :root {
-  /* Primary color ramp (default Naive UI green #18a058) */
-  --tnzi-primary: #18a058;
-  --tnzi-primary-rgb: 24 160 88;
-  --tnzi-primary-50: #f3faf5;
-  --tnzi-primary-100: #dbf1e3;
-  --tnzi-primary-200: #b5e3c6;
-  --tnzi-primary-300: #7ccda1;
-  --tnzi-primary-400: #43b27c;
-  --tnzi-primary-500: #18a058;
-  --tnzi-primary-500-rgb: 24 160 88;
-  --tnzi-primary-600: #148b4b;
-  --tnzi-primary-700: #0f703c;
-  --tnzi-primary-800: #0a552d;
-  --tnzi-primary-900: #063a1e;
-  --tnzi-primary-950: #04281a;
+  /* Primary color ramp (default brand teal #0d9488 — Fabrikam Manus green) */
+  --tnzi-primary: #0d9488;
+  --tnzi-primary-rgb: 13 148 136;
+  --tnzi-primary-50: #f3f9f8;
+  --tnzi-primary-100: #ddedea;
+  --tnzi-primary-200: #b8dad4;
+  --tnzi-primary-300: #82beb5;
+  --tnzi-primary-400: #48a499;
+  --tnzi-primary-500: #0d9488;
+  --tnzi-primary-500-rgb: 13 148 136;
+  --tnzi-primary-600: #158278;
+  --tnzi-primary-700: #19665e;
+  --tnzi-primary-800: #194d47;
+  --tnzi-primary-900: #15302d;
+  --tnzi-primary-950: #12221f;
 
   /* Non-primary roles ship base+500+rgb only; createTnziUi() injects full ramps at runtime. */
 

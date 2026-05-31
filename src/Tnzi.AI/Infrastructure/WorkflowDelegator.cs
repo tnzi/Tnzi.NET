@@ -222,6 +222,15 @@ public class WorkflowDelegator : IWorkflowDelegator
             || (!string.IsNullOrWhiteSpace(status) && status.StartsWith("PartialFailure", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// 把工作流执行状态（字符串）映射为核心 <see cref="AgentRunStatus"/> 枚举。
+    /// </summary>
+    /// <remarks>
+    /// 此处<b>有意</b>用字符串而非直接引用 Workflow 子模块的 <c>WorkflowExecutionStatus</c> 枚举做参数：
+    /// 核心 AIModule 不能硬依赖可选子模块 Tnzi.AI.Workflow（与 <c>AgentRun.WorkflowExecutionId</c>
+    /// 采用字符串软引用同理），这是刻意的跨模块解耦而非重复定义。比较通过 <c>nameof(...)</c> +
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> 与子模块枚举名保持一致。
+    /// </remarks>
     public AgentRunStatus MapStatus(string? status)
     {
         if (string.Equals(status, nameof(WorkflowExecutionStatus.AwaitingInput), StringComparison.OrdinalIgnoreCase))

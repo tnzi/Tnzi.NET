@@ -40,13 +40,13 @@ public class AiMiddlewareOrderingTests
     }
 
     /// <summary>
-    /// 验证 24 个中间件槽位全部定义
+    /// 验证 23 个中间件槽位全部定义
     /// </summary>
     [Fact]
-    public void OrderConstants_Has24Slots()
+    public void OrderConstants_Has23Slots()
     {
         var count = GetOrderFields().Count;
-        count.ShouldBe(24);
+        count.ShouldBe(23);
     }
 
     /// <summary>
@@ -63,7 +63,6 @@ public class AiMiddlewareOrderingTests
     [InlineData(nameof(AiMiddlewareOrders.ContextInjection), nameof(AiMiddlewareOrders.Todo))]
     [InlineData(nameof(AiMiddlewareOrders.Todo), nameof(AiMiddlewareOrders.SkillConstraint))]
     [InlineData(nameof(AiMiddlewareOrders.SkillConstraint), nameof(AiMiddlewareOrders.UsageLogging))]
-    [InlineData(nameof(AiMiddlewareOrders.DeferredToolFilter), nameof(AiMiddlewareOrders.LoopDetection))]
     [InlineData(nameof(AiMiddlewareOrders.LoopDetection), nameof(AiMiddlewareOrders.ToolGuardrail))]
     [InlineData(nameof(AiMiddlewareOrders.ToolGuardrail), nameof(AiMiddlewareOrders.ToolErrorRecovery))]
     [InlineData(nameof(AiMiddlewareOrders.OutputGuardrail), nameof(AiMiddlewareOrders.Title))]

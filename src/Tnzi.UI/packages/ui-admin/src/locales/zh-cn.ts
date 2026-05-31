@@ -1,4 +1,9 @@
-export const zhCn = {
+import type { AdminMessages } from './en'
+
+// Annotated `: AdminMessages` so the compiler enforces key parity with the
+// English source of truth — a missing or stray key fails typecheck instead
+// of silently falling back to the raw key at runtime.
+export const zhCn: AdminMessages = {
   admin: {
     crud: {
       create: '新增', edit: '编辑', view: '查看',
@@ -545,8 +550,8 @@ export const zhCn = {
       commerce: '商业化',
       iam: { _label: '身份与权限' },
       ai: {
-        _label: 'AI 服务',
-        workspaceAgents: '工作区智能体',
+        _label: 'AI',
+        workspaceAgents: '本地智能体',
         agents: '智能体',
         workflows: '工作流',
         workflowRuns: '工作流执行',
@@ -554,7 +559,7 @@ export const zhCn = {
         personas: '人格',
         knowledge: '知识库',
         mcp: 'MCP 服务器',
-        providers: '模型提供方',
+        providers: 'AI 供应商',
         quota: '配额',
         threads: '会话线程',
         usage: '用量统计',
@@ -566,16 +571,16 @@ export const zhCn = {
       },
       chat: {
         _label: '会话',
-        sessions: '会话列表',
-        messages: '消息列表',
+        sessions: '会话',
+        messages: '消息',
       },
       system: {
         _label: '系统管理',
-        menus: '菜单管理',
+        menus: '菜单',
         dictionaries: '字典',
         parameters: '参数',
         scheduledJobs: '定时任务',
-        features: '特性开关',
+        features: '功能开关',
         accessLogs: '访问日志',
         logFiles: '日志文件',
         diagnostics: '系统诊断',
@@ -603,7 +608,7 @@ export const zhCn = {
         functionModules: '功能模块',
         roleFunctions: '角色权限',
         entityRoles: '数据权限',
-        permissions: '权限点',
+        permissions: '权限',
       },
       template: {
         templates: '模板',
@@ -1237,10 +1242,11 @@ export const zhCn = {
             occurredAt: '发生时间',
             exceptionType: '异常类型',
             message: '错误信息',
-            endpoint: '终结点',
-            duration: '耗时',
+            statusCode: '状态码',
+            errorCode: '错误码',
+            requestId: '请求 ID',
           },
-          top: { byType: '按异常类型 Top', byController: '按控制器 Top' },
+          top: { byType: '按异常类型 Top', byStatusCode: '按状态码', byErrorCode: '按错误码' },
           empty: { exceptions: '暂无异常记录' },
         },
         healthchecks: {
@@ -1292,7 +1298,7 @@ export const zhCn = {
           },
         },
         localization: {
-          title: '缺失翻译追踪',
+          title: '缺失翻译',
           kpi: {
             totalKeys: '缺失键',
             totalAccess: '访问总数',
@@ -1342,7 +1348,7 @@ export const zhCn = {
       storage: {
         label: '存储',
         files: {
-          title: '文件',
+          title: '文件管理',
           refresh: '刷新',
           newRootFolder: '新建根目录',
           newSubFolder: '新建子目录',
@@ -1392,7 +1398,7 @@ export const zhCn = {
           actions: { delete: '删除', download: '下载', export: '导出' },
         },
         chunks: {
-          title: '上传分片（诊断视图）',
+          title: '上传分片',
           banner: {
             title: '故障排查视图',
             body: '此页列出底层上传分片，用于定位"上传一半失败 + 清理孤立分片"等问题。普通用户无需关心。',
@@ -1444,7 +1450,7 @@ export const zhCn = {
           actions: { delete: '删除', export: '导出' },
         },
         operations: {
-          title: '审计操作',
+          title: '操作记录',
           empty: '无符合筛选条件的操作记录。',
           anonymous: '(匿名)',
           loadMore: '加载更多',
@@ -1544,7 +1550,7 @@ export const zhCn = {
           actions: { view: '查看订单', delete: '删除', export: '导出', refund: '退款' },
         },
         subscriptions: {
-          title: '订阅管理',
+          title: '付费订阅',
           cancelAtPeriodEnd: '到期取消',
           confirmCancelTitle: '确认取消订阅',
           confirmCancelPrompt: '在当前计费周期结束时取消订阅？',
@@ -1565,7 +1571,7 @@ export const zhCn = {
           actions: { create: '申请退款', approve: '通过', reject: '拒绝', delete: '删除', export: '导出' },
         },
         promotions: {
-          title: '优惠 / 优惠券',
+          title: '优惠管理',
           actions: { refresh: '刷新', create: '新建优惠', edit: '编辑', deactivate: '停用', cancel: '取消', save: '保存' },
           filter: { search: '搜索代码 / 名称…', activeAny: '状态' },
           modal: { create: '新建优惠', edit: '编辑优惠' },
@@ -1583,8 +1589,8 @@ export const zhCn = {
             endTime: '结束时间',
             isActive: '启用',
           },
-          type: { coupon: '优惠券', autoApply: '自动应用', referral: '推荐奖励', trial: '试用' },
-          discountType: { percentage: '百分比', fixedAmount: '固定金额', freeTrialDays: '免费试用天数' },
+          type: { percentageDiscount: '百分比折扣', fixedAmountDiscount: '固定金额减免', firstSubscription: '首次订阅', limitedTime: '限时折扣', thresholdDiscount: '满减折扣' },
+          discountType: { percentage: '百分比', fixedAmount: '固定金额' },
           status: { active: '启用', inactive: '未启用', valid: '有效' },
           unit: { days: '天' },
           deactivateConfirm: '停用优惠 "{code}"？新的使用请求将立即被拒绝。',
@@ -1874,8 +1880,8 @@ export const zhCn = {
           },
         },
         workflowRuns: {
-          title: '工作流运行',
-          pageTitle: '工作流运行',
+          title: '运行记录',
+          pageTitle: '运行记录',
           refresh: '刷新',
           empty: '无符合筛选条件的运行。',
           loadMore: '加载更多',
@@ -1934,8 +1940,8 @@ export const zhCn = {
           },
         },
         skills: {
-          title: '技能',
-          pageTitle: '技能',
+          title: '技能库',
+          pageTitle: '技能库',
           columns: {
             name: '名称', slug: '标识', description: '描述', version: '版本',
             author: '作者', scope: '作用域', source: '来源', priority: '优先级',
@@ -1948,8 +1954,8 @@ export const zhCn = {
           },
         },
         providers: {
-          title: '模型提供商',
-          pageTitle: '模型提供商',
+          title: 'AI 供应商',
+          pageTitle: 'AI 供应商',
           apiKeyHint: '留空表示保留原密钥。',
           testConnection: '测试连接',
           testing: '测试中…',
@@ -2066,7 +2072,7 @@ export const zhCn = {
           },
         },
         workspaceAgents: {
-          title: '工作区智能体',
+          title: '本地智能体',
           banner: '此处列出的是从磁盘上 AGENT.md 文件自动发现的智能体定义（位于全局 ~/.tnzi/agents/ 或项目 .agents/ 目录下）。修改请直接编辑磁盘上的文件，该视图只读。用于查看启动时框架加载了哪些智能体，并预览其完整提示词与人格内容。',
           loadError: '加载工作区智能体失败',
           columns: {
@@ -2116,7 +2122,7 @@ export const zhCn = {
           },
         },
         permissions: {
-          title: '工具权限规则',
+          title: '工具权限',
           actions: {
             refresh: '刷新',
             create: '新建规则',
@@ -2174,7 +2180,7 @@ export const zhCn = {
           },
         },
         devices: {
-          title: 'AI 设备与配对',
+          title: 'AI 设备',
           actions: { refresh: '刷新', approve: '批准', reject: '拒绝', revoke: '撤销' },
           kpi: {
             connected: '已连接',
@@ -2194,14 +2200,13 @@ export const zhCn = {
             nodeId: '节点 ID',
             capabilities: '能力',
             actions: '操作',
-            code: '配对码',
             deviceName: '设备',
             createdAt: '请求时间',
             expiresAt: '过期时间',
           },
         },
         channels: {
-          title: 'AI 频道与网关',
+          title: 'AI 频道',
           actions: { refresh: '刷新' },
           kpi: {
             adapters: '适配器',
@@ -2263,8 +2268,8 @@ export const zhCn = {
           },
         },
         evaluations: {
-          title: '评测',
-          pageTitle: '评测运行',
+          title: '评测记录',
+          pageTitle: '评测记录',
           refresh: '刷新',
           newRun: '新建运行',
           note: '点击一次设置 A 侧，点击另一行设置 B 侧并比较两次运行的结果。',
@@ -2300,7 +2305,7 @@ export const zhCn = {
           actions: { create: '新增模板', edit: '编辑模板', delete: '删除模板', preview: '预览', clone: '克隆' },
         },
         layouts: {
-          title: '模板布局',
+          title: '布局管理',
           columns: { layoutName: '布局名称', module: '模块', category: '分类', isDefault: '默认', isActive: '启用' },
           form: { layoutName: '布局名称', module: '模块', category: '分类', layoutContent: '内容', description: '描述', isDefault: '默认', isActive: '启用' },
           actions: { create: '新增布局', edit: '编辑布局', delete: '删除布局', setDefault: '设为默认', preview: '预览' },

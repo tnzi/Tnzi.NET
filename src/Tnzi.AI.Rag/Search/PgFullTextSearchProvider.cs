@@ -17,17 +17,21 @@ namespace Tnzi.AI.Rag.Search;
 public class PgFullTextSearchProvider : IKeywordSearchProvider
 {
     private readonly ILogger<PgFullTextSearchProvider> _logger;
+    private readonly ICurrentTenant? _currentTenant;
     private readonly string _connectionString;
     private readonly string _chunkTable;
     private readonly string _knowledgeBaseTable;
 
     public PgFullTextSearchProvider(
-        IConfiguration configuration, IOptions<AIRagOptions> options, ILogger<PgFullTextSearchProvider> logger)
+        IConfiguration configuration,
+        IOptions<AIRagOptions> options,
+        ILogger<PgFullTextSearchProvider> logger,
+        ICurrentTenant? currentTenant = null)
     {
         Check.NotNull(configuration);
         _logger = Check.NotNull(logger);
-        _connectionString = configuration.GetConnectionString("Default")
-            ?? throw new InvalidOperationException("Connection string 'Default' not found for PgFullTextSearchProvider");
+        _currentTenant = currentTenant;
+        _connectionString = RagConnectionStringResolver.Resolve(configuration, nameof(PgFullTextSearchProvider));
 
         var prefix = Check.NotNull(options).Value.TableNamePrefix;
         _chunkTable = $"{prefix}_DocumentChunk";
@@ -49,26 +53,9 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        var sql = knowledgeBaseId.HasValue
-            ? $"""
-              SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId",
-                     ts_rank(to_tsvector('english', "Content"), plainto_tsquery('english', @query)) AS score
-              FROM "{_chunkTable}"
-              WHERE "KnowledgeBaseId" = @kbId
-                AND to_tsvector('english', "Content") @@ plainto_tsquery('english', @query)
-              ORDER BY score DESC
-              LIMIT @topK
-              """
-            : $"""
-              SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId",
-                     ts_rank(to_tsvector('english', c."Content"), plainto_tsquery('english', @query)) AS score
-              FROM "{_chunkTable}" c
-              INNER JOIN "{_knowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"
-              WHERE kb."IsEnabled" = true AND kb."IsDeleted" = false
-                AND to_tsvector('english', c."Content") @@ plainto_tsquery('english', @query)
-              ORDER BY score DESC
-              LIMIT @topK
-              """;
+        // 多租户隔离：仅当存在非空租户上下文时追加 TenantId 谓词（单租户 / host 不追加，见 RagTenantSqlFilter）
+        var tenantId = _currentTenant?.Id;
+        var sql = BuildSearchSql(_chunkTable, _knowledgeBaseTable, knowledgeBaseId.HasValue, tenantId);
 
         await using var cmd = new NpgsqlCommand(sql, connection);
         cmd.Parameters.Add(new NpgsqlParameter("query", NpgsqlDbType.Text) { Value = query });
@@ -78,6 +65,8 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
         {
             cmd.Parameters.Add(new NpgsqlParameter("kbId", NpgsqlDbType.Uuid) { Value = knowledgeBaseId.Value });
         }
+
+        RagTenantSqlFilter.AddParameter(cmd, tenantId);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -98,5 +87,42 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
             results.Count, topK, knowledgeBaseId, sw.Elapsed.TotalSeconds);
 
         return results;
+    }
+
+    /// <summary>
+    /// 组合全文搜索 SQL —— 提取为静态方法以便对租户谓词的有无进行单元测试（无需真实 PostgreSQL）。
+    /// </summary>
+    /// <param name="chunkTable">chunk 表名（已含前缀，不含引号）</param>
+    /// <param name="knowledgeBaseTable">knowledge base 表名（已含前缀，不含引号）</param>
+    /// <param name="hasKnowledgeBaseId">是否按指定知识库过滤（单表查询）</param>
+    /// <param name="tenantId">当前租户 ID；null 时不追加租户谓词</param>
+    public static string BuildSearchSql(
+        string chunkTable, string knowledgeBaseTable, bool hasKnowledgeBaseId, Guid? tenantId)
+    {
+        if (hasKnowledgeBaseId)
+        {
+            var tenantPredicate = RagTenantSqlFilter.BuildPredicate(tenantId, columnQualifier: "");
+            return $"""
+              SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId",
+                     ts_rank(to_tsvector('english', "Content"), plainto_tsquery('english', @query)) AS score
+              FROM "{chunkTable}"
+              WHERE "KnowledgeBaseId" = @kbId
+                AND to_tsvector('english', "Content") @@ plainto_tsquery('english', @query){tenantPredicate}
+              ORDER BY score DESC
+              LIMIT @topK
+              """;
+        }
+
+        var joinTenantPredicate = RagTenantSqlFilter.BuildPredicate(tenantId, columnQualifier: "c.");
+        return $"""
+              SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId",
+                     ts_rank(to_tsvector('english', c."Content"), plainto_tsquery('english', @query)) AS score
+              FROM "{chunkTable}" c
+              INNER JOIN "{knowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"
+              WHERE kb."IsEnabled" = true AND kb."IsDeleted" = false
+                AND to_tsvector('english', c."Content") @@ plainto_tsquery('english', @query){joinTenantPredicate}
+              ORDER BY score DESC
+              LIMIT @topK
+              """;
     }
 }

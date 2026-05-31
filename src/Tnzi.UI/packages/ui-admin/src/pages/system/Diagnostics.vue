@@ -25,7 +25,7 @@
             <TSvgIcon icon="mdi:router-network" :size="14" />
           </template>
         </NStatistic>
-        <NStatistic :label="t('kpi.exceptions', { minutes: summary?.windowMinutes ?? 60 })" :value="summary?.totalCount ?? 0">
+        <NStatistic :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? 0">
           <template #suffix>
             <TSvgIcon icon="mdi:alert-circle-outline" :size="14" />
           </template>
@@ -126,16 +126,13 @@
             </NPopconfirm>
           </div>
 
-          <div v-if="summary && (summary.topExceptions?.length || summary.byController?.length)" class="t-diagnostics-page__bd">
+          <div v-if="summary && (summary.topExceptions?.length || statusCodeRows.length || errorCodeRows.length)" class="t-diagnostics-page__bd">
             <NCard size="small" :title="t('top.byType')" :bordered="false">
               <NList v-if="summary.topExceptions?.length" hoverable>
                 <NListItem v-for="row in summary.topExceptions" :key="row.exceptionType">
                   <NThing>
                     <template #header>
                       <code class="t-diagnostics-page__excname">{{ row.exceptionType }}</code>
-                    </template>
-                    <template #description>
-                      <span class="t-diagnostics-page__lastseen">{{ row.lastSeenUtc ? formatDate(row.lastSeenUtc) : '' }}</span>
                     </template>
                     <template #header-extra>
                       <NTag :bordered="false" type="error">{{ row.count }}</NTag>
@@ -145,15 +142,30 @@
               </NList>
               <NEmpty v-else size="small" :description="t('empty.exceptions')" />
             </NCard>
-            <NCard size="small" :title="t('top.byController')" :bordered="false">
-              <NList v-if="summary.byController?.length" hoverable>
-                <NListItem v-for="row in summary.byController" :key="row.controller">
+            <NCard size="small" :title="t('top.byStatusCode')" :bordered="false">
+              <NList v-if="statusCodeRows.length" hoverable>
+                <NListItem v-for="row in statusCodeRows" :key="row.key">
                   <NThing>
                     <template #header>
-                      <span>{{ row.controller }}</span>
+                      <code class="t-diagnostics-page__excname">{{ row.key }}</code>
                     </template>
                     <template #header-extra>
                       <NTag :bordered="false" type="warning">{{ row.count }}</NTag>
+                    </template>
+                  </NThing>
+                </NListItem>
+              </NList>
+              <NEmpty v-else size="small" :description="t('empty.exceptions')" />
+            </NCard>
+            <NCard size="small" :title="t('top.byErrorCode')" :bordered="false">
+              <NList v-if="errorCodeRows.length" hoverable>
+                <NListItem v-for="row in errorCodeRows" :key="row.key">
+                  <NThing>
+                    <template #header>
+                      <code class="t-diagnostics-page__excname">{{ row.key }}</code>
+                    </template>
+                    <template #header-extra>
+                      <NTag :bordered="false" type="info">{{ row.count }}</NTag>
                     </template>
                   </NThing>
                 </NListItem>
@@ -197,6 +209,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createDiagnosticsBridge,
@@ -207,6 +220,7 @@ import {
   type ModuleDiagnosticsDto,
 } from '../../services/bridges/diagnostics-bridge'
 import { interpolate, translatePageKey } from '../_shared/translate'
+import { methodTone } from '../_shared/http-method'
 
 const bridge = createDiagnosticsBridge({ client: useAdminClient() })
 
@@ -385,12 +399,31 @@ const windowOptions = [
   { value: 1440, label: '24 h' },
 ]
 
+/** Map an HTTP status code to a Naive UI tag tone (2xx info, 4xx warning, 5xx error). */
+function statusTone(code: number): 'info' | 'warning' | 'error' | 'default' {
+  if (code >= 500) return 'error'
+  if (code >= 400) return 'warning'
+  if (code >= 200 && code < 300) return 'info'
+  return 'default'
+}
+
+/** Flatten a `Record<string, number>` breakdown into sorted (desc) rows for list rendering. */
+function toCountRows(record?: Record<string, number>): Array<{ key: string; count: number }> {
+  if (!record) return []
+  return Object.entries(record)
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count)
+}
+
+const statusCodeRows = computed(() => toCountRows(summary.value?.byStatusCode))
+const errorCodeRows = computed(() => toCountRows(summary.value?.byErrorCode))
+
 const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
   {
     title: () => t('cols.occurredAt'),
-    key: 'occurredAtUtc',
+    key: 'timestamp',
     width: 180,
-    render: (row) => formatDate(row.occurredAtUtc),
+    render: (row) => formatDate(row.timestamp),
   },
   {
     title: () => t('cols.exceptionType'),
@@ -399,26 +432,31 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
     render: (row) =>
       h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.exceptionType),
   },
-  { title: () => t('cols.message'), key: 'message', ellipsis: { tooltip: true } },
   {
-    title: () => t('cols.endpoint'),
-    key: 'path',
-    width: 220,
+    title: () => t('cols.statusCode'),
+    key: 'statusCode',
+    width: 110,
+    align: 'center',
     render: (row) =>
-      h('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
-        row.method
-          ? h(NTag, { size: 'tiny', bordered: false, type: methodTone(row.method) }, () => row.method ?? '')
-          : null,
-        h('span', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.path ?? '—'),
-      ]),
+      row.statusCode != null
+        ? h(NTag, { size: 'tiny', bordered: false, type: statusTone(row.statusCode) }, () => String(row.statusCode))
+        : '—',
   },
   {
-    title: () => t('cols.duration'),
-    key: 'durationMs',
-    width: 100,
-    align: 'right',
-    render: (row) => (row.durationMs != null ? `${row.durationMs.toFixed(1)} ms` : '—'),
+    title: () => t('cols.errorCode'),
+    key: 'errorCode',
+    width: 160,
+    render: (row) =>
+      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.errorCode || '—'),
   },
+  {
+    title: () => t('cols.requestId'),
+    key: 'requestId',
+    width: 200,
+    render: (row) =>
+      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.requestId || '—'),
+  },
+  { title: () => t('cols.message'), key: 'message', ellipsis: { tooltip: true } },
 ]
 
 async function refreshExceptions(): Promise<void> {
@@ -444,27 +482,6 @@ async function clearExceptions(): Promise<void> {
     await refreshExceptions()
   } catch {
     // Bridge already swallows; refresh still safe.
-  }
-}
-
-// ─── Shared helpers ────────────────────────────────────────────────
-function methodTone(m: string): 'success' | 'info' | 'warning' | 'error' | 'default' {
-  switch ((m ?? '').toUpperCase()) {
-    case 'GET': return 'info'
-    case 'POST': return 'success'
-    case 'PUT': return 'warning'
-    case 'PATCH': return 'warning'
-    case 'DELETE': return 'error'
-    default: return 'default'
-  }
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
   }
 }
 
@@ -519,9 +536,5 @@ onMounted(() => {
 .t-diagnostics-page__excname {
   font-family: var(--tnzi-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
-}
-.t-diagnostics-page__lastseen {
-  font-size: 11px;
-  color: var(--tnzi-base-text-muted, #888);
 }
 </style>

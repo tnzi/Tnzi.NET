@@ -33,7 +33,7 @@ import {
   type AccessLogQueryDto,
 } from '@tnzi/core/services/system'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pageArray, pagedResult } from '../_mappers'
+import { mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminMenuApi>[0]
 
@@ -137,13 +137,6 @@ export interface ScheduledJobDto {
   lastJobState?: string | null
   error?: string | null
   removed: boolean
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {

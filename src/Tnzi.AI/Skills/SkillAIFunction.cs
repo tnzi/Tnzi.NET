@@ -71,7 +71,6 @@ public sealed class SkillAIFunction : AIFunction
         if (_constraintEnforcer is not null)
         {
             var constraintResult = _constraintEnforcer.Apply(_skill, new SkillConstraintContext());
-            // 约束结果仅供日志/审计，不阻断渲染内容返回
         }
 
         return new ValueTask<object?>((object)renderResult.RenderedContent);

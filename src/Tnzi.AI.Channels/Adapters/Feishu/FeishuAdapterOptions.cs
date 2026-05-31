@@ -1,5 +1,3 @@
-using Tnzi.AI.Channels.Options;
-
 namespace Tnzi.AI.Channels.Adapters.Feishu;
 
 /// <summary>

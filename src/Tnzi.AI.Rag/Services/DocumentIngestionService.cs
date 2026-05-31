@@ -11,6 +11,7 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
     private readonly IEmbeddingService _embeddingService;
     private readonly IRepository<DocumentChunk, Guid> _chunkRepository;
     private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
+    private readonly IGraphExtractor _graphExtractor;
     private readonly AIRagOptions _options;
 
     public DocumentIngestionService(
@@ -19,6 +20,7 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
         IEmbeddingService embeddingService,
         IRepository<DocumentChunk, Guid> chunkRepository,
         IRepository<KnowledgeBase, Guid> kbRepository,
+        IGraphExtractor graphExtractor,
         IOptions<AIRagOptions> options,
         IServiceProvider serviceProvider,
         IAsyncChunkingStrategy? asyncChunkingStrategy = null) : base(serviceProvider)
@@ -29,6 +31,7 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
         _embeddingService = Check.NotNull(embeddingService);
         _chunkRepository = Check.NotNull(chunkRepository);
         _kbRepository = Check.NotNull(kbRepository);
+        _graphExtractor = Check.NotNull(graphExtractor);
         _options = Check.NotNull(options).Value;
     }
 
@@ -123,6 +126,26 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
             }
 
             await _chunkRepository.InsertManyAsync(chunkEntities);
+
+            // 6. GraphRAG 实体/关系抽取（默认关闭，opt-in via AI:Rag:GraphRag:Enabled）
+            // 抽取失败不能影响文档摄取主流程：捕获并记录后继续。
+            if (_options.GraphRag.Enabled)
+            {
+                try
+                {
+                    var graphResult = await _graphExtractor.ExtractAsync(text, kbId, ct);
+                    Logger.LogDebug(
+                        "GraphRAG extraction for document {FileName} in KB {KbId}: {NodeCount} nodes, {EdgeCount} edges",
+                        fileName, kbId, graphResult.Nodes.Count, graphResult.Edges.Count);
+                }
+                catch (Exception graphEx)
+                {
+                    // 静默降级：图谱抽取失败不影响已成功的向量摄取
+                    Logger.LogWarning(graphEx,
+                        "GraphRAG extraction failed for document {FileName} in KB {KbId}; vector ingestion already persisted, continuing",
+                        fileName, kbId);
+                }
+            }
 
             sw.Stop();
             RagActivitySource.RecordIngestion(kbId, chunks.Count, sw.Elapsed.TotalSeconds);

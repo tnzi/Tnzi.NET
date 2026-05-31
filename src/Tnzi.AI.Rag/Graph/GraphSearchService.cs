@@ -78,7 +78,6 @@ public class GraphSearchService : IGraphSearchService
 
             // 3. 加载关联边和目标节点（1-hop）
             var nodeIds = scoredNodes.Select(x => x.Node.Id).ToHashSet();
-            var relatedNodes = new List<RelatedNodeInfo>();
             Dictionary<Guid, List<(KnowledgeGraphEdge Edge, KnowledgeGraphNode TargetNode, RelationDirection Direction)>>? edgesByNode = null;
 
             if (options.IncludeRelationships)

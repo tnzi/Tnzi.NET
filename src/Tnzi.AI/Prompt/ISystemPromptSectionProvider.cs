@@ -8,5 +8,5 @@ public interface ISystemPromptSectionProvider
     /// <summary>
     /// 获取提示词段落（返回 null 表示不注入）
     /// </summary>
-    SystemPromptSection? GetSection();
+    Task<SystemPromptSection?> GetSectionAsync(CancellationToken cancellationToken = default);
 }

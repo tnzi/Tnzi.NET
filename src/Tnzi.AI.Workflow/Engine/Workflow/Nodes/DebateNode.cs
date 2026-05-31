@@ -1,4 +1,3 @@
-
 namespace Tnzi.AI.Engine.Workflow.Nodes;
 
 /// <summary>

@@ -8,6 +8,13 @@ public class McpServerSecurityMiddleware
     public const string ApiKeyHeaderName = "X-Api-Key";
     public const string TenantHeaderName = "X-Tenant-Id";
 
+    /// <summary>
+    /// HttpContext.Items key under which the hashed caller key (16-char hex) is stored by
+    /// <see cref="McpServerHttpSecurityMiddleware"/>. Downstream code reads this key to
+    /// associate usage records with the caller without touching the raw API key.
+    /// </summary>
+    public const string CallerHashItemKey = "mcp-caller-hash";
+
     private readonly IOptions<McpServerOptions> _options;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<McpServerSecurityMiddleware> _logger;
@@ -241,12 +248,22 @@ public class McpServerSecurityMiddleware
     /// <summary>
     /// 记录审计日志
     /// </summary>
+    /// <param name="toolName">MCP 工具名称</param>
+    /// <param name="agentId">调用的 Agent ID（自定义工具为 null）</param>
+    /// <param name="durationMs">调用耗时（毫秒）</param>
+    /// <param name="isSuccess">是否成功</param>
+    /// <param name="errorMessage">错误信息（成功时为 null）</param>
+    /// <param name="callerApiKeyId">调用方 API Key 的哈希摘要（16 位十六进制，非原始 Key）。
+    /// 由 <see cref="McpServerHttpSecurityMiddleware"/> 通过 <see cref="BuildClientKey"/> 计算后
+    /// 存入 <c>HttpContext.Items[<see cref="CallerHashItemKey"/>]</c>。</param>
+    /// <param name="ct">取消令牌</param>
     public async Task AuditLogAsync(
         string toolName,
         Guid? agentId,
         long durationMs,
         bool isSuccess,
         string? errorMessage = null,
+        string? callerApiKeyId = null,
         CancellationToken ct = default)
     {
         if (!_options.Value.EnableAuditLog)
@@ -257,26 +274,28 @@ public class McpServerSecurityMiddleware
         try
         {
             using var scope = _serviceProvider.CreateScope();
-            var usageLogService = scope.ServiceProvider.GetService<IUsageLogService>();
-            if (usageLogService == null) return;
 
-            await usageLogService.LogUsageAsync(
-                operationType: "McpToolCall",
-                provider: "mcp-server",
-                model: toolName,
-                inputTokens: 0,
-                outputTokens: 0,
-                durationMs: durationMs,
-                isSuccess: isSuccess,
-                errorMessage: errorMessage,
-                agentId: agentId,
-                ct: ct);
+            var usageLogService = scope.ServiceProvider.GetService<IUsageLogService>();
+            if (usageLogService != null)
+            {
+                await usageLogService.LogUsageAsync(
+                    operationType: "McpToolCall",
+                    provider: "mcp-server",
+                    model: toolName,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    durationMs: durationMs,
+                    isSuccess: isSuccess,
+                    errorMessage: errorMessage,
+                    agentId: agentId,
+                    ct: ct);
+            }
 
             // Also record to MCP-specific analytics for tool stats/popularity/errors
             var analyticsService = scope.ServiceProvider.GetService<IMcpToolAnalyticsService>();
             if (analyticsService != null)
             {
-                await analyticsService.RecordUsageAsync(toolName, durationMs, isSuccess, errorMessage);
+                await analyticsService.RecordUsageAsync(toolName, durationMs, isSuccess, errorMessage, callerApiKeyId);
             }
         }
         catch (Exception ex)

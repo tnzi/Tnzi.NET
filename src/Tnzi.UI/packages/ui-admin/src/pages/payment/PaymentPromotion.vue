@@ -96,10 +96,11 @@
             <NSelect
               v-model:value="form.type"
               :options="[
-                { value: 0, label: t('type.coupon') },
-                { value: 1, label: t('type.autoApply') },
-                { value: 2, label: t('type.referral') },
-                { value: 3, label: t('type.trial') },
+                { value: 1, label: t('type.percentageDiscount') },
+                { value: 2, label: t('type.fixedAmountDiscount') },
+                { value: 3, label: t('type.firstSubscription') },
+                { value: 4, label: t('type.limitedTime') },
+                { value: 5, label: t('type.thresholdDiscount') },
               ]"
             />
           </NFormItemGi>
@@ -107,9 +108,8 @@
             <NSelect
               v-model:value="form.discountType"
               :options="[
-                { value: 0, label: t('discountType.percentage') },
-                { value: 1, label: t('discountType.fixedAmount') },
-                { value: 2, label: t('discountType.freeTrialDays') },
+                { value: 1, label: t('discountType.percentage') },
+                { value: 2, label: t('discountType.fixedAmount') },
               ]"
             />
           </NFormItemGi>
@@ -189,9 +189,12 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createPromotionBridge,
+  DiscountType,
+  PromotionType,
   type CreatePromotionDto,
   type PromotionDto,
 } from '../../services/bridges/promotion-bridge'
@@ -222,29 +225,24 @@ function onActiveFilterChange(v: string | null): void {
 
 function discountLabel(value: number, type: number, currency = 'USD'): string {
   switch (type) {
-    case 0: return `${value}%`
-    case 1: {
+    case DiscountType.Percentage: return `${value}%`
+    case DiscountType.Fixed: {
       try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(value) }
       catch { return `${value.toFixed(2)} ${currency}` }
     }
-    case 2: return `${value} ${t('unit.days')}`
     default: return String(value)
   }
 }
 function typeLabel(n: number): string {
   switch (n) {
-    case 0: return t('type.coupon')
-    case 1: return t('type.autoApply')
-    case 2: return t('type.referral')
-    case 3: return t('type.trial')
+    case PromotionType.PercentageDiscount: return t('type.percentageDiscount')
+    case PromotionType.FixedAmountDiscount: return t('type.fixedAmountDiscount')
+    case PromotionType.FirstSubscription: return t('type.firstSubscription')
+    case PromotionType.LimitedTime: return t('type.limitedTime')
+    case PromotionType.ThresholdDiscount: return t('type.thresholdDiscount')
     default: return String(n)
   }
 }
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
-}
-
 const columns: DataTableColumns<PromotionDto> = [
   {
     title: () => t('cols.isActive'),
@@ -331,18 +329,20 @@ const editMode = ref(false)
 const editId = ref<string | null>(null)
 const modalTitle = computed(() => (editMode.value ? t('modal.edit') : t('modal.create')))
 
+// Enum defaults mirror backend Tnzi.Payment.Metadata:
+//   PromotionType.PercentageDiscount = 1, DiscountType.Percentage = 1
 const form = reactive<CreatePromotionDto & { isActive?: boolean }>({
   promotionCode: '',
   name: '',
-  description: null,
-  type: 0,
+  description: undefined,
+  type: PromotionType.PercentageDiscount,
   discountValue: 0,
-  discountType: 0,
-  maxDiscountAmount: null,
-  minimumOrderAmount: null,
+  discountType: DiscountType.Percentage,
+  maxDiscountAmount: undefined,
+  minimumOrderAmount: undefined,
   startTime: new Date().toISOString(),
-  endTime: null,
-  totalUsageLimit: null,
+  endTime: undefined,
+  totalUsageLimit: undefined,
   isActive: true,
 })
 
@@ -352,21 +352,21 @@ const startTimeTs = computed({
 })
 const endTimeTs = computed({
   get: () => (form.endTime ? new Date(form.endTime).getTime() : null),
-  set: (v: number | null) => { form.endTime = v ? new Date(v).toISOString() : null },
+  set: (v: number | null) => { form.endTime = v ? new Date(v).toISOString() : undefined },
 })
 
 function resetForm(): void {
   form.promotionCode = ''
   form.name = ''
-  form.description = null
-  form.type = 0
+  form.description = undefined
+  form.type = PromotionType.PercentageDiscount
   form.discountValue = 0
-  form.discountType = 0
-  form.maxDiscountAmount = null
-  form.minimumOrderAmount = null
+  form.discountType = DiscountType.Percentage
+  form.maxDiscountAmount = undefined
+  form.minimumOrderAmount = undefined
   form.startTime = new Date().toISOString()
-  form.endTime = null
-  form.totalUsageLimit = null
+  form.endTime = undefined
+  form.totalUsageLimit = undefined
   form.isActive = true
 }
 
@@ -383,15 +383,15 @@ function openEdit(row: PromotionDto): void {
   editId.value = row.id
   form.promotionCode = row.promotionCode
   form.name = row.name
-  form.description = row.description ?? null
+  form.description = row.description ?? undefined
   form.type = row.type
   form.discountValue = row.discountValue
   form.discountType = row.discountType
-  form.maxDiscountAmount = row.maxDiscountAmount ?? null
-  form.minimumOrderAmount = row.minimumOrderAmount ?? null
+  form.maxDiscountAmount = row.maxDiscountAmount ?? undefined
+  form.minimumOrderAmount = row.minimumOrderAmount ?? undefined
   form.startTime = row.startTime
-  form.endTime = row.endTime ?? null
-  form.totalUsageLimit = row.totalUsageLimit ?? null
+  form.endTime = row.endTime ?? undefined
+  form.totalUsageLimit = row.totalUsageLimit ?? undefined
   form.isActive = row.isActive
   modalVisible.value = true
 }

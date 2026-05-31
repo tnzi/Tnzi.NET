@@ -265,7 +265,11 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
             doc.ErrorMessage = ingestResult.ErrorMessage;
         }
 
-        await _docRepository.UpdateAsync(doc, ct);
+        // doc 仍处于 Added 状态（InsertAsync 在 UnitOfWork 内延迟提交至 action 末尾），
+        // 上面对 Status/ChunkCount/ErrorMessage 的修改会随末尾 SaveChanges 直接写入 INSERT。
+        // 切勿在此调用 UpdateAsync(doc) —— 会把 ChangeTracker 状态从 Added 翻成 Modified，
+        // 致 SaveChanges 对尚未 INSERT 的行发 UPDATE → "affected 0 rows" 乐观并发异常
+        // （同 AgentThreadService Phase 1.5 InsertAsync-then-Update 教训）。
 
         return Ok(new DocumentUploadResultDto
         {
@@ -316,8 +320,22 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         using var activity = RagActivitySource.StartSearchActivity(topK, kbId);
         var sw = Stopwatch.StartNew();
 
-        // 生成查询向量
-        var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, ct: ct);
+        // 获取知识库配置：query 向量必须与摄取时使用相同的 embedding provider/model，
+        // 否则向量空间不一致、检索无意义（此前漏传 options 致回退到 AI 顶层 DefaultProvider，
+        // 与摄取使用的 DefaultEmbeddingProvider 不一致 — 例如 DeepSeek 根本无 embedding API）。
+        var kb = await _kbRepository.GetAsync(kbId, ct);
+        if (kb == null)
+        {
+            return Fail<List<SearchResultDto>>($"Knowledge base not found: {kbId}", 404);
+        }
+
+        // 生成查询向量（provider/model 与摄取对齐）
+        var embeddingOptions = new EmbeddingOptions
+        {
+            Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
+            Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
+        };
+        var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, embeddingOptions, ct);
         if (!embeddingResult.Succeeded)
         {
             return Fail<List<SearchResultDto>>($"Embedding generation failed: {embeddingResult.Message}");
@@ -325,9 +343,6 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
 
         var rawResults = await _vectorStore.SearchAsync(embeddingResult.Data!, topK, kbId, metadataFilter, ct);
         var results = await _reranker.RerankAsync(query, rawResults, topK, ct);
-
-        // 获取知识库名称
-        var kb = await _kbRepository.GetAsync(kbId, ct);
 
         // 获取文档名映射
         var docIds = results.Select(r => r.DocumentId).Distinct().ToList();
@@ -359,8 +374,14 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         using var activity = RagActivitySource.StartSearchActivity(topK);
         var sw = Stopwatch.StartNew();
 
-        // 生成查询向量
-        var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, ct: ct);
+        // 生成查询向量：跨库搜索使用全局默认 embedding provider/model
+        // （此前漏传 options 致回退到 AI 顶层 DefaultProvider，可能无 embedding 能力）。
+        var embeddingOptions = new EmbeddingOptions
+        {
+            Provider = _options.DefaultEmbeddingProvider,
+            Model = _options.DefaultEmbeddingModel
+        };
+        var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, embeddingOptions, ct);
         if (!embeddingResult.Succeeded)
         {
             return Fail<List<SearchResultDto>>($"Embedding generation failed: {embeddingResult.Message}");

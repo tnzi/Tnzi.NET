@@ -282,16 +282,3 @@ public class ProcessTools : IAIToolProvider
         return string.Join('\n', lines[^count..]);
     }
 }
-
-/// <summary>
-/// 托管进程状态
-/// </summary>
-internal class ManagedProcess
-{
-    public System.Diagnostics.Process Process { get; set; } = null!;
-    public StringBuilder Stdout { get; } = new();
-    public StringBuilder Stderr { get; } = new();
-    public string Command { get; set; } = string.Empty;
-    public DateTime StartTime { get; set; }
-    public string Id { get; set; } = string.Empty;
-}

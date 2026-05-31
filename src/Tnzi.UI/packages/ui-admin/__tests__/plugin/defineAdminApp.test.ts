@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp, h, defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import type { RouteRecordRaw } from 'vue-router'
+import type { RouteRecordRaw, Router } from 'vue-router'
 import { defineAdminApp } from '../../src/plugin/defineAdminApp'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 
@@ -152,6 +152,43 @@ describe('defineAdminApp', () => {
     const instance = install(app, pinia)
     expect(typeof instance.uninstall).toBe('function')
     expect(() => instance.uninstall()).not.toThrow()
+  })
+
+  it('installs auth + permission guards only when auth.enabled (open by default)', () => {
+    const beforeEachCount = (auth?: { enabled: boolean }): number => {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+      const router = { beforeEach: vi.fn(), afterEach: vi.fn(), onError: vi.fn() } as unknown as Router
+      defineAdminApp({ client: dummyClient, ...(auth ? { auth } : {}) }).install(app, pinia, router)
+      return (router.beforeEach as ReturnType<typeof vi.fn>).mock.calls.length
+    }
+    // Delta-based so the assertion is robust to however many beforeEach hooks
+    // useRouteProgress installs: enabling auth adds exactly 2 (auth + permission).
+    expect(beforeEachCount({ enabled: true }) - beforeEachCount()).toBe(2)
+  })
+
+  it('auth guard redirects to the REAL login route under the default basePath (/login, not /admin/login)', () => {
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const guards: Array<(to: unknown, from: unknown, next: (arg?: unknown) => void) => void> = []
+    const router = {
+      beforeEach: vi.fn((g) => guards.push(g)),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    // default basePath ('/admin') — applyBasePath leaves login at '/login'.
+    defineAdminApp({ client: dummyClient, auth: { enabled: true } }).install(app, pinia, router)
+    // Fresh store = not logged in → the auth guard must redirect to the real
+    // route. Regression guard for the basePath default-prefix bug.
+    const redirects: unknown[] = []
+    const to = { meta: {}, name: 'x', path: '/admin/x', fullPath: '/admin/x', query: {}, params: {} }
+    for (const g of guards) g(to, {}, (arg?: unknown) => { if (arg) redirects.push(arg) })
+    expect(redirects).toContain('/login')
+    expect(redirects).not.toContain('/admin/login')
   })
 
   it('hideRoutes marks the matching sub-menu meta.hideInMenu without touching others', () => {

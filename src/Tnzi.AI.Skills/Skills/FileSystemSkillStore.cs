@@ -697,20 +697,14 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         private GitIgnoreRule(string baseDirectory, string pattern, bool isNegated, bool directoryOnly)
         {
             BaseDirectory = baseDirectory;
-            Pattern = pattern;
             IsNegated = isNegated;
-            DirectoryOnly = directoryOnly;
             BasenameOnly = !pattern.Contains('/');
             Regex = BuildRegex(pattern, directoryOnly, BasenameOnly);
         }
 
         public string BaseDirectory { get; }
 
-        public string Pattern { get; }
-
         public bool IsNegated { get; }
-
-        public bool DirectoryOnly { get; }
 
         public bool BasenameOnly { get; }
 
@@ -777,7 +771,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
             string finalPattern;
             if (basenameOnly)
             {
-                finalPattern = "^" + escaped + (directoryOnly ? "$" : "$");
+                finalPattern = "^" + escaped + "$";
             }
             else
             {

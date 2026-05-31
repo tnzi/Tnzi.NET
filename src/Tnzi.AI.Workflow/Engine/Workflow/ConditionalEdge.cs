@@ -35,8 +35,5 @@ public enum EdgeConditionType
     OutputEquals,
 
     /// <summary>通过 JsonPath 提取值匹配</summary>
-    JsonPath,
-
-    /// <summary>通过 LLM 对输出进行分类</summary>
-    LlmClassify
+    JsonPath
 }

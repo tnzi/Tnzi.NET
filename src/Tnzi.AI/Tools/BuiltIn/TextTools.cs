@@ -50,7 +50,7 @@ public class TextTools : IAIToolProvider
         {
             "upper" => Task.FromResult(text.ToUpper()),
             "lower" => Task.FromResult(text.ToLower()),
-            "title" => Task.FromResult(System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text.ToLower())),
+            "title" => Task.FromResult(CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text.ToLower())),
             _ => Task.FromResult(text)
         };
     }

@@ -10,6 +10,7 @@ public class AgentFactory : IAgentFactory
     private readonly IOptions<AIOptions> _options;
     private readonly IToolResolver _toolResolver;
     private readonly AgentExecutorOptionsBuilder _optionsBuilder;
+    private readonly IToolRegistry _toolRegistry;
     private readonly ILogger<AgentFactory> _logger;
 
     public AgentFactory(
@@ -17,12 +18,14 @@ public class AgentFactory : IAgentFactory
         IOptions<AIOptions> options,
         IToolResolver toolResolver,
         AgentExecutorOptionsBuilder optionsBuilder,
+        IToolRegistry toolRegistry,
         ILogger<AgentFactory> logger)
     {
         _chatClientFactory = Check.NotNull(chatClientFactory);
         _options = Check.NotNull(options);
         _toolResolver = Check.NotNull(toolResolver);
         _optionsBuilder = Check.NotNull(optionsBuilder);
+        _toolRegistry = Check.NotNull(toolRegistry);
         _logger = Check.NotNull(logger);
     }
 
@@ -63,7 +66,25 @@ public class AgentFactory : IAgentFactory
         // 4. 构建 AgentExecutorOptions
         var executorOptions = _optionsBuilder.Build(options, name, instructions, tools, temperature, maxTokens, agentId, agentName: name);
 
-        // 5. 创建 AgentExecutor（注入 Logger 以便记录工具执行异常）
+        // 5b. 从 IToolRegistry 填充 ToolDefinitions（供并行执行守卫和 GracefulShutdown 中断路径使用）
+        // 仅当调用方指定了 toolGroups 时才查询：MCP/OpenAPI 工具无注册表元数据，不在此填充，
+        // executor 遇到未知工具时自动降级为顺序执行（fail-closed 安全默认）。
+        if (toolGroups != null)
+        {
+            var toolGroupsList = toolGroups.ToList();
+            var toolDefs = _toolRegistry.GetToolsByGroupsWithPermissions(toolGroupsList, userPermissions);
+            if (toolDefs.Count > 0)
+            {
+                var dict = new Dictionary<string, ToolDefinition>(StringComparer.OrdinalIgnoreCase);
+                foreach (var td in toolDefs)
+                {
+                    dict.TryAdd(td.Name, td);
+                }
+                executorOptions.ToolDefinitions = dict;
+            }
+        }
+
+        // 6. 创建 AgentExecutor（注入 Logger 以便记录工具执行异常）
         executorOptions.Logger = _logger;
         var agent = new AgentExecutor(meaiChatClient, executorOptions);
 

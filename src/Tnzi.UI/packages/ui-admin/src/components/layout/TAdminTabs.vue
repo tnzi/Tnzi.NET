@@ -172,7 +172,7 @@ import { useAdminTabStore, type AdminTab } from '../../stores/useAdminTabStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { humanise, translatePageKey } from '../../pages/_shared/translate'
 import { TSvgIcon } from '@tnzi/ui'
 import TChromeTabBg from './TChromeTabBg.vue'
 
@@ -227,21 +227,6 @@ const draggableList = computed<AdminTab[]>({
 function onTabClick(tab: AdminTab): void {
   tabStore.switchRouteByTab(tab)
   emit('tabClick', tab)
-}
-
-/**
- * Last-segment capitalised fallback for i18n keys that haven't been
- * translated yet (e.g. `tnzi.admin.modules.identity.users.title` →
- * "Users"). Matches what `TAdminAutoBreadcrumb` and soybean render.
- */
-function humanise(raw: string): string {
-  if (!raw) return ''
-  const parts = raw.split('.')
-  let last = parts[parts.length - 1] ?? raw
-  if (last === 'title' && parts.length > 1) {
-    last = parts[parts.length - 2] ?? raw
-  }
-  return last.charAt(0).toUpperCase() + last.slice(1)
 }
 
 function renderTitle(raw: string): string {

@@ -592,7 +592,11 @@ const route = useRoute()
 
 onMounted(async () => {
   await loadAll()
-  const queryRoleId = typeof route.query.roleId === 'string' ? route.query.roleId : null
+  // Optional-chain `route`: useRoute() is undefined when the component is
+  // mounted without a router (SSR / bare test mount), and reading `.query`
+  // off undefined inside this async hook would surface as an unhandled
+  // rejection. The deep-link pre-select is simply skipped when there's no route.
+  const queryRoleId = typeof route?.query?.roleId === 'string' ? route.query.roleId : null
   if (queryRoleId && roles.value.some((r) => r.id === queryRoleId)) {
     selectedRoleId.value = queryRoleId
     await loadAssignedForRole(queryRoleId)

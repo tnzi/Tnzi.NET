@@ -10,6 +10,7 @@ public class EvaluationServiceTests
     private readonly Mock<IRepository<EvaluationRun, Guid>> _repository = new();
     private readonly Mock<IAgentEvaluator> _evaluator = new();
     private readonly IServiceProvider _serviceProvider;
+    private readonly Mock<IServiceScopeFactory> _scopeFactory = new();
 
     public EvaluationServiceTests()
     {
@@ -22,7 +23,7 @@ public class EvaluationServiceTests
         _serviceProvider = services.BuildServiceProvider();
     }
 
-    private EvaluationService CreateService() => new(_serviceProvider, _repository.Object, _evaluator.Object);
+    private EvaluationService CreateService() => new(_serviceProvider, _repository.Object, _evaluator.Object, _scopeFactory.Object);
 
     private static EvaluationRun MakeRun(
         Guid? id = null,
@@ -190,5 +191,75 @@ public class EvaluationServiceTests
         // Assert
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(404);
+    }
+
+    // -------------------------------------------------------------------------
+    // RunBatchAsync — per-target DI scope isolation (B10)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task RunBatchAsync_ParallelTargets_NoDbContextConflict()
+    {
+        // Arrange: 5 targets so maxConcurrency=3 actually overlaps
+        const int targetCount = 5;
+        var targets = Enumerable.Range(0, targetCount)
+            .Select(_ => new BatchEvaluationTargetDto { AgentId = Guid.NewGuid() })
+            .ToList();
+
+        var cases = new List<EvaluationCaseDto>
+        {
+            new() { Input = "q1", ExpectedOutput = "a1" }
+        };
+
+        var dto = new BatchEvaluationDto { Targets = targets, Cases = cases };
+
+        // Track scopes created — each target must get its own
+        var scopesCreated = 0;
+
+        // Each scope resolves a fresh IEvaluationService backed by its own repo/evaluator
+        _scopeFactory
+            .Setup(f => f.CreateScope())
+            .Returns(() =>
+            {
+                Interlocked.Increment(ref scopesCreated);
+
+                var scopeRepo = new Mock<IRepository<EvaluationRun, Guid>>();
+                scopeRepo
+                    .Setup(r => r.InsertAsync(It.IsAny<EvaluationRun>(), It.IsAny<CancellationToken>()))
+                    .Returns(Task.CompletedTask);
+                scopeRepo
+                    .Setup(r => r.UpdateAsync(It.IsAny<EvaluationRun>(), It.IsAny<CancellationToken>()))
+                    .Returns(Task.CompletedTask);
+
+                var scopeEvaluator = new Mock<IAgentEvaluator>();
+                scopeEvaluator
+                    .Setup(e => e.EvaluateAsync(It.IsAny<EvaluationCase>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new EvaluationResult { Passed = true, Score = 1.0 });
+
+                var scopeServiceFactory = new Mock<IServiceScopeFactory>();
+                var innerServices = new ServiceCollection();
+                innerServices.AddLogging();
+                var innerSp = innerServices.BuildServiceProvider();
+
+                var scopedSvc = new EvaluationService(innerSp, scopeRepo.Object, scopeEvaluator.Object, scopeServiceFactory.Object);
+
+                var scopeServiceProvider = new Mock<IServiceProvider>();
+                scopeServiceProvider
+                    .Setup(sp => sp.GetService(typeof(IEvaluationService)))
+                    .Returns(scopedSvc);
+
+                var scope = new Mock<IServiceScope>();
+                scope.Setup(s => s.ServiceProvider).Returns(scopeServiceProvider.Object);
+                return scope.Object;
+            });
+
+        var svc = CreateService();
+
+        // Act — should not throw InvalidOperationException from concurrent EF context use
+        var exception = await Record.ExceptionAsync(() => svc.RunBatchAsync(dto));
+
+        // Assert
+        exception.ShouldBeNull();
+        scopesCreated.ShouldBe(targetCount);
     }
 }

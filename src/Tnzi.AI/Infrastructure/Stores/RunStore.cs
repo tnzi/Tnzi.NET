@@ -75,4 +75,20 @@ public class RunStore : IRunStore
             .Take(maxResults)
             .ToListAsync(cancellationToken);
     }
+
+    /// <summary>统计指定根 Run 下的后代数量（不含根自身）</summary>
+    public async Task<int> CountDescendantsAsync(Guid rootRunId, CancellationToken cancellationToken = default)
+    {
+        return await _runRepository.AsQueryable()
+            .CountAsync(r => r.RootRunId == rootRunId && r.Id != rootRunId, cancellationToken);
+    }
+
+    /// <summary>获取指定 Run 的父 Run ID（仅 Id + ParentRunId 字段）</summary>
+    public async Task<Guid?> GetParentRunIdAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        return await _runRepository.AsQueryable()
+            .Where(r => r.Id == runId)
+            .Select(r => r.ParentRunId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
 }

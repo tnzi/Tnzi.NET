@@ -76,6 +76,14 @@ public class DeviceModuleTests
         toolsDesc.Lifetime.ShouldBe(ServiceLifetime.Singleton);
     }
 
+    [Fact]
+    public void DeviceOptions_Default_LocalNodeEnabled_IsFalse()
+    {
+        var options = new DeviceOptions();
+
+        options.LocalNodeEnabled.ShouldBeFalse();
+    }
+
     private static ServiceCollection CreateServiceCollection()
     {
         var services = new ServiceCollection();

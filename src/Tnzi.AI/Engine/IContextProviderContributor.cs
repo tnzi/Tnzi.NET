@@ -7,8 +7,9 @@ namespace Tnzi.AI.Engine;
 /// <remarks>
 /// <para>
 /// 通过 DI 注册 <see cref="IContextProviderContributor"/> 实现，
-/// <see cref="AgentExecutorOptionsBuilder"/> 在构建 <see cref="CompositeContextProvider"/> 时
-/// 自动收集所有贡献者，取代之前硬编码 new 的方式。
+/// <c>CompositeContextProviderFactory</c> 注入所有已注册的贡献者并按 <see cref="Order"/> 排序，
+/// 在每次请求时调用 <c>TryBuild</c> 收集各贡献者产出的 provider，组装成一个
+/// <see cref="CompositeContextProvider"/>。该工厂由 <c>ContextInjectionMiddleware</c> 驱动。
 /// </para>
 /// <para>
 /// 每个贡献者的 <see cref="Order"/> 决定其在组合提供器中的顺序（值越小越先执行）。

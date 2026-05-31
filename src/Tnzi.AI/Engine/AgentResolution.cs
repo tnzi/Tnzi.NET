@@ -23,6 +23,22 @@ public class AgentResolution
     /// <summary>额外配置 JSON（当通过已定义 Agent 创建时传递）</summary>
     public string? AgentConfiguration { get; init; }
 
+    /// <summary>
+    /// Persona FK from the resolved Agent entity. When set, ContextInjectionMiddleware
+    /// loads the persona content via IAgentPersonaService and injects a &lt;soul&gt; block
+    /// into the system prompt. Independent of AgentConfiguration JSON so DB-loaded agents
+    /// don't need to round-trip personaId through the execution config blob.
+    /// </summary>
+    public Guid? PersonaId { get; init; }
+
+    /// <summary>
+    /// Inline persona content already loaded from an out-of-band source
+    /// (e.g. workspace PERSONA.md). Takes precedence over PersonaId — when set,
+    /// ContextInjectionMiddleware injects this content directly without hitting
+    /// IAgentPersonaService. Enables persona for agents that have no DB row.
+    /// </summary>
+    public string? PersonaContent { get; init; }
+
     /// <summary>错误码（仅失败时非 null）</summary>
     public string? ErrorCode { get; init; }
 
@@ -40,9 +56,9 @@ public class AgentResolution
     /// <summary>
     /// 创建成功结果
     /// </summary>
-    public static AgentResolution Success(AgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single, AgentCreationParameters? creationParameters = null)
+    public static AgentResolution Success(AgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single, AgentCreationParameters? creationParameters = null, Guid? personaId = null, string? personaContent = null)
     {
-        return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode, CreationParameters = creationParameters };
+        return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode, CreationParameters = creationParameters, PersonaId = personaId, PersonaContent = personaContent };
     }
 
     /// <summary>
@@ -50,14 +66,17 @@ public class AgentResolution
     /// </summary>
     public static AgentResolution SuccessWithoutExecutor(
         string provider, string? model, Guid? agentId,
-        string? agentConfiguration, AgentExecutionMode executionMode)
+        string? agentConfiguration, AgentExecutionMode executionMode,
+        Guid? personaId = null, string? personaContent = null)
     {
         return new AgentResolution
         {
             Agent = null, Provider = provider, Model = model,
             AgentId = agentId, AgentConfiguration = agentConfiguration,
             ExecutionMode = executionMode,
-            IsResolvedWithoutExecutor = true
+            IsResolvedWithoutExecutor = true,
+            PersonaId = personaId,
+            PersonaContent = personaContent
         };
     }
 

@@ -146,16 +146,6 @@ public static class AIActivitySource
     }
 
     /// <summary>
-    /// 记录工具调用
-    /// </summary>
-    public static void RecordToolCall(string toolName, string? toolGroup = null)
-    {
-        _toolCallCounter.Add(1,
-            new KeyValuePair<string, object?>(SemanticTags.ToolName, toolName),
-            new KeyValuePair<string, object?>(SemanticTags.ToolGroup, toolGroup));
-    }
-
-    /// <summary>
     /// 记录工具调用（增强版：含耗时、参数摘要、结果摘要）
     /// </summary>
     public static void RecordToolCallDetailed(

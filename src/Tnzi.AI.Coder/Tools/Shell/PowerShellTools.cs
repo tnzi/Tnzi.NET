@@ -9,7 +9,7 @@ namespace Tnzi.AI.Coder.Shell;
 /// 即使平台默认 IShellAdapter 被替换为 Bash 也不受影响。
 /// </remarks>
 [AIToolGroup("shell", "PowerShell Execution", "Execute PowerShell commands on Windows hosts")]
-public sealed class PowerShellTools : IAIToolProvider
+public sealed class PowerShellTools : ShellToolsBase, IAIToolProvider
 {
     private readonly ICommandSanitizer _commandSanitizer;
     private readonly IPathValidator _pathValidator;
@@ -34,6 +34,15 @@ public sealed class PowerShellTools : IAIToolProvider
         _approvalHandler = approvalHandler;
     }
 
+    protected override ICommandSanitizer CommandSanitizer => _commandSanitizer;
+    protected override IPathValidator PathValidator => _pathValidator;
+    protected override IToolApprovalHandler? ApprovalHandler => _approvalHandler;
+    // 保留具体 PowerShellShellAdapter 字段以保证始终使用 PowerShell（平台钉死）
+    protected override IShellAdapter Adapter => _shellAdapter;
+    protected override CoderOptions Options => _options;
+    protected override ILogger Logger => _logger;
+    protected override string ShellLogLabel => "PowerShell command";
+
     /// <summary>
     /// 执行 PowerShell 命令
     /// </summary>
@@ -55,7 +64,7 @@ public sealed class PowerShellTools : IAIToolProvider
         try
         {
             // 1. 命令消毒 + 审批流
-            var (sanitizeError, approvedCommand) = await SanitizeAndApproveAsync(command, "powershell", workingDirectory);
+            var (sanitizeError, approvedCommand) = await SanitizeAndApproveAsync(command, "powershell", "Execute a PowerShell command (powershell)", workingDirectory);
             if (sanitizeError != null) return sanitizeError;
             command = approvedCommand;
 
@@ -96,7 +105,7 @@ public sealed class PowerShellTools : IAIToolProvider
         try
         {
             // 1. 命令消毒 + 审批流
-            var (sanitizeError, approvedCommand) = await SanitizeAndApproveAsync(command, "powershell_streaming", workingDirectory);
+            var (sanitizeError, approvedCommand) = await SanitizeAndApproveAsync(command, "powershell_streaming", "Execute a PowerShell command (powershell_streaming)", workingDirectory);
             if (sanitizeError != null) return sanitizeError;
             command = approvedCommand;
 
@@ -124,221 +133,4 @@ public sealed class PowerShellTools : IAIToolProvider
             return new { error = $"Failed to execute command: {ex.Message}" };
         }
     }
-
-    /// <summary>
-    /// 同步执行进程并等待完成
-    /// </summary>
-    private async Task<object> ExecuteProcessAsync(string command, string workDir, int timeout)
-    {
-        var psi = _shellAdapter.CreateProcessStartInfo(command, workDir);
-        EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
-
-        using var process = new Process { StartInfo = psi };
-        var stdoutBuilder = new StringBuilder();
-        var stderrBuilder = new StringBuilder();
-        var maxOutput = _options.Sandbox.MaxOutputSize;
-
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data != null && stdoutBuilder.Length < maxOutput)
-                stdoutBuilder.AppendLine(e.Data);
-        };
-
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data != null && stderrBuilder.Length < maxOutput)
-                stderrBuilder.AppendLine(e.Data);
-        };
-
-        var sw = Stopwatch.StartNew();
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var cts = new CancellationTokenSource(timeout);
-        try
-        {
-            await process.WaitForExitAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch { /* 尽力终止 */ }
-
-            return new
-            {
-                error = $"Command timed out after {timeout}ms",
-                stdout = TruncateOutput(stdoutBuilder.ToString()),
-                stderr = TruncateOutput(stderrBuilder.ToString()),
-                timed_out = true
-            };
-        }
-
-        sw.Stop();
-
-        _logger.LogDebug("PowerShell command completed with exit code {ExitCode} in {Duration}ms",
-            process.ExitCode, sw.ElapsedMilliseconds);
-
-        return new
-        {
-            stdout = TruncateOutput(stdoutBuilder.ToString()),
-            stderr = TruncateOutput(stderrBuilder.ToString()),
-            exit_code = process.ExitCode,
-            duration_ms = sw.ElapsedMilliseconds
-        };
-    }
-
-    /// <summary>
-    /// 启动进程并收集初始输出，未完成则注册到 ProcessRegistry
-    /// </summary>
-    private async Task<object> LaunchAndCollectInitialOutputAsync(string command, string workDir, int waitMs)
-    {
-        var psi = _shellAdapter.CreateProcessStartInfo(command, workDir);
-        EnvironmentFilter.ApplyEnvironmentFilter(psi, _options.Sandbox);
-
-        ManagedProcess? managed = null;
-        try
-        {
-            managed = ProcessRegistry.CreateManagedProcess(command, psi, _options.Sandbox.MaxOutputSize);
-            managed.Process.Start();
-            managed.Process.BeginOutputReadLine();
-            managed.Process.BeginErrorReadLine();
-
-            // 等待初始输出
-            using var cts = new CancellationTokenSource(waitMs);
-            try
-            {
-                await managed.Process.WaitForExitAsync(cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // 进程仍在运行，这是正常的
-            }
-
-            string stdout, stderr;
-            lock (managed.Stdout) { stdout = managed.Stdout.ToString(); }
-            lock (managed.Stderr) { stderr = managed.Stderr.ToString(); }
-
-            var hasExited = false;
-            int? exitCode = null;
-            try
-            {
-                hasExited = managed.Process.HasExited;
-                if (hasExited) exitCode = managed.Process.ExitCode;
-            }
-            catch
-            {
-                hasExited = true;
-            }
-
-            if (hasExited)
-            {
-                managed.Process.Dispose();
-
-                _logger.LogDebug("Streaming PowerShell command completed with exit code {ExitCode}", exitCode);
-
-                return new
-                {
-                    stdout = TruncateOutput(stdout),
-                    stderr = TruncateOutput(stderr),
-                    running = false,
-                    exit_code = exitCode
-                };
-            }
-
-            // 进程仍在运行，注册到 ProcessRegistry
-            var processId = ProcessRegistry.Register(managed);
-            managed = null; // 已注册，不在 catch 中清理
-
-            _logger.LogDebug("Streaming PowerShell command still running, registered as {ProcessId}", processId);
-
-            return new
-            {
-                stdout = TruncateOutput(stdout),
-                stderr = TruncateOutput(stderr),
-                running = true,
-                process_id = processId
-            };
-        }
-        catch (Exception ex)
-        {
-            try { if (managed?.Process != null && !managed.Process.HasExited) managed.Process.Kill(entireProcessTree: true); }
-            catch { /* best effort */ }
-            try { managed?.Process?.Dispose(); }
-            catch { /* best effort */ }
-            return new { error = $"Failed to execute command: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// 命令消毒 + 审批流
-    /// </summary>
-    private async Task<(object? error, string command)> SanitizeAndApproveAsync(
-        string command, string toolName, string? workingDirectory)
-    {
-        var sanitizeResult = _commandSanitizer.Sanitize(command);
-        if (!sanitizeResult.IsAllowed)
-        {
-            return (new { error = $"Command denied: {sanitizeResult.Reason}" }, command);
-        }
-
-        if (sanitizeResult.RequiresApproval && _approvalHandler != null)
-        {
-            var approvalRequest = new ToolApprovalRequest
-            {
-                ToolName = toolName,
-                ToolGroup = "shell",
-                ToolDescription = $"Execute a PowerShell command ({toolName})",
-                Arguments = new Dictionary<string, object?>
-                {
-                    ["command"] = command,
-                    ["working_directory"] = workingDirectory
-                },
-                Reason = sanitizeResult.Reason
-            };
-
-            var approvalResult = await _approvalHandler.RequestApprovalAsync(approvalRequest);
-            if (!approvalResult.Approved)
-            {
-                _logger.LogDebug("PowerShell command '{Command}' rejected by approval handler: {Reason}",
-                    command, approvalResult.RejectionReason);
-                return (new
-                {
-                    error = $"Command rejected: {approvalResult.RejectionReason ?? "Not approved"}",
-                    status = approvalResult.Status.ToString()
-                }, command);
-            }
-
-            if (approvalResult.ModifiedArguments?.TryGetValue("command", out var modified) == true
-                && modified is string modifiedCommand)
-            {
-                command = modifiedCommand;
-            }
-        }
-
-        return (null, command);
-    }
-
-    /// <summary>
-    /// 验证工作目录
-    /// </summary>
-    private async Task<(object? error, string? resolvedPath)> ValidateWorkingDirectoryAsync(string? workingDirectory)
-    {
-        var workDir = workingDirectory ?? _options.ProjectRoot;
-        var dirValidation = await _pathValidator.ValidateAsync(workDir);
-        if (!dirValidation.IsValid)
-        {
-            return (new { error = $"Invalid working directory: {dirValidation.Error}" }, null);
-        }
-
-        var resolvedWorkDir = dirValidation.ResolvedPath!;
-        if (!Directory.Exists(resolvedWorkDir))
-        {
-            return (new { error = $"Working directory not found: {workDir}" }, null);
-        }
-
-        return (null, resolvedWorkDir);
-    }
-
-    private string TruncateOutput(string output) => OutputHelper.Truncate(output, _options.Sandbox.MaxOutputSize);
 }

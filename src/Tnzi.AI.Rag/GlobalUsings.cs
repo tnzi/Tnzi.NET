@@ -42,6 +42,7 @@ global using Tnzi.AI.Rag.Search;
 global using Tnzi.AI.Rag.Graph;
 global using Tnzi.AI.Rag.VectorStore;
 global using Tnzi.BackgroundJobs;
+global using Tnzi.Caching;
 global using Tnzi.Application;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;

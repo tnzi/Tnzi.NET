@@ -75,6 +75,14 @@ public class GuardrailsOptions
     /// LLM-as-Judge guardrail 配置
     /// </summary>
     public LlmJudgeOptions LlmJudge { get; set; } = new();
+
+    /// <summary>
+    /// When true, ToolGuardrailMiddleware serializes tool arguments as Content
+    /// and passes them to IGuardrailProvider content-inspection (PII / MaxLength etc.).
+    /// Default false: only the tool-name allowlist/denylist runs, large legitimate
+    /// payloads are not scanned and cannot inadvertently trip length or injection checks.
+    /// </summary>
+    public bool InspectToolArguments { get; set; }
 }
 
 /// <summary>

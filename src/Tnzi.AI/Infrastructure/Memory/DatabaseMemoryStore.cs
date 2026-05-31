@@ -51,9 +51,20 @@ public partial class DatabaseMemoryStore : IMemoryStore
     public async Task<string?> ReadAsync(string scope, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(scope);
+        return await ReadCoreAsync(_repository.AsQueryable().Where(e => e.Scope == scope), ct);
+    }
 
-        var query = _repository.AsQueryable().Where(e => e.Scope == scope);
+    /// <inheritdoc />
+    public async Task<string?> ReadByAgentAsync(Guid agentId, string scope, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(scope);
+        // 按结构化 AgentId 列检索（修复 AgentId 列只写不读的缺陷），与当前用户无关 → headless-safe。
+        return await ReadCoreAsync(
+            _repository.AsQueryable().Where(e => e.AgentId == agentId && e.Scope == scope), ct);
+    }
 
+    private async Task<string?> ReadCoreAsync(IQueryable<MemoryEntry> query, CancellationToken ct)
+    {
         // 过期过滤
         if (_memoryOptions?.EntryExpiration.HasValue == true)
         {
@@ -164,7 +175,21 @@ public partial class DatabaseMemoryStore : IMemoryStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MemorySearchResult>> SearchAsync(string scope, string query, int maxResults = 10, CancellationToken ct = default)
-        => await SearchInternalAsync(scope, query, maxResults, category: null, ct);
+    {
+        Check.NotNullOrWhiteSpace(scope);
+        return await SearchInternalAsync(_repository.AsQueryable().Where(e => e.Scope == scope), query, maxResults, category: null, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MemorySearchResult>> SearchByAgentAsync(
+        Guid agentId, string scope, string query, int maxResults = 10, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(scope);
+        // 按结构化 AgentId 列检索，与当前用户无关 → headless-safe。
+        return await SearchInternalAsync(
+            _repository.AsQueryable().Where(e => e.AgentId == agentId && e.Scope == scope),
+            query, maxResults, category: null, ct);
+    }
 
     /// <summary>
     /// 按类别搜索指定 scope 的记忆
@@ -173,14 +198,14 @@ public partial class DatabaseMemoryStore : IMemoryStore
         string scope, string query, string category, int maxResults = 10,
         CancellationToken ct = default)
     {
+        Check.NotNullOrWhiteSpace(scope);
         Check.NotNullOrWhiteSpace(category);
-        return await SearchInternalAsync(scope, query, maxResults, category, ct);
+        return await SearchInternalAsync(_repository.AsQueryable().Where(e => e.Scope == scope), query, maxResults, category, ct);
     }
 
     private async Task<IReadOnlyList<MemorySearchResult>> SearchInternalAsync(
-        string scope, string query, int maxResults, string? category, CancellationToken ct)
+        IQueryable<MemoryEntry> scopedQuery, string query, int maxResults, string? category, CancellationToken ct)
     {
-        Check.NotNullOrWhiteSpace(scope);
         Check.NotNullOrWhiteSpace(query);
 
         var queryLower = query.ToLower();
@@ -188,7 +213,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
             ? queryLower.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : [queryLower];
 
-        var baseQuery = _repository.AsQueryable().Where(e => e.Scope == scope);
+        var baseQuery = scopedQuery;
         if (!string.IsNullOrEmpty(category))
             baseQuery = baseQuery.Where(e => e.Category == category);
 
@@ -448,13 +473,15 @@ public partial class DatabaseMemoryStore : IMemoryStore
         Check.NotNull(content);
 
         var scopeKey = scope.ToScopeKey();
+        // Agent-bound 范围以结构化 AgentId 列作为删除/检索维度；其余按 scope 字符串。
+        var agentBoundId = scope is { AgentBound: true, AgentId: { } aid } ? aid : (Guid?)null;
 
         if (_unitOfWorkManager != null)
         {
             await _unitOfWorkManager.BeginTransactionAsync(ct);
             try
             {
-                await WriteInternalAsync(scopeKey, content, scope.UserId, scope.AgentId, ct);
+                await WriteInternalAsync(scopeKey, content, scope.UserId, scope.AgentId, agentBoundId, ct);
                 await _unitOfWorkManager.CommitTransactionAsync(ct);
             }
             catch
@@ -465,7 +492,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
         }
         else
         {
-            await WriteInternalAsync(scopeKey, content, scope.UserId, scope.AgentId, ct);
+            await WriteInternalAsync(scopeKey, content, scope.UserId, scope.AgentId, agentBoundId, ct);
         }
 
         _logger.LogDebug("Written memory for scope {Scope}, length: {Length}", scopeKey, content.Length);
@@ -498,12 +525,22 @@ public partial class DatabaseMemoryStore : IMemoryStore
         await TrimExcessEntriesAsync(scopeKey, ct);
     }
 
-    private async Task WriteInternalAsync(string scope, string content, Guid? userId, Guid? agentId, CancellationToken ct)
+    private async Task WriteInternalAsync(string scope, string content, Guid? userId, Guid? agentId, Guid? agentBoundId, CancellationToken ct)
     {
-        // 删除该 scope 下所有旧条目
-        await _repository.AsQueryable()
-            .Where(e => e.Scope == scope)
-            .ExecuteDeleteAsync(ct);
+        // 删除旧条目：Agent-bound 范围按 (AgentId, Scope) 维度删除，
+        // 避免误删共享同一 scope 字符串的其他 Agent 记忆；否则按 scope 字符串删除（原行为）。
+        if (agentBoundId.HasValue)
+        {
+            await _repository.AsQueryable()
+                .Where(e => e.AgentId == agentBoundId.Value && e.Scope == scope)
+                .ExecuteDeleteAsync(ct);
+        }
+        else
+        {
+            await _repository.AsQueryable()
+                .Where(e => e.Scope == scope)
+                .ExecuteDeleteAsync(ct);
+        }
 
         // 写入新条目
         var entry = new MemoryEntry

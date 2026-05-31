@@ -63,6 +63,23 @@ watch(
 onBeforeUnmount(() => {
   reset();
 });
+
+/** Event-delegated copy for fenced code blocks (buttons live in v-html output). */
+function onMarkdownClick(e: MouseEvent): void {
+  const target = e.target as HTMLElement;
+  const btn = target.closest('.t-md-code__copy');
+  if (!btn) return;
+  const encoded = btn.closest('.t-md-code')?.getAttribute('data-code');
+  if (!encoded) return;
+  navigator.clipboard.writeText(decodeURIComponent(encoded)).catch(() => {
+    /* clipboard unavailable */
+  });
+  const original = btn.textContent;
+  btn.textContent = 'Copied';
+  window.setTimeout(() => {
+    btn.textContent = original;
+  }, 2000);
+}
 </script>
 
 <template>
@@ -70,6 +87,7 @@ onBeforeUnmount(() => {
     class="t-stream-markdown"
     :class="[streaming && 'ai-streaming', props.class]"
     v-html="html"
+    @click="onMarkdownClick"
   />
 </template>
 
@@ -100,32 +118,47 @@ onBeforeUnmount(() => {
 }
 .t-stream-markdown :deep(li) { margin-bottom: 0.25em; }
 .t-stream-markdown :deep(code) {
-  font-size: 0.8125em;
-  font-family: monospace;
+  font-size: 0.85em;
+  font-weight: 600;
+  font-family: var(--tnzi-ai-font-mono, monospace);
   background-color: var(--tnzi-ai-code-bg);
-  padding: 1px 4px;
-  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--tnzi-border) 60%, transparent);
+  padding: 2px 6px;
+  border-radius: 7px;
 }
 .t-stream-markdown :deep(pre) {
   background-color: var(--tnzi-ai-code-bg);
-  padding: 12px;
-  border-radius: 6px;
+  padding: 0.95em 1em;
+  border-radius: 12px;
   overflow-x: auto;
   margin-bottom: 0.75em;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tnzi-base-text) 6%, transparent);
 }
 .t-stream-markdown :deep(pre code) {
   background: none;
+  border: none;
   padding: 0;
+  font-weight: 400;
+  font-size: 0.92em;
+  line-height: 1.6;
 }
 .t-stream-markdown :deep(blockquote) {
-  border-left: 3px solid var(--tnzi-border);
-  padding-left: 1em;
+  border-left: 3px solid var(--tnzi-ai-accent, var(--tnzi-primary));
+  border-radius: 0 10px 10px 0;
+  background: var(--tnzi-ai-accent-soft, rgba(13, 148, 136, 0.06));
+  padding: 0.5em 1em;
   color: var(--tnzi-base-text-muted);
-  margin: 0.5em 0;
+  font-style: normal;
+  margin: 0.6em 0;
 }
 .t-stream-markdown :deep(a) {
   color: var(--tnzi-primary);
-  text-decoration: underline;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--tnzi-primary) 40%, transparent);
+  transition: border-color 0.15s;
+}
+.t-stream-markdown :deep(a:hover) {
+  border-bottom-color: var(--tnzi-primary);
 }
 .t-stream-markdown :deep(hr) {
   border: none;
@@ -134,17 +167,36 @@ onBeforeUnmount(() => {
 }
 .t-stream-markdown :deep(table) {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--tnzi-border);
+  border-radius: 8px;
+  overflow: hidden;
   font-size: 0.875em;
+  margin-bottom: 0.75em;
 }
 .t-stream-markdown :deep(th),
 .t-stream-markdown :deep(td) {
-  border: 1px solid var(--tnzi-border);
-  padding: 4px 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--tnzi-border);
+  text-align: left;
 }
 .t-stream-markdown :deep(th) {
-  background-color: var(--tnzi-container-bg);
+  background-color: var(--tnzi-ai-surface);
   font-weight: 600;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tnzi-base-text-muted);
+}
+.t-stream-markdown :deep(td) {
+  font-variant-numeric: tabular-nums;
+}
+.t-stream-markdown :deep(tr:last-child td) {
+  border-bottom: none;
+}
+.t-stream-markdown :deep(tbody tr:hover td) {
+  background-color: var(--tnzi-ai-hover);
 }
 
 /* Streaming cursor */
@@ -161,5 +213,64 @@ onBeforeUnmount(() => {
 @keyframes t-md-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+/* Fenced code block (shiki) wrapper — header bar + highlighted body */
+.t-stream-markdown :deep(.t-md-code) {
+  margin-bottom: 0.75em;
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: var(--tnzi-ai-code-bg);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tnzi-base-text) 6%, transparent);
+}
+.t-stream-markdown :deep(.t-md-code__bar) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+  border-bottom: 1px solid color-mix(in srgb, var(--tnzi-border) 50%, transparent);
+}
+.t-stream-markdown :deep(.t-md-code__lang) {
+  font-family: var(--tnzi-ai-font-mono, monospace);
+  text-transform: lowercase;
+}
+.t-stream-markdown :deep(.t-md-code__copy) {
+  border: none;
+  background: none;
+  color: var(--tnzi-base-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.t-stream-markdown :deep(.t-md-code__copy:hover) {
+  background: var(--tnzi-ai-hover, rgba(0, 0, 0, 0.04));
+  color: var(--tnzi-ai-text);
+}
+.t-stream-markdown :deep(.t-md-code__body) {
+  overflow-x: auto;
+  padding: 0.85em 1em;
+  font-size: 0.9em;
+  line-height: 1.6;
+}
+.t-stream-markdown :deep(.t-md-code__body pre),
+.t-stream-markdown :deep(.t-md-code__body .shiki),
+.t-stream-markdown :deep(.t-md-code__fallback) {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  box-shadow: none;
+}
+/* shiki dual-theme: switch to dark token colors under .dark */
+.dark .t-stream-markdown :deep(.shiki),
+.dark .t-stream-markdown :deep(.shiki span) {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
 }
 </style>

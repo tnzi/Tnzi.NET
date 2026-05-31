@@ -27,7 +27,7 @@ import {
   type AuditOperationQueryDto,
 } from '@tnzi/core/services/audit'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult } from '../_mappers'
+import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminAuditApi>[0]
 
@@ -44,13 +44,6 @@ export interface AuditBridge {
     exportCsvUrl(): string
   }
   operations: BridgeCrudContract<AuditOperationDto>
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 const readOnlyReject = (): Promise<never> =>

@@ -1,4 +1,3 @@
-
 namespace Tnzi.AI.Options;
 
 /// <summary>

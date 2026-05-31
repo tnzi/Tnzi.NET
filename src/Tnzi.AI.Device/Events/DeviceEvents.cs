@@ -37,14 +37,3 @@ public class DevicePairingApprovedEvent : EventBase
 {
     public string NodeId { get; init; } = string.Empty;
 }
-
-/// <summary>
-/// Raised when a device command is executed
-/// </summary>
-public class DeviceCommandExecutedEvent : EventBase
-{
-    public string NodeId { get; init; } = string.Empty;
-    public string Family { get; init; } = string.Empty;
-    public string Command { get; init; } = string.Empty;
-    public bool Success { get; init; }
-}

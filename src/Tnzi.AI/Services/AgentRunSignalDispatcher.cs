@@ -9,15 +9,18 @@ public class AgentRunSignalDispatcher : IAgentRunSignalDispatcher
     private readonly IRunStore _runStore;
     private readonly IAgentRunService _agentRunService;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ISubAgentRunCancellationRegistry? _cancellationRegistry;
 
     public AgentRunSignalDispatcher(
         IRunStore runStore,
         IAgentRunService agentRunService,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ISubAgentRunCancellationRegistry? cancellationRegistry = null)
     {
         _runStore = Check.NotNull(runStore);
         _agentRunService = Check.NotNull(agentRunService);
         _serviceProvider = Check.NotNull(serviceProvider);
+        _cancellationRegistry = cancellationRegistry;
     }
 
     public async Task<Result> DispatchInputAsync(Guid runId, SendAgentRunInput input, CancellationToken ct = default)
@@ -105,6 +108,9 @@ public class AgentRunSignalDispatcher : IAgentRunSignalDispatcher
         {
             return cancelResult;
         }
+
+        // Trip the CTS so the in-process background Task actually stops
+        _cancellationRegistry?.TryCancel(runId);
 
         if (string.IsNullOrWhiteSpace(run.WorkflowExecutionId) || !run.WorkflowDefinitionId.HasValue)
         {

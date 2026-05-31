@@ -256,7 +256,14 @@ public class RagRetriever : ApplicationService, IRagRetriever
     }
 
     /// <summary>
-    /// 执行图谱搜索（在指定知识库中搜索匹配的实体及关系）
+    /// 执行图谱搜索（在指定知识库中搜索匹配的实体及关系）。
+    /// <para>
+    /// <b>有意限定为 KB-scoped</b>：<see cref="IGraphSearchService.SearchAsync"/> 的契约要求传入具体的
+    /// <c>knowledgeBaseId</c>，不存在跨库 / search-all 的重载。因此当请求未指定 <c>KnowledgeBaseIds</c>
+    /// （search-all 路径）时跳过图谱搜索，仅返回向量结果。要让图谱参与检索，调用方需显式指定一个或多个
+    /// 知识库 ID（图谱搜索内部经 EF 全局过滤器自动应用租户隔离，与向量 raw-SQL 路径不同）。
+    /// 跨库图谱搜索属于刻意推迟的范围扩展，不在 D1 默认关闭的接线内。
+    /// </para>
     /// </summary>
     private async Task<IReadOnlyList<GraphSearchResult>> SearchGraphAsync(
         string query, RagRetrievalOptions options, CancellationToken ct)

@@ -60,16 +60,16 @@ public class LocalDeviceNodeTests
     }
 
     [Fact]
-    public async Task InvokeAsync_Notification_ReturnsSuccess()
+    public async Task InvokeAsync_Notification_ReturnsUnsupportedFail()
     {
+        // The local server node is headless — notification must return an honest failure, not pretend to succeed
         var parameters = JsonSerializer.SerializeToElement(new { title = "Test", body = "Hello" });
         var command = new DeviceCommand("notification", "send", parameters);
 
         var result = await _node.InvokeAsync(command);
 
-        result.Success.ShouldBeTrue();
-        result.TextResult.ShouldContain("Test");
-        result.TextResult.ShouldContain("Hello");
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldContain("not supported");
     }
 
     [Fact]

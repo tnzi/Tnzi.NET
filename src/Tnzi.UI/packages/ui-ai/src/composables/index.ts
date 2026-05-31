@@ -31,3 +31,6 @@ export { useCodeHighlight, detectLangFromFilename } from './useCodeHighlight';
 export type { CodeLang, CodeTheme, UseCodeHighlightOptions, UseCodeHighlightReturn } from './useCodeHighlight';
 export { useVoiceInput } from './useVoiceInput';
 export type { UseVoiceInputOptions, UseVoiceInputReturn } from './useVoiceInput';
+export { useComposerAttachments } from './useComposerAttachments';
+export type { UseComposerAttachmentsOptions, UseComposerAttachmentsReturn } from './useComposerAttachments';
+export { useAutoGrowTextarea } from './useAutoGrowTextarea';

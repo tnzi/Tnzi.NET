@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace Tnzi.AI.Tools.Approval.Sse;
 
 /// <summary>

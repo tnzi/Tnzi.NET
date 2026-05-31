@@ -48,7 +48,7 @@ public class KnowledgeDocument : AuditedEntity<Guid>, IMultiTenant
     public string? ContentHash { get; set; }
 
     /// <summary>
-    /// 文档版本号（每次内容更新时递增）
+    /// 文档版本号（保留字段，当前未使用，固定为默认值 1；预留给未来的内容版本管理）
     /// </summary>
     public int Version { get; set; } = 1;
 }

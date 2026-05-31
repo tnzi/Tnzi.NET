@@ -284,6 +284,49 @@ public class SkillConstraintMiddlewareTests
 
     #endregion
 
+    #region Test 7: Deny wins over allow (B2)
+
+    [Fact]
+    public async Task InvokeAsync_ToolAllowedByOneSkillDeniedByAnother_DenyWins()
+    {
+        // "tool-x" is in the registry (so it can be injected by the allow-list path)
+        var toolRegistry = CreateToolRegistry(("tool-x", "group-a"));
+
+        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
+
+        var context = CreateContext();
+
+        // Skill A explicitly allows "tool-x"
+        var skillA = new SkillDefinition
+        {
+            Slug = "skill-allow",
+            Name = "Skill Allow",
+            Content = "A",
+            AllowedTools = ["tool-x"],
+            Priority = 1
+        };
+
+        // Skill B explicitly denies "tool-x"
+        var skillB = new SkillDefinition
+        {
+            Slug = "skill-deny",
+            Name = "Skill Deny",
+            Content = "B",
+            DeniedTools = ["tool-x"],
+            Priority = 0
+        };
+
+        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skillA, skillB };
+
+        await middleware.InvokeAsync(context, NextDelegate);
+
+        // Deny wins: tool-x must NOT be injected or present
+        context.AdditionalTools.ShouldNotContain(t => t.Name != null &&
+            string.Equals(t.Name, "tool-x", StringComparison.OrdinalIgnoreCase));
+    }
+
+    #endregion
+
     #region Streaming path
 
     [Fact]

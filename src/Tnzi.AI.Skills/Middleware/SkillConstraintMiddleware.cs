@@ -134,7 +134,8 @@ public class SkillConstraintMiddleware : IAiMiddleware
                 _logger.LogInformation("Skill constraints denied {Count} individual tools", deniedCount);
         }
 
-        // Inject per-skill AllowedTools: ensure individually whitelisted tools are present in AdditionalTools
+        // Inject per-skill AllowedTools: ensure individually whitelisted tools are present in AdditionalTools.
+        // Deny wins: skip tools that are in the deny set even if they were also allowed by another skill.
         if (accumulatedAllowedTools.Count > 0)
         {
             var existingToolNames = new HashSet<string>(
@@ -146,6 +147,10 @@ public class SkillConstraintMiddleware : IAiMiddleware
 
             foreach (var toolName in accumulatedAllowedTools)
             {
+                // Deny always wins over allow (intersection semantics)
+                if (accumulatedDeniedTools.Contains(toolName))
+                    continue;
+
                 if (existingToolNames.Contains(toolName))
                     continue;
 

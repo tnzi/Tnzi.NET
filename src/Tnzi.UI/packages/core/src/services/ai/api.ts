@@ -1,10 +1,17 @@
 /**
- * AI Module API - Complete backend endpoint coverage
+ * AI Module API
  *
  * Covers: Chat, Threads, Agents (admin), Agent Runs (admin), Providers (admin),
  * Quotas (user + admin), Usage Analytics (admin), Evaluations (admin),
  * Skills (user + admin), Workflows (admin), MCP (admin), MCP Tool Analytics (admin),
- * Personas (admin), Skill Categories (admin), Artifacts (user), User Profile (user)
+ * Personas (admin), Skill Categories (admin), Artifacts (user), User Profile (user),
+ * Workspace Agents (admin).
+ *
+ * RAG endpoints live in `./rag`. The Permission rule engine
+ * (`usePermissionAdminApi` → admin/permissions), Agent Tasks
+ * (`useAdminTaskApi` → admin/ai/tasks), and Sub-Agent Types
+ * (`useAdminSubAgentTypeApi` → admin/ai/sub-agent-types) live in
+ * `./permission`, `./task`, and `./sub-agent-type` respectively.
  */
 
 import type { HttpClient } from '../../http/http';

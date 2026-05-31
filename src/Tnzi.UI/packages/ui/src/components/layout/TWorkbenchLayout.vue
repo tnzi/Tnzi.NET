@@ -34,10 +34,18 @@ import {
   type Component,
 } from 'vue'
 import { NGrid, NGi } from 'naive-ui'
-import { VueDraggable } from 'vue-draggable-plus'
 import TWidgetCard from './TWidgetCard.vue'
 import { useWorkbenchLayout } from '../../composables/layout/useWorkbenchLayout'
 import type { SpanValue, WidgetDef, WorkbenchConfig } from './widget-types'
+
+// `vue-draggable-plus` is an optional peer dependency. Lazy-load it via
+// defineAsyncComponent so fixed-mode consumers (who never set
+// `layout: 'draggable'`, and may not have it installed) never resolve the
+// module. The `<VueDraggable v-if="draggable">` branch only mounts — and
+// thus only triggers this dynamic import — in draggable mode.
+const VueDraggable = defineAsyncComponent(
+  () => import('vue-draggable-plus').then((m) => m.VueDraggable as unknown as Component),
+)
 
 interface Props {
   /** Widget array — the source of truth. */
@@ -229,7 +237,7 @@ function itemStyle(def: WidgetDef): Record<string, string> {
  */
 function resolveComponent(def: WidgetDef): Component {
   const c = def.component
-  if (typeof c === 'function' && (c as Function).length === 0) {
+  if (typeof c === 'function' && (c as (...args: unknown[]) => unknown).length === 0) {
     return defineAsyncComponent(c as () => Promise<{ default: Component }>)
   }
   return c as Component

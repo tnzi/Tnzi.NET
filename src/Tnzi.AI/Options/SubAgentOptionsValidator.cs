@@ -9,5 +9,11 @@ public class SubAgentOptionsValidator : OptionsValidatorBase<SubAgentOptions>
 
         if (options.TimeoutSeconds < 1)
             errors.Add("TimeoutSeconds must be >= 1");
+
+        if (options.MaxDepth < 1)
+            errors.Add("MaxDepth must be >= 1");
+
+        if (options.MaxDescendantsPerRoot < 1)
+            errors.Add("MaxDescendantsPerRoot must be >= 1");
     }
 }

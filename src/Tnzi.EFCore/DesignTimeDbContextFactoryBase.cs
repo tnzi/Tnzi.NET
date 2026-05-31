@@ -15,6 +15,10 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
     /// </summary>
     public TDbContext CreateDbContext(string[] args)
     {
+        // Allow subclasses to inject design-time-only static state (e.g. migrations assembly,
+        // module container) before the context is built. Runs in both add/update commands.
+        OnBeforeCreate(args);
+
         // Find configuration file path
         var configPath = FindConfigurationPath();
         if (string.IsNullOrEmpty(configPath))
@@ -554,6 +558,15 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 在构建 DbContext 之前调用的钩子（默认空实现）。
+    /// 子类可重写以设置仅设计时需要的静态状态，例如迁移文件所在程序集。
+    /// </summary>
+    /// <param name="args">设计时命令参数</param>
+    protected virtual void OnBeforeCreate(string[] args)
+    {
     }
 
     /// <summary>

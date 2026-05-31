@@ -551,9 +551,9 @@ export const en = {
       // Top-level groups whose own name clashes with a route-prefix sub-tree
       // (ai/chat/system/audit) use `_label` to disambiguate. The router
       // namespace lives at the same key and resolves via deep lookup.
-      iam: { _label: 'Identity & Permission' },
+      iam: { _label: 'Identity & Access' },
       ai: {
-        _label: 'AI Service',
+        _label: 'AI',
         agents: 'Agents',
         workspaceAgents: 'Workspace Agents',
         workflows: 'Workflows',
@@ -832,7 +832,7 @@ export const en = {
       identity: {
         label: 'Identity',
         users: {
-          title: 'User Management',
+          title: 'Users',
           columns: {
             userName: 'Username', email: 'Email', phoneNumber: 'Phone',
             organizationName: 'Organization', isLockedOut: 'Lock Status', isEmailConfirmed: 'Email Confirmed',
@@ -843,10 +843,10 @@ export const en = {
             nickname: 'Nickname', keyword: 'Keyword', keywordHint: 'Username / email / phone',
             isLockedOut: 'Lock Status', isEmailConfirmed: 'Email Confirmed',
           },
-          actions: { create: 'Create User', edit: 'Edit User', delete: 'Delete User', more: 'More', resetPassword: 'Reset Password', enable: 'Enable', disable: 'Disable', lock: 'Lock', unlock: 'Unlock', confirmEnable: 'Enable this user?', confirmDisable: 'Disable this user?', confirmLock: 'Lock this user?', confirmUnlock: 'Unlock this user?', enableSuccess: 'User enabled', disableSuccess: 'User disabled', lockSuccess: 'User locked', unlockSuccess: 'User unlocked', resetPasswordSuccess: 'Password reset', newPassword: 'New password', resetPasswordHint: 'Set the new password for this user. They must change it on next login.', disableReason: 'Reason (optional)', lockUntil: 'Lock until (leave empty = permanent)', manageRoles: 'Manage Roles', manageRolesTitle: "Manage {user}'s Roles", manageRolesHint: 'Check the roles to grant. Unchecked roles will be removed when you save.', manageRolesSuccess: 'Roles updated', noRolesAvailable: 'No roles configured in the system yet' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', more: 'More', resetPassword: 'Reset Password', enable: 'Enable', disable: 'Disable', lock: 'Lock', unlock: 'Unlock', confirmEnable: 'Enable this user?', confirmDisable: 'Disable this user?', confirmLock: 'Lock this user?', confirmUnlock: 'Unlock this user?', enableSuccess: 'User enabled', disableSuccess: 'User disabled', lockSuccess: 'User locked', unlockSuccess: 'User unlocked', resetPasswordSuccess: 'Password reset', newPassword: 'New password', resetPasswordHint: 'Set the new password for this user. They must change it on next login.', disableReason: 'Reason (optional)', lockUntil: 'Lock until (leave empty = permanent)', manageRoles: 'Manage Roles', manageRolesTitle: "Manage {user}'s Roles", manageRolesHint: 'Check the roles to grant. Unchecked roles will be removed when you save.', manageRolesSuccess: 'Roles updated', noRolesAvailable: 'No roles configured in the system yet' },
         },
         roles: {
-          title: 'Role Management',
+          title: 'Roles',
           columns: { name: 'Name', description: 'Description', isDefault: 'Default', isSystem: 'System', creationTime: 'Created At' },
           form: { name: 'Name', description: 'Description', isDefault: 'Default Role', isSystem: 'System Role', keyword: 'Keyword' },
           detail: {
@@ -866,16 +866,16 @@ export const en = {
               gotoEditor: 'Open Permission Editor',
             },
           },
-          actions: { create: 'Create Role', edit: 'Edit Role', delete: 'Delete Role', detail: 'View Detail' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', detail: 'View' },
         },
         tenants: {
-          title: 'Tenant Management',
+          title: 'Tenants',
           columns: { name: 'Name', code: 'Code', isEnabled: 'Enabled', expiredAt: 'Expires At', remark: 'Remark', creationTime: 'Created At' },
           form: { name: 'Name', code: 'Code', isEnabled: 'Enabled', expiredAt: 'Expires At', remark: 'Remark', keyword: 'Keyword' },
-          actions: { create: 'Create Tenant', edit: 'Edit Tenant', delete: 'Delete Tenant' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         loginLogs: {
-          title: 'Login Log',
+          title: 'Login Logs',
           columns: { userName: 'Username', ipAddress: 'IP Address', userAgent: 'User Agent', isSuccess: 'Success', failureReason: 'Failure Reason', loginTime: 'Login Time' },
           form: { userName: 'Username', userId: 'User ID', ipAddress: 'IP Address', userAgent: 'User Agent', isSuccess: 'Success', failureReason: 'Failure Reason', loginTime: 'Login Time', startDate: 'Start Date', endDate: 'End Date' },
           actions: { delete: 'Delete', export: 'Export' },
@@ -949,7 +949,7 @@ export const en = {
           },
         },
         organizations: {
-          title: 'Organization Management',
+          title: 'Organizations',
           refresh: 'Refresh',
           addRoot: 'Add root',
           addChild: 'Add child',
@@ -990,7 +990,7 @@ export const en = {
           },
         },
         sessions: {
-          title: 'Session Management',
+          title: 'Sessions',
           stats: {
             activeSessions: 'Active sessions',
             onlineUsers: 'Online users',
@@ -1040,9 +1040,9 @@ export const en = {
             description: 'Description',
           },
           actions: {
-            create: 'Create Module',
-            edit: 'Edit Module',
-            delete: 'Delete Module',
+            create: 'Create',
+            edit: 'Edit',
+            delete: 'Delete',
             enable: 'Enable',
             disable: 'Disable',
             enableSuccess: 'Module enabled (cascaded to children)',
@@ -1073,7 +1073,7 @@ export const en = {
           columns: { code: 'Code', name: 'Name', moduleId: 'Module', isEnabled: 'Status', description: 'Description' },
           status: { enabled: 'Enabled', disabled: 'Disabled' },
           form: { code: 'Code', name: 'Name', moduleId: 'Module', description: 'Description' },
-          actions: { create: 'Create Permission', edit: 'Edit Permission', delete: 'Delete Permission' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         roleFunctions: {
           title: 'Role Permissions',
@@ -1141,7 +1141,7 @@ export const en = {
           // Legacy keys retained.
           columns: { entityInfoId: 'Entity Info', roleId: 'Role', operation: 'Operation', isEnabled: 'Enabled', filter: 'Filter' },
           form: { entityInfoId: 'Entity Info ID', roleId: 'Role ID', operation: 'Operation', filter: 'Filter (JSON)', isEnabled: 'Enabled' },
-          actions: { create: 'Create Rule', edit: 'Edit Rule', delete: 'Delete Rule' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
           tabs: { matrix: 'Role Matrix', inspect: 'Inspect User' },
           inspect: {
             hint: 'Enter a user ID to see the effective data permissions they inherit from every role they hold.',
@@ -1158,26 +1158,26 @@ export const en = {
       system: {
         label: 'System',
         menus: {
-          title: 'Menu Management',
+          title: 'Menus',
           columns: { name: 'Name', icon: 'Icon', parentName: 'Parent', path: 'Path', component: 'Component', permission: 'Permission', type: 'Type', sortOrder: 'Sort', isHidden: 'Hidden' },
           form: { name: 'Name', type: 'Type', parentId: 'Parent', parentIdPlaceholder: 'Search parent menu… (leave empty for top-level)', path: 'Path', component: 'Component', icon: 'Icon (mdi:xxx)', permission: 'Permission Code', sortOrder: 'Sort', isHidden: 'Hidden' },
           status: { hidden: 'Hidden', visible: 'Visible' },
-          actions: { create: 'Create Menu', edit: 'Edit Menu', delete: 'Delete Menu' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         dictionaries: {
-          title: 'Dictionary Management',
+          title: 'Dictionaries',
           columns: { key: 'Key', value: 'Value', group: 'Group', isSystem: 'System', sortOrder: 'Sort', description: 'Description' },
           form: { key: 'Key', value: 'Value', group: 'Group', description: 'Description', sortOrder: 'Sort' },
-          actions: { create: 'Create Entry', edit: 'Edit Entry', delete: 'Delete Entry' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         parameters: {
-          title: 'Parameter Management',
+          title: 'Parameters',
           columns: { key: 'Key', value: 'Value', valueType: 'Type', group: 'Group', description: 'Description' },
           form: { key: 'Key', value: 'Value', valueType: 'Type', group: 'Group', description: 'Description' },
-          actions: { create: 'Create Parameter', edit: 'Edit Parameter', delete: 'Delete Parameter' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         accessLogs: {
-          title: 'Access Log',
+          title: 'Access Logs',
           columns: { path: 'Path', method: 'Method', statusCode: 'Status', responseTime: 'Duration (ms)', ipAddress: 'IP', userName: 'User', creationTime: 'Requested At' },
           form: { path: 'Path', method: 'Method', statusCode: 'Status Code', responseTime: 'Duration (ms)', userName: 'User', ipAddress: 'IP Address', ipFullAddress: 'IP Location', uaBrowser: 'Browser', uaOperatingSystem: 'OS', uaDeviceType: 'Device Type', userAgent: 'User-Agent' },
           actions: { delete: 'Delete', export: 'Export' },
@@ -1186,13 +1186,13 @@ export const en = {
           title: 'Scheduled Jobs',
           columns: { id: 'Job ID', cron: 'Cron', queue: 'Queue', lastJobState: 'Last State', lastExecution: 'Last Run', nextExecution: 'Next Run', removed: 'State' },
           form: { id: 'Job ID', cron: 'Cron', queue: 'Queue', lastExecution: 'Last Run', nextExecution: 'Next Run', lastJobId: 'Last Job ID', lastJobState: 'Last State', error: 'Error' },
-          actions: { delete: 'Delete Job', trigger: 'Trigger Now', triggerSuccess: 'Job triggered' },
+          actions: { delete: 'Delete', trigger: 'Trigger Now', triggerSuccess: 'Job triggered' },
         },
         features: {
           title: 'Feature Flags',
           columns: { name: 'Name', displayName: 'Display Name', group: 'Group', valueType: 'Type', defaultValue: 'Default', isEnabled: 'Enabled', source: 'Source', description: 'Description' },
           form: { name: 'Name', displayName: 'Display Name', description: 'Description', valueType: 'Value Type', defaultValue: 'Default Value', parentName: 'Parent Feature', group: 'Group', isEnabled: 'Enabled' },
-          actions: { create: 'Create Feature', edit: 'Edit Feature', delete: 'Delete Feature' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         logFiles: {
           title: 'Log Files',
@@ -1242,10 +1242,11 @@ export const en = {
             occurredAt: 'Occurred',
             exceptionType: 'Exception',
             message: 'Message',
-            endpoint: 'Endpoint',
-            duration: 'Duration',
+            statusCode: 'Status',
+            errorCode: 'Error Code',
+            requestId: 'Request ID',
           },
-          top: { byType: 'Top by Exception Type', byController: 'Top by Controller' },
+          top: { byType: 'Top by Exception Type', byStatusCode: 'By Status Code', byErrorCode: 'By Error Code' },
           empty: { exceptions: 'No exceptions recorded' },
         },
         healthchecks: {
@@ -1397,7 +1398,7 @@ export const en = {
           actions: { delete: 'Delete', download: 'Download', export: 'Export' },
         },
         chunks: {
-          title: 'Storage Chunks (diagnostics)',
+          title: 'Chunks (diagnostics)',
           banner: {
             title: 'Troubleshooting view',
             body: 'This page lists low-level upload chunks — useful when an upload fails midway and orphans need cleaning up. End users never need to touch it.',
@@ -1420,7 +1421,7 @@ export const en = {
       audit: {
         label: 'Audit',
         logs: {
-          title: 'Audit Log',
+          title: 'Logs',
           empty: 'No audit entries match the current filter.',
           anonymous: '(anonymous)',
           loadMore: 'Load more',
@@ -1450,7 +1451,7 @@ export const en = {
           actions: { delete: 'Delete', export: 'Export' },
         },
         operations: {
-          title: 'Audit Operations',
+          title: 'Operations',
           empty: 'No operation entries match the current filter.',
           anonymous: '(anonymous)',
           loadMore: 'Load more',
@@ -1482,11 +1483,11 @@ export const en = {
       notification: {
         label: 'Notification',
         templates: {
-          title: 'Notification Templates',
+          title: 'Templates',
           previewTitle: 'Template Preview',
           columns: { templateName: 'Template Name', category: 'Category (Channel)', description: 'Description', defaultLayoutName: 'Default Layout', isActive: 'Active', source: 'Source' },
           form: { templateName: 'Template Name', category: 'Category', description: 'Description', defaultLayoutName: 'Default Layout', subjectTemplate: 'Subject Template', contentTemplate: 'Content Template (Razor)', isActive: 'Active' },
-          actions: { create: 'Create Template', edit: 'Edit Template', delete: 'Delete Template', preview: 'Preview', sendTest: 'Send Test', cancel: 'Cancel', send: 'Send' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', preview: 'Preview', sendTest: 'Send Test', cancel: 'Cancel', send: 'Send' },
           preview: {
             title: 'Preview · {name}',
             variables: 'Template Variables (JSON)',
@@ -1506,7 +1507,7 @@ export const en = {
           channel: { email: 'Email', sms: 'SMS', push: 'Push' },
         },
         messages: {
-          title: 'Notification Messages',
+          title: 'Messages',
           columns: { subject: 'Subject', type: 'Type', status: 'Status', templateName: 'Template', recipients: 'Success/Total', failureReason: 'Failure Reason', retryCount: 'Retries', sentTime: 'Sent At' },
           form: { subject: 'Subject', templateName: 'Template', content: 'Content', failureReason: 'Failure Reason' },
           actions: {
@@ -1517,21 +1518,21 @@ export const en = {
           },
         },
         subscriptions: {
-          title: 'Notification Subscriptions',
+          title: 'Subscriptions',
           columns: { userId: 'User', channel: 'Channel', category: 'Category', isEnabled: 'Enabled', quietHoursStart: 'Quiet Hours Start', quietHoursEnd: 'Quiet Hours End', maxFrequencyPerHour: 'Max/Hour' },
           form: { userId: 'User ID', channel: 'Channel', category: 'Category (optional)', isEnabled: 'Enabled', quietHoursStart: 'Quiet Hours Start (HH:mm:ss UTC)', quietHoursEnd: 'Quiet Hours End (HH:mm:ss UTC)', maxFrequencyPerHour: 'Max Frequency / Hour' },
-          actions: { create: 'Create Subscription', edit: 'Edit Subscription', delete: 'Delete Subscription' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
       },
       chat: {
         label: 'Chat',
         sessions: {
-          title: 'Chat Sessions',
+          title: 'Sessions',
           viewMessages: 'Messages',
           columns: { title: 'Title', participants: 'Participants', messageCount: 'Messages', lastMessageAt: 'Last Message', status: 'Status' },
           form: { title: 'Title', description: 'Description', status: 'Status' },
           status: { archived: 'Archived' },
-          actions: { create: 'Create Session', edit: 'Edit Session', delete: 'Delete Session' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         messages: {
           title: 'In-App Messages',
@@ -1544,23 +1545,23 @@ export const en = {
       payment: {
         label: 'Payment',
         orders: {
-          title: 'Payment Orders',
+          title: 'Orders',
           columns: { orderNo: 'Order No', userId: 'Customer', totalAmount: 'Amount', currency: 'Currency', status: 'Status', paymentMethod: 'Method', paidAt: 'Paid At', createdAt: 'Created At' },
           form: { orderNo: 'Order No', userId: 'Customer ID', totalAmount: 'Amount', currency: 'Currency', status: 'Status', notes: 'Notes' },
-          actions: { view: 'View Order', delete: 'Delete', export: 'Export', refund: 'Refund' },
+          actions: { view: 'View', delete: 'Delete', export: 'Export', refund: 'Refund' },
         },
         subscriptions: {
-          title: 'Payment Subscriptions',
+          title: 'Subscriptions',
           cancelAtPeriodEnd: 'Cancel at Period End',
           confirmCancelTitle: 'Confirm Cancellation',
           confirmCancelPrompt: 'Cancel subscription at end of current billing period?',
           confirmCancelConfirm: 'Yes, Cancel',
           columns: { userId: 'Customer', planId: 'Plan', status: 'Status', billingCycle: 'Cycle', startDate: 'Start', nextBilling: 'Next Billing' },
           form: { userId: 'Customer', planId: 'Plan', billingCycle: 'Billing Cycle', status: 'Status' },
-          actions: { create: 'Create Subscription', edit: 'Edit Subscription', delete: 'Delete Subscription', cancel: 'Cancel' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', cancel: 'Cancel' },
         },
         refunds: {
-          title: 'Payment Refunds',
+          title: 'Refunds',
           approveTitle: 'Approve Refund',
           approvePrompt: 'Are you sure you want to approve this refund request?',
           rejectTitle: 'Reject Refund',
@@ -1568,7 +1569,7 @@ export const en = {
           rejectReasonPlaceholder: 'Enter rejection reason...',
           columns: { orderNo: 'Order No', amount: 'Amount', reason: 'Reason', status: 'Status', requestedAt: 'Requested At', processedAt: 'Processed At' },
           form: { orderNo: 'Order No', amount: 'Amount', reason: 'Reason', status: 'Status' },
-          actions: { create: 'Create Refund', approve: 'Approve', reject: 'Reject', delete: 'Delete', export: 'Export' },
+          actions: { create: 'Create', approve: 'Approve', reject: 'Reject', delete: 'Delete', export: 'Export' },
         },
         promotions: {
           title: 'Promotions & Coupons',
@@ -1589,8 +1590,8 @@ export const en = {
             endTime: 'End Time',
             isActive: 'Active',
           },
-          type: { coupon: 'Coupon', autoApply: 'Auto-Apply', referral: 'Referral', trial: 'Trial' },
-          discountType: { percentage: 'Percentage', fixedAmount: 'Fixed Amount', freeTrialDays: 'Free Trial Days' },
+          type: { percentageDiscount: 'Percentage Discount', fixedAmountDiscount: 'Fixed Amount', firstSubscription: 'First Subscription', limitedTime: 'Limited Time', thresholdDiscount: 'Threshold Discount' },
+          discountType: { percentage: 'Percentage', fixedAmount: 'Fixed Amount' },
           status: { active: 'Active', inactive: 'Inactive', valid: 'Valid' },
           unit: { days: 'days' },
           deactivateConfirm: 'Deactivate promotion "{code}"? New uses will be rejected immediately.',
@@ -2202,7 +2203,6 @@ export const en = {
             nodeId: 'Node ID',
             capabilities: 'Capabilities',
             actions: 'Actions',
-            code: 'Pairing Code',
             deviceName: 'Device',
             createdAt: 'Requested',
             expiresAt: 'Expires',
@@ -2301,19 +2301,25 @@ export const en = {
       template: {
         label: 'Template',
         templates: {
-          title: 'Template Management',
+          title: 'Templates',
           previewTitle: 'Template Preview',
           columns: { templateName: 'Template Name', module: 'Module', category: 'Category', defaultLayoutName: 'Layout', isActive: 'Enabled' },
           form: { templateName: 'Template Name', module: 'Module', category: 'Category', defaultLayoutName: 'Layout Name', subjectTemplate: 'Subject', contentTemplate: 'Content', description: 'Description', isActive: 'Enabled' },
-          actions: { create: 'Create Template', edit: 'Edit Template', delete: 'Delete Template', preview: 'Preview', clone: 'Clone' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', preview: 'Preview', clone: 'Clone' },
         },
         layouts: {
-          title: 'Template Layouts',
+          title: 'Layouts',
           columns: { layoutName: 'Layout Name', module: 'Module', category: 'Category', isDefault: 'Default', isActive: 'Enabled' },
           form: { layoutName: 'Layout Name', module: 'Module', category: 'Category', layoutContent: 'Content', description: 'Description', isDefault: 'Default', isActive: 'Enabled' },
-          actions: { create: 'Create Layout', edit: 'Edit Layout', delete: 'Delete Layout', setDefault: 'Set as Default', preview: 'Preview' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', setDefault: 'Set as Default', preview: 'Preview' },
         },
       },
     },
   },
 }
+
+// `en` is the source of truth for the admin i18n key set. Other locales
+// annotate themselves `: AdminMessages` so the compiler enforces key parity
+// — a missing or stray key becomes a typecheck error instead of a silent
+// runtime fallback to the raw key.
+export type AdminMessages = typeof en

@@ -12,19 +12,29 @@ public interface IDevicePairingService
     Task<PairingRequest> CreatePairingRequestAsync(string nodeId, string deviceName, DevicePlatform platform, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Approve a pending pairing request by code
+    /// Approve a pending pairing request by its secret Code (device-side use)
     /// </summary>
     Task<DevicePairingInfo?> ApprovePairingAsync(string code, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reject a pending pairing request by code
+    /// Approve a pending pairing request by its public Id — safe for admin API endpoints
+    /// </summary>
+    Task<DevicePairingInfo?> ApprovePairingByIdAsync(string id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reject a pending pairing request by its secret Code (device-side use)
     /// </summary>
     Task<bool> RejectPairingAsync(string code, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get all pending pairing requests
+    /// Reject a pending pairing request by its public Id — safe for admin API endpoints
     /// </summary>
-    Task<IReadOnlyList<PairingRequest>> GetPendingRequestsAsync(CancellationToken cancellationToken = default);
+    Task<bool> RejectPairingByIdAsync(string id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get all pending pairing requests — Code is redacted from returned DTOs
+    /// </summary>
+    Task<IReadOnlyList<PendingPairingRequestDto>> GetPendingRequestsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Check if a device node is approved

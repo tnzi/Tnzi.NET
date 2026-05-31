@@ -33,6 +33,10 @@ import TSettingsDialog from '@/shell/TSettingsDialog.vue'
 import TLandingPage from '@/shell/TLandingPage.vue'
 import type { LandingChip } from '@/shell/TLandingPage.vue'
 import TThreadComposer from '@/components/chat/TThreadComposer.vue'
+import MessageResponse from '@/components/chat/MessageResponse.vue'
+import { useAutoScroll } from '@/composables/useAutoScroll'
+import type { ComposerAction } from '@/components/chat/composer-types'
+import { DEFAULT_COMPOSER_ACCEPT } from '@/components/chat/composer-types'
 import TReasoningStage from '@/components/chat/TReasoningStage.vue'
 import TArtifactPanel from '@/components/artifact/TArtifactPanel.vue'
 import type {
@@ -90,6 +94,12 @@ const props = withDefaults(
     sidebarWidth?: number
     /** Section heading above the threads list. */
     threadsLabel?: string
+    /** Label for the prominent new-chat button at the top of the sidebar. */
+    newChatLabel?: string
+    /** Hover delete affordance on each thread row (with inline confirm). Default true. */
+    enableThreadDelete?: boolean
+    /** Inline delete-confirm prompt label. */
+    deleteConfirmLabel?: string
 
     // ── Threads ─────────────────────────────────────────────────────────
     threads?: ReadonlyArray<ThreadItem>
@@ -101,17 +111,31 @@ const props = withDefaults(
     /** Composer text — v-model'able. */
     inputText?: string
     composerPlaceholder?: string
+    /** Extra composer toolbar buttons (declarative — "more buttons"). */
+    composerActions?: ReadonlyArray<ComposerAction>
+    /** Built-in voice (speech-to-text) mic button. Default true. */
+    enableVoice?: boolean
+    /** Built-in attachment button (paperclip + drag/paste). Default false. */
+    enableAttachments?: boolean
+    /** Accepted attachment file types. */
+    composerAccept?: string
+    /** Voice recognition language (BCP-47). */
+    voiceLang?: string
     /** Agent display name. */
     agentName?: string
     /** Small label rendered after the agent name (e.g. "Pro", "Lite"). */
     agentLabel?: string
     /** Top-bar title; defaults to active thread title or brandName. */
     threadTitle?: string
+    /** Max width of the conversation content column (CSS length, e.g. "1100px"). */
+    contentWidth?: string | number
 
     // ── Landing empty state ─────────────────────────────────────────────
     /** Show the landing empty state when there are no messages. */
     showLanding?: boolean
     landingGreeting?: string
+    /** Optional subtitle rendered below the landing greeting. */
+    landingSubline?: string
     landingPlaceholder?: string
     landingChips?: ReadonlyArray<LandingChip>
 
@@ -119,6 +143,11 @@ const props = withDefaults(
     enableSettings?: boolean
     settingsSections?: ReadonlyArray<SettingsSection>
     settingsTitle?: string
+    /** Account info for the built-in settings Account section (props-driven,
+     *  consumer-supplied — ui-ai stays business-agnostic). */
+    accountName?: string
+    accountEmail?: string
+    accountRole?: string
 
     // ── Command palette ─────────────────────────────────────────────────
     enableCommandPalette?: boolean
@@ -146,11 +175,19 @@ const props = withDefaults(
     initialSidebarMode: 'expanded',
     sidebarWidth: 300,
     threadsLabel: 'All tasks',
+    newChatLabel: 'New chat',
+    enableThreadDelete: true,
+    deleteConfirmLabel: 'Delete?',
     threads: () => [],
     messages: () => [],
     isStreaming: false,
     inputText: '',
     composerPlaceholder: 'Type a message…',
+    composerActions: () => [],
+    enableVoice: true,
+    enableAttachments: false,
+    composerAccept: DEFAULT_COMPOSER_ACCEPT,
+    voiceLang: 'en-US',
     agentName: 'Assistant',
     showLanding: true,
     landingGreeting: 'What can I do for you?',
@@ -184,6 +221,7 @@ const emit = defineEmits<{
 
   // Composer
   send: [content: string, files: File[]]
+  'composer-action': [id: string]
   stop: []
   'update:input-text': [value: string]
 
@@ -199,6 +237,7 @@ const emit = defineEmits<{
   // Settings + theme
   'update:theme': [theme: ThemePref]
   'open-settings': []
+  'sign-out': []
 
   // Artifact
   'close-artifact': []
@@ -287,9 +326,9 @@ function pickTheme(next: ThemePref): void {
   emit('update:theme', next)
 }
 
-function onLandingSubmit(text: string): void {
-  if (!text.trim()) return
-  emit('send', text, [])
+function onLandingSubmit(text: string, files: File[] = []): void {
+  if (!text.trim() && files.length === 0) return
+  emit('send', text, files)
   emit('update:input-text', '')
 }
 
@@ -300,10 +339,35 @@ function onChipClick(chip: LandingChip): void {
   }
 }
 
-function onComposerSend(text: string): void {
-  if (!text.trim()) return
-  emit('send', text, [])
+function onComposerSend(text: string, files: File[]): void {
+  if (!text.trim() && files.length === 0) return
+  emit('send', text, files)
   emit('update:input-text', '')
+}
+
+const rootStyle = computed<Record<string, string> | undefined>(() => {
+  if (props.contentWidth == null) return undefined
+  const w = typeof props.contentWidth === 'number' ? `${props.contentWidth}px` : props.contentWidth
+  return { '--tnzi-ai-content-width': w }
+})
+
+const accountInitial = computed(() => (props.accountName?.charAt(0) ?? '?').toUpperCase())
+
+// Stick-to-bottom auto-scroll for the message thread (re-attaches when the
+// user scrolls back to the bottom; pauses while they read scrollback).
+const { containerRef: threadScrollRef } = useAutoScroll()
+
+// Inline thread-delete confirmation (single-value state machine).
+const confirmingDeleteId = ref<string | null>(null)
+function askDeleteThread(id: string): void {
+  confirmingDeleteId.value = id
+}
+function confirmDeleteThread(id: string): void {
+  emit('delete-thread', id)
+  confirmingDeleteId.value = null
+}
+function cancelDeleteThread(): void {
+  confirmingDeleteId.value = null
 }
 
 async function onCopyMessage(message: ChatMessage): Promise<void> {
@@ -331,7 +395,7 @@ function onArtifactWidthChange(w: number): void {
 </script>
 
 <template>
-  <div class="t-chat-app" :class="{ 't-chat-app--dark': isDark }">
+  <div class="t-chat-app" :class="{ 't-chat-app--dark': isDark }" :style="rootStyle">
     <!-- ───────────────────────── Sidebar ───────────────────────── -->
     <TCollapsibleSidebar
       v-model="sidebarMode"
@@ -375,6 +439,14 @@ function onArtifactWidthChange(w: number): void {
 
       <!-- Sidebar content (expanded mode): nav + threads list -->
       <template #content>
+        <button
+          type="button"
+          class="t-chat-app__nav-item t-chat-app__new-chat"
+          @click="emit('new-chat')"
+        >
+          <Icon icon="lucide:square-pen" class="t-chat-app__nav-icon" />
+          <span>{{ newChatLabel }}</span>
+        </button>
         <slot name="sidebar-nav" :nav="mainNav">
           <nav v-if="mainNav.length > 0" class="t-chat-app__nav">
             <button
@@ -408,17 +480,45 @@ function onArtifactWidthChange(w: number): void {
                 <Icon icon="lucide:plus" />
               </button>
             </div>
-            <button
+            <div
               v-for="thread in threads"
               :key="thread.id"
-              type="button"
               class="t-chat-app__thread-row"
               :class="{ 'is-active': thread.id === activeThreadId }"
-              @click="emit('select-thread', thread.id)"
             >
-              <Icon icon="lucide:message-square" class="t-chat-app__thread-icon" />
-              <span class="t-chat-app__thread-title">{{ thread.title }}</span>
-            </button>
+              <template v-if="confirmingDeleteId === thread.id">
+                <span class="t-chat-app__thread-confirm-label">{{ deleteConfirmLabel }}</span>
+                <button
+                  type="button"
+                  class="t-chat-app__thread-confirm t-chat-app__thread-confirm--yes"
+                  @click="confirmDeleteThread(thread.id)"
+                >Yes</button>
+                <button
+                  type="button"
+                  class="t-chat-app__thread-confirm"
+                  @click="cancelDeleteThread"
+                >No</button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="t-chat-app__thread-select"
+                  @click="emit('select-thread', thread.id)"
+                >
+                  <Icon icon="lucide:message-square" class="t-chat-app__thread-icon" />
+                  <span class="t-chat-app__thread-title">{{ thread.title }}</span>
+                </button>
+                <button
+                  v-if="enableThreadDelete"
+                  type="button"
+                  class="t-chat-app__thread-del"
+                  aria-label="Delete conversation"
+                  @click="askDeleteThread(thread.id)"
+                >
+                  <Icon icon="lucide:x" />
+                </button>
+              </template>
+            </div>
           </div>
         </slot>
       </template>
@@ -544,10 +644,17 @@ function onArtifactWidthChange(w: number): void {
         v-if="!hasMessages && showLanding"
         v-model="composerText"
         :greeting="landingGreeting"
+        :subline="landingSubline"
         :chips="landingChips"
         :placeholder="landingPlaceholder"
+        :composer-actions="composerActions"
+        :enable-voice="enableVoice"
+        :enable-attachments="enableAttachments"
+        :accept="composerAccept"
+        :voice-lang="voiceLang"
         @submit="onLandingSubmit"
         @chip-click="onChipClick"
+        @action="emit('composer-action', $event)"
       >
         <template v-if="$slots['landing-plan']" #plan>
           <slot name="landing-plan" />
@@ -578,7 +685,7 @@ function onArtifactWidthChange(w: number): void {
         class="t-chat-app__workspace"
         :class="{ 't-chat-app__workspace--has-artifact': !!artifact }"
       >
-        <div class="t-chat-app__thread">
+        <div ref="threadScrollRef" class="t-chat-app__thread">
           <template v-for="msg in messages" :key="msg.id">
             <slot name="message" :message="msg" :copied="copiedId === msg.id">
               <div class="t-chat-app__msg" :class="`t-chat-app__msg--${msg.role}`">
@@ -610,7 +717,29 @@ function onArtifactWidthChange(w: number): void {
                     {{ msg.reasoning }}
                   </TReasoningStage>
 
-                  <div class="t-chat-app__msg-body">{{ msg.content }}</div>
+                  <div v-if="msg.status === 'error'" class="t-chat-app__msg-error">
+                    <Icon icon="lucide:circle-alert" class="t-chat-app__msg-error-icon" />
+                    <span>{{ msg.error || 'Something went wrong. Please try again.' }}</span>
+                    <button
+                      type="button"
+                      class="t-chat-app__msg-error-retry"
+                      @click="emit('regenerate', msg.id)"
+                    >
+                      <Icon icon="lucide:rotate-ccw" />
+                      Retry
+                    </button>
+                  </div>
+                  <template v-else>
+                    <MessageResponse
+                      class="t-chat-app__msg-body"
+                      :content="msg.content"
+                      :streaming="msg.isStreaming ?? false"
+                    />
+                    <div v-if="msg.status === 'stopped'" class="t-chat-app__msg-stopped">
+                      <span class="t-chat-app__msg-stopped-mark" aria-hidden="true" />
+                      Generation stopped
+                    </div>
+                  </template>
 
                   <div v-if="!msg.isStreaming" class="t-chat-app__msg-actions">
                     <button
@@ -655,7 +784,13 @@ function onArtifactWidthChange(w: number): void {
             v-model="composerText"
             :placeholder="composerPlaceholder"
             :disabled="isStreaming"
+            :composer-actions="composerActions"
+            :enable-voice="enableVoice"
+            :enable-attachments="enableAttachments"
+            :accept="composerAccept"
+            :voice-lang="voiceLang"
             @send="onComposerSend"
+            @action="emit('composer-action', $event)"
           >
             <template v-if="$slots['thread-composer-left']" #left>
               <slot name="thread-composer-left" />
@@ -696,12 +831,42 @@ function onArtifactWidthChange(w: number): void {
       :sections="effectiveSettingsSections"
       :title="settingsTitle"
     >
-      <!-- Default Account section -->
+      <!-- Default Account section — real profile card (props-driven) -->
       <template #account>
         <slot name="settings-account">
-          <div class="t-chat-app__settings-empty">
-            Configure your account section by providing a
-            <code>#settings-account</code> slot.
+          <div class="t-chat-app__account">
+            <div class="t-chat-app__account-card">
+              <div class="t-chat-app__account-avatar">{{ accountInitial }}</div>
+              <div class="t-chat-app__account-meta">
+                <div class="t-chat-app__account-name">{{ accountName || 'User' }}</div>
+                <div v-if="accountRole" class="t-chat-app__account-role">{{ accountRole }}</div>
+              </div>
+              <button
+                type="button"
+                class="t-chat-app__account-signout"
+                aria-label="Sign out"
+                @click="emit('sign-out')"
+              >
+                <Icon icon="lucide:log-out" />
+              </button>
+            </div>
+            <div v-if="accountEmail || accountRole" class="t-chat-app__account-details">
+              <div v-if="accountEmail" class="t-chat-app__account-row">
+                <div class="t-chat-app__account-row-text">
+                  <span class="t-chat-app__account-row-label">Email</span>
+                  <span class="t-chat-app__account-row-sub">Your login email address</span>
+                </div>
+                <span class="t-chat-app__account-row-value">{{ accountEmail }}</span>
+              </div>
+              <div v-if="accountEmail && accountRole" class="t-chat-app__account-divider" />
+              <div v-if="accountRole" class="t-chat-app__account-row">
+                <div class="t-chat-app__account-row-text">
+                  <span class="t-chat-app__account-row-label">Role</span>
+                  <span class="t-chat-app__account-row-sub">Your system role and permissions</span>
+                </div>
+                <span class="t-chat-app__account-badge">{{ accountRole }}</span>
+              </div>
+            </div>
           </div>
         </slot>
       </template>
@@ -866,7 +1031,8 @@ function onArtifactWidthChange(w: number): void {
 }
 .t-chat-app__nav-item:hover { background: var(--tnzi-ai-hover); }
 .t-chat-app__nav-item.is-active {
-  background: var(--tnzi-ai-selected);
+  background: var(--tnzi-ai-accent-soft);
+  color: var(--tnzi-ai-accent);
   font-weight: 500;
 }
 .t-chat-app__nav-icon {
@@ -877,7 +1043,7 @@ function onArtifactWidthChange(w: number): void {
   color: var(--tnzi-ai-text-secondary);
 }
 .t-chat-app__nav-item.is-active .t-chat-app__nav-icon {
-  color: var(--tnzi-ai-text);
+  color: var(--tnzi-ai-accent);
 }
 
 /* ─── Sidebar sections (threads list) ──────────────────────────────────── */
@@ -937,7 +1103,91 @@ function onArtifactWidthChange(w: number): void {
   transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
 .t-chat-app__thread-row:hover { background: var(--tnzi-ai-hover); }
-.t-chat-app__thread-row.is-active { background: var(--tnzi-ai-selected); }
+.t-chat-app__thread-row.is-active {
+  background: var(--tnzi-ai-accent-soft);
+  color: var(--tnzi-ai-accent);
+  font-weight: 500;
+  position: relative;
+}
+.t-chat-app__thread-row.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--tnzi-ai-accent);
+}
+.t-chat-app__thread-row.is-active .t-chat-app__thread-icon {
+  color: var(--tnzi-ai-accent);
+}
+.t-chat-app__thread-select {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+.t-chat-app__thread-del {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: var(--tnzi-ai-text-tertiary);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
+    background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
+    color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-chat-app__thread-row:hover .t-chat-app__thread-del,
+.t-chat-app__thread-del:focus-visible {
+  opacity: 1;
+}
+.t-chat-app__thread-del:hover {
+  background: var(--tnzi-ai-press);
+  color: var(--tnzi-ai-danger, #dc2626);
+}
+.t-chat-app__thread-confirm-label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--tnzi-ai-text-tertiary);
+}
+.t-chat-app__thread-confirm {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--tnzi-ai-text-secondary);
+}
+.t-chat-app__thread-confirm:hover {
+  background: var(--tnzi-ai-hover);
+}
+.t-chat-app__thread-confirm--yes {
+  color: var(--tnzi-ai-danger, #dc2626);
+}
+.t-chat-app__thread-confirm--yes:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
 .t-chat-app__thread-icon {
   flex-shrink: 0;
   width: 18px;
@@ -1082,8 +1332,8 @@ function onArtifactWidthChange(w: number): void {
   color: var(--tnzi-ai-text);
 }
 .t-chat-app__rail-btn.is-active {
-  background: var(--tnzi-ai-selected);
-  color: var(--tnzi-ai-text);
+  background: var(--tnzi-ai-accent-soft);
+  color: var(--tnzi-ai-accent);
 }
 
 /* ─── Main pane + topbar ───────────────────────────────────────────────── */
@@ -1149,7 +1399,7 @@ function onArtifactWidthChange(w: number): void {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  max-width: 820px;
+  max-width: var(--tnzi-ai-content-width, 820px);
   width: 100%;
   margin: 0 auto;
 }
@@ -1223,9 +1473,56 @@ function onArtifactWidthChange(w: number): void {
 .t-chat-app__msg-body {
   font-size: 15px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
   color: var(--tnzi-ai-text);
+}
+.t-chat-app__msg-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--tnzi-ai-danger, #dc2626) 28%, transparent);
+  background: color-mix(in srgb, var(--tnzi-ai-danger, #dc2626) 6%, var(--tnzi-ai-surface));
+  border-radius: 10px;
+  color: var(--tnzi-ai-danger, #dc2626);
+  font-size: 14px;
+}
+.t-chat-app__msg-error-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+.t-chat-app__msg-error-retry {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  color: var(--tnzi-ai-danger, #dc2626);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.t-chat-app__msg-error-retry:hover {
+  background: color-mix(in srgb, var(--tnzi-ai-danger, #dc2626) 10%, transparent);
+}
+.t-chat-app__msg-stopped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--tnzi-ai-text-tertiary);
+  user-select: none;
+}
+.t-chat-app__msg-stopped-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+  flex-shrink: 0;
 }
 
 /* Message action buttons — pill chips. Default rendering is icon-only (a
@@ -1271,6 +1568,118 @@ function onArtifactWidthChange(w: number): void {
 .t-chat-app__artifact-slot {
   flex-shrink: 0;
   margin: 12px 12px 12px 0;
+}
+
+/* ─── New-chat button (prominent, top of sidebar) ──────────────────────── */
+.t-chat-app__new-chat {
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* ─── Settings: built-in Account profile card ──────────────────────────── */
+.t-chat-app__account {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.t-chat-app__account-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--tnzi-ai-border);
+  border-radius: 14px;
+  background: var(--tnzi-ai-surface);
+}
+.t-chat-app__account-avatar {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--tnzi-ai-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+}
+.t-chat-app__account-meta {
+  flex: 1;
+  min-width: 0;
+}
+.t-chat-app__account-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tnzi-ai-text);
+}
+.t-chat-app__account-role {
+  font-size: 13px;
+  color: var(--tnzi-ai-text-tertiary);
+  margin-top: 2px;
+}
+.t-chat-app__account-signout {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--tnzi-ai-text-tertiary);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
+    color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-chat-app__account-signout:hover {
+  background: var(--tnzi-ai-hover);
+  color: var(--tnzi-ai-text);
+}
+.t-chat-app__account-details {
+  border: 1px solid var(--tnzi-ai-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.t-chat-app__account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.t-chat-app__account-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.t-chat-app__account-row-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tnzi-ai-text);
+}
+.t-chat-app__account-row-sub {
+  font-size: 12px;
+  color: var(--tnzi-ai-text-tertiary);
+}
+.t-chat-app__account-row-value {
+  font-size: 14px;
+  color: var(--tnzi-ai-text-secondary);
+}
+.t-chat-app__account-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--tnzi-ai-accent-soft);
+  color: var(--tnzi-ai-accent);
+}
+.t-chat-app__account-divider {
+  height: 1px;
+  background: var(--tnzi-ai-border);
+  margin: 0 16px;
 }
 
 /* ─── Settings dialog content ──────────────────────────────────────────── */

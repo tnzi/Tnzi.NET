@@ -1,328 +1,275 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
-// --- Mocks: defaultUserPreferences + useProfileApi ---
+// Mock UserStateManager so tests exercise store delegation without touching real http/storage.
+// The store is a thin proxy: state is read through computed(() => manager.xxx),
+// actions forward to manager methods.
+const managerInstance = {
+  // --- State (mutable per test) ---
+  currentUser: null as { id: string; userName?: string; nickname?: string; avatar?: string; email?: string; roles?: string[] } | null,
+  preferences: { theme: 'light', language: 'en-US', density: 'default', fontSize: 14 } as any,
+  recentItems: [] as any[],
+  favorites: [] as any[],
+  isLoading: false,
+  error: null as string | null,
+  // --- Getters ---
+  isLoaded: false,
+  isAuthenticated: false,
+  displayName: '',
+  userName: '',
+  avatar: null as string | null,
+  email: null as string | null,
+  roles: [] as string[],
+  theme: 'light',
+  language: 'en-US',
+  recentItemsCount: 0,
+  favoritesCount: 0,
+  // --- Methods ---
+  fetchCurrentUser: vi.fn().mockResolvedValue(undefined),
+  updateProfile: vi.fn().mockResolvedValue({ id: 'u1', userName: 'alice', nickname: 'Ally' }),
+  updatePreferences: vi.fn(),
+  resetPreferences: vi.fn(),
+  setTheme: vi.fn(),
+  setLanguage: vi.fn(),
+  addRecentItem: vi.fn(),
+  removeRecentItem: vi.fn(),
+  clearRecentItems: vi.fn(),
+  addFavorite: vi.fn(),
+  removeFavorite: vi.fn(),
+  isFavorite: vi.fn((id: string) => id === 'fav'),
+  loadPersistedData: vi.fn(),
+  persistData: vi.fn(),
+}
+
 vi.mock('@tnzi/core/state', () => ({
-  defaultUserPreferences: { theme: 'light', language: 'en-us', density: 'default', fontSize: 14 },
+  UserStateManager: vi.fn(() => managerInstance),
 }))
 
-const profileApiMock = {
-  get: vi.fn().mockResolvedValue({ succeeded: true, data: { id: 'u1', userName: 'alice', nickname: 'Alice', avatar: 'a.png', email: 'a@b.com', roles: ['admin'] } }),
-  update: vi.fn(async (d: any) => ({ succeeded: true, data: { id: 'u1', userName: 'alice', nickname: d.nickname ?? 'Alice' } })),
-}
-vi.mock('@tnzi/core/services/identity', () => ({
-  useProfileApi: vi.fn(() => profileApiMock),
+vi.mock('@tnzi/core/adapters/storage', () => ({
+  createLocalStorageAdapter: () => ({ getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() }),
 }))
 
-// In-memory storage mock exposed to tests via getStoreStorage
-const storageBag: Record<string, unknown> = {}
-const storageMock = {
-  get: vi.fn((k: string) => storageBag[k] ?? null),
-  set: vi.fn((k: string, v: unknown) => { storageBag[k] = v }),
-  remove: vi.fn((k: string) => { delete storageBag[k] }),
-}
+// Stub the theme adapter so manager construction stays inert
+vi.mock('../../src/adapters/theme', () => ({
+  createThemeAdapter: () => ({ applyTheme: vi.fn(), getResolvedTheme: () => 'light' }),
+}))
 
+// Stub factory runtime accessors since UserStateManager is mocked and won't use them
 vi.mock('../../src/stores/factory', () => ({
   getStoreHttpClient: () => ({ get: vi.fn(), post: vi.fn() }),
-  getStoreStorage: () => storageMock,
+  getStoreStorage: () => null,
 }))
 
-const applyThemeSpy = vi.fn()
-const applyLanguageSpy = vi.fn()
-vi.mock('../../src/utils/naive-helpers', () => ({
-  applyThemeToDOM: (t: string) => applyThemeSpy(t),
-  applyLanguageToDOM: (l: string) => applyLanguageSpy(l),
-}))
-
-import { useUserStore, useUser } from '../../src/stores/user'
+import { useUserStore, useUser, resetUserRuntime } from '../../src/stores/user'
+import { UserStateManager as MockedUserStateManager } from '@tnzi/core/state'
 
 describe('stores/user', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    Object.keys(storageBag).forEach((k) => delete storageBag[k])
-    profileApiMock.get.mockClear()
-    profileApiMock.update.mockClear()
-    storageMock.get.mockClear()
-    storageMock.set.mockClear()
-    applyThemeSpy.mockClear()
-    applyLanguageSpy.mockClear()
+    resetUserRuntime()
+    // Reset mock call history but keep implementation
+    Object.values(managerInstance).forEach((v) => {
+      if (typeof v === 'function' && 'mockClear' in v) (v as ReturnType<typeof vi.fn>).mockClear()
+    })
+    // Reset mutable manager state
+    managerInstance.currentUser = null
+    managerInstance.recentItems = []
+    managerInstance.favorites = []
+    managerInstance.isLoading = false
+    managerInstance.error = null
+    managerInstance.isLoaded = false
+    managerInstance.isAuthenticated = false
+    managerInstance.displayName = ''
+    managerInstance.userName = ''
+    managerInstance.avatar = null
+    managerInstance.email = null
+    managerInstance.roles = []
+    managerInstance.theme = 'light'
+    managerInstance.language = 'en-US'
+    managerInstance.recentItemsCount = 0
+    managerInstance.favoritesCount = 0
   })
 
-  describe('initial state + getters', () => {
-    it('starts empty with default preferences and guest display name', () => {
-      const s = useUserStore()
-      expect(s.currentUser).toBeNull()
-      expect(s.isLoaded).toBe(false)
-      expect(s.isAuthenticated).toBe(false)
-      expect(s.displayName).toBe('Guest')
-      expect(s.userName).toBe('')
-      expect(s.avatar).toBeNull()
-      expect(s.email).toBeNull()
-      expect(s.roles).toEqual([])
-      expect(s.theme).toBe('light')
-      expect(s.language).toBe('en-us')
-      expect(s.recentItemsCount).toBe(0)
-      expect(s.favoritesCount).toBe(0)
-    })
-
-    it('derives display name from nickname, userName fallback, then Guest', () => {
-      const s = useUserStore()
-      s.currentUser = { id: 'u1', userName: 'alice', nickname: 'Alice' } as any
-      expect(s.displayName).toBe('Alice')
-      s.currentUser = { id: 'u1', userName: 'bob' } as any
-      expect(s.displayName).toBe('bob')
-      s.currentUser = { id: 'u1' } as any
-      expect(s.displayName).toBe('Guest')
-    })
-
-    it('reflects roles/avatar/email from currentUser', () => {
-      const s = useUserStore()
-      s.currentUser = { id: 'u1', userName: 'a', avatar: 'x.png', email: 'a@b.com', roles: ['r1'] } as any
-      expect(s.avatar).toBe('x.png')
-      expect(s.email).toBe('a@b.com')
-      expect(s.roles).toEqual(['r1'])
-    })
+  afterEach(() => {
+    resetUserRuntime()
   })
 
-  describe('fetchCurrentUser', () => {
-    it('populates currentUser on success and clears loading', async () => {
+  describe('useUserStore — reactive state proxies', () => {
+    it('exposes currentUser/isLoading/error through the manager', () => {
+      managerInstance.currentUser = { id: 'u1', userName: 'alice' }
+      managerInstance.isLoading = true
+      managerInstance.error = 'boom'
       const s = useUserStore()
-      await s.fetchCurrentUser()
-      expect(profileApiMock.get).toHaveBeenCalled()
-      expect(s.currentUser?.userName).toBe('alice')
-      expect(s.isLoading).toBe(false)
-      expect(s.error).toBeNull()
-    })
-
-    it('skips assignment when result not succeeded', async () => {
-      profileApiMock.get.mockResolvedValueOnce({ succeeded: false, data: null } as any)
-      const s = useUserStore()
-      await s.fetchCurrentUser()
-      expect(s.currentUser).toBeNull()
-    })
-
-    it('sets error and rethrows on failure', async () => {
-      profileApiMock.get.mockRejectedValueOnce(new Error('boom'))
-      const s = useUserStore()
-      await expect(s.fetchCurrentUser()).rejects.toThrow('boom')
+      expect(s.currentUser).toEqual({ id: 'u1', userName: 'alice' })
+      expect(s.isLoading).toBe(true)
       expect(s.error).toBe('boom')
-      expect(s.isLoading).toBe(false)
     })
 
-    it('non-Error rejection → generic message', async () => {
-      profileApiMock.get.mockRejectedValueOnce('stringy')
+    it('exposes preferences/recentItems/favorites', () => {
+      managerInstance.preferences = { theme: 'dark', language: 'zh-CN' } as any
+      managerInstance.recentItems = [{ id: 'r1' }] as any
+      managerInstance.favorites = [{ id: 'f1' }] as any
       const s = useUserStore()
-      await expect(s.fetchCurrentUser()).rejects.toBe('stringy')
-      expect(s.error).toBe('Failed to fetch user')
+      expect(s.preferences).toEqual({ theme: 'dark', language: 'zh-CN' })
+      expect(s.recentItems).toEqual([{ id: 'r1' }])
+      expect(s.favorites).toEqual([{ id: 'f1' }])
     })
   })
 
-  describe('updateProfile', () => {
-    it('throws when not authenticated', async () => {
+  describe('useUserStore — getters', () => {
+    it('proxies isLoaded/isAuthenticated/userName/avatar/email/roles/theme/language/counts', () => {
+      managerInstance.isLoaded = true
+      managerInstance.isAuthenticated = true
+      managerInstance.userName = 'alice'
+      managerInstance.avatar = 'a.png'
+      managerInstance.email = 'a@b.com'
+      managerInstance.roles = ['admin']
+      managerInstance.theme = 'dark'
+      managerInstance.language = 'zh-CN'
+      managerInstance.recentItemsCount = 3
+      managerInstance.favoritesCount = 2
       const s = useUserStore()
-      await expect(s.updateProfile({ nickname: 'x' } as any)).rejects.toThrow('Not authenticated')
+      expect(s.isLoaded).toBe(true)
+      expect(s.isAuthenticated).toBe(true)
+      expect(s.userName).toBe('alice')
+      expect(s.avatar).toBe('a.png')
+      expect(s.email).toBe('a@b.com')
+      expect(s.roles).toEqual(['admin'])
+      expect(s.theme).toBe('dark')
+      expect(s.language).toBe('zh-CN')
+      expect(s.recentItemsCount).toBe(3)
+      expect(s.favoritesCount).toBe(2)
     })
 
-    it('updates currentUser and returns data on success', async () => {
+    it('displayName proxies the manager value', () => {
+      managerInstance.displayName = 'Alice Smith'
       const s = useUserStore()
-      s.currentUser = { id: 'u1', userName: 'alice' } as any
+      expect(s.displayName).toBe('Alice Smith')
+    })
+
+    it('displayName falls back to "Guest" when manager returns empty string', () => {
+      managerInstance.displayName = ''
+      const s = useUserStore()
+      expect(s.displayName).toBe('Guest')
+    })
+  })
+
+  describe('useUserStore — profile actions', () => {
+    it('fetchCurrentUser delegates to manager', async () => {
+      const s = useUserStore()
+      await s.fetchCurrentUser()
+      expect(managerInstance.fetchCurrentUser).toHaveBeenCalled()
+    })
+
+    it('updateProfile delegates with payload and returns result', async () => {
+      const s = useUserStore()
       const result = await s.updateProfile({ nickname: 'Ally' } as any)
-      expect(profileApiMock.update).toHaveBeenCalledWith({ nickname: 'Ally' })
-      expect(result.nickname).toBe('Ally')
-      expect(s.currentUser?.nickname).toBe('Ally')
-      expect(s.isLoading).toBe(false)
-    })
-
-    it('throws generic Update failed when result.succeeded is false', async () => {
-      profileApiMock.update.mockResolvedValueOnce({ succeeded: false, data: null } as any)
-      const s = useUserStore()
-      s.currentUser = { id: 'u1', userName: 'alice' } as any
-      await expect(s.updateProfile({} as any)).rejects.toThrow('Update failed')
-      expect(s.error).toBe('Update failed')
-    })
-
-    it('sets error from thrown Error', async () => {
-      profileApiMock.update.mockRejectedValueOnce(new Error('bad'))
-      const s = useUserStore()
-      s.currentUser = { id: 'u1', userName: 'alice' } as any
-      await expect(s.updateProfile({} as any)).rejects.toThrow('bad')
-      expect(s.error).toBe('bad')
+      expect(managerInstance.updateProfile).toHaveBeenCalledWith({ nickname: 'Ally' })
+      expect(result).toEqual({ id: 'u1', userName: 'alice', nickname: 'Ally' })
     })
   })
 
-  describe('preferences', () => {
-    it('updatePreferences merges partial and persists', async () => {
+  describe('useUserStore — preferences actions', () => {
+    it('updatePreferences delegates', async () => {
       const s = useUserStore()
       await s.updatePreferences({ theme: 'dark' as any })
-      expect(s.preferences.theme).toBe('dark')
-      expect(applyThemeSpy).toHaveBeenCalledWith('dark')
-      expect(storageMock.set).toHaveBeenCalled()
+      expect(managerInstance.updatePreferences).toHaveBeenCalledWith({ theme: 'dark' })
     })
 
-    it('updatePreferences with language triggers applyLanguage', async () => {
+    it('resetPreferences delegates', () => {
       const s = useUserStore()
-      await s.updatePreferences({ language: 'zh-cn' as any })
-      expect(s.preferences.language).toBe('zh-cn')
-      expect(applyLanguageSpy).toHaveBeenCalledWith('zh-cn')
-    })
-
-    it('updatePreferences without theme/language does not re-apply DOM', async () => {
-      const s = useUserStore()
-      await s.updatePreferences({ fontSize: 16 } as any)
-      expect(applyThemeSpy).not.toHaveBeenCalled()
-      expect(applyLanguageSpy).not.toHaveBeenCalled()
-      expect(s.preferences.fontSize).toBe(16)
-    })
-
-    it('resetPreferences reverts to defaults and re-applies DOM', () => {
-      const s = useUserStore()
-      s.preferences = { ...s.preferences, theme: 'dark' as any, language: 'fr' as any }
       s.resetPreferences()
-      expect(s.preferences.theme).toBe('light')
-      expect(s.preferences.language).toBe('en-us')
-      expect(applyThemeSpy).toHaveBeenCalledWith('light')
-      expect(applyLanguageSpy).toHaveBeenCalledWith('en-us')
+      expect(managerInstance.resetPreferences).toHaveBeenCalled()
     })
 
-    it('setTheme updates, applies, and persists', () => {
+    it('setTheme delegates', () => {
       const s = useUserStore()
       s.setTheme('dark' as any)
-      expect(s.preferences.theme).toBe('dark')
-      expect(applyThemeSpy).toHaveBeenCalledWith('dark')
-      expect(storageMock.set).toHaveBeenCalled()
+      expect(managerInstance.setTheme).toHaveBeenCalledWith('dark')
     })
 
-    it('setLanguage updates, applies, and persists', () => {
+    it('setLanguage delegates', () => {
       const s = useUserStore()
-      s.setLanguage('zh-cn')
-      expect(s.preferences.language).toBe('zh-cn')
-      expect(applyLanguageSpy).toHaveBeenCalledWith('zh-cn')
+      s.setLanguage('zh-CN')
+      expect(managerInstance.setLanguage).toHaveBeenCalledWith('zh-CN')
     })
   })
 
-  describe('recent items', () => {
-    it('addRecentItem prepends and removes duplicate by id', () => {
+  describe('useUserStore — recent items + favorites actions', () => {
+    it('addRecentItem/removeRecentItem/clearRecentItems delegate', () => {
       const s = useUserStore()
-      s.addRecentItem({ id: '1', title: 'A', route: '/a' } as any)
-      s.addRecentItem({ id: '2', title: 'B', route: '/b' } as any)
-      s.addRecentItem({ id: '1', title: 'A2', route: '/a' } as any)
-      expect(s.recentItems[0].id).toBe('1')
-      expect(s.recentItems[0].title).toBe('A2')
-      expect(s.recentItems.length).toBe(2)
-    })
-
-    it('addRecentItem trims past max (20)', () => {
-      const s = useUserStore()
-      for (let i = 0; i < 25; i++) {
-        s.addRecentItem({ id: `${i}`, title: `T${i}`, route: `/${i}` } as any)
-      }
-      expect(s.recentItems.length).toBe(20)
-      expect(s.recentItems[0].id).toBe('24')
-    })
-
-    it('removeRecentItem and clearRecentItems', () => {
-      const s = useUserStore()
-      s.addRecentItem({ id: '1', title: 'A', route: '/a' } as any)
-      s.addRecentItem({ id: '2', title: 'B', route: '/b' } as any)
+      const item = { id: '1', title: 'A', type: 'page', url: '/a' } as any
+      s.addRecentItem(item)
+      expect(managerInstance.addRecentItem).toHaveBeenCalledWith(item)
       s.removeRecentItem('1')
-      expect(s.recentItems.find((i) => i.id === '1')).toBeUndefined()
+      expect(managerInstance.removeRecentItem).toHaveBeenCalledWith('1')
       s.clearRecentItems()
-      expect(s.recentItems).toEqual([])
+      expect(managerInstance.clearRecentItems).toHaveBeenCalled()
+    })
+
+    it('addFavorite/removeFavorite/isFavorite delegate', () => {
+      const s = useUserStore()
+      const item = { id: 'fav', title: 'F', type: 'page', url: '/f' } as any
+      s.addFavorite(item)
+      expect(managerInstance.addFavorite).toHaveBeenCalledWith(item)
+      expect(s.isFavorite('fav')).toBe(true)
+      expect(s.isFavorite('nope')).toBe(false)
+      s.removeFavorite('fav')
+      expect(managerInstance.removeFavorite).toHaveBeenCalledWith('fav')
     })
   })
 
-  describe('favorites', () => {
-    it('addFavorite skips duplicates and returns silently', () => {
-      const s = useUserStore()
-      s.addFavorite({ id: '1', title: 'A', route: '/a' } as any)
-      s.addFavorite({ id: '1', title: 'A-dup', route: '/a' } as any)
-      expect(s.favorites.length).toBe(1)
-      expect(s.favorites[0].title).toBe('A')
-    })
-
-    it('addFavorite trims past max (10)', () => {
-      const s = useUserStore()
-      for (let i = 0; i < 15; i++) {
-        s.addFavorite({ id: `${i}`, title: `T${i}`, route: `/${i}` } as any)
-      }
-      expect(s.favorites.length).toBe(10)
-      expect(s.favorites[0].id).toBe('14')
-    })
-
-    it('removeFavorite and isFavorite', () => {
-      const s = useUserStore()
-      s.addFavorite({ id: '1', title: 'A', route: '/a' } as any)
-      expect(s.isFavorite('1')).toBe(true)
-      expect(s.isFavorite('2')).toBe(false)
-      s.removeFavorite('1')
-      expect(s.isFavorite('1')).toBe(false)
-    })
-  })
-
-  describe('persistence', () => {
-    it('persistData writes storage when storage exists', () => {
-      const s = useUserStore()
-      s.addRecentItem({ id: '1', title: 'A', route: '/a' } as any)
-      expect(storageBag['user_data']).toBeDefined()
-    })
-
-    it('loadPersistedData restores preferences/recentItems/favorites and applies DOM', async () => {
-      storageBag['user_data'] = {
-        preferences: { theme: 'dark' as any, language: 'zh-cn' as any, density: 'default', fontSize: 14 },
-        recentItems: [{ id: 'r1', title: 'R', route: '/r', accessedAt: new Date() }],
-        favorites: [{ id: 'f1', title: 'F', route: '/f', accessedAt: new Date() }],
-      }
+  describe('useUserStore — persistence actions', () => {
+    it('loadPersistedData/persistData delegate', async () => {
       const s = useUserStore()
       await s.loadPersistedData()
-      expect(s.preferences.theme).toBe('dark')
-      expect(s.preferences.language).toBe('zh-cn')
-      expect(s.recentItems).toHaveLength(1)
-      expect(s.favorites).toHaveLength(1)
-      expect(applyThemeSpy).toHaveBeenCalledWith('dark')
-      expect(applyLanguageSpy).toHaveBeenCalledWith('zh-cn')
-    })
-
-    it('loadPersistedData is a noop when storage has no entry', async () => {
-      const s = useUserStore()
-      await s.loadPersistedData()
-      expect(s.recentItems).toEqual([])
-      expect(s.favorites).toEqual([])
-      // applyTheme/applyLanguage still called with default
-      expect(applyThemeSpy).toHaveBeenCalledWith('light')
-    })
-
-    it('loadPersistedData handles partial payload (only preferences)', async () => {
-      storageBag['user_data'] = { preferences: { theme: 'dark' as any, language: 'en-us', density: 'default', fontSize: 14 } }
-      const s = useUserStore()
-      await s.loadPersistedData()
-      expect(s.preferences.theme).toBe('dark')
-      expect(s.recentItems).toEqual([])
+      expect(managerInstance.loadPersistedData).toHaveBeenCalled()
+      s.persistData()
+      expect(managerInstance.persistData).toHaveBeenCalled()
     })
   })
 
   describe('useUser composable', () => {
     it('exposes computed refs and bound actions', async () => {
+      managerInstance.isAuthenticated = true
+      managerInstance.theme = 'dark'
+      managerInstance.language = 'zh-CN'
+      managerInstance.recentItemsCount = 1
+      managerInstance.favoritesCount = 1
       const u = useUser()
       expect(u.currentUser.value).toBeNull()
-      expect(u.isAuthenticated.value).toBe(false)
-      expect(u.theme.value).toBe('light')
-      expect(u.language.value).toBe('en-us')
-      u.setTheme('dark' as any)
+      expect(u.isAuthenticated.value).toBe(true)
       expect(u.theme.value).toBe('dark')
-      u.addRecentItem({ id: '1', title: 'A', route: '/a' } as any)
+      expect(u.language.value).toBe('zh-CN')
       expect(u.recentItemsCount.value).toBe(1)
-      u.addFavorite({ id: '2', title: 'B', route: '/b' } as any)
       expect(u.favoritesCount.value).toBe(1)
-      expect(u.isFavorite('2')).toBe(true)
+      u.setTheme('light' as any)
+      expect(managerInstance.setTheme).toHaveBeenCalledWith('light')
+      u.addRecentItem({ id: '1', title: 'A', type: 'page', url: '/a' } as any)
+      expect(managerInstance.addRecentItem).toHaveBeenCalled()
+      u.addFavorite({ id: '2', title: 'B', type: 'page', url: '/b' } as any)
+      expect(managerInstance.addFavorite).toHaveBeenCalled()
+      expect(u.isFavorite('fav')).toBe(true)
       u.clearRecentItems()
-      expect(u.recentItemsCount.value).toBe(0)
+      expect(managerInstance.clearRecentItems).toHaveBeenCalled()
     })
 
-    it('composable fetchCurrentUser delegates to store', async () => {
+    it('composable fetchCurrentUser delegates to manager', async () => {
       const u = useUser()
       await u.fetchCurrentUser()
-      expect(profileApiMock.get).toHaveBeenCalled()
-      expect(u.currentUser.value?.userName).toBe('alice')
+      expect(managerInstance.fetchCurrentUser).toHaveBeenCalled()
+    })
+  })
+
+  describe('resetUserRuntime', () => {
+    it('creates a fresh manager instance on next access', () => {
+      const ctor = vi.mocked(MockedUserStateManager)
+      useUserStore().fetchCurrentUser()
+      const callsBefore = ctor.mock.calls.length
+      resetUserRuntime()
+      useUserStore().fetchCurrentUser()
+      const callsAfter = ctor.mock.calls.length
+      expect(callsAfter).toBeGreaterThan(callsBefore)
     })
   })
 })

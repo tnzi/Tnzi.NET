@@ -3,9 +3,9 @@
     DeviceList — surfaces /admin/devices* exposed by `Tnzi.AI.Device`.
     Two tabs:
       • Connected — registered device nodes with platform / state / capabilities
-      • Pending pairings — open requests waiting on operator approval, each
-                            row showing the 8-char code the device displays
-                            plus approve/reject actions.
+      • Pending pairings — open requests waiting on operator approval, with
+                            approve/reject actions. The 8-char pairing code is
+                            a device-side secret and is not returned by the API.
   -->
   <div class="t-devices-page t-stack-page">
     <div class="t-devices-page__header">
@@ -92,6 +92,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../../plugin/client'
 import {
   createDeviceBridge,
@@ -150,11 +151,6 @@ function stateLabel(s: DeviceConnectionState): string {
     default: return String(s)
   }
 }
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
-}
-
 const deviceColumns: DataTableColumns<DeviceNodeDto> = [
   {
     title: () => t('cols.state'),
@@ -224,17 +220,6 @@ const deviceColumns: DataTableColumns<DeviceNodeDto> = [
 ]
 
 const pairingColumns: DataTableColumns<PairingRequestDto> = [
-  {
-    title: () => t('cols.code'),
-    key: 'code',
-    width: 140,
-    render: (row) =>
-      h(
-        'code',
-        { style: 'font-family: var(--tnzi-font-mono); font-size: 16px; font-weight: 600; letter-spacing: 2px;' },
-        row.code,
-      ),
-  },
   {
     title: () => t('cols.deviceName'),
     key: 'deviceName',

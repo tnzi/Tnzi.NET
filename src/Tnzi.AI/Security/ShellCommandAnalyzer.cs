@@ -197,6 +197,5 @@ public sealed class ShellCommandAnalyzer : IShellCommandAnalyzer
     }
 
     private static bool IsDestructivePrefix(string prefix)
-        => DestructivePrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase)
-           || (string.Equals(prefix, "git", StringComparison.OrdinalIgnoreCase) && false);
+        => DestructivePrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase);
 }

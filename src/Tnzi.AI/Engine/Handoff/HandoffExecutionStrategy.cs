@@ -296,9 +296,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             Response = response,
             HandoffPath = handoffPath,
             FinalAgentName = finalAgentName,
-            AggregatedUsage = inputTokens > 0 || outputTokens > 0
-                ? new TokenUsageDto { InputTokens = inputTokens, OutputTokens = outputTokens, TotalTokens = inputTokens + outputTokens }
-                : null
+            AggregatedUsage = ExecutionStrategyAgentLoader.BuildUsage(inputTokens, outputTokens)
         };
     }
 }

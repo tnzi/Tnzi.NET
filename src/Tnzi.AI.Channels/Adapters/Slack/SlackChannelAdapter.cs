@@ -14,7 +14,7 @@ namespace Tnzi.AI.Channels.Adapters.Slack;
 /// - files.upload: 发送文件
 /// - 事件接收通过 Webhook（Event Subscriptions）由 Controller 调用 HandleEventAsync
 /// </remarks>
-public class SlackChannelAdapter : IChannelAdapter
+public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
     private const string BaseUrl = "https://slack.com/api";
 
@@ -164,6 +164,53 @@ public class SlackChannelAdapter : IChannelAdapter
             Encoding.UTF8.GetBytes(computedSignature),
             Encoding.UTF8.GetBytes(signature));
     }
+
+    /// <inheritdoc />
+    public string Platform => Name;
+
+    /// <inheritdoc />
+    public async Task<WebhookProcessResult> ProcessWebhookAsync(
+        string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
+    {
+        // URL 验证 challenge（Slack Events API 首次验证）— 在验签前回显（Slack 规范允许）。
+        if (TryGetSlackChallenge(rawBody, out var challenge))
+        {
+            return WebhookProcessResult.Challenge(challenge!, "text/plain");
+        }
+
+        // 验签：配置了 SigningSecret 时强制校验 HMAC-SHA256 + 5 分钟时间窗。
+        if (!string.IsNullOrWhiteSpace(_options.SigningSecret))
+        {
+            if (!ValidateSlackSignature(rawBody, ToMutable(headers)))
+            {
+                return WebhookProcessResult.Rejected("Invalid Slack signature");
+            }
+        }
+
+        await HandleEventCoreAsync(rawBody, ct);
+        return WebhookProcessResult.Accepted();
+    }
+
+    private static bool TryGetSlackChallenge(string body, out string? challenge)
+    {
+        challenge = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("type", out var typeEl) &&
+                typeEl.GetString() == "url_verification" &&
+                doc.RootElement.TryGetProperty("challenge", out var chEl))
+            {
+                challenge = chEl.GetString();
+                return challenge != null;
+            }
+        }
+        catch (JsonException) { /* not a challenge */ }
+        return false;
+    }
+
+    private static Dictionary<string, string> ToMutable(IReadOnlyDictionary<string, string> headers)
+        => new(headers, StringComparer.OrdinalIgnoreCase);
 
     private async Task HandleEventCoreAsync(string eventJson, CancellationToken ct)
     {

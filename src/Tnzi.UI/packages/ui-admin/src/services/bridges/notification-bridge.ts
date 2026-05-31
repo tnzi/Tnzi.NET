@@ -34,7 +34,7 @@ import type {
 } from '@tnzi/core/services/template'
 import type { PagedList } from '@tnzi/core/types'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult } from '../_mappers'
+import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 /** Server-side pinned module name for notification templates. */
 const NOTIFICATION_TEMPLATE_BASE = '/admin/notification-templates'
@@ -101,13 +101,6 @@ export interface NotificationBridge {
    * upsert via PUT /admin/notification-preferences/user/{userId}.
    */
   subscriptions: BridgeCrudContract<NotificationPreferenceDto>
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>

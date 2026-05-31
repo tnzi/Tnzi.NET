@@ -52,6 +52,3 @@ export function resetUiAdapter(): void {
   resetMessageAdapter();
   resetDialogAdapter();
 }
-
-/** @deprecated Use `resetUiAdapter` instead */
-export const resetUiAdapterRuntime = resetUiAdapter;

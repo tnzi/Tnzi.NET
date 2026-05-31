@@ -48,9 +48,6 @@ public class TnziApplication : ITnziApplication
     private bool _servicesConfigured = false;
     private Dictionary<Type, List<ServiceDescriptor>>? _moduleServiceMap;
 
-    // 缓存空的服务提供者，避免重复创建
-    private static readonly IServiceProvider EmptyServiceProvider = new ServiceCollection().BuildServiceProvider();
-
     /// <summary>
     /// 创建 Tnzi 应用程序实例
     /// </summary>
@@ -308,7 +305,9 @@ public class TnziApplication : ITnziApplication
         if (disposing)
         {
             // 如果尚未关闭应用程序，尝试同步关闭
-            // 注意：这是为了兼容非异步 Dispose 场景的保底措施
+            // 注意：这是兼容非异步 Dispose 场景的兜底措施。
+            // 正常优雅关闭走 TnziShutdownHostedService.StopAsync(异步) 或 DisposeAsync；
+            // 此同步分支仅在宿主/测试以同步 Dispose 释放容器时执行。
             if (!_isShutdown)
             {
                 try
@@ -316,9 +315,19 @@ public class TnziApplication : ITnziApplication
                     // 同步释放：使用 Task.Run 避免同步上下文死锁
                     Task.Run(ShutdownAsync).GetAwaiter().GetResult();
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // 忽略关闭过程中的错误，避免中断 Dispose
+                    // 关闭失败不应中断 Dispose，但必须记录（不再静默吞掉）
+                    try
+                    {
+                        ServiceProvider?.GetService<ILogger<TnziApplication>>()?
+                            .LogError(ex, "Error during synchronous TnziApplication shutdown in Dispose");
+                    }
+                    catch
+                    {
+                        // 日志服务不可用（容器正在释放）时退回控制台，避免完全丢失信息
+                        Console.Error.WriteLine($"[Tnzi] Error during synchronous shutdown in Dispose: {ex}");
+                    }
                 }
             }
 

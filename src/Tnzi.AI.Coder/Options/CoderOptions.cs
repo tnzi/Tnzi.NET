@@ -35,7 +35,7 @@ public class CoderOptions
     /// <summary>
     /// 默认工具组列表
     /// </summary>
-    public List<string> DefaultToolGroups { get; set; } = ["filesystem", "shell", "codesearch", "web", "memory", "project", "git", "diff", "process", "repl"];
+    public List<string> DefaultToolGroups { get; set; } = ["filesystem", "shell", "codesearch", "web", "coder-memory", "project", "git", "diff", "process", "repl"];
 
     /// <summary>
     /// 最大工具迭代次数

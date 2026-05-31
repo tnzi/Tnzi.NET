@@ -1,4 +1,3 @@
-
 namespace Tnzi.AI.Engine;
 
 /// <summary>
@@ -55,9 +54,6 @@ public interface IWorkflowBuilder
 
     /// <summary>添加条件边</summary>
     IWorkflowBuilder AddConditionalEdge(string fromNodeId, Dictionary<string, string> routes, string? defaultTarget = null, EdgeConditionType conditionType = EdgeConditionType.OutputContains);
-
-    /// <summary>添加 LLM 分类条件边</summary>
-    IWorkflowBuilder AddLlmConditionalEdge(string fromNodeId, Dictionary<string, string> routes, string? defaultTarget = null);
 
     /// <summary>添加循环</summary>
     IWorkflowBuilder AddLoop(string loopId, int maxIterations, Action<IWorkflowBuilder> loopBody);
@@ -174,12 +170,6 @@ public class WorkflowBuilder : IWorkflowBuilder
             ConditionType = conditionType
         });
         return this;
-    }
-
-    /// <inheritdoc />
-    public IWorkflowBuilder AddLlmConditionalEdge(string fromNodeId, Dictionary<string, string> routes, string? defaultTarget = null)
-    {
-        return AddConditionalEdge(fromNodeId, routes, defaultTarget, EdgeConditionType.LlmClassify);
     }
 
     /// <inheritdoc />
@@ -400,7 +390,6 @@ public class WorkflowBuilder : IWorkflowBuilder
         public IWorkflowStepBuilder AddDebateStep(string stepId, Guid? agentId = null) => _parent.AddDebateStep(stepId, agentId);
         public IWorkflowStepBuilder AddTransformStep(string stepId, Guid? agentId = null) => _parent.AddTransformStep(stepId, agentId);
         public IWorkflowBuilder AddConditionalEdge(string fromNodeId, Dictionary<string, string> routes, string? defaultTarget = null, EdgeConditionType conditionType = EdgeConditionType.OutputContains) => _parent.AddConditionalEdge(fromNodeId, routes, defaultTarget, conditionType);
-        public IWorkflowBuilder AddLlmConditionalEdge(string fromNodeId, Dictionary<string, string> routes, string? defaultTarget = null) => _parent.AddLlmConditionalEdge(fromNodeId, routes, defaultTarget);
         public IWorkflowBuilder AddLoop(string loopId, int maxIterations, Action<IWorkflowBuilder> loopBody) => _parent.AddLoop(loopId, maxIterations, loopBody);
         public IReadOnlyList<WorkflowStepDto> Build() => _parent.Build();
         public WorkflowGraph BuildGraph() => _parent.BuildGraph();

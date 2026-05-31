@@ -33,6 +33,3 @@ export function useRuntimeAdapter(): IRuntimeAdapter {
 export function resetRuntimeAdapter(): void {
   _active = null;
 }
-
-/** @deprecated Use `resetRuntimeAdapter` instead */
-export const resetRuntimeAdapterRuntime = resetRuntimeAdapter;

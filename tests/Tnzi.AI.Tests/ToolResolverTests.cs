@@ -407,6 +407,96 @@ public class ToolResolverTests
     // OpenAPI cache invalidation on config change
     // ------------------------------------------------------------------
 
+    // ------------------------------------------------------------------
+    // A2: OpenAPI tools routed through approval/permission gating
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ResolveToolsAsync_OpenApiTools_WithApprovalHandler_WrappedAsApprovalToolWrapper()
+    {
+        // Arrange: approval enabled + an approval handler + one OpenAPI tool from the generator mock
+        var approvalHandler = new Mock<IToolApprovalHandler>();
+        var permissionEvaluator = new ToolPermissionEvaluator([]);
+
+        var options = CreateOptionsMonitor(o =>
+        {
+            o.ToolApproval = new ToolApprovalOptions
+            {
+                Enabled = true,
+                Mode = ToolApprovalMode.AlwaysRequire
+            };
+            o.OpenApiTools = new OpenApiToolsOptions { Enabled = true };
+        });
+
+        // Create an AIFunction mock so it can be wrapped by ApprovalToolWrapper
+        var functionMock = new Mock<AIFunction>();
+        functionMock.Setup(f => f.Name).Returns("get_weather");
+
+        var generatorMock = new Mock<OpenApiToolGenerator>(
+            Mock.Of<IHttpClientFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new AIOptions
+            {
+                OpenApiTools = new OpenApiToolsOptions { Enabled = true }
+            }),
+            Mock.Of<ILogger<OpenApiToolGenerator>>());
+        generatorMock
+            .Setup(g => g.GenerateToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AITool[] { functionMock.Object });
+
+        using var resolver = CreateResolver(
+            openApiToolGenerator: generatorMock.Object,
+            options: options,
+            approvalHandler: approvalHandler.Object,
+            permissionEvaluator: permissionEvaluator);
+
+        // Act
+        var result = await resolver.ResolveToolsAsync(null);
+
+        // Assert: OpenAPI tool should be wrapped in ApprovalToolWrapper
+        result.ShouldNotBeNull();
+        result!.Count.ShouldBe(1);
+        result[0].ShouldBeOfType<ApprovalToolWrapper>();
+    }
+
+    [Fact]
+    public async Task ResolveToolsAsync_OpenApiTools_WithNoGovernance_NotWrapped()
+    {
+        // Arrange: governance off (default) — OpenAPI tools must NOT be wrapped
+        var options = CreateOptionsMonitor(o =>
+        {
+            o.ToolApproval = new ToolApprovalOptions { Enabled = false };
+            o.OpenApiTools = new OpenApiToolsOptions { Enabled = true };
+        });
+
+        var functionMock = new Mock<AIFunction>();
+        functionMock.Setup(f => f.Name).Returns("get_weather");
+
+        var generatorMock = new Mock<OpenApiToolGenerator>(
+            Mock.Of<IHttpClientFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new AIOptions
+            {
+                OpenApiTools = new OpenApiToolsOptions { Enabled = true }
+            }),
+            Mock.Of<ILogger<OpenApiToolGenerator>>());
+        generatorMock
+            .Setup(g => g.GenerateToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AITool[] { functionMock.Object });
+
+        // No approvalHandler, no permissionEvaluator
+        using var resolver = CreateResolver(
+            openApiToolGenerator: generatorMock.Object,
+            options: options);
+
+        // Act
+        var result = await resolver.ResolveToolsAsync(null);
+
+        // Assert: tool returned as-is (no wrapper)
+        result.ShouldNotBeNull();
+        result!.Count.ShouldBe(1);
+        result[0].ShouldNotBeOfType<ApprovalToolWrapper>();
+        result[0].Name.ShouldBe("get_weather");
+    }
+
     [Fact]
     public async Task ResolveToolsAsync_AfterOptionsChange_RegeneratesOpenApiTools()
     {

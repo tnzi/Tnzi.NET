@@ -179,6 +179,28 @@ public class ApprovalRequestedEvent : EventBase
 }
 
 /// <summary>
+/// AgentPersona 内容更新事件 — 当管理员通过 IAgentPersonaService.UpdateAsync 修改 Persona 内容时发布。
+/// 用于触发 ContextInjectionMiddleware 静态 cache 即时失效，避免 5 分钟 TTL 窗口内继续注入旧 Soul。
+/// </summary>
+public class AgentPersonaUpdatedEvent : EventBase
+{
+    /// <summary>Persona ID</summary>
+    public Guid PersonaId { get; set; }
+    /// <summary>Persona slug (admin reference)</summary>
+    public string? Slug { get; set; }
+}
+
+/// <summary>
+/// AgentPersona 删除事件 — 当 IAgentPersonaService.DeleteAsync 删除 Persona 时发布。
+/// 同样触发 cache 失效，避免删除后仍被注入到 LLM 请求。
+/// </summary>
+public class AgentPersonaDeletedEvent : EventBase
+{
+    /// <summary>Persona ID</summary>
+    public Guid PersonaId { get; set; }
+}
+
+/// <summary>
 /// Agent 运行失败事件 — 当 AI 运行因异常终止时发布（与 AgentRunCompletedEvent 互斥）。可用于告警、自动重试策略判定、运维监控。
 /// </summary>
 public class AgentRunFailedEvent : EventBase

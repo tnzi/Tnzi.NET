@@ -160,31 +160,69 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
                                     continue;
                                 }
 
-                                // 获取事件处理器并执行（创建 Scope 以支持 Scoped 生命周期的处理器）
-                                // 支持事件继承和条件处理器
-                                using var handlerScope = _serviceProvider.CreateScope();
-                                var handlers = GetEventHandlers<TEvent>(eventType, handlerScope.ServiceProvider);
+                                // 执行处理器；失败时按重试预算在进程内重试，耗尽后进 DLQ 或保留偏移量等待重投。
+                                // 关键不变量：处理器失败绝不无条件提交偏移量（杜绝静默丢消息）。
+                                var failureCount = await RunHandlersAsync<TEvent>(eventType, @event);
+                                var attemptsMade = 1;
 
-                                var tasks = new List<Task>();
-                                foreach (var handler in handlers)
+                                while (true)
                                 {
-                                    if (handler == null) continue;
+                                    var outcome = KafkaConsumeDecider.Decide(
+                                        failureCount,
+                                        attemptsMade,
+                                        _options.Consumer.MaxConsumeRetries,
+                                        _options.Consumer.DeadLetterEnabled);
 
-                                    // 为每个处理器创建独立任务，实现错误隔离
-                                    var handlerTask = ExecuteHandlerWithErrorIsolationAsync(handler, @event, eventType);
-                                    tasks.Add(handlerTask);
+                                    if (outcome == KafkaConsumeOutcome.Commit)
+                                    {
+                                        currentConsumer.Commit(result);
+                                        _logger.LogDebug("Processed event {EventType} with ID {EventId}", eventTypeName, @event.EventId);
+                                        break;
+                                    }
+
+                                    if (outcome == KafkaConsumeOutcome.Retry)
+                                    {
+                                        _logger.LogWarning(
+                                            "{FailureCount} handler(s) failed for event {EventType} (EventId: {EventId}). Retrying in-process (attempt {Attempt}/{Max}).",
+                                            failureCount, eventTypeName, @event.EventId, attemptsMade, _options.Consumer.MaxConsumeRetries);
+
+                                        if (_options.Consumer.ConsumeRetryBackoffMs > 0)
+                                        {
+                                            await Task.Delay(_options.Consumer.ConsumeRetryBackoffMs, cts.Token);
+                                        }
+
+                                        failureCount = await RunHandlersAsync<TEvent>(eventType, @event);
+                                        attemptsMade++;
+                                        continue;
+                                    }
+
+                                    if (outcome == KafkaConsumeOutcome.DeadLetter)
+                                    {
+                                        try
+                                        {
+                                            await ProduceToDeadLetterAsync(topic, result.Message, eventTypeName, @event.EventId);
+                                            currentConsumer.Commit(result);
+                                            _logger.LogError(
+                                                "Event {EventType} (EventId: {EventId}) routed to dead-letter topic after {Attempts} failed attempt(s); offset committed.",
+                                                eventTypeName, @event.EventId, attemptsMade);
+                                        }
+                                        catch (Exception dlqEx)
+                                        {
+                                            // DLQ 投递失败 ⇒ 不提交偏移量，等待重投，绝不丢失
+                                            _logger.LogCritical(dlqEx,
+                                                "Failed to dead-letter event {EventType} (EventId: {EventId}); offset NOT committed, message will be redelivered.",
+                                                eventTypeName, @event.EventId);
+                                        }
+                                        break;
+                                    }
+
+                                    // RedeliverWithoutCommit：不提交偏移量，等待重投（at-least-once，绝不静默丢弃）
+                                    _logger.LogCritical(
+                                        "Event {EventType} (EventId: {EventId}) failed after {Attempts} attempt(s) and dead-letter is disabled. " +
+                                        "Offset NOT committed; message will be redelivered (at-least-once).",
+                                        eventTypeName, @event.EventId, attemptsMade);
+                                    break;
                                 }
-
-                                if (tasks.Count > 0)
-                                {
-                                    // 等待所有处理器完成（即使某些失败，其他处理器也会继续执行）
-                                    await Task.WhenAll(tasks);
-                                }
-
-                                // 提交偏移量
-                                currentConsumer.Commit(result);
-
-                                _logger.LogDebug("Processed event {EventType} with ID {EventId}", eventTypeName, @event.EventId);
                             }
                             catch (ConsumeException ex)
                             {
@@ -345,9 +383,39 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
     }
 
     /// <summary>
-    /// 执行处理器并实现错误隔离（单个处理器失败不影响其他处理器）
+    /// 在独立 DI scope 内执行某事件的全部处理器，返回失败的处理器数量。
+    /// 单个处理器失败不影响其他处理器（错误隔离），但失败会被计数以决定是否提交偏移量。
     /// </summary>
-    private async Task ExecuteHandlerWithErrorIsolationAsync<TEvent>(object handler, TEvent @event, Type eventType) where TEvent : class, IEvent
+    private async Task<int> RunHandlersAsync<TEvent>(Type eventType, TEvent @event) where TEvent : class, IEvent
+    {
+        // 每次（含重试）使用全新 scope，确保 Scoped 处理器被重新解析
+        using var handlerScope = _serviceProvider.CreateScope();
+        var handlers = GetEventHandlers<TEvent>(eventType, handlerScope.ServiceProvider);
+
+        var tasks = new List<Task<bool>>();
+        foreach (var handler in handlers)
+        {
+            if (handler == null) continue;
+
+            // 为每个处理器创建独立任务，实现错误隔离
+            tasks.Add(ExecuteHandlerWithErrorIsolationAsync(handler, @event, eventType));
+        }
+
+        if (tasks.Count == 0)
+        {
+            return 0;
+        }
+
+        // 等待所有处理器完成（即使某些失败，其他处理器也会继续执行）
+        var results = await Task.WhenAll(tasks);
+        return results.Count(succeeded => !succeeded);
+    }
+
+    /// <summary>
+    /// 执行处理器并实现错误隔离（单个处理器失败不影响其他处理器）。
+    /// 返回 true 表示成功（含条件处理器主动跳过、缺失 HandleAsync 的配置型问题），false 表示执行抛异常。
+    /// </summary>
+    private async Task<bool> ExecuteHandlerWithErrorIsolationAsync<TEvent>(object handler, TEvent @event, Type eventType) where TEvent : class, IEvent
     {
         var handlerType = handler.GetType();
         try
@@ -362,7 +430,7 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
                 {
                     _logger.LogDebug("Handler {HandlerType} cannot handle event {EventType} (EventId: {EventId})",
                         handlerType.Name, eventType.Name, @event.EventId);
-                    return;
+                    return true;
                 }
             }
 
@@ -373,18 +441,53 @@ public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, 
             }
             else
             {
+                // 配置型问题（缺失 HandleAsync）：重试无益，记录告警但不计为可重试失败
                 _logger.LogWarning("Handler {HandlerType} does not have HandleAsync method with expected signature",
                     handlerType.Name);
             }
+
+            return true;
         }
         catch (Exception ex)
         {
-            // 错误隔离：记录错误但不影响其他处理器
+            // 错误隔离：记录错误但不影响其他处理器；返回 false 以便上层据此决定是否提交偏移量
             _logger.LogError(ex,
                 "Error in handler {HandlerType} for event {EventType} (EventId: {EventId}). " +
                 "This error is isolated and will not affect other handlers.",
                 handlerType.Name, eventType.Name, @event.EventId);
+            return false;
         }
+    }
+
+    /// <summary>
+    /// 将处理失败的原始消息投递到死信主题（"{源主题}{DeadLetterTopicSuffix}"），保留原始头并附加死信元数据。
+    /// 投递失败时抛出，由调用方决定不提交偏移量（消息将重投，绝不丢失）。
+    /// </summary>
+    private async Task ProduceToDeadLetterAsync(string sourceTopic, Message<string, string> original, string eventTypeName, Guid eventId)
+    {
+        var dlqTopic = $"{sourceTopic}{_options.Consumer.DeadLetterTopicSuffix}";
+
+        var headers = new Headers();
+        if (original.Headers != null)
+        {
+            foreach (var header in original.Headers)
+            {
+                headers.Add(header.Key, header.GetValueBytes());
+            }
+        }
+        headers.Add("x-dead-letter-source-topic", Encoding.UTF8.GetBytes(sourceTopic));
+        headers.Add("x-dead-letter-event-type", Encoding.UTF8.GetBytes(eventTypeName));
+
+        var dlqMessage = new Message<string, string>
+        {
+            Key = original.Key,
+            Value = original.Value,
+            Headers = headers
+        };
+
+        await _producer.ProduceAsync(dlqTopic, dlqMessage);
+        _logger.LogWarning("Event {EventType} (EventId: {EventId}) produced to dead-letter topic {DlqTopic}.",
+            eventTypeName, eventId, dlqTopic);
     }
 
     public bool HasHandlers<TEvent>() where TEvent : class, IEvent

@@ -56,7 +56,8 @@ public class AgentExecutor
             ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
             HistoryReducer = _options.HistoryReducer,
             Middlewares = _options.Middlewares,
-            ToolDefinitions = _options.ToolDefinitions
+            ToolDefinitions = _options.ToolDefinitions,
+            SectionProviders = _options.SectionProviders
         };
 
         return new AgentExecutor(_chatClient, newOptions);
@@ -78,7 +79,8 @@ public class AgentExecutor
             ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
             HistoryReducer = _options.HistoryReducer,
             Middlewares = _options.Middlewares,
-            ToolDefinitions = _options.ToolDefinitions
+            ToolDefinitions = _options.ToolDefinitions,
+            SectionProviders = _options.SectionProviders
         };
 
         return new AgentExecutor(_chatClient, newOptions);
@@ -94,11 +96,14 @@ public class AgentExecutor
     {
         Check.NotNull(messages);
 
+        // 工作副本 — 不修改调用方传入的列表（不变性规则）
+        var working = new List<ChatMessage>(messages);
+
         // 历史压缩（如果 OptionsBuilder 配置了 reducer）
-        messages = await ReduceHistoryAsync(messages, ct);
+        working = await ReduceHistoryAsync(working, ct);
 
         // 构建 ChatOptions（输出合并后的完整工具列表）
-        var chatOptions = BuildChatOptions(out var allTools);
+        var (chatOptions, allTools) = await BuildChatOptionsAsync(ct);
 
         // 工具调用循环
         var totalInputTokens = 0;
@@ -106,7 +111,7 @@ public class AgentExecutor
 
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
         {
-            var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+            var response = await _chatClient.GetResponseAsync(working, chatOptions, ct);
 
             // 累计 token 用量
             if (response.Usage != null)
@@ -115,8 +120,8 @@ public class AgentExecutor
                 totalOutputTokens += (int)(response.Usage.OutputTokenCount ?? 0);
             }
 
-            // 将助手回复添加到消息列表
-            messages.AddRange(response.Messages);
+            // 将助手回复添加到工作副本
+            working.AddRange(response.Messages);
 
             // 检查是否有工具调用
             var toolCalls = ExtractToolCalls(response.Messages);
@@ -126,13 +131,13 @@ public class AgentExecutor
             // fracturing (\n\n between every token) in the continuation.
             if (_options.StripTextFromToolCallMessages && toolCalls.Count > 0)
             {
-                for (var i = messages.Count - response.Messages.Count; i < messages.Count; i++)
+                for (var i = working.Count - response.Messages.Count; i < working.Count; i++)
                 {
-                    var msg = messages[i];
+                    var msg = working[i];
                     if (msg.Role == ChatRole.Assistant && msg.Contents.OfType<FunctionCallContent>().Any())
                     {
                         var filtered = msg.Contents.Where(c => c is not TextContent).ToList();
-                        messages[i] = new ChatMessage(ChatRole.Assistant, [.. filtered]);
+                        working[i] = new ChatMessage(ChatRole.Assistant, [.. filtered]);
                     }
                 }
             }
@@ -150,19 +155,19 @@ public class AgentExecutor
                         TotalTokens = totalInputTokens + totalOutputTokens
                     },
                     FinishReason = response.FinishReason?.ToString(),
-                    Messages = messages,
+                    Messages = working,
                     Citations = null,
                     Reasoning = ExtractReasoning(response.Messages)
                 };
             }
 
-            // 执行工具并添加结果到消息
+            // 执行工具并添加结果到工作副本
             var toolResults = await ExecuteToolCallsAsync(toolCalls, allTools, ct);
-            messages.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
+            working.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
         }
 
         // 达到最大迭代次数 — 附加提示告知用户 AI 因达到工具调用上限而停止
-        var lastAssistantText = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
+        var lastAssistantText = working.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
         var truncationNotice = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]";
         return new AgentResponse
         {
@@ -174,9 +179,9 @@ public class AgentExecutor
                 TotalTokens = totalInputTokens + totalOutputTokens
             },
             FinishReason = FinishReasons.MaxToolIterations,
-            Messages = messages,
+            Messages = working,
             Citations = null,
-            Reasoning = ExtractReasoning(messages)
+            Reasoning = ExtractReasoning(working)
         };
     }
 
@@ -189,12 +194,15 @@ public class AgentExecutor
     {
         Check.NotNull(messages);
 
+        // 工作副本 — 不修改调用方传入的列表（不变性规则）
+        var working = new List<ChatMessage>(messages);
+
         // 历史压缩（如果 OptionsBuilder 配置了 reducer）
-        messages = await ReduceHistoryAsync(messages, ct);
+        working = await ReduceHistoryAsync(working, ct);
 
         // 构建 ChatOptions（输出合并后的完整工具列表）
         // Context injection is owned by ContextInjectionMiddleware (already ran before us).
-        var chatOptions = BuildChatOptions(out var allTools);
+        var (chatOptions, allTools) = await BuildChatOptionsAsync(ct);
 
         // 工具调用循环（流式版本）
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
@@ -219,7 +227,7 @@ public class AgentExecutor
             var earlyToolSignalSent = false;
             const int noTextThreshold = 3;
 
-            await foreach (var update in _chatClient.GetStreamingResponseAsync(messages, chatOptions, ct))
+            await foreach (var update in _chatClient.GetStreamingResponseAsync(working, chatOptions, ct))
             {
                 // 收集内容（TextReasoningContent 为合成类型，不加入 assistantContents）
                 foreach (var content in update.Contents)
@@ -327,7 +335,7 @@ public class AgentExecutor
                 ? assistantContents.Where(c => c is not TextContent).ToList()
                 : assistantContents;
             var assistantMessage = new ChatMessage(ChatRole.Assistant, [.. historyContents]);
-            messages.Add(assistantMessage);
+            working.Add(assistantMessage);
 
             // 检查是否有工具调用
             if (toolCallContents.Count == 0)
@@ -345,7 +353,7 @@ public class AgentExecutor
 
             // 执行工具（含详情，用于客户端性能基准）
             var (toolResults, toolDetails) = await ExecuteToolCallsWithDetailsAsync(toolCallContents, allTools, ct);
-            messages.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
+            working.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
 
             // Emit tool call details for client-side benchmarking
             yield return new AgentStreamChunk { ToolCalls = toolDetails };
@@ -394,17 +402,36 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 构建 ChatOptions，同时输出合并后的完整工具列表。
+    /// 异步构建 ChatOptions，同时返回合并后的完整工具列表。
     /// Tool injection from ContextProvider is now handled at the runtime layer
     /// (AgentRuntime.MergeAdditionalTools) before this executor is called.
+    /// System prompt sections contributed by registered ISystemPromptSectionProvider instances
+    /// are assembled here and merged with the static Instructions string.
     /// </summary>
-    private ChatOptions BuildChatOptions(out IList<AITool> allTools)
+    private async Task<(ChatOptions Options, IList<AITool> AllTools)> BuildChatOptionsAsync(CancellationToken ct = default)
     {
         var chatOptions = new ChatOptions();
 
+        // Assemble system prompt: start with static Instructions, then overlay dynamic sections.
+        var builder = new SystemPromptTemplateBuilder();
+
         if (!string.IsNullOrWhiteSpace(_options.Instructions))
         {
-            chatOptions.Instructions = _options.Instructions;
+            builder.AddSection(SystemPromptTemplateBuilder.Tags.Instructions, _options.Instructions, 30);
+        }
+
+        if (_options.SectionProviders is { Count: > 0 })
+        {
+            foreach (var provider in _options.SectionProviders)
+            {
+                builder.AddSectionProvider(provider);
+            }
+        }
+
+        var assembled = await builder.BuildAsync(ct);
+        if (!string.IsNullOrWhiteSpace(assembled))
+        {
+            chatOptions.Instructions = assembled;
         }
 
         if (_options.Temperature.HasValue)
@@ -423,8 +450,7 @@ public class AgentExecutor
             chatOptions.Tools = tools;
         }
 
-        allTools = tools;
-        return chatOptions;
+        return (chatOptions, tools);
     }
 
     /// <summary>
@@ -466,7 +492,7 @@ public class AgentExecutor
     /// 执行工具调用核心实现（条件并行/串行 + 中间件管道 + 增强追踪 + 空结果标记）
     /// </summary>
     /// <remarks>
-    /// 安全规则（借鉴 Claude Code StreamingToolExecutor）：
+    /// 安全规则：
     /// 仅当所有工具都是 IsConcurrencySafe 且无 IsDestructive 时才并行执行，否则降级为顺序执行。
     /// </remarks>
     private async Task<(List<FunctionResultContent> Results, List<ToolCallDetail> Details)> ExecuteToolCallsCoreAsync(

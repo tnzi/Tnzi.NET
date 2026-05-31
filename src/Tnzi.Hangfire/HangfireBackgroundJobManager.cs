@@ -8,11 +8,11 @@ namespace Tnzi.Hangfire;
 /// </summary>
 public class HangfireBackgroundJobManager : IBackgroundJobManager
 {
-    private readonly ICurrentTenant? _currentTenant;
+    private readonly IServiceProvider _serviceProvider;
 
-    public HangfireBackgroundJobManager(ICurrentTenant? currentTenant = null)
+    public HangfireBackgroundJobManager(IServiceProvider serviceProvider)
     {
-        _currentTenant = currentTenant;
+        _serviceProvider = Check.NotNull(serviceProvider);
     }
 
     /// <inheritdoc />
@@ -72,12 +72,19 @@ public class HangfireBackgroundJobManager : IBackgroundJobManager
 
     /// <summary>
     /// 自动捕获当前租户上下文到任务参数
+    /// 注意：ICurrentTenant 是 Scoped 服务，不能在 Singleton 构造时持有引用；
+    /// 通过根 IServiceProvider 创建 scope 动态解析，避免 captive dependency。
+    /// 与 LocalEventBus 中 PublishAsync 的处理方式一致。
     /// </summary>
     private void CaptureTenantContext<TArgs>(TArgs args) where TArgs : class
     {
-        if (args is ITenantAwareJobArgs tenantAware && tenantAware.TenantId == null)
+        if (args is not ITenantAwareJobArgs tenantAware || tenantAware.TenantId != null)
         {
-            tenantAware.TenantId = _currentTenant?.Id;
+            return;
         }
+
+        using var scope = _serviceProvider.CreateScope();
+        var currentTenant = scope.ServiceProvider.GetService<ICurrentTenant>();
+        tenantAware.TenantId = currentTenant?.Id;
     }
 }

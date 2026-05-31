@@ -3,6 +3,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
+import { methodTone as methodType } from '../_shared/http-method'
 
 interface AccessLogRow {
   id?: string
@@ -15,17 +16,6 @@ interface AccessLogRow {
   creationTime?: string
   requestBody?: string
   responseBody?: string
-}
-
-function methodType(method?: string): 'info' | 'success' | 'warning' | 'error' | 'default' {
-  switch (method?.toUpperCase()) {
-    case 'GET': return 'info'
-    case 'POST': return 'success'
-    case 'PUT':
-    case 'PATCH': return 'warning'
-    case 'DELETE': return 'error'
-    default: return 'default'
-  }
 }
 
 function statusType(code?: number): 'success' | 'info' | 'warning' | 'error' | 'default' {

@@ -99,4 +99,64 @@ public class MemoryScopeTests
 
         a.ShouldNotBe(b);
     }
+
+    // --- Agent-bound 范围（修复 AgentId 列只写不读缺陷）---
+
+    [Fact]
+    public void ForAgent_SetsAgentBoundAndAgentId()
+    {
+        var agentId = Guid.NewGuid();
+        var scope = MemoryScope.ForAgent(agentId, "default");
+
+        scope.AgentBound.ShouldBeTrue();
+        scope.AgentId.ShouldBe(agentId);
+        scope.Name.ShouldBe("default");
+        scope.UserId.ShouldBeNull();
+        scope.SessionId.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ForAgent_BlankName_DefaultsToDefault()
+    {
+        var scope = MemoryScope.ForAgent(Guid.NewGuid(), "  ");
+        scope.Name.ShouldBe("default");
+    }
+
+    [Fact]
+    public void ToScopeKey_AgentBound_IsUserIndependentAndDeterministic()
+    {
+        var agentId = Guid.NewGuid();
+        var scope = MemoryScope.ForAgent(agentId, "default");
+
+        var key = scope.ToScopeKey();
+
+        // 与当前用户无关 → headless 写入/读取一致；不含 user:/session: 段
+        key.ShouldBe($"agent-bound:{agentId:N}:default");
+        key.ShouldNotContain("user:");
+        key.ShouldNotContain("session:");
+    }
+
+    [Fact]
+    public void ToScopeKey_AgentBound_DiffersFromUserScopedAgentKey()
+    {
+        var agentId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        var agentBound = MemoryScope.ForAgent(agentId, "default").ToScopeKey();
+        var userScoped = new MemoryScope("default", userId, agentId).ToScopeKey();
+
+        // 两条路径产生不同的 key —— 这正是修复前消费者记忆永不命中的根因
+        agentBound.ShouldNotBe(userScoped);
+    }
+
+    [Fact]
+    public void AgentBound_DefaultFalse_PreservesLegacyKey()
+    {
+        // 不显式设置 AgentBound 时，含 AgentId 的 scope 仍生成旧格式 key（向后兼容）
+        var agentId = Guid.NewGuid();
+        var scope = new MemoryScope("default", AgentId: agentId);
+
+        scope.AgentBound.ShouldBeFalse();
+        scope.ToScopeKey().ShouldBe($"agent:{agentId:N}:default");
+    }
 }

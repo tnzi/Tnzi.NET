@@ -288,33 +288,7 @@ public class AgentService : ApplicationService, IAgentService
     }
 
     private static bool TryMapFailure(AgentRunResult result, out int statusCode, out string errorCode)
-    {
-        switch (result.FinishReason)
-        {
-            case FinishReasons.QuotaExceeded:
-                statusCode = 429;
-                errorCode = ErrorCodes.QuotaExceeded;
-                return true;
-            case FinishReasons.GuardrailRejected:
-                statusCode = 400;
-                errorCode = ErrorCodes.GuardrailRejected;
-                return true;
-            case FinishReasons.Rejected:
-                statusCode = 400;
-                errorCode = ErrorCodes.AgentRunFailed;
-                return true;
-            case FinishReasons.MaxHandoffs:
-            case FinishReasons.Error:
-            case FinishReasons.Failed:
-                statusCode = 500;
-                errorCode = ErrorCodes.AgentRunFailed;
-                return true;
-            default:
-                statusCode = 0;
-                errorCode = string.Empty;
-                return false;
-        }
-    }
+        => AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out statusCode, out errorCode);
 
     public async IAsyncEnumerable<StreamEvent> RunStreamingAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -401,51 +375,7 @@ public class AgentService : ApplicationService, IAgentService
     }
 
     private static StreamEvent? CreateStreamEvent(AgentStreamChunk chunk, Guid? threadId, string defaultErrorCode)
-    {
-        var hasPayload =
-            chunk.Error != null ||
-            chunk.AgentName != null ||
-            chunk.ReasoningText != null ||
-            chunk.Text != null ||
-            chunk.ToolCalls != null ||
-            chunk.IsToolCall ||
-            chunk.ToolCallNames != null ||
-            chunk.EventType != null ||
-            chunk.EventData != null ||
-            chunk.Suggestions != null ||
-            chunk.Todos != null ||
-            chunk.Artifacts != null;
-
-        if (!hasPayload)
-        {
-            return null;
-        }
-
-        return new StreamEvent
-        {
-            Delta = chunk.Text,
-            FinishReason = chunk.FinishReason,
-            Model = chunk.Model,
-            ThreadId = threadId,
-            IsError = chunk.Error != null,
-            ErrorMessage = chunk.Error,
-            ErrorCode = chunk.Error != null && chunk.FinishReason == FinishReasons.GuardrailRejected
-                ? ErrorCodes.GuardrailRejected
-                : chunk.Error != null
-                    ? defaultErrorCode
-                    : null,
-            IsToolCall = chunk.IsToolCall,
-            ToolCallNames = chunk.ToolCallNames,
-            ReasoningDelta = chunk.ReasoningText,
-            AgentName = chunk.AgentName,
-            ToolCalls = chunk.ToolCalls,
-            EventType = chunk.EventType,
-            EventData = chunk.EventData,
-            Suggestions = chunk.Suggestions,
-            Todos = chunk.Todos,
-            Artifacts = chunk.Artifacts
-        };
-    }
+        => AgentStreamMapper.BuildStreamEvent(chunk, threadId, defaultErrorCode);
 
     public async Task<Result<AgentDto>> ConfigureAbTestAsync(Guid agentId, ConfigureAbTestDto input)
     {

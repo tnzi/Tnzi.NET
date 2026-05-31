@@ -1,48 +1,43 @@
 /**
- * Invoice bridge — wraps `/admin/invoices/*` exposed by
- * `Tnzi.Payment.Controllers.Admin.DefaultInvoiceAdminController`.
+ * Invoice bridge — thin adapter over `@tnzi/core`'s admin invoice API
+ * (`useAdminInvoiceApi`, wrapping `/admin/invoices/*` exposed by
+ * `Tnzi.Payment.Controllers.Admin.DefaultInvoiceAdminController`).
+ *
+ * Delegates to the canonical `useAdminInvoiceApi` factory in
+ * `@tnzi/core/services/payment` (getList / get / send / markAsPaid / cancel).
+ * This file keeps the bridge's original public surface (`InvoiceDto` /
+ * `InvoiceQueryDto` / `MarkInvoicePaidDto` re-exports + `createInvoiceBridge`)
+ * so consuming pages are unaffected.
  *
  * The admin page focuses on the lifecycle ops (mark-paid / cancel / send)
  * — manual creation is more complex (line-items editor) and intentionally
  * routes through the dedicated create flow rather than the table page.
+ *
+ * Backend note: `InvoiceQueryDto` server-side filters on
+ * invoiceNo/type/status/customerEmail/startTime/endTime only — there is no
+ * free-text `searchText` parameter, so the page's search box is a no-op
+ * server-side (the param is serialised but silently ignored). `status`
+ * filters as expected.
  */
 import type { HttpClient } from '@tnzi/core/http'
+import {
+  useAdminInvoiceApi,
+  type InvoiceDto as CoreInvoiceDto,
+  type MarkInvoicePaidDto as CoreMarkInvoicePaidDto,
+} from '@tnzi/core/services/payment'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export interface InvoiceDto {
-  id: string
-  invoiceNo: string
-  type: number
-  status: number
-  amount: number
-  currency: string
-  taxAmount: number
-  discountAmount: number
-  dueAmount: number
-  paidAmount: number
-  customerName: string
-  customerEmail: string
-  customerCompany?: string | null
-  invoiceDate: string
-  dueDate?: string | null
-  paidDate?: string | null
-  pdfFileUrl?: string | null
-  notes?: string | null
-  creationTime: string
-}
+// Re-export under the original bridge names consumed by pages.
+export type InvoiceDto = CoreInvoiceDto
+export type MarkInvoicePaidDto = CoreMarkInvoicePaidDto
 
+/** Page-facing query shape (table page: page + status + free-text search). */
 export interface InvoiceQueryDto {
   pageIndex: number
   pageSize: number
   status?: number | null
   type?: number | null
   searchText?: string | null
-}
-
-export interface MarkInvoicePaidDto {
-  /** Amount actually settled — must be > 0 (backend RangeAttribute). */
-  paidAmount: number
-  /** Free-text note attached to the settlement (e.g. payment ref / channel). */
-  remark?: string | null
 }
 
 export interface InvoiceBridgeDeps {
@@ -55,13 +50,6 @@ export interface InvoiceBridge {
   send(id: string, recipientEmail?: string): Promise<void>
   markAsPaid(id: string, payload: MarkInvoicePaidDto): Promise<void>
   cancel(id: string, reason: string): Promise<void>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createInvoiceBridge(deps: InvoiceBridgeDeps = {}): InvoiceBridge {
@@ -78,17 +66,17 @@ export function createInvoiceBridge(deps: InvoiceBridgeDeps = {}): InvoiceBridge
     }
   }
 
+  const api = useAdminInvoiceApi(client)
+
   return {
     getList: async (query: InvoiceQueryDto) => {
-      const params = new URLSearchParams({
-        pageIndex: String(query.pageIndex),
-        pageSize: String(query.pageSize),
-      })
-      if (query.status != null) params.set('status', String(query.status))
-      if (query.type != null) params.set('type', String(query.type))
-      if (query.searchText) params.set('searchText', query.searchText)
       const result = unwrap<{ items: InvoiceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
-        await client.get(`/admin/invoices?${params.toString()}`),
+        await api.getList({
+          pageIndex: query.pageIndex,
+          pageSize: query.pageSize,
+          status: query.status ?? undefined,
+          type: query.type ?? undefined,
+        } as never),
       )
       return {
         items: result.items ?? [],
@@ -98,15 +86,15 @@ export function createInvoiceBridge(deps: InvoiceBridgeDeps = {}): InvoiceBridge
       }
     },
     getById: async (id: string) =>
-      unwrap<InvoiceDto | null>(await client.get<InvoiceDto>(`/admin/invoices/${encodeURIComponent(id)}`)),
+      unwrap<InvoiceDto | null>(await api.get(id)),
     send: async (id: string, recipientEmail?: string) => {
-      await client.post(`/admin/invoices/${encodeURIComponent(id)}/send`, recipientEmail ? { recipientEmail } : {})
+      await api.send(id, recipientEmail ? { recipientEmail } : undefined)
     },
     markAsPaid: async (id: string, payload: MarkInvoicePaidDto) => {
-      await client.post(`/admin/invoices/${encodeURIComponent(id)}/mark-paid`, payload)
+      await api.markAsPaid(id, payload)
     },
     cancel: async (id: string, reason: string) => {
-      await client.post(`/admin/invoices/${encodeURIComponent(id)}/cancel`, { reason })
+      await api.cancel(id, reason)
     },
   }
 }

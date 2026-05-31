@@ -3,9 +3,14 @@ namespace Tnzi.AI.Entities;
 /// <summary>
 /// 工作流执行实例实体 — 持久化工作流的检查点状态
 /// </summary>
-public class WorkflowExecution : CreationAuditedEntity<Guid>, IMultiTenant
+public class WorkflowExecution : CreationAuditedEntity<Guid>, IMultiTenant, IConcurrencyStamp
 {
     public Guid? TenantId { get; set; }
+
+    /// <summary>
+    /// 乐观并发标记（每次更新时由框架 AuditPropertyHelper 自动变更）
+    /// </summary>
+    public string ConcurrencyStamp { get; set; } = string.Empty;
 
     /// <summary>
     /// 执行实例唯一标识（业务 ID，区别于数据库主键 Id）

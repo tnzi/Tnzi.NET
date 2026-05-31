@@ -1,6 +1,3 @@
-using Tnzi.AI.Dtos;
-using Tnzi.AI.Services.Interfaces;
-
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>

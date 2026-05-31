@@ -181,6 +181,53 @@ public class DefaultSkillControllerTests
         _skillService.Verify(s => s.CreateAsync(input), Times.Once);
     }
 
+    /// <summary>
+    /// PD-5: Self-service create endpoint must always force Scope=User,
+    /// even if the caller tries to specify Tenant or System scope.
+    /// </summary>
+    [Theory]
+    [InlineData(SkillScope.Tenant)]
+    [InlineData(SkillScope.System)]
+    public async Task Create_CallerRequestsElevatedScope_ForcesScopeToUser(SkillScope requestedScope)
+    {
+        CreateSkillDto? captured = null;
+        var created = new SkillDetailDto { Slug = "my-skill", Name = "My Skill" };
+        _skillService.Setup(s => s.CreateAsync(It.IsAny<CreateSkillDto>()))
+            .Callback<CreateSkillDto>(dto => captured = dto)
+            .ReturnsAsync(Result<SkillDetailDto>.Success(created));
+
+        var input = new CreateSkillDto
+        {
+            Slug = "my-skill",
+            Name = "My Skill",
+            Content = "Content",
+            Scope = requestedScope
+        };
+
+        var result = await _controller.Create(input);
+
+        result.Succeeded.ShouldBeTrue();
+        // The service must receive Scope=User regardless of the requested scope
+        captured.ShouldNotBeNull();
+        captured!.Scope.ShouldBe(SkillScope.User);
+    }
+
+    [Fact]
+    public async Task Create_CallerSendsUserScope_ScopeRemainsUser()
+    {
+        CreateSkillDto? captured = null;
+        var created = new SkillDetailDto { Slug = "user-skill" };
+        _skillService.Setup(s => s.CreateAsync(It.IsAny<CreateSkillDto>()))
+            .Callback<CreateSkillDto>(dto => captured = dto)
+            .ReturnsAsync(Result<SkillDetailDto>.Success(created));
+
+        var input = new CreateSkillDto { Slug = "user-skill", Name = "User Skill", Scope = SkillScope.User };
+
+        await _controller.Create(input);
+
+        captured!.Scope.ShouldBe(SkillScope.User);
+    }
+
     // -------------------------------------------------------------------------
     // Update
     // -------------------------------------------------------------------------

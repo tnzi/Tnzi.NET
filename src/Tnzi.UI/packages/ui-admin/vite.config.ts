@@ -32,8 +32,11 @@ export default defineConfig({
         pages: resolve(__dirname, 'src/pages/index.ts'),
         router: resolve(__dirname, 'src/router/index.ts'),
         stores: resolve(__dirname, 'src/stores/index.ts'),
-        template: resolve(__dirname, 'src/template/index.ts'),
         presets: resolve(__dirname, 'src/presets/index.ts'),
+        // locales barrel needs its own entry — consumers import the
+        // aggregate `@tnzi/ui-admin/locales`; without this entry,
+        // preserveModules tree-shakes the barrel and the subpath 404s.
+        'locales/index': resolve(__dirname, 'src/locales/index.ts'),
       },
       name: 'TnziUiAdmin',
       formats: ['es'],

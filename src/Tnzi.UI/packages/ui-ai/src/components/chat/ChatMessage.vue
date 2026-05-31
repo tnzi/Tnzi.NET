@@ -13,6 +13,7 @@ import type { FeedbackValue } from './MessageFeedback.vue';
 import MessageResponse from './MessageResponse.vue';
 import MessageAttachments from './MessageAttachments.vue';
 import MessageActions from './MessageActions.vue';
+import MessageFeedback from './MessageFeedback.vue';
 import Reasoning from '../reasoning/Reasoning.vue';
 import ToolCallDisplay from '../reasoning/ToolCallDisplay.vue';
 
@@ -138,6 +139,11 @@ const hasAttachments = computed(
             @copy="emit('copy', message.id)"
             @regenerate="emit('regenerate', message.id)"
             @edit="emit('edit', message.id)"
+          />
+          <MessageFeedback
+            v-if="showFeedback"
+            :value="null"
+            @feedback="(type, reason) => emit('feedback', message.id, type, reason)"
           />
         </slot>
       </div>

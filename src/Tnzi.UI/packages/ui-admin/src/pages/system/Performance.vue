@@ -115,6 +115,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createPerformanceBridge,
@@ -123,6 +124,7 @@ import {
   type SlowRequestRecordDto,
 } from '../../services/bridges/performance-bridge'
 import { interpolate, translatePageKey } from '../_shared/translate'
+import { methodTone } from '../_shared/http-method'
 
 const bridge = createPerformanceBridge({ client: useAdminClient() })
 
@@ -142,26 +144,10 @@ const windowOptions = [
   { value: 1440, label: '24 h' },
 ]
 
-function methodTone(m: string): 'success' | 'info' | 'warning' | 'error' | 'default' {
-  switch ((m ?? '').toUpperCase()) {
-    case 'GET': return 'info'
-    case 'POST': return 'success'
-    case 'PUT': return 'warning'
-    case 'PATCH': return 'warning'
-    case 'DELETE': return 'error'
-    default: return 'default'
-  }
-}
-
 function formatMs(v: number | undefined | null): string {
   if (v == null) return '—'
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
   return `${v.toFixed(1)} ms`
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
 }
 
 const endpointColumns: DataTableColumns<EndpointStatsDto> = [

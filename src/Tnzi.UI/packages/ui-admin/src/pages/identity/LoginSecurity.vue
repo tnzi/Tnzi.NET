@@ -129,6 +129,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createLoginSecurityBridge,
@@ -180,10 +181,6 @@ const failureProgressStatus = computed<'success' | 'warning' | 'error'>(() => {
 function formatPercent(n: number | undefined | null): string {
   if (n == null) return '—'
   return `${n.toFixed(2)}%`
-}
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
 }
 
 // Track which rows are currently being acted on so we can disable the

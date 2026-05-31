@@ -122,6 +122,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../../plugin/client'
 import {
   createChannelsBridge,
@@ -143,11 +144,6 @@ const channelStatus = ref<ChannelModuleStatusDto | null>(null)
 const gatewayStatus = ref<GatewayStatusDto | null>(null)
 const connections = ref<GatewayConnectionInfo[]>([])
 const bindings = ref<SessionBindingRuleDto[]>([])
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
-}
 
 function scopeLabel(s: number): string {
   // SessionScope enum: 0=Global / 1=PerPeer / 2=PerChannelPeer / 3=PerThread

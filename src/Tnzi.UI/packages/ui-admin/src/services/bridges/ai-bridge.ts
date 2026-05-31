@@ -121,8 +121,9 @@ import {
 import { useAdminKnowledgeBaseApi, useAdminWorkspaceAgentApi } from '@tnzi/core/services/ai'
 import type { WorkspaceAgentDto } from '@tnzi/core/services/ai'
 import { createPagedList } from '@tnzi/core'
-import type { ApiResult, PagedList } from '@tnzi/core'
+import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
+import { unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminAgentApi>[0]
@@ -246,38 +247,6 @@ export interface AiBridge {
   }
 }
 
-// ---- Helpers ---------------------------------------------------------------
-
-function mapQuery(q: CrudPageQuery): Record<string, unknown> {
-  return {
-    pageIndex: q.pageIndex,
-    pageSize: q.pageSize,
-    keyword: q.searchText || undefined,
-    sortBy: q.sortField,
-    sortOrder: q.sortOrder ?? undefined,
-    ...q.filters,
-  }
-}
-
-/**
- * HttpClient types its return as `ApiResult<T>`, but at runtime `normalizeApiResult`
- * (core 2026-03-25) unwraps the envelope so the runtime value is already `T`. This
- * helper aligns the compile-time type with runtime reality for call sites that store
- * the result in a typed local. It also defensively checks the real discriminator
- * (`success`, matching ApiResult — the original Phase 2b draft used the wrong
- * `succeeded` field name, which was corrected in Phase 5 Task 5.1 follow-up).
- */
-function unwrap<T>(res: ApiResult<T> | T): T {
-  if (
-    res &&
-    typeof res === 'object' &&
-    'success' in (res as object) &&
-    'data' in (res as object)
-  ) {
-    return (res as ApiResult<T>).data
-  }
-  return res as T
-}
 
 // 0.2.72+ (C4): `CrudPageResult<T>` is now an alias for `@tnzi/core`'s
 // `PagedList<T>`, so the legacy 4-field projection collapses to identity.

@@ -8,8 +8,8 @@ import TFormSchemaRenderer, { type FormSchemaItem } from '../../../src/pages/_sh
 const stubs = {
   Form: { template: '<form><slot /></form>' },
   FormItem: { props: ['label', 'path'], template: '<div class="form-item" :data-label="label"><slot /></div>' },
-  Input: { props: ['value', 'disabled'], emits: ['update:value'], template: '<input class="ipt" :value="value" :disabled="disabled" @input="$emit(\'update:value\', $event.target.value)" />' },
-  InputNumber: { props: ['value', 'disabled'], emits: ['update:value'], template: '<input type="number" class="ipt-num" :value="value" :disabled="disabled" @input="$emit(\'update:value\', Number($event.target.value))" />' },
+  Input: { props: ['value', 'disabled', 'readonly'], emits: ['update:value'], template: '<input class="ipt" :value="value" :disabled="disabled" :readonly="readonly" @input="$emit(\'update:value\', $event.target.value)" />' },
+  InputNumber: { props: ['value', 'disabled', 'readonly'], emits: ['update:value'], template: '<input type="number" class="ipt-num" :value="value" :disabled="disabled" :readonly="readonly" @input="$emit(\'update:value\', Number($event.target.value))" />' },
   Switch: { props: ['value', 'disabled'], emits: ['update:value'], template: '<button class="sw" :data-value="value" @click="$emit(\'update:value\', !value)"></button>' },
   Select: { props: ['value', 'options', 'disabled'], emits: ['update:value'], template: '<select class="sel" :disabled="disabled"></select>' },
   DatePicker: { props: ['value', 'disabled'], emits: ['update:value'], template: '<input type="date" class="dt" />' },
@@ -49,7 +49,11 @@ describe('TFormSchemaRenderer', () => {
     expect(wrapper.find('.sw').attributes('data-value')).toBe('true')
   })
 
-  it('readonly=true disables all inputs', () => {
+  it('readonly=true makes text/number inputs non-editable (readonly, not disabled)', () => {
+    // View-mode design: text-style fields (text / textarea / number) use the
+    // native `readonly` attribute (keeps normal text colour, stays readable
+    // for long content) rather than `disabled`. Non-text widgets
+    // (switch / select / date) use `disabled` since they lack `readonly`.
     const schema: FormSchemaItem[] = [
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'age',  label: 'Age',  type: 'number' },
@@ -58,8 +62,8 @@ describe('TFormSchemaRenderer', () => {
       props: { schema, model: {}, readonly: true },
       global: { stubs },
     })
-    expect((wrapper.find('.ipt').element as HTMLInputElement).disabled).toBe(true)
-    expect((wrapper.find('.ipt-num').element as HTMLInputElement).disabled).toBe(true)
+    expect((wrapper.find('.ipt').element as HTMLInputElement).readOnly).toBe(true)
+    expect((wrapper.find('.ipt-num').element as HTMLInputElement).readOnly).toBe(true)
   })
 
   it('skips items where `visible(model)` returns false', () => {

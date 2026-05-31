@@ -26,32 +26,46 @@ public class GatewayWebSocketHandler
     private readonly ILogger<GatewayWebSocketHandler> _logger;
     private readonly int _maxConnectionsPerUser;
     private readonly int _heartbeatIntervalSeconds;
+    private readonly bool _requireAuthentication;
 
-    public GatewayWebSocketHandler(IGateway gateway, IPresenceTracker presence, ILogger<GatewayWebSocketHandler> logger, int maxConnectionsPerUser = 5, int heartbeatIntervalSeconds = 30)
+    /// <summary>
+    /// Serializes all sends on this connection — WebSocket forbids overlapping SendAsync
+    /// calls (heartbeat vs stream), which otherwise corrupt frames / throw InvalidOperationException.
+    /// </summary>
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+    public GatewayWebSocketHandler(IGateway gateway, IPresenceTracker presence, ILogger<GatewayWebSocketHandler> logger, int maxConnectionsPerUser = 5, int heartbeatIntervalSeconds = 30, bool requireAuthentication = false)
     {
         _gateway = Check.NotNull(gateway);
         _presence = Check.NotNull(presence);
         _logger = Check.NotNull(logger);
         _maxConnectionsPerUser = maxConnectionsPerUser;
         _heartbeatIntervalSeconds = heartbeatIntervalSeconds;
+        _requireAuthentication = requireAuthentication;
     }
 
     /// <summary>处理 WebSocket 连接的完整生命周期</summary>
     public async Task HandleAsync(WebSocket ws, string? userId, CancellationToken ct)
     {
-        // 检查每用户最大连接数
-        if (userId != null)
+        // 要求认证时，拒绝匿名连接
+        if (_requireAuthentication && string.IsNullOrEmpty(userId))
         {
-            var existingConnections = _presence.GetConnections()
-                .Count(c => c.UserId == userId);
-            if (existingConnections >= _maxConnectionsPerUser)
-            {
-                _logger.LogWarning("Maximum connections per user exceeded: userId={UserId} existing={Count} max={Max}",
-                    userId, existingConnections, _maxConnectionsPerUser);
-                await ws.CloseAsync(WebSocketCloseStatus.PolicyViolation,
-                    "Maximum connections per user exceeded", CancellationToken.None);
-                return;
-            }
+            _logger.LogWarning("Rejecting anonymous WebSocket connection: AI:Channels:Gateway:RequireAuthentication is enabled");
+            await ws.CloseAsync(WebSocketCloseStatus.PolicyViolation,
+                "Authentication required", CancellationToken.None);
+            return;
+        }
+
+        // 检查每用户最大连接数 — 匿名连接共享 UserId==null 桶，同样受上限约束
+        var existingConnections = _presence.GetConnections()
+            .Count(c => c.UserId == userId);
+        if (existingConnections >= _maxConnectionsPerUser)
+        {
+            _logger.LogWarning("Maximum connections per user exceeded: userId={UserId} existing={Count} max={Max}",
+                userId ?? "<anonymous>", existingConnections, _maxConnectionsPerUser);
+            await ws.CloseAsync(WebSocketCloseStatus.PolicyViolation,
+                "Maximum connections per user exceeded", CancellationToken.None);
+            return;
         }
 
         var connectionId = Guid.NewGuid().ToString("N");
@@ -136,11 +150,13 @@ public class GatewayWebSocketHandler
                 }
                 catch { /* best effort */ }
             }
+
+            _sendLock.Dispose();
         }
     }
 
-    /// <summary>发送周期性心跳消息，检测并清理僵尸连接</summary>
-    private static async Task RunHeartbeatAsync(WebSocket ws, int intervalSeconds, CancellationToken ct)
+    /// <summary>发送周期性心跳消息，检测并清理僵尸连接（与流式发送共用 _sendLock 串行化）</summary>
+    private async Task RunHeartbeatAsync(WebSocket ws, int intervalSeconds, CancellationToken ct)
     {
         var interval = TimeSpan.FromSeconds(intervalSeconds);
         while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
@@ -151,9 +167,7 @@ public class GatewayWebSocketHandler
                 if (ws.State == WebSocketState.Open)
                 {
                     var heartbeat = new GatewayMessage { Type = "event", Method = "heartbeat" };
-                    var json = JsonSerializer.Serialize(heartbeat);
-                    var bytes = Encoding.UTF8.GetBytes(json);
-                    await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, endOfMessage: true, ct);
+                    await SendAsync(ws, heartbeat, ct);
                 }
             }
             catch (OperationCanceledException) { break; }
@@ -203,7 +217,7 @@ public class GatewayWebSocketHandler
         var payload = msg.Payload;
         var text = payload?.TryGetProperty("text", out var textElem) == true ? textElem.GetString() : null;
         var channel = payload?.TryGetProperty("channel", out var chanElem) == true ? chanElem.GetString() : "web";
-        var chatId = payload?.TryGetProperty("chatId", out var chatIdElem) == true ? chatIdElem.GetString() : userId;
+        var chatId = ResolveChatId(payload, userId);
 
         if (string.IsNullOrEmpty(text))
         {
@@ -215,7 +229,7 @@ public class GatewayWebSocketHandler
         var request = new GatewayRequest
         {
             Channel = channel ?? "web",
-            ChatId = chatId ?? "unknown",
+            ChatId = chatId,
             UserId = userId ?? "anonymous",
             UserMessage = text
         };
@@ -300,12 +314,46 @@ public class GatewayWebSocketHandler
         return ValidMethods.Contains(method);
     }
 
-    private static async Task SendAsync(WebSocket ws, GatewayMessage msg, CancellationToken ct)
+    /// <summary>
+    /// 解析 chat.send 的 chatId。已认证用户强制使用其身份作为 peer/session 标识，
+    /// 客户端提供的 chatId 仅作话题区分（绝不能用于冒充其他 peer）。匿名连接可自行选择 chatId。
+    /// </summary>
+    public static string ResolveChatId(JsonElement? payload, string? userId)
+    {
+        // 已认证：FORCE chatId = userId，忽略客户端提供的 chatId 作为 peer 身份
+        if (!string.IsNullOrEmpty(userId))
+        {
+            return userId;
+        }
+
+        // 匿名：使用客户端提供的 chatId，缺省回退到 "unknown"
+        var clientChatId = payload?.TryGetProperty("chatId", out var chatIdElem) == true
+            ? chatIdElem.GetString()
+            : null;
+        return string.IsNullOrEmpty(clientChatId) ? "unknown" : clientChatId;
+    }
+
+    /// <summary>
+    /// 通过 per-connection 信号量串行化的唯一发送入口。所有发送路径（心跳 + 流式 + 响应）
+    /// 都经此方法，确保对同一 WebSocket 不会有重叠 SendAsync 调用。
+    /// </summary>
+    private async Task SendAsync(WebSocket ws, GatewayMessage msg, CancellationToken ct)
     {
         if (ws.State != WebSocketState.Open) return;
 
         var json = JsonSerializer.Serialize(msg);
         var bytes = Encoding.UTF8.GetBytes(json);
-        await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
+
+        await _sendLock.WaitAsync(ct);
+        try
+        {
+            // 取锁后再次检查状态，避免在关闭竞争窗口内发送
+            if (ws.State != WebSocketState.Open) return;
+            await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 }

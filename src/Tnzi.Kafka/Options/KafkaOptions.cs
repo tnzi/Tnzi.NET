@@ -99,4 +99,27 @@ public class KafkaConsumerOptions
     /// 重连最大退避时间（秒，默认: 60）
     /// </summary>
     public int MaxReconnectBackoffSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// 处理器失败时的进程内最大重试次数（默认: 3，设为 0 表示失败即耗尽）。
+    /// 重试期间不提交偏移量，避免静默丢消息。
+    /// </summary>
+    public int MaxConsumeRetries { get; set; } = 3;
+
+    /// <summary>
+    /// 处理器失败重试的退避时间（毫秒，默认: 500）。
+    /// </summary>
+    public int ConsumeRetryBackoffMs { get; set; } = 500;
+
+    /// <summary>
+    /// 是否启用死信投递（默认: true）。
+    /// 启用时：重试耗尽后将原始消息投递到死信主题并提交偏移量（毒消息移走、分区继续推进）。
+    /// 禁用时：重试耗尽后不提交偏移量，等待重投（at-least-once，绝不静默丢弃）。
+    /// </summary>
+    public bool DeadLetterEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 死信主题后缀（默认: ".dlq"），最终死信主题为 "{原主题}{后缀}"。
+    /// </summary>
+    public string DeadLetterTopicSuffix { get; set; } = ".dlq";
 }

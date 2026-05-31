@@ -4,8 +4,9 @@ namespace Tnzi.AI.Engine.Workflow;
 /// 工作流状态 — 管理步骤间的输入/输出传递
 /// </summary>
 /// <remarks>
-/// 内部存储已从 string 升级为 <see cref="WorkflowStepOutput"/>，
-/// 通过隐式转换保持对旧 string API 的向后兼容。
+/// 输出以 <see cref="WorkflowStepOutput"/>（文本 + 元数据）存储，
+/// 同时暴露字符串兼容 API —— <see cref="SetOutput(string, string)"/> 依赖
+/// string 到 <see cref="WorkflowStepOutput"/> 的隐式转换。
 /// </remarks>
 public partial class WorkflowState
 {

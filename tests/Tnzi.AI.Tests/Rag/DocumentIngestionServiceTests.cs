@@ -13,8 +13,9 @@ public class DocumentIngestionServiceTests
     private readonly Mock<IEmbeddingService> _embeddingServiceMock = new();
     private readonly Mock<IRepository<DocumentChunk, Guid>> _chunkRepoMock = new();
     private readonly Mock<IRepository<KnowledgeBase, Guid>> _kbRepoMock = new();
+    private readonly Mock<IGraphExtractor> _graphExtractorMock = new();
 
-    private DocumentIngestionService CreateService(IAsyncChunkingStrategy? asyncStrategy = null)
+    private DocumentIngestionService CreateService(IAsyncChunkingStrategy? asyncStrategy = null, bool graphRagEnabled = false)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
@@ -26,7 +27,8 @@ public class DocumentIngestionServiceTests
             DefaultChunkOverlap = 64,
             EmbeddingBatchSize = 100,
             DefaultEmbeddingProvider = "openai",
-            DefaultEmbeddingModel = "text-embedding-3-small"
+            DefaultEmbeddingModel = "text-embedding-3-small",
+            GraphRag = new GraphRagOptions { Enabled = graphRagEnabled }
         });
 
         return new DocumentIngestionService(
@@ -35,6 +37,7 @@ public class DocumentIngestionServiceTests
             _embeddingServiceMock.Object,
             _chunkRepoMock.Object,
             _kbRepoMock.Object,
+            _graphExtractorMock.Object,
             options,
             serviceProviderMock.Object,
             asyncStrategy);
@@ -307,4 +310,81 @@ public class DocumentIngestionServiceTests
         result.Succeeded.ShouldBeTrue();
         result.ChunkCount.ShouldBe(5);
     }
+
+    #region GraphRAG wiring (D1)
+
+    /// <summary>
+    /// 配置一次成功的摄取所需的 extractor / chunking / embedding mock
+    /// </summary>
+    private void SetupSuccessfulPipeline(Guid kbId)
+    {
+        _extractorMock.Setup(e => e.Supports("test.txt")).Returns(true);
+        _extractorMock
+            .Setup(e => e.ExtractTextAsync(It.IsAny<Stream>(), "test.txt", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Document text content for graph extraction.");
+        SetupKnowledgeBase(kbId);
+
+        _chunkingStrategyMock
+            .Setup(c => c.Chunk(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(new List<string> { "Chunk one" });
+
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<List<float[]>>.Success(new List<float[]> { new float[] { 0.1f } }));
+    }
+
+    [Fact]
+    public async Task IngestAsync_GraphRagEnabled_CallsExtractAsync()
+    {
+        var kbId = Guid.NewGuid();
+        SetupSuccessfulPipeline(kbId);
+        _graphExtractorMock
+            .Setup(g => g.ExtractAsync(It.IsAny<string>(), kbId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GraphExtractionResult.Empty);
+
+        var service = CreateService(graphRagEnabled: true);
+        var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
+
+        result.Succeeded.ShouldBeTrue();
+        _graphExtractorMock.Verify(
+            g => g.ExtractAsync(It.IsAny<string>(), kbId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task IngestAsync_GraphRagDisabledByDefault_DoesNotCallExtractAsync()
+    {
+        var kbId = Guid.NewGuid();
+        SetupSuccessfulPipeline(kbId);
+
+        var service = CreateService(); // graphRagEnabled defaults to false
+        var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
+
+        result.Succeeded.ShouldBeTrue();
+        _graphExtractorMock.Verify(
+            g => g.ExtractAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task IngestAsync_GraphRagExtractionThrows_DoesNotFailIngestion()
+    {
+        var kbId = Guid.NewGuid();
+        SetupSuccessfulPipeline(kbId);
+        _graphExtractorMock
+            .Setup(g => g.ExtractAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("graph extraction blew up"));
+
+        var service = CreateService(graphRagEnabled: true);
+        var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
+
+        // 图谱抽取失败必须不影响主流程：向量摄取仍成功，chunk 已插入
+        result.Succeeded.ShouldBeTrue();
+        result.ChunkCount.ShouldBe(1);
+        _chunkRepoMock.Verify(
+            r => r.InsertManyAsync(It.IsAny<List<DocumentChunk>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    #endregion
 }

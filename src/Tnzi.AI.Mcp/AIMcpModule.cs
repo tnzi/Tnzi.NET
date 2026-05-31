@@ -1,7 +1,6 @@
 using ModelContextProtocol.AspNetCore;
 using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Services;
-using Tnzi.AI.Mcp.Services.Interfaces;
 using TnziMcpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 
 namespace Tnzi.AI.Mcp;
@@ -40,6 +39,9 @@ public class AIMcpModule : TnziApplicationModule
         var mcpServerOptions = context.Configuration.GetSection("AI:McpServer").Get<TnziMcpServerOptions>() ?? new TnziMcpServerOptions();
         var mcpHttpServiceProviderAccessor = new McpServerServiceProviderAccessor();
         var mcpHttpHandlerBridge = new McpServerHttpHandlerBridge(mcpHttpServiceProviderAccessor);
+
+        // IHttpContextAccessor — needed by McpServerHost to read the caller hash from HTTP context
+        services.AddHttpContextAccessor();
 
         // MCP Tool Analytics
         services.AddScoped<IMcpToolAnalyticsService, McpToolAnalyticsService>();

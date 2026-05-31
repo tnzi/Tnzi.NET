@@ -23,10 +23,21 @@ public static class GatewayMiddlewareExtensions
                 var logger = context.RequestServices.GetRequiredService<ILogger<GatewayWebSocketHandler>>();
                 var gatewayOptions = context.RequestServices.GetRequiredService<IOptions<GatewayOptions>>();
 
-                var handler = new GatewayWebSocketHandler(gateway, presence, logger, gatewayOptions.Value.MaxConnectionsPerUser, gatewayOptions.Value.HeartbeatIntervalSeconds);
+                var handler = new GatewayWebSocketHandler(gateway, presence, logger,
+                    gatewayOptions.Value.MaxConnectionsPerUser,
+                    gatewayOptions.Value.HeartbeatIntervalSeconds,
+                    gatewayOptions.Value.RequireAuthentication);
                 var userId = context.User?.Identity?.IsAuthenticated == true
                     ? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                     : null;
+
+                // 要求认证时，在 AcceptWebSocketAsync 之前用 HTTP 401 拒绝匿名连接
+                if (gatewayOptions.Value.RequireAuthentication && string.IsNullOrEmpty(userId))
+                {
+                    logger.LogWarning("Rejecting anonymous WebSocket connection with 401: RequireAuthentication is enabled");
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
 
                 using var ws = await context.WebSockets.AcceptWebSocketAsync();
                 await handler.HandleAsync(ws, userId, context.RequestAborted);

@@ -1,5 +1,3 @@
-using Tnzi.Options;
-
 namespace Tnzi.AI.Sandbox.Options;
 
 public class SandboxModuleOptionsValidator : OptionsValidatorBase<SandboxModuleOptions>

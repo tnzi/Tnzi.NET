@@ -60,16 +60,32 @@ public class EFCoreDbInitializer<TDbContext> : IDbInitializer
             return;
         }
 
-        // 数据库存在但没有迁移文件
-        // 检查是否有迁移历史表（这个操作需要查询数据库，较慢）
+        // 数据库存在但没有【待应用】迁移
+        // 检查是否有迁移历史记录（这个操作需要查询数据库，较慢）
         var appliedMigrations = await _dbContext.Database.GetAppliedMigrationsAsync(cancellationToken);
         var hasMigrationHistory = appliedMigrations.Any();
 
         if (hasMigrationHistory)
         {
-            // 有迁移历史但当前没有迁移文件，说明可能迁移文件被删除了
-            // 这种情况下，数据库结构应该已经是最新的，不需要做任何操作
-            _logger.LogDebug("Database has migration history but no migration files found. Database structure should be up to date.");
+            // 区分两种 "history 非空" 场景，避免多 DbContext 共享历史表时的静默误判：
+            var definedMigrations = _dbContext.Database.GetMigrations();
+            if (definedMigrations.Any())
+            {
+                // 本 context 有自己的迁移文件且无 pending —— schema 确实最新，无需操作
+                _logger.LogDebug("Database has migration history and no pending migrations. Schema is up to date.");
+            }
+            else
+            {
+                // 可疑：本 context 没有任何自己的迁移文件，历史表却非空。
+                // 这通常意味着它与其他 DbContext 共享了同一张 __EFMigrationsHistory 表
+                // （未配置独立 MigrationsHistoryTable），别的 context 的迁移记录被误判为本 context 已最新，
+                // 从而跳过本 context 的建表 —— 本 context 的表可能根本没创建（参见 RagDbContext 既往问题）。
+                _logger.LogWarning(
+                    "DbContext '{DbContextName}' has no migration files of its own, yet the migration history table is non-empty. " +
+                    "It likely shares '__EFMigrationsHistory' with another DbContext, so its tables may NOT have been created. " +
+                    "Configure an isolated MigrationsHistoryTable (separate schema/table) for this context, or add migrations for it.",
+                    typeof(TDbContext).Name);
+            }
             return;
         }
 

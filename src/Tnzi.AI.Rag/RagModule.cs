@@ -57,8 +57,19 @@ public class RagModule : TnziApplicationModule
             case "PostgreSQL":
                 services.AddSingleton<IVectorStore, PgVectorStore>();
                 break;
-            default: // "Auto" — 使用 TryAdd，允许用户提前注册自定义实现
-                services.TryAddSingleton<IVectorStore, PgVectorStore>();
+            default: // "Auto" — 覆盖 AIModule 的 NoOp 占位，但尊重用户预注册的自定义实现
+                // 不能用 TryAdd：AIModule 已用 TryAddScoped 注册了 NoOpVectorStore 占位，
+                // TryAdd 见到既有注册会直接跳过，导致 NoOp 一直生效、向量检索静默返空。
+                // 故检测最后一条 IVectorStore 注册：若为 NoOp 占位（INoOpService）或无注册则覆盖为
+                // PgVectorStore；若为用户预注册的真实实现则保留之。
+                var existing = services.LastOrDefault(d => d.ServiceType == typeof(IVectorStore));
+                var existingIsNoOp = existing?.ImplementationType is { } implType
+                    && typeof(INoOpService).IsAssignableFrom(implType);
+                if (existing is null || existingIsNoOp)
+                {
+                    services.RemoveAll<IVectorStore>();
+                    services.AddSingleton<IVectorStore, PgVectorStore>();
+                }
                 break;
         }
 
@@ -94,7 +105,6 @@ public class RagModule : TnziApplicationModule
 
         // 核心业务服务
         services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
-        services.AddScoped<IIncrementalIndexService, IncrementalIndexService>();
         services.AddScoped<IKnowledgeBaseService, KnowledgeBaseService>();
 
         // Parent Document Retriever（可选，通过 AI:Rag:ParentDocumentRetrieval:Enabled 启用）
@@ -135,13 +145,76 @@ public class RagModule : TnziApplicationModule
         if (hybridEnabled)
         {
             // 混合搜索模式：注册关键词搜索提供者 + HybridSearchService
-            services.TryAddScoped<IKeywordSearchProvider, InMemoryKeywordSearchProvider>();
+            // 关键词提供者按向量存储后端选择，与上方 IVectorStore 的 switch 保持一致：
+            // PostgreSQL / Auto → PgFullTextSearchProvider（tsvector + GIN 索引，DB 侧检索，
+            //   避免每次查询全表加载 + 内存分词的 O(N) 开销）；
+            // InMemory/其他 → InMemoryKeywordSearchProvider（全表加载 + 内存分词，仅开发/测试）。
+            // "Auto" 对应 PgVectorStore（见上方 IVectorStore switch），故关键词也走 PG 全文搜索。
+            // 仍用 TryAdd，应用可预先注册自定义实现以覆盖默认值。
+            switch (vectorStoreProvider)
+            {
+                case "InMemory":
+                    services.TryAddScoped<IKeywordSearchProvider, InMemoryKeywordSearchProvider>();
+                    break;
+                default: // "PostgreSQL"、"Auto" 及其他 → PG 全文搜索
+                    services.TryAddScoped<IKeywordSearchProvider, PgFullTextSearchProvider>();
+                    break;
+            }
+
             services.AddScoped<ITextSearchService, HybridSearchService>();
         }
         else
         {
             // 纯向量搜索模式（默认）
             services.AddScoped<ITextSearchService, VectorTextSearchService>();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 启动探测：确认配置的默认嵌入提供商可解析，否则 RAG 检索将静默失效（摄取/搜索在请求时返回空）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 仅做一次性探测并 <c>LogWarning</c>（不 throw）：RAG 可能是可选功能，且各知识库可配置自己的
+    /// 嵌入提供商（per-KB），因此 <c>DefaultEmbeddingProvider</c> 未设置时直接跳过探测。
+    /// </para>
+    /// </remarks>
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        var serviceProvider = context.ServiceProvider;
+        var logger = serviceProvider.GetRequiredService<ILogger<RagModule>>();
+        var options = serviceProvider.GetRequiredService<IOptions<AIRagOptions>>().Value;
+
+        // DefaultEmbeddingProvider 未设置时，各知识库使用 per-KB 提供商配置，跳过探测
+        if (string.IsNullOrWhiteSpace(options.DefaultEmbeddingProvider))
+        {
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            var factory = serviceProvider.GetRequiredService<IChatClientFactory>();
+            var generator = factory.GetEmbeddingGenerator(options.DefaultEmbeddingProvider, options.DefaultEmbeddingModel);
+
+            if (generator == null)
+            {
+                logger.LogWarning(
+                    "RAG default embedding provider '{Provider}' (model '{Model}') did not resolve to an embedding generator. "
+                    + "Document ingestion and retrieval will be NON-FUNCTIONAL until a provider with an embedding API is configured "
+                    + "(chat-only providers such as DeepSeek do not expose an embedding endpoint). "
+                    + "Configure AI:Rag:DefaultEmbeddingProvider to point at a provider that supports embeddings, or set a per-knowledge-base provider.",
+                    options.DefaultEmbeddingProvider, options.DefaultEmbeddingModel ?? "<default>");
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to resolve RAG default embedding provider '{Provider}' at startup. "
+                + "Document ingestion and retrieval will be NON-FUNCTIONAL until the embedding provider is configured correctly.",
+                options.DefaultEmbeddingProvider);
         }
 
         return Task.CompletedTask;

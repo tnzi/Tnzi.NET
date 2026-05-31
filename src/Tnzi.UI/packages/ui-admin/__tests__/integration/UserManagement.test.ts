@@ -90,9 +90,9 @@ describe('UserManagement page (integration)', () => {
     expect(wrapper.find('form').exists()).toBe(true)
   })
 
-  it('page title contains "User Management"', async () => {
+  it('page title resolves the "Users" i18n label', async () => {
     const wrapper = mount(UserManagement, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.text()).toContain('User Management')
+    expect(wrapper.text()).toContain('Users')
   })
 })

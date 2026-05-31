@@ -453,7 +453,14 @@ export class HttpClient {
   private async executeRequest<T>(config: RequestConfig): Promise<ApiResult<T>> {
     try {
       const fullUrl = this.buildUrl(config.url, config.params);
+      const isFormData = config.body instanceof FormData;
       const headers = this.buildHeaders(config.headers);
+      if (isFormData) {
+        // Let the browser set multipart/form-data with the correct boundary;
+        // a forced application/json Content-Type would corrupt the upload.
+        delete (headers as Record<string, string>)['Content-Type'];
+        delete (headers as Record<string, string>)['content-type'];
+      }
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), config.timeout ?? 30000);
@@ -471,7 +478,11 @@ export class HttpClient {
       const response = await fetch(fullUrl, {
         method: config.method,
         headers,
-        body: config.body ? JSON.stringify(config.body) : undefined,
+        body: isFormData
+          ? (config.body as FormData)
+          : config.body
+            ? JSON.stringify(config.body)
+            : undefined,
         signal,
         credentials: config.withCredentials ? 'include' : 'same-origin',
       });

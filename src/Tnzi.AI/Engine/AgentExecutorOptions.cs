@@ -72,4 +72,10 @@ public class AgentExecutorOptions
     /// tool_calls in the same assistant message. Default: false.
     /// </summary>
     public bool StripTextFromToolCallMessages { get; set; }
+
+    /// <summary>
+    /// 系统提示词段落提供器列表 — Build 时动态注入额外提示词段落。
+    /// 由 AgentFactory 从 DI 中解析并注入（Scoped 感知）。
+    /// </summary>
+    public IReadOnlyList<ISystemPromptSectionProvider>? SectionProviders { get; set; }
 }

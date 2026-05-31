@@ -8,92 +8,43 @@
  *   • GET    /admin/permissions/persisted-rules            (DB-persisted rules)
  *   • POST   /admin/permissions/persisted-rules            (create)
  *   • DELETE /admin/permissions/persisted-rules/{id}       (delete)
+ *
+ * DTOs + enums + the raw API factory live in `@tnzi/core/services/ai`
+ * (`permission.ts`). This bridge delegates to `usePermissionAdminApi(client)`
+ * and adds the tolerant `unwrap` + empty-on-404 shaping the page expects.
+ *
+ * Enum compatibility: core models `PermissionBehavior` / `ToolPermissionScope`
+ * as numeric enums (Allow=0 / Ask=1 / Deny=2; System=0 / Project=1 / User=2 /
+ * Session=3). The previous bridge used `0 | 1 | 2`(`| 3`) numeric unions.
+ * Numeric enum members are numeric literals, so the consuming page's
+ * `switch (n) { case 0: … }` checks and `value: 0` NSelect options stay
+ * compatible — `PermissionRules.vue` is unchanged. Both the enums (value) and
+ * the types are re-exported so existing imports keep resolving.
  */
 import type { HttpClient } from '@tnzi/core/http'
+import { usePermissionAdminApi, PermissionBehavior, ToolPermissionScope } from '@tnzi/core/services/ai'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export type PermissionBehavior = 0 | 1 | 2 // Allow / Ask / Deny
-export type ToolPermissionScope = 0 | 1 | 2 | 3 // System / Project / User / Session
+// Re-export the enums as runtime values (consumers may import them as values
+// or, as PermissionRules.vue does, as types).
+export { PermissionBehavior, ToolPermissionScope }
 
-export interface PermissionRuleItemDto {
-  toolPattern: string
-  toolGroup?: string | null
-  commandPrefix?: string | null
-  serverName?: string | null
-  pathPrefix?: string | null
-  isSubAgentOnly: boolean
-  subAgentName?: string | null
-  isWorkflowOnly: boolean
-  workflowNodeName?: string | null
-  behavior: PermissionBehavior
-  scope: ToolPermissionScope
-  priority: number
-  isDestructiveOnly: boolean
-  reason?: string | null
-}
+export type {
+  PermissionRuleItemDto,
+  PermissionRulesDto,
+  PersistedPermissionRuleDto,
+  CreatePersistedPermissionRuleDto,
+  PermissionEvaluateRequestDto,
+  PermissionEvaluateResultDto,
+} from '@tnzi/core/services/ai'
 
-export interface PermissionRulesDto {
-  hasRules: boolean
-  sessionRules: PermissionRuleItemDto[]
-}
-
-export interface PersistedPermissionRuleDto {
-  id: string
-  toolPattern?: string | null
-  toolGroup?: string | null
-  commandPrefix?: string | null
-  serverName?: string | null
-  pathPrefix?: string | null
-  behavior: PermissionBehavior
-  scope: ToolPermissionScope
-  priority: number
-  isDestructiveOnly: boolean
-  isSubAgentOnly: boolean
-  reason?: string | null
-  userId?: string | null
-  isEnabled: boolean
-  creationTime: string
-  lastModificationTime?: string | null
-}
-
-export interface CreatePersistedPermissionRuleDto {
-  toolPattern?: string | null
-  toolGroup?: string | null
-  commandPrefix?: string | null
-  serverName?: string | null
-  pathPrefix?: string | null
-  behavior: PermissionBehavior
-  scope: ToolPermissionScope
-  priority: number
-  isDestructiveOnly: boolean
-  isSubAgentOnly: boolean
-  reason?: string | null
-  userId?: string | null
-  isEnabled: boolean
-}
-
-export interface PermissionEvaluateRequestDto {
-  toolName: string
-  toolGroup?: string | null
-  serverName?: string | null
-  isSubAgent?: boolean
-  subAgentName?: string | null
-  isDestructive?: boolean
-  shellCommand?: string | null
-  workingDirectory?: string | null
-}
-
-export interface PermissionEvaluateResultDto {
-  toolName: string
-  behavior: PermissionBehavior
-  reason?: string | null
-  scope?: ToolPermissionScope | null
-  matchedRulePattern?: string | null
-  matchedToolGroup?: string | null
-  matchedServerName?: string | null
-  matchedPathPrefix?: string | null
-  matchedSubAgentName?: string | null
-  matchedWorkflowNodeName?: string | null
-}
+import type {
+  PermissionRulesDto,
+  PersistedPermissionRuleDto,
+  CreatePersistedPermissionRuleDto,
+  PermissionEvaluateRequestDto,
+  PermissionEvaluateResultDto,
+} from '@tnzi/core/services/ai'
 
 export interface PermissionBridgeDeps {
   client?: HttpClient
@@ -105,13 +56,6 @@ export interface PermissionBridge {
   getPersistedRules(): Promise<PersistedPermissionRuleDto[]>
   createPersistedRule(input: CreatePersistedPermissionRuleDto): Promise<PersistedPermissionRuleDto | null>
   deletePersistedRule(id: string): Promise<void>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createPermissionBridge(deps: PermissionBridgeDeps = {}): PermissionBridge {
@@ -128,25 +72,19 @@ export function createPermissionBridge(deps: PermissionBridgeDeps = {}): Permiss
     }
   }
 
+  const api = usePermissionAdminApi(client)
+
   return {
     getRules: async () =>
-      unwrap<PermissionRulesDto | null>(
-        await client.get<PermissionRulesDto>('/admin/permissions/rules'),
-      ),
+      unwrap<PermissionRulesDto | null>(await api.getRules()),
     evaluate: async (req) =>
-      unwrap<PermissionEvaluateResultDto | null>(
-        await client.post<PermissionEvaluateResultDto>('/admin/permissions/rules/evaluate', req),
-      ),
+      unwrap<PermissionEvaluateResultDto | null>(await api.evaluate(req)),
     getPersistedRules: async () =>
-      unwrap<PersistedPermissionRuleDto[]>(
-        await client.get<PersistedPermissionRuleDto[]>('/admin/permissions/persisted-rules'),
-      ) ?? [],
+      unwrap<PersistedPermissionRuleDto[]>(await api.getPersistedRules()) ?? [],
     createPersistedRule: async (input) =>
-      unwrap<PersistedPermissionRuleDto | null>(
-        await client.post<PersistedPermissionRuleDto>('/admin/permissions/persisted-rules', input),
-      ),
+      unwrap<PersistedPermissionRuleDto | null>(await api.createPersistedRule(input)),
     deletePersistedRule: async (id: string) => {
-      await client.delete(`/admin/permissions/persisted-rules/${encodeURIComponent(id)}`)
+      await api.deletePersistedRule(id)
     },
   }
 }

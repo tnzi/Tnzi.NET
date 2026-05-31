@@ -46,6 +46,15 @@ public class AgentPersonaService : ApplicationService, IAgentPersonaService
 
         input.MapTo(entity);
         await _repository.UpdateAsync(entity, ct);
+
+        // Notify ContextInjectionMiddleware so cached Soul content for this persona
+        // is evicted immediately rather than at the next 5-minute TTL boundary.
+        await PublishCacheInvalidationAsync(new AgentPersonaUpdatedEvent
+        {
+            PersonaId = entity.Id,
+            Slug = entity.Slug
+        });
+
         return Ok(entity.MapTo<AgentPersonaDto>());
     }
 
@@ -59,7 +68,31 @@ public class AgentPersonaService : ApplicationService, IAgentPersonaService
             return Fail("Cannot delete system persona.", 403);
 
         await _repository.DeleteAsync(id, ct);
+
+        await PublishCacheInvalidationAsync(new AgentPersonaDeletedEvent
+        {
+            PersonaId = id
+        });
+
         return Ok();
+    }
+
+    /// <summary>
+    /// Best-effort fire-and-forget event publish — failure is logged but never
+    /// propagated to the caller. Cache invalidation is a hint, not a guarantee.
+    /// </summary>
+    private async Task PublishCacheInvalidationAsync(EventBase evt)
+    {
+        try
+        {
+            var bus = EventBus;
+            if (bus == null) return;
+            await bus.PublishAsync(evt);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish persona cache invalidation event ({EventType})", evt.GetType().Name);
+        }
     }
 
     public async Task<Result<AgentPersonaDto>> GetByIdAsync(Guid id, CancellationToken ct = default)

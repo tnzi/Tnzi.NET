@@ -56,16 +56,6 @@ public partial class AIModule
             // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
         }
 
-        using (var workflowScope = serviceProvider.CreateScope())
-        {
-            var workflowService = workflowScope.ServiceProvider.GetRequiredService<IWorkflowService>();
-            if (workflowService is INoOpService)
-            {
-                logger.LogInformation(
-                    "IWorkflowService is a no-op fallback; workflow APIs will return 501 until a workflow module is loaded.");
-            }
-        }
-
         if (options.ContextProviders.Enabled
             && options.ContextProviders.Skills.Enabled)
         {
@@ -77,35 +67,60 @@ public partial class AIModule
             }
         }
 
-        using (var scope = serviceProvider.CreateScope())
+        // 统一探测所有可选子模块的 NoOp 回退实现（仅信息级日志，不抛出）。
+        // 每项对应 AIModule.ConfigureServicesAsync 中的一个 TryAdd NoOp 注册；
+        // 加载相应子模块后会被真实实现覆盖。新增 NoOp 回退时必须在此追加一行。
+        // 注意：ITextSearchService 的 NoOp 回退是有条件的硬错误（见上方），不在此列。
+        foreach (var (serviceType, message) in NoOpFallbackProbes)
         {
-            if (scope.ServiceProvider.GetService<IExternalCliExecutor>() is INoOpService)
+            using var scope = serviceProvider.CreateScope();
+            if (scope.ServiceProvider.GetService(serviceType) is INoOpService)
             {
-                logger.LogInformation(
-                    "IExternalCliExecutor is a no-op fallback; ExternalCli agents will fail at runtime until Tnzi.AI.Cli module is loaded.");
-            }
-
-            if (scope.ServiceProvider.GetService<IWorkflowExecutionMailbox>() is INoOpService)
-            {
-                logger.LogInformation(
-                    "IWorkflowExecutionMailbox is a no-op fallback; workflow signal dispatch will be unavailable until a workflow module is loaded.");
-            }
-
-            if (scope.ServiceProvider.GetService<IVectorStore>() is INoOpService)
-            {
-                logger.LogInformation(
-                    "IVectorStore is a no-op fallback; vector search will return empty results until Tnzi.AI.Rag module is loaded.");
-            }
-
-            if (scope.ServiceProvider.GetService<ISkillService>() is INoOpService)
-            {
-                logger.LogInformation(
-                    "ISkillService is a no-op fallback; skill management APIs will return 501 until Tnzi.AI.Skills module is loaded.");
+                logger.LogInformation("{Message}", message);
             }
         }
 
         logger.LogDebug("AI runtime configuration validation passed.");
     }
+
+    /// <summary>
+    /// 可选子模块 NoOp 回退探测表 — 覆盖 <see cref="INoOpService"/> 的全部回退注册。
+    /// </summary>
+    /// <remarks>
+    /// 不包含 <c>ITextSearchService</c>：当 TextSearch/ChatHistoryMemory 启用却仍是 NoOp 时，
+    /// 它是一个有条件的硬错误（抛出），而非信息级降级。
+    /// </remarks>
+    private static readonly (Type ServiceType, string Message)[] NoOpFallbackProbes =
+    [
+        (typeof(IWorkflowService),
+            "IWorkflowService is a no-op fallback; workflow APIs will return 501 until Tnzi.AI.Workflow module is loaded."),
+        (typeof(IWorkflowExecutionControlService),
+            "IWorkflowExecutionControlService is a no-op fallback; workflow run control will be unavailable until Tnzi.AI.Workflow module is loaded."),
+        (typeof(IWorkflowExecutionQueryService),
+            "IWorkflowExecutionQueryService is a no-op fallback; workflow run queries will be unavailable until Tnzi.AI.Workflow module is loaded."),
+        (typeof(IWorkflowExecutionMailbox),
+            "IWorkflowExecutionMailbox is a no-op fallback; workflow signal dispatch will be unavailable until Tnzi.AI.Workflow module is loaded."),
+        (typeof(IExternalCliExecutor),
+            "IExternalCliExecutor is a no-op fallback; ExternalCli agents will fail at runtime until Tnzi.AI.Cli module is loaded."),
+        (typeof(IAgentStreamForwarder),
+            "IAgentStreamForwarder is a no-op fallback; cross-process agent stream forwarding will be unavailable until a forwarder is registered."),
+        (typeof(IVectorStore),
+            "IVectorStore is a no-op fallback; vector search will return empty results until Tnzi.AI.Rag module is loaded."),
+        (typeof(ISkillLoadTracker),
+            "ISkillLoadTracker is a no-op fallback; skill load tracking will be unavailable until Tnzi.AI.Skills module is loaded."),
+        (typeof(ISkillService),
+            "ISkillService is a no-op fallback; skill management APIs will return 501 until Tnzi.AI.Skills module is loaded."),
+        (typeof(ISkillStore),
+            "ISkillStore is a no-op fallback; skill storage will be unavailable until Tnzi.AI.Skills module is loaded."),
+        (typeof(ISkillTemplateEngine),
+            "ISkillTemplateEngine is a no-op fallback; skill template rendering will be unavailable until Tnzi.AI.Skills module is loaded."),
+        (typeof(ISkillConstraintEnforcer),
+            "ISkillConstraintEnforcer is a no-op fallback; skill constraint enforcement will be unavailable until Tnzi.AI.Skills module is loaded."),
+        (typeof(ISkillSearchService),
+            "ISkillSearchService is a no-op fallback; skill search will be unavailable until Tnzi.AI.Skills module is loaded."),
+        (typeof(ISkillRequirementsValidator),
+            "ISkillRequirementsValidator is a no-op fallback; skill requirements validation will be unavailable until Tnzi.AI.Skills module is loaded."),
+    ];
 
     /// <summary>
     /// 校验所有工具的 [RequiresSkill] 引用是否指向已注册的 Skill

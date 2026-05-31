@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Tnzi.AI.Tools.Sql;
 
 /// <summary>

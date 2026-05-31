@@ -9,6 +9,7 @@ public class EvaluationMetricsServiceTests
 
     private readonly Mock<IRepository<EvaluationRun, Guid>> _repository = new();
     private readonly Mock<IAgentEvaluator> _evaluator = new();
+    private readonly Mock<IServiceScopeFactory> _scopeFactory = new();
     private readonly IServiceProvider _serviceProvider;
 
     public EvaluationMetricsServiceTests()
@@ -20,10 +21,25 @@ public class EvaluationMetricsServiceTests
         var services = new ServiceCollection();
         services.AddLogging();
         _serviceProvider = services.BuildServiceProvider();
+
+        // Default scope factory: each scope resolves a fresh EvaluationService with
+        // the same mocked repository/evaluator so RunBatchAsync tests keep working.
+        _scopeFactory
+            .Setup(f => f.CreateScope())
+            .Returns(() =>
+            {
+                var noopScopeFactory = new Mock<IServiceScopeFactory>();
+                var scopedSvc = new EvaluationService(_serviceProvider, _repository.Object, _evaluator.Object, noopScopeFactory.Object);
+                var sp = new Mock<IServiceProvider>();
+                sp.Setup(p => p.GetService(typeof(IEvaluationService))).Returns(scopedSvc);
+                var scope = new Mock<IServiceScope>();
+                scope.Setup(s => s.ServiceProvider).Returns(sp.Object);
+                return scope.Object;
+            });
     }
 
     private EvaluationMetricsService CreateMetricsService() => new(_serviceProvider, _repository.Object);
-    private EvaluationService CreateEvaluationService() => new(_serviceProvider, _repository.Object, _evaluator.Object);
+    private EvaluationService CreateEvaluationService() => new(_serviceProvider, _repository.Object, _evaluator.Object, _scopeFactory.Object);
 
     private static EvaluationRun MakeRun(
         Guid? id = null,

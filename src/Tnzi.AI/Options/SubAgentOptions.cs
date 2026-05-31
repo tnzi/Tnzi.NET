@@ -7,6 +7,16 @@ public class SubAgentOptions
     public int TimeoutSeconds { get; set; } = 900;
 
     /// <summary>
+    /// 调用链最大深度（根 → 叶，默认 5）。超过此深度拒绝 Spawn。
+    /// </summary>
+    public int MaxDepth { get; set; } = 5;
+
+    /// <summary>
+    /// 单个根 Run 下最大后代数量（默认 25）。超过此数量拒绝 Spawn。
+    /// </summary>
+    public int MaxDescendantsPerRoot { get; set; } = 25;
+
+    /// <summary>
     /// 全局禁止的工具名称列表（所有 Agent 包括主 Agent 均不可使用）
     /// </summary>
     public List<string> GlobalDisallowedTools { get; set; } = [];

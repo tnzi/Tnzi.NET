@@ -62,6 +62,11 @@ public class AICoderModule : TnziApplicationModule
         // （因为 ToolAdapter 从 Singleton ServiceProvider 解析工具实例）
         services.AddSingleton<FileSystemTools>();
         services.AddSingleton<ShellTools>();
+        // BashTools and PowerShellTools are both registered regardless of OS.
+        // Each class has an in-method OS guard that returns a clear "only available on {platform} hosts"
+        // result when invoked on the wrong platform — no exception, graceful denial.
+        // ToolScanner scans by assembly reflection, so both appear in the LLM tool list; the
+        // in-method guard is the correct enforcement layer rather than DI-level gating.
         services.AddSingleton<BashTools>();
         services.AddSingleton<PowerShellTools>();
         services.AddSingleton<CodeSearchTools>();

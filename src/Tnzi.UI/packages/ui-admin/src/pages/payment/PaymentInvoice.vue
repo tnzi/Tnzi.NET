@@ -112,6 +112,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateOnly as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createInvoiceBridge,
@@ -134,24 +135,22 @@ const pageSize = ref(20)
 const searchText = ref('')
 const statusFilter = ref<number | null>(null)
 
-// InvoiceStatus enum (mirror): 0=Draft, 1=Pending, 2=Sent, 3=Paid, 4=PartiallyPaid, 5=Overdue, 6=Cancelled, 7=Refunded
+// InvoiceStatus enum (mirrors backend Tnzi.Payment.Metadata.InvoiceStatus):
+// 0=Draft, 1=Pending, 2=Sent, 3=Paid, 4=Overdue, 5=Cancelled
 const statusOptions = [
   { value: 0, label: t('status.draft') },
   { value: 1, label: t('status.pending') },
   { value: 2, label: t('status.sent') },
   { value: 3, label: t('status.paid') },
-  { value: 4, label: t('status.partiallyPaid') },
-  { value: 5, label: t('status.overdue') },
-  { value: 6, label: t('status.cancelled') },
-  { value: 7, label: t('status.refunded') },
+  { value: 4, label: t('status.overdue') },
+  { value: 5, label: t('status.cancelled') },
 ]
 function statusTone(s: number): 'success' | 'warning' | 'error' | 'info' | 'default' {
   switch (s) {
     case 3: return 'success'
-    case 4: return 'warning'
-    case 5: return 'error'
-    case 6: return 'default'
     case 2: return 'info'
+    case 4: return 'error'
+    case 5: return 'default'
     default: return 'default'
   }
 }
@@ -165,11 +164,6 @@ function formatMoney(n: number, currency: string): string {
     return `${n.toFixed(2)} ${currency}`
   }
 }
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleDateString() } catch { return iso }
-}
-
 const columns: DataTableColumns<InvoiceDto> = [
   {
     title: () => t('cols.status'),
@@ -225,8 +219,8 @@ const columns: DataTableColumns<InvoiceDto> = [
           ),
         )
       }
-      // Mark-paid: only when unpaid
-      if (row.status !== 3 && row.status !== 6 && row.status !== 7) {
+      // Mark-paid: only when unpaid (not Paid / Cancelled)
+      if (row.status !== 3 && row.status !== 5) {
         buttons.push(
           h(NButton, { size: 'tiny', type: 'primary', tertiary: true, onClick: () => openMarkPaid(row) }, {
             icon: () => h(TSvgIcon, { icon: 'mdi:cash-check', size: 12 }),
@@ -235,7 +229,7 @@ const columns: DataTableColumns<InvoiceDto> = [
         )
       }
       // Cancel: only when not already cancelled / paid
-      if (row.status !== 3 && row.status !== 6) {
+      if (row.status !== 3 && row.status !== 5) {
         buttons.push(
           h(NButton, { size: 'tiny', type: 'warning', tertiary: true, onClick: () => openCancel(row) }, {
             icon: () => h(TSvgIcon, { icon: 'mdi:close-circle-outline', size: 12 }),

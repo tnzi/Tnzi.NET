@@ -9,7 +9,10 @@ export * from './components'
 export * from './headless'
 export * from './pages'
 export * from './stores'
-export * from './template'
+// Real route table + auth/permission guards. (Replaced the legacy
+// `./template` barrel, whose `defaultAdminRoutes` was an empty [] that
+// shadowed the real 64-route table shipped here.)
+export * from './router'
 export * from './plugin'
 export * from './presets'
 // Phase J (0.2.71+): Workbench widget system. Exposes the WidgetDef

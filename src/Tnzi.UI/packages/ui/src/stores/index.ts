@@ -6,8 +6,8 @@
 
 // Store composables
 export { useAuth, resetAuthRuntime } from './auth';
-export { useUser } from './user';
-export { useApp } from './app';
+export { useUser, resetUserRuntime } from './user';
+export { useApp, resetAppRuntime } from './app';
 
 // Raw Pinia stores
 export { useAuthStore } from './auth';

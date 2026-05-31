@@ -81,24 +81,9 @@ public class ToolDefinition
     public IReadOnlyList<string> Aliases { get; set; } = [];
 
     /// <summary>
-    /// 是否默认延迟加载
-    /// </summary>
-    public bool ShouldDefer { get; set; }
-
-    /// <summary>
-    /// 是否始终预加载
-    /// </summary>
-    public bool AlwaysLoad { get; set; }
-
-    /// <summary>
     /// 搜索优先级。值越高越优先。
     /// </summary>
     public int Priority { get; set; }
-
-    /// <summary>
-    /// 服务端提示（例如 MCP server 名称）
-    /// </summary>
-    public string? ServerHint { get; set; }
 
     /// <summary>
     /// 工具中断行为

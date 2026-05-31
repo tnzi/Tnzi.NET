@@ -212,6 +212,65 @@ public class AgentVersionRouterTests
         result.Agent.TenantId.ShouldBe(tenantId);
     }
 
+    /// <summary>
+    /// A/B-routed variants must be able to diverge persona. Historical bug:
+    /// ApplySnapshot hardcoded `PersonaId = original.PersonaId`, so any A/B test
+    /// targeting different Soul content was silently no-op — both A and B routed
+    /// through the live PersonaId, defeating the whole purpose of the experiment.
+    /// Snapshot.PersonaId must win when present.
+    /// </summary>
+    [Fact]
+    public async Task RouteAsync_SnapshotPersonaIdWinsOverOriginal()
+    {
+        var agentId = Guid.NewGuid();
+        var livePersonaId = Guid.NewGuid();
+        var variantBPersonaId = Guid.NewGuid();
+
+        var config = """{"abTest":{"enabled":true,"versionA":1,"versionB":2,"trafficPercentB":100}}""";
+        var agent = CreateAgent(agentId, config);
+        agent.PersonaId = livePersonaId; // current "control" persona
+
+        // Version B snapshot ships a DIFFERENT persona
+        var versionB = CreateVersionEntityWithPersona(agentId, 2, "Variant B", variantBPersonaId);
+        var router = CreateRouter(versions: [versionB]);
+
+        var result = await router.RouteAsync(agent, CancellationToken.None);
+
+        result.IsAbTestRouted.ShouldBeTrue();
+        result.SelectedVariant.ShouldBe("B");
+        // CRITICAL: routed Agent.PersonaId must be the snapshot's, not original's.
+        // If this regresses, A/B experiments on persona become silently meaningless.
+        result.Agent.PersonaId.ShouldBe(variantBPersonaId);
+        // Original control Agent unchanged
+        agent.PersonaId.ShouldBe(livePersonaId);
+    }
+
+    /// <summary>
+    /// Legacy snapshot rows (taken before PersonaId was added to AgentConfigSnapshot)
+    /// deserialize with PersonaId = null. ApplySnapshot must fall back to original.PersonaId
+    /// so an A/B test referencing a pre-existing version doesn't drop persona entirely.
+    /// </summary>
+    [Fact]
+    public async Task RouteAsync_LegacySnapshotWithoutPersonaId_FallsBackToOriginal()
+    {
+        var agentId = Guid.NewGuid();
+        var livePersonaId = Guid.NewGuid();
+
+        var config = """{"abTest":{"enabled":true,"versionA":1,"versionB":2,"trafficPercentB":100}}""";
+        var agent = CreateAgent(agentId, config);
+        agent.PersonaId = livePersonaId;
+
+        // Legacy snapshot without PersonaId (mirrors AgentVersion rows from before this PR)
+        var legacyVersion = CreateVersionEntity(agentId, 2, "Legacy B");
+        var router = CreateRouter(versions: [legacyVersion]);
+
+        var result = await router.RouteAsync(agent, CancellationToken.None);
+
+        result.IsAbTestRouted.ShouldBeTrue();
+        // Fallback path keeps the live persona — no surprise loss
+        result.Agent.PersonaId.ShouldBe(livePersonaId);
+    }
+
     [Fact]
     public async Task RouteAsync_InvalidSnapshotJson_ReturnsPassthrough()
     {
@@ -473,6 +532,9 @@ public class AgentVersionRouterTests
     }
 
     private static AgentVersion CreateVersionEntity(Guid agentId, int version, string name)
+        => CreateVersionEntityWithPersona(agentId, version, name, personaId: null);
+
+    private static AgentVersion CreateVersionEntityWithPersona(Guid agentId, int version, string name, Guid? personaId)
     {
         var snapshot = new
         {
@@ -492,7 +554,8 @@ public class AgentVersionRouterTests
             Roles = (List<string>?)null,
             QualityTier = 3,
             LatencyTier = 3,
-            CostTier = 3
+            CostTier = 3,
+            PersonaId = personaId
         };
 
         return new AgentVersion

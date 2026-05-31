@@ -137,6 +137,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateOnly as formatDate } from '@tnzi/core'
 import TWidgetLineChart from '../../widgets/builtin/TWidgetLineChart.vue'
 import { useAdminClient } from '../../plugin/client'
 import {
@@ -189,9 +190,6 @@ function formatPercent(n: number | null | undefined): string {
   if (n == null) return '—'
   return `${(n * 100).toFixed(2)}%`
 }
-function formatDate(iso: string): string {
-  try { return new Date(iso).toLocaleDateString() } catch { return iso }
-}
 
 const trendCategories = computed(() => trend.value.map((p) => formatDate(p.date)))
 const trendSeries = computed(() => [
@@ -216,15 +214,17 @@ const channelColumns: DataTableColumns<ChannelStatisticsDto> = [
   },
 ]
 
+// Columns mirror the backend `PlanDistributionDto` (planName /
+// subscriptionCount / revenue). There is no `planCode` server-side, so it is
+// not surfaced.
 const planColumns: DataTableColumns<PlanDistributionDto> = [
-  { title: () => t('cols.planCode'), key: 'planCode' },
   { title: () => t('cols.planName'), key: 'planName' },
-  { title: () => t('cols.subscribers'), key: 'subscriberCount', align: 'right' },
+  { title: () => t('cols.subscribers'), key: 'subscriptionCount', align: 'right' },
   {
     title: () => t('cols.monthlyRevenue'),
-    key: 'monthlyRevenue',
+    key: 'revenue',
     align: 'right',
-    render: (row) => formatMoney(row.monthlyRevenue),
+    render: (row) => formatMoney(row.revenue),
   },
 ]
 

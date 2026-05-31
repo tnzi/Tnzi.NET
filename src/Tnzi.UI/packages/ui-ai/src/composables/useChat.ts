@@ -61,6 +61,10 @@ export interface ChatMessage {
   parentId?: string | null;
   /** Feedback rating (true = positive, false = negative, null = none). */
   feedbackRating?: boolean | null;
+  /** Lifecycle status — 'error'/'stopped' render dedicated UI in TChatApp/ChatMessage. */
+  status?: 'streaming' | 'done' | 'stopped' | 'error';
+  /** Error message shown when status === 'error'. */
+  error?: string | null;
 }
 
 export interface UseChatOptions {

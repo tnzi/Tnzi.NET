@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import AuthLayout from '../../../src/components/layout/AuthLayout.vue'
-import BlankLayout from '../../../src/components/layout/BlankLayout.vue'
-import CenteredLayout from '../../../src/components/layout/CenteredLayout.vue'
+import AuthLayout from '../../../src/components/layout/TAuthLayout.vue'
+import BlankLayout from '../../../src/components/layout/TBlankLayout.vue'
+import CenteredLayout from '../../../src/components/layout/TCenteredLayout.vue'
 
 describe('AuthLayout', () => {
   it('renders default slot centered', () => {

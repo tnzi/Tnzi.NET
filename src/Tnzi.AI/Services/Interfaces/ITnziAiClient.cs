@@ -1,5 +1,3 @@
-using Tnzi.AI.Models;
-
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>

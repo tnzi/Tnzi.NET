@@ -191,6 +191,103 @@ public class MemoryContextProviderRetrievalTests
     }
 
     [Fact]
+    public async Task GetContextAsync_AgentBoundScope_InjectsAgentMemory_Headless()
+    {
+        // 回归测试：Agent X 的 agent-bound 记忆必须在该 Agent 运行时被注入，
+        // 即使没有当前用户（headless）。本地 scope 无记忆（模拟 headless 无用户记忆）。
+        var agentId = Guid.NewGuid();
+        var localScope = new MemoryScope("default"); // headless: 无 UserId
+        var agentBoundScope = MemoryScope.ForAgent(agentId, "default");
+
+        var store = new Mock<IMemoryStore>();
+        // 本地 scope 读取无内容
+        store.Setup(s => s.ReadAsync(
+                It.Is<MemoryScope>(sc => !sc.AgentBound), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+        // Agent-bound scope 返回管理员预置记忆（按结构化 AgentId 列检索的代理）
+        store.Setup(s => s.ReadAsync(
+                It.Is<MemoryScope>(sc => sc.AgentBound && sc.AgentId == agentId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("[instruction] Always greet candidates by first name");
+
+        var provider = new MemoryContextProvider(
+            store.Object,
+            localScope,
+            NullLogger<MemoryContextProvider>.Instance,
+            memoryOptions: new MemoryOptions { RetrievalModeThreshold = 20 },
+            agentBoundScope: agentBoundScope);
+
+        var result = await provider.GetContextAsync(
+            [new ChatMessage(ChatRole.User, "hello")]);
+
+        result.Messages.ShouldNotBeEmpty();
+        var text = result.Messages![0].Text!;
+        // 核心断言：headless 下 agent-bound 记忆被注入 LLM 上下文
+        text.ShouldContain("Always greet candidates by first name");
+        // 且确实通过 agent-bound 范围读取（而非本地 scope）
+        store.Verify(s => s.ReadAsync(
+            It.Is<MemoryScope>(sc => sc.AgentBound && sc.AgentId == agentId), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetContextAsync_AgentBoundScope_LabeledAlongsideLocalMemory()
+    {
+        // 当本地记忆与 agent-bound 记忆同时存在时，应作为两个带标签的段一起注入。
+        var agentId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var localScope = new MemoryScope("default", userId);
+        var agentBoundScope = MemoryScope.ForAgent(agentId, "default");
+
+        var store = new Mock<IMemoryStore>();
+        store.Setup(s => s.ReadAsync(
+                It.Is<MemoryScope>(sc => !sc.AgentBound), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("[fact] user-specific note");
+        store.Setup(s => s.ReadAsync(
+                It.Is<MemoryScope>(sc => sc.AgentBound && sc.AgentId == agentId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("[instruction] curated agent rule");
+
+        var provider = new MemoryContextProvider(
+            store.Object,
+            localScope,
+            NullLogger<MemoryContextProvider>.Instance,
+            memoryOptions: new MemoryOptions { RetrievalModeThreshold = 20 },
+            agentBoundScope: agentBoundScope);
+
+        var result = await provider.GetContextAsync(
+            [new ChatMessage(ChatRole.User, "hello")]);
+
+        result.Messages.ShouldNotBeEmpty();
+        var text = result.Messages![0].Text!;
+        text.ShouldContain("### Local Memory");
+        text.ShouldContain("### Agent Memory");
+        text.ShouldContain("user-specific note");
+        text.ShouldContain("curated agent rule");
+    }
+
+    [Fact]
+    public async Task GetContextAsync_NoAgentBoundScope_DoesNotInjectAgentMemory()
+    {
+        // 向后兼容：未提供 agent-bound scope 时，仅注入本地记忆，行为不变。
+        var store = new Mock<IMemoryStore>();
+        store.Setup(s => s.ReadAsync(It.IsAny<MemoryScope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("[fact] local memory only");
+
+        var provider = new MemoryContextProvider(
+            store.Object,
+            new MemoryScope("test"),
+            NullLogger<MemoryContextProvider>.Instance,
+            memoryOptions: new MemoryOptions { RetrievalModeThreshold = 20 });
+
+        var result = await provider.GetContextAsync(
+            [new ChatMessage(ChatRole.User, "hello")]);
+
+        result.Messages.ShouldNotBeEmpty();
+        var text = result.Messages![0].Text!;
+        text.ShouldContain("local memory only");
+        text.ShouldNotContain("Agent Memory");
+    }
+
+    [Fact]
     public async Task GetContextAsync_LargeMemory_NoUserMessage_FallsBackToFullInjection()
     {
         var memoryContent = string.Join("\n", Enumerable.Range(1, 25).Select(i => $"[fact] Entry {i}"));

@@ -112,7 +112,32 @@ public class ToolResolver : IToolResolver, IDisposable
         var openApiTools = await GetOpenApiToolsAsync(ct);
         if (openApiTools != null)
         {
-            foreach (var t in openApiTools)
+            // Route OpenAPI tools through the same approval/permission gating as C# tools.
+            // Uses synthetic tool-group name "openapi" so approval rules can target the group.
+            // Only applies when governance is actually configured (ShouldWrapWithApproval()),
+            // preserving the default no-governance behaviour.
+            IEnumerable<AITool> openApiToolsToMerge = openApiTools;
+            if (ShouldWrapWithApproval() && openApiTools.Count > 0)
+            {
+                var approvalOptions = _options.CurrentValue.ToolApproval;
+                var openApiGroupMap = new Dictionary<string, string>(openApiTools.Count, StringComparer.OrdinalIgnoreCase);
+                foreach (var t in openApiTools)
+                {
+                    if (t.Name != null) openApiGroupMap[t.Name] = "openapi";
+                }
+                openApiToolsToMerge = ApprovalToolWrapper.Wrap(
+                    (IList<AITool>)openApiTools,
+                    _approvalHandler,
+                    approvalOptions,
+                    _permissionEvaluator,
+                    _shellCommandAnalyzer,
+                    _executionContextAccessor,
+                    _approvalLogger,
+                    openApiGroupMap,
+                    _eventBus);
+            }
+
+            foreach (var t in openApiToolsToMerge)
             {
                 if (t.Name != null && names.Add(t.Name)) merged.Add(t);
             }

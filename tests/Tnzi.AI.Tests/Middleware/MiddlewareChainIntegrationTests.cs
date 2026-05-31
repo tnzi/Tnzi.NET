@@ -53,14 +53,6 @@ public class MiddlewareChainIntegrationTests
         mw.Order.ShouldBe(AiMiddlewareOrders.ViewImage);
     }
 
-    [Fact]
-    public void DeferredToolFilterMiddleware_Order_IsCorrect()
-    {
-        var mw = new DeferredToolFilterMiddleware(
-            NullLogger<DeferredToolFilterMiddleware>.Instance);
-        mw.Order.ShouldBe(AiMiddlewareOrders.DeferredToolFilter);
-    }
-
     #endregion
 
     #region 中间件管道 — 端到端执行
@@ -141,7 +133,6 @@ public class MiddlewareChainIntegrationTests
             typeof(LoopDetectionMiddleware),
             typeof(ToolErrorRecoveryMiddleware),
             typeof(SubAgentLimitMiddleware),
-            typeof(DeferredToolFilterMiddleware),
             typeof(SummarizationMiddleware),
             typeof(FileUploadMiddleware),
             typeof(ViewImageMiddleware),

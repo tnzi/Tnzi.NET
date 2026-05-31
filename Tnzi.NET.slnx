@@ -69,6 +69,7 @@
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
+    <Project Path="tests/Tnzi.Kafka.Tests/Tnzi.Kafka.Tests.csproj" />
     <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
     <Project Path="tests/Tnzi.Mapster.Tests/Tnzi.Mapster.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />

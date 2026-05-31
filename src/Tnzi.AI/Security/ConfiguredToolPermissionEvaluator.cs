@@ -1,7 +1,5 @@
 namespace Tnzi.AI.Security;
 
-using Tnzi.AI.Options;
-
 /// <summary>
 /// 基于 AIOptions 动态配置的工具权限评估器。
 /// 支持配置文件规则 + 数据库持久化规则（通过 IServiceScopeFactory 异步加载）。

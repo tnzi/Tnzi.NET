@@ -15,6 +15,7 @@ global using Tnzi.AI.Dtos;
 global using Tnzi.AI.Engine;
 global using Tnzi.AI.Middleware;
 global using Tnzi.AI.Sandbox.Abstractions;
+global using Tnzi.AI.Sandbox.Dtos;
 global using Tnzi.AI.Sandbox.Middleware;
 global using Tnzi.AI.Sandbox.Models;
 global using Tnzi.AI.Sandbox.Options;

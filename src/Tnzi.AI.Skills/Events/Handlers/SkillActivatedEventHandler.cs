@@ -24,9 +24,18 @@ public class SkillActivatedEventHandler : IEventHandler<SkillActivatedEvent>
             if (@event.Source != SkillSource.Database || _repository == null)
                 return;
 
-            // Atomic update: increment activation count and set last activated time
+            // Narrow predicate to the exact resolved row using all identity fields.
+            // This prevents cross-tenant and cross-user activation-count bleed when
+            // multiple tenants/users share the same slug.
+            var scopedTenantId = @event.TenantId;
+            var scopedOwnerUserId = @event.OwnerUserId;
+
             var updated = await _repository
-                .Where(e => e.Slug == @event.Slug && !e.IsDeleted)
+                .Where(e => e.Slug == @event.Slug
+                         && e.Scope == @event.Scope
+                         && e.TenantId == scopedTenantId
+                         && e.OwnerUserId == scopedOwnerUserId
+                         && !e.IsDeleted)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(e => e.ActivationCount, e => e.ActivationCount + 1)
                     .SetProperty(e => e.LastActivatedAt, @event.ActivatedAt), cancellationToken);

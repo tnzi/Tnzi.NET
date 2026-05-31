@@ -1,3 +1,5 @@
+using Tnzi.Security.Authorization;
+
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
@@ -601,6 +603,260 @@ public class SkillServiceTests : IDisposable
         capturedEntity.ConstraintsJson.ShouldContain("allowedToolGroups");
         capturedEntity.ConstraintsJson.ShouldContain("requiredModel");
         capturedEntity.ConstraintsJson.ShouldContain("gpt-4");
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateAsync — no service-layer permission gate (FIX 1 regression proof)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateAsync_TenantScope_NoPermissionChecker_Succeeds()
+    {
+        // Gate is gone: no IPermissionChecker in the service provider → succeeds.
+        // (Auth gate is the admin endpoint, not the service layer.)
+        var input = new CreateSkillDto
+        {
+            Slug = "admin-skill",
+            Name = "Admin Skill",
+            Content = "Content",
+            Scope = SkillScope.Tenant,
+            Enabled = true
+        };
+
+        _mockRepository.Setup(r => r.AnyAsync(It.IsAny<Expression<Func<SkillEntity, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockRepository.Setup(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = CreateService();
+        var result = await service.CreateAsync(input);
+
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task CreateAsync_TenantScope_WithDenyAllPermissionChecker_Succeeds()
+    {
+        // Regression test for PD-5 admin regression: a deny-all IPermissionChecker (simulating
+        // Authorization module loaded without the undeclared permission seeded) must NOT block
+        // the create — the service-layer gate was removed, so the admin endpoint's own
+        // ApiAdminControllerBase authorization is the sole gate.
+        var input = new CreateSkillDto
+        {
+            Slug = "tenant-skill-gate",
+            Name = "Tenant Skill",
+            Content = "Content",
+            Scope = SkillScope.Tenant,
+            Enabled = true
+        };
+
+        _mockRepository.Setup(r => r.AnyAsync(It.IsAny<Expression<Func<SkillEntity, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockRepository.Setup(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Build a service provider with a deny-all IPermissionChecker
+        var mockPermissionChecker = new Mock<IPermissionChecker>();
+        mockPermissionChecker
+            .Setup(p => p.IsGrantedAsync(It.IsAny<string>()))
+            .ReturnsAsync(false);
+        mockPermissionChecker
+            .Setup(p => p.IsGrantedAnyAsync(It.IsAny<string[]>()))
+            .ReturnsAsync(false);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(mockPermissionChecker.Object);
+        var sp = services.BuildServiceProvider();
+
+        var service = new SkillService(
+            sp,
+            _mockRepository.Object,
+            _mockRegistry.Object,
+            _mockTemplateEngine.Object,
+            _fileStore);
+
+        var result = await service.CreateAsync(input);
+
+        // Gate is gone: even a deny-all checker must not 403
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateAsync — TenantId persistence (B1)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateAsync_TenantScope_WithCurrentTenant_PersistsTenantId()
+    {
+        var tenantId = Guid.NewGuid();
+
+        var mockTenant = new Mock<ICurrentTenant>();
+        mockTenant.Setup(t => t.Id).Returns(tenantId);
+
+        var input = new CreateSkillDto
+        {
+            Slug = "tenant-skill",
+            Name = "Tenant Skill",
+            Content = "Content",
+            Scope = SkillScope.Tenant,
+            Enabled = true
+        };
+
+        SkillEntity? capturedEntity = null;
+        _mockRepository.Setup(r => r.AnyAsync(It.IsAny<Expression<Func<SkillEntity, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockRepository.Setup(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<SkillEntity, CancellationToken>((e, _) => capturedEntity = e)
+            .Returns(Task.CompletedTask);
+
+        var service = new SkillService(
+            _serviceProvider,
+            _mockRepository.Object,
+            _mockRegistry.Object,
+            _mockTemplateEngine.Object,
+            _fileStore,
+            requirementsValidator: null,
+            currentTenant: mockTenant.Object);
+
+        var result = await service.CreateAsync(input);
+
+        result.Succeeded.ShouldBeTrue();
+        capturedEntity.ShouldNotBeNull();
+        capturedEntity!.TenantId.ShouldBe(tenantId);
+    }
+
+    [Fact]
+    public async Task CreateAsync_UserScope_DoesNotPersistTenantId()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        var mockTenant = new Mock<ICurrentTenant>();
+        mockTenant.Setup(t => t.Id).Returns(tenantId);
+
+        var mockUser = new Mock<ICurrentUser>();
+        mockUser.Setup(u => u.Id).Returns(userId);
+
+        var input = new CreateSkillDto
+        {
+            Slug = "user-skill",
+            Name = "User Skill",
+            Content = "Content",
+            Scope = SkillScope.User,
+            Enabled = true
+        };
+
+        SkillEntity? capturedEntity = null;
+        _mockRepository.Setup(r => r.AnyAsync(It.IsAny<Expression<Func<SkillEntity, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockRepository.Setup(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<SkillEntity, CancellationToken>((e, _) => capturedEntity = e)
+            .Returns(Task.CompletedTask);
+
+        // Build a service provider that provides ICurrentUser
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(mockUser.Object);
+        var sp = services.BuildServiceProvider();
+
+        var service = new SkillService(
+            sp,
+            _mockRepository.Object,
+            _mockRegistry.Object,
+            _mockTemplateEngine.Object,
+            _fileStore,
+            requirementsValidator: null,
+            currentTenant: mockTenant.Object);
+
+        var result = await service.CreateAsync(input);
+
+        result.Succeeded.ShouldBeTrue();
+        capturedEntity.ShouldNotBeNull();
+        capturedEntity!.TenantId.ShouldBeNull();
+        capturedEntity.OwnerUserId.ShouldBe(userId);
+    }
+
+    [Fact]
+    public async Task CreateAsync_TenantScope_DuplicateCheckIncludesTenantId()
+    {
+        // Two different tenants sharing the same slug:
+        // T1 already has "shared-slug" as a Tenant-scoped skill.
+        // T2 should be allowed to create the same slug because the dup-check is tenant-scoped.
+        // This test proves the predicate includes TenantId by compiling and evaluating it
+        // against two in-memory rows — same slug, different tenants.
+        var tenantId1 = Guid.NewGuid();
+        var tenantId2 = Guid.NewGuid();
+
+        var rowForT1 = new SkillEntity
+        {
+            Id = Guid.NewGuid(),
+            Slug = "shared-slug",
+            Scope = SkillScope.Tenant,
+            TenantId = tenantId1,
+            OwnerUserId = null,
+            IsDeleted = false
+        };
+
+        var mockTenant = new Mock<ICurrentTenant>();
+        mockTenant.Setup(t => t.Id).Returns(tenantId2); // current tenant is T2
+
+        var input = new CreateSkillDto
+        {
+            Slug = "shared-slug",
+            Name = "Skill",
+            Content = "Content",
+            Scope = SkillScope.Tenant,
+            Enabled = true
+        };
+
+        // Capture the predicate passed to AnyAsync and evaluate it against in-memory rows.
+        Expression<Func<SkillEntity, bool>>? capturedPredicate = null;
+        _mockRepository
+            .Setup(r => r.AnyAsync(It.IsAny<Expression<Func<SkillEntity, bool>>>(), It.IsAny<CancellationToken>()))
+            .Callback<Expression<Func<SkillEntity, bool>>, CancellationToken>((pred, _) => capturedPredicate = pred)
+            .ReturnsAsync(false); // T2 has no conflict
+        _mockRepository.Setup(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = new SkillService(
+            _serviceProvider,
+            _mockRepository.Object,
+            _mockRegistry.Object,
+            _mockTemplateEngine.Object,
+            _fileStore,
+            requirementsValidator: null,
+            currentTenant: mockTenant.Object);
+
+        var result = await service.CreateAsync(input);
+
+        // Should succeed: no cross-tenant collision
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldNotBeNull();
+        result.Data!.Slug.ShouldBe("shared-slug");
+
+        // The predicate MUST have been captured (AnyAsync was called)
+        capturedPredicate.ShouldNotBeNull("AnyAsync should have been called with a predicate");
+
+        // Compile the predicate and evaluate against in-memory rows to prove tenant-scoping.
+        var compiledPredicate = capturedPredicate!.Compile();
+
+        // T1's row: same slug + same scope, but different TenantId → must NOT match (T2 predicate)
+        compiledPredicate(rowForT1).ShouldBeFalse(
+            "T1's row should not match the T2 duplicate-check predicate");
+
+        // A synthetic T2 row: would be a true duplicate for T2 → must match
+        var rowForT2 = new SkillEntity
+        {
+            Id = Guid.NewGuid(),
+            Slug = "shared-slug",
+            Scope = SkillScope.Tenant,
+            TenantId = tenantId2,
+            OwnerUserId = null,
+            IsDeleted = false
+        };
+        compiledPredicate(rowForT2).ShouldBeTrue(
+            "T2's own row with the same slug should match the T2 duplicate-check predicate");
     }
 
     // -------------------------------------------------------------------------

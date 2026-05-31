@@ -143,6 +143,7 @@ public class WorkflowServiceCheckpointIntegrationTests
                     })
             });
 
+        WorkflowExecution? casUpdatedEntity = null;
         var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
         executionRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WorkflowExecution
@@ -151,6 +152,9 @@ public class WorkflowServiceCheckpointIntegrationTests
                 WorkflowDefinitionId = workflowId,
                 InitialInput = "input"
             });
+        executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowExecution, CancellationToken>((e, _) => casUpdatedEntity ??= e)
+            .Returns(Task.CompletedTask);
 
         var checkpointStore = new Mock<IWorkflowCheckpointStore>();
         checkpointStore.Setup(x => x.GetCheckpointAsync(executionId, It.IsAny<CancellationToken>()))
@@ -173,6 +177,73 @@ public class WorkflowServiceCheckpointIntegrationTests
         result.Data.ShouldNotBeNull();
         result.Data.ExecutionId.ShouldBe(executionId);
         result.Data.Output.ShouldBe("Result A");
+
+        // CAS guard: the execution is flipped to Running via UpdateAsync BEFORE the engine runs.
+        executionRepository.Verify(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        casUpdatedEntity.ShouldNotBeNull();
+        casUpdatedEntity!.Status.ShouldBe(WorkflowExecutionStatus.Running);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_ConcurrentResume_LosingWriterGets409_WithoutRunningEngine()
+    {
+        var workflowId = Guid.NewGuid();
+        const string executionId = "resume-cas-conflict-001";
+
+        var workflowRepository = new Mock<IRepository<WorkflowDefinition, Guid>>();
+        workflowRepository.Setup(x => x.GetAsync(workflowId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkflowDefinition
+            {
+                Id = workflowId,
+                Name = "wf",
+                IsEnabled = true,
+                ExecutionMode = WorkflowExecutionMode.Dag,
+                Steps = SerializeSteps(
+                    new WorkflowStepDto
+                    {
+                        StepId = "step-a",
+                        Configuration = new Dictionary<string, string>
+                        {
+                            ["nodeType"] = "fixed-result",
+                            ["result"] = "Result A"
+                        }
+                    })
+            });
+
+        var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
+        executionRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkflowExecution
+            {
+                ExecutionId = executionId,
+                WorkflowDefinitionId = workflowId,
+                InitialInput = "input"
+            });
+        // Simulate losing the optimistic-concurrency CAS: a concurrent Resume already
+        // bumped the stamp, so this writer's pre-engine UpdateAsync throws.
+        executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateConcurrencyException("stale concurrency token"));
+
+        var checkpointStore = new Mock<IWorkflowCheckpointStore>();
+        checkpointStore.Setup(x => x.GetCheckpointAsync(executionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkflowCheckpoint
+            {
+                ExecutionId = executionId,
+                InitialInput = "input",
+                Status = WorkflowExecutionStatus.Paused,
+                CompletedStepIds = [],
+                StepOutputs = new Dictionary<string, WorkflowStepOutput>()
+            });
+
+        var service = CreateService(workflowRepository, executionRepository, checkpointStore);
+
+        var result = await service.ResumeAsync(executionId);
+
+        // The losing writer gets 409 Conflict — the engine never ran (no checkpoint save).
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(409);
+        checkpointStore.Verify(
+            x => x.SaveCheckpointAsync(It.IsAny<WorkflowCheckpoint>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -209,6 +280,8 @@ public class WorkflowServiceCheckpointIntegrationTests
                 WorkflowDefinitionId = workflowId,
                 InitialInput = "input"
             });
+        executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var checkpointStore = new Mock<IWorkflowCheckpointStore>();
         checkpointStore.Setup(x => x.GetCheckpointAsync(executionId, It.IsAny<CancellationToken>()))
@@ -230,6 +303,9 @@ public class WorkflowServiceCheckpointIntegrationTests
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldNotBeNull();
         result.Data.Output.ShouldBe("Recovered");
+
+        // CAS guard transitions to Running before the engine resumes from the failed checkpoint.
+        executionRepository.Verify(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]

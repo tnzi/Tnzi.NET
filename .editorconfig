@@ -23,3 +23,31 @@ trim_trailing_whitespace = false
 
 [Makefile]
 indent_style = tab
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C# 编译期约定门禁（配合 Directory.Build.props 的 EnableNETAnalyzers +
+# EnforceCodeStyleInBuild）。当前为 warnings-first：先让规则可见、积累存量清理，
+# 待清零后再在此把少数高价值规则提级为 error 并开启 TreatWarningsAsErrors。
+#
+# 注意：框架特有的 7 条 "Never Violate"（[Route] 不含 api/ 前缀、框架程序集禁用
+# IScopedDependency 自动注册、实体配置用 EntityTypeConfigurationBase、禁硬编码 DB SQL、
+# 构造参数用 Check.NotNull、Admin 控制器继承 ApiAdminControllerBase、用 MapTo 而非 .Adapt）
+# 属语义级规则，内置分析器无法覆盖，需后续自定义 Roslyn 分析器（Tnzi.Analyzers，待办）。
+# ─────────────────────────────────────────────────────────────────────────────
+[*.cs]
+# 高价值：移除冗余 using（直接呼应"用 GlobalUsings、类文件不保留 redundant using"约定）
+dotnet_diagnostic.IDE0005.severity = warning
+# 降噪：库代码是否 ConfigureAwait 由框架约定决定，不在此强制
+dotnet_diagnostic.CA2007.severity = none
+# 建议级（IDE 提示，不进构建警告）
+dotnet_diagnostic.CA2016.severity = suggestion
+dotnet_diagnostic.CA1822.severity = suggestion
+
+# C# 代码风格偏好
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_prefer_braces = true:suggestion
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false

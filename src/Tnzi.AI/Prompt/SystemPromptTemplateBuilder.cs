@@ -64,21 +64,26 @@ public class SystemPromptTemplateBuilder
     }
 
     /// <summary>
-    /// 构建完整的系统提示词
+    /// 异步构建完整的系统提示词
     /// </summary>
-    public string Build()
+    public async Task<string> BuildAsync(CancellationToken cancellationToken = default)
     {
         var merged = new Dictionary<string, SystemPromptSection>(_sections, StringComparer.Ordinal);
 
         foreach (var provider in _providers)
         {
-            var section = provider.GetSection();
+            var section = await provider.GetSectionAsync(cancellationToken);
             if (section != null)
             {
                 merged[section.Tag] = section;
             }
         }
 
+        return Assemble(merged);
+    }
+
+    private static string Assemble(Dictionary<string, SystemPromptSection> merged)
+    {
         var ordered = merged.Values
             .Where(s => !string.IsNullOrEmpty(s.Content))
             .OrderBy(s => s.Order)

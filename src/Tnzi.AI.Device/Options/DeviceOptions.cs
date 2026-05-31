@@ -36,7 +36,9 @@ public class DeviceOptions
     public List<string>? AllowedPlatforms { get; set; }
 
     /// <summary>
-    /// Whether to register the local device node on startup
+    /// Whether to register the local device node on startup.
+    /// Defaults to <c>false</c> — the local node exposes host shell command execution;
+    /// operators must explicitly opt in by setting this to <c>true</c>.
     /// </summary>
-    public bool LocalNodeEnabled { get; set; } = true;
+    public bool LocalNodeEnabled { get; set; } = false;
 }

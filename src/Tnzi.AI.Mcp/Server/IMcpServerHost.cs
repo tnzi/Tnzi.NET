@@ -46,7 +46,4 @@ public class McpToolExposureOptions
 
     /// <summary>自定义描述（默认使用 Agent 描述）</summary>
     public string? Description { get; init; }
-
-    /// <summary>是否启用流式响应</summary>
-    public bool EnableStreaming { get; init; }
 }

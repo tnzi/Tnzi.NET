@@ -4,11 +4,11 @@ import { defaultThemeSettings, mergeThemeSettings } from '../../src/theme/settin
 describe('defaultThemeSettings', () => {
   it('has 5 color roles', () => {
     expect(Object.keys(defaultThemeSettings.colors)).toHaveLength(5)
-    expect(defaultThemeSettings.colors.primary).toBe('#18a058')
+    expect(defaultThemeSettings.colors.primary).toBe('#0d9488')
   })
 
   it('has palettes generated for all roles', () => {
-    expect(defaultThemeSettings.palettes.primary[500]).toBe('#18a058')
+    expect(defaultThemeSettings.palettes.primary[500]).toBe('#0d9488')
     expect(defaultThemeSettings.palettes.primary[50]).toMatch(/^#[0-9a-f]{6}$/i)
     expect(defaultThemeSettings.palettes.info[500]).toBe('#2080f0')
   })

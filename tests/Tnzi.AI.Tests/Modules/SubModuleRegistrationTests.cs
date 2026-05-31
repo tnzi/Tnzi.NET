@@ -299,9 +299,16 @@ public class SubModuleRegistrationTests
     {
         var services = ConfigureChannelsModule(enabled: true, feishuEnabled: true);
 
+        // Webhook adapters register the concrete type as a singleton, then forward both
+        // IChannelAdapter and IInboundWebhookAdapter to it via factory (ImplementationType is null).
+        services.Any(d => d.ServiceType == typeof(FeishuChannelAdapter))
+            .ShouldBeTrue("FeishuChannelAdapter concrete singleton should be registered");
         services.Any(d => d.ServiceType == typeof(IChannelAdapter)
-            && d.ImplementationType == typeof(FeishuChannelAdapter))
-            .ShouldBeTrue("FeishuChannelAdapter should be registered");
+            && d.ImplementationFactory != null)
+            .ShouldBeTrue("FeishuChannelAdapter should be exposed as IChannelAdapter");
+        services.Any(d => d.ServiceType == typeof(IInboundWebhookAdapter)
+            && d.ImplementationFactory != null)
+            .ShouldBeTrue("FeishuChannelAdapter should be exposed as IInboundWebhookAdapter");
     }
 
     // =========================================================================

@@ -1,7 +1,5 @@
 namespace Tnzi.AI.Security;
 
-using Tnzi.AI.Options;
-
 /// <summary>
 /// 将配置选项转换为运行时权限规则。
 /// </summary>

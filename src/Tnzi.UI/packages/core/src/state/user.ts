@@ -35,6 +35,7 @@ const STORAGE_KEY_RECENTS = 'tnzi:user:recents';
 const STORAGE_KEY_FAVORITES = 'tnzi:user:favorites';
 
 const MAX_RECENT_ITEMS = 50;
+const MAX_FAVORITES = 50;
 
 // ============================================
 // Debounce utility
@@ -79,6 +80,14 @@ export class UserStateManager {
 
   get isLoaded(): boolean {
     return this.currentUser !== null;
+  }
+
+  get isAuthenticated(): boolean {
+    return this.currentUser !== null;
+  }
+
+  get roles(): string[] {
+    return this.currentUser?.roles ?? [];
   }
 
   get displayName(): string {
@@ -144,11 +153,36 @@ export class UserStateManager {
       this.deps.theme.applyTheme(preferences.theme);
     }
 
+    // Apply language to document root
+    if (preferences.language !== undefined) {
+      this._applyLanguage(preferences.language);
+    }
+
     this._debouncedPersist();
   }
 
   resetPreferences(): void {
     this.preferences = { ...defaultUserPreferences };
+    this.deps.theme?.applyTheme(this.preferences.theme);
+    this._applyLanguage(this.preferences.language);
+    this._debouncedPersist();
+  }
+
+  /** Set the UI theme preference (applies theme + persists). */
+  setTheme(theme: UserPreferences['theme']): void {
+    this.updatePreferences({ theme });
+  }
+
+  /** Set the language preference (applies language to DOM + persists). */
+  setLanguage(language: UserPreferences['language']): void {
+    this.updatePreferences({ language });
+  }
+
+  /** Apply the language to the document root element's `lang` attribute. */
+  private _applyLanguage(language: string): void {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = language;
+    }
   }
 
   async updateProfile(data: UpdateUserDto): Promise<UserDto> {
@@ -199,6 +233,10 @@ export class UserStateManager {
   addFavorite(item: Omit<RecentItem, 'accessedAt'>): void {
     if (this.isFavorite(item.id)) return;
     this.favorites.push({ ...item, accessedAt: new Date() });
+    // Cap to avoid unbounded growth in persisted storage (drops oldest).
+    if (this.favorites.length > MAX_FAVORITES) {
+      this.favorites = this.favorites.slice(-MAX_FAVORITES);
+    }
     this._debouncedPersist();
   }
 

@@ -5,7 +5,7 @@ import { defaultThemeSettings } from '../../src/theme/settings'
 describe('buildNaiveThemeOverrides', () => {
   it('generates a common section with primary color', () => {
     const overrides = buildNaiveThemeOverrides(defaultThemeSettings)
-    expect(overrides.common?.primaryColor).toBe('#18a058')
+    expect(overrides.common?.primaryColor).toBe('#0d9488')
   })
 
   it('generates hover/pressed/suppl variants from palette', () => {
@@ -19,7 +19,7 @@ describe('buildNaiveThemeOverrides', () => {
 
   it('applies all 5 semantic color roles', () => {
     const overrides = buildNaiveThemeOverrides(defaultThemeSettings)
-    expect(overrides.common?.primaryColor).toBe('#18a058')
+    expect(overrides.common?.primaryColor).toBe('#0d9488')
     expect(overrides.common?.infoColor).toBe('#2080f0')
     expect(overrides.common?.successColor).toBe('#18a058')
     expect(overrides.common?.warningColor).toBe('#f0a020')
@@ -43,7 +43,7 @@ describe('buildNaiveThemeOverrides', () => {
     const overrides = buildNaiveThemeOverrides(settings)
     expect(overrides.common?.primaryColorHover).toBe('#ff00ff')
     // Non-overridden base keys must survive the merge
-    expect(overrides.common?.primaryColor).toBe('#18a058')
+    expect(overrides.common?.primaryColor).toBe('#0d9488')
     expect(overrides.common?.errorColor).toBe('#d03050')
   })
 

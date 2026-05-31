@@ -87,11 +87,6 @@
       "import": "./dist/utils/index.js",
       "require": "./dist/utils/index.cjs"
     },
-    "./schemas": {
-      "types": "./dist/schemas/index.d.ts",
-      "import": "./dist/schemas/index.js",
-      "require": "./dist/schemas/index.cjs"
-    },
     "./constants": {
       "types": "./dist/constants/index.d.ts",
       "import": "./dist/constants/index.js",

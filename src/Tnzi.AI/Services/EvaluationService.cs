@@ -7,15 +7,18 @@ public class EvaluationService : ApplicationService, IEvaluationService
 {
     private readonly IRepository<EvaluationRun, Guid> _repository;
     private readonly IAgentEvaluator _evaluator;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public EvaluationService(
         IServiceProvider serviceProvider,
         IRepository<EvaluationRun, Guid> repository,
-        IAgentEvaluator evaluator)
+        IAgentEvaluator evaluator,
+        IServiceScopeFactory scopeFactory)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _evaluator = Check.NotNull(evaluator);
+        _scopeFactory = Check.NotNull(scopeFactory);
     }
 
     public async Task<Result<EvaluationRunDetailDto>> GetByIdAsync(Guid id)
@@ -129,7 +132,9 @@ public class EvaluationService : ApplicationService, IEvaluationService
             await semaphore.WaitAsync(ct);
             try
             {
-                return await CreateAndRunAsync(
+                using var scope = _scopeFactory.CreateScope();
+                var scopedService = scope.ServiceProvider.GetRequiredService<IEvaluationService>();
+                return await scopedService.CreateAndRunAsync(
                     new CreateEvaluationRunDto
                     {
                         AgentId = target.AgentId,

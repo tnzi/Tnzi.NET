@@ -71,6 +71,18 @@ public class AIRagOptions
     public string TableNamePrefix { get; set; } = "RAG";
 
     /// <summary>
+    /// RagDbContext 迁移文件所在的程序集名称（如 "Acme.Api"）。
+    /// <para>
+    /// RagDbContext 定义在框架库 Tnzi.AI.Rag 中，但其迁移文件应由消费应用持有
+    /// （因为嵌入维度 <see cref="DefaultEmbeddingDimensions"/> 可配置，不能锁死在框架库的迁移里）。
+    /// 运行时通过此项让 RagDbContext 在执行迁移时查找正确程序集中的迁移；
+    /// 设计时由 <c>RagDbContext.DesignTimeMigrationsAssembly</c> 静态字段提供（参见设计时工厂）。
+    /// </para>
+    /// <para>未配置时回退到 RagDbContext 所在程序集（Tnzi.AI.Rag）。</para>
+    /// </summary>
+    public string? MigrationsAssembly { get; set; }
+
+    /// <summary>
     /// 混合搜索配置
     /// </summary>
     public HybridSearchOptions HybridSearch { get; set; } = new();
@@ -89,6 +101,27 @@ public class AIRagOptions
     /// Parent Document Retrieval 配置
     /// </summary>
     public ParentDocumentRetrievalOptions ParentDocumentRetrieval { get; set; } = new();
+
+    /// <summary>
+    /// GraphRAG（知识图谱）配置
+    /// </summary>
+    public GraphRagOptions GraphRag { get; set; } = new();
+}
+
+/// <summary>
+/// GraphRAG（知识图谱）配置选项
+/// </summary>
+public class GraphRagOptions
+{
+    /// <summary>
+    /// 是否在文档摄取时提取知识图谱实体/关系（默认 false）。
+    /// <para>
+    /// 默认关闭：开启后每次摄取会额外调用一次 LLM（<see cref="Graph.IGraphExtractor"/>）进行实体抽取，
+    /// 带来额外的延迟和成本。关闭时图谱表保持为空，<see cref="Graph.IGraphSearchService"/> 返回空结果，
+    /// 摄取行为与成本不变。
+    /// </para>
+    /// </summary>
+    public bool Enabled { get; set; }
 }
 
 /// <summary>

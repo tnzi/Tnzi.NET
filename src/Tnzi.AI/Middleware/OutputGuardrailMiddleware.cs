@@ -217,24 +217,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     }
 
     /// <summary>发布 Guardrail 拦截事件（静默失败）</summary>
-    private async Task PublishGuardrailRejectionEventAsync(AiMiddlewareContext context, string guardrailName, string reason, string direction)
-    {
-        try
-        {
-            if (_eventBus == null) return;
-
-            await _eventBus.PublishAsync(new GuardrailRejectionEvent
-            {
-                UserId = context.Request.UserId,
-                ThreadId = context.Request.ThreadId,
-                GuardrailName = guardrailName,
-                Reason = reason,
-                Direction = direction
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish GuardrailRejectionEvent");
-        }
-    }
+    private Task PublishGuardrailRejectionEventAsync(AiMiddlewareContext context, string guardrailName, string reason, string direction)
+        => GuardrailEventPublisher.PublishGuardrailRejectionEventAsync(
+            _eventBus, _logger, context.Request.UserId, context.Request.ThreadId, guardrailName, reason, direction);
 }

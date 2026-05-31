@@ -1,34 +1,29 @@
 /**
- * Login security bridge — wraps `/admin/login-security/*` exposed by
- * `Tnzi.Identity.Controllers.Admin.DefaultLoginSecurityAdminController`.
+ * Login security bridge — thin adapter over `@tnzi/core`'s admin
+ * login-security API (`useAdminLoginSecurityApi`, wrapping
+ * `/admin/login-security/*` exposed by
+ * `Tnzi.Identity.Controllers.Admin.DefaultLoginSecurityAdminController`).
+ *
+ * Delegates to the canonical `useAdminLoginSecurityApi` factory in
+ * `@tnzi/core/services/identity` (getOverview / getFrequentFailures). This
+ * file keeps the bridge's original public surface (`SecurityOverviewDto` /
+ * `UserFailedLoginSummaryDto` re-exports + `createLoginSecurityBridge`) so
+ * consuming pages are unaffected.
  *
  * Read endpoints for the security overview dashboard:
  *   • GET /admin/login-security/overview           — KPIs over a time window
  *   • GET /admin/login-security/frequent-failures  — users hitting failure threshold
- *   • GET /admin/login-security/user/{userId}/recent-logins
- *   • GET /admin/login-security/user/{userId}/frequent-ips
  */
 import type { HttpClient } from '@tnzi/core/http'
+import {
+  useAdminLoginSecurityApi,
+  type SecurityOverviewDto,
+  type UserFailedLoginSummaryDto,
+} from '@tnzi/core/services/identity'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export interface SecurityOverviewDto {
-  timeRangeHours: number
-  totalLoginAttempts: number
-  successfulLogins: number
-  failedLogins: number
-  failureRate: number
-  distinctUsers: number
-  distinctIpAddresses: number
-  lockedOutUsers: number
-}
-
-export interface UserFailedLoginSummaryDto {
-  userId: string
-  userName?: string | null
-  email?: string | null
-  failureCount: number
-  lastFailureTime?: string | null
-  ipAddresses: string[]
-}
+// Re-export under the original bridge names consumed by pages.
+export type { SecurityOverviewDto, UserFailedLoginSummaryDto }
 
 export interface LoginSecurityBridgeDeps {
   client?: HttpClient
@@ -37,13 +32,6 @@ export interface LoginSecurityBridgeDeps {
 export interface LoginSecurityBridge {
   getOverview(hours?: number): Promise<SecurityOverviewDto | null>
   getFrequentFailures(hours?: number, minFailures?: number): Promise<UserFailedLoginSummaryDto[]>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createLoginSecurityBridge(deps: LoginSecurityBridgeDeps = {}): LoginSecurityBridge {
@@ -57,16 +45,12 @@ export function createLoginSecurityBridge(deps: LoginSecurityBridgeDeps = {}): L
     }
   }
 
+  const api = useAdminLoginSecurityApi(client)
+
   return {
     getOverview: async (hours = 24) =>
-      unwrap<SecurityOverviewDto | null>(
-        await client.get<SecurityOverviewDto>(`/admin/login-security/overview?hours=${hours}`),
-      ),
+      unwrap<SecurityOverviewDto | null>(await api.getOverview(hours)),
     getFrequentFailures: async (hours = 24, minFailures = 3) =>
-      unwrap<UserFailedLoginSummaryDto[]>(
-        await client.get<UserFailedLoginSummaryDto[]>(
-          `/admin/login-security/frequent-failures?hours=${hours}&minFailures=${minFailures}`,
-        ),
-      ) ?? [],
+      unwrap<UserFailedLoginSummaryDto[]>(await api.getFrequentFailures({ hours, minFailures })) ?? [],
   }
 }

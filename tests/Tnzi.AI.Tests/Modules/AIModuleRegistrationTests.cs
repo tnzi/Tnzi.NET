@@ -186,7 +186,6 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(LoopDetectionMiddleware))]
     [InlineData(typeof(ToolErrorRecoveryMiddleware))]
     [InlineData(typeof(SubAgentLimitMiddleware))]
-    [InlineData(typeof(DeferredToolFilterMiddleware))]
     [InlineData(typeof(SummarizationMiddleware))]
     [InlineData(typeof(FileUploadMiddleware))]
     [InlineData(typeof(ViewImageMiddleware))]
@@ -211,8 +210,8 @@ public class AIModuleRegistrationTests
         var services = CreateServiceCollection();
         var middlewareCount = services.Count(d => d.ServiceType == typeof(IAiMiddleware));
 
-        // AIModule 注册了 19 个中间件（每个都有 IAiMiddleware 转发）
-        middlewareCount.ShouldBeGreaterThanOrEqualTo(19, "Should register at least 19 IAiMiddleware forwards");
+        // AIModule 注册了 18 个中间件（每个都有 IAiMiddleware 转发）
+        middlewareCount.ShouldBeGreaterThanOrEqualTo(18, "Should register at least 18 IAiMiddleware forwards");
     }
 
     [Fact]

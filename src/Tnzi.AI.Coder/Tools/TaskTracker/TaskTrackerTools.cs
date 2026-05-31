@@ -242,10 +242,10 @@ public class TaskTrackerTools : IAIToolProvider
     {
         return status.Trim().ToLower() switch
         {
-            "pending" => "pending",
-            "in_progress" or "in-progress" or "inprogress" => "in_progress",
-            "completed" or "done" => "completed",
-            "blocked" => "blocked",
+            "pending" => TaskItemStatus.Pending,
+            "in_progress" or "in-progress" or "inprogress" => TaskItemStatus.InProgress,
+            "completed" or "done" => TaskItemStatus.Completed,
+            "blocked" => TaskItemStatus.Blocked,
             _ => null
         };
     }

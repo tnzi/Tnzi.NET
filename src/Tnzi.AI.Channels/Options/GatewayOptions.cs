@@ -17,8 +17,15 @@ public class GatewayOptions
     /// <summary>默认会话作用域</summary>
     public SessionScope DefaultScope { get; set; } = SessionScope.PerPeer;
 
-    /// <summary>每用户最大连接数</summary>
+    /// <summary>每用户最大连接数（匿名连接共享 UserId==null 桶，同样受此上限约束）</summary>
     public int MaxConnectionsPerUser { get; set; } = 5;
+
+    /// <summary>
+    /// 是否要求 WebSocket 连接已认证。默认 false（兼容现有匿名开发客户端）。
+    /// 设为 true 时，未携带已认证主体的连接在 AcceptWebSocketAsync 前被拒绝（401/关闭）。
+    /// 生产环境强烈建议设为 true（AI:Channels:Gateway:RequireAuthentication=true）。
+    /// </summary>
+    public bool RequireAuthentication { get; set; }
 
     /// <summary>心跳间隔（秒）</summary>
     public int HeartbeatIntervalSeconds { get; set; } = 30;

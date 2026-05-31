@@ -6,18 +6,18 @@ namespace Tnzi.AI.Services;
 public class SuggestionService : ISuggestionService
 {
     private readonly IAiUtility _aiUtility;
-    private readonly IAgentThreadInternalService _threadService;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<SuggestionOptions> _options;
     private readonly ILogger<SuggestionService> _logger;
 
     public SuggestionService(
         IAiUtility aiUtility,
-        IAgentThreadInternalService threadService,
+        IServiceScopeFactory scopeFactory,
         IOptions<SuggestionOptions> options,
         ILogger<SuggestionService> logger)
     {
         _aiUtility = Check.NotNull(aiUtility);
-        _threadService = Check.NotNull(threadService);
+        _scopeFactory = Check.NotNull(scopeFactory);
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
     }
@@ -27,7 +27,18 @@ public class SuggestionService : ISuggestionService
         try
         {
             // 1. 加载最近消息
-            var messages = await _threadService.GetMessageHistoryAsync(threadId, 6, ct);
+            // Read the message history in an isolated DI scope so the EF DbContext is never shared
+            // with the originating request (or with a sibling event handler running concurrently in
+            // the same scope). Mirrors ThreadTitleGenerationHandler — see its remarks. This avoids
+            // "A second operation was started on this context instance" when suggestion generation
+            // overlaps other DbContext work on the ambient scope.
+            List<ChatMessage> messages;
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var threadService = scope.ServiceProvider.GetRequiredService<IAgentThreadInternalService>();
+                messages = await threadService.GetMessageHistoryAsync(threadId, 6, ct);
+            }
+
             if (messages is not { Count: > 0 })
                 return [];
 

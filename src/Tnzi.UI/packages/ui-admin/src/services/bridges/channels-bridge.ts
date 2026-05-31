@@ -3,47 +3,30 @@
  * `Tnzi.AI.Channels`. The module is an optional sub-module of Tnzi.AI; when
  * not loaded the backend returns 404 and the bridge surfaces empty values
  * so the page renders an "unavailable" state.
+ *
+ * DTOs + the raw API factory live in `@tnzi/core/services/ai` (`channels.ts`).
+ * This bridge delegates to `useChannelsAdminApi(client)` and adds the tolerant
+ * `unwrap` + empty-on-404 shaping the pages expect.
  */
 import type { HttpClient } from '@tnzi/core/http'
+import { useChannelsAdminApi } from '@tnzi/core/services/ai'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export interface ChannelAdapterDto {
-  name: string
-  supportsStreaming: boolean
-}
+export type {
+  ChannelAdapterDto,
+  ChannelModuleStatusDto,
+  GatewayStatusDto,
+  GatewayConnectionInfo,
+  SessionBindingRuleDto,
+} from '@tnzi/core/services/ai'
 
-export interface ChannelModuleStatusDto {
-  enabled: boolean
-  maxConcurrency: number
-  streamingThrottleMs: number
-  adapters: ChannelAdapterDto[]
-}
-
-export interface GatewayStatusDto {
-  enabled: boolean
-  connectedWebSocketCount: number
-  activeSessionCount: number
-}
-
-export interface GatewayConnectionInfo {
-  connectionId: string
-  userId?: string | null
-  clientType: string
-  deviceNodeId?: string | null
-  connectedAt: string
-}
-
-export interface SessionBindingRuleDto {
-  id: string
-  channel?: string | null
-  peerKind?: string | null
-  peerId?: string | null
-  agentId: string
-  scope: number
-  priority: number
-  isEnabled: boolean
-  creationTime?: string | null
-  lastModificationTime?: string | null
-}
+import type {
+  ChannelAdapterDto,
+  ChannelModuleStatusDto,
+  GatewayStatusDto,
+  GatewayConnectionInfo,
+  SessionBindingRuleDto,
+} from '@tnzi/core/services/ai'
 
 export interface ChannelsBridgeDeps {
   client?: HttpClient
@@ -61,13 +44,6 @@ export interface ChannelsBridge {
   }
 }
 
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
-}
-
 export function createChannelsBridge(deps: ChannelsBridgeDeps = {}): ChannelsBridge {
   const { client } = deps
 
@@ -79,30 +55,22 @@ export function createChannelsBridge(deps: ChannelsBridgeDeps = {}): ChannelsBri
     }
   }
 
+  const api = useChannelsAdminApi(client)
+
   return {
     channels: {
       getStatus: async () =>
-        unwrap<ChannelModuleStatusDto | null>(
-          await client.get<ChannelModuleStatusDto>('/admin/channels/status'),
-        ),
+        unwrap<ChannelModuleStatusDto | null>(await api.getStatus()),
       getAdapters: async () =>
-        unwrap<ChannelAdapterDto[]>(
-          await client.get<ChannelAdapterDto[]>('/admin/channels/adapters'),
-        ) ?? [],
+        unwrap<ChannelAdapterDto[]>(await api.getAdapters()) ?? [],
     },
     gateway: {
       getStatus: async () =>
-        unwrap<GatewayStatusDto | null>(
-          await client.get<GatewayStatusDto>('/admin/gateway/status'),
-        ),
+        unwrap<GatewayStatusDto | null>(await api.getGatewayStatus()),
       getConnections: async () =>
-        unwrap<GatewayConnectionInfo[]>(
-          await client.get<GatewayConnectionInfo[]>('/admin/gateway/connections'),
-        ) ?? [],
+        unwrap<GatewayConnectionInfo[]>(await api.getGatewayConnections()) ?? [],
       getBindings: async () =>
-        unwrap<SessionBindingRuleDto[]>(
-          await client.get<SessionBindingRuleDto[]>('/admin/gateway/bindings'),
-        ) ?? [],
+        unwrap<SessionBindingRuleDto[]>(await api.getGatewayBindings()) ?? [],
     },
   }
 }

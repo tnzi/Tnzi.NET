@@ -23,6 +23,7 @@ export default defineConfig({
         stores: resolve(__dirname, 'src/stores/index.ts'),
         composables: resolve(__dirname, 'src/composables/index.ts'),
         resolvers: resolve(__dirname, 'src/resolvers/index.ts'),
+        utils: resolve(__dirname, 'src/utils/index.ts'),
       },
       name: 'TnziUi',
       formats: ['es'],

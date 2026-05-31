@@ -1,7 +1,3 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Tnzi.Security.Claims;
-
 namespace Tnzi.AI.Tools.Approval.Sse;
 
 /// <summary>
@@ -164,9 +160,9 @@ public sealed class SseToolApprovalHandler : IToolApprovalHandler
 
         try
         {
-            return System.Text.Json.JsonSerializer.Serialize(request.Arguments);
+            return JsonSerializer.Serialize(request.Arguments);
         }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException || ex is NotSupportedException)
+        catch (Exception ex) when (ex is JsonException || ex is NotSupportedException)
         {
             _logger.LogWarning(ex,
                 "Failed to serialize approval arguments for tool {Tool}; emitting empty payload to UI.",

@@ -222,6 +222,7 @@ import { computed, ref, onMounted } from 'vue'
 import { NButton, NInput, NPopover, NSelect, NSpin, NTag } from 'naive-ui'
 // NSpin is still used for the sidebar (level/file list) — kept in the import.
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import { createLoggingBridge } from '../../services/bridges/logging-bridge'
 import type {
@@ -305,15 +306,6 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return ''
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
 }
 
 async function refreshLevels(): Promise<void> {

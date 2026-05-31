@@ -385,6 +385,137 @@ public class DatabaseMemoryStoreTests
 
     #endregion
 
+    #region Agent-bound retrieval (structured AgentId column)
+
+    // 回归测试：修复 "memory 写入结构化 AgentId 列、但读取仅按 Scope 字符串过滤 →
+    // Agent 记忆永不命中" 的缺陷。Agent-bound 范围必须通过 AgentId 列检索，且 headless-safe。
+
+    [Fact]
+    public async Task ReadAsync_AgentBoundScope_RetrievesByAgentIdColumn()
+    {
+        var agentId = Guid.NewGuid();
+        // 消费者写入形态：结构化 AgentId 列 + 朴素 Scope 字符串 "default"。
+        var entries = new List<MemoryEntry>
+        {
+            new() { Scope = "default", Content = "Agent X persona note", AgentId = agentId, CreationTime = DateTime.UtcNow.AddMinutes(-1) },
+            new() { Scope = "default", Content = "Another agent note", AgentId = Guid.NewGuid(), CreationTime = DateTime.UtcNow },
+            new() { Scope = "default", Content = "Plain user note", AgentId = null, CreationTime = DateTime.UtcNow }
+        };
+
+        // 通过接口调用 MemoryScope 重载（default interface method → ReadByAgentAsync）
+        IMemoryStore store = CreateStore(entries);
+        var result = await store.ReadAsync(MemoryScope.ForAgent(agentId, "default"));
+
+        result.ShouldNotBeNull();
+        result.ShouldContain("Agent X persona note");
+        result.ShouldNotContain("Another agent note");
+        result.ShouldNotContain("Plain user note");
+    }
+
+    [Fact]
+    public async Task ReadAsync_AgentBoundScope_Headless_NoCurrentUser_StillMatches()
+    {
+        // headless：没有 UserId 参与。Agent-bound 写入与读取都不含 user 维度，仍能匹配。
+        var agentId = Guid.NewGuid();
+        var entries = new List<MemoryEntry>
+        {
+            new() { Scope = "default", Content = "Headless agent memory", AgentId = agentId, UserId = null, CreationTime = DateTime.UtcNow }
+        };
+
+        var store = CreateStore(entries);
+        var result = await store.ReadByAgentAsync(agentId, "default");
+
+        result.ShouldNotBeNull();
+        result.ShouldContain("Headless agent memory");
+    }
+
+    [Fact]
+    public async Task ReadByAgentAsync_DifferentAgent_ReturnsNull()
+    {
+        var agentId = Guid.NewGuid();
+        var entries = new List<MemoryEntry>
+        {
+            new() { Scope = "default", Content = "Agent A memory", AgentId = agentId, CreationTime = DateTime.UtcNow }
+        };
+
+        var store = CreateStore(entries);
+        var result = await store.ReadByAgentAsync(Guid.NewGuid(), "default");
+
+        result.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task SearchByAgentAsync_FiltersByAgentIdColumn()
+    {
+        var agentId = Guid.NewGuid();
+        var entries = new List<MemoryEntry>
+        {
+            new() { Scope = "default", Content = "agent prefers concise replies", AgentId = agentId, CreationTime = DateTime.UtcNow },
+            new() { Scope = "default", Content = "agent prefers verbose replies", AgentId = Guid.NewGuid(), CreationTime = DateTime.UtcNow }
+        };
+
+        var store = CreateStore(entries);
+        var results = await store.SearchByAgentAsync(agentId, "default", "prefers", maxResults: 10);
+
+        results.Count.ShouldBe(1);
+        results[0].Content.ShouldContain("concise");
+    }
+
+    [Fact]
+    public async Task SearchAsync_AgentBoundScope_RoutesThroughAgentIdColumn()
+    {
+        var agentId = Guid.NewGuid();
+        var entries = new List<MemoryEntry>
+        {
+            new() { Scope = "default", Content = "bound agent fact about widgets", AgentId = agentId, CreationTime = DateTime.UtcNow },
+            new() { Scope = "default", Content = "other agent fact about widgets", AgentId = Guid.NewGuid(), CreationTime = DateTime.UtcNow }
+        };
+
+        // 通过接口调用 MemoryScope 重载（default interface method → SearchByAgentAsync）
+        IMemoryStore store = CreateStore(entries);
+        var results = await store.SearchAsync(MemoryScope.ForAgent(agentId, "default"), "widgets", maxResults: 10);
+
+        results.Count.ShouldBe(1);
+        results[0].Content.ShouldContain("bound agent");
+    }
+
+    [Fact]
+    public async Task WriteAsync_AgentBoundScope_WritesAgentIdAndDeterministicScopeKey()
+    {
+        var agentId = Guid.NewGuid();
+        var mockRepo = CreateMockRepo([]);
+        var store = CreateStore(mockRepo);
+
+        await store.WriteAsync(MemoryScope.ForAgent(agentId, "default"), "Curated agent memory");
+
+        mockRepo.Verify(r => r.InsertAsync(
+            It.Is<MemoryEntry>(e =>
+                e.AgentId == agentId &&
+                e.Content == "Curated agent memory" &&
+                e.Scope == $"agent-bound:{agentId:N}:default"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReadAsync_StringScope_UnaffectedByAgentBoundRows()
+    {
+        // 向后兼容：现有按 Scope 字符串读取的行为不受影响，AgentId 列存在与否都能读到。
+        var entries = new List<MemoryEntry>
+        {
+            new() { Scope = "default", Content = "Legacy plain row", AgentId = null, CreationTime = DateTime.UtcNow },
+            new() { Scope = "default", Content = "Legacy agent-tagged row", AgentId = Guid.NewGuid(), CreationTime = DateTime.UtcNow.AddMinutes(1) }
+        };
+
+        var store = CreateStore(entries);
+        var result = await store.ReadAsync("default");
+
+        result.ShouldNotBeNull();
+        result.ShouldContain("Legacy plain row");
+        result.ShouldContain("Legacy agent-tagged row");
+    }
+
+    #endregion
+
     #region ClearAsync
 
     [Fact]

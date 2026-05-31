@@ -32,9 +32,6 @@ export * from "./headless/index";
 // Utilities
 export * from "./utils/index";
 
-// Schemas (Zod)
-export * from "./schemas/index";
-
 // Constants
 export * from "./constants/index";
 

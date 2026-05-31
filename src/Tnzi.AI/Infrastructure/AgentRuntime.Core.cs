@@ -71,10 +71,13 @@ public partial class AgentRuntime
         var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
         var messages = new List<ChatMessage>(context.Messages);
-        if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
+        // Use EffectiveUserMessage (set by InputGuardrailMiddleware after e.g. PII redaction),
+        // falling back to the original Request.UserMessage when the guardrail made no change.
+        var effectiveUserMsg = context.EffectiveUserMessage ?? context.Request.UserMessage;
+        if (!string.IsNullOrWhiteSpace(effectiveUserMsg))
         {
             var userMessage = await _agentResolver.BuildChatMessageAsync(
-                context.Request.UserMessage, context.Request.ContentParts, ct);
+                effectiveUserMsg, context.Request.ContentParts, ct);
             messages.Add(userMessage);
         }
 
@@ -136,10 +139,13 @@ public partial class AgentRuntime
         var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
         var messages = new List<ChatMessage>(context.Messages);
-        if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
+        // Use EffectiveUserMessage (set by InputGuardrailMiddleware after e.g. PII redaction),
+        // falling back to the original Request.UserMessage when the guardrail made no change.
+        var effectiveUserMsg = context.EffectiveUserMessage ?? context.Request.UserMessage;
+        if (!string.IsNullOrWhiteSpace(effectiveUserMsg))
         {
             var userMessage = await _agentResolver.BuildChatMessageAsync(
-                context.Request.UserMessage, context.Request.ContentParts, ct);
+                effectiveUserMsg, context.Request.ContentParts, ct);
             messages.Add(userMessage);
         }
 

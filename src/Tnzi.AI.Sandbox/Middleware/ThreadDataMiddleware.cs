@@ -1,15 +1,4 @@
-using Tnzi.AI;
-
 namespace Tnzi.AI.Sandbox.Middleware;
-
-public static class SandboxPropertyKeys
-{
-    public const string ThreadData = "ThreadData";
-    public const string Sandbox = "Sandbox";
-    public const string SandboxId = "SandboxId";
-}
-
-public record ThreadDataState(string ThreadDirectory, string WorkspacePath, string UploadsPath, string OutputsPath, string SkillsPath);
 
 public class ThreadDataMiddleware : IAiMiddleware
 {

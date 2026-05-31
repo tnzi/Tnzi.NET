@@ -13,6 +13,7 @@ public partial class SkillService : ApplicationService, ISkillService
     private readonly ISkillTemplateEngine _templateEngine;
     private readonly FileSystemSkillStore _fileStore;
     private readonly ISkillRequirementsValidator? _requirementsValidator;
+    private readonly ICurrentTenant? _currentTenant;
 
     public SkillService(
         IServiceProvider serviceProvider,
@@ -20,7 +21,8 @@ public partial class SkillService : ApplicationService, ISkillService
         ISkillRegistry registry,
         ISkillTemplateEngine templateEngine,
         FileSystemSkillStore fileStore,
-        ISkillRequirementsValidator? requirementsValidator = null)
+        ISkillRequirementsValidator? requirementsValidator = null,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -28,6 +30,7 @@ public partial class SkillService : ApplicationService, ISkillService
         _templateEngine = Check.NotNull(templateEngine);
         _fileStore = Check.NotNull(fileStore);
         _requirementsValidator = requirementsValidator;
+        _currentTenant = currentTenant;
     }
 
     public async Task<Result<List<SkillSummaryDto>>> GetAvailableAsync()
@@ -87,16 +90,18 @@ public partial class SkillService : ApplicationService, ISkillService
         if (renderResult.UnusedParameters.Count > 0)
             warnings.Add($"Unused parameters: {string.Join(", ", renderResult.UnusedParameters)}");
 
-        // Publish usage tracking event
+        // Publish usage tracking event with full row identity so the handler can narrow the update
         if (EventBus != null)
         {
-            await EventBus.PublishAsync(new AI.Events.SkillActivatedEvent
+            await EventBus.PublishAsync(new SkillActivatedEvent
             {
                 Slug = skill.Slug,
                 Scope = skill.Scope,
                 Source = skill.Source,
                 ActivatedAt = DateTime.UtcNow,
-                UserId = CurrentUser?.Id
+                UserId = CurrentUser?.Id,
+                TenantId = skill.TenantId,
+                OwnerUserId = skill.OwnerUserId
             });
         }
 
@@ -135,10 +140,14 @@ public partial class SkillService : ApplicationService, ISkillService
             ownerUserId = userId.Value;
         }
 
+        // Resolve TenantId: tenant-scoped skills store the current tenant; others stay null
+        Guid? tenantId = input.Scope == SkillScope.Tenant ? _currentTenant?.Id : null;
+
         // Check for duplicate slug in same scope/tenant/user
         var duplicate = await _repository.AnyAsync(e =>
             e.Slug == input.Slug &&
             e.Scope == input.Scope &&
+            e.TenantId == tenantId &&
             e.OwnerUserId == ownerUserId);
 
         if (duplicate)
@@ -148,6 +157,7 @@ public partial class SkillService : ApplicationService, ISkillService
         {
             Slug = input.Slug,
             Scope = input.Scope,
+            TenantId = tenantId,
             OwnerUserId = ownerUserId,
             Name = input.Name,
             Description = input.Description,
@@ -465,9 +475,12 @@ public partial class SkillService : ApplicationService, ISkillService
         var toInsert = new List<SkillEntity>();
         var toUpdate = new List<SkillEntity>();
 
-        // Pre-load existing slugs in target scope for conflict detection
+        // Resolve TenantId for the import batch (same rule as CreateAsync)
+        Guid? importTenantId = targetScope == SkillScope.Tenant ? _currentTenant?.Id : null;
+
+        // Pre-load existing slugs in target scope+tenant for conflict detection
         var existingSlugs = await _repository.AsQueryable()
-            .Where(e => e.Scope == targetScope)
+            .Where(e => e.Scope == targetScope && e.TenantId == importTenantId)
             .Select(e => new { e.Id, e.Slug })
             .ToDictionaryAsync(e => e.Slug, e => e.Id, StringComparer.OrdinalIgnoreCase);
 
@@ -533,6 +546,7 @@ public partial class SkillService : ApplicationService, ISkillService
                 {
                     Slug = skill.Slug,
                     Scope = targetScope,
+                    TenantId = importTenantId,
                     OwnerUserId = ownerUserId,
                     Name = skill.Name,
                     Description = skill.Description,

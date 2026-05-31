@@ -67,8 +67,13 @@ public class ReplTools : IAIToolProvider
             }
 
             // 审批流
-            if (sanitizeResult.RequiresApproval && _approvalHandler != null)
+            if (sanitizeResult.RequiresApproval)
             {
+                // fail-closed: if approval is required but no handler is wired, deny execution
+                if (_approvalHandler == null)
+                {
+                    return new { error = "Command requires approval but no approval handler is configured." };
+                }
                 var codePreview = code.Length > 500 ? code[..500] + "..." : code;
                 var approvalRequest = new ToolApprovalRequest
                 {
@@ -143,20 +148,6 @@ public class ReplTools : IAIToolProvider
             _logger.LogDebug(ex, "Failed to execute {Language} code", language);
             return new { error = $"Failed to execute code: {ex.Message}" };
         }
-    }
-
-    /// <summary>
-    /// 执行 SQL 查询（存根 — 需要数据库配置）
-    /// </summary>
-    [AIFunction("execute_sql", "Execute a SQL query against a configured database", Enabled = false)]
-    public Task<object> ExecuteSqlAsync(
-        [AIParameter("query", "SQL query to execute")] string query,
-        [AIParameter("connection_name", "Connection name from configuration", false)] string? connectionName = null)
-    {
-        return Task.FromResult<object>(new
-        {
-            error = "SQL execution requires database configuration. Use bash tool with your database CLI instead."
-        });
     }
 
     /// <summary>

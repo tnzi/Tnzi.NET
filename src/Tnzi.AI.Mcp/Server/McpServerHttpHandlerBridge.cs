@@ -1,6 +1,3 @@
-using ModelContextProtocol.Protocol;
-
-
 namespace Tnzi.AI.Mcp.Server;
 
 /// <summary>

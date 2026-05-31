@@ -86,6 +86,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createSignalRBridge,
@@ -147,11 +148,6 @@ const filteredUsers = computed(() => {
     )
   })
 })
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
-}
 
 const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
   {

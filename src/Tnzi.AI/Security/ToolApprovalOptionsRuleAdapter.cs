@@ -1,7 +1,5 @@
 namespace Tnzi.AI.Security;
 
-using Tnzi.AI.Options;
-
 /// <summary>
 /// 将旧的 ToolApprovalOptions 适配为 ToolPermissionRule。
 /// 这是兼容层，避免在接入权限引擎的第一阶段破坏既有配置行为。

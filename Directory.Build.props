@@ -7,7 +7,18 @@
     <!-- 允许向前滚动到更高版本的运行时 -->
     <RollForward>LatestMajor</RollForward>
     <!-- 同时也加上这个，双重保险 -->
-    <ResourceLanguages>en</ResourceLanguages> 
+    <ResourceLanguages>en</ResourceLanguages>
+  </PropertyGroup>
+
+  <!-- 编译期约定门禁：启用 .NET 内置分析器 + 代码风格检查（仅警告，不阻断构建）。 -->
+  <!-- 这是把"约定靠散文"升级为"约定靠编译器"的第一步；规则细分严重度见根 .editorconfig。 -->
+  <!-- 仅对 C# 项目生效，避免影响前端壳工程（ProjectType=Frontend）。 -->
+  <PropertyGroup Condition="'$(ProjectType)' != 'Frontend' and '$(MSBuildProjectExtension)' == '.csproj'">
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Default</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- 暂不开启 TreatWarningsAsErrors，待存量警告清零后再逐步收紧（见 .editorconfig 中按规则提级为 error 的少数高价值项） -->
   </PropertyGroup>
 
   <!-- Frontend project file visibility rules (Solution Explorer) -->

@@ -10,7 +10,7 @@ import { useAdminAppStore } from '../../stores/useAdminAppStore'
  * `TAdminTabs.renderTitle` so every surface shows the same humanised
  * label when a key is missing.
  */
-function humanise(key: string): string {
+export function humanise(key: string): string {
   if (!key) return ''
   const parts = key.split('.')
   let last = parts[parts.length - 1] ?? key

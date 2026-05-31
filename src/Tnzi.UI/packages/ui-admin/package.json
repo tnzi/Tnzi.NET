@@ -31,10 +31,6 @@
       "types": "./dist/stores/index.d.ts",
       "import": "./dist/stores.js"
     },
-    "./template": {
-      "types": "./dist/template/index.d.ts",
-      "import": "./dist/template.js"
-    },
     "./presets": {
       "types": "./dist/presets/index.d.ts",
       "import": "./dist/presets.js"

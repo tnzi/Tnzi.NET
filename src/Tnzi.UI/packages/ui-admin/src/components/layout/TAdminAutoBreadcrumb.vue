@@ -18,7 +18,7 @@ import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-rou
 import TAdminBreadcrumb, { type TAdminBreadcrumbItem } from './TAdminBreadcrumb.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { DEFAULT_ROUTE_ICONS } from '../../router/routeIcons'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { humanise, translatePageKey } from '../../pages/_shared/translate'
 
 interface Props {
   /** Show the route icon beside each crumb label. Default `true`. */
@@ -34,23 +34,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const route = useRoute()
 const router = useRouter()
-
-/**
- * Last-segment capitalised fallback for i18n keys that haven't been
- * translated yet (e.g. `tnzi.admin.modules.identity.users.title` →
- * "Users"). Matches what soybean renders when a `$t` lookup misses.
- */
-function humanise(key: string): string {
-  if (!key) return ''
-  const parts = key.split('.')
-  // Drop a trailing `title` if present so the user sees the meaningful
-  // last segment.
-  let last = parts[parts.length - 1] ?? key
-  if (last === 'title' && parts.length > 1) {
-    last = parts[parts.length - 2] ?? key
-  }
-  return last.charAt(0).toUpperCase() + last.slice(1)
-}
 
 function resolveLabel(r: RouteLocationNormalizedLoaded['matched'][number]): string {
   const raw =

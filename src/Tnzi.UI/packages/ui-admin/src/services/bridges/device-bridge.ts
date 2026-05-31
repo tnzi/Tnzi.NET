@@ -5,36 +5,28 @@
  * Surfaces connected device nodes + pending pairing requests, and exposes
  * approve / reject / revoke operations. The module is an optional sub-module
  * of Tnzi.AI; bridge returns empty on 404 so the page renders gracefully.
+ *
+ * DTOs + the raw API factory live in `@tnzi/core/services/ai` (`device.ts`).
+ * This bridge delegates to `useDeviceAdminApi(client)` and adds the tolerant
+ * `unwrap` + empty-on-404 shaping the pages expect.
  */
 import type { HttpClient } from '@tnzi/core/http'
+import { useDeviceAdminApi } from '@tnzi/core/services/ai'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export type DevicePlatform = 0 | 1 | 2 | 3 | 4 | 5
-export type DeviceConnectionState = 0 | 1 | 2
+export type {
+  DevicePlatform,
+  DeviceConnectionState,
+  DeviceNodeDto,
+  PairingRequestDto,
+  DevicePairingInfoDto,
+} from '@tnzi/core/services/ai'
 
-export interface DeviceNodeDto {
-  nodeId: string
-  name: string
-  platform: DevicePlatform
-  state: DeviceConnectionState
-  capabilities: string[]
-}
-
-export interface PairingRequestDto {
-  id: string
-  code: string
-  nodeId: string
-  deviceName: string
-  platform: DevicePlatform
-  createdAt: string
-  expiresAt: string
-}
-
-export interface DevicePairingInfoDto {
-  nodeId: string
-  name: string
-  platform: DevicePlatform
-  capabilities: Array<{ name: string; description?: string | null; permissionLevel: number }>
-}
+import type {
+  DeviceNodeDto,
+  PairingRequestDto,
+  DevicePairingInfoDto,
+} from '@tnzi/core/services/ai'
 
 export interface DeviceBridgeDeps {
   client?: HttpClient
@@ -46,13 +38,6 @@ export interface DeviceBridge {
   approvePairing(requestId: string): Promise<DevicePairingInfoDto | null>
   rejectPairing(requestId: string): Promise<void>
   revokeDevice(nodeId: string): Promise<void>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createDeviceBridge(deps: DeviceBridgeDeps = {}): DeviceBridge {
@@ -69,22 +54,20 @@ export function createDeviceBridge(deps: DeviceBridgeDeps = {}): DeviceBridge {
     }
   }
 
+  const api = useDeviceAdminApi(client)
+
   return {
     getDevices: async () =>
-      unwrap<DeviceNodeDto[]>(await client.get<DeviceNodeDto[]>('/admin/devices')) ?? [],
+      unwrap<DeviceNodeDto[]>(await api.getDevices()) ?? [],
     getPendingPairings: async () =>
-      unwrap<PairingRequestDto[]>(await client.get<PairingRequestDto[]>('/admin/devices/pairing')) ?? [],
+      unwrap<PairingRequestDto[]>(await api.getPendingPairings()) ?? [],
     approvePairing: async (requestId: string) =>
-      unwrap<DevicePairingInfoDto | null>(
-        await client.post<DevicePairingInfoDto>(
-          `/admin/devices/pairing/${encodeURIComponent(requestId)}/approve`,
-        ),
-      ),
+      unwrap<DevicePairingInfoDto | null>(await api.approvePairing(requestId)),
     rejectPairing: async (requestId: string) => {
-      await client.post(`/admin/devices/pairing/${encodeURIComponent(requestId)}/reject`)
+      await api.rejectPairing(requestId)
     },
     revokeDevice: async (nodeId: string) => {
-      await client.delete(`/admin/devices/${encodeURIComponent(nodeId)}`)
+      await api.revokeDevice(nodeId)
     },
   }
 }

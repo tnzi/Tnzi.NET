@@ -13,7 +13,7 @@ describe('useTheme', () => {
   it('returns the current theme settings reactive ref', () => {
     const ctx = createThemeContext(defaultThemeSettings)
     const { settings } = useTheme(ctx)
-    expect(settings.value.colors.primary).toBe('#18a058')
+    expect(settings.value.colors.primary).toBe('#0d9488')
   })
 
   it('setMode updates the mode reactively', () => {

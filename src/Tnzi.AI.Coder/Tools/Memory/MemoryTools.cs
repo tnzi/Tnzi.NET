@@ -3,7 +3,7 @@ namespace Tnzi.AI.Coder.Memory;
 /// <summary>
 /// 持久记忆工具组 — 读写持久化记忆
 /// </summary>
-[AIToolGroup("memory", "Persistent Memory", "Read/write persistent memory")]
+[AIToolGroup("coder-memory", "Coder Persistent Memory", "Read/write persistent memory for the Coder agent")]
 public class MemoryTools : IAIToolProvider
 {
     // Singleton tool wrapper resolves IMemoryStore (potentially Scoped, e.g. DatabaseMemoryStore)

@@ -28,14 +28,4 @@ internal static class ExecutionStrategyAgentLoader
             }
             : null;
     }
-
-    public static List<CitationDto>? MergeCitations(params IEnumerable<CitationDto>?[] sources)
-    {
-        var merged = sources
-            .Where(x => x != null)
-            .SelectMany(x => x!)
-            .ToList();
-
-        return merged.Count > 0 ? merged : null;
-    }
 }

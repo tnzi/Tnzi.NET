@@ -78,6 +78,13 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
         return Task.CompletedTask;
     }
 
+    /// <remarks>
+    /// ⚠️ 多 DbContext 注意：当单个工作单元涉及 2 个及以上 DbContext 时，各上下文按顺序逐个提交，
+    /// 这<b>不是</b>跨上下文的分布式/原子事务。若前面的上下文已提交、后面的上下文提交失败，
+    /// 已提交的部分<b>无法</b>回滚——此时框架会回滚尚未提交的上下文、清空 post-commit 队列，
+    /// 并记录 <c>LogCritical("Partial commit detected ...")</c> 后重新抛出，可能需要人工干预或补偿。
+    /// 跨上下文的强一致性应通过单一 DbContext、Outbox 模式（<c>EfCoreEventStore</c>）或幂等/补偿设计实现。
+    /// </remarks>
     public async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
     {
         if (!IsEnabledTransaction)

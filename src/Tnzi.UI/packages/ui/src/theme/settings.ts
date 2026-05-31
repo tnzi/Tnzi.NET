@@ -2,7 +2,7 @@ import type { ThemeColors, ThemeSettings } from './types'
 import { getColorPalette } from './palette'
 
 const defaultColors: ThemeColors = {
-  primary: '#18a058',
+  primary: '#0d9488',
   info: '#2080f0',
   success: '#18a058',
   warning: '#f0a020',

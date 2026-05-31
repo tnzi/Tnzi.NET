@@ -384,7 +384,7 @@ public partial class CodeSearchTools : IAIToolProvider
     [GeneratedRegex(@"^\s*(?:public\s+|internal\s+|protected\s+|private\s+)?(?:abstract\s+|sealed\s+|static\s+|partial\s+)*(class|interface|struct|enum|record)\s+(\w+)", RegexOptions.Multiline, matchTimeoutMilliseconds: 5000)]
     private static partial Regex CSharpTypeRegex();
 
-    // 修正: 第一个捕获组匹配访问修饰符, 第二个匹配返回类型, 第三个匹配方法名
+    // 第一个捕获组匹配访问修饰符, 第二个匹配返回类型, 第三个匹配方法名
     [GeneratedRegex(@"^\s*(public|protected|internal|private)\s+(?:static\s+|virtual\s+|override\s+|abstract\s+|async\s+)*(\S+)\s+(\w+)\s*\(", RegexOptions.Multiline, matchTimeoutMilliseconds: 5000)]
     private static partial Regex CSharpMethodRegex();
 

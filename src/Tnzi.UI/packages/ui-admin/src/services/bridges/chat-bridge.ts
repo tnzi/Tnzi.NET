@@ -32,7 +32,7 @@ import {
   ChatSessionStatus,
 } from '@tnzi/core/services/chat'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult } from '../_mappers'
+import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useChatAdminApi>[0]
 
@@ -58,13 +58,6 @@ export interface ChatBridge {
   /** Admin-curated chat session groupings. /admin/chat-sessions CRUD. */
   sessions: BridgeCrudContract<ChatSessionListItemDto>
   messages: ChatMessageContract
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>

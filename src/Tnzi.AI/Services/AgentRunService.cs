@@ -244,32 +244,6 @@ public class AgentRunService : ApplicationService, IAgentRunService
     }
 
     private static bool TryMapFailure(AgentRunResult result, out int statusCode, out string errorCode)
-    {
-        switch (result.FinishReason)
-        {
-            case FinishReasons.QuotaExceeded:
-                statusCode = 429;
-                errorCode = ErrorCodes.QuotaExceeded;
-                return true;
-            case FinishReasons.GuardrailRejected:
-                statusCode = 400;
-                errorCode = ErrorCodes.GuardrailRejected;
-                return true;
-            case FinishReasons.Rejected:
-                statusCode = 400;
-                errorCode = ErrorCodes.AgentRunFailed;
-                return true;
-            case FinishReasons.MaxHandoffs:
-            case FinishReasons.Error:
-            case FinishReasons.Failed:
-                statusCode = 500;
-                errorCode = ErrorCodes.AgentRunFailed;
-                return true;
-            default:
-                statusCode = 0;
-                errorCode = string.Empty;
-                return false;
-        }
-    }
+        => AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out statusCode, out errorCode);
 
 }

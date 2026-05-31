@@ -25,4 +25,10 @@ public interface IRunStore
 
     /// <summary>按条件分页查询 Run 列表</summary>
     Task<List<AgentRun>> ListAsync(AgentRunStatus? status, int maxResults, CancellationToken cancellationToken = default);
+
+    /// <summary>统计指定根 Run 下的后代数量（不含根自身）</summary>
+    Task<int> CountDescendantsAsync(Guid rootRunId, CancellationToken cancellationToken = default);
+
+    /// <summary>获取指定 Run 的父 Run ID（仅 Id + ParentRunId 字段）</summary>
+    Task<Guid?> GetParentRunIdAsync(Guid runId, CancellationToken cancellationToken = default);
 }

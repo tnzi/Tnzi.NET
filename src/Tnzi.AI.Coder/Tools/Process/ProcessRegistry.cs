@@ -27,7 +27,7 @@ internal static class ProcessRegistry
         {
             Command = command,
             StartTime = DateTime.UtcNow,
-            Process = new System.Diagnostics.Process { StartInfo = psi }
+            Process = new Process { StartInfo = psi }
         };
 
         managed.Process.OutputDataReceived += (_, e) =>

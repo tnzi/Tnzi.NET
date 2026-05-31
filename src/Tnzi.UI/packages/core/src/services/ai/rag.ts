@@ -39,7 +39,18 @@ export interface KnowledgeBaseUpdateParams {
 export interface SearchTestParams {
   query: string;
   topK?: number;
-  threshold?: number;
+  /** Metadata key/value filter matched against chunk metadata JSON. */
+  metadataFilter?: Record<string, string>;
+}
+
+/** Query for the paged document list (POST /admin/knowledge-bases/{id}/documents/query). */
+export interface DocumentQueryParams {
+  pageIndex?: number;
+  pageSize?: number;
+  /** Filename keyword search. */
+  keyword?: string;
+  /** Filter by ingestion status (backend DocumentStatus enum value). */
+  status?: number;
 }
 
 /** Result returned from POST /admin/knowledge-bases/{id}/reindex */
@@ -112,27 +123,23 @@ export function useAdminKnowledgeBaseApi(client: HttpClient) {
       client.delete(`${base}/${id}`),
 
     /** Upload a document to a knowledge base */
-    uploadDocument: (kbId: string, file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return client.post(`${base}/${kbId}/documents`, formData);
-    },
+    uploadDocument: (kbId: string, file: File) =>
+      // Backend route is POST {id}/upload (multipart, IFormFile). Use
+      // client.upload (multipart/form-data via XHR) — NOT client.post, which
+      // would JSON.stringify the FormData into "{}" and drop the file.
+      client.upload(`${base}/${kbId}/upload`, file),
 
-    /** Get documents in a knowledge base */
-    getDocuments: (kbId: string, params?: { page?: number; pageSize?: number }) =>
-      client.get(`${base}/${kbId}/documents`, { params }),
+    /** Get the paged document list for a knowledge base (POST {id}/documents/query) */
+    getDocuments: (kbId: string, query?: DocumentQueryParams) =>
+      client.post(`${base}/${kbId}/documents/query`, query ?? {}),
 
     /** Delete a document from a knowledge base */
     deleteDocument: (kbId: string, docId: string) =>
       client.delete(`${base}/${kbId}/documents/${docId}`),
 
-    /** Test search against a knowledge base */
+    /** Search within a knowledge base (POST {id}/search) */
     searchTest: (kbId: string, data: SearchTestParams) =>
-      client.post(`${base}/${kbId}/search-test`, data),
-
-    /** Get knowledge base stats (document count, chunk count, etc.) */
-    getStats: (kbId: string) =>
-      client.get(`${base}/${kbId}/stats`),
+      client.post(`${base}/${kbId}/search`, data),
 
     /** Trigger full re-vectorization of all chunks in a knowledge base (admin) */
     reindex: (kbId: string) =>

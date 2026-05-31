@@ -45,10 +45,10 @@ public class InputGuardrailMiddleware : IAiMiddleware
                 };
             }
 
-            // 如果 guardrail 修改了文本，更新 context.Properties 供下游使用
+            // 如果 guardrail 修改了文本（如 PII 脱敏），写入 EffectiveUserMessage 供 AgentRuntime 使用
             if (!string.Equals(text, inputText, StringComparison.Ordinal))
             {
-                context.Properties["GuardrailModifiedInput"] = text;
+                context.EffectiveUserMessage = text;
             }
         }
         catch (TripwireGuardrailException ex)
@@ -99,7 +99,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
             }
             else if (!string.Equals(text, inputText, StringComparison.Ordinal))
             {
-                context.Properties["GuardrailModifiedInput"] = text;
+                context.EffectiveUserMessage = text;
             }
         }
         catch (TripwireGuardrailException ex)
@@ -130,24 +130,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
     }
 
     /// <summary>发布 Guardrail 拦截事件（静默失败）</summary>
-    private async Task PublishGuardrailRejectionEventAsync(AiMiddlewareContext context, string guardrailName, string reason, string direction)
-    {
-        try
-        {
-            if (_eventBus == null) return;
-
-            await _eventBus.PublishAsync(new GuardrailRejectionEvent
-            {
-                UserId = context.Request.UserId,
-                ThreadId = context.Request.ThreadId,
-                GuardrailName = guardrailName,
-                Reason = reason,
-                Direction = direction
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish GuardrailRejectionEvent");
-        }
-    }
+    private Task PublishGuardrailRejectionEventAsync(AiMiddlewareContext context, string guardrailName, string reason, string direction)
+        => GuardrailEventPublisher.PublishGuardrailRejectionEventAsync(
+            _eventBus, _logger, context.Request.UserId, context.Request.ThreadId, guardrailName, reason, direction);
 }

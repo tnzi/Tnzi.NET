@@ -1,8 +1,3 @@
-using Tnzi.AI.Channels.Adapters.Dingtalk;
-using Tnzi.AI.Channels.Adapters.Discord;
-using Tnzi.AI.Channels.Adapters.Feishu;
-using Tnzi.AI.Channels.Adapters.Slack;
-
 namespace Tnzi.AI.Channels.Options;
 
 /// <summary>

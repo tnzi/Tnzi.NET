@@ -83,32 +83,45 @@ public sealed class KeyedAsyncLock
 
     private RefCountedSemaphore GetOrAddSemaphore(string key)
     {
+        // 引用计数的增减与移除都在 entry 自身的锁内进行，并配合 Removed 标志，
+        // 关闭了 "Decrement→0 后、TryRemove 前被另一线程重获同实例" 的 TOCTOU 窗口：
+        // 若某条目已被并发移除，重获者会在锁内观察到 Removed 并重试取/建新条目，
+        // 从而保证同一 key 任意时刻最多只有一把有效信号量（互斥不被破坏）。
         while (true)
         {
-            var semaphore = _locks.GetOrAdd(key, _ => new RefCountedSemaphore());
-            if (Interlocked.Increment(ref semaphore.RefCount) > 1 || _locks.ContainsKey(key))
+            var semaphore = _locks.GetOrAdd(key, static _ => new RefCountedSemaphore());
+            lock (semaphore.SyncRoot)
             {
-                return semaphore;
+                if (!semaphore.Removed)
+                {
+                    semaphore.RefCount++;
+                    return semaphore;
+                }
+                // 该条目已被并发移除，重试以获取/创建新的条目
             }
-
-            // Semaphore was removed between GetOrAdd and Increment, retry
-            Interlocked.Decrement(ref semaphore.RefCount);
         }
     }
 
     private void ReleaseSemaphore(string key, RefCountedSemaphore semaphore)
     {
-        if (Interlocked.Decrement(ref semaphore.RefCount) == 0)
+        lock (semaphore.SyncRoot)
         {
-            // 最后一个引用，尝试移除
-            _locks.TryRemove(new KeyValuePair<string, RefCountedSemaphore>(key, semaphore));
+            if (--semaphore.RefCount == 0)
+            {
+                // 最后一个引用：在锁内标记移除并从字典剔除。
+                // 此时任何并发重获者要么尚未拿到本实例，要么会在锁内看到 Removed 后重试。
+                semaphore.Removed = true;
+                _locks.TryRemove(new KeyValuePair<string, RefCountedSemaphore>(key, semaphore));
+            }
         }
     }
 
     private sealed class RefCountedSemaphore
     {
         public readonly SemaphoreSlim Semaphore = new(1, 1);
+        public readonly object SyncRoot = new();
         public int RefCount;
+        public bool Removed;
     }
 
     private sealed class KeyedLockReleaser : IAsyncDisposable

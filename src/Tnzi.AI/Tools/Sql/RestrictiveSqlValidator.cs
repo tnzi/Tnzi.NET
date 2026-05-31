@@ -1,8 +1,5 @@
 using System.Collections.Frozen;
 using System.IO;
-using System.Text;
-using System.Text.RegularExpressions;
-using Microsoft.Extensions.Options;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace Tnzi.AI.Tools.Sql;

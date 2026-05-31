@@ -4,6 +4,16 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 vi.mock('../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
+
+// NotificationTemplate.vue calls `useMessage()` directly (like GdprRequests /
+// WorkflowEditor) — it requires NMessageProvider in the tree, so stub it.
+vi.mock('naive-ui', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('naive-ui')
+  return {
+    ...actual,
+    useMessage: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
+  }
+})
 vi.mock('../../src/services/bridges/notification-bridge', () => ({
   createNotificationBridge: () => ({
     messages: {
@@ -31,7 +41,10 @@ vi.mock('../../src/services/bridges/notification-bridge', () => ({
 
 const stubs = {
   DataTable: { props: ['data'], template: '<div class="dt" :data-rows="data.length" />' },
-  Pagination: { template: '<div />' },
+  // inheritAttrs:false so TCrudPage's `prefix` render-fn (and other NPagination
+  // props) don't fall through onto the bare <div> — `Element.prefix` is a
+  // read-only DOM property and assigning a function to it throws.
+  Pagination: { inheritAttrs: false, template: '<div />' },
   Input: { props: ['value'], template: '<input />' },
   Button: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
   Modal: { props: ['show'], template: '<div v-if="show"><slot /></div>' },

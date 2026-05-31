@@ -42,6 +42,7 @@ import type { Pinia } from 'pinia'
 import type { RouteRecordRaw, Router } from 'vue-router'
 import type { HttpClient } from '@tnzi/core/http'
 import { defaultAdminRoutes } from '../router/routes'
+import { createAuthGuard, createPermissionGuard } from '../router/guards'
 import {
   createTnziUiAdmin,
   type TnziUiAdminInstance,
@@ -236,6 +237,33 @@ export interface DefineAdminAppOptions {
    * already installed the pinia plugin yourself.
    */
   pluginOptions?: Omit<TnziUiAdminOptions, 'client' | 'pinia'>
+
+  /**
+   * Opt-in route guards. When `enabled`, `install()` registers the built-in
+   * auth guard (redirects unauthenticated users to `loginPath`) and
+   * permission guard (redirects to `forbiddenPath` when a route's
+   * `meta.permission` isn't held) on the router passed to `install()`.
+   *
+   * Both guards read `useAdminAuthStore`, which the consumer populates after
+   * login (via `setToken` / `setUserInfo`). Without this option **no guard is
+   * installed** — the admin is open by default — so consumers that wire their
+   * own `router.beforeEach` (e.g. an app with its own auth store) are not
+   * double-guarded. Routes opt out per-route with `meta.requiresAuth = false`.
+   *
+   * @example
+   * ```ts
+   * defineAdminApp({ client, auth: { enabled: true } })
+   * // custom paths:
+   * defineAdminApp({ client, auth: { enabled: true, loginPath: '/login', forbiddenPath: '/403' } })
+   * ```
+   */
+  auth?: {
+    enabled?: boolean
+    /** Where the auth guard redirects unauthenticated users. Default `/login`. */
+    loginPath?: string
+    /** Where the permission guard redirects on missing permission. Default `/403`. */
+    forbiddenPath?: string
+  }
 }
 
 export interface DefineAdminAppResult {
@@ -559,6 +587,24 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // Idempotent — safe if the consumer already called useRouteProgress.
     if (router) {
       useRouteProgress(router)
+    }
+
+    // Opt-in route guards. Only installed when the consumer asks for them, so
+    // apps that wire their own `router.beforeEach` aren't double-guarded and
+    // the historical open-by-default behaviour is preserved for consumers who
+    // don't opt in. Defaults are basePath-aware so the redirect targets match
+    // the actual login/403 route paths.
+    if (router && options.auth?.enabled) {
+      // Mirror applyBasePath's prefixing: the login/403 routes are only
+      // prefixed for custom base paths — both '/' (domain root) AND the
+      // default '/admin' leave them at '/login' / '/403' (applyBasePath
+      // short-circuits '/admin'). Using `${basePath}/login` for the default
+      // would point the guard at the non-existent '/admin/login'.
+      const prefix = basePath === '/' || basePath === '/admin' ? '' : basePath
+      const loginPath = options.auth.loginPath ?? `${prefix}/login`
+      const forbiddenPath = options.auth.forbiddenPath ?? `${prefix}/403`
+      router.beforeEach(createAuthGuard({ loginPath }))
+      router.beforeEach(createPermissionGuard({ forbiddenPath }))
     }
 
     // Seed the route store so TAdminSidebar can render the menu. The store

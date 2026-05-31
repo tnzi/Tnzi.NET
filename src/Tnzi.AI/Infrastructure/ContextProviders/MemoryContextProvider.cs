@@ -8,6 +8,7 @@ public sealed class MemoryContextProvider : IContextProvider
 {
     private readonly IMemoryStore _memoryStore;
     private readonly MemoryScope _scope;
+    private readonly MemoryScope? _agentBoundScope;
     private readonly IChatClientFactory? _chatClientFactory;
     private readonly MemoryOptions? _memoryOptions;
     private readonly IMemoryConsolidator? _memoryConsolidator;
@@ -24,8 +25,12 @@ public sealed class MemoryContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// 初始化（含 MemoryScope + 可选自动沉淀）
+    /// 初始化（含 MemoryScope + 可选自动沉淀 + 可选 Agent-bound 范围）
     /// </summary>
+    /// <param name="agentBoundScope">
+    /// 可选的 Agent-bound 记忆范围 — 绑定到当前 Agent（通过结构化 AgentId 列检索），
+    /// 与当前用户无关，确保 headless 运行也能加载。为只读注入，不参与自动沉淀。
+    /// </param>
     public MemoryContextProvider(
         IMemoryStore memoryStore,
         MemoryScope scope,
@@ -33,7 +38,8 @@ public sealed class MemoryContextProvider : IContextProvider
         IChatClientFactory? chatClientFactory = null,
         MemoryOptions? memoryOptions = null,
         IMemoryConsolidator? memoryConsolidator = null,
-        IAgentExecutionContextAccessor? executionContextAccessor = null)
+        IAgentExecutionContextAccessor? executionContextAccessor = null,
+        MemoryScope? agentBoundScope = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _scope = Check.NotNull(scope);
@@ -42,6 +48,11 @@ public sealed class MemoryContextProvider : IContextProvider
         _memoryOptions = memoryOptions;
         _memoryConsolidator = memoryConsolidator;
         _executionContextAccessor = executionContextAccessor;
+        // 仅当与本地 scope 键不同才作为独立段加载，避免重复（例如本地 scope 已含相同 agent 维度时）。
+        _agentBoundScope = agentBoundScope is { AgentBound: true }
+            && !string.Equals(agentBoundScope.ToScopeKey(), scope.ToScopeKey(), StringComparison.OrdinalIgnoreCase)
+            ? agentBoundScope
+            : null;
     }
 
     /// <inheritdoc />
@@ -179,8 +190,13 @@ public sealed class MemoryContextProvider : IContextProvider
 
     private async Task<List<ScopedMemorySegment>> LoadMemorySegmentsAsync(CancellationToken ct)
     {
-        // 并行读取三段记忆（本地、项目快照、共享）
+        // 并行读取四段记忆（本地、Agent-bound、项目快照、共享）
         var localTask = _memoryStore.ReadAsync(_scope, ct);
+
+        // Agent-bound：绑定到当前 Agent 的记忆（结构化 AgentId 列检索），headless-safe。
+        var agentBoundTask = _agentBoundScope != null
+            ? _memoryStore.ReadAsync(_agentBoundScope, ct)
+            : Task.FromResult<string?>(null);
 
         var projectScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
             _memoryOptions?.EnableProjectSnapshot == true,
@@ -199,15 +215,22 @@ public sealed class MemoryContextProvider : IContextProvider
             ? _memoryStore.ReadAsync(sharedScope!, ct)
             : Task.FromResult<string?>(null);
 
-        await Task.WhenAll(localTask, projectTask, sharedTask);
+        await Task.WhenAll(localTask, agentBoundTask, projectTask, sharedTask);
 
-        var segments = new List<ScopedMemorySegment>(3);
+        var segments = new List<ScopedMemorySegment>(4);
 
         var localMemory = localTask.Result;
         if (!string.IsNullOrWhiteSpace(localMemory))
         {
             segments.Add(new ScopedMemorySegment("Local Memory", _scope.ToScopeKey(), _scope, localMemory));
             _logger.LogDebug("Loaded local memory for scope {Scope}, length: {Length}", _scope.Name, localMemory.Length);
+        }
+
+        var agentBoundMemory = agentBoundTask.Result;
+        if (!string.IsNullOrWhiteSpace(agentBoundMemory))
+        {
+            segments.Add(new ScopedMemorySegment("Agent Memory", _agentBoundScope!.ToScopeKey(), _agentBoundScope, agentBoundMemory));
+            _logger.LogDebug("Loaded agent-bound memory for scope {Scope}, length: {Length}", _agentBoundScope.ToScopeKey(), agentBoundMemory.Length);
         }
 
         var projectMemory = projectTask.Result;

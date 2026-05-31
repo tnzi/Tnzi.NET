@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace Tnzi.AI.Tests.Modules;
 
 /// <summary>
@@ -48,6 +50,126 @@ public class AIModuleOptionalDependencyTests
         options.ShouldNotBeNull();
     }
 
+    /// <summary>
+    /// 当只加载 AIModule（无任何子模块）时，全部 INoOpService 回退实现都应能从 DI 解析，
+    /// 且解析结果确实是 INoOpService（即真正命中了 NoOp 回退，而非真实实现或 null）。
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(IWorkflowService))]
+    [InlineData(typeof(IWorkflowExecutionControlService))]
+    [InlineData(typeof(IWorkflowExecutionQueryService))]
+    [InlineData(typeof(IWorkflowExecutionMailbox))]
+    [InlineData(typeof(IExternalCliExecutor))]
+    [InlineData(typeof(IAgentStreamForwarder))]
+    [InlineData(typeof(IVectorStore))]
+    [InlineData(typeof(ISkillLoadTracker))]
+    [InlineData(typeof(ISkillService))]
+    [InlineData(typeof(ISkillStore))]
+    [InlineData(typeof(ISkillTemplateEngine))]
+    [InlineData(typeof(ISkillConstraintEnforcer))]
+    [InlineData(typeof(ISkillSearchService))]
+    [InlineData(typeof(ISkillRequirementsValidator))]
+    public void CoreModule_AllNoOpFallbacks_ResolveAsNoOpService(Type serviceType)
+    {
+        var services = CreateServiceCollection();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var resolved = scope.ServiceProvider.GetService(serviceType);
+
+        resolved.ShouldNotBeNull($"{serviceType.Name} should resolve to a NoOp fallback");
+        resolved.ShouldBeAssignableTo<INoOpService>(
+            $"{serviceType.Name} should resolve to an INoOpService fallback when no sub-module is loaded");
+    }
+
+    /// <summary>
+    /// 完整性守卫：枚举 Tnzi.AI 程序集中全部 INoOpService 实现，
+    /// 确保每一个（除有条件硬错误的 ITextSearchService 外）解析出来都是 INoOpService。
+    /// 新增 NoOp 回退而忘记在 AIModule.Validation 的探测表中登记时，此测试会失败。
+    /// </summary>
+    [Fact]
+    public void CoreModule_EveryNoOpImplementation_ResolvesAsNoOpFallback()
+    {
+        var services = CreateServiceCollection();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        // ITextSearchService 是有条件硬错误（feature 开启时抛出），不走信息级探测
+        var coveredServiceTypes = new HashSet<Type>
+        {
+            typeof(IWorkflowService), typeof(IWorkflowExecutionControlService),
+            typeof(IWorkflowExecutionQueryService), typeof(IWorkflowExecutionMailbox),
+            typeof(IExternalCliExecutor), typeof(IAgentStreamForwarder), typeof(IVectorStore),
+            typeof(ISkillLoadTracker), typeof(ISkillService), typeof(ISkillStore),
+            typeof(ISkillTemplateEngine), typeof(ISkillConstraintEnforcer),
+            typeof(ISkillSearchService), typeof(ISkillRequirementsValidator),
+            typeof(ITextSearchService)
+        };
+
+        var noOpImpls = typeof(AIModule).Assembly.GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false }
+                && typeof(INoOpService).IsAssignableFrom(t))
+            .ToList();
+
+        noOpImpls.ShouldNotBeEmpty();
+
+        foreach (var impl in noOpImpls)
+        {
+            // 找到该 NoOp 实现对应的 INoOpService 之外的服务接口
+            var serviceIface = impl.GetInterfaces()
+                .FirstOrDefault(i => i != typeof(INoOpService)
+                    && coveredServiceTypes.Contains(i));
+
+            serviceIface.ShouldNotBeNull(
+                $"{impl.Name} is an INoOpService implementation but its service interface is not covered by the NoOp probe table");
+
+            var resolved = scope.ServiceProvider.GetService(serviceIface);
+            resolved.ShouldBeAssignableTo<INoOpService>(
+                $"{serviceIface.Name} should resolve to a NoOp fallback when no sub-module is loaded");
+        }
+    }
+
+    /// <summary>
+    /// 无子模块、且未启用 TextSearch/ChatHistoryMemory 时，启动校验不应抛出。
+    /// </summary>
+    [Fact]
+    public void ValidateRuntimeConfiguration_NoSubModules_DoesNotThrow()
+    {
+        var services = CreateServiceCollection();
+        using var provider = services.BuildServiceProvider();
+        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("test");
+
+        Should.NotThrow(() => InvokeValidateRuntimeConfiguration(provider, logger));
+    }
+
+    /// <summary>
+    /// 启用 TextSearch 但 ITextSearchService 仍是 NoOp 回退时，启动校验必须抛出硬错误。
+    /// </summary>
+    [Fact]
+    public void ValidateRuntimeConfiguration_TextSearchEnabledWithNoOp_Throws()
+    {
+        var services = CreateServiceCollection(new Dictionary<string, string?>
+        {
+            ["AI:ContextProviders:Enabled"] = "true",
+            ["AI:ContextProviders:TextSearch:Enabled"] = "true"
+        });
+        using var provider = services.BuildServiceProvider();
+        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("test");
+
+        var ex = Should.Throw<TargetInvocationException>(
+            () => InvokeValidateRuntimeConfiguration(provider, logger));
+        ex.InnerException.ShouldBeOfType<InvalidOperationException>();
+    }
+
+    private static void InvokeValidateRuntimeConfiguration(IServiceProvider provider, ILogger logger)
+    {
+        var method = typeof(AIModule).GetMethod(
+            "ValidateRuntimeConfiguration",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        method.ShouldNotBeNull();
+        method.Invoke(null, [provider, logger]);
+    }
+
     [Fact]
     public async Task OptionsBuilder_BuildsSuccessfullyWithEmptyContributors()
     {
@@ -59,9 +181,7 @@ public class AIModuleOptionalDependencyTests
             LoggerFactory.Create(_ => { }),
             Mock.Of<IChatClientFactory>(),
             [],
-            Enumerable.Empty<IContextProviderContributor>(),
             new HeuristicTokenEstimator(),
-            Mock.Of<IAgentExecutionContextAccessor>(),
             Mock.Of<ILogger<AgentExecutorOptionsBuilder>>());
 
         var options = builder.Build(null, "TestAgent", "hello", null, null, null);

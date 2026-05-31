@@ -1,35 +1,30 @@
 /**
- * SignalR bridge — wraps `/admin/signalr/*` exposed by
- * `Tnzi.SignalR.Controllers.DefaultSignalRAdminController`.
+ * SignalR bridge — delegates to `useAdminSignalRApi`
+ * (from `@tnzi/core/services/signalr`) so admin pages get the standard
+ * dependency-injection + single-mock-seam pattern other bridges use.
  *
  * Read endpoints (stats, online-users, per-user connections, group lookups)
  * plus one destructive endpoint (force-disconnect a user). All endpoints
  * return 404 when the host app doesn't load Tnzi.SignalR — the bridge
  * still surfaces a typed contract so the page can degrade to an empty state.
+ *
+ * DTO types are re-exported below so existing page imports keep resolving
+ * after the contract moved into `@tnzi/core`.
  */
-import type { HttpClient } from '@tnzi/core/http'
+import {
+  useAdminSignalRApi,
+  type SignalRStatsDto,
+  type ConnectionInfoDto,
+  type OnlineUserDto,
+} from '@tnzi/core/services/signalr'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export interface SignalRStatsDto {
-  onlineUserCount: number
-  totalConnectionCount: number
-  timestamp: string
-}
+type HttpClient = Parameters<typeof useAdminSignalRApi>[0]
 
-export interface ConnectionInfoDto {
-  connectionId: string
-  userId?: string | null
-  userName?: string | null
-  connectedAt?: string | null
-  ipAddress?: string | null
-  userAgent?: string | null
-  hubName?: string | null
-  groups: string[]
-}
-
-export interface OnlineUserDto {
-  userId: string
-  connectionCount: number
-  connections: ConnectionInfoDto[]
+export type {
+  SignalRStatsDto,
+  ConnectionInfoDto,
+  OnlineUserDto,
 }
 
 export interface SignalRBridgeDeps {
@@ -44,13 +39,6 @@ export interface SignalRBridge {
   getConnection(connectionId: string): Promise<ConnectionInfoDto | null>
   disconnectUser(userId: string): Promise<void>
   getGroupConnections(groupName: string): Promise<string[]>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createSignalRBridge(deps: SignalRBridgeDeps = {}): SignalRBridge {
@@ -69,33 +57,23 @@ export function createSignalRBridge(deps: SignalRBridgeDeps = {}): SignalRBridge
     }
   }
 
+  const api = useAdminSignalRApi(client)
+
   return {
     getStats: async () =>
-      unwrap<SignalRStatsDto | null>(
-        await client.get<SignalRStatsDto>('/admin/signalr/stats'),
-      ),
+      unwrap<SignalRStatsDto | null>(await api.getStats()),
     getOnlineUsers: async () =>
-      unwrap<OnlineUserDto[]>(
-        await client.get<OnlineUserDto[]>('/admin/signalr/online-users'),
-      ) ?? [],
+      unwrap<OnlineUserDto[]>(await api.getOnlineUsers()) ?? [],
     isUserOnline: async (userId: string) =>
-      unwrap<boolean>(
-        await client.get<boolean>(`/admin/signalr/users/${encodeURIComponent(userId)}/online`),
-      ) ?? false,
+      unwrap<boolean>(await api.isUserOnline(userId)) ?? false,
     getUserConnections: async (userId: string) =>
-      unwrap<OnlineUserDto | null>(
-        await client.get<OnlineUserDto>(`/admin/signalr/users/${encodeURIComponent(userId)}/connections`),
-      ),
+      unwrap<OnlineUserDto | null>(await api.getUserConnections(userId)),
     getConnection: async (connectionId: string) =>
-      unwrap<ConnectionInfoDto | null>(
-        await client.get<ConnectionInfoDto>(`/admin/signalr/connections/${encodeURIComponent(connectionId)}`),
-      ),
+      unwrap<ConnectionInfoDto | null>(await api.getConnection(connectionId)),
     disconnectUser: async (userId: string) => {
-      await client.delete(`/admin/signalr/users/${encodeURIComponent(userId)}/connections`)
+      await api.disconnectUser(userId)
     },
     getGroupConnections: async (groupName: string) =>
-      unwrap<string[]>(
-        await client.get<string[]>(`/admin/signalr/groups/${encodeURIComponent(groupName)}/connections`),
-      ) ?? [],
+      unwrap<string[]>(await api.getGroupConnections(groupName)) ?? [],
   }
 }

@@ -8,7 +8,6 @@ public class WorkflowGraph
     private readonly Dictionary<string, WorkflowStepDto> _nodeMap;
     private readonly Dictionary<string, List<string>> _adjacency;
     private readonly Dictionary<string, List<string>> _reverseAdjacency;
-    private readonly List<string> _topologicalOrder;
 
     /// <summary>所有节点定义</summary>
     public IReadOnlyList<WorkflowStepDto> Nodes { get; }
@@ -65,8 +64,8 @@ public class WorkflowGraph
             }
         }
 
-        // 循环检测（对非循环边）并生成拓扑排序
-        _topologicalOrder = ComputeTopologicalOrder();
+        // 循环检测（对非循环边）
+        ComputeTopologicalOrder();
     }
 
     /// <summary>
@@ -101,14 +100,6 @@ public class WorkflowGraph
     }
 
     /// <summary>
-    /// 获取节点的上游依赖节点 ID
-    /// </summary>
-    public IReadOnlyList<string> GetDependencies(string nodeId)
-    {
-        return _reverseAdjacency.GetValueOrDefault(nodeId, []);
-    }
-
-    /// <summary>
     /// 获取节点的下游节点 ID
     /// </summary>
     public IReadOnlyList<string> GetDownstream(string nodeId)
@@ -134,11 +125,6 @@ public class WorkflowGraph
         }
         return result;
     }
-
-    /// <summary>
-    /// 获取拓扑排序结果
-    /// </summary>
-    public IReadOnlyList<string> GetTopologicalOrder() => _topologicalOrder;
 
     /// <summary>
     /// 获取指定节点的条件边（如果有）
@@ -167,7 +153,7 @@ public class WorkflowGraph
     /// <summary>
     /// Kahn 算法拓扑排序（检测环路）
     /// </summary>
-    private List<string> ComputeTopologicalOrder()
+    private void ComputeTopologicalOrder()
     {
         var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var node in Nodes)
@@ -210,20 +196,6 @@ public class WorkflowGraph
         {
             throw new InvalidOperationException("Workflow contains circular dependencies outside of defined loops.");
         }
-
-        // 将循环节点按定义顺序追加到拓扑排序结果中
-        foreach (var loopDef in Loops.Values)
-        {
-            foreach (var nodeId in loopDef.NodeIds)
-            {
-                if (!order.Contains(nodeId))
-                {
-                    order.Add(nodeId);
-                }
-            }
-        }
-
-        return order;
     }
 }
 

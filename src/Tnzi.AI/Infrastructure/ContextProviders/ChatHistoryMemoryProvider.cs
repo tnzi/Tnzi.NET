@@ -235,9 +235,4 @@ public class ChatHistoryMemoryScope
     /// 线程 ID（可选）
     /// </summary>
     public string? ThreadId { get; set; }
-
-    /// <summary>
-    /// 搜索范围（可选，默认与存储范围相同）
-    /// </summary>
-    public ChatHistoryMemoryScope? SearchScope { get; set; }
 }

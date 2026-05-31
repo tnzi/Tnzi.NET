@@ -30,7 +30,7 @@ import {
   type UpdateFileFolderDto,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult } from '../_mappers'
+import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminFileApi>[0]
 
@@ -133,13 +133,6 @@ export interface StorageBridgeDeps {
   fileApi?: ReturnType<typeof useAdminFileApi>
   storageApi?: ReturnType<typeof useStorageApi>
   folderApi?: ReturnType<typeof useAdminFileFolderApi>
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge {

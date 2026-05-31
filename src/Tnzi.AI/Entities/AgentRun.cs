@@ -15,7 +15,15 @@ public class AgentRun : MultiTenantAuditedEntity<Guid>
     /// <summary>关联的工作流定义（工作流运行时）</summary>
     public Guid? WorkflowDefinitionId { get; set; }
 
-    /// <summary>关联的工作流执行实例 ID（工作流运行时）</summary>
+    /// <summary>
+    /// 关联的工作流执行实例 ID（工作流运行时）。
+    /// </summary>
+    /// <remarks>
+    /// 这是一个<b>有意为之的字符串软引用（string-FK），而非指向 Workflow 实体的强外键。</b>
+    /// 核心 AIModule 不能硬依赖可选子模块 Tnzi.AI.Workflow 的 <c>WorkflowExecution</c> 实体
+    /// （应用可以不加载 Workflow 子模块），因此这里用字符串而非 <c>Guid</c> 导航属性来保持解耦。
+    /// 不要将其误认为是可以折叠成 EF 关系的冗余字段。
+    /// </remarks>
     public string? WorkflowExecutionId { get; set; }
 
     /// <summary>父级运行实例 ID（子 Agent / workflow 子调用）</summary>

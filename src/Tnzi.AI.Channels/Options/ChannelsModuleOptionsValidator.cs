@@ -21,6 +21,12 @@ public class ChannelsModuleOptionsValidator : OptionsValidatorBase<ChannelsModul
         if (options.Slack.Enabled && string.IsNullOrWhiteSpace(options.Slack.BotToken))
             errors.Add("Slack.BotToken is required when Slack adapter is enabled");
 
+        if (options.Slack.Enabled && string.IsNullOrWhiteSpace(options.Slack.SigningSecret))
+            errors.Add("Slack.SigningSecret is required when the Slack adapter is enabled (inbound webhook signatures cannot be verified otherwise)");
+
+        if (options.Feishu.Enabled && string.IsNullOrWhiteSpace(options.Feishu.EncryptKey))
+            errors.Add("Feishu.EncryptKey is required when the Feishu adapter is enabled (inbound webhook signatures cannot be verified otherwise)");
+
         if (options.Discord.Enabled && string.IsNullOrWhiteSpace(options.Discord.BotToken))
             errors.Add("Discord.BotToken is required when Discord adapter is enabled");
 

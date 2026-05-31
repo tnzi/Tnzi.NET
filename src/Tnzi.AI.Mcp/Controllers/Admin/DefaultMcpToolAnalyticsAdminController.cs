@@ -1,7 +1,5 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using Tnzi.AI.Mcp.Dtos;
-using Tnzi.AI.Mcp.Services.Interfaces;
 
 namespace Tnzi.AI.Mcp.Controllers.Admin;
 

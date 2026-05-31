@@ -182,9 +182,6 @@ public class RetryMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 构建共享的 ShouldHandle 谓词（Retry + CircuitBreaker 复用）
-    /// </summary>
-    /// <summary>
     /// 构建共享的异常过滤谓词（Retry + CircuitBreaker 复用）
     /// </summary>
     private static Func<Exception, bool> CreateShouldRetryPredicate(bool excludeRateLimitRetry)

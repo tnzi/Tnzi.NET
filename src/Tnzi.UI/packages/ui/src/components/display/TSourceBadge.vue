@@ -138,6 +138,8 @@ const config = computed(() => {
       return { type: 'warning' as const, icon: 'mdi:laptop', fallback: 'Workspace' }
     case 'config':
       return { type: 'warning' as const, icon: 'mdi:tune', fallback: 'Config' }
+    default:
+      return { type: 'info' as const, icon: 'mdi:database', fallback: 'Database' }
   }
 })
 

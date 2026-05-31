@@ -1,44 +1,30 @@
 /**
- * Performance bridge — wraps `/admin/performance/*` exposed by
- * `Tnzi.Performance.Controllers.DefaultPerformanceAdminController`.
+ * Performance bridge — delegates to `useAdminPerformanceApi`
+ * (from `@tnzi/core/services/performance`) so admin pages get the standard
+ * dependency-injection + single-mock-seam pattern other bridges use.
  *
  * `Tnzi.Performance` is an optional infrastructure module. When the host app
  * doesn't load it, `ConditionalControllerProvider` drops the controller, all
  * endpoints return 404, and the bridge surfaces empty data via the page's
  * catch-and-fallback so the menu entry can stay registered without breaking.
+ *
+ * DTO types are re-exported below so existing page imports keep resolving
+ * after the contract moved into `@tnzi/core`.
  */
-import type { HttpClient } from '@tnzi/core/http'
+import {
+  useAdminPerformanceApi,
+  type PercentileResultDto,
+  type EndpointStatsDto,
+  type SlowRequestRecordDto,
+} from '@tnzi/core/services/performance'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export interface PercentileResultDto {
-  p50: number
-  p95: number
-  p99: number
-  average: number
-  min: number
-  max: number
-  sampleCount: number
-}
+type HttpClient = Parameters<typeof useAdminPerformanceApi>[0]
 
-export interface EndpointStatsDto {
-  path: string
-  method: string
-  requestCount: number
-  averageDurationMs: number
-  p95DurationMs: number
-  minDurationMs: number
-  maxDurationMs: number
-  errorCount: number
-  lastRequestTime: string
-}
-
-export interface SlowRequestRecordDto {
-  path: string
-  method: string
-  statusCode: number
-  durationMs: number
-  userId?: string | null
-  requestId?: string | null
-  timestamp: string
+export type {
+  PercentileResultDto,
+  EndpointStatsDto,
+  SlowRequestRecordDto,
 }
 
 export interface PerformanceBridgeDeps {
@@ -50,13 +36,6 @@ export interface PerformanceBridge {
   getEndpoints(minutes?: number, topN?: number): Promise<EndpointStatsDto[]>
   getSlowRequests(count?: number, thresholdMs?: number): Promise<SlowRequestRecordDto[]>
   clear(): Promise<void>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createPerformanceBridge(deps: PerformanceBridgeDeps = {}): PerformanceBridge {
@@ -72,27 +51,17 @@ export function createPerformanceBridge(deps: PerformanceBridgeDeps = {}): Perfo
     }
   }
 
+  const api = useAdminPerformanceApi(client)
+
   return {
     getSummary: async (minutes = 60) =>
-      unwrap<PercentileResultDto | null>(
-        await client.get<PercentileResultDto>(`/admin/performance/summary?minutes=${minutes}`),
-      ),
+      unwrap<PercentileResultDto | null>(await api.getSummary(minutes)),
     getEndpoints: async (minutes = 60, topN = 0) =>
-      unwrap<EndpointStatsDto[]>(
-        await client.get<EndpointStatsDto[]>(`/admin/performance/endpoints?minutes=${minutes}&topN=${topN}`),
-      ) ?? [],
-    getSlowRequests: async (count = 20, thresholdMs?: number) => {
-      const qs = thresholdMs != null
-        ? `?count=${count}&thresholdMs=${thresholdMs}`
-        : `?count=${count}`
-      return (
-        unwrap<SlowRequestRecordDto[]>(
-          await client.get<SlowRequestRecordDto[]>(`/admin/performance/slow-requests${qs}`),
-        ) ?? []
-      )
-    },
+      unwrap<EndpointStatsDto[]>(await api.getEndpoints(minutes, topN)) ?? [],
+    getSlowRequests: async (count = 20, thresholdMs?: number) =>
+      unwrap<SlowRequestRecordDto[]>(await api.getSlowRequests(count, thresholdMs)) ?? [],
     clear: async () => {
-      await client.delete('/admin/performance')
+      await api.clear()
     },
   }
 }

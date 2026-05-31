@@ -20,7 +20,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TLoginPage from '../../components/pages/TLoginPage.vue'
 import { useAdminLoginConfig } from '../../plugin/loginConfig'
-import { translatePageKey } from '../_shared/translate'
+import { humanise, translatePageKey } from '../_shared/translate'
 import { type LoginModule } from './useLoginContext'
 import PwdLogin from './modules/PwdLogin.vue'
 import CodeLogin from './modules/CodeLogin.vue'
@@ -86,13 +86,10 @@ function defaultTranslate(key: string, fallback?: string): string {
   // worse than the caller-supplied English fallback. Treat any humanised
   // tail as a miss when a fallback is available.
   if (!hit) return fallback ?? key
-  // Cheap miss detection: if the lookup just returned the humanised last
-  // segment we'd rather use the caller fallback.
-  const lastSeg = key.split('.').pop() ?? key
-  const humanised = lastSeg.replace(/([a-z])([A-Z])/g, '$1 $2')
-  const looksLikeHumanised =
-    hit === humanised.charAt(0).toUpperCase() + humanised.slice(1)
-  if (looksLikeHumanised && fallback) return fallback
+  // Cheap miss detection: if the lookup just returned the shared
+  // `humanise` fallback (last segment, camelCase→spaced) we'd rather use
+  // the caller-supplied English fallback.
+  if (fallback && hit === humanise(key)) return fallback
   return hit
 }
 

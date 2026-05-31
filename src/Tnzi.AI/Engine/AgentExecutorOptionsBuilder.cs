@@ -17,10 +17,7 @@ public class AgentExecutorOptionsBuilder
     private readonly ILoggerFactory _loggerFactory;
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IEnumerable<IToolExecutionMiddleware> _middlewares;
-    private readonly IEnumerable<IContextProviderContributor> _contextContributors;
     private readonly ITokenEstimator _tokenEstimator;
-    private readonly IAgentExecutionContextAccessor _executionContextAccessor;
-    private readonly ICurrentUser? _currentUser;
     private readonly ILogger<AgentExecutorOptionsBuilder> _logger;
 
     public AgentExecutorOptionsBuilder(
@@ -28,21 +25,15 @@ public class AgentExecutorOptionsBuilder
         ILoggerFactory loggerFactory,
         IChatClientFactory chatClientFactory,
         IEnumerable<IToolExecutionMiddleware> middlewares,
-        IEnumerable<IContextProviderContributor> contextContributors,
         ITokenEstimator tokenEstimator,
-        IAgentExecutionContextAccessor executionContextAccessor,
-        ILogger<AgentExecutorOptionsBuilder> logger,
-        ICurrentUser? currentUser = null)
+        ILogger<AgentExecutorOptionsBuilder> logger)
     {
         _options = Check.NotNull(options);
         _loggerFactory = Check.NotNull(loggerFactory);
         _chatClientFactory = Check.NotNull(chatClientFactory);
         _middlewares = Check.NotNull(middlewares);
-        _contextContributors = Check.NotNull(contextContributors);
         _tokenEstimator = Check.NotNull(tokenEstimator);
-        _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _logger = Check.NotNull(logger);
-        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -188,10 +179,5 @@ public class AgentExecutorOptionsBuilder
     {
         var middlewares = _middlewares.ToList();
         return middlewares.Count > 0 ? middlewares : null;
-    }
-
-    private Guid? ResolveCurrentUserId()
-    {
-        return _currentUser?.Id ?? _executionContextAccessor.CurrentRequest?.UserId;
     }
 }

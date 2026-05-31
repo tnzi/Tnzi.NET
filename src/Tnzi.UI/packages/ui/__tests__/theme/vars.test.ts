@@ -59,8 +59,8 @@ describe('buildCssVars', () => {
     )
     // 5 bases + 5 roles × 11 levels = 60 (the `-rgb` variants don't match this regex)
     expect(colorKeys).toHaveLength(60)
-    expect(vars['--tnzi-primary']).toBe('#18a058')
-    expect(vars['--tnzi-primary-500']).toBe('#18a058')
+    expect(vars['--tnzi-primary']).toBe('#0d9488')
+    expect(vars['--tnzi-primary-500']).toBe('#0d9488')
     expect(vars['--tnzi-primary-50']).toMatch(/^#[0-9a-f]{6}$/i)
   })
 
@@ -69,8 +69,8 @@ describe('buildCssVars', () => {
     // RGB triplet format is "R G B" — space-separated, no rgb() wrapper.
     expect(vars['--tnzi-primary-rgb']).toMatch(/^\d+ \d+ \d+$/)
     expect(vars['--tnzi-primary-500-rgb']).toMatch(/^\d+ \d+ \d+$/)
-    // #18a058 == rgb(24, 160, 88)
-    expect(vars['--tnzi-primary-rgb']).toBe('24 160 88')
+    // #0d9488 == rgb(13, 148, 136)
+    expect(vars['--tnzi-primary-rgb']).toBe('13 148 136')
   })
 
   it('emits light-mode functional tokens', () => {
@@ -116,7 +116,7 @@ describe('injectCssVars / clearCssVars', () => {
   it('inject then clear round-trip removes all vars', () => {
     const vars = buildCssVars(defaultThemeSettings.colors, 'light')
     injectCssVars(vars, el)
-    expect(el.style.getPropertyValue('--tnzi-primary')).toBe('#18a058')
+    expect(el.style.getPropertyValue('--tnzi-primary')).toBe('#0d9488')
     clearCssVars(el)
     expect(el.style.getPropertyValue('--tnzi-primary')).toBe('')
   })

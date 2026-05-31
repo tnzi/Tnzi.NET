@@ -1,9 +1,6 @@
 using System.Net.Http;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Tnzi.AI.Mcp.Options;
-using Tnzi.AI.Mcp.Services.Interfaces;
-using Tnzi.Utilities;
 
 namespace Tnzi.AI.Mcp.Services;
 

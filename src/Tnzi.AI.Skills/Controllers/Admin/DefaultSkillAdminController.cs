@@ -50,28 +50,8 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     [HttpPost]
     public virtual async Task<ApiResult<SkillDetailDto>> Create([FromBody] CreateSkillDto input)
     {
-        var dto = new CreateSkillDto
-        {
-            Slug = input.Slug,
-            Scope = SkillScope.Tenant,
-            Name = input.Name,
-            Description = input.Description,
-            Content = input.Content,
-            WhenToUse = input.WhenToUse,
-            Parameters = input.Parameters,
-            AllowedToolGroups = input.AllowedToolGroups,
-            AllowedTools = input.AllowedTools,
-            DeniedTools = input.DeniedTools,
-            RequiredModel = input.RequiredModel,
-            RequiredProvider = input.RequiredProvider,
-            Requirements = input.Requirements,
-            Tags = input.Tags,
-            Priority = input.Priority,
-            Version = input.Version,
-            Author = input.Author,
-            Enabled = input.Enabled
-        };
-        var result = await SkillService.CreateAsync(dto);
+        input.Scope = SkillScope.Tenant;
+        var result = await SkillService.CreateAsync(input);
         return result.ToApiResult();
     }
 

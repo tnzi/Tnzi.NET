@@ -13,7 +13,4 @@ public static class CliConstants
 
     /// <summary>AiMiddlewareContext.Properties 中的 CLI 会话 ID key</summary>
     public const string CliSessionIdKey = "CliSessionId";
-
-    /// <summary>AgentRun.Metadata 中的 CLI Provider 名称 key</summary>
-    public const string CliProviderKey = "cliProvider";
 }

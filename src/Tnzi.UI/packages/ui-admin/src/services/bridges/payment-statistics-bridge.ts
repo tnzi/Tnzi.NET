@@ -1,60 +1,37 @@
 /**
- * Payment statistics bridge — wraps `/admin/payment-statistics/*` exposed
- * by `Tnzi.Payment.Controllers.Admin.DefaultPaymentStatisticsAdminController`.
+ * Payment statistics bridge — thin adapter over `@tnzi/core`'s admin
+ * payment-statistics API (`useAdminPaymentStatisticsApi`, wrapping
+ * `/admin/payment-statistics/*` exposed by
+ * `Tnzi.Payment.Controllers.Admin.DefaultPaymentStatisticsAdminController`).
  *
- * 7 endpoints (overview / revenue trend / subscription metrics / promotion
- * analytics / refund analytics / reconciliation summary + export).
+ * Delegates to the canonical `useAdminPaymentStatisticsApi` factory in
+ * `@tnzi/core/services/payment`:
+ *   • getOverview            → getStatistics({ startTime, endTime })
+ *   • getRevenueTrend        → getRevenueTrend({ startTime, endTime, granularity })
+ *   • getSubscriptionMetrics → getSubscriptionMetrics()
+ *
+ * This file keeps the bridge's original public surface (DTO re-exports +
+ * `createPaymentStatisticsBridge`) so consuming pages are unaffected.
  */
 import type { HttpClient } from '@tnzi/core/http'
+import {
+  useAdminPaymentStatisticsApi,
+  type ChannelStatisticsDto as CoreChannelStatisticsDto,
+  type PaymentStatisticsDto as CorePaymentStatisticsDto,
+  type RevenueTrendPointDto as CoreRevenueTrendPointDto,
+  type PlanDistributionDto as CorePlanDistributionDto,
+  type SubscriptionMetricsDto as CoreSubscriptionMetricsDto,
+  type TrendGranularity as CoreTrendGranularity,
+} from '@tnzi/core/services/payment'
+import { unwrapResult as unwrap } from '../_mappers'
 
-export type TrendGranularity = 1 | 2 | 3 // Day / Week / Month
-
-export interface ChannelStatisticsDto {
-  channelCode: string
-  revenue: number
-  transactionCount: number
-  percentage: number
-}
-
-export interface PaymentStatisticsDto {
-  startTime: string
-  endTime: string
-  totalRevenue: number
-  totalTransactions: number
-  successfulTransactions: number
-  failedTransactions: number
-  totalRefunds: number
-  refundCount: number
-  refundRate: number
-  activeSubscriptions: number
-  channelDistribution: ChannelStatisticsDto[]
-}
-
-export interface RevenueTrendPointDto {
-  date: string
-  revenue: number
-  transactionCount: number
-  refundAmount: number
-  netRevenue: number
-}
-
-export interface PlanDistributionDto {
-  planCode: string
-  planName: string
-  subscriberCount: number
-  monthlyRevenue: number
-}
-
-export interface SubscriptionMetricsDto {
-  monthlyRecurringRevenue: number
-  activeSubscriptions: number
-  trialSubscriptions: number
-  newSubscriptionsThisMonth: number
-  cancelledThisMonth: number
-  churnRate: number
-  averageRevenuePerUser: number
-  planDistribution: PlanDistributionDto[]
-}
+// Re-export under the original bridge names consumed by pages.
+export type TrendGranularity = CoreTrendGranularity
+export type ChannelStatisticsDto = CoreChannelStatisticsDto
+export type PaymentStatisticsDto = CorePaymentStatisticsDto
+export type RevenueTrendPointDto = CoreRevenueTrendPointDto
+export type PlanDistributionDto = CorePlanDistributionDto
+export type SubscriptionMetricsDto = CoreSubscriptionMetricsDto
 
 export interface PaymentStatisticsBridgeDeps {
   client?: HttpClient
@@ -64,13 +41,6 @@ export interface PaymentStatisticsBridge {
   getOverview(startTime?: string, endTime?: string): Promise<PaymentStatisticsDto | null>
   getRevenueTrend(startTime: string, endTime: string, granularity: TrendGranularity): Promise<RevenueTrendPointDto[]>
   getSubscriptionMetrics(): Promise<SubscriptionMetricsDto | null>
-}
-
-function unwrap<T>(res: T | { data?: T | null }): T {
-  if (res && typeof res === 'object' && 'data' in (res as object) && (res as { data?: unknown }).data != null) {
-    return (res as { data: T }).data
-  }
-  return res as T
 }
 
 export function createPaymentStatisticsBridge(deps: PaymentStatisticsBridgeDeps = {}): PaymentStatisticsBridge {
@@ -85,33 +55,14 @@ export function createPaymentStatisticsBridge(deps: PaymentStatisticsBridgeDeps 
     }
   }
 
+  const api = useAdminPaymentStatisticsApi(client)
+
   return {
-    getOverview: async (startTime?: string, endTime?: string) => {
-      const params = new URLSearchParams()
-      if (startTime) params.set('startTime', startTime)
-      if (endTime) params.set('endTime', endTime)
-      const qs = params.toString()
-      return unwrap<PaymentStatisticsDto | null>(
-        await client.get<PaymentStatisticsDto>(`/admin/payment-statistics${qs ? `?${qs}` : ''}`),
-      )
-    },
-    getRevenueTrend: async (startTime: string, endTime: string, granularity: TrendGranularity) => {
-      const params = new URLSearchParams({
-        startTime,
-        endTime,
-        granularity: String(granularity),
-      })
-      return (
-        unwrap<RevenueTrendPointDto[]>(
-          await client.get<RevenueTrendPointDto[]>(
-            `/admin/payment-statistics/revenue-trend?${params.toString()}`,
-          ),
-        ) ?? []
-      )
-    },
+    getOverview: async (startTime?: string, endTime?: string) =>
+      unwrap<PaymentStatisticsDto | null>(await api.getStatistics({ startTime, endTime })),
+    getRevenueTrend: async (startTime: string, endTime: string, granularity: TrendGranularity) =>
+      unwrap<RevenueTrendPointDto[]>(await api.getRevenueTrend({ startTime, endTime, granularity })) ?? [],
     getSubscriptionMetrics: async () =>
-      unwrap<SubscriptionMetricsDto | null>(
-        await client.get<SubscriptionMetricsDto>('/admin/payment-statistics/subscription-metrics'),
-      ),
+      unwrap<SubscriptionMetricsDto | null>(await api.getSubscriptionMetrics()),
   }
 }

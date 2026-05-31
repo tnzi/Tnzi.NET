@@ -3,31 +3,16 @@ import { ref, computed } from 'vue'
 import { en } from '../locales/en'
 import { zhCn } from '../locales/zh-cn'
 import { DEFAULT_ROUTE_ICONS } from '../router/routeIcons'
+import { humanise } from '../pages/_shared/translate'
 import { useAdminAppStore } from './useAdminAppStore'
 
 /**
  * Resolve a dotted i18n key against the bundled admin locale pack.
- * Returns the original key unchanged if no entry matches.
+ * Returns the original key unchanged if no entry matches. Missing-key
+ * fallback humanises the last segment (shared `humanise` from
+ * `_shared/translate`) so the sidebar / breadcrumb / tabs all show the
+ * same label when a key is missing.
  */
-/**
- * Last-segment capitalised fallback for i18n keys that haven't been
- * translated yet (e.g. `tnzi.admin.modules.identity.users.title` →
- * "Users"). Matches what `TAdminAutoBreadcrumb` and `TAdminTabs` render
- * so the sidebar / breadcrumb / tabs all share a single humanised
- * surface when a key is missing.
- */
-function humanise(key: string): string {
-  if (!key) return ''
-  const parts = key.split('.')
-  let last = parts[parts.length - 1] ?? key
-  if (last === 'title' && parts.length > 1) {
-    last = parts[parts.length - 2] ?? key
-  }
-  // CamelCase → spaced (e.g. `loginLogs` → `Login Logs`).
-  const spaced = last.replace(/([a-z])([A-Z])/g, '$1 $2')
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
-}
-
 /**
  * Walk a dotted path through a messages tree, returning the string leaf or
  * undefined if any segment is missing / not a string.

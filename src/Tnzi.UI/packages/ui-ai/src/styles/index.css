@@ -28,9 +28,15 @@
   --tnzi-ai-border-strong: rgba(0, 0, 0, 0.20);
   --tnzi-ai-divider:       #ebebeb;
 
-  /* Accent */
-  --tnzi-ai-accent:      #0081f2;
-  --tnzi-ai-accent-soft: rgba(0, 129, 242, 0.12);
+  /* Accent — inherits @tnzi/ui brand primary (teal #0d9488 by default; follows --tnzi-primary) */
+  --tnzi-ai-accent:      var(--tnzi-primary);
+  --tnzi-ai-accent-soft: rgb(var(--tnzi-primary-rgb) / 0.12);
+  --tnzi-ai-accent-glow: rgb(var(--tnzi-primary-rgb) / 0.32);
+
+  /* Status colors */
+  --tnzi-ai-success: #16a34a;
+  --tnzi-ai-warning: #d97706;
+  --tnzi-ai-danger:  #dc2626;
 
   /* Interaction overlays */
   --tnzi-ai-hover:    rgba(55, 53, 47, 0.04);
@@ -56,6 +62,15 @@
   --tnzi-ai-duration-base: 200ms;
   --tnzi-ai-duration-slow: 320ms;
   --tnzi-ai-easing:        cubic-bezier(0.2, 0, 0, 1);
+
+  /* Conversation content width — consumers may widen (e.g. 1100px) via the
+     `content-width` prop on TChatApp or by redefining this variable. */
+  --tnzi-ai-content-width: 820px;
+
+  /* Scrollbars — applied ONLY inside .t-chat-app / .t-ai-scroll, never global * */
+  --tnzi-ai-scrollbar-size:        8px;
+  --tnzi-ai-scrollbar-thumb:       rgba(0, 0, 0, 0.18);
+  --tnzi-ai-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
 }
 
 .dark,
@@ -73,12 +88,19 @@
   --tnzi-ai-border-strong: rgba(255, 255, 255, 0.20);
   --tnzi-ai-divider:       rgba(255, 255, 255, 0.08);
 
-  --tnzi-ai-accent:      #3a9bf5;
-  --tnzi-ai-accent-soft: rgba(58, 155, 245, 0.18);
+  --tnzi-ai-accent:      var(--tnzi-primary);
+  --tnzi-ai-accent-soft: rgb(var(--tnzi-primary-rgb) / 0.18);
+
+  --tnzi-ai-success: #30d158;
+  --tnzi-ai-warning: #f59e0b;
+  --tnzi-ai-danger:  #ff453a;
 
   --tnzi-ai-hover:    rgba(255, 255, 255, 0.04);
   --tnzi-ai-press:    rgba(255, 255, 255, 0.06);
   --tnzi-ai-selected: rgba(255, 255, 255, 0.08);
+
+  --tnzi-ai-scrollbar-thumb:       rgba(255, 255, 255, 0.18);
+  --tnzi-ai-scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
 }
 
 /* Display helper for serif hero headings (Manus-style).
@@ -107,7 +129,7 @@
   /* Reasoning / thought panels */
   --tnzi-ai-reasoning-indent: 16px;
   --tnzi-ai-reasoning-border: var(--tnzi-border);
-  --tnzi-ai-reasoning-bg: hsl(45 100% 97%);
+  --tnzi-ai-reasoning-bg: rgba(146, 64, 14, 0.06);
 
   /* Tool call blocks */
   --tnzi-ai-tool-call-bg: hsl(210 40% 96%);
@@ -134,7 +156,7 @@
   --tnzi-ai-chat-user-bg: hsl(217.2 32.6% 17.5%);
   --tnzi-ai-chat-assistant-bg: var(--tnzi-container-bg);
   --tnzi-ai-chat-system-bg: rgba(255, 255, 255, 0.04);
-  --tnzi-ai-reasoning-bg: hsl(40 30% 12%);
+  --tnzi-ai-reasoning-bg: rgba(245, 158, 11, 0.08);
   --tnzi-ai-tool-call-bg: hsl(217.2 32.6% 12%);
   --tnzi-ai-streaming-cursor: hsl(210 40% 98%);
   --tnzi-ai-code-bg: hsl(220 14% 11%);
@@ -149,4 +171,68 @@
 .t-reasoning-indent {
   padding-left: var(--tnzi-ai-reasoning-indent);
   border-left: 1px solid var(--tnzi-ai-reasoning-border);
+}
+
+/* ===========================================================================
+ * Unified custom scrollbar — scoped to the ui-ai surface so it NEVER leaks
+ * into the consumer's global `*` (unlike a raw global rule). Every scroll
+ * container inside TChatApp (left nav, thread list, message area, settings,
+ * command palette, artifact pane) inherits this automatically; standalone
+ * scrollers can opt in with the `.t-ai-scroll` class.
+ * ========================================================================= */
+.t-chat-app,
+.t-chat-app *,
+.t-ai-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tnzi-ai-scrollbar-thumb, rgba(0, 0, 0, 0.18)) transparent;
+}
+.t-chat-app ::-webkit-scrollbar,
+.t-ai-scroll::-webkit-scrollbar {
+  width: var(--tnzi-ai-scrollbar-size, 8px);
+  height: var(--tnzi-ai-scrollbar-size, 8px);
+}
+.t-chat-app ::-webkit-scrollbar-track,
+.t-ai-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.t-chat-app ::-webkit-scrollbar-thumb,
+.t-ai-scroll::-webkit-scrollbar-thumb {
+  background: var(--tnzi-ai-scrollbar-thumb, rgba(0, 0, 0, 0.18));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.t-chat-app ::-webkit-scrollbar-thumb:hover,
+.t-ai-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--tnzi-ai-scrollbar-thumb-hover, rgba(0, 0, 0, 0.32));
+  background-clip: padding-box;
+}
+.t-chat-app ::-webkit-scrollbar-corner,
+.t-ai-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ===========================================================================
+ * Shimmer skeleton — opt-in loading placeholder. Apply `.t-ai-skeleton` to any
+ * block (size it yourself) or `.t-ai-chip-skeleton` for a 96×28 pill.
+ * ========================================================================= */
+@keyframes t-ai-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.t-ai-skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--tnzi-ai-hover, rgba(0, 0, 0, 0.04)) 25%,
+    var(--tnzi-ai-border, rgba(0, 0, 0, 0.08)) 37%,
+    var(--tnzi-ai-hover, rgba(0, 0, 0, 0.04)) 63%
+  );
+  background-size: 200% 100%;
+  animation: t-ai-shimmer 1.5s ease-in-out infinite;
+}
+.t-ai-chip-skeleton {
+  width: 96px;
+  height: 28px;
+  border-radius: 999px;
 }

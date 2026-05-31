@@ -146,13 +146,56 @@ public class AICoderModuleTests
     {
         var services = CreateServiceCollection();
 
-        // 验证所有工具类都被注册
+        // 验证所有工具类都被注册（BashTools 和 PowerShellTools 均无条件注册）
         services.Any(d => d.ServiceType == typeof(FileSystemTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ShellTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(BashTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(PowerShellTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(CodeSearchTools)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(GitTools)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void BashTools_AndPowerShellTools_BothResolvableFromDI()
+    {
+        // Both are registered unconditionally so ToolAdapter can resolve them.
+        // The in-method OS guard (not DI gating) is the enforcement layer.
+        var services = CreateServiceCollection();
+        var provider = services.BuildServiceProvider();
+
+        provider.GetService<BashTools>().ShouldNotBeNull(
+            "BashTools must be resolvable from DI on all platforms");
+        provider.GetService<PowerShellTools>().ShouldNotBeNull(
+            "PowerShellTools must be resolvable from DI on all platforms");
+    }
+
+    [Fact]
+    public async Task WrongOsShellTools_ReturnGracefulErrorNotException()
+    {
+        // Invoking the wrong-OS shell tool must return a structured error object, never throw.
+        // This confirms the in-method OS guard (not DI gating) is the enforcement layer.
+        var services = CreateServiceCollection();
+        var provider = services.BuildServiceProvider();
+
+        if (OperatingSystem.IsWindows())
+        {
+            // On Windows: BashTools.ExecuteBashAsync must return a graceful error, not throw
+            var bashTools = provider.GetRequiredService<BashTools>();
+            var result = await bashTools.ExecuteBashAsync("echo test");
+            result.ShouldNotBeNull("BashTools must return a result object on Windows, not throw");
+            // Result must contain an "error" field describing platform unavailability
+            var json = System.Text.Json.JsonSerializer.Serialize(result);
+            json.ShouldContain("only available");
+        }
+        else
+        {
+            // On Unix: PowerShellTools.ExecutePowerShellAsync must return a graceful error, not throw
+            var psTools = provider.GetRequiredService<PowerShellTools>();
+            var result = await psTools.ExecutePowerShellAsync("echo test");
+            result.ShouldNotBeNull("PowerShellTools must return a result object on Unix, not throw");
+            var json = System.Text.Json.JsonSerializer.Serialize(result);
+            json.ShouldContain("only available");
+        }
     }
 
     [Fact]

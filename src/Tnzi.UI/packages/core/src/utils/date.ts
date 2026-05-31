@@ -27,6 +27,44 @@ export function formatDate(date: Date | string, format = 'yyyy-MM-dd'): string {
 }
 
 /**
+ * Locale-aware date+time formatter (`toLocaleString`).
+ *
+ * Null/undefined/empty → `fallback` (default `''`). Invalid input falls back
+ * to the original string when one was given. Use this for "human" timestamps
+ * in tables/detail panes; use {@link formatDate} for fixed `yyyy-MM-dd` output.
+ */
+export function formatDateTime(
+  value: string | number | Date | null | undefined,
+  options?: { fallback?: string },
+): string {
+  if (value === null || value === undefined || value === '') return options?.fallback ?? '';
+  // `new Date(invalid)` does not throw — it yields an Invalid Date whose
+  // toLocaleString() is the literal "Invalid Date". Guard explicitly so
+  // unparseable input falls back to the original string (or fallback).
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return typeof value === 'string' ? value : (options?.fallback ?? '');
+  }
+  return d.toLocaleString();
+}
+
+/**
+ * Locale-aware date-only formatter (`toLocaleDateString`). Same null/fallback
+ * semantics as {@link formatDateTime}.
+ */
+export function formatDateOnly(
+  value: string | number | Date | null | undefined,
+  options?: { fallback?: string },
+): string {
+  if (value === null || value === undefined || value === '') return options?.fallback ?? '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return typeof value === 'string' ? value : (options?.fallback ?? '');
+  }
+  return d.toLocaleDateString();
+}
+
+/**
  * Format relative time
  */
 export function formatRelativeTime(date: Date | string): string {

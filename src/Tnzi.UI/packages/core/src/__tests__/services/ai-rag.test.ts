@@ -28,6 +28,10 @@ function createMockClient() {
       calls.push({ method: 'DELETE', url: args[0] as string, options: args[1] });
       return mockResult(null);
     }),
+    upload: vi.fn((...args: unknown[]) => {
+      calls.push({ method: 'UPLOAD', url: args[0] as string, data: args[1], options: args[2] });
+      return mockResult(null);
+    }),
     resolveUrl: vi.fn((path: string) => `http://localhost:5000/api${path}`),
     calls,
   };
@@ -118,23 +122,21 @@ describe('useAdminKnowledgeBaseApi', () => {
     expect(api.getDocuments).toBeDefined();
     expect(api.deleteDocument).toBeDefined();
     expect(api.searchTest).toBeDefined();
-    expect(api.getStats).toBeDefined();
   });
 
-  it('should call getList with params', async () => {
+  it('should call getList via POST /query with params', async () => {
     const api = useAdminKnowledgeBaseApi(client);
-    await api.getList({ page: 1, pageSize: 10 });
-    expect(client.get).toHaveBeenCalledWith('/admin/knowledge-bases', {
-      params: { page: 1, pageSize: 10 },
+    await api.getList({ pageIndex: 1, pageSize: 10 });
+    expect(client.post).toHaveBeenCalledWith('/admin/knowledge-bases/query', {
+      pageIndex: 1,
+      pageSize: 10,
     });
   });
 
-  it('should call getList without params', async () => {
+  it('should call getList via POST /query without params', async () => {
     const api = useAdminKnowledgeBaseApi(client);
     await api.getList();
-    expect(client.get).toHaveBeenCalledWith('/admin/knowledge-bases', {
-      params: undefined,
-    });
+    expect(client.post).toHaveBeenCalledWith('/admin/knowledge-bases/query', {});
   });
 
   it('should call getById', async () => {
@@ -175,23 +177,22 @@ describe('useAdminKnowledgeBaseApi', () => {
     expect(client.delete).toHaveBeenCalledWith('/admin/knowledge-bases/kb1');
   });
 
-  it('should call uploadDocument with FormData', async () => {
+  it('should call uploadDocument via client.upload to the /upload route', async () => {
     const api = useAdminKnowledgeBaseApi(client);
     const file = new File(['test content'], 'test.txt');
     await api.uploadDocument('kb1', file);
-    expect(client.post).toHaveBeenCalled();
-    const [url, formData] = (client.post as ReturnType<typeof vi.fn>).mock.calls[
-      (client.post as ReturnType<typeof vi.fn>).mock.calls.length - 1
-    ];
-    expect(url).toBe('/admin/knowledge-bases/kb1/documents');
-    expect(formData).toBeInstanceOf(FormData);
+    // Must use client.upload (multipart) — NOT client.post, which would
+    // JSON.stringify the file away — and hit the backend POST {id}/upload route.
+    expect(client.upload).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/upload', file);
+    expect(client.post).not.toHaveBeenCalled();
   });
 
-  it('should call getDocuments', async () => {
+  it('should call getDocuments via POST {id}/documents/query', async () => {
     const api = useAdminKnowledgeBaseApi(client);
-    await api.getDocuments('kb1', { page: 1, pageSize: 20 });
-    expect(client.get).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/documents', {
-      params: { page: 1, pageSize: 20 },
+    await api.getDocuments('kb1', { pageIndex: 1, pageSize: 20 });
+    expect(client.post).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/documents/query', {
+      pageIndex: 1,
+      pageSize: 20,
     });
   });
 
@@ -201,18 +202,12 @@ describe('useAdminKnowledgeBaseApi', () => {
     expect(client.delete).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/documents/doc1');
   });
 
-  it('should call searchTest', async () => {
+  it('should call searchTest via POST {id}/search', async () => {
     const api = useAdminKnowledgeBaseApi(client);
     await api.searchTest('kb1', { query: 'test', topK: 5 });
-    expect(client.post).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/search-test', {
+    expect(client.post).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/search', {
       query: 'test',
       topK: 5,
     });
-  });
-
-  it('should call getStats', async () => {
-    const api = useAdminKnowledgeBaseApi(client);
-    await api.getStats('kb1');
-    expect(client.get).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/stats');
   });
 });

@@ -15,9 +15,8 @@ namespace Tnzi.AI.Channels.Adapters.Dingtalk;
 /// - 事件接收通过 Webhook 回调由 Controller 调用 HandleEventAsync
 /// - 认证: appkey+appsecret 获取 access_token
 /// </remarks>
-public class DingtalkChannelAdapter : IChannelAdapter
+public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
-    private const string OldApiBaseUrl = "https://oapi.dingtalk.com";
     private const string NewApiBaseUrl = "https://api.dingtalk.com";
 
     private readonly ILogger<DingtalkChannelAdapter> _logger;
@@ -168,6 +167,27 @@ public class DingtalkChannelAdapter : IChannelAdapter
         return CryptographicOperations.FixedTimeEquals(
             Encoding.UTF8.GetBytes(computedSign),
             Encoding.UTF8.GetBytes(sign));
+    }
+
+    /// <inheritdoc />
+    public string Platform => Name;
+
+    /// <inheritdoc />
+    public async Task<WebhookProcessResult> ProcessWebhookAsync(
+        string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
+    {
+        // 钉钉无 URL 验证握手 — 直接验签。配置了 VerifyWebhookSignature（默认 true）时，
+        // 缺少 timestamp/sign 头或签名不匹配一律拒绝。
+        if (_options.VerifyWebhookSignature)
+        {
+            if (!ValidateDingtalkSignature(new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase)))
+            {
+                return WebhookProcessResult.Rejected("Invalid DingTalk signature");
+            }
+        }
+
+        await HandleEventCoreAsync(rawBody, ct);
+        return WebhookProcessResult.Accepted();
     }
 
     /// <remarks>

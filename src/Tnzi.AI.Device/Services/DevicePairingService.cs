@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Tnzi.AI.Device.Events;
 using Tnzi.AI.Device.Options;
 using Tnzi.EventBus;
@@ -15,7 +16,10 @@ public class DevicePairingService : IDevicePairingService
     /// </summary>
     private const string PairingAlphabet = "ABCDEFGHJKLMNPQRTUVWXY23456789";
 
+    // Keyed by secret Code (fast approval by code from device); Id→Code mapping for admin approve/reject
     private readonly ConcurrentDictionary<string, PairingRequest> _pendingRequests = new(StringComparer.OrdinalIgnoreCase);
+    // Lookup from public Id → secret Code, so admins can approve/reject by Id without the Code appearing in URLs
+    private readonly ConcurrentDictionary<string, string> _idToCode = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DevicePairingInfo> _approvedDevices = new(StringComparer.OrdinalIgnoreCase);
     private readonly DeviceOptions _options;
     private readonly ILogger<DevicePairingService> _logger;
@@ -58,6 +62,7 @@ public class DevicePairingService : IDevicePairingService
         };
 
         _pendingRequests[code] = request;
+        _idToCode[request.Id] = code;
 
         _logger.LogInformation("Pairing request created for device {NodeId} with code {Code}",
             nodeId, code);
@@ -89,6 +94,33 @@ public class DevicePairingService : IDevicePairingService
             return Task.FromResult<DevicePairingInfo?>(null);
         }
 
+        _idToCode.TryRemove(request.Id, out _);
+        return Task.FromResult<DevicePairingInfo?>(ApproveRequest(request));
+    }
+
+    /// <summary>
+    /// Approve a pending pairing request by its public Id — safe for use in URLs/logs
+    /// </summary>
+    public Task<DevicePairingInfo?> ApprovePairingByIdAsync(string id, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(id);
+        CleanupExpired();
+
+        if (!_idToCode.TryRemove(id, out var code))
+        {
+            return Task.FromResult<DevicePairingInfo?>(null);
+        }
+
+        if (!_pendingRequests.TryRemove(code, out var request))
+        {
+            return Task.FromResult<DevicePairingInfo?>(null);
+        }
+
+        return Task.FromResult<DevicePairingInfo?>(ApproveRequest(request));
+    }
+
+    private DevicePairingInfo ApproveRequest(PairingRequest request)
+    {
         var info = new DevicePairingInfo
         {
             NodeId = request.NodeId,
@@ -114,26 +146,59 @@ public class DevicePairingService : IDevicePairingService
             _logger.LogWarning(ex, "Failed to publish DevicePairingApprovedEvent for nodeId={NodeId}", request.NodeId);
         }
 
-        return Task.FromResult<DevicePairingInfo?>(info);
+        return info;
     }
 
     public Task<bool> RejectPairingAsync(string code, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrWhiteSpace(code);
+        if (_pendingRequests.TryRemove(code, out var req))
+        {
+            _idToCode.TryRemove(req.Id, out _);
+            _logger.LogInformation("Pairing rejected for code [redacted]");
+            return Task.FromResult(true);
+        }
+
+        return Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// Reject a pending pairing request by its public Id — safe for use in URLs/logs
+    /// </summary>
+    public Task<bool> RejectPairingByIdAsync(string id, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(id);
+
+        if (!_idToCode.TryRemove(id, out var code))
+        {
+            return Task.FromResult(false);
+        }
+
         var removed = _pendingRequests.TryRemove(code, out _);
 
         if (removed)
         {
-            _logger.LogInformation("Pairing rejected for code {Code}", code);
+            _logger.LogInformation("Pairing rejected for request {RequestId}", id);
         }
 
         return Task.FromResult(removed);
     }
 
-    public Task<IReadOnlyList<PairingRequest>> GetPendingRequestsAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<PendingPairingRequestDto>> GetPendingRequestsAsync(CancellationToken cancellationToken = default)
     {
         CleanupExpired();
-        IReadOnlyList<PairingRequest> result = _pendingRequests.Values.ToList().AsReadOnly();
+        IReadOnlyList<PendingPairingRequestDto> result = _pendingRequests.Values
+            .Select(r => new PendingPairingRequestDto
+            {
+                Id = r.Id,
+                NodeId = r.NodeId,
+                DeviceName = r.DeviceName,
+                Platform = r.Platform,
+                CreatedAt = r.CreatedAt,
+                ExpiresAt = r.ExpiresAt
+            })
+            .ToList()
+            .AsReadOnly();
         return Task.FromResult(result);
     }
 
@@ -157,31 +222,32 @@ public class DevicePairingService : IDevicePairingService
     }
 
     /// <summary>
-    /// Remove expired pairing requests
+    /// Remove expired pairing requests and their Id→Code mappings
     /// </summary>
     private void CleanupExpired()
     {
         var now = DateTimeOffset.UtcNow;
         var expired = _pendingRequests
             .Where(kvp => kvp.Value.ExpiresAt < now)
-            .Select(kvp => kvp.Key)
+            .Select(kvp => kvp.Value)
             .ToList();
 
-        foreach (var code in expired)
+        foreach (var req in expired)
         {
-            _pendingRequests.TryRemove(code, out _);
+            _pendingRequests.TryRemove(req.Code, out _);
+            _idToCode.TryRemove(req.Id, out _);
         }
     }
 
     /// <summary>
-    /// Generate a random pairing code using the safe alphabet
+    /// Generate a cryptographically-random pairing code using the safe alphabet
     /// </summary>
     private static string GeneratePairingCode(int length)
     {
         var chars = new char[length];
         for (var i = 0; i < length; i++)
         {
-            chars[i] = PairingAlphabet[Random.Shared.Next(PairingAlphabet.Length)];
+            chars[i] = PairingAlphabet[RandomNumberGenerator.GetInt32(PairingAlphabet.Length)];
         }
 
         return new string(chars);

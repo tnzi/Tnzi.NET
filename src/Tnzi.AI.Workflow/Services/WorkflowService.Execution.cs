@@ -1,8 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Tnzi.AI.Services.Interfaces;
-
-using Tnzi.AI.Infrastructure;
-
 namespace Tnzi.AI.Services;
 
 /// <summary>
@@ -313,12 +308,21 @@ public partial class WorkflowService
         if (workflowDef == null)
             return Fail<WorkflowExecutionResultDto>("Associated workflow definition not found", 404, ErrorCodes.WorkflowNotFound);
 
+        // 仅 DAG 模式支持恢复
+        if (workflowDef.ExecutionMode != WorkflowExecutionMode.Dag)
+            return Fail<WorkflowExecutionResultDto>("Resume is only supported for DAG execution mode", 400, ErrorCodes.WorkflowExecutionInvalidState);
+
+        // CAS guard: transition the execution to Running BEFORE invoking the engine.
+        // The optimistic concurrency stamp (B13) is the compare-and-swap token — two
+        // concurrent Resume POSTs both pass the status guard above, but only one wins the
+        // status flip; the loser's UpdateAsync throws DbUpdateConcurrencyException and we
+        // return 409 instead of re-running the engine (which would re-execute nodes and
+        // double-charge tokens).
+        if (!await TryTransitionToRunningAsync(executionEntity, ct))
+            return Fail<WorkflowExecutionResultDto>("Workflow execution is already being resumed by another request", 409, ErrorCodes.WorkflowExecutionInvalidState);
+
         try
         {
-            // 仅 DAG 模式支持恢复
-            if (workflowDef.ExecutionMode != WorkflowExecutionMode.Dag)
-                return Fail<WorkflowExecutionResultDto>("Resume is only supported for DAG execution mode", 400, ErrorCodes.WorkflowExecutionInvalidState);
-
             var graph = BuildWorkflowGraph(workflowDef);
             var existingRun = await _runRepository.FirstOrDefaultAsync(r => r.WorkflowExecutionId == executionId, ct);
 
@@ -583,6 +587,12 @@ public partial class WorkflowService
         if (workflowDef.ExecutionMode != WorkflowExecutionMode.Dag)
             return Fail<WorkflowExecutionResultDto>("Resume with input is only supported for DAG execution mode", 400, ErrorCodes.WorkflowExecutionInvalidState);
 
+        // CAS guard: flip the execution to Running BEFORE running the engine so two
+        // concurrent ResumeWithInput POSTs cannot both execute. The concurrency stamp
+        // (B13) is the compare-and-swap token; the losing writer gets 409.
+        if (!await TryTransitionToRunningAsync(executionEntity, ct))
+            return Fail<WorkflowExecutionResultDto>("Workflow execution is already being resumed by another request", 409, ErrorCodes.WorkflowExecutionInvalidState);
+
         try
         {
             // 从检查点恢复状态，移除中断步骤使其重新进入就绪队列
@@ -796,6 +806,38 @@ public partial class WorkflowService
         }, ct);
 
         return executionId;
+    }
+
+    /// <summary>
+    /// Atomically transition a (resumable) execution to <see cref="WorkflowExecutionStatus.Running"/>
+    /// using the optimistic concurrency stamp as a compare-and-swap token. Returns
+    /// <c>false</c> when a concurrent Resume already flipped the status (stale token →
+    /// <see cref="DbUpdateConcurrencyException"/>), so the caller can return 409 instead of
+    /// re-running the engine and double-executing nodes. The detached entity read by the
+    /// caller carries the stamp it observed; a successful UpdateAsync bumps it.
+    /// </summary>
+    private async Task<bool> TryTransitionToRunningAsync(WorkflowExecution executionEntity, CancellationToken ct)
+    {
+        executionEntity.Status = WorkflowExecutionStatus.Running;
+        executionEntity.CurrentWaitReason = null;
+        executionEntity.UpdatedTime = DateTime.UtcNow;
+        if (executionEntity.StartedAt == null)
+        {
+            executionEntity.StartedAt = DateTime.UtcNow;
+        }
+
+        try
+        {
+            await _executionRepository.UpdateAsync(executionEntity, ct);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            Logger.LogInformation(ex,
+                "Resume CAS lost for execution {ExecutionId}: a concurrent resume already transitioned it",
+                executionEntity.ExecutionId);
+            return false;
+        }
     }
 
     private async Task TryUpdateWorkflowExecutionStatusAsync(string executionId, WorkflowExecutionStatus status, CancellationToken ct, string? currentWaitReason = null)

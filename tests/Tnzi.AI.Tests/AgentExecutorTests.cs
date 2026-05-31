@@ -219,6 +219,140 @@ public class AgentExecutorTests
         toolDetails[0].Error.ShouldContain("InvalidOperationException");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WithSectionProvider_IncludesSectionInInstructions()
+    {
+        // Arrange: a section provider that emits a known tag + content
+        const string sectionTag = "bot_skills";
+        const string sectionContent = "You have access to skill: email_outreach";
+
+        var provider = new TestSystemPromptSectionProvider(
+            new SystemPromptSection(sectionTag, sectionContent, 40));
+
+        var mockClient = new Mock<IChatClient>();
+        ChatOptions? capturedOptions = null;
+        mockClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<ChatMessage> _, ChatOptions? opts, CancellationToken _) =>
+            {
+                capturedOptions = opts;
+                return new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done"));
+            });
+
+        var options = new AgentExecutorOptions
+        {
+            Name = "TestAgent",
+            Instructions = "Base instructions.",
+            SectionProviders = [provider]
+        };
+
+        var executor = new AgentExecutor(mockClient.Object, options);
+
+        // Act
+        var messages = new List<ChatMessage> { new(ChatRole.User, "Hello") };
+        await executor.ExecuteAsync(messages, CancellationToken.None);
+
+        // Assert: the assembled Instructions should contain both the static section and the provider section
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions!.Instructions.ShouldNotBeNullOrWhiteSpace();
+        capturedOptions.Instructions.ShouldContain($"<{sectionTag}>");
+        capturedOptions.Instructions.ShouldContain(sectionContent);
+        capturedOptions.Instructions.ShouldContain("<instructions>");
+        capturedOptions.Instructions.ShouldContain("Base instructions.");
+    }
+
+    /// <summary>
+    /// Test double for ISystemPromptSectionProvider
+    /// </summary>
+    private sealed class TestSystemPromptSectionProvider(SystemPromptSection section) : ISystemPromptSectionProvider
+    {
+        public Task<SystemPromptSection?> GetSectionAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<SystemPromptSection?>(section);
+    }
+
+    // ── C2: immutability — caller's messages list must not be mutated ─────────
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotMutateCallerMessages()
+    {
+        // Arrange: LLM does one tool call then returns final answer
+        var toolCallContent = new FunctionCallContent("call_1", "calculator", new Dictionary<string, object?>());
+        var assistantMsgWithToolCall = new ChatMessage(ChatRole.Assistant, [toolCallContent]);
+        var finalMsg = new ChatMessage(ChatRole.Assistant, "42");
+
+        var callCount = 0;
+        var mockClient = new Mock<IChatClient>();
+        mockClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                callCount++;
+                return callCount == 1
+                    ? new ChatResponse([assistantMsgWithToolCall])
+                    : new ChatResponse([finalMsg]);
+            });
+
+        var tool = AIFunctionFactory.Create(() => "100", "calculator", "Calculate");
+        var options = new AgentExecutorOptions { Name = "TestAgent", Tools = [tool] };
+        var executor = new AgentExecutor(mockClient.Object, options);
+
+        var callerMessages = new List<ChatMessage> { new(ChatRole.User, "What is 6*7?") };
+        var originalCount = callerMessages.Count;
+
+        // Act
+        var response = await executor.ExecuteAsync(callerMessages, CancellationToken.None);
+
+        // Assert — caller list is untouched
+        callerMessages.Count.ShouldBe(originalCount,
+            "ExecuteAsync must not mutate the caller-supplied messages list");
+        response.Text.ShouldBe("42");
+        // The response carries its own messages list (distinct object)
+        response.Messages.ShouldNotBeSameAs(callerMessages);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_DoesNotMutateCallerMessages()
+    {
+        // Arrange: LLM does one tool call then returns final answer (streaming)
+        var toolCallContent = new FunctionCallContent("call_1", "calculator", new Dictionary<string, object?>());
+
+        var callCount = 0;
+        var mockClient = new Mock<IChatClient>();
+        mockClient.Setup(c => c.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateStreamingResponse(
+                        new ChatResponseUpdate(ChatRole.Assistant, [toolCallContent]));
+                }
+                return CreateStreamingResponse(
+                    new ChatResponseUpdate(ChatRole.Assistant, "42"));
+            });
+
+        var tool = AIFunctionFactory.Create(() => "100", "calculator", "Calculate");
+        var options = new AgentExecutorOptions { Name = "TestAgent", Tools = [tool] };
+        var executor = new AgentExecutor(mockClient.Object, options);
+
+        var callerMessages = new List<ChatMessage> { new(ChatRole.User, "What is 6*7?") };
+        var originalCount = callerMessages.Count;
+
+        // Act
+        await foreach (var _ in executor.ExecuteStreamingAsync(callerMessages, CancellationToken.None)) { }
+
+        // Assert — caller list is untouched
+        callerMessages.Count.ShouldBe(originalCount,
+            "ExecuteStreamingAsync must not mutate the caller-supplied messages list");
+    }
+
     private static async IAsyncEnumerable<ChatResponseUpdate> CreateStreamingResponse(params ChatResponseUpdate[] updates)
     {
         foreach (var update in updates)

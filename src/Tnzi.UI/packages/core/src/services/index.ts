@@ -15,3 +15,7 @@ export * as System from './system';
 export * as Audit from './audit';
 export * as Template from './template';
 export * as Logging from './logging';
+export * as Diagnostics from './diagnostics';
+export * as Performance from './performance';
+export * as SignalR from './signalr';
+export * as Localization from './localization';

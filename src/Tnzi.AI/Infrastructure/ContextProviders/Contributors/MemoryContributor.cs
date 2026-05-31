@@ -11,7 +11,6 @@ internal sealed class MemoryContributor : IContextProviderContributor
     private readonly IOptions<AIOptions> _options;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly IMemoryConsolidator? _memoryConsolidator;
-    private readonly ICurrentUser? _currentUser;
     private readonly ILoggerFactory _loggerFactory;
 
     public int Order => ContextProviderOrders.Memory;
@@ -22,8 +21,7 @@ internal sealed class MemoryContributor : IContextProviderContributor
         IOptions<AIOptions> options,
         IAgentExecutionContextAccessor executionContextAccessor,
         ILoggerFactory loggerFactory,
-        IMemoryConsolidator? memoryConsolidator = null,
-        ICurrentUser? currentUser = null)
+        IMemoryConsolidator? memoryConsolidator = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _chatClientFactory = Check.NotNull(chatClientFactory);
@@ -31,7 +29,6 @@ internal sealed class MemoryContributor : IContextProviderContributor
         _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _loggerFactory = Check.NotNull(loggerFactory);
         _memoryConsolidator = memoryConsolidator;
-        _currentUser = currentUser;
     }
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
@@ -47,6 +44,13 @@ internal sealed class MemoryContributor : IContextProviderContributor
                 memoryOptions.EnableAgentIsolation,
                 context.UserId,
                 context.AgentId);
+
+            // Agent-bound 范围：绑定到当前 Agent 的记忆（通过结构化 AgentId 列检索），
+            // 与当前用户无关，确保 headless 运行也能加载（如管理员为该 Agent 预置的人设/知识记忆）。
+            var agentBoundScope = context.AgentId.HasValue
+                ? MemoryScope.ForAgent(context.AgentId.Value, memoryOptions.DefaultScope)
+                : null;
+
             var logger = _loggerFactory.CreateLogger<MemoryContextProvider>();
             return new MemoryContextProvider(
                 _memoryStore,
@@ -55,7 +59,8 @@ internal sealed class MemoryContributor : IContextProviderContributor
                 _chatClientFactory,
                 memoryOptions,
                 _memoryConsolidator,
-                _executionContextAccessor);
+                _executionContextAccessor,
+                agentBoundScope);
         }
         catch (Exception ex)
         {

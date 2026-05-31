@@ -89,6 +89,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import { interpolate, translatePageKey } from '../_shared/translate'
 
@@ -158,11 +159,6 @@ function formatMs(v: number | undefined | null): string {
   if (v == null) return '—'
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
   return `${v.toFixed(1)} ms`
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return ''
-  try { return new Date(iso).toLocaleString() } catch { return iso }
 }
 
 const columns: DataTableColumns<HealthEntry> = [

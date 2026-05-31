@@ -33,7 +33,7 @@ import {
   type LayoutQueryDto,
 } from '@tnzi/core/services/template'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult } from '../_mappers'
+import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminTemplateApi>[0]
 
@@ -70,13 +70,6 @@ export interface TemplateBridgeTemplateContract extends BridgeCrudContract<Templ
 export interface TemplateBridge {
   templates: TemplateBridgeTemplateContract
   layouts: BridgeCrudContract<LayoutInfoDto>
-}
-
-function unwrap<T>(res: T | { data: T; succeeded: boolean }): T {
-  if (res && typeof res === 'object' && 'succeeded' in (res as object) && 'data' in (res as object)) {
-    return (res as { data: T; succeeded: boolean }).data
-  }
-  return res as T
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>

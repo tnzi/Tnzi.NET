@@ -58,11 +58,26 @@ public class AgentResolver : IAgentResolver
                         var wsProvider = wsAgent.Provider ?? defaultProvider;
                         var wsModel = model ?? wsAgent.Model;
                         var wsInstructions = wsAgent.Instructions ?? string.Empty;
+                        // Honor workspace AGENT.md frontmatter `executionMode: Handoff|AgentAsTools|Router|ExternalCli|Single`.
+                        // Unknown / missing values fall back to Single (default for DB agents).
+                        var wsExecutionMode = ParseExecutionMode(wsAgent.ExecutionMode);
+                        // wsAgent.Temperature is float? but the factory takes double? — widen safely.
+                        var wsTemperature = wsAgent.Temperature.HasValue ? (double?)wsAgent.Temperature.Value : null;
                         var wsExecutor = await _agentFactory.CreateAgentAsync(
                             wsProvider, wsModel, wsInstructions, wsAgent.Name,
-                            wsAgent.ToolGroups, wsAgent.Temperature, wsAgent.MaxTokens,
+                            wsAgent.ToolGroups, wsTemperature, wsAgent.MaxTokens,
                             options: null, ct: ct);
-                        return AgentResolution.Success(wsExecutor, wsProvider, wsModel, agentId);
+                        // Provide CreationParameters so SkillConstraintMiddleware can rebuild
+                        // the executor when a skill triggers a model/provider override.
+                        var wsCreationParams = new AgentCreationParameters(
+                            wsInstructions, wsAgent.Name, wsAgent.ToolGroups,
+                            wsTemperature, wsAgent.MaxTokens, UserPermissions: null);
+                        return AgentResolution.Success(
+                            wsExecutor, wsProvider, wsModel, agentId,
+                            agentConfiguration: null,
+                            executionMode: wsExecutionMode,
+                            creationParameters: wsCreationParams,
+                            personaContent: string.IsNullOrWhiteSpace(wsAgent.PersonaContent) ? null : wsAgent.PersonaContent);
                     }
                 }
 
@@ -91,7 +106,8 @@ public class AgentResolver : IAgentResolver
             {
                 return AgentResolution.SuccessWithoutExecutor(
                     entity.Provider, model ?? entity.Model, agentId,
-                    entity.Configuration, entity.ExecutionMode);
+                    entity.Configuration, entity.ExecutionMode,
+                    personaId: entity.PersonaId);
             }
 
             // model param acts as an override (e.g. think-model auto-switch); fall back to entity default
@@ -109,7 +125,7 @@ public class AgentResolver : IAgentResolver
                 agentId: entity.Id,
                 ct: ct);
             var creationParams = new AgentCreationParameters(renderedInstructions, entity.Name, entityToolGroups, entity.Temperature, entity.MaxTokens, userPermissions);
-            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams);
+            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaId: entity.PersonaId);
         }
 
         // 2. 使用 ToolGroups（无 AgentId 但有工具组）
@@ -178,6 +194,19 @@ public class AgentResolver : IAgentResolver
         }
 
         return Task.FromResult(new ChatMessage(ChatRole.User, contents));
+    }
+
+    /// <summary>
+    /// Parse a workspace `executionMode` frontmatter value (case-insensitive) into the
+    /// AgentExecutionMode enum. Unknown / empty values fall back to Single.
+    /// </summary>
+    private static AgentExecutionMode ParseExecutionMode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return AgentExecutionMode.Single;
+        return Enum.TryParse<AgentExecutionMode>(raw.Trim(), ignoreCase: true, out var mode)
+            ? mode
+            : AgentExecutionMode.Single;
     }
 
     /// <summary>
