@@ -28,13 +28,11 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     private readonly FeishuAdapterOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly HashSet<string> _allowedUsers;
-
-    private string? _tenantAccessToken;
-    private DateTime _tokenExpiry = DateTime.MinValue;
-    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    private readonly TokenRefresher _tokenRefresher;
 
     public string Name => "feishu";
     public bool SupportsStreaming => true;
+    public bool SupportsFileAttachment => false;
 
     public FeishuChannelAdapter(
         ILogger<FeishuChannelAdapter> logger,
@@ -53,6 +51,7 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             throw new ArgumentException("Feishu AppSecret is required when adapter is enabled");
 
         _allowedUsers = [.. _options.AllowedUserIds];
+        _tokenRefresher = new TokenRefresher(RefreshTenantAccessTokenAsync, _logger, Name);
     }
 
     public Task StartAsync(CancellationToken ct = default)
@@ -278,7 +277,7 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public async Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {
-        var token = await GetTenantAccessTokenAsync(ct);
+        var token = await _tokenRefresher.GetTokenAsync(ct);
         var client = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
 
         var payload = JsonSerializer.Serialize(new
@@ -301,49 +300,34 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Feishu file sending is not yet implemented. Check <see cref="SupportsFileAttachment"/>
+    /// before calling this method; it will always return false for this adapter.
+    /// </remarks>
     public Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
         => Task.FromResult(false);
 
     public ValueTask DisposeAsync()
-    {
-        _tokenLock.Dispose();
-        return ValueTask.CompletedTask;
-    }
+        => _tokenRefresher.DisposeAsync();
 
     /// <summary>
-    /// 获取 tenant_access_token（双重检查锁定，有效期 2 小时，提前 5 分钟刷新）
+    /// 调用飞书 API 刷新 tenant_access_token。
     /// </summary>
-    private async Task<string> GetTenantAccessTokenAsync(CancellationToken ct)
+    private async Task<(string Token, int ExpiresInSeconds)> RefreshTenantAccessTokenAsync(CancellationToken ct)
     {
-        if (_tenantAccessToken != null && DateTime.UtcNow < _tokenExpiry)
-            return _tenantAccessToken;
+        var client = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
+        var response = await client.PostAsJsonAsync(
+            $"{BaseUrl}/auth/v3/tenant_access_token/internal",
+            new { app_id = _options.AppId, app_secret = _options.AppSecret }, ct);
 
-        await _tokenLock.WaitAsync(ct);
-        try
-        {
-            if (_tenantAccessToken != null && DateTime.UtcNow < _tokenExpiry)
-                return _tenantAccessToken;
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
 
-            var client = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
-            var response = await client.PostAsJsonAsync(
-                $"{BaseUrl}/auth/v3/tenant_access_token/internal",
-                new { app_id = _options.AppId, app_secret = _options.AppSecret }, ct);
-
-            response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            _tenantAccessToken = root.GetProperty("tenant_access_token").GetString()!;
-            var expire = root.GetProperty("expire").GetInt32();
-            _tokenExpiry = DateTime.UtcNow.AddSeconds(expire - 300);
-
-            _logger.LogDebug("Feishu tenant access token refreshed, expires in {Seconds}s", expire);
-            return _tenantAccessToken;
-        }
-        finally
-        {
-            _tokenLock.Release();
-        }
+        var token = root.GetProperty("tenant_access_token").GetString()!;
+        var expire = root.GetProperty("expire").GetInt32();
+        return (token, expire);
     }
 }

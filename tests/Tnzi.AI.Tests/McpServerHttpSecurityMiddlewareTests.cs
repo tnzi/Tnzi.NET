@@ -114,7 +114,7 @@ public class McpServerHttpSecurityMiddlewareTests
                 Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
-                TenantIsolation = true,
+                RateLimitPerTenant = true,
                 AllowApiKeyInQuery = true
             }),
             NullLogger<McpServerSecurityMiddleware>.Instance,
@@ -135,7 +135,7 @@ public class McpServerHttpSecurityMiddlewareTests
                 Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
-                TenantIsolation = true,
+                RateLimitPerTenant = true,
                 AllowApiKeyInQuery = true
             }),
             security);

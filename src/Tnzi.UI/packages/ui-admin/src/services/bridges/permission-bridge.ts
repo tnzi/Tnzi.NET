@@ -18,7 +18,7 @@
  * Session=3). The previous bridge used `0 | 1 | 2`(`| 3`) numeric unions.
  * Numeric enum members are numeric literals, so the consuming page's
  * `switch (n) { case 0: … }` checks and `value: 0` NSelect options stay
- * compatible — `PermissionRules.vue` is unchanged. Both the enums (value) and
+ * compatible — `ToolPermissions.vue` is unchanged. Both the enums (value) and
  * the types are re-exported so existing imports keep resolving.
  */
 import type { HttpClient } from '@tnzi/core/http'
@@ -26,7 +26,7 @@ import { usePermissionAdminApi, PermissionBehavior, ToolPermissionScope } from '
 import { unwrapResult as unwrap } from '../_mappers'
 
 // Re-export the enums as runtime values (consumers may import them as values
-// or, as PermissionRules.vue does, as types).
+// or, as ToolPermissions.vue does, as types).
 export { PermissionBehavior, ToolPermissionScope }
 
 export type {

@@ -22,7 +22,14 @@ export {
 export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
 
 // Layout primitives
+export { default as TPageHeader } from './layout/TPageHeader.vue'
+export { default as TContentPage } from './layout/TContentPage.vue'
 export { default as TDarkModeContainer } from './layout/TDarkModeContainer.vue'
+
+// Detail primitives — 3-mode (modal/drawer/page) detail host + skeleton.
+export { default as TDetailLayout } from './detail/TDetailLayout.vue'
+export { default as TDetailHost } from './detail/TDetailHost.vue'
+export type { TDetailHostProps } from './detail/TDetailHost.vue'
 export { default as TAdminRouterView } from './layout/TAdminRouterView.vue'
 // 0.2.72+ (A1): one-shot wrapper that mounts the 5-provider naive-ui stack
 // (Config / LoadingBar / Message / Notification / Dialog) and pipes the

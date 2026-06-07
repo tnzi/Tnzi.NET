@@ -43,8 +43,11 @@ withDefaults(defineProps<Props>(), { fixed: false })
      squash the footer when content is empty. */
   flex-shrink: 0;
   gap: 12px;
-  min-height: var(--tnzi-admin-footer-height, 48px);
-  padding: 12px 16px;
+  /* Compact: a single copyright/links line — min-height centers it, no
+     vertical padding so the footer doesn't eat content height. Horizontal
+     padding matches the 12px content gutter. */
+  min-height: var(--tnzi-admin-footer-height, 32px);
+  padding: 0 12px;
   font-size: 12px;
   color: var(--tnzi-base-text-muted);
   background-color: var(--tnzi-admin-footer-bg, transparent);

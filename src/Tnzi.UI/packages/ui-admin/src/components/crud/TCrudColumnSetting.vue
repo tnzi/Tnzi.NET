@@ -20,7 +20,7 @@
         <!-- NPopover.Binder.Target requires exactly one child; fall back to a hidden anchor
              so the popover stays render-safe when the consumer drives `show` manually
              without supplying its own trigger element. -->
-        <span aria-hidden="true" style="display:inline-block;width:0;height:0" />
+        <span aria-hidden="true" class="inline-block w-0 h-0" />
       </slot>
     </template>
     <div class="t-crud-column-setting">

@@ -13,6 +13,7 @@
  */
 import { computed } from 'vue'
 import TWorkbenchLayout from '../../components/pages/TWorkbenchLayout.vue'
+import TContentPage from '../../components/layout/TContentPage.vue'
 import { useAdminWorkbenchConfig } from '../../plugin/workbenchConfig'
 import { defaultWorkbenchWidgets } from '../../widgets/presets'
 import type { WidgetDef } from '../../widgets/types'
@@ -24,13 +25,14 @@ const layout = computed(() => config?.layout ?? 'fixed')
 const persistKey = computed(() => config?.persistKey)
 const xGap = computed(() => config?.xGap ?? 16)
 const yGap = computed(() => config?.yGap ?? 16)
+
+// Workbench renders its own greeting banner via TWorkbenchLayout/THeaderBanner,
+// so we suppress the TContentPage header (show-header=false).
+const t = (key: string) => key
 </script>
 
 <template>
-  <!-- t-page-scroll: TAdminContent itself no longer scrolls (so CRUD
-       pages can pin their pagination); long-form pages opt in by
-       wrapping their body with this utility class. -->
-  <div class="t-workbench t-page-scroll">
+  <TContentPage :show-header="false" :translate="t" scroll="auto">
     <TWorkbenchLayout
       :widgets="widgets"
       :layout="layout"
@@ -38,13 +40,5 @@ const yGap = computed(() => config?.yGap ?? 16)
       :x-gap="xGap"
       :y-gap="yGap"
     />
-  </div>
+  </TContentPage>
 </template>
-
-<style scoped>
-.t-workbench {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-</style>

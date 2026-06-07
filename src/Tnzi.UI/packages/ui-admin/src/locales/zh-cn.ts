@@ -31,6 +31,7 @@ export const zhCn: AdminMessages = {
       createTitle: '新增', editTitle: '编辑', viewTitle: '查看',
       fetchError: '数据加载失败',
       retry: '重试',
+      empty: '暂无数据',
     },
     tabs: {
       closeCurrent: '关闭当前',
@@ -99,6 +100,7 @@ export const zhCn: AdminMessages = {
         tabStyleButton: '按钮',
         tabStyleSlider: '滑动条',
         closeTabByMiddleClick: '鼠标中键关闭标签',
+        tabScrollAnimation: '标签滚动动画',
         scrollMode: '滚动模式',
         scrollModeContent: '内容滚动（默认）',
         scrollModeWrapper: '整页滚动',
@@ -647,6 +649,11 @@ export const zhCn: AdminMessages = {
             history: '登录日志',
             linked: '绑定账号',
             danger: '危险操作',
+            groups: {
+              account: '账户',
+              activity: '活动',
+              advanced: '高级',
+            },
           },
           profile: {
             noRoles: '暂未分配角色。',

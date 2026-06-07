@@ -6,14 +6,17 @@ namespace Tnzi.AI.Services;
 public class AgentVersionRouter : IAgentVersionRouter
 {
     private readonly IRepository<AgentVersion, Guid> _versionRepository;
+    private readonly ICurrentUser? _currentUser;
     private readonly ILogger<AgentVersionRouter> _logger;
 
     public AgentVersionRouter(
         IRepository<AgentVersion, Guid> versionRepository,
-        ILogger<AgentVersionRouter> logger)
+        ILogger<AgentVersionRouter> logger,
+        ICurrentUser? currentUser = null)
     {
         _versionRepository = Check.NotNull(versionRepository);
         _logger = Check.NotNull(logger);
+        _currentUser = currentUser;
     }
 
     /// <inheritdoc />
@@ -37,9 +40,12 @@ public class AgentVersionRouter : IAgentVersionRouter
             return AgentVersionRouteResult.Passthrough(agent);
         }
 
-        // 确定性流量分配：基于 Agent ID + 版本号的确定性哈希，同一 Agent 始终路由到同一 variant
-        var hashInput = HashCode.Combine(agent.Id, abTestConfig.VersionA, abTestConfig.VersionB);
-        var roll = Math.Abs(hashInput % 100);
+        // 流量分配维度：优先按当前用户（实现真正的用户级 A/B 分流 —— 不同用户按比例分到 A/B，
+        // 同一用户始终落同一变体）；headless（无 ICurrentUser）时退化为按 Agent 稳定分配。
+        // 使用稳定哈希（SHA256）而非 HashCode.Combine —— 后者每进程随机化哈希种子，会导致
+        // 同一用户在服务重启后切换变体，破坏 A/B 实验的一致性。
+        var routingKey = _currentUser?.Id?.ToString() ?? agent.Id.ToString();
+        var roll = StableRoll(routingKey, agent.Id, abTestConfig.VersionA, abTestConfig.VersionB);
         var useVariantB = roll < abTestConfig.TrafficPercentB;
         var selectedVersion = useVariantB ? abTestConfig.VersionB : abTestConfig.VersionA;
         var selectedVariant = useVariantB ? "B" : "A";
@@ -188,5 +194,17 @@ public class AgentVersionRouter : IAgentVersionRouter
             // PersonaId field existed (legacy AgentConfigSnapshot rows).
             PersonaId = snapshot.PersonaId ?? original.PersonaId
         };
+    }
+
+    /// <summary>
+    /// 稳定的 0-99 流量分配值。基于 SHA256 而非 <see cref="HashCode.Combine(object?,object?,object?)"/> ——
+    /// 后者使用每进程随机化的哈希种子，跨进程/重启不稳定，会让同一路由键在重启后切换 A/B 变体。
+    /// </summary>
+    private static int StableRoll(string routingKey, Guid agentId, int versionA, int versionB)
+    {
+        var input = $"{routingKey}|{agentId}|{versionA}|{versionB}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        var value = BitConverter.ToUInt32(hash, 0);
+        return (int)(value % 100);
     }
 }

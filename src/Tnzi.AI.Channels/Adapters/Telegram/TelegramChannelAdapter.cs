@@ -20,6 +20,7 @@ public class TelegramChannelAdapter : IChannelAdapter
 
     public string Name => "telegram";
     public bool SupportsStreaming => false;
+    public bool SupportsFileAttachment => true;
 
     public TelegramChannelAdapter(
         ILogger<TelegramChannelAdapter> logger,

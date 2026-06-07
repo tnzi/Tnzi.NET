@@ -115,6 +115,12 @@ public class WorkflowStepDto
     /// <summary>Whether this step requires human approval before downstream steps can proceed</summary>
     public bool RequiresApproval { get; set; }
 
+    /// <summary>
+    /// Error handling policy when this node fails (Fail = stop workflow, Skip = skip node + continue, Continue = use error as output + continue).
+    /// Defaults to Fail for backward compatibility.
+    /// </summary>
+    public NodeErrorPolicy OnError { get; set; } = NodeErrorPolicy.Fail;
+
     /// <summary>Extra configuration key-value pairs (e.g., nodeType, loopId)</summary>
     public Dictionary<string, string>? Configuration { get; set; }
 }

@@ -6,22 +6,16 @@
     showing per-connection IP/UA/Hub/groups). One destructive action per
     row (force disconnect) gated by NPopconfirm.
   -->
-  <div class="t-signalr-page">
-    <div class="t-signalr-page__header">
-      <div class="t-signalr-page__title">
-        <TSvgIcon icon="mdi:broadcast" :size="20" />
-        <h2>{{ t('title') }}</h2>
-      </div>
-      <div class="t-signalr-page__toolbar">
-        <NText depth="3" style="font-size: 12px">
-          {{ stats?.timestamp ? t('lastUpdate', { time: formatDate(stats.timestamp) }) : '' }}
-        </NText>
-        <NButton size="small" :loading="loading" @click="refresh">
-          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-          {{ t('actions.refresh') }}
-        </NButton>
-      </div>
-    </div>
+  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+    <template #actions>
+      <NText depth="3" class="text-12px">
+        {{ stats?.timestamp ? t('lastUpdate', { time: formatDate(stats.timestamp) }) : '' }}
+      </NText>
+      <NButton size="small" :loading="loading" @click="refresh">
+        <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+        {{ t('actions.refresh') }}
+      </NButton>
+    </template>
 
     <div class="t-signalr-page__kpis">
       <NCard size="small" :bordered="false">
@@ -53,12 +47,16 @@
           :placeholder="t('filter.user')"
           clearable
           size="small"
-          style="width: 240px"
+          class="w-240px"
         >
           <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
         </NInput>
       </template>
-      <NDataTable
+      <!-- Online users have expandable rows (a nested per-connection table),
+           so on phones we keep the table form with horizontal scroll rather
+           than collapsing to cards (which would drop the expand affordance). -->
+      <TResponsiveTable
+        mobile="scroll"
         :columns="columns"
         :data="filteredUsers"
         :row-key="(row: OnlineUserDto) => row.userId"
@@ -69,11 +67,12 @@
         :flex-height="true"
       />
     </NCard>
-  </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import {
   NButton,
   NCard,
@@ -94,6 +93,7 @@ import {
   type SignalRStatsDto,
 } from '../../services/bridges/signalr-bridge'
 import { interpolate, translatePageKey } from '../_shared/translate'
+import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createSignalRBridge({ client: useAdminClient() })
 const t = (key: string, params?: Record<string, unknown>) =>
@@ -167,7 +167,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
                 key: 'connectionId',
                 width: 220,
                 render: (c) =>
-                  h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 11px;' }, c.connectionId),
+                  h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-11px' }, c.connectionId),
               },
               { title: () => t('cols.hub'), key: 'hubName', width: 140 },
               {
@@ -185,7 +185,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
                 render: (c) =>
                   h(
                     'div',
-                    { style: 'display: flex; flex-wrap: wrap; gap: 4px;' },
+                    { class: 'flex flex-wrap gap-4px' },
                     (c.groups ?? []).map((g: string) =>
                       h(NTag, { size: 'tiny', bordered: false }, () => g),
                     ),
@@ -201,7 +201,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
     key: 'userId',
     ellipsis: { tooltip: true },
     render: (row) =>
-      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.userId),
+      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.userId),
   },
   {
     title: () => t('cols.userName'),
@@ -274,14 +274,6 @@ onMounted(() => { void refresh() })
 </script>
 
 <style scoped>
-.t-signalr-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
 /* SignalR has a single primary table (online users). The list card grows
    to fill the residual height after the KPI strip; the NDataTable inside
    uses `flex-height` (set on the component) so its scrollable body fills
@@ -289,47 +281,21 @@ onMounted(() => { void refresh() })
    at the bottom. Naive UI's content wrapper class is `n-card-content`
    (dash, NOT BEM `n-card__content`) — must be a flex column with
    min-height: 0 for `flex-height` to compute correctly. */
-.t-signalr-page :deep(.n-card:last-of-type) {
+:deep(.n-card:last-of-type) {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.t-signalr-page :deep(.n-card:last-of-type > .n-card-content) {
+:deep(.n-card:last-of-type > .n-card-content) {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.t-signalr-page :deep(.n-card:last-of-type .n-data-table) {
+:deep(.n-card:last-of-type .n-data-table) {
   flex: 1 1 auto;
   min-height: 0;
-}
-.t-signalr-page__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  padding: 16px 20px;
-  background: var(--tnzi-container-bg);
-  border: 1px solid var(--tnzi-border);
-  border-radius: 8px;
-}
-.t-signalr-page__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.t-signalr-page__title h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-.t-signalr-page__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 .t-signalr-page__kpis {
   display: grid;

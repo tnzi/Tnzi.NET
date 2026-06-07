@@ -4,6 +4,7 @@ using System.Text.Json;
 using Tnzi.AI.Cli.Engine;
 using Tnzi.AI.Cli.Options;
 using Tnzi.AI.Cli.Providers;
+using Tnzi.AI.Dtos;
 using Tnzi.AI.Engine;
 
 namespace Tnzi.AI.Cli.Tests;
@@ -139,6 +140,64 @@ public class ClaudeCodeCliProviderTests
         psi.Environment["SHARED_VAR"].ShouldBe("from-request");
     }
 
+    [Fact]
+    public void BuildProcess_SecureByDefault_StripsNonBaselineHostVars()
+    {
+        const string secretKey = "TNZI_CLI_TEST_SECRET_XYZ";
+        Environment.SetEnvironmentVariable(secretKey, "leaked");
+        try
+        {
+            var psi = _provider.BuildProcess(CreateRequest(), CreateOptions());
+
+            psi.Environment.ContainsKey(secretKey).ShouldBeFalse(); // secret stripped
+            psi.Environment.ContainsKey("PATH").ShouldBeTrue();      // safe baseline retained
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secretKey, null);
+        }
+    }
+
+    [Fact]
+    public void BuildProcess_InheritAllHostEnvironment_KeepsHostVars()
+    {
+        const string secretKey = "TNZI_CLI_TEST_SECRET_INHERIT";
+        Environment.SetEnvironmentVariable(secretKey, "value");
+        try
+        {
+            var opts = CreateOptions();
+            opts.InheritAllHostEnvironment = true;
+
+            var psi = _provider.BuildProcess(CreateRequest(), opts);
+
+            psi.Environment.ContainsKey(secretKey).ShouldBeTrue();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secretKey, null);
+        }
+    }
+
+    [Fact]
+    public void BuildProcess_EnvironmentWhitelist_KeepsListedHostVar()
+    {
+        const string key = "TNZI_CLI_TEST_WHITELISTED";
+        Environment.SetEnvironmentVariable(key, "value");
+        try
+        {
+            var opts = CreateOptions();
+            opts.EnvironmentWhitelist = [key];
+
+            var psi = _provider.BuildProcess(CreateRequest(), opts);
+
+            psi.Environment.ContainsKey(key).ShouldBeTrue();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(key, null);
+        }
+    }
+
     #endregion
 
     #region ParseOutputAsync Tests
@@ -231,6 +290,31 @@ public class ClaudeCodeCliProviderTests
     }
 
     [Fact]
+    public async Task ParseOutput_ResultEvent_ShouldPopulateUsage()
+    {
+        var events = await ParseJsonLines(
+            """{"type":"result","result":"done","is_error":false,"total_cost_usd":0.01,"usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":30,"cache_creation_input_tokens":50}}""");
+
+        var complete = events.Single(e => e.EventType == CliEventType.Complete);
+        complete.Usage.ShouldNotBeNull();
+        complete.Usage!.InputTokens.ShouldBe(100);
+        complete.Usage.OutputTokens.ShouldBe(200);
+        complete.Usage.CachedInputTokens.ShouldBe(30);
+        complete.Usage.CacheCreationTokens.ShouldBe(50);
+        complete.Usage.TotalTokens.ShouldBe(300); // input + output only (cache tracked separately)
+    }
+
+    [Fact]
+    public async Task ParseOutput_ResultEvent_NoUsage_LeavesUsageNull()
+    {
+        var events = await ParseJsonLines(
+            """{"type":"result","result":"done","is_error":false,"total_cost_usd":0.01}""");
+
+        var complete = events.Single(e => e.EventType == CliEventType.Complete);
+        complete.Usage.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task ParseOutput_ShouldSkipNonJsonLines()
     {
         var events = await ParseJsonLines(
@@ -316,6 +400,24 @@ public class ClaudeCodeCliProviderTests
 
         chunk.ShouldNotBeNull();
         chunk!.FinishReason.ShouldBe("stop");
+    }
+
+    [Fact]
+    public void MapToStreamChunk_Complete_ShouldCarryUsage()
+    {
+        var evt = new CliAgentEvent
+        {
+            EventType = CliEventType.Complete,
+            Usage = new TokenUsageDto { InputTokens = 5, OutputTokens = 7 }
+        };
+
+        var chunk = _provider.MapToStreamChunk(evt);
+
+        chunk.ShouldNotBeNull();
+        chunk!.FinishReason.ShouldBe("stop");
+        chunk.Usage.ShouldNotBeNull();
+        chunk.Usage!.InputTokens.ShouldBe(5);
+        chunk.Usage.OutputTokens.ShouldBe(7);
     }
 
     #endregion

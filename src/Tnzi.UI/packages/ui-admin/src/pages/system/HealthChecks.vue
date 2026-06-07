@@ -6,26 +6,20 @@
     default) which sits outside the `/api` prefix. When the module isn't
     loaded the page renders an "unavailable" banner explaining how to wire it.
   -->
-  <div class="t-hc-page t-stack-page">
-    <div class="t-hc-page__header">
-      <div class="t-hc-page__title">
-        <TSvgIcon icon="mdi:heart-pulse" :size="20" />
-        <h2>{{ t('title') }}</h2>
-      </div>
-      <div class="t-hc-page__toolbar">
-        <NSelect
-          v-model:value="endpoint"
-          :options="endpointOptions"
-          size="medium"
-          style="width: 200px"
-          @update:value="refresh"
-        />
-        <NButton size="small" :loading="loading" @click="refresh">
-          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-          {{ t('actions.refresh') }}
-        </NButton>
-      </div>
-    </div>
+  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+    <template #actions>
+      <NSelect
+        v-model:value="endpoint"
+        :options="endpointOptions"
+        size="small"
+        class="w-200px"
+        @update:value="refresh"
+      />
+      <NButton size="small" :loading="loading" @click="refresh">
+        <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+        {{ t('actions.refresh') }}
+      </NButton>
+    </template>
 
     <NCard size="small" :bordered="false" class="t-hc-page__overall">
       <div class="t-hc-page__overall-row">
@@ -56,15 +50,15 @@
 
     <NAlert v-if="unavailable" :title="t('unavailable.title')" type="warning" :closable="false">
       <div>{{ t('unavailable.body') }}</div>
-      <div style="margin-top: 8px">
-        <code style="font-family: var(--tnzi-font-mono); font-size: 12px">
+      <div class="mt-8px">
+        <code class="font-[family-name:var(--tnzi-font-mono)] text-12px">
           [DependsOn(typeof(HealthChecksModule))]
         </code>
       </div>
     </NAlert>
 
     <NCard v-else :title="t('sections.checks')" size="small" :bordered="false" class="t-table-card">
-      <NDataTable
+      <TResponsiveTable
         :columns="columns"
         :data="entries"
         :loading="loading"
@@ -74,7 +68,7 @@
         :flex-height="true"
       />
     </NCard>
-  </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
@@ -83,15 +77,16 @@ import {
   NAlert,
   NButton,
   NCard,
-  NDataTable,
   NSelect,
   NTag,
 } from 'naive-ui'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import { interpolate, translatePageKey } from '../_shared/translate'
+import TContentPage from '../../components/layout/TContentPage.vue'
 
 const client = useAdminClient()
 const t = (key: string, params?: Record<string, unknown>) =>
@@ -229,33 +224,7 @@ onMounted(() => { void refresh() })
 </script>
 
 <style scoped>
-/* Layout shell from shared `.t-stack-page` + `.t-table-card` utilities. */
-.t-hc-page__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  padding: 16px 20px;
-  background: var(--tnzi-container-bg);
-  border: 1px solid var(--tnzi-border);
-  border-radius: 8px;
-}
-.t-hc-page__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.t-hc-page__title h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-.t-hc-page__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+/* Layout shell from TContentPage (scroll="fill") + shared `.t-table-card` utilities. */
 .t-hc-page__overall-row {
   display: flex;
   align-items: center;

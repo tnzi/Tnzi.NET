@@ -2,6 +2,12 @@
 
 All notable changes to the `@tnzi/*` frontend packages are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `@tnzi/ui-admin`: `TListShell` composable list shell + `TCardPage`/`TCardRenderer` (card lists) + `TTableRenderer`. `page`/`container` height modes for embedding lists as page sections. `useCrudPage` write callbacks are now optional (pure-display lists need only `fetchData`; create/edit/delete affordances auto-hide).
+
 ## [unreleased] — `@tnzi/ui-admin` page-consistency overhaul
 
 Follow-up to the responsive batch — user reported that custom pages drift from the standard NCard / token vocabulary that TCrudPage pages enforce: "用量统计页面没有白色背景容器 / 评测页面的容器似乎不是同一风格,外边距偏大". Comprehensive audit found 15 custom (non-TCrudPage) pages with five categories of drift; this commit set unifies all five.

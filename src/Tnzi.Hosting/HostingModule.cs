@@ -22,6 +22,7 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(AISkillsModule))]
 [OptionalDependsOn(typeof(AIWorkflowModule))]
 [OptionalDependsOn(typeof(AIMcpModule))]
+[OptionalDependsOn(typeof(AIMcpClientModule))]
 [OptionalDependsOn(typeof(AuditModule))]
 [OptionalDependsOn(typeof(SystemModule))]
 [OptionalDependsOn(typeof(HangfireModule))]

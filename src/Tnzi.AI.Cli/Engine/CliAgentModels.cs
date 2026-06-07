@@ -50,8 +50,11 @@ public class CliAgentEvent
     /// <summary>是否为错误</summary>
     public bool IsError { get; init; }
 
-    /// <summary>元数据（cost、tokens、duration 等）</summary>
+    /// <summary>元数据（cost、duration、turns 等非 token 信息）</summary>
     public Dictionary<string, JsonElement>? Metadata { get; init; }
+
+    /// <summary>归一化 Token 用量（仅 Complete 事件填充，由 provider 从 CLI 输出解析）</summary>
+    public TokenUsageDto? Usage { get; init; }
 }
 
 /// <summary>

@@ -371,7 +371,16 @@ public class DingtalkChannelAdapterTests
     }
 
     [Fact]
-    public async Task SendFileAsync_AlwaysReturnsFalse()
+    public void SupportsFileAttachment_ReturnsFalse()
+    {
+        // DingTalk robot API does not support file uploads — SupportsFileAttachment must
+        // advertise this so callers skip SendFileAsync rather than silently receiving false.
+        var adapter = CreateAdapter();
+        adapter.SupportsFileAttachment.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SendFileAsync_ReturnsFalse()
     {
         var adapter = CreateAdapter();
         var attachment = new ResolvedAttachment(

@@ -1,5 +1,5 @@
 /**
- * Column shape only — the page (`FunctionModule.vue`) builds its column array
+ * Column shape only — the page (`FunctionModules.vue`) builds its column array
  * inline so it can inject the `parentId → parentName` lookup and the enabled
  * status renderer; this file is just the row type for now. Keep it small.
  */

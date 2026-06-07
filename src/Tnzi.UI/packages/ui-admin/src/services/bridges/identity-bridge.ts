@@ -136,7 +136,7 @@ export interface IdentityBridge {
   }
   roles: BridgeCrudContract<RoleDto, CreateRoleDto, UpdateRoleDto> & {
     /** Get all roles (no paging) — used to populate the role-assignment
-     *  picker in UserManagement and the role list in RoleFunction. */
+     *  picker in Users and the role list in RoleFunction. */
     getAll(): Promise<RoleDto[]>
     /** Get a role's detail DTO (includes `userCount`). */
     getDetail(id: string): Promise<RoleDetailDto>

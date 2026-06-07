@@ -37,7 +37,13 @@ export default defineConfig({
     // by `@tnzi/ui` theme system + ui-admin's own layout tokens).
     'text-primary': 'text-[var(--tnzi-primary,#646cff)]',
     'text-muted': 'text-[var(--tnzi-base-text-muted,#888)]',
+    // Semantic status colors mapped to base theme tokens (theme-aware,
+    // mirrors @tnzi/ui). Fallbacks match Naive UI's default status palette
+    // so atoms still paint if a token is missing.
+    'text-success': 'text-[var(--tnzi-success,#18a058)]',
     'text-error': 'text-[var(--tnzi-error,#d03050)]',
+    'text-warning': 'text-[var(--tnzi-warning,#f0a020)]',
+    'text-info': 'text-[var(--tnzi-info,#2080f0)]',
     'border-tnzi': 'border border-[var(--tnzi-border,#e5e7eb)]',
     'bg-layout': 'bg-[var(--tnzi-layout-bg,#f5f7fa)]',
     'bg-card': 'bg-[var(--tnzi-container-bg,#fff)]',

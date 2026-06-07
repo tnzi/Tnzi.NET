@@ -49,6 +49,31 @@ public class LocalDeviceNodeTests
     }
 
     [Fact]
+    public void Capabilities_System_DoesNotExposeRunCommand()
+    {
+        // Host shell execution was removed from the local node (RCE risk) — only read-only "info" remains.
+        var system = _node.Capabilities.Single(c => c.Family == "system");
+
+        system.Commands.ShouldNotContain("run");
+        system.Commands.ShouldContain("info");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_SystemRun_IsRejected_NotExecuted()
+    {
+        // The local node must never spawn a host shell — it returns an honest failure
+        // pointing at the Sandbox module's isolated bash tool instead of executing.
+        var parameters = JsonSerializer.SerializeToElement(new { command = "echo pwned" });
+        var command = new DeviceCommand("system", "run", parameters);
+
+        var result = await _node.InvokeAsync(command);
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldNotBeNull();
+        result.Error!.ShouldContain("Sandbox");
+    }
+
+    [Fact]
     public async Task InvokeAsync_UnknownFamily_ReturnsError()
     {
         var command = new DeviceCommand("unknown_family", "test");

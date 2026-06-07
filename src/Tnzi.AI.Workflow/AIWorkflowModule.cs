@@ -1,5 +1,7 @@
+using Tnzi.AI.Infrastructure;
 using Tnzi.AI.Infrastructure.Stores;
 using Tnzi.AI.Services.Interfaces;
+using Tnzi.AI.Workflow.Options;
 
 namespace Tnzi.AI.Workflow;
 
@@ -19,6 +21,15 @@ public class AIWorkflowModule : TnziApplicationModule
     /// </summary>
     public override int LoadOrder => 52;
 
+    public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        context.Services.AddOptions<WorkflowWatchdogOptions>()
+            .Bind(context.Configuration.GetSection("AI:WorkflowWatchdog"))
+            .ValidateWith<WorkflowWatchdogOptions, WorkflowWatchdogOptionsValidator>();
+
+        return Task.CompletedTask;
+    }
+
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var services = context.Services;
@@ -37,6 +48,9 @@ public class AIWorkflowModule : TnziApplicationModule
         services.AddScoped<IWorkflowNodeServiceContext, WorkflowNodeServiceContext>();
         services.AddScoped<WorkflowNodeExecutor>();
         services.AddScoped<WorkflowEngine>();
+
+        // 注册 Watchdog（Scoped — 每次扫描由宿主调度器在其自己的 scope 内解析）
+        services.AddScoped<WorkflowWatchdogService>();
 
         // 注册工作流节点
         services.AddScoped<IWorkflowNode, AgentNode>();

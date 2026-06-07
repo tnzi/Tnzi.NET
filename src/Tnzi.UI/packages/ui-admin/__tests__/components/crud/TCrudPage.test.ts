@@ -182,13 +182,15 @@ describe('TCrudPage', () => {
       props: { state: state as any, allColumns: state.columnSettings.visibleColumns.value },
       global: { stubs },
     })
-    const input = wrapper.find('.t-crud-page__search .n-input-stub')
+    // Simple keyword search now lives in the white page-header bar
+    // (TListShell #actions), class `.t-list-shell__search`.
+    const input = wrapper.find('.t-list-shell__search .n-input-stub')
     await input.setValue('query')
     expect(state.setSearch).not.toHaveBeenCalled()
     // Find the primary Search button — it's the only n-button stub with
     // text "Search" inside the search panel.
     const searchBtn = wrapper
-      .findAll('.t-crud-page__search button')
+      .findAll('.t-list-shell__search button')
       .find((b) => b.text() === 'admin.crud.search' || b.text().toLowerCase().includes('search'))
     expect(searchBtn).toBeTruthy()
     await searchBtn!.trigger('click')

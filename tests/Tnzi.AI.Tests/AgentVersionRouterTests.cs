@@ -177,6 +177,49 @@ public class AgentVersionRouterTests
     }
 
     [Fact]
+    public async Task RouteAsync_SameUser_SameAgent_IsStable()
+    {
+        var agentId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var config = """{"abTest":{"enabled":true,"versionA":1,"versionB":2,"trafficPercentB":50}}""";
+        var va = CreateVersionEntity(agentId, 1, "Version A Agent");
+        var vb = CreateVersionEntity(agentId, 2, "Version B Agent");
+
+        string? first = null;
+        for (var i = 0; i < 10; i++)
+        {
+            var agent = CreateAgent(agentId, config);
+            var router = CreateRouterWithUser(userId, versions: [va, vb]);
+            var result = await router.RouteAsync(agent, CancellationToken.None);
+            first ??= result.SelectedVariant;
+            // 同一用户每次都落同一变体（用户级确定性）
+            result.SelectedVariant.ShouldBe(first);
+        }
+    }
+
+    [Fact]
+    public async Task RouteAsync_DifferentUsers_SameAgent_SplitsTraffic()
+    {
+        var agentId = Guid.NewGuid();
+        var config = """{"abTest":{"enabled":true,"versionA":1,"versionB":2,"trafficPercentB":50}}""";
+        var va = CreateVersionEntity(agentId, 1, "Version A Agent");
+        var vb = CreateVersionEntity(agentId, 2, "Version B Agent");
+
+        var variantSet = new HashSet<string>();
+        // 同一 Agent、30 个不同用户：50% 分配下应同时出现 A 和 B（真正的用户级 A/B 分流）
+        for (var i = 0; i < 30; i++)
+        {
+            var agent = CreateAgent(agentId, config);
+            var router = CreateRouterWithUser(Guid.NewGuid(), versions: [va, vb]);
+            var result = await router.RouteAsync(agent, CancellationToken.None);
+            result.IsAbTestRouted.ShouldBeTrue();
+            variantSet.Add(result.SelectedVariant!);
+        }
+
+        variantSet.Count.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task RouteAsync_DoesNotMutateOriginalAgent()
     {
         var agentId = Guid.NewGuid();
@@ -583,6 +626,25 @@ public class AgentVersionRouterTests
         return new AgentVersionRouter(
             versionRepo.Object,
             Mock.Of<ILogger<AgentVersionRouter>>());
+    }
+
+    private static AgentVersionRouter CreateRouterWithUser(Guid userId, List<AgentVersion>? versions = null)
+    {
+        var versionList = versions ?? [];
+        var versionRepo = new Mock<IRepository<AgentVersion, Guid>>();
+        var mock = versionList.BuildMock();
+        versionRepo.As<IQueryable<AgentVersion>>().Setup(q => q.Provider).Returns(mock.Provider);
+        versionRepo.As<IQueryable<AgentVersion>>().Setup(q => q.Expression).Returns(mock.Expression);
+        versionRepo.As<IQueryable<AgentVersion>>().Setup(q => q.ElementType).Returns(mock.ElementType);
+        versionRepo.As<IQueryable<AgentVersion>>().Setup(q => q.GetEnumerator()).Returns(mock.GetEnumerator());
+
+        var user = new Mock<Tnzi.Security.Claims.ICurrentUser>();
+        user.Setup(u => u.Id).Returns(userId);
+
+        return new AgentVersionRouter(
+            versionRepo.Object,
+            Mock.Of<ILogger<AgentVersionRouter>>(),
+            user.Object);
     }
 
     private static AgentService CreateAgentService(

@@ -20,7 +20,11 @@ public class LocalDeviceNode : IDeviceNode
     [
         new("clipboard", ["read", "write"]),
         new("notification", ["send"]),
-        new("system", ["run", "info"], DevicePermissionLevel.Elevated)
+        new("system", ["info"], DevicePermissionLevel.Elevated)
+        // "run" (host shell execution) is intentionally NOT offered by the local node —
+        // running arbitrary model-supplied commands on the server host is an RCE. Isolated
+        // command execution belongs to the Sandbox module (Docker/Local sandbox); remote
+        // device nodes may still implement "system/run" on their own side.
         // screenshot and file families not yet implemented — add when InvokeAsync handles them
     ];
 
@@ -77,7 +81,7 @@ public class LocalDeviceNode : IDeviceNode
         return command.Command.ToLowerInvariant() switch
         {
             "info" => Task.FromResult(GetSystemInfo()),
-            "run" => RunCommandAsync(command, cancellationToken),
+            "run" => Task.FromResult(RunNotSupported()),
             _ => Task.FromResult(DeviceCommandResult.Fail($"Unknown system command: {command.Command}"))
         };
     }
@@ -94,61 +98,18 @@ public class LocalDeviceNode : IDeviceNode
         return DeviceCommandResult.Ok(info.ToString());
     }
 
-    private static async Task<DeviceCommandResult> RunCommandAsync(DeviceCommand command, CancellationToken cancellationToken)
+    /// <summary>
+    /// Host shell execution via the local device node is deliberately disabled: running
+    /// arbitrary model-supplied commands on the server host is a remote-code-execution
+    /// risk, and a token/substring denylist is not a real boundary. For isolated command
+    /// execution on the server, load the Sandbox module and use its <c>bash</c> tool
+    /// (Docker/Local sandbox with resource limits and path virtualization).
+    /// </summary>
+    private static DeviceCommandResult RunNotSupported()
     {
-        var cmd = command.Parameters?.GetProperty("command").GetString();
-        if (string.IsNullOrEmpty(cmd))
-        {
-            return DeviceCommandResult.Fail("Command parameter is required for system run");
-        }
-
-        // Use ArgumentList instead of Arguments to prevent shell injection
-        var psi = new ProcessStartInfo
-        {
-            FileName = OperatingSystem.IsWindows() ? "cmd" : "/bin/bash",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        if (OperatingSystem.IsWindows())
-        {
-            psi.ArgumentList.Add("/c");
-            psi.ArgumentList.Add(cmd);
-        }
-        else
-        {
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(cmd);
-        }
-
-        using var process = new Process { StartInfo = psi };
-        process.Start();
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(command.Timeout);
-
-        try
-        {
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
-            await Task.WhenAll(stdoutTask, stderrTask);
-            var stdout = stdoutTask.Result;
-            var stderr = stderrTask.Result;
-            await process.WaitForExitAsync(cts.Token);
-
-            var output = new StringBuilder();
-            if (!string.IsNullOrEmpty(stdout)) output.AppendLine(stdout.TrimEnd());
-            if (!string.IsNullOrEmpty(stderr)) output.AppendLine($"[stderr] {stderr.TrimEnd()}");
-            output.AppendLine($"[exit_code] {process.ExitCode}");
-
-            return DeviceCommandResult.Ok(output.ToString());
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-            return DeviceCommandResult.Fail($"Command timed out after {command.Timeout.TotalSeconds}s");
-        }
+        return DeviceCommandResult.Fail(
+            "Host shell execution is not available on the local server node (RCE risk). " +
+            "Load the Sandbox module and use its isolated 'bash' tool for command execution.");
     }
 
     private static DeviceCommandResult HandleNotification(DeviceCommand _)

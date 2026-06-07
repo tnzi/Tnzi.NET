@@ -11,6 +11,13 @@ public interface IChannelAdapter : IAsyncDisposable
     /// <summary>是否支持流式编辑消息</summary>
     bool SupportsStreaming { get; }
 
+    /// <summary>
+    /// 是否支持文件附件发送。
+    /// 返回 false 的适配器不应被调用 <see cref="SendFileAsync"/>。
+    /// 默认实现返回 false，有能力的平台（Telegram、Slack、Discord）覆盖为 true。
+    /// </summary>
+    bool SupportsFileAttachment => false;
+
     /// <summary>启动监听</summary>
     Task StartAsync(CancellationToken ct = default);
 
@@ -20,6 +27,9 @@ public interface IChannelAdapter : IAsyncDisposable
     /// <summary>发送文本消息</summary>
     Task SendAsync(OutboundMessage message, CancellationToken ct = default);
 
-    /// <summary>发送文件附件</summary>
+    /// <summary>
+    /// 发送文件附件。调用前应先检查 <see cref="SupportsFileAttachment"/>。
+    /// 不支持文件的适配器应返回 false 而非抛出异常。
+    /// </summary>
     Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default);
 }

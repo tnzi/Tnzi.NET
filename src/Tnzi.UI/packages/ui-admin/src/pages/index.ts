@@ -1,6 +1,6 @@
-// Phase 2b Task 2.32: Re-exports the first rewritten page (UserManagement PoC).
+// Phase 2b Task 2.32: Re-exports the first rewritten page (Users PoC).
 // Remaining pages (authorization/system/...) are rewritten incrementally in Phase 3.
-export { default as UserManagement } from './identity/UserManagement.vue'
+export { default as Users } from './identity/Users.vue'
 
 // Translation helpers — host apps build their own `t()` against the same
 // resolver the framework's pages use. Picks up consumer-supplied messages

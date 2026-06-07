@@ -22,7 +22,7 @@ import type { KpiCard } from '../components/pages/TDashboardPage.vue'
 import type { TimelineItem } from '../components/dashboard/TProjectTimeline.vue'
 import type { QuickAction } from './builtin/TWidgetQuickActions.vue'
 
-import TWidgetStatsKpis from './builtin/TWidgetStatsKpis.vue'
+import TWidgetKpiStrip from './builtin/TWidgetKpiStrip.vue'
 import TWidgetQuickActions from './builtin/TWidgetQuickActions.vue'
 import TWidgetSystemHealth from './builtin/TWidgetSystemHealth.vue'
 import TWidgetIdentityStats from './builtin/TWidgetIdentityStats.vue'
@@ -33,14 +33,14 @@ import TWidgetChatStats from './builtin/TWidgetChatStats.vue'
 import TWidgetAuditRecent from './builtin/TWidgetAuditRecent.vue'
 import TWidgetActivityTimeline from './builtin/TWidgetActivityTimeline.vue'
 import TWidgetTips from './builtin/TWidgetTips.vue'
-import TWidgetOpsHealth from './builtin/TWidgetOpsHealth.vue'
+import TWidgetOpsSnapshot from './builtin/TWidgetOpsSnapshot.vue'
 
 /**
  * The canned 4-tile KPI strip the Workbench shipped with before the
  * widget refactor. **Mock placeholder data** — exposed only for consumers
  * who want to render a static demo / marketing screenshot without hitting
  * the admin API. The bundled Workbench deck no longer wires these in;
- * `TWidgetStatsKpis` auto-fetches real admin metrics (users, access logs,
+ * `TWidgetKpiStrip` auto-fetches real admin metrics (users, access logs,
  * AI requests, payment orders) when `kpis` is omitted.
  */
 export function defaultKpiCards(): KpiCard[] {
@@ -155,7 +155,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
   return [
     {
       id: 'kpi',
-      component: TWidgetStatsKpis,
+      component: TWidgetKpiStrip,
       span: 24,
       bare: true,
       // KPI strip now auto-fetches 4 real admin metrics — no props needed.
@@ -227,7 +227,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
     },
     {
       id: 'ops-health',
-      component: TWidgetOpsHealth,
+      component: TWidgetOpsSnapshot,
       title: 'admin.widgets.opsHealth.title',
       icon: 'mdi:heart-pulse',
       span: { xs: 24, sm: 24, md: 12, lg: 12 },

@@ -157,3 +157,20 @@ export function maybeTranslate(value: string | undefined | null): string {
   const hit = translatePageKey('', value)
   return hit || value
 }
+
+/**
+ * Decide whether `value` is an i18n key (translate it) or a human literal
+ * (show verbatim). A "key" is a dotted lowerCamel path like `admin.crud.list`.
+ * When `value` is empty, translate `fallback` instead. Mirrors the heuristic
+ * formerly inlined in TListShell.
+ */
+export function maybeTranslateKey(
+  translate: ((key: string) => string) | undefined,
+  value: string | undefined,
+  fallback: string,
+): string {
+  const t = (k: string) => (translate ? translate(k) : k)
+  if (!value) return t(fallback)
+  if (/^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)*$/.test(value)) return t(value)
+  return value
+}

@@ -18,7 +18,7 @@
  */
 import { reactive, ref, computed, onMounted } from 'vue'
 import {
-  NCard, NSpace, NButton, NForm, NFormItem, NGrid, NGi,
+  NCard, NButton, NForm, NFormItem, NGrid, NGi,
   NDatePicker, NInput, NSpin,
 } from 'naive-ui'
 import type { EChartsOption } from 'echarts'
@@ -30,6 +30,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import { translatePageKey } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import TContentPage from '../../../components/layout/TContentPage.vue'
 import {
   STAT_CARDS,
   defaultDateRange,
@@ -216,7 +217,21 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
 </script>
 
 <template>
-  <div class="t-usage-dashboard t-page-scroll" data-test="usage-dashboard">
+  <TContentPage :title="t('title')" :translate="t" scroll="auto">
+    <template #actions>
+      <NButton
+        size="small"
+        type="primary"
+        :loading="loading"
+        data-test="refresh-btn"
+        @click="refresh"
+      >
+        <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+        {{ loading ? t('loading') : t('refresh') }}
+      </NButton>
+    </template>
+
+    <div class="t-usage-dashboard" data-test="usage-dashboard">
     <!-- Filter card — soybean parity: NCard bordered=false + NForm inline -->
     <NCard
       :bordered="false"
@@ -233,7 +248,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
                 type="datetime"
                 clearable
                 size="small"
-                style="width: 100%"
+                class="w-full"
                 data-test="filter-start"
                 @update:value="refresh"
               />
@@ -246,7 +261,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
                 type="datetime"
                 clearable
                 size="small"
-                style="width: 100%"
+                class="w-full"
                 data-test="filter-end"
                 @update:value="refresh"
               />
@@ -275,18 +290,6 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
             </NFormItem>
           </NGi>
         </NGrid>
-        <div class="t-usage-dashboard__filter-actions">
-          <NButton
-            size="small"
-            type="primary"
-            :loading="loading"
-            data-test="refresh-btn"
-            @click="refresh"
-          >
-            <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-            {{ loading ? t('loading') : t('refresh') }}
-          </NButton>
-        </div>
       </NForm>
     </NCard>
 
@@ -413,6 +416,7 @@ defineExpose({ refresh, filters, summary, agentRows, modelRows, trend, errors })
       </div>
     </div>
   </div>
+  </TContentPage>
 </template>
 
 <style scoped>

@@ -48,6 +48,7 @@
     <Project Path="src/Tnzi.AI.Skills/Tnzi.AI.Skills.csproj" />
     <Project Path="src/Tnzi.AI.Workflow/Tnzi.AI.Workflow.csproj" />
     <Project Path="src/Tnzi.AI.Mcp/Tnzi.AI.Mcp.csproj" />
+    <Project Path="src/Tnzi.AI.McpClient/Tnzi.AI.McpClient.csproj" />
     <Project Path="src/Tnzi.AI.Coder/Tnzi.AI.Coder.csproj" />
     <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
     <Project Path="src/Tnzi.AI.Channels/Tnzi.AI.Channels.csproj" />

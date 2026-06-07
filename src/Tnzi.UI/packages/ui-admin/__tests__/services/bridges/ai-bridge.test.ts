@@ -172,7 +172,7 @@ function mockMcpApi() {
       transport: 'http',
       endpoint: '/mcp',
       requireAuthentication: true,
-      tenantIsolation: true,
+      rateLimitPerTenant: true,
       rateLimitPerMinute: 60,
       exposedAgentCount: 0,
       customToolCount: 3,

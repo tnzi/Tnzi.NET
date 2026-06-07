@@ -150,9 +150,12 @@ const drawerWidth = computed<number | string>(() => {
   return 420
 })
 
-// Layout / preset card grids fall to 2 cols on xs so 3x96 fixed cards
-// don't push the inner content past the drawer edge.
-const compactGridCols = computed<number>(() => (bp.isXs.value ? 2 : 3))
+// NOTE: the layout/preset grids are 3-col by default, dropping to 2-col on
+// phones. This is done via a scoped `@media` query rather than a v-bind CSS
+// var — NDrawer teleports its content to <body>, and Vue's `v-bind()` writes
+// the var onto the component root (which stays in place), so teleported nodes
+// can't resolve it and `repeat(var(--x), 1fr)` collapses to a single column.
+// Scoped data-v selectors DO follow teleported nodes, so a media query works.
 
 // Phase C: layout modes that host the menu in the header. The shell forces
 // headerVisible=true in these modes; mirror that here so the drawer's
@@ -244,6 +247,7 @@ function buildSnapshot(): AdminThemeSnapshot {
       grayscale: themeStore.grayscale,
       colourWeakness: themeStore.colourWeakness,
       closeTabByMiddleClick: themeStore.closeTabByMiddleClick,
+      tabScrollAnimation: themeStore.tabScrollAnimation,
       scrollMode: themeStore.scrollMode,
       mixCollapsedWidth: themeStore.mixCollapsedWidth,
       mixChildMenuWidth: themeStore.mixChildMenuWidth,
@@ -365,6 +369,9 @@ function applySnapshot(snapshot: AdminThemeSnapshot): void {
   if (typeof snapshot.admin.closeTabByMiddleClick === 'boolean') {
     themeStore.setCloseTabByMiddleClick(snapshot.admin.closeTabByMiddleClick)
   }
+  if (typeof snapshot.admin.tabScrollAnimation === 'boolean') {
+    themeStore.setTabScrollAnimation(snapshot.admin.tabScrollAnimation)
+  }
   if (snapshot.admin.scrollMode === 'content' || snapshot.admin.scrollMode === 'wrapper') {
     themeStore.setScrollMode(snapshot.admin.scrollMode)
   }
@@ -435,7 +442,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :value="ctx.settings.value.mode"
               type="segment"
               size="small"
-              style="width: 240px"
+              class="w-240px"
               @update:value="(m: string | number) => setMode(m as 'light' | 'dark' | 'auto')"
             >
               <NTab name="light">
@@ -508,7 +515,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :min="0"
               :max="16"
               :step="1"
-              style="width: 120px"
+              class="w-120px"
               @update:value="(v: number | null) => v != null && themeStore.setThemeRadius(v)"
             />
           </section>
@@ -545,7 +552,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :min="160"
                 :max="320"
                 :step="4"
-                style="width: 120px"
+                class="w-120px"
                 @update:value="(v: number | null) => v != null && themeStore.setSiderWidth(v)"
               />
             </section>
@@ -557,7 +564,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :min="48"
                 :max="100"
                 :step="2"
-                style="width: 120px"
+                class="w-120px"
                 @update:value="(v: number | null) => v != null && themeStore.setSiderCollapsedWidth(v)"
               />
             </section>
@@ -572,7 +579,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :min="60"
                 :max="140"
                 :step="2"
-                style="width: 120px"
+                class="w-120px"
                 @update:value="(v: number | null) => v != null && themeStore.setMixSiderWidth(v)"
               />
             </section>
@@ -587,7 +594,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :min="48"
                 :max="100"
                 :step="2"
-                style="width: 120px"
+                class="w-120px"
                 @update:value="(v: number | null) => v != null && themeStore.setMixCollapsedWidth(v)"
               />
             </section>
@@ -602,7 +609,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :min="160"
                 :max="320"
                 :step="4"
-                style="width: 120px"
+                class="w-120px"
                 @update:value="(v: number | null) => v != null && themeStore.setMixChildMenuWidth(v)"
               />
             </section>
@@ -632,7 +639,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :min="44"
               :max="80"
               :step="2"
-              style="width: 120px"
+              class="w-120px"
               @update:value="(v: number | null) => v != null && themeStore.setHeaderHeight(v)"
             />
           </section>
@@ -660,7 +667,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :min="32"
               :max="56"
               :step="2"
-              style="width: 120px"
+              class="w-120px"
               @update:value="(v: number | null) => v != null && themeStore.setTabHeight(v)"
             />
           </section>
@@ -669,7 +676,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             <NSelect
               :value="themeStore.tabStyle"
               size="small"
-              style="width: 160px"
+              class="w-160px"
               :options="TAB_STYLE_OPTIONS.map((s) => ({ value: s, label: translate(TAB_STYLE_LABEL_KEY[s]) }))"
               @update:value="(v: TabStyle) => themeStore.setTabStyle(v)"
             />
@@ -683,6 +690,13 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             <NSwitch
               :value="themeStore.closeTabByMiddleClick"
               @update:value="themeStore.setCloseTabByMiddleClick"
+            />
+          </section>
+          <section v-if="themeStore.tabVisible" class="t-theme-drawer__row">
+            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.tabScrollAnimation') }}</span>
+            <NSwitch
+              :value="themeStore.tabScrollAnimation"
+              @update:value="themeStore.setTabScrollAnimation"
             />
           </section>
 
@@ -700,7 +714,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :min="32"
               :max="80"
               :step="2"
-              style="width: 120px"
+              class="w-120px"
               @update:value="(v: number | null) => v != null && themeStore.setFooterHeight(v)"
             />
           </section>
@@ -712,7 +726,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             <NSelect
               :value="themeStore.scrollMode"
               size="small"
-              style="width: 160px"
+              class="w-160px"
               :options="[
                 { value: 'content', label: translate('admin.theme.layout.scrollModeContent') },
                 { value: 'wrapper', label: translate('admin.theme.layout.scrollModeWrapper') },
@@ -741,7 +755,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             <NSelect
               :value="themeStore.pageTransition"
               size="small"
-              style="width: 160px"
+              class="w-160px"
               :options="TRANSITION_OPTIONS.map((t) => ({ value: t, label: translate(TRANSITION_LABEL_KEY[t]) }))"
               @update:value="(v: PageTransition) => themeStore.setPageTransition(v)"
             />
@@ -808,7 +822,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               <NInput
                 :value="themeStore.watermark.text"
                 size="small"
-                style="width: 180px"
+                class="w-180px"
                 @update:value="(v: string) => themeStore.setWatermark({ text: v })"
               />
             </section>
@@ -835,7 +849,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :max="0.5"
                 :step="0.05"
                 :precision="2"
-                style="width: 120px"
+                class="w-120px"
                 @update:value="(v: number | null) => v != null && themeStore.setWatermark({ opacity: v })"
               />
             </section>
@@ -847,7 +861,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :max="32"
                 :step="1"
                 size="small"
-                style="width: 100px"
+                class="w-100px"
                 @update:value="(v: number | null) => v != null && themeStore.setWatermark({ fontSize: v })"
               />
             </section>
@@ -909,7 +923,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :rows="6"
               size="small"
               readonly
-              style="margin-top: 8px; font-family: monospace; font-size: 11px"
+              class="mt-8px font-mono text-11px"
             />
           </section>
 
@@ -921,9 +935,9 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :rows="5"
               size="small"
               :placeholder="translate('admin.theme.preset.importPlaceholder')"
-              style="font-family: monospace; font-size: 11px"
+              class="font-mono text-11px"
             />
-            <div class="t-theme-drawer__row-actions" style="margin-top: 8px">
+            <div class="t-theme-drawer__row-actions mt-8px">
               <NButton size="small" @click="onChooseFile">
                 {{ translate('admin.theme.preset.chooseFile') }}
               </NButton>
@@ -1054,7 +1068,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
    on .t-layout-card itself in TLayoutModeCard). */
 .t-theme-drawer__layout-grid {
   display: grid;
-  grid-template-columns: repeat(v-bind(compactGridCols), 1fr);
+  grid-template-columns: repeat(3, 1fr);
   column-gap: 16px;
   row-gap: 12px;
 }
@@ -1071,9 +1085,19 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
  *   design that read as accidental rather than designed. */
 .t-theme-drawer__preset-grid {
   display: grid;
-  grid-template-columns: repeat(v-bind(compactGridCols), 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-top: 4px;
+}
+
+/* Phones (<sm, viewport <640px): drop both card grids to 2 columns so the
+   fixed-96px cards never push past the full-width drawer edge. Mirrors the
+   former `compactGridCols` intent without the teleport-broken v-bind var. */
+@media (max-width: 639.98px) {
+  .t-theme-drawer__layout-grid,
+  .t-theme-drawer__preset-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .t-theme-drawer__preset-card {
   display: flex;

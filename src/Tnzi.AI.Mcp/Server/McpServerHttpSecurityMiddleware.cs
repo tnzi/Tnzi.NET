@@ -39,7 +39,7 @@ public class McpServerHttpSecurityMiddleware
             return;
         }
 
-        if (_options.Value.TenantIsolation)
+        if (_options.Value.RateLimitPerTenant)
         {
             context.Items[McpServerSecurityMiddleware.TenantHeaderName] =
                 _security.ExtractTenantId(context.Request);

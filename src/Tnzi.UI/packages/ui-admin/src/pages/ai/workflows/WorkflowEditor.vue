@@ -3,7 +3,8 @@
     WorkflowEditor — heavyweight visual editor.
 
     Layout:
-      - Top toolbar:    back / save / validate / run / publish + view-mode tabs
+      - Top header:     TDetailLayout plain — title (workflow name) + back + action buttons
+      - View tabs:      visual / JSON toggle rendered inside body (below header)
       - Left panel:     node palette ("add node by type") + node list (select/delete/duplicate)
       - Center canvas:  Vue Flow with drag-to-move + drag-to-connect.
                         Node positions persist via configuration["__x"/"__y"].
@@ -16,64 +17,70 @@
     and the property form mutates draft.steps in place so the round-trip
     matches what the backend executors expect.
   -->
-  <div class="t-wf-editor t-page-scroll">
-    <header class="t-wf-editor__toolbar">
-      <div class="t-wf-editor__toolbar-left">
-        <NButton size="small" tertiary @click="goBack">
-          <template #icon><TSvgIcon icon="mdi:arrow-left" :size="16" /></template>
-          {{ t('admin.common.back') }}
-        </NButton>
-        <h2 class="t-wf-editor__title">
-          {{ workflow?.name || t('editor.untitled') }}
-          <NTag v-if="workflow" size="small" :type="workflow.isEnabled ? 'success' : 'warning'" :bordered="false">
-            {{ workflow.isEnabled ? t('admin.shared.status.enabled') : t('admin.shared.status.disabled') }}
-          </NTag>
-        </h2>
-        <NTabs
-          v-model:value="viewMode"
-          type="segment"
-          size="small"
-          animated
-          class="t-wf-editor__view-tabs"
-        >
-          <NTab name="visual" :tab="t('editor.visualTab')" />
-          <NTab name="json" :tab="t('editor.jsonTab')" />
-        </NTabs>
+  <TDetailLayout
+    layout="plain"
+    :title="workflow?.name || t('editor.untitled')"
+    :back="'/admin/ai/workflows'"
+    :translate="t"
+  >
+    <template #title>
+      <div class="t-wf-editor__header-title">
+        <span class="t-wf-editor__header-name">{{ workflow?.name || t('editor.untitled') }}</span>
+        <NTag v-if="workflow" size="small" :type="workflow.isEnabled ? 'success' : 'warning'" :bordered="false">
+          {{ workflow.isEnabled ? t('admin.shared.status.enabled') : t('admin.shared.status.disabled') }}
+        </NTag>
       </div>
-      <div class="t-wf-editor__toolbar-right">
-        <NButton size="small" tertiary :disabled="!workflow" @click="onValidate">
-          <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
-          {{ t('actions.validate') }}
-        </NButton>
-        <NButton size="small" type="info" :disabled="!workflow?.isEnabled" @click="openRun">
-          <template #icon><TSvgIcon icon="mdi:play" :size="16" /></template>
-          {{ t('actions.run') }}
-        </NButton>
-        <NButton
-          size="small"
-          :type="workflow?.isEnabled ? 'warning' : 'success'"
-          :disabled="!workflow"
-          @click="togglePublish"
-        >
-          {{ workflow?.isEnabled ? t('actions.disable') : t('actions.enable') }}
-        </NButton>
-        <NButton size="small" type="primary" :loading="saving" :disabled="!dirty" @click="onSave">
-          <template #icon><TSvgIcon icon="mdi:content-save-outline" :size="16" /></template>
-          {{ t('admin.common.save') }}
-        </NButton>
-      </div>
-    </header>
+    </template>
 
-    <div v-if="loading" class="t-wf-editor__loading">
-      <NSpin />
-    </div>
-    <NAlert v-else-if="loadError" type="error" :title="t('editor.loadError')">{{ loadError }}</NAlert>
-    <div v-else-if="!workflowId" class="t-wf-editor__empty">{{ t('editor.missingId') }}</div>
+    <template #actions>
+      <NButton size="small" tertiary :disabled="!workflow" @click="onValidate">
+        <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
+        {{ t('actions.validate') }}
+      </NButton>
+      <NButton size="small" type="info" :disabled="!workflow?.isEnabled" @click="openRun">
+        <template #icon><TSvgIcon icon="mdi:play" :size="16" /></template>
+        {{ t('actions.run') }}
+      </NButton>
+      <NButton
+        size="small"
+        :type="workflow?.isEnabled ? 'warning' : 'success'"
+        :disabled="!workflow"
+        @click="togglePublish"
+      >
+        {{ workflow?.isEnabled ? t('actions.disable') : t('actions.enable') }}
+      </NButton>
+      <NButton size="small" type="primary" :loading="saving" :disabled="!dirty" @click="onSave">
+        <template #icon><TSvgIcon icon="mdi:content-save-outline" :size="16" /></template>
+        {{ t('admin.common.save') }}
+      </NButton>
+    </template>
 
-    <!-- Visual editor (default) -->
-    <div v-else-if="viewMode === 'visual'" class="t-wf-editor__body">
-      <!-- Left: node palette + node list -->
-      <aside class="t-wf-editor__sidebar">
+    <template #default>
+      <div class="t-wf-editor">
+        <!-- View-mode tabs (visual / JSON) — rendered inside body so they stay with the content -->
+        <div class="t-wf-editor__view-bar">
+          <NTabs
+            v-model:value="viewMode"
+            type="segment"
+            size="small"
+            animated
+            class="t-wf-editor__view-tabs"
+          >
+            <NTab name="visual" :tab="t('editor.visualTab')" />
+            <NTab name="json" :tab="t('editor.jsonTab')" />
+          </NTabs>
+        </div>
+
+        <div v-if="loading" class="t-wf-editor__loading">
+          <NSpin />
+        </div>
+        <NAlert v-else-if="loadError" type="error" :title="t('editor.loadError')">{{ loadError }}</NAlert>
+        <div v-else-if="!workflowId" class="t-wf-editor__empty">{{ t('editor.missingId') }}</div>
+
+        <!-- Visual editor (default) -->
+        <div v-else-if="viewMode === 'visual'" class="t-wf-editor__body">
+          <!-- Left: node palette + node list -->
+          <aside class="t-wf-editor__sidebar">
         <NCard size="small" :title="t('editor.nodePalette')" :bordered="false">
           <div class="t-wf-editor__palette">
             <button
@@ -94,8 +101,7 @@
           size="small"
           :title="t('editor.nodeList')"
           :bordered="false"
-          style="margin-top: 12px; flex: 1; min-height: 0; display: flex; flex-direction: column"
-          class="t-wf-editor__node-list-card"
+          class="t-wf-editor__node-list-card mt-12px flex-1 min-h-0 flex flex-col"
         >
           <template #header-extra>
             <span class="t-wf-editor__stats-pill">{{ draft.steps?.length ?? 0 }}</span>
@@ -303,7 +309,8 @@
             </NFormItem>
           </NForm>
 
-          <NDivider style="margin: 12px 0 8px" />
+          <!-- !important beats Naive's own .n-divider:not(.n-divider--vertical) margin (specificity 0,2,0) -->
+          <NDivider class="!m-[12px_0_8px]" />
           <div class="t-wf-editor__inspector-footer">
             <NButton size="tiny" tertiary @click="duplicateStep(selectedStep)">
               <template #icon><TSvgIcon icon="mdi:content-duplicate" :size="14" /></template>
@@ -350,7 +357,8 @@
             </NFormItem>
           </NForm>
 
-          <NDivider style="margin: 12px 0" />
+          <!-- !important beats Naive's own .n-divider margin (specificity 0,2,0) -->
+          <NDivider class="!m-[12px_0]" />
           <div class="t-wf-editor__stats">
             <div><span>{{ t('editor.stepsCount') }}:</span> {{ draft.steps?.length ?? 0 }}</div>
             <div><span>{{ t('columns.executionMode') }}:</span> {{ executionModeLabel }}</div>
@@ -368,7 +376,7 @@
             {{ t('editor.format') }}
           </NButton>
         </template>
-        <NAlert v-if="stepsJsonError" type="error" :show-icon="false" style="margin-bottom: 8px">
+        <NAlert v-if="stepsJsonError" type="error" :show-icon="false" class="mb-8px">
           {{ stepsJsonError }}
         </NAlert>
         <NInput
@@ -382,50 +390,52 @@
       </NCard>
     </div>
 
-    <!-- Run modal -->
-    <NModal v-model:show="runModal.show" :title="t('actions.run')" preset="card" style="max-width: 560px">
-      <NForm label-placement="left" label-width="100px">
-        <NFormItem :label="t('run.input')" required>
-          <NInput v-model:value="runModal.input" type="textarea" :rows="6" :placeholder="t('run.inputPlaceholder')" />
-        </NFormItem>
-      </NForm>
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
-          <NButton @click="runModal.show = false">{{ t('admin.common.cancel') }}</NButton>
-          <NButton
-            type="primary"
-            :loading="runModal.running"
-            :disabled="!runModal.input?.trim()"
-            @click="confirmRun"
-          >
-            {{ t('actions.run') }}
-          </NButton>
-        </div>
-      </template>
-    </NModal>
+        <!-- Run modal -->
+        <NModal v-model:show="runModal.show" :title="t('actions.run')" preset="card" class="max-w-560px">
+          <NForm label-placement="left" label-width="100px">
+            <NFormItem :label="t('run.input')" required>
+              <NInput v-model:value="runModal.input" type="textarea" :rows="6" :placeholder="t('run.inputPlaceholder')" />
+            </NFormItem>
+          </NForm>
+          <template #footer>
+            <div class="flex justify-end gap-8px">
+              <NButton @click="runModal.show = false">{{ t('admin.common.cancel') }}</NButton>
+              <NButton
+                type="primary"
+                :loading="runModal.running"
+                :disabled="!runModal.input?.trim()"
+                @click="confirmRun"
+              >
+                {{ t('actions.run') }}
+              </NButton>
+            </div>
+          </template>
+        </NModal>
 
-    <!-- Validate result modal -->
-    <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" style="max-width: 520px">
-      <NAlert
-        v-if="validateModal.result"
-        :type="validateModal.result.isValid ? 'success' : 'error'"
-        :title="validateModal.result.isValid ? t('validate.passed') : t('validate.failed')"
-        :show-icon="true"
-      >
-        <ul v-if="(validateModal.result.errors?.length ?? 0) > 0" class="t-wf-editor__validate-list">
-          <li v-for="(err, i) in (validateModal.result.errors ?? [])" :key="`e-${i}`">{{ err }}</li>
-        </ul>
-        <ul v-if="(validateModal.result.warnings?.length ?? 0) > 0" class="t-wf-editor__validate-list">
-          <li v-for="(w, i) in (validateModal.result.warnings ?? [])" :key="`w-${i}`">⚠ {{ w }}</li>
-        </ul>
-      </NAlert>
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end">
-          <NButton @click="validateModal.show = false">{{ t('admin.common.close') }}</NButton>
-        </div>
-      </template>
-    </NModal>
-  </div>
+        <!-- Validate result modal -->
+        <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" class="max-w-520px">
+          <NAlert
+            v-if="validateModal.result"
+            :type="validateModal.result.isValid ? 'success' : 'error'"
+            :title="validateModal.result.isValid ? t('validate.passed') : t('validate.failed')"
+            :show-icon="true"
+          >
+            <ul v-if="(validateModal.result.errors?.length ?? 0) > 0" class="t-wf-editor__validate-list">
+              <li v-for="(err, i) in (validateModal.result.errors ?? [])" :key="`e-${i}`">{{ err }}</li>
+            </ul>
+            <ul v-if="(validateModal.result.warnings?.length ?? 0) > 0" class="t-wf-editor__validate-list">
+              <li v-for="(w, i) in (validateModal.result.warnings ?? [])" :key="`w-${i}`">⚠ {{ w }}</li>
+            </ul>
+          </NAlert>
+          <template #footer>
+            <div class="flex justify-end">
+              <NButton @click="validateModal.show = false">{{ t('admin.common.close') }}</NButton>
+            </div>
+          </template>
+        </NModal>
+      </div>
+    </template>
+  </TDetailLayout>
 </template>
 
 <script setup lang="ts">
@@ -450,6 +460,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import TDetailLayout from '../../../components/detail/TDetailLayout.vue'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { translatePageKey, interpolate } from '../../_shared/translate'
@@ -982,10 +993,6 @@ async function onSave(): Promise<void> {
   }
 }
 
-function goBack(): void {
-  router.push({ name: 'ai.workflows' }).catch(() => undefined)
-}
-
 // --- Toggle publish ---------------------------------------------------------
 async function togglePublish(): Promise<void> {
   if (!workflow.value) return
@@ -1058,38 +1065,31 @@ void loadAgents()
 </script>
 
 <style scoped>
+/* Inner body wrapper — fills TDetailLayout's scrollable body region */
 .t-wf-editor {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 100%;
+  min-height: 0;
 }
-.t-wf-editor__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 4px;
-}
-.t-wf-editor__toolbar-left,
-.t-wf-editor__toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.t-wf-editor__view-tabs {
-  margin-left: 8px;
-  width: 200px;
-}
-.t-wf-editor__title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--tnzi-base-text);
+/* Header title slot: workflow name + status badge inline */
+.t-wf-editor__header-title {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+.t-wf-editor__header-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+/* View-mode tab bar (visual / JSON) rendered at the top of the body */
+.t-wf-editor__view-bar {
+  display: flex;
+  align-items: center;
+}
+.t-wf-editor__view-tabs {
+  width: 200px;
 }
 .t-wf-editor__loading,
 .t-wf-editor__empty,

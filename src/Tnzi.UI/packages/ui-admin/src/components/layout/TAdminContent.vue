@@ -65,6 +65,13 @@ defineExpose({ currentTransition })
 .t-admin-content[data-full-content='true'] {
   padding: 0;
 }
+/* Phone: trim the content gutter so list cards / tables reclaim the scarce
+   horizontal space (16px → 10px each side = +12px usable on a 375px screen). */
+@media (max-width: 767px) {
+  .t-admin-content {
+    padding: 10px;
+  }
+}
 .t-admin-content__page {
   height: 100%;
   min-height: 0;

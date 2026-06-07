@@ -196,6 +196,14 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         return count;
     }
 
+    // 扫描时跳过的目录名（明显的非 skill 目录）
+    private static readonly HashSet<string> SkipDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", ".svn", ".hg", "node_modules", ".venv", "__pycache__",
+        // common build/dependency output dirs that may hold stray SKILL.md but aren't real skills
+        "dist", "build", "bin", "obj", "target", "out", "vendor"
+    };
+
     private async Task<List<SkillDefinition>> LoadSkillsFromPathAsync(string resolvedPath, HashSet<string> scannedSkillFiles, CancellationToken ct)
     {
         var skills = new List<SkillDefinition>();
@@ -206,8 +214,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
             return skills;
         }
 
-        var ignoreMatcher = GitIgnoreRuleSet.Load(resolvedPath);
-        var skillFiles = Directory.EnumerateFiles(resolvedPath, "SKILL.md", SearchOption.AllDirectories);
+        var skillFiles = EnumerateSkillFiles(resolvedPath);
 
         foreach (var file in skillFiles)
         {
@@ -216,12 +223,6 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
             var normalizedFile = NormalizeFilePath(file);
             if (normalizedFile == null || !scannedSkillFiles.Add(normalizedFile))
             {
-                continue;
-            }
-
-            if (ignoreMatcher.IsIgnored(normalizedFile))
-            {
-                _logger.LogDebug("Skipped gitignored skill file: {FilePath}", normalizedFile);
                 continue;
             }
 
@@ -250,6 +251,30 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         }
 
         return skills;
+    }
+
+    /// <summary>
+    /// Recursively enumerates SKILL.md files, skipping well-known non-skill directories.
+    /// </summary>
+    private static IEnumerable<string> EnumerateSkillFiles(string rootPath)
+    {
+        return EnumerateSkillFilesCore(rootPath);
+
+        static IEnumerable<string> EnumerateSkillFilesCore(string dir)
+        {
+            var skillMd = Path.Combine(dir, "SKILL.md");
+            if (File.Exists(skillMd))
+                yield return skillMd;
+
+            foreach (var subDir in Directory.EnumerateDirectories(dir))
+            {
+                if (SkipDirectoryNames.Contains(Path.GetFileName(subDir)))
+                    continue;
+
+                foreach (var file in EnumerateSkillFilesCore(subDir))
+                    yield return file;
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -634,151 +659,4 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         }
     }
 
-    private sealed class GitIgnoreRuleSet
-    {
-        private readonly string _rootPath;
-        private readonly List<GitIgnoreRule> _rules;
-
-        private GitIgnoreRuleSet(string rootPath, List<GitIgnoreRule> rules)
-        {
-            _rootPath = rootPath;
-            _rules = rules;
-        }
-
-        public static GitIgnoreRuleSet Load(string rootPath)
-        {
-            var normalizedRoot = NormalizeDirectoryPath(rootPath) ?? rootPath;
-            var rules = new List<GitIgnoreRule>();
-            foreach (var gitIgnorePath in Directory.EnumerateFiles(normalizedRoot, ".gitignore", SearchOption.AllDirectories)
-                         .OrderBy(x => x.Length))
-            {
-                var baseDirectory = Path.GetDirectoryName(gitIgnorePath);
-                if (string.IsNullOrWhiteSpace(baseDirectory))
-                {
-                    continue;
-                }
-
-                foreach (var rawLine in File.ReadLines(gitIgnorePath))
-                {
-                    var rule = GitIgnoreRule.TryParse(baseDirectory, rawLine);
-                    if (rule != null)
-                    {
-                        rules.Add(rule);
-                    }
-                }
-            }
-
-            return new GitIgnoreRuleSet(normalizedRoot, rules);
-        }
-
-        public bool IsIgnored(string filePath)
-        {
-            var normalizedFile = NormalizeFilePath(filePath);
-            if (normalizedFile == null || !normalizedFile.StartsWith(_rootPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            var ignored = false;
-            foreach (var rule in _rules)
-            {
-                if (rule.IsMatch(normalizedFile))
-                {
-                    ignored = !rule.IsNegated;
-                }
-            }
-
-            return ignored;
-        }
-    }
-
-    private sealed class GitIgnoreRule
-    {
-        private GitIgnoreRule(string baseDirectory, string pattern, bool isNegated, bool directoryOnly)
-        {
-            BaseDirectory = baseDirectory;
-            IsNegated = isNegated;
-            BasenameOnly = !pattern.Contains('/');
-            Regex = BuildRegex(pattern, directoryOnly, BasenameOnly);
-        }
-
-        public string BaseDirectory { get; }
-
-        public bool IsNegated { get; }
-
-        public bool BasenameOnly { get; }
-
-        public Regex Regex { get; }
-
-        public static GitIgnoreRule? TryParse(string baseDirectory, string rawLine)
-        {
-            if (string.IsNullOrWhiteSpace(rawLine))
-                return null;
-
-            var line = rawLine.Trim();
-            if (line.Length == 0 || line.StartsWith('#'))
-                return null;
-
-            var isNegated = line.StartsWith('!');
-            if (isNegated)
-            {
-                line = line[1..];
-            }
-
-            if (line.Length == 0)
-                return null;
-
-            var directoryOnly = line.EndsWith('/');
-            line = line.TrimStart('/').TrimEnd('/');
-            if (line.Length == 0)
-                return null;
-
-            var normalizedBase = NormalizeDirectoryPath(baseDirectory) ?? baseDirectory;
-            return new GitIgnoreRule(normalizedBase, line.Replace('\\', '/'), isNegated, directoryOnly);
-        }
-
-        public bool IsMatch(string filePath)
-        {
-            if (!filePath.StartsWith(BaseDirectory, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            var relative = Path.GetRelativePath(BaseDirectory, filePath).Replace('\\', '/');
-            if (relative.StartsWith("..", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            if (BasenameOnly)
-            {
-                var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                return segments.Any(segment => Regex.IsMatch(segment));
-            }
-
-            return Regex.IsMatch(relative);
-        }
-
-        private static Regex BuildRegex(string pattern, bool directoryOnly, bool basenameOnly)
-        {
-            var escaped = Regex.Escape(pattern)
-                .Replace(@"\*\*", "__DOUBLE_STAR__")
-                .Replace(@"\*", "[^/]*")
-                .Replace(@"\?", "[^/]");
-
-            escaped = escaped.Replace("__DOUBLE_STAR__", ".*");
-
-            string finalPattern;
-            if (basenameOnly)
-            {
-                finalPattern = "^" + escaped + "$";
-            }
-            else
-            {
-                finalPattern = "^" + escaped + (directoryOnly ? "($|/.*)" : "$");
-            }
-
-            return new Regex(finalPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        }
-    }
 }

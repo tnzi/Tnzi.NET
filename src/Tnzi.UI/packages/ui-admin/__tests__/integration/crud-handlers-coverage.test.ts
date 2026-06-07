@@ -106,42 +106,45 @@ vi.mock('../../src/services/bridges/system-bridge', () => ({
 }))
 
 // --- Static page imports (after all vi.mock calls) ---
-import AgentList from '../../src/pages/ai/agents/AgentList.vue'
-import SkillList from '../../src/pages/ai/skills/SkillList.vue'
-import PersonaList from '../../src/pages/ai/personas/PersonaList.vue'
-import KbManager from '../../src/pages/ai/knowledge/KbManager.vue'
-import McpServerList from '../../src/pages/ai/mcp/McpServerList.vue'
-import ProviderConfig from '../../src/pages/ai/providers/ProviderConfig.vue'
-import QuotaRules from '../../src/pages/ai/quota/QuotaRules.vue'
-import PaymentOrder from '../../src/pages/payment/PaymentOrder.vue'
-import PaymentRefund from '../../src/pages/payment/PaymentRefund.vue'
-import PaymentSubscription from '../../src/pages/payment/PaymentSubscription.vue'
-import ChatSession from '../../src/pages/chat/ChatSession.vue'
-import ChatMessage from '../../src/pages/chat/ChatMessage.vue'
-import NotificationTemplate from '../../src/pages/notification/NotificationTemplate.vue'
-import NotificationMessage from '../../src/pages/notification/NotificationMessage.vue'
-import NotificationSubscription from '../../src/pages/notification/NotificationSubscription.vue'
-import TemplateLayout from '../../src/pages/template/TemplateLayout.vue'
-import TemplateManagement from '../../src/pages/template/TemplateManagement.vue'
-import UserManagement from '../../src/pages/identity/UserManagement.vue'
-import RoleManagement from '../../src/pages/identity/RoleManagement.vue'
-import TenantManagement from '../../src/pages/identity/TenantManagement.vue'
-import LoginLog from '../../src/pages/identity/LoginLog.vue'
+// Some entity names repeat across modules (Messages/Subscriptions/Templates
+// live in more than one module folder); they're aliased here since this file
+// imports many pages into one scope.
+import Agents from '../../src/pages/ai/agents/Agents.vue'
+import Skills from '../../src/pages/ai/skills/Skills.vue'
+import Personas from '../../src/pages/ai/personas/Personas.vue'
+import Knowledge from '../../src/pages/ai/knowledge/Knowledge.vue'
+import McpServers from '../../src/pages/ai/mcp/McpServers.vue'
+import Providers from '../../src/pages/ai/providers/Providers.vue'
+import Quotas from '../../src/pages/ai/quota/Quotas.vue'
+import Orders from '../../src/pages/payment/Orders.vue'
+import Refunds from '../../src/pages/payment/Refunds.vue'
+import PaymentSubscriptions from '../../src/pages/payment/Subscriptions.vue'
+import ChatSessions from '../../src/pages/chat/Sessions.vue'
+import ChatMessages from '../../src/pages/chat/Messages.vue'
+import NotificationTemplates from '../../src/pages/notification/Templates.vue'
+import NotificationMessages from '../../src/pages/notification/Messages.vue'
+import NotificationSubscriptions from '../../src/pages/notification/Subscriptions.vue'
+import Layouts from '../../src/pages/template/Layouts.vue'
+import Templates from '../../src/pages/template/Templates.vue'
+import Users from '../../src/pages/identity/Users.vue'
+import Roles from '../../src/pages/identity/Roles.vue'
+import Tenants from '../../src/pages/identity/Tenants.vue'
+import LoginLogs from '../../src/pages/identity/LoginLogs.vue'
 import GdprRequests from '../../src/pages/identity/GdprRequests.vue'
-import AuditLog from '../../src/pages/audit/AuditLog.vue'
-import AuditOperation from '../../src/pages/audit/AuditOperation.vue'
-import AccessLog from '../../src/pages/system/AccessLog.vue'
-import DictionaryManagement from '../../src/pages/system/DictionaryManagement.vue'
-import ParameterManagement from '../../src/pages/system/ParameterManagement.vue'
-import MenuManagement from '../../src/pages/system/MenuManagement.vue'
-import ScheduledJob from '../../src/pages/system/ScheduledJob.vue'
-import FunctionModule from '../../src/pages/authorization/FunctionModule.vue'
-import EntityRole from '../../src/pages/authorization/EntityRole.vue'
-import RoleFunction from '../../src/pages/authorization/RoleFunction.vue'
-import Permission from '../../src/pages/authorization/Permission.vue'
-import StorageFile from '../../src/pages/storage/StorageFile.vue'
-import StorageChunk from '../../src/pages/storage/StorageChunk.vue'
-import StorageVersion from '../../src/pages/storage/StorageVersion.vue'
+import Logs from '../../src/pages/audit/Logs.vue'
+import Operations from '../../src/pages/audit/Operations.vue'
+import AccessLogs from '../../src/pages/system/AccessLogs.vue'
+import Dictionaries from '../../src/pages/system/Dictionaries.vue'
+import Parameters from '../../src/pages/system/Parameters.vue'
+import Menus from '../../src/pages/system/Menus.vue'
+import ScheduledJobs from '../../src/pages/system/ScheduledJobs.vue'
+import FunctionModules from '../../src/pages/authorization/FunctionModules.vue'
+import EntityRoles from '../../src/pages/authorization/EntityRoles.vue'
+import RoleFunctions from '../../src/pages/authorization/RoleFunctions.vue'
+import Permissions from '../../src/pages/authorization/Permissions.vue'
+import Files from '../../src/pages/storage/Files.vue'
+import Chunks from '../../src/pages/storage/Chunks.vue'
+import Versions from '../../src/pages/storage/Versions.vue'
 
 const stubs = {
   DataTable: { props: ['data', 'rowKey'], template: '<div class="dt" />' },
@@ -237,25 +240,25 @@ async function exerciseCrud(Page: any) {
 
 const PAGES: Array<[string, any]> = [
   // AI (Phase 5)
-  ['AgentList', AgentList], ['SkillList', SkillList], ['PersonaList', PersonaList],
-  ['KbManager', KbManager], ['McpServerList', McpServerList],
-  ['ProviderConfig', ProviderConfig], ['QuotaRules', QuotaRules],
+  ['Agents', Agents], ['Skills', Skills], ['Personas', Personas],
+  ['Knowledge', Knowledge], ['McpServers', McpServers],
+  ['Providers', Providers], ['Quotas', Quotas],
   // Payment / Chat / Notification / Template
-  ['PaymentOrder', PaymentOrder], ['PaymentRefund', PaymentRefund], ['PaymentSubscription', PaymentSubscription],
-  ['ChatSession', ChatSession], ['ChatMessage', ChatMessage],
-  ['NotificationTemplate', NotificationTemplate], ['NotificationMessage', NotificationMessage],
-  ['NotificationSubscription', NotificationSubscription],
-  ['TemplateLayout', TemplateLayout], ['TemplateManagement', TemplateManagement],
+  ['Orders', Orders], ['Refunds', Refunds], ['PaymentSubscriptions', PaymentSubscriptions],
+  ['ChatSessions', ChatSessions], ['ChatMessages', ChatMessages],
+  ['NotificationTemplates', NotificationTemplates], ['NotificationMessages', NotificationMessages],
+  ['NotificationSubscriptions', NotificationSubscriptions],
+  ['Layouts', Layouts], ['Templates', Templates],
   // Identity / Audit / System / Authorization / Storage
-  ['UserManagement', UserManagement], ['RoleManagement', RoleManagement],
-  ['TenantManagement', TenantManagement], ['LoginLog', LoginLog], ['GdprRequests', GdprRequests],
-  ['AuditLog', AuditLog], ['AuditOperation', AuditOperation],
-  ['AccessLog', AccessLog], ['DictionaryManagement', DictionaryManagement],
-  ['ParameterManagement', ParameterManagement], ['MenuManagement', MenuManagement],
-  ['ScheduledJob', ScheduledJob],
-  ['FunctionModule', FunctionModule], ['EntityRole', EntityRole],
-  ['RoleFunction', RoleFunction], ['Permission', Permission],
-  ['StorageFile', StorageFile], ['StorageChunk', StorageChunk], ['StorageVersion', StorageVersion],
+  ['Users', Users], ['Roles', Roles],
+  ['Tenants', Tenants], ['LoginLogs', LoginLogs], ['GdprRequests', GdprRequests],
+  ['Logs', Logs], ['Operations', Operations],
+  ['AccessLogs', AccessLogs], ['Dictionaries', Dictionaries],
+  ['Parameters', Parameters], ['Menus', Menus],
+  ['ScheduledJobs', ScheduledJobs],
+  ['FunctionModules', FunctionModules], ['EntityRoles', EntityRoles],
+  ['RoleFunctions', RoleFunctions], ['Permissions', Permissions],
+  ['Files', Files], ['Chunks', Chunks], ['Versions', Versions],
 ]
 
 describe('CRUD handlers coverage booster', () => {

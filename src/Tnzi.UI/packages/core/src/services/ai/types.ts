@@ -1408,7 +1408,8 @@ export interface McpServerStatusDto {
   transport: string;
   endpoint: string;
   requireAuthentication: boolean;
-  tenantIsolation: boolean;
+  /** Whether rate-limit keys are partitioned per tenant (not execution isolation) */
+  rateLimitPerTenant: boolean;
   rateLimitPerMinute: number;
   exposedAgentCount: number;
   customToolCount: number;

@@ -3,9 +3,9 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using Tnzi.AI.Mcp.Options;
-using Tnzi.AI.Mcp.Services;
-using Tnzi.AI.Mcp.Services.Interfaces;
+using Tnzi.AI.McpClient.Options;
+using Tnzi.AI.McpClient.Services;
+using Tnzi.AI.McpClient.Services.Interfaces;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests;
@@ -222,7 +222,7 @@ public class McpOAuthTokenManagerTests
             };
         });
         var factory = CreateMockHttpFactoryWithHandler(handler);
-        var options = MsOptions.Create(new McpOAuthOptions
+        var options = MsOptions.Create(new McpClientOAuthOptions
         {
             Servers = new Dictionary<string, McpOAuthServerConfig>
             {
@@ -246,9 +246,9 @@ public class McpOAuthTokenManagerTests
     }
 
     // Helper methods
-    private static IOptions<McpOAuthOptions> CreateOptions(string serverName, string grantType = "client_credentials", int refreshSkewSeconds = 60)
+    private static IOptions<McpClientOAuthOptions> CreateOptions(string serverName, string grantType = "client_credentials", int refreshSkewSeconds = 60)
     {
-        return MsOptions.Create(new McpOAuthOptions
+        return MsOptions.Create(new McpClientOAuthOptions
         {
             Servers = new Dictionary<string, McpOAuthServerConfig>
             {
@@ -264,9 +264,9 @@ public class McpOAuthTokenManagerTests
         });
     }
 
-    private static IOptions<McpOAuthOptions> CreateOptionsWithRevocation(string serverName, string revocationEndpoint)
+    private static IOptions<McpClientOAuthOptions> CreateOptionsWithRevocation(string serverName, string revocationEndpoint)
     {
-        return MsOptions.Create(new McpOAuthOptions
+        return MsOptions.Create(new McpClientOAuthOptions
         {
             Servers = new Dictionary<string, McpOAuthServerConfig>
             {

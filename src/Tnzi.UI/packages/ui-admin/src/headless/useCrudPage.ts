@@ -7,6 +7,7 @@ import {
 } from './useColumnSettings'
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
 import { useFormModal, type UseFormModalReturn } from './useFormModal'
+import type { DetailMode } from './useDetail'
 
 /**
  * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
@@ -59,9 +60,9 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   rowKey: (row: T) => TId
   initialPageSize?: number
   fetchData: (query: CrudPageQuery) => Promise<CrudPageResult<T>>
-  createData: (data: Partial<T>) => Promise<T>
-  updateData: (id: TId, data: Partial<T>) => Promise<T>
-  deleteData: (ids: TId[]) => Promise<void>
+  createData?: (data: Partial<T>) => Promise<T>
+  updateData?: (id: TId, data: Partial<T>) => Promise<T>
+  deleteData?: (ids: TId[]) => Promise<void>
   exportData?: (query: CrudPageQuery) => Promise<Blob>
   importData?: (file: File) => Promise<void>
   onRefresh?: () => void
@@ -96,6 +97,8 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    * `retryDelayMs * 2 ** attempt` — defaults give 300 → 600 → 1200ms.
    */
   retryDelayMs?: number
+  /** Presentation mode for the add/edit/view detail. Default 'modal'. */
+  detailMode?: DetailMode
 }
 
 export interface UseCrudPageReturn<T, TId = string | number> {
@@ -114,6 +117,13 @@ export interface UseCrudPageReturn<T, TId = string | number> {
    * forcing callers to pass `rowKey` twice.
    */
   rowKey: (row: T) => TId
+  // Static — derived from options at construction time; do not change after useCrudPage() returns.
+  /** Whether a `createData` callback was supplied. Drives create-affordance visibility. */
+  canCreate: boolean
+  /** Whether an `updateData` callback was supplied. */
+  canUpdate: boolean
+  /** Whether a `deleteData` callback was supplied. */
+  canDelete: boolean
   refresh: () => Promise<void>
   setPage: (pageIndex: number) => void
   setPageSize: (pageSize: number) => void
@@ -134,6 +144,7 @@ export interface UseCrudPageReturn<T, TId = string | number> {
    * triggering another HTTP call.
    */
   dismissError: () => void
+  detailMode: Ref<DetailMode>
 }
 
 /**
@@ -183,6 +194,8 @@ export function useCrudPage<T, TId = string | number>(
   const error = ref<Error | null>(null)
 
   const hasData = computed(() => items.value.length > 0)
+
+  const detailMode = ref<DetailMode>(options.detailMode ?? 'modal')
 
   const columnSettings = useColumnSettings({
     pageId: options.pageId,
@@ -303,17 +316,25 @@ export function useCrudPage<T, TId = string | number>(
       return null
     }
     if (mode === 'create') {
+      if (!options.createData) {
+        formModal.close()
+        return null
+      }
       const created = await runWithErrorHandling('create', () =>
-        options.createData(data as Partial<T>),
+        options.createData!(data as Partial<T>),
       )
       formModal.close()
       await refresh()
       return created
     }
     // edit
+    if (!options.updateData) {
+      formModal.close()
+      return null
+    }
     const id = options.rowKey(data as T)
     const updated = await runWithErrorHandling('update', () =>
-      options.updateData(id, data as Partial<T>),
+      options.updateData!(id, data as Partial<T>),
     )
     formModal.close()
     await refresh()
@@ -321,9 +342,10 @@ export function useCrudPage<T, TId = string | number>(
   }
 
   async function handleDelete(ids?: TId[]): Promise<void> {
+    if (!options.deleteData) return
     const target = ids ?? batchActions.selectedIds.value
     if (target.length === 0) return
-    await runWithErrorHandling('delete', () => options.deleteData(target))
+    await runWithErrorHandling('delete', () => options.deleteData!(target))
     batchActions.clear()
     await refresh()
   }
@@ -350,6 +372,9 @@ export function useCrudPage<T, TId = string | number>(
     batchActions,
     formModal,
     rowKey: options.rowKey,
+    canCreate: !!options.createData,
+    canUpdate: !!options.updateData,
+    canDelete: !!options.deleteData,
     refresh,
     setPage,
     setPageSize,
@@ -365,5 +390,6 @@ export function useCrudPage<T, TId = string | number>(
     exportAll,
     importFile,
     dismissError,
+    detailMode,
   }
 }

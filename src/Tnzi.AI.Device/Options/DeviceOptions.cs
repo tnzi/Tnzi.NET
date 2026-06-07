@@ -26,11 +26,6 @@ public class DeviceOptions
     public int MaxPendingPairings { get; set; } = 5;
 
     /// <summary>
-    /// Whether elevated-permission operations require explicit approval
-    /// </summary>
-    public bool RequireApprovalForElevated { get; set; } = true;
-
-    /// <summary>
     /// List of allowed platforms (null = all platforms allowed)
     /// </summary>
     public List<string>? AllowedPlatforms { get; set; }
@@ -41,4 +36,10 @@ public class DeviceOptions
     /// operators must explicitly opt in by setting this to <c>true</c>.
     /// </summary>
     public bool LocalNodeEnabled { get; set; } = false;
+
+    /// <summary>
+    /// WebSocket path where remote devices connect for pairing and command execution.
+    /// Defaults to <c>/ws/device</c>.
+    /// </summary>
+    public string WebSocketPath { get; set; } = "/ws/device";
 }

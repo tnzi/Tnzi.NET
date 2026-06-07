@@ -1,5 +1,5 @@
 <template>
-  <ChartImpl v-if="canRenderEcharts" :option="option" :height="height" :renderer="renderer" />
+  <ChartInner v-if="canRenderEcharts" :option="option" :height="height" :renderer="renderer" />
   <div v-else class="t-chart-panel t-chart-panel--noop" :style="containerStyle" aria-hidden="true" />
 </template>
 
@@ -50,7 +50,7 @@ const canRenderEcharts = (() => {
 
 // Lazy-load the real echarts component only when echarts is usable. Keeps
 // jsdom-mounted tests free of ResizeObserver + canvas crashes.
-const ChartImpl = defineAsyncComponent(() => import('./TChartPanelImpl.vue'))
+const ChartInner = defineAsyncComponent(() => import('./TChartPanelInner.vue'))
 </script>
 
 <style scoped>

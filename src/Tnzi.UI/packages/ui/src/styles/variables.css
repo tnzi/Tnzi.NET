@@ -10,6 +10,13 @@
  */
 
 :root {
+  /* ------ Typography ------
+   * Single source of truth for the UI font stacks. Components and the
+   * reset both consume these so the font can be re-themed in one place.
+   * No web font is bundled — these are OS-native stacks. */
+  --tnzi-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --tnzi-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
   /* Primary color ramp (default brand teal #0d9488 — Fabrikam Manus green) */
   --tnzi-primary: #0d9488;
   --tnzi-primary-rgb: 13 148 136;

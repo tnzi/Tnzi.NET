@@ -8,30 +8,24 @@
 
     Read-mostly. No edits, no per-row modal — this is an ops console, not a CRUD page.
   -->
-  <div class="t-diagnostics-page t-stack-page">
-    <div class="t-diagnostics-page__header">
-      <div class="t-diagnostics-page__title">
-        <TSvgIcon icon="mdi:stethoscope" :size="20" />
-        <h2>{{ t('title') }}</h2>
-      </div>
-      <div class="t-diagnostics-page__kpis">
-        <NStatistic :label="t('kpi.modules')" :value="modules.length">
-          <template #suffix>
-            <TSvgIcon icon="mdi:view-grid-outline" :size="14" />
-          </template>
-        </NStatistic>
-        <NStatistic :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? 0">
-          <template #suffix>
-            <TSvgIcon icon="mdi:router-network" :size="14" />
-          </template>
-        </NStatistic>
-        <NStatistic :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? 0">
-          <template #suffix>
-            <TSvgIcon icon="mdi:alert-circle-outline" :size="14" />
-          </template>
-        </NStatistic>
-      </div>
-    </div>
+  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+    <template #actions>
+      <NStatistic :label="t('kpi.modules')" :value="modules.length">
+        <template #suffix>
+          <TSvgIcon icon="mdi:view-grid-outline" :size="14" />
+        </template>
+      </NStatistic>
+      <NStatistic :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? 0">
+        <template #suffix>
+          <TSvgIcon icon="mdi:router-network" :size="14" />
+        </template>
+      </NStatistic>
+      <NStatistic :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? 0">
+        <template #suffix>
+          <TSvgIcon icon="mdi:alert-circle-outline" :size="14" />
+        </template>
+      </NStatistic>
+    </template>
 
     <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
       <!-- ─── Modules ─── -->
@@ -41,8 +35,8 @@
             <NInput
               v-model:value="moduleFilter"
               :placeholder="t('filter.module')"
-              clearable
-              style="width: 280px"
+              clearable size="small"
+              class="w-280px"
             >
               <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
             </NInput>
@@ -51,7 +45,7 @@
               {{ t('actions.refresh') }}
             </NButton>
           </div>
-          <NDataTable
+          <TResponsiveTable
             :columns="moduleColumns"
             :data="filteredModules"
             :loading="modulesLoading"
@@ -71,7 +65,7 @@
               v-model:value="controllerFilter"
               :placeholder="t('filter.controller')"
               clearable
-              style="width: 280px"
+              class="w-280px"
             >
               <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
             </NInput>
@@ -80,15 +74,15 @@
               :options="moduleSelectOptions"
               :placeholder="t('filter.byModule')"
               clearable
-              size="medium"
-              style="width: 200px"
+              size="small"
+              class="w-200px"
             />
             <NButton size="small" @click="refreshControllers">
               <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
               {{ t('actions.refresh') }}
             </NButton>
           </div>
-          <NDataTable
+          <TResponsiveTable
             :columns="controllerColumns"
             :data="filteredControllers"
             :loading="controllersLoading"
@@ -107,8 +101,8 @@
             <NSelect
               v-model:value="windowMinutes"
               :options="windowOptions"
-              size="medium"
-              style="width: 160px"
+              size="small"
+              class="w-160px"
               @update:value="refreshExceptions"
             />
             <NButton size="small" @click="refreshExceptions">
@@ -174,7 +168,7 @@
             </NCard>
           </div>
 
-          <NDataTable
+          <TResponsiveTable
             :columns="exceptionColumns"
             :data="exceptions"
             :loading="exceptionsLoading"
@@ -186,15 +180,15 @@
         </div>
       </NTabPane>
     </NTabs>
-  </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import {
   NButton,
   NCard,
-  NDataTable,
   NEmpty,
   NInput,
   NList,
@@ -221,6 +215,7 @@ import {
 } from '../../services/bridges/diagnostics-bridge'
 import { interpolate, translatePageKey } from '../_shared/translate'
 import { methodTone } from '../_shared/http-method'
+import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createDiagnosticsBridge({ client: useAdminClient() })
 
@@ -240,13 +235,13 @@ const moduleColumns: DataTableColumns<ModuleDiagnosticsDto> = [
     key: 'assembly',
     width: 220,
     render: (row) =>
-      h('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
+      h('div', { class: 'flex items-center gap-8px' }, [
         h(TSvgIcon, {
           icon: row.isEnabled ? 'mdi:check-circle' : 'mdi:circle-off-outline',
           size: 14,
-          style: row.isEnabled ? 'color: var(--tnzi-success)' : 'color: var(--tnzi-base-text-muted)',
+          color: row.isEnabled ? 'var(--tnzi-success)' : 'var(--tnzi-base-text-muted)',
         }),
-        h('span', { style: 'font-family: var(--tnzi-font-mono)' }, row.assembly),
+        h('span', { class: 'font-[family-name:var(--tnzi-font-mono)]' }, row.assembly),
       ]),
   },
   { title: () => t('cols.type'), key: 'type', width: 200, ellipsis: true },
@@ -337,7 +332,7 @@ const controllerColumns: DataTableColumns<ControllerInfoDto> = [
     key: 'route',
     width: 280,
     render: (row) =>
-      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.route || '—'),
+      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.route || '—'),
   },
   { title: () => t('cols.type'), key: 'type', ellipsis: { tooltip: true } },
   { title: () => t('cols.module'), key: 'module', width: 180 },
@@ -348,7 +343,7 @@ const controllerColumns: DataTableColumns<ControllerInfoDto> = [
     render: (row) =>
       h(
         'div',
-        { style: 'display: flex; flex-wrap: wrap; gap: 4px;' },
+        { class: 'flex flex-wrap gap-4px' },
         (row.methods ?? []).map((m) =>
           h(NTag, { size: 'tiny', bordered: false, type: methodTone(m) }, () => m),
         ),
@@ -430,7 +425,7 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
     key: 'exceptionType',
     width: 220,
     render: (row) =>
-      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.exceptionType),
+      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.exceptionType),
   },
   {
     title: () => t('cols.statusCode'),
@@ -447,14 +442,14 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
     key: 'errorCode',
     width: 160,
     render: (row) =>
-      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.errorCode || '—'),
+      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.errorCode || '—'),
   },
   {
     title: () => t('cols.requestId'),
     key: 'requestId',
     width: 200,
     render: (row) =>
-      h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.requestId || '—'),
+      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.requestId || '—'),
   },
   { title: () => t('cols.message'), key: 'message', ellipsis: { tooltip: true } },
 ]
@@ -493,35 +488,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Layout shell comes from shared `.t-stack-page` + `.t-table-tabs`
-   utilities in styles/polish.css. Only page-specific decorations live
-   here. */
-.t-diagnostics-page__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  padding: 16px 20px;
-  background: var(--tnzi-container-bg);
-  border: 1px solid var(--tnzi-border);
-  border-radius: 8px;
-}
-.t-diagnostics-page__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.t-diagnostics-page__title h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-.t-diagnostics-page__kpis {
-  display: flex;
-  gap: 32px;
-  flex-wrap: wrap;
-}
 .t-diagnostics-page__bd {
   display: grid;
   grid-template-columns: 1fr 1fr;

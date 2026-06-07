@@ -124,8 +124,9 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const tabHeight = ref(44)
   const footerHeight = ref(42)
 
-  // Tab style (chrome / button / slider)
-  const tabStyle = ref<TabStyle>('chrome')
+  // Tab style (chrome / button / slider) — defaults to `button` (the
+  // rounded-chip style; least visual noise, no SVG-arc geometry).
+  const tabStyle = ref<TabStyle>('button')
 
   // Page transition
   const pageTransition = ref<PageTransition>('fade-slide')
@@ -141,7 +142,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // implementation produced black-bg + grey-icon visual garbage (children
   // had higher CSS specificity than the wrapper hack), and there was no
   // soybean reference to align against.
-  const invertSider = ref(false)
+  // Defaults to `true`: the shipped theme uses a dark sider on a light
+  // body (the common "inverted sider" admin look). Only takes visual effect
+  // in light mode + vertical-family layouts (see useAdminShellLayout gating).
+  const invertSider = ref(true)
 
   // Fixed positioning
   const fixedHeader = ref(true)
@@ -180,6 +184,14 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       `themeStore.tab.closeTabByMiddleClick`). Defaults to false to
       match soybean. */
   const closeTabByMiddleClick = ref(false)
+  /** When the active tab changes, the tab bar auto-scrolls the active tab
+      into view (so it's never hidden off-screen when there are many tabs).
+      This toggle only controls the SCROLL ANIMATION:
+      - `false` (default): the tab snaps into view instantly (`behavior:'auto'`)
+        — still visible, no motion. Off by default because the long-distance
+        smooth glide can feel disorienting / uncomfortable for some users.
+      - `true`: smooth animated scroll (`behavior:'smooth'`). */
+  const tabScrollAnimation = ref(false)
   /** Phase H1 A2: how the layout scrolls.
       - `'content'` (default, matches soybean): only the main content
         area scrolls; header / tab / footer stay pinned to the chrome.
@@ -330,6 +342,9 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   function setCloseTabByMiddleClick(v: boolean): void {
     closeTabByMiddleClick.value = v
   }
+  function setTabScrollAnimation(v: boolean): void {
+    tabScrollAnimation.value = v
+  }
   function setScrollMode(v: 'content' | 'wrapper'): void {
     if (v === 'content' || v === 'wrapper') scrollMode.value = v
   }
@@ -389,10 +404,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     headerHeight.value = 50
     tabHeight.value = 44
     footerHeight.value = 42
-    tabStyle.value = 'chrome'
+    tabStyle.value = 'button'
     pageTransition.value = 'fade-slide'
     pageAnimate.value = true
-    invertSider.value = false
+    invertSider.value = true
     fixedHeader.value = true
     fixedTab.value = true
     fixedFooter.value = false
@@ -409,6 +424,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     grayscale.value = false
     colourWeakness.value = false
     closeTabByMiddleClick.value = false
+    tabScrollAnimation.value = false
     scrollMode.value = 'content'
     if (typeof document !== 'undefined') {
       document.documentElement.style.filter = ''
@@ -483,6 +499,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     grayscale,
     colourWeakness,
     closeTabByMiddleClick,
+    tabScrollAnimation,
     scrollMode,
     // setters
     setLayoutMode,
@@ -522,6 +539,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setGrayscale,
     setColourWeakness,
     setCloseTabByMiddleClick,
+    setTabScrollAnimation,
     setScrollMode,
     reset,
   }
@@ -564,6 +582,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'grayscale',
       'colourWeakness',
       'closeTabByMiddleClick',
+      'tabScrollAnimation',
       'scrollMode',
     ],
   },

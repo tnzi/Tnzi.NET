@@ -7,12 +7,10 @@ namespace Tnzi.AI.Device.Tools;
 public class DeviceTools : IAIToolProvider
 {
     private readonly IDeviceRegistry _registry;
-    private readonly ILogger<DeviceTools> _logger;
 
-    public DeviceTools(IDeviceRegistry registry, ILogger<DeviceTools> logger)
+    public DeviceTools(IDeviceRegistry registry)
     {
         _registry = Check.NotNull(registry);
-        _logger = Check.NotNull(logger);
     }
 
     /// <summary>
@@ -118,24 +116,21 @@ public class DeviceTools : IAIToolProvider
         return await node.InvokeAsync(command);
     }
 
-    private static readonly string[] DangerousPatterns = [";", "&&", "||", "|", ">", "<", "`", "$(", "${"];
-    private static readonly string[] DangerousCommands = ["rm -rf /", "rm -rf /*", "del /s /q", "format ", "mkfs", "dd if="];
-
     /// <summary>
-    /// Run a system command on a device node (elevated permission required — shell metacharacters are rejected)
+    /// Run a system command on a target device node. The command is delivered to the chosen
+    /// node, which executes it under its own security policy. The local server node does NOT
+    /// execute host shell commands (RCE risk) — for isolated execution on the server, load the
+    /// Sandbox module and use its bash tool.
     /// </summary>
-    [AIFunction("device_run", "Run a system command on a device node. WARNING: This is an elevated operation requiring approval. Shell metacharacters (;, &&, ||, |, >, <, `, $) are rejected for safety.",
+    [AIFunction("device_run", "Run a system command on a target device node. The command is delivered to the chosen device, which executes it under its own security policy. The local server node does NOT run host shell commands — for isolated execution on the server, use the Sandbox module's bash tool.",
         SearchHint = "execute run command device")]
     public async Task<DeviceCommandResult> RunCommandAsync(
         [AIParameter("command", "System command to execute")] string command,
         [AIParameter("node_id", "Target device node ID (auto-selects if omitted)", false)] string? nodeId = null)
     {
-        // 校验命令安全性
-        var validationError = ValidateCommand(command);
-        if (validationError != null)
+        if (string.IsNullOrWhiteSpace(command))
         {
-            _logger.LogWarning("Command rejected: {Reason} — command={Command}", validationError, command);
-            return DeviceCommandResult.Fail(validationError);
+            return DeviceCommandResult.Fail("Command is required");
         }
 
         var node = ResolveNode(nodeId, "system");
@@ -147,31 +142,6 @@ public class DeviceTools : IAIToolProvider
         var parameters = JsonSerializer.SerializeToElement(new { command });
         var cmd = new DeviceCommand("system", "run", parameters);
         return await node.InvokeAsync(cmd);
-    }
-
-    /// <summary>
-    /// Validate command for dangerous patterns and shell metacharacters
-    /// </summary>
-    private static string? ValidateCommand(string command)
-    {
-        foreach (var pattern in DangerousPatterns)
-        {
-            if (command.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-            {
-                return $"Command contains disallowed shell metacharacter: {pattern}";
-            }
-        }
-
-        var trimmed = command.TrimStart();
-        foreach (var dangerous in DangerousCommands)
-        {
-            if (trimmed.StartsWith(dangerous, StringComparison.OrdinalIgnoreCase))
-            {
-                return $"Command matches dangerous pattern: {dangerous}";
-            }
-        }
-
-        return null; // valid
     }
 
     /// <summary>

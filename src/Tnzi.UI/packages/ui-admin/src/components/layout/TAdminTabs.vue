@@ -264,8 +264,21 @@ function onMouseDown(tab: AdminTab, event: MouseEvent): void {
   }
 }
 
-// Phase G — auto-scroll the active tab into view (mirrors soybean's
-// `scrollToActiveTab`). Triggers on route change and on initial mount.
+// Reveal the active tab in the bar — but ONLY when it's actually clipped or
+// off-screen, exactly like Chrome's tab strip.
+//
+// A fully-visible tab is left precisely where it is, so clicking a tab never
+// yanks it out from under the pointer. (The old implementation used
+// `scrollIntoView({ inline: 'center' })`, which re-centred the tab on EVERY
+// activation — every click jumped the whole strip, which felt jarring.)
+//
+// Only the tab bar's own horizontal scroll (`listRef`, the `overflow-x:auto`
+// container) is touched — never the page — and the distance is the minimum
+// needed to bring the clipped edge into view, plus a small margin so the
+// revealed tab isn't flush against the edge. This single handler covers both
+// cases the user described: a direct click on an already-visible tab does
+// nothing, while navigating to a tab that was appended off the right edge
+// (new tab) scrolls just enough to reveal it.
 const listRef = ref<HTMLElement | null>(null)
 const tabRefs = new Map<string, HTMLElement>()
 function onTabRef(id: string, el: Element | null | { $el?: Element }): void {
@@ -275,15 +288,33 @@ function onTabRef(id: string, el: Element | null | { $el?: Element }): void {
 }
 const rootRef = ref<HTMLElement | null>(null)
 
+function scrollActiveTabIntoView(id: string): void {
+  const list = listRef.value
+  const el = tabRefs.get(id)
+  if (!list || !el || typeof list.scrollBy !== 'function') return
+  const listRect = list.getBoundingClientRect()
+  const elRect = el.getBoundingClientRect()
+  // Breathing room so the revealed tab isn't jammed against the edge.
+  const margin = 16
+  // Smooth glide only when the user opts in (themeStore.tabScrollAnimation,
+  // default off); otherwise snap instantly.
+  const behavior: ScrollBehavior = themeStore.tabScrollAnimation ? 'smooth' : 'auto'
+  if (elRect.left < listRect.left) {
+    // Clipped on the left — scroll left to reveal the tab's leading edge.
+    list.scrollBy({ left: elRect.left - listRect.left - margin, behavior })
+  } else if (elRect.right > listRect.right) {
+    // Clipped on the right — scroll right to reveal the tab's trailing edge.
+    list.scrollBy({ left: elRect.right - listRect.right + margin, behavior })
+  }
+  // else: fully visible — leave it exactly where it is (no movement).
+}
+
 watch(
   () => tabStore.activeTabId,
   async (id) => {
     if (!id) return
     await nextTick()
-    const el = tabRefs.get(id)
-    if (el && typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-    }
+    scrollActiveTabIntoView(id)
   },
   { immediate: true },
 )

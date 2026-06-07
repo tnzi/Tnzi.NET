@@ -94,14 +94,21 @@ describe('useAdminThemeStore', () => {
     expect(store.watermark.text).toBe('Tnzi Admin')
   })
 
-  it('tabStyle defaults to chrome and validates input', () => {
+  it('tabStyle defaults to button and validates input', () => {
     const store = useAdminThemeStore()
-    expect(store.tabStyle).toBe('chrome')
-    store.setTabStyle('button')
     expect(store.tabStyle).toBe('button')
+    store.setTabStyle('chrome')
+    expect(store.tabStyle).toBe('chrome')
     // @ts-expect-error — invalid style ignored
     store.setTabStyle('invalid')
-    expect(store.tabStyle).toBe('button')
+    expect(store.tabStyle).toBe('chrome')
+  })
+
+  it('tabScrollAnimation defaults to off and toggles', () => {
+    const store = useAdminThemeStore()
+    expect(store.tabScrollAnimation).toBe(false)
+    store.setTabScrollAnimation(true)
+    expect(store.tabScrollAnimation).toBe(true)
   })
 
   it('fixed positioning flags have sensible defaults', () => {
@@ -118,6 +125,15 @@ describe('useAdminThemeStore', () => {
     expect(store.pageAnimate).toBe(true)
     store.setPageAnimate(false)
     expect(store.pageAnimate).toBe(false)
+  })
+
+  it('invertSider defaults to true (shipped dark-sider theme) and toggles', () => {
+    const store = useAdminThemeStore()
+    expect(store.invertSider).toBe(true)
+    store.toggleInvertSider()
+    expect(store.invertSider).toBe(false)
+    store.toggleInvertSider()
+    expect(store.invertSider).toBe(true)
   })
 
   it('4-tier sider width system defaults match ui-admin spec', () => {
@@ -145,11 +161,13 @@ describe('useAdminThemeStore', () => {
     store.setPageAnimate(false)
     store.setWatermark({ enabled: true, text: 'X' })
     store.setFixedFooter(true)
+    store.toggleInvertSider() // true → false
     store.reset()
     expect(store.layoutMode).toBe('vertical')
-    expect(store.tabStyle).toBe('chrome')
+    expect(store.tabStyle).toBe('button')
     expect(store.pageAnimate).toBe(true)
     expect(store.watermark.enabled).toBe(false)
     expect(store.fixedFooter).toBe(false)
+    expect(store.invertSider).toBe(true)
   })
 })

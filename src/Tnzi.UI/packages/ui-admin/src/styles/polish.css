@@ -106,7 +106,7 @@ body *::-webkit-scrollbar-thumb:active {
  * their own block flow.
  *
  * The flex column + `flex:1` on `.n-card-content` lets pages with
- * internal grid/flex layouts (OrganizationManagement) stretch their
+ * internal grid/flex layouts (Organizations) stretch their
  * inner regions to the card height without each page repeating the
  * Naive-UI specific selector. Pages that just render a NForm /
  * NDataTable inside the card still benefit — the card background
@@ -149,7 +149,7 @@ body *::-webkit-scrollbar-thumb:active {
 .t-stack-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -180,6 +180,36 @@ body *::-webkit-scrollbar-thumb:active {
   min-height: 0;
 }
 
+/* ── Constrained content column (detail / form max-width) ──
+ * Wrap a detail page's form or long-form content in this so inputs stop
+ * stretching edge-to-edge on ultrawide displays. Data tables, which DO
+ * want the full width, simply stay unwrapped — that's the "fill" escape
+ * hatch. Mirrors BotDetail's `.body { max-width: 920px }` pattern.
+ *
+ * The cap is a CSS var, so a page or theme can widen / narrow / disable it
+ * without forking the class. Set it on any ancestor (or via TDetailLayout's
+ * `content-max-width` prop, which writes it onto the layout root):
+ *   --tnzi-detail-content-max: 1100px;   (widen)
+ *   --tnzi-detail-content-max: none;     (full-bleed — let the form fill too)
+ *
+ * Stays left-aligned and keeps the scrollbar at the panel edge (the wrapper
+ * is capped, the scroll container around it is not). To centre instead, add
+ * `margin-inline: auto` at the call site.
+ *
+ * Usage:
+ *   <div class="t-section-body">           ← scroll container, full width
+ *     <div class="t-detail-content">…form…</div>   ← capped column
+ *   </div>
+ *   <NDataTable :flex-height="true" />      ← sibling table: leave unwrapped
+ */
+.t-detail-content {
+  width: 100%;
+  max-width: var(--tnzi-detail-content-max, 920px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* ── Tabbed table page ──
  * Apply to NTabs when the tab pane bodies contain primary data tables
  * (Diagnostics, the post-2026-05-20 Performance redesign). The tabs
@@ -207,7 +237,7 @@ body *::-webkit-scrollbar-thumb:active {
   background: var(--tnzi-container-bg);
   border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  padding: 0 16px 16px;
+  padding: 0 12px 12px;
 }
 .t-table-tabs > .n-tabs-nav {
   flex-shrink: 0;

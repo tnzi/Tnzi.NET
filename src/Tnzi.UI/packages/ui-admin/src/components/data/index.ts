@@ -1,4 +1,7 @@
 export { default as TLogViewer } from './TLogViewer.vue'
 export { default as TChunkFileUpload } from './TChunkFileUpload.vue'
+export { default as TDataCardList } from './TDataCardList.vue'
+export { default as TResponsiveTable } from './TResponsiveTable.vue'
 export type { LogEntry } from './TLogViewer.vue'
 export type { ChunkUploader } from './TChunkFileUpload.vue'
+export type { CardColumn } from './TDataCardList.vue'

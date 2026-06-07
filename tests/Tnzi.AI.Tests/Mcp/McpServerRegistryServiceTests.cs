@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
-using Tnzi.AI.Mcp.Services;
-using Tnzi.AI.Mcp.Services.Interfaces;
+using Tnzi.AI.McpClient.Services;
+using Tnzi.AI.McpClient.Services.Interfaces;
 
 namespace Tnzi.AI.Tests.Mcp;
 

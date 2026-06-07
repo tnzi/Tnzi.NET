@@ -34,7 +34,7 @@
  *                        reindex wired to POST /admin/knowledge-bases/{id}/reindex (Phase 5 prereq)
  *  10. mcpServers      → ENTITY-DRIVEN CRUD (Phase 5 backend prereq):
  *                        useAdminMcpApi.{getList,getById,create,update,delete,test} wired against
- *                        POST /admin/mcp/entities/query and entities/* sub-routes. Backend stores
+ *                        POST /admin/mcp/client/servers/query and servers/* sub-routes. Backend stores
  *                        external MCP server registrations in the AI_McpServerRegistration table
  *                        with auth tokens encrypted via IDataProtectionProvider. Legacy hosting
  *                        endpoints (status, tools, agent exposure) remain on the same factory but
@@ -573,7 +573,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   // ---- mcpServers ---------------------------------------------------------
   // Phase 5 backend prereq: entity-driven CRUD for external MCP server client
   // registrations. fetch/create/update/delete/test all wire to real backend
-  // endpoints under /admin/mcp/entities/*.
+  // endpoints under /admin/mcp/client/servers/*.
   const mcpServers = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<McpServerRow>> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
@@ -703,7 +703,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
 export { WorkflowExecutionMode } from '@tnzi/core/services/ai'
 
 /**
- * Workspace-agent helper — used by the read-only `WorkspaceAgentList`
+ * Workspace-agent helper — used by the read-only `WorkspaceAgents`
  * page. We expose a minimal `list()` so the page no longer needs to
  * import `useAdminWorkspaceAgentApi` directly. Lives outside the main
  * bridge contract because workspace agents are discovered from YAML

@@ -43,6 +43,19 @@ public class DefaultDeviceAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 发起设备配对请求，返回含一次性配对码（Code）的请求。
+    /// admin 将 Code 带外提供给设备；设备用它连接 /ws/device（WebSocketDeviceNode）完成注册。
+    /// </summary>
+    [HttpPost("pairing")]
+    public virtual async Task<ApiResult<PairingRequest>> CreatePairing([FromBody] CreatePairingRequestDto request, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(request);
+        var pairing = await _pairingService.CreatePairingRequestAsync(
+            request.NodeId, request.DeviceName, request.Platform, cancellationToken);
+        return ApiResult<PairingRequest>.Ok(pairing);
+    }
+
+    /// <summary>
     /// 获取待审批的配对请求 — Code 已从响应中移除
     /// </summary>
     [HttpGet("pairing")]

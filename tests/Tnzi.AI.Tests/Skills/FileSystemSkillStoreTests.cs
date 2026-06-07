@@ -219,19 +219,31 @@ public class FileSystemSkillStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAllAsync_SkipsGitIgnoredSkillFiles()
+    public async Task GetAllAsync_SkipsWellKnownNonSkillDirectories()
     {
-        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "ignored-skill/");
-        CreateSkillFile("included-skill", """
+        // .git and node_modules should be skipped even if they contain a SKILL.md
+        var gitDir = Path.Combine(_tempDir, ".git", "skill-in-git");
+        Directory.CreateDirectory(gitDir);
+        File.WriteAllText(Path.Combine(gitDir, "SKILL.md"), """
             ---
-            name: Included Skill
-            description: Should load.
+            name: Git Internal Skill
+            description: Should be skipped.
             ---
             """);
-        CreateSkillFile("ignored-skill", """
+
+        var nodeDir = Path.Combine(_tempDir, "node_modules", "some-package");
+        Directory.CreateDirectory(nodeDir);
+        File.WriteAllText(Path.Combine(nodeDir, "SKILL.md"), """
             ---
-            name: Ignored Skill
+            name: Node Module Skill
             description: Should be skipped.
+            ---
+            """);
+
+        CreateSkillFile("real-skill", """
+            ---
+            name: Real Skill
+            description: Should load.
             ---
             """);
 
@@ -239,7 +251,7 @@ public class FileSystemSkillStoreTests : IDisposable
         var skills = await store.GetAllAsync();
 
         skills.Count.ShouldBe(1);
-        skills[0].Name.ShouldBe("Included Skill");
+        skills[0].Name.ShouldBe("Real Skill");
     }
 
     [Fact]

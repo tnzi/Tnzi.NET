@@ -7,6 +7,7 @@ global using Tnzi.AI.Channels;
 global using Tnzi.AI.Cli;
 global using Tnzi.AI.Coder;
 global using Tnzi.AI.Mcp;
+global using Tnzi.AI.McpClient;
 global using Tnzi.AI.Rag;
 global using Tnzi.AI.Skills;
 global using Tnzi.AI.Workflow;

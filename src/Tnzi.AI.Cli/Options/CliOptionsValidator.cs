@@ -38,13 +38,13 @@ public class CliOptionsValidator : OptionsValidatorBase<CliOptions>
 
         foreach (var (name, provider) in options.Providers)
         {
-            if (provider.EnvironmentWhitelist is null)
+            if (provider.InheritAllHostEnvironment)
             {
-                AddWarning(warnings, $"Providers:{name}:EnvironmentWhitelist",
-                    $"CLI provider '{name}' has no EnvironmentWhitelist — the child process will inherit " +
-                    "ALL host environment variables, including secrets (database connection strings, " +
-                    "cloud credentials, internal tokens). Configure a whitelist (e.g. [\"PATH\", \"HOME\", " +
-                    "\"USERPROFILE\", \"LANG\", \"TMP\", \"TEMP\", \"SYSTEMROOT\"]) for production deployments.");
+                AddWarning(warnings, $"Providers:{name}:InheritAllHostEnvironment",
+                    $"CLI provider '{name}' has InheritAllHostEnvironment=true — the child process will inherit " +
+                    "ALL host environment variables, including secrets (database connection strings, cloud " +
+                    "credentials, internal tokens). Prefer the secure default (safe OS baseline + " +
+                    "EnvironmentWhitelist) and only inherit the keys the CLI actually needs.");
             }
         }
     }

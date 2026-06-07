@@ -6,7 +6,8 @@ using TnziMcpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 namespace Tnzi.AI.Mcp;
 
 /// <summary>
-/// MCP Server 模块 — 将 Tnzi.AI Agent 暴露为 MCP Server，支持 HTTP/SSE 和 stdio 传输
+/// MCP Server 模块 — 将 Tnzi.AI Agent 暴露为 MCP Server，支持 HTTP/SSE 和 stdio 传输。
+/// Client 侧管理（外部 MCP Server 注册表、OAuth Token）由 AIMcpClientModule 负责。
 /// </summary>
 [DependsOn(typeof(AIModule))]
 public class AIMcpModule : TnziApplicationModule
@@ -27,9 +28,6 @@ public class AIMcpModule : TnziApplicationModule
             .Bind(context.Configuration.GetSection("AI:McpServer"))
             .ValidateWith<TnziMcpServerOptions, McpServerOptionsValidator>();
 
-        context.Services.AddOptions<McpOAuthOptions>()
-            .Bind(context.Configuration.GetSection("AI:McpServer:OAuth"));
-
         return Task.CompletedTask;
     }
 
@@ -45,15 +43,6 @@ public class AIMcpModule : TnziApplicationModule
 
         // MCP Tool Analytics
         services.AddScoped<IMcpToolAnalyticsService, McpToolAnalyticsService>();
-
-        // MCP Server Registration registry (Phase 5 backend prereq) — entity-driven
-        // CRUD for external MCP server client registrations. AuthToken encrypted via
-        // IDataProtectionProvider (registered by AIModule.AddDataProtection() — we
-        // depend on AIModule so that registration is already in the container).
-        services.AddScoped<IMcpServerRegistryService, McpServerRegistryService>();
-
-        // MCP OAuth Token Manager（Singleton — per-server 锁和缓存）
-        services.AddSingleton<IMcpOAuthTokenManager, McpOAuthTokenManager>();
 
         // MCP Server Host（可选，通过 AI:McpServer:Enabled 激活）— Singleton 以保持速率限制状态
         services.AddSingleton<McpServerSecurityMiddleware>();

@@ -1,12 +1,13 @@
 <template>
-  <div class="t-agent-detail t-page-scroll">
-    <header class="t-agent-detail__header">
-      <router-link to="/admin/ai/agents" class="t-agent-detail__back">
-        {{ t('detail.backToList') }}
-      </router-link>
-      <h2 class="t-agent-detail__title">
-        {{ agent?.name ?? '—' }}
-      </h2>
+  <TDetailLayout
+    layout="tabs"
+    :sections="sections"
+    v-model:active-section="activeSection"
+    :back="'/admin/ai/agents'"
+    :translate="t"
+  >
+    <template #title>
+      <span class="t-agent-detail__name">{{ agent?.name ?? '—' }}</span>
       <NTag
         v-if="agent"
         size="small"
@@ -15,151 +16,147 @@
       >
         {{ agent.isEnabled ? t('detail.enabled') : t('detail.disabled') }}
       </NTag>
-      <div class="t-agent-detail__header-actions">
-        <NButton size="small" :disabled="!isDirty" @click="resetEdits">
-          {{ t('detail.reset') }}
-        </NButton>
-        <NButton type="primary" size="small" :loading="saving" :disabled="!isDirty" @click="handleSave">
-          {{ t('detail.save') }}
-        </NButton>
-      </div>
-    </header>
+    </template>
 
-    <div v-if="loadError" class="t-agent-detail__error" role="alert">
-      {{ loadError }}
-    </div>
-    <NSpin v-else :show="loading">
-      <div v-if="!agent" class="t-agent-detail__placeholder">—</div>
-      <div v-else class="t-agent-detail__quadrants">
+    <template #actions>
+      <NButton size="small" :disabled="!isDirty" @click="resetEdits">
+        {{ t('detail.reset') }}
+      </NButton>
+      <NButton size="small" type="primary" :loading="saving" :disabled="!isDirty" @click="handleSave">
+        {{ t('detail.save') }}
+      </NButton>
+    </template>
 
-        <!-- Quadrant 1: Identity -->
-        <NCard
-          size="small"
-          :bordered="false"
-          class="t-agent-detail__panel"
-        >
-          <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.identity') }}</h3>
-          <NForm label-placement="left" label-width="100px">
-            <NFormItem :label="t('form.name')" required>
-              <NInput v-model:value="edit.name" />
-            </NFormItem>
-            <NFormItem :label="t('form.description')">
-              <NInput v-model:value="edit.description" type="textarea" :rows="2" />
-            </NFormItem>
-            <NFormItem :label="t('form.isEnabled')">
-              <NSwitch v-model:value="edit.isEnabled" />
-            </NFormItem>
-          </NForm>
-        </NCard>
+    <template #default="{ section }">
+      <NSpin :show="loading">
+        <div v-if="loadError" class="t-agent-detail__error" role="alert">{{ loadError }}</div>
+        <div v-else-if="!agent" class="t-agent-detail__placeholder">—</div>
+        <template v-else>
+          <!-- Identity -->
+          <NCard v-if="section === 'identity'" size="small" :bordered="false">
+            <NForm label-placement="left" label-width="100px">
+              <NFormItem :label="t('form.name')" required>
+                <NInput v-model:value="edit.name" />
+              </NFormItem>
+              <NFormItem :label="t('form.description')">
+                <NInput v-model:value="edit.description" type="textarea" :rows="2" />
+              </NFormItem>
+              <NFormItem :label="t('form.isEnabled')">
+                <NSwitch v-model:value="edit.isEnabled" />
+              </NFormItem>
+            </NForm>
+          </NCard>
 
-        <!-- Quadrant 2: Provider / Model -->
-        <NCard size="small" :bordered="false" class="t-agent-detail__panel">
-          <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.provider') }}</h3>
-          <NForm label-placement="left" label-width="100px">
-            <NFormItem :label="t('form.provider')" required>
+          <!-- Provider / Model -->
+          <NCard v-else-if="section === 'provider'" size="small" :bordered="false">
+            <NForm label-placement="left" label-width="100px">
+              <NFormItem :label="t('form.provider')" required>
+                <NSelect
+                  v-model:value="edit.provider"
+                  :options="providerOptions"
+                  filterable
+                  tag
+                  :placeholder="t('detail.providerPlaceholder')"
+                />
+              </NFormItem>
+              <NFormItem :label="t('form.model')">
+                <NInput v-model:value="edit.model" :placeholder="t('detail.modelPlaceholder')" />
+              </NFormItem>
+              <NFormItem :label="t('form.instructions')">
+                <NInput
+                  v-model:value="edit.instructions"
+                  type="textarea"
+                  :rows="3"
+                  :placeholder="t('detail.instructionsPlaceholder')"
+                />
+              </NFormItem>
+            </NForm>
+          </NCard>
+
+          <!-- Persona -->
+          <NCard v-else-if="section === 'persona'" size="small" :bordered="false">
+            <NSpace vertical size="small">
               <NSelect
-                v-model:value="edit.provider"
-                :options="providerOptions"
-                filterable
-                tag
-                :placeholder="t('detail.providerPlaceholder')"
-              />
-            </NFormItem>
-            <NFormItem :label="t('form.model')">
-              <NInput v-model:value="edit.model" :placeholder="t('detail.modelPlaceholder')" />
-            </NFormItem>
-            <NFormItem :label="t('form.instructions')">
-              <NInput
-                v-model:value="edit.instructions"
-                type="textarea"
-                :rows="3"
-                :placeholder="t('detail.instructionsPlaceholder')"
-              />
-            </NFormItem>
-          </NForm>
-        </NCard>
-
-        <!-- Quadrant 3: Persona -->
-        <NCard size="small" :bordered="false" class="t-agent-detail__panel">
-          <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.persona') }}</h3>
-          <NSpace vertical size="small">
-            <NSelect
-              v-model:value="personaSelectValue"
-              :options="personaOptions"
-              :placeholder="t('detail.personaPlaceholder')"
-              clearable
-              filterable
-              @update:value="onPersonaChange"
-            />
-            <div v-if="selectedPersona" class="t-agent-detail__persona-preview">
-              <div class="t-agent-detail__persona-name">
-                {{ selectedPersona.name }}
-                <NTag v-if="selectedPersona.isSystem" size="tiny" :bordered="false">
-                  {{ t('detail.system') }}
-                </NTag>
-              </div>
-              <code class="t-agent-detail__persona-slug">{{ selectedPersona.slug }}</code>
-              <pre v-if="selectedPersona.content" class="t-agent-detail__persona-content">{{ selectedPersona.content }}</pre>
-            </div>
-            <div v-else class="t-agent-detail__hint">
-              {{ t('detail.personaHint') }}
-            </div>
-          </NSpace>
-        </NCard>
-
-        <!-- Quadrant 4: Tool groups + Recent runs -->
-        <NCard size="small" :bordered="false" class="t-agent-detail__panel">
-          <h3 class="t-agent-detail__panel-title">{{ t('detail.panels.tools') }}</h3>
-          <NForm label-placement="left" label-width="100px">
-            <NFormItem :label="t('form.toolGroups')">
-              <NDynamicTags v-model:value="toolGroupsModel" />
-            </NFormItem>
-            <NFormItem :label="t('form.temperature')">
-              <NInputNumber
-                v-model:value="edit.temperature"
-                :step="0.1"
-                :min="0"
-                :max="2"
+                v-model:value="personaSelectValue"
+                :options="personaOptions"
+                :placeholder="t('detail.personaPlaceholder')"
                 clearable
-                style="width: 140px"
+                filterable
+                @update:value="onPersonaChange"
               />
-            </NFormItem>
-            <NFormItem :label="t('form.maxTokens')">
-              <NInputNumber v-model:value="edit.maxTokens" :min="0" clearable style="width: 140px" />
-            </NFormItem>
-          </NForm>
-          <div class="t-agent-detail__panel-divider"></div>
-          <h4 class="t-agent-detail__sub-title">{{ t('detail.recentRuns') }}</h4>
-          <div v-if="runsError" class="t-agent-detail__error">{{ runsError }}</div>
-          <ul v-else-if="recentRuns.length" class="t-agent-detail__runs-list">
-            <li v-for="run in recentRuns" :key="run.id">
-              <router-link :to="`/admin/ai/agents/${agent?.id}/runs/${run.id}`">
-                <code>{{ run.id.slice(0, 8) }}</code>
-              </router-link>
-              <NTag size="tiny" :type="runStatusType(run.status)" :bordered="false">
-                {{ run.status }}
-              </NTag>
-              <span class="t-agent-detail__runs-time">{{ formatTime(run.creationTime) }}</span>
-            </li>
-          </ul>
-          <div v-else class="t-agent-detail__hint">{{ t('detail.noRuns') }}</div>
-        </NCard>
-      </div>
-    </NSpin>
+              <div v-if="selectedPersona" class="t-agent-detail__persona-preview">
+                <div class="t-agent-detail__persona-name">
+                  {{ selectedPersona.name }}
+                  <NTag v-if="selectedPersona.isSystem" size="tiny" :bordered="false">
+                    {{ t('detail.system') }}
+                  </NTag>
+                </div>
+                <code class="t-agent-detail__persona-slug">{{ selectedPersona.slug }}</code>
+                <pre v-if="selectedPersona.content" class="t-agent-detail__persona-content">{{ selectedPersona.content }}</pre>
+              </div>
+              <div v-else class="t-agent-detail__hint">
+                {{ t('detail.personaHint') }}
+              </div>
+            </NSpace>
+          </NCard>
 
-    <div v-if="saveStatus" class="t-agent-detail__status" :data-state="saveStatus.kind">
-      {{ saveStatus.message }}
-    </div>
-  </div>
+          <!-- Tools -->
+          <NCard v-else-if="section === 'tools'" size="small" :bordered="false">
+            <NForm label-placement="left" label-width="100px">
+              <NFormItem :label="t('form.toolGroups')">
+                <NDynamicTags v-model:value="toolGroupsModel" />
+              </NFormItem>
+              <NFormItem :label="t('form.temperature')">
+                <NInputNumber
+                  v-model:value="edit.temperature"
+                  :step="0.1"
+                  :min="0"
+                  :max="2"
+                  clearable
+                  class="w-140px"
+                />
+              </NFormItem>
+              <NFormItem :label="t('form.maxTokens')">
+                <NInputNumber v-model:value="edit.maxTokens" :min="0" clearable class="w-140px" />
+              </NFormItem>
+            </NForm>
+          </NCard>
+
+          <!-- Recent Runs -->
+          <NCard v-else-if="section === 'runs'" size="small" :bordered="false">
+            <div v-if="runsError" class="t-agent-detail__error">{{ runsError }}</div>
+            <ul v-else-if="recentRuns.length" class="t-agent-detail__runs-list">
+              <li v-for="run in recentRuns" :key="run.id">
+                <router-link :to="`/admin/ai/agents/${agent?.id}/runs/${run.id}`">
+                  <code>{{ run.id.slice(0, 8) }}</code>
+                </router-link>
+                <NTag size="tiny" :type="runStatusType(run.status)" :bordered="false">
+                  {{ run.status }}
+                </NTag>
+                <span class="t-agent-detail__runs-time">{{ formatTime(run.creationTime) }}</span>
+              </li>
+            </ul>
+            <div v-else class="t-agent-detail__hint">{{ t('detail.noRuns') }}</div>
+          </NCard>
+        </template>
+      </NSpin>
+
+      <div v-if="saveStatus" class="t-agent-detail__status" :data-state="saveStatus.kind">
+        {{ saveStatus.message }}
+      </div>
+    </template>
+  </TDetailLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NSpin, NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NTag, NButton,
-  NSpace, NDynamicTags,
+  NSpace, NDynamicTags, NCard,
 } from 'naive-ui'
+import TDetailLayout from '../../../components/detail/TDetailLayout.vue'
+import type { DetailSection } from '../../../headless/useDetail'
 import { translatePageKey } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -168,8 +165,25 @@ import type {
 } from '@tnzi/core/services/ai'
 
 const route = useRoute()
+const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
 const t = (key: string) => translatePageKey('ai.agents', key)
+
+// ---- Sections ----------------------------------------------------------------
+
+const sections: DetailSection[] = [
+  { key: 'identity', label: t('detail.panels.identity'), icon: 'mdi:information-outline' },
+  { key: 'provider', label: t('detail.panels.provider'), icon: 'mdi:tune' },
+  { key: 'persona', label: t('detail.panels.persona'), icon: 'mdi:account-circle-outline' },
+  { key: 'tools', label: t('detail.panels.tools'), icon: 'mdi:wrench-outline' },
+  { key: 'runs', label: t('detail.panels.runs'), icon: 'mdi:play-circle-outline' },
+]
+
+const activeSection = ref<string>((route.query.section as string) || 'identity')
+
+watch(activeSection, (k) => {
+  void router.replace({ query: { ...route.query, section: k } })
+})
 
 // ---- State ----------------------------------------------------------------
 
@@ -454,69 +468,10 @@ watch(() => route.params?.id, async (next, prev) => {
 </script>
 
 <style scoped>
-/* TAdminContent supplies the 16px page padding; the previous local
-   override doubled it (32px) and broke parity with TCrudPage pages. */
-.t-agent-detail {
-  /* no padding — owned by TAdminContent */
-}
-.t-agent-detail__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.t-agent-detail__back {
-  font-size: 13px;
-  color: var(--tnzi-primary);
-  text-decoration: none;
-}
-.t-agent-detail__back:hover {
-  text-decoration: underline;
-}
-.t-agent-detail__title {
-  margin: 0;
-  font-size: 20px;
-}
-.t-agent-detail__header-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-}
-.t-agent-detail__quadrants {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-@media (max-width: 960px) {
-  .t-agent-detail__quadrants {
-    grid-template-columns: 1fr;
-  }
-}
-/* NCard supplies the chrome (border, padding). We only add the soft
-   drop-shadow + radius to match TCrudPage list-card parity, plus a
-   min-height so the 4-up grid doesn't collapse when one quadrant
-   is sparser than the others. */
-.t-agent-detail__panel {
-  border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-  min-height: 280px;
-}
-.t-agent-detail__panel-title {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: var(--tnzi-base-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-.t-agent-detail__panel-divider {
-  border-top: 1px solid var(--tnzi-border);
-  margin: 12px 0;
-}
-.t-agent-detail__sub-title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--tnzi-base-text-muted);
+.t-agent-detail__name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
 }
 .t-agent-detail__hint {
   color: var(--tnzi-base-text-muted);
@@ -552,7 +507,7 @@ watch(() => route.params?.id, async (next, prev) => {
   list-style: none;
   padding: 0;
   margin: 0;
-  max-height: 160px;
+  max-height: 480px;
   overflow: auto;
 }
 .t-agent-detail__runs-list li {

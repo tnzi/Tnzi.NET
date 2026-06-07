@@ -28,6 +28,7 @@
     <ProjectReference Include="..\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.AI.McpClient\Tnzi.AI.McpClient.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Audit\Tnzi.Audit.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Feature\Tnzi.Feature.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Template\Tnzi.Template.csproj" PrivateAssets="all" />

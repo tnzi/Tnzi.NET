@@ -174,7 +174,7 @@ public class McpServerSecurityMiddleware
     {
         Check.NotNull(context);
 
-        var tenantSegment = _options.Value.TenantIsolation
+        var tenantSegment = _options.Value.RateLimitPerTenant
             ? ExtractTenantId(context.Request) ?? "public"
             : "shared";
 

@@ -36,18 +36,19 @@ public class McpServerOptions
     public List<string> AllowedApiKeys { get; set; } = [];
 
     /// <summary>
-    /// 是否启用速率限制键的租户分区（默认开启）。
+    /// 是否按租户分区速率限制键（默认开启）。
     /// <para>
-    /// <b>当前行为：</b> 当 <c>TenantIsolation = true</c> 时，<c>X-Tenant-Id</c> 请求头的值会被
-    /// 追加到速率限制键（client key）中，实现各租户独立的速率限制配额。
+    /// 当 <c>RateLimitPerTenant = true</c> 时，<c>X-Tenant-Id</c> 请求头的值会被追加到
+    /// 速率限制键（client key）中，使各租户拥有独立的速率限制配额。
     /// </para>
     /// <para>
-    /// <b>重要限制：</b> 此选项<b>不</b>对 Agent 执行进行租户隔离。Agent 调用运行在从
-    /// 根 DI 容器创建的 scope 中，没有 <c>ICurrentTenant.Change</c> 调用，因此 MCP Server
-    /// 对 Agent 执行而言实际上是单租户模式。真正的按租户执行隔离尚未实现。
+    /// <b>注意 — 此选项仅做限流分区，不做执行隔离：</b> Agent 调用运行在根 DI 容器创建的
+    /// scope 中，没有 <c>ICurrentTenant.Change</c>，因此 MCP Server 对 Agent 执行而言是
+    /// 单租户的。若需要真正的按租户执行隔离，须在应用层另行实现（此字段不提供该能力，
+    /// 故命名为 RateLimitPerTenant 而非 TenantIsolation 以免误导）。
     /// </para>
     /// </summary>
-    public bool TenantIsolation { get; set; } = true;
+    public bool RateLimitPerTenant { get; set; } = true;
 
     /// <summary>
     /// 是否启用审计日志（默认开启）

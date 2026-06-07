@@ -42,6 +42,23 @@ public class PairingRequest
 }
 
 /// <summary>
+/// Request body for admin-initiated device pairing. The returned <see cref="PairingRequest.Code"/>
+/// is handed out-of-band to the device, which then connects to the device WebSocket endpoint
+/// (default <c>/ws/device</c>) and presents the code to complete registration.
+/// </summary>
+public class CreatePairingRequestDto
+{
+    /// <summary>Device node ID to pair</summary>
+    public string NodeId { get; set; } = string.Empty;
+
+    /// <summary>Human-readable device name</summary>
+    public string DeviceName { get; set; } = string.Empty;
+
+    /// <summary>Device platform</summary>
+    public DevicePlatform Platform { get; set; }
+}
+
+/// <summary>
 /// Public DTO for a pending pairing request returned by the admin API — Code is redacted
 /// </summary>
 public class PendingPairingRequestDto

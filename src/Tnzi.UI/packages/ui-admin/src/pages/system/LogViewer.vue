@@ -9,7 +9,8 @@
     edit UX because log retention is owned server-side by Serilog's
     `RetainedFileCountLimit` per level.
   -->
-  <div class="t-log-viewer-page">
+  <TContentPage :title="t('title')" :translate="t" card scroll="fill">
+    <div class="t-log-viewer-page">
     <div class="t-log-viewer-page__sidebar">
       <div class="t-log-viewer-page__sidebar-header">
         <span class="t-log-viewer-page__title">{{ t('levels') }}</span>
@@ -112,7 +113,7 @@
             size="small"
             :placeholder="t('filterPlaceholder')"
             clearable
-            style="width: 200px"
+            class="w-200px"
           >
             <template #prefix>
               <TSvgIcon icon="mdi:filter-outline" :size="14" />
@@ -122,7 +123,7 @@
             v-model:value="lineCount"
             :options="lineCountOptions"
             size="small"
-            style="width: 110px"
+            class="w-110px"
             @update:value="reloadTail"
           />
           <NButton size="small" :loading="tailLoading" @click="reloadTail">
@@ -147,20 +148,20 @@
                 clearable
                 @keydown.enter="runSearch"
               />
-              <div style="display: flex; gap: 8px;">
+              <div class="flex gap-8px">
                 <NSelect
                   v-model:value="searchLevel"
                   :options="searchLevelOptions"
                   :placeholder="t('searchAnyLevel')"
                   clearable
                   size="small"
-                  style="flex: 1"
+                  class="flex-1"
                 />
                 <NSelect
                   v-model:value="searchMaxResults"
                   :options="searchMaxResultsOptions"
                   size="small"
-                  style="width: 110px"
+                  class="w-110px"
                 />
               </div>
               <NButton type="primary" :loading="searchLoading" @click="runSearch">
@@ -214,7 +215,8 @@
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
@@ -233,6 +235,7 @@ import type {
   LogSearchResultDto,
 } from '@tnzi/core/services/logging'
 import { translatePageKey, interpolate } from '../_shared/translate'
+import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createLoggingBridge({ client: useAdminClient() })
 

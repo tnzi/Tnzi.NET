@@ -13,7 +13,7 @@
   /* ------ Layout sizing ------ */
   --tnzi-admin-header-height: 56px;
   --tnzi-admin-tab-height: 44px;
-  --tnzi-admin-footer-height: 48px;
+  --tnzi-admin-footer-height: 32px;
 
   /* 4-tier sider width system (matches soybean-admin) */
   --tnzi-admin-sider-width: 220px;
@@ -21,8 +21,8 @@
   --tnzi-admin-sider-mix-width: 90px;
   --tnzi-admin-sider-mix-child-width: 200px;
 
-  --tnzi-admin-content-padding: 16px;
-  --tnzi-admin-content-padding-mobile: 12px;
+  --tnzi-admin-content-padding: 12px;
+  --tnzi-admin-content-padding-mobile: 10px;
 
   /* ------ Z-index strata ------ */
   --tnzi-admin-z-header: 80;
@@ -114,11 +114,6 @@
 
    Heights step down on phones because the header chrome competes with
    the URL bar / status bar for vertical space. */
-@media (max-width: 1023px) {
-  :root {
-    --tnzi-admin-content-padding: 14px;
-  }
-}
 @media (max-width: 767px) {
   :root {
     --tnzi-admin-header-height: 52px;

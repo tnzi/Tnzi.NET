@@ -1,69 +1,54 @@
 <template>
   <div class="t-row-actions">
     <slot name="prepend" :row="row" />
-    <!--
-      Read-only rows (file-source / embedded / workspace / code-defined
-      entries from dual-source modules — see TSourceBadge): the row's
-      `isReadOnly === true` flag suppresses every default action button.
-      Consumers can still render a `view` button via #append if they want
-      to expose read-only inspection. The "View" entry routes through
-      the same form-modal pipeline but with `mode === 'view'`.
-    -->
-    <template v-if="readOnly">
-      <NButton
-        ghost
-        size="small"
-        @click="handleView"
-      >
-        {{ t('admin.crud.view') }}
-      </NButton>
-      <!-- Consumers can still attach non-mutating actions to read-only
-           rows (e.g. preview, send-test, export) via `moreOptions`. The
-           dropdown is suppressed only when no extra options were supplied. -->
-      <NDropdown
-        v-if="hasMoreOptions"
-        trigger="click"
-        :options="dropdownOptions"
-        @select="(key: string) => onDropdownSelect(key)"
-      >
-        <NButton size="small" ghost>
-          {{ t('admin.crud.more') }} ▾
-        </NButton>
-      </NDropdown>
-    </template>
-    <template v-else>
-      <NButton
-        v-if="showEdit"
-        type="primary"
-        ghost
-        size="small"
-        @click="handleEdit"
-      >
-        {{ t('admin.crud.edit') }}
-      </NButton>
-      <slot name="middle" :row="row" />
-      <NDropdown
-        v-if="hasMoreOptions"
-        trigger="click"
-        :options="dropdownOptions"
-        @select="(key: string) => onDropdownSelect(key)"
-      >
-        <NButton size="small" ghost>
-          {{ t('admin.crud.more') }} ▾
-        </NButton>
-      </NDropdown>
+
+    <!-- Inline action buttons. Actions flagged `confirm` are wrapped in a
+         popconfirm so destructive ops still gate before firing. -->
+    <template v-for="action in inline" :key="action.key">
       <NPopconfirm
-        v-else-if="showDelete"
-        @positive-click="handleDelete"
+        v-if="needsConfirm(action)"
+        @positive-click="() => fire(action)"
       >
         <template #trigger>
-          <NButton type="error" ghost size="small">
-            {{ t('admin.crud.delete') }}
+          <NButton
+            :type="action.type ?? 'default'"
+            ghost
+            size="small"
+            :disabled="isDisabled(action)"
+          >
+            <template v-if="action.icon" #icon><TSvgIcon :icon="action.icon" :size="14" /></template>
+            {{ labelOf(action) }}
           </NButton>
         </template>
-        {{ confirmText ?? t('admin.crud.confirmDelete') }}
+        {{ confirmTextOf(action) }}
       </NPopconfirm>
+      <NButton
+        v-else
+        :type="action.type ?? 'default'"
+        ghost
+        size="small"
+        :disabled="isDisabled(action)"
+        @click="fire(action)"
+      >
+        <template v-if="action.icon" #icon><TSvgIcon :icon="action.icon" :size="14" /></template>
+        {{ labelOf(action) }}
+      </NButton>
     </template>
+
+    <slot name="middle" :row="row" />
+
+    <!-- Overflow → More▾ dropdown. -->
+    <NDropdown
+      v-if="overflow.length"
+      trigger="click"
+      :options="dropdownOptions"
+      @select="onDropdownSelect"
+    >
+      <NButton size="small" ghost class="t-row-actions__more">
+        {{ moreLabelText }} ▾
+      </NButton>
+    </NDropdown>
+
     <slot name="append" :row="row" />
   </div>
 </template>
@@ -71,109 +56,130 @@
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed } from 'vue'
 import { NButton, NDropdown, NPopconfirm, useDialog, type DropdownOption } from 'naive-ui'
-import type { UseCrudPageReturn } from '../../headless/useCrudPage'
+import { TSvgIcon } from '@tnzi/ui'
+import { splitRowActions, type RowAction } from '../../headless/rowActions'
 
-export interface TRowActionsProps<
-  T,
-  TId extends string | number = string | number,
-> {
+export interface TRowActionsProps<T> {
   row: T
-  state: UseCrudPageReturn<T, TId>
-  showEdit?: boolean
-  showDelete?: boolean
-  confirmText?: string
-  /**
-   * Strict 2-button mode. When supplied, the row column collapses every
-   * secondary operation (incl. Delete) into a `[More▾]` dropdown beside
-   * the primary action — see component comments above. The function form
-   * lets per-row state (e.g. row.isEnabled) drive the option list.
-   */
-  moreOptions?: DropdownOption[] | ((row: T) => DropdownOption[])
-  /**
-   * Selection callback for the More▾ dropdown. The framework intercepts
-   * the reserved `delete` key (renders a confirm dialog + invokes
-   * `state.handleDelete([rowId])`) so consumers only handle their own
-   * custom keys.
-   */
-  onMoreSelect?: (key: string, row: T) => void
-  /**
-   * When `false`, the framework's default Delete entry is NOT injected
-   * into the More dropdown. Use this if `showDelete` is also `false`
-   * (e.g. immutable records like PaymentRefund). Default `true`.
-   */
-  includeDeleteInMore?: boolean
+  /** Declarative action list. Use `editAction`/`viewAction`/`deleteAction`
+   *  factories for the built-ins, plain objects for custom operations.
+   *  Optional (defaults to `[]`) so a slot-only usage that just hosts
+   *  `#prepend`/`#append` buttons can omit it. */
+  actions?: RowAction<T>[]
+  /** Max inline slots before the tail collapses into More▾ (default 2). */
+  maxInline?: number
+  /** Disable collapsing — render every action inline (default false → collapse on). */
+  collapse?: boolean
+  /** Override the More▾ button label. */
+  moreLabel?: string
   translate?: (key: string) => string
 }
 
-const props = withDefaults(defineProps<TRowActionsProps<T, TId>>(), {
-  showEdit: true,
-  showDelete: true,
-  confirmText: undefined,
-  moreOptions: undefined,
-  onMoreSelect: undefined,
-  includeDeleteInMore: true,
+const props = withDefaults(defineProps<TRowActionsProps<T>>(), {
+  actions: () => [],
+  maxInline: 2,
+  collapse: true,
+  moreLabel: undefined,
   translate: undefined,
 })
+
+defineSlots<{
+  prepend?: (props: { row: T }) => unknown
+  middle?: (props: { row: T }) => unknown
+  append?: (props: { row: T }) => unknown
+}>()
 
 function t(key: string): string {
   if (props.translate) return props.translate(key)
   const fallback: Record<string, string> = {
     'admin.crud.edit': 'Edit',
+    'admin.crud.view': 'View',
     'admin.crud.delete': 'Delete',
     'admin.crud.more': 'More',
+    'admin.crud.confirm': 'Confirm',
+    'admin.crud.cancel': 'Cancel',
     'admin.crud.confirmDelete': 'Are you sure to delete?',
   }
   return fallback[key] ?? key
 }
+function maybeTranslate(value: string): string {
+  if (/^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)*$/.test(value)) return t(value)
+  return value
+}
 
-/**
- * True when this row originates from a read-only source (file system,
- * embedded resource, code-defined, workspace, appsettings…). Detected
- * by inspecting `row.isReadOnly`. The dual-source modules
- * (Skills/Template/Feature/Workspace Agent/…) backfill this field at
- * the DTO layer so the front-end doesn't need module-specific logic.
- */
-const readOnly = computed<boolean>(() => {
-  const r = props.row as { isReadOnly?: boolean } | null
-  return r?.isReadOnly === true
-})
+const { inline, overflow } = (() => {
+  const split = computed(() =>
+    splitRowActions(props.actions, props.row, {
+      maxInline: props.maxInline,
+      collapse: props.collapse,
+    }),
+  )
+  return {
+    inline: computed(() => split.value.inline),
+    overflow: computed(() => split.value.overflow),
+  }
+})()
 
-const hasMoreOptions = computed(() => props.moreOptions !== undefined)
+const moreLabelText = computed(() => props.moreLabel ?? t('admin.crud.more'))
 
-const resolvedMoreOptions = computed<DropdownOption[]>(() => {
-  if (!props.moreOptions) return []
-  return typeof props.moreOptions === 'function'
-    ? props.moreOptions(props.row)
-    : props.moreOptions
-})
+/** Default i18n label keys for the built-in action keys. */
+const DEFAULT_LABEL_KEY: Record<string, string> = {
+  edit: 'admin.crud.edit',
+  view: 'admin.crud.view',
+  delete: 'admin.crud.delete',
+}
 
-/**
- * Final option list shown in the More▾ dropdown. The framework's
- * built-in `delete` entry is appended at the bottom (after a divider
- * separator if consumer options exist) so destructive ops stay visually
- * distinct from neutral ones. Suppressed when `showDelete=false` or
- * `includeDeleteInMore=false`.
- */
+function rawLabel(a: RowAction<T>): string {
+  if (a.label != null) return typeof a.label === 'function' ? a.label(props.row) : a.label
+  return DEFAULT_LABEL_KEY[a.key] ?? a.key
+}
+function labelOf(a: RowAction<T>): string {
+  return maybeTranslate(rawLabel(a))
+}
+function isDisabled(a: RowAction<T>): boolean {
+  return a.disabled ? a.disabled(props.row) : false
+}
+function needsConfirm(a: RowAction<T>): boolean {
+  return a.confirm !== undefined && a.confirm !== false
+}
+function confirmTextOf(a: RowAction<T>): string {
+  const c = a.confirm
+  if (typeof c === 'function') return c(props.row)
+  if (typeof c === 'string') return maybeTranslate(c)
+  return t('admin.crud.confirmDelete')
+}
+function fire(a: RowAction<T>): void {
+  void a.onClick?.(props.row)
+}
+
+// ── More▾ dropdown ────────────────────────────────────────────────────
 const dropdownOptions = computed<DropdownOption[]>(() => {
-  const opts: DropdownOption[] = [...resolvedMoreOptions.value]
-  if (props.showDelete && props.includeDeleteInMore) {
-    if (opts.length > 0) {
-      opts.push({ type: 'divider', key: 'd-delete' })
+  const opts: DropdownOption[] = []
+  for (const a of overflow.value) {
+    if (a.divider && opts.length > 0) {
+      opts.push({ type: 'divider', key: `divider-${a.key}` })
     }
     opts.push({
-      key: 'delete',
-      label: t('admin.crud.delete'),
-      props: { style: 'color: var(--tnzi-color-error, #e54040)' },
+      key: a.key,
+      label: labelOf(a),
+      disabled: isDisabled(a),
+      ...(a.type === 'error'
+        ? { props: { style: 'color: var(--tnzi-color-error, #e54040)' } }
+        : {}),
     })
   }
   return opts
 })
 
-// useDialog is provider-dependent; cache a safe wrapper so calling it
-// without a provider (e.g. unit-test mount that skips n-dialog-provider)
-// doesn't crash — we fall back to window.confirm so the destructive
-// confirm guarantee still holds in test environments.
-function safeDialog(): { warning: (cfg: { title: string; content: string; positiveText: string; negativeText: string; onPositiveClick: () => void | Promise<void> }) => void } {
+function safeDialog(): {
+  warning: (cfg: {
+    title: string
+    content: string
+    positiveText: string
+    negativeText: string
+    onPositiveClick: () => void | Promise<void>
+  }) => void
+} {
   try {
     const d = useDialog()
     return { warning: (cfg) => { d.warning(cfg) } }
@@ -189,33 +195,20 @@ function safeDialog(): { warning: (cfg: { title: string; content: string; positi
 }
 const dialog = safeDialog()
 
-function handleEdit(): void {
-  props.state.openEdit(props.row)
-}
-
-function handleView(): void {
-  props.state.openView(props.row)
-}
-
-async function handleDelete(): Promise<void> {
-  const id = props.state.rowKey(props.row)
-  await props.state.handleDelete([id])
-}
-
 function onDropdownSelect(key: string): void {
-  if (key === 'delete') {
+  const action = overflow.value.find((a) => a.key === key)
+  if (!action) return
+  if (needsConfirm(action)) {
     dialog.warning({
-      title: t('admin.crud.delete'),
-      content: props.confirmText ?? t('admin.crud.confirmDelete'),
+      title: labelOf(action),
+      content: confirmTextOf(action),
       positiveText: t('admin.crud.confirm'),
       negativeText: t('admin.crud.cancel'),
-      onPositiveClick: async () => {
-        await handleDelete()
-      },
+      onPositiveClick: () => fire(action),
     })
     return
   }
-  props.onMoreSelect?.(key, props.row)
+  fire(action)
 }
 </script>
 
@@ -225,5 +218,6 @@ function onDropdownSelect(key: string): void {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

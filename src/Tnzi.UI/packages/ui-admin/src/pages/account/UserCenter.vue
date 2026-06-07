@@ -2,243 +2,230 @@
   <!--
     UserCenter — self-service personal center.
 
-    Left-rail tabs route between sections, right pane renders the active
-    section. Each section is rendered inline (single .vue file) so consumers
-    don't have to register five sub-routes to get a working profile page.
-
-    Wires the `identityBridge.me.*` sub-contract added alongside this page —
-    see `services/bridges/identity-bridge.ts` for the surface.
+    BotDetail-style layout: a slim header (avatar + name + roles + refresh)
+    over a left vertical menu (sections) + right content panel, both white
+    cards. Built on the shared `TDetailLayout` (layout="side"). Each section
+    is rendered inline so consumers don't register five sub-routes.
   -->
-  <div class="t-user-center t-stack-page">
-    <NCard :title="t('title')" :bordered="false">
-      <template #header-extra>
+  <div class="t-user-center">
+    <TDetailLayout
+      layout="side"
+      :sections="sections"
+      :active-section="activeTab"
+      :translate="t"
+      @update:active-section="(k) => (activeTab = k)"
+    >
+      <!-- Slim header: avatar + name + roles -->
+      <template #title>
+        <div class="t-user-center__head">
+          <div class="t-user-center__avatar t-user-center__avatar--sm">
+            <img
+              v-if="profile?.avatar"
+              :src="profile.avatar"
+              :alt="profile.userName"
+              class="t-user-center__avatar-img"
+            />
+            <span v-else class="t-user-center__avatar-initials">{{ avatarInitials }}</span>
+          </div>
+          <div class="t-user-center__head-text">
+            <span class="t-user-center__head-name">{{ profile?.nickname || profile?.userName || t('title') }}</span>
+            <span class="t-user-center__head-meta">
+              <NTag v-for="r in profile?.roles ?? []" :key="r" size="tiny" :bordered="false">{{ r }}</NTag>
+            </span>
+          </div>
+        </div>
+      </template>
+
+      <template #actions>
         <NButton size="small" tertiary :loading="loadingProfile" @click="reloadAll">
           <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
           {{ t('refresh') }}
         </NButton>
       </template>
 
-      <div class="t-user-center__layout t-form-page">
-        <!-- Left rail — tab nav -->
-        <NMenu
-          v-model:value="activeTab"
-          :options="navOptions"
-          class="t-user-center__nav"
-        />
-
-        <!-- Right content -->
-        <section class="t-user-center__content">
+      <template #default>
+        <div class="t-user-center__panel">
           <NSpin :show="loadingProfile && !profile">
             <!-- ===== Basic profile ===== -->
-            <div v-if="activeTab === 'profile'" class="t-user-center__section t-user-center__section--scroll">
-              <header class="t-user-center__section-header">
-                <div class="t-user-center__identity">
-                  <!--
-                    NAvatar inside the admin shell rendered as 0x0 (CSS conflict
-                    with the shell's flex tokens). Use a plain `<div>` we
-                    fully control: shows the user's uploaded avatar URL if
-                    present, otherwise an initial letter on a tinted disc.
-                  -->
-                  <div class="t-user-center__avatar">
-                    <img
-                      v-if="profile?.avatar"
-                      :src="profile.avatar"
-                      :alt="profile.userName"
-                      class="t-user-center__avatar-img"
-                    />
-                    <span v-else class="t-user-center__avatar-initials">
-                      {{ avatarInitials }}
-                    </span>
-                  </div>
-                  <div>
-                    <h2 class="t-user-center__user-name">
-                      {{ profile?.nickname || profile?.userName || '—' }}
-                    </h2>
-                    <div class="t-user-center__user-meta">
-                      <NTag v-for="r in profile?.roles ?? []" :key="r" size="small" :bordered="false">
-                        {{ r }}
-                      </NTag>
-                      <span v-if="!(profile?.roles?.length)" class="t-user-center__hint">
-                        {{ t('profile.noRoles') }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+            <section v-if="activeTab === 'profile'" class="t-user-center__section">
+              <header class="t-user-center__section-bar">
+                <h3 class="t-user-center__section-title">{{ t('nav.profile') }}</h3>
               </header>
-
-              <NForm label-placement="top" size="small" :show-feedback="false">
-                <div class="t-user-center__form-grid">
-                  <NFormItem :label="t('profile.userName')">
-                    <NInput :value="profile?.userName ?? ''" disabled />
-                  </NFormItem>
-                  <NFormItem :label="t('profile.nickname')">
-                    <NInput v-model:value="form.nickname" :placeholder="t('profile.nicknamePlaceholder')" />
-                  </NFormItem>
-                  <!--
-                    Email / phone are NOT directly editable via PUT — the
-                    backend exposes a send-code + confirm flow (so a typo
-                    can't lock the user out, and we get verification).
-                    Render as read-only inputs with a "Change…" trigger
-                    that opens the verification modal.
-                  -->
-                  <NFormItem :label="t('profile.email')">
+              <div class="t-user-center__section-body">
+                <div class="t-detail-content">
+                <NForm label-placement="top" size="small" :show-feedback="false">
+                  <div class="t-user-center__form-grid">
+                    <NFormItem :label="t('profile.userName')">
+                      <NInput :value="profile?.userName ?? ''" disabled />
+                    </NFormItem>
+                    <NFormItem :label="t('profile.nickname')">
+                      <NInput v-model:value="form.nickname" :placeholder="t('profile.nicknamePlaceholder')" />
+                    </NFormItem>
+                    <NFormItem :label="t('profile.email')">
+                      <NInput
+                        :value="profile?.email ?? ''"
+                        disabled
+                        :placeholder="t('profile.emailPlaceholder')"
+                      >
+                        <template #suffix>
+                          <NButton size="tiny" tertiary @click="openChangeEmail">
+                            {{ t('profile.change') }}
+                          </NButton>
+                        </template>
+                      </NInput>
+                    </NFormItem>
+                    <NFormItem :label="t('profile.phone')">
+                      <NInput
+                        :value="profile?.phoneNumber ?? ''"
+                        disabled
+                        :placeholder="t('profile.phonePlaceholder')"
+                      >
+                        <template #suffix>
+                          <NButton size="tiny" tertiary @click="openChangePhone">
+                            {{ t('profile.change') }}
+                          </NButton>
+                        </template>
+                      </NInput>
+                    </NFormItem>
+                    <NFormItem :label="t('profile.gender')">
+                      <NSelect
+                        v-model:value="form.gender"
+                        :options="genderOptions"
+                        :placeholder="t('profile.genderPlaceholder')"
+                      />
+                    </NFormItem>
+                    <NFormItem :label="t('profile.birthday')">
+                      <NDatePicker
+                        v-model:formatted-value="form.birthday"
+                        value-format="yyyy-MM-dd"
+                        type="date"
+                        clearable
+                        class="w-full"
+                      />
+                    </NFormItem>
+                  </div>
+                  <NFormItem :label="t('profile.bio')">
                     <NInput
-                      :value="profile?.email ?? ''"
-                      disabled
-                      :placeholder="t('profile.emailPlaceholder')"
-                    >
-                      <template #suffix>
-                        <NButton size="tiny" tertiary @click="openChangeEmail">
-                          {{ t('profile.change') }}
-                        </NButton>
-                      </template>
-                    </NInput>
-                  </NFormItem>
-                  <NFormItem :label="t('profile.phone')">
-                    <NInput
-                      :value="profile?.phoneNumber ?? ''"
-                      disabled
-                      :placeholder="t('profile.phonePlaceholder')"
-                    >
-                      <template #suffix>
-                        <NButton size="tiny" tertiary @click="openChangePhone">
-                          {{ t('profile.change') }}
-                        </NButton>
-                      </template>
-                    </NInput>
-                  </NFormItem>
-                  <NFormItem :label="t('profile.gender')">
-                    <NSelect
-                      v-model:value="form.gender"
-                      :options="genderOptions"
-                      :placeholder="t('profile.genderPlaceholder')"
+                      v-model:value="form.bio"
+                      type="textarea"
+                      :rows="3"
+                      :placeholder="t('profile.bioPlaceholder')"
                     />
                   </NFormItem>
-                  <NFormItem :label="t('profile.birthday')">
-                    <NDatePicker
-                      v-model:formatted-value="form.birthday"
-                      value-format="yyyy-MM-dd"
-                      type="date"
-                      clearable
-                      style="width: 100%"
-                    />
+                  <NFormItem :label="t('profile.address')">
+                    <NInput v-model:value="form.address" :placeholder="t('profile.addressPlaceholder')" />
                   </NFormItem>
+                  <NFormItem :label="t('profile.website')">
+                    <NInput v-model:value="form.website" :placeholder="t('profile.websitePlaceholder')" />
+                  </NFormItem>
+                </NForm>
+                <div class="t-user-center__save-bar">
+                  <NButton size="small" @click="resetProfileForm">{{ t('reset') }}</NButton>
+                  <NButton size="small" type="primary" :loading="savingProfile" @click="saveProfile">
+                    {{ t('save') }}
+                  </NButton>
                 </div>
-                <NFormItem :label="t('profile.bio')">
-                  <NInput
-                    v-model:value="form.bio"
-                    type="textarea"
-                    :rows="3"
-                    :placeholder="t('profile.bioPlaceholder')"
-                  />
-                </NFormItem>
-                <NFormItem :label="t('profile.address')">
-                  <NInput v-model:value="form.address" :placeholder="t('profile.addressPlaceholder')" />
-                </NFormItem>
-                <NFormItem :label="t('profile.website')">
-                  <NInput v-model:value="form.website" :placeholder="t('profile.websitePlaceholder')" />
-                </NFormItem>
-              </NForm>
-
-              <div class="t-user-center__actions">
-                <NButton type="primary" :loading="savingProfile" @click="saveProfile">
-                  {{ t('save') }}
-                </NButton>
-                <NButton @click="resetProfileForm">{{ t('reset') }}</NButton>
+                </div>
               </div>
-            </div>
+            </section>
 
             <!-- ===== Security ===== -->
-            <div v-else-if="activeTab === 'security'" class="t-user-center__section t-user-center__section--scroll">
-              <h3 class="t-user-center__section-title">{{ t('security.password.title') }}</h3>
-              <p class="t-user-center__hint">{{ t('security.password.hint') }}</p>
-              <NForm label-placement="top" size="small" :show-feedback="false">
-                <div class="t-user-center__form-grid">
-                  <NFormItem :label="t('security.password.current')" required>
-                    <NInput
-                      v-model:value="pwForm.currentPassword"
-                      type="password"
-                      show-password-on="click"
-                      :placeholder="t('security.password.currentPlaceholder')"
-                    />
-                  </NFormItem>
-                  <NFormItem :label="t('security.password.new')" required>
-                    <NInput
-                      v-model:value="pwForm.newPassword"
-                      type="password"
-                      show-password-on="click"
-                      :placeholder="t('security.password.newPlaceholder')"
-                    />
-                  </NFormItem>
-                  <NFormItem :label="t('security.password.confirm')" required>
-                    <NInput
-                      v-model:value="pwForm.confirm"
-                      type="password"
-                      show-password-on="click"
-                      :placeholder="t('security.password.confirmPlaceholder')"
-                    />
-                  </NFormItem>
+            <section v-else-if="activeTab === 'security'" class="t-user-center__section">
+              <header class="t-user-center__section-bar">
+                <h3 class="t-user-center__section-title">{{ t('nav.security') }}</h3>
+              </header>
+              <div class="t-user-center__section-body">
+                <div class="t-detail-content">
+                <h4 class="t-user-center__sub-title">{{ t('security.password.title') }}</h4>
+                <p class="t-user-center__hint">{{ t('security.password.hint') }}</p>
+                <NForm label-placement="top" size="small" :show-feedback="false">
+                  <div class="t-user-center__form-grid">
+                    <NFormItem :label="t('security.password.current')" required>
+                      <NInput
+                        v-model:value="pwForm.currentPassword"
+                        type="password"
+                        show-password-on="click"
+                        :placeholder="t('security.password.currentPlaceholder')"
+                      />
+                    </NFormItem>
+                    <NFormItem :label="t('security.password.new')" required>
+                      <NInput
+                        v-model:value="pwForm.newPassword"
+                        type="password"
+                        show-password-on="click"
+                        :placeholder="t('security.password.newPlaceholder')"
+                      />
+                    </NFormItem>
+                    <NFormItem :label="t('security.password.confirm')" required>
+                      <NInput
+                        v-model:value="pwForm.confirm"
+                        type="password"
+                        show-password-on="click"
+                        :placeholder="t('security.password.confirmPlaceholder')"
+                      />
+                    </NFormItem>
+                  </div>
+                </NForm>
+                <div class="t-user-center__actions">
+                  <NButton
+                    type="primary"
+                    size="small"
+                    :loading="changingPassword"
+                    :disabled="!canChangePassword"
+                    @click="submitChangePassword"
+                  >
+                    {{ t('security.password.submit') }}
+                  </NButton>
                 </div>
-              </NForm>
-              <div class="t-user-center__actions">
-                <NButton
-                  type="primary"
-                  :loading="changingPassword"
-                  :disabled="!canChangePassword"
-                  @click="submitChangePassword"
-                >
-                  {{ t('security.password.submit') }}
-                </NButton>
-              </div>
 
-              <NDivider />
+                <NDivider />
 
-              <h3 class="t-user-center__section-title">{{ t('security.twoFactor.title') }}</h3>
-              <div class="t-user-center__row">
-                <div>
-                  <div class="t-user-center__row-label">{{ t('security.twoFactor.totp') }}</div>
-                  <div class="t-user-center__hint">{{ t('security.twoFactor.totpHint') }}</div>
+                <h4 class="t-user-center__sub-title">{{ t('security.twoFactor.title') }}</h4>
+                <div class="t-user-center__row">
+                  <div>
+                    <div class="t-user-center__row-label">{{ t('security.twoFactor.totp') }}</div>
+                    <div class="t-user-center__hint">{{ t('security.twoFactor.totpHint') }}</div>
+                  </div>
+                  <NSpace size="small" align="center">
+                    <NTag :type="twoFactor?.isTotpEnabled ? 'success' : 'default'" size="small" :bordered="false">
+                      {{ twoFactor?.isTotpEnabled ? t('security.twoFactor.enabled') : t('security.twoFactor.disabled') }}
+                    </NTag>
+                    <NPopconfirm v-if="twoFactor?.isTotpEnabled" @positive-click="disableTotp">
+                      <template #trigger>
+                        <NButton size="tiny" type="warning" ghost :loading="togglingTwoFactor">
+                          {{ t('security.twoFactor.disable') }}
+                        </NButton>
+                      </template>
+                      {{ t('security.twoFactor.confirmDisable') }}
+                    </NPopconfirm>
+                  </NSpace>
                 </div>
-                <NSpace size="small" align="center">
-                  <NTag :type="twoFactor?.isTotpEnabled ? 'success' : 'default'" size="small" :bordered="false">
-                    {{ twoFactor?.isTotpEnabled ? t('security.twoFactor.enabled') : t('security.twoFactor.disabled') }}
-                  </NTag>
-                  <NPopconfirm v-if="twoFactor?.isTotpEnabled" @positive-click="disableTotp">
-                    <template #trigger>
-                      <NButton size="tiny" type="warning" ghost :loading="togglingTwoFactor">
-                        {{ t('security.twoFactor.disable') }}
-                      </NButton>
-                    </template>
-                    {{ t('security.twoFactor.confirmDisable') }}
-                  </NPopconfirm>
-                </NSpace>
-              </div>
-              <div class="t-user-center__row">
-                <div>
-                  <div class="t-user-center__row-label">{{ t('security.twoFactor.global') }}</div>
-                  <div class="t-user-center__hint">{{ t('security.twoFactor.globalHint') }}</div>
+                <div class="t-user-center__row">
+                  <div>
+                    <div class="t-user-center__row-label">{{ t('security.twoFactor.global') }}</div>
+                    <div class="t-user-center__hint">{{ t('security.twoFactor.globalHint') }}</div>
+                  </div>
+                  <NSpace size="small" align="center">
+                    <NTag :type="twoFactor?.isEnabled ? 'success' : 'warning'" size="small" :bordered="false">
+                      {{ twoFactor?.isEnabled ? t('security.twoFactor.enabled') : t('security.twoFactor.disabled') }}
+                    </NTag>
+                    <NPopconfirm v-if="twoFactor?.isEnabled" @positive-click="disableTwoFactor">
+                      <template #trigger>
+                        <NButton size="tiny" type="warning" ghost :loading="togglingTwoFactor">
+                          {{ t('security.twoFactor.disable') }}
+                        </NButton>
+                      </template>
+                      {{ t('security.twoFactor.confirmDisable') }}
+                    </NPopconfirm>
+                  </NSpace>
                 </div>
-                <NSpace size="small" align="center">
-                  <NTag :type="twoFactor?.isEnabled ? 'success' : 'warning'" size="small" :bordered="false">
-                    {{ twoFactor?.isEnabled ? t('security.twoFactor.enabled') : t('security.twoFactor.disabled') }}
-                  </NTag>
-                  <NPopconfirm v-if="twoFactor?.isEnabled" @positive-click="disableTwoFactor">
-                    <template #trigger>
-                      <NButton size="tiny" type="warning" ghost :loading="togglingTwoFactor">
-                        {{ t('security.twoFactor.disable') }}
-                      </NButton>
-                    </template>
-                    {{ t('security.twoFactor.confirmDisable') }}
-                  </NPopconfirm>
-                </NSpace>
+                </div>
               </div>
-            </div>
+            </section>
 
-            <!-- ===== Sessions (login devices) =====
-                 Table-section variant: the NDataTable owns its own scroll
-                 + pagination so the outer page never scrolls. -->
-            <div v-else-if="activeTab === 'sessions'" class="t-user-center__section t-user-center__section--table">
-              <header class="t-user-center__section-header">
+            <!-- ===== Sessions (login devices) ===== -->
+            <section v-else-if="activeTab === 'sessions'" class="t-user-center__section">
+              <header class="t-user-center__section-bar">
                 <h3 class="t-user-center__section-title">{{ t('sessions.title') }}</h3>
                 <NPopconfirm @positive-click="revokeAll">
                   <template #trigger>
@@ -249,111 +236,128 @@
                   {{ t('sessions.confirmRevokeAll') }}
                 </NPopconfirm>
               </header>
-              <p class="t-user-center__hint">{{ t('sessions.hint') }}</p>
-              <NDataTable
-                :data="sessions"
-                :columns="sessionColumns"
-                :row-key="(r: UserSessionDto) => r.id"
-                size="small"
-                :bordered="false"
-                :loading="loadingSessions"
-                :flex-height="true"
-                :pagination="{ pageSize: 10 }"
-              />
-            </div>
+              <div class="t-user-center__section-body t-user-center__section-body--fill">
+                <p class="t-user-center__hint">{{ t('sessions.hint') }}</p>
+                <TResponsiveTable
+                  class="t-user-center__table"
+                  :data="sessions"
+                  :columns="sessionColumns"
+                  :row-key="(r: UserSessionDto) => r.id"
+                  size="small"
+                  :bordered="false"
+                  :loading="loadingSessions"
+                  :flex-height="true"
+                  :pagination="{ pageSize: 10 }"
+                />
+              </div>
+            </section>
 
-            <!-- ===== Login history =====
-                 Same table-section variant — flex-fill + built-in pager. -->
-            <div v-else-if="activeTab === 'history'" class="t-user-center__section t-user-center__section--table">
-              <header class="t-user-center__section-header">
+            <!-- ===== Login history ===== -->
+            <section v-else-if="activeTab === 'history'" class="t-user-center__section">
+              <header class="t-user-center__section-bar">
                 <h3 class="t-user-center__section-title">{{ t('history.title') }}</h3>
                 <NButton size="small" tertiary :loading="loadingHistory" @click="loadHistory">
                   <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
                   {{ t('refresh') }}
                 </NButton>
               </header>
-              <NDataTable
-                :data="history"
-                :columns="historyColumns"
-                :row-key="(r: LoginLogDto) => r.id"
-                size="small"
-                :bordered="false"
-                :loading="loadingHistory"
-                :flex-height="true"
-                :pagination="{ pageSize: 15 }"
-              />
-            </div>
+              <div class="t-user-center__section-body t-user-center__section-body--fill">
+                <TResponsiveTable
+                  class="t-user-center__table"
+                  :data="history"
+                  :columns="historyColumns"
+                  :row-key="(r: LoginLogDto) => r.id"
+                  size="small"
+                  :bordered="false"
+                  :loading="loadingHistory"
+                  :flex-height="true"
+                  :pagination="{ pageSize: 15 }"
+                />
+              </div>
+            </section>
 
             <!-- ===== Linked accounts ===== -->
-            <div v-else-if="activeTab === 'linked'" class="t-user-center__section t-user-center__section--scroll">
-              <h3 class="t-user-center__section-title">{{ t('linked.title') }}</h3>
-              <p class="t-user-center__hint">{{ t('linked.hint') }}</p>
-              <NSpin :show="loadingLinked">
-                <ul v-if="linked.length" class="t-user-center__linked-list">
-                  <li v-for="acc in linked" :key="acc.loginProvider" class="t-user-center__linked-item">
-                    <div>
-                      <div class="t-user-center__row-label">{{ acc.providerDisplayName || acc.loginProvider }}</div>
-                      <div class="t-user-center__hint">{{ acc.providerKey }}</div>
-                    </div>
-                    <NPopconfirm @positive-click="unlink(acc.loginProvider)">
-                      <template #trigger>
-                        <NButton size="small" type="error" ghost>{{ t('linked.unlink') }}</NButton>
-                      </template>
-                      {{ t('linked.confirmUnlink') }}
-                    </NPopconfirm>
-                  </li>
-                </ul>
-                <div v-else class="t-user-center__empty">{{ t('linked.empty') }}</div>
-              </NSpin>
-            </div>
+            <section v-else-if="activeTab === 'linked'" class="t-user-center__section">
+              <header class="t-user-center__section-bar">
+                <h3 class="t-user-center__section-title">{{ t('linked.title') }}</h3>
+              </header>
+              <div class="t-user-center__section-body">
+                <div class="t-detail-content">
+                <p class="t-user-center__hint">{{ t('linked.hint') }}</p>
+                <NSpin :show="loadingLinked">
+                  <ul v-if="linked.length" class="t-user-center__linked-list">
+                    <li v-for="acc in linked" :key="acc.loginProvider" class="t-user-center__linked-item">
+                      <div>
+                        <div class="t-user-center__row-label">{{ acc.providerDisplayName || acc.loginProvider }}</div>
+                        <div class="t-user-center__hint">{{ acc.providerKey }}</div>
+                      </div>
+                      <NPopconfirm @positive-click="unlink(acc.loginProvider)">
+                        <template #trigger>
+                          <NButton size="small" type="error" ghost>{{ t('linked.unlink') }}</NButton>
+                        </template>
+                        {{ t('linked.confirmUnlink') }}
+                      </NPopconfirm>
+                    </li>
+                  </ul>
+                  <div v-else class="t-user-center__empty">{{ t('linked.empty') }}</div>
+                </NSpin>
+                </div>
+              </div>
+            </section>
 
             <!-- ===== Danger zone ===== -->
-            <div v-else-if="activeTab === 'danger'" class="t-user-center__section t-user-center__section--scroll">
-              <h3 class="t-user-center__section-title">{{ t('danger.title') }}</h3>
-              <p class="t-user-center__hint">{{ t('danger.hint') }}</p>
+            <section v-else-if="activeTab === 'danger'" class="t-user-center__section">
+              <header class="t-user-center__section-bar">
+                <h3 class="t-user-center__section-title">{{ t('danger.title') }}</h3>
+              </header>
+              <div class="t-user-center__section-body">
+                <div class="t-detail-content">
+                <p class="t-user-center__hint">{{ t('danger.hint') }}</p>
 
-              <NAlert type="info" :show-icon="false" style="margin-bottom: 12px">
-                <strong>{{ t('danger.export.title') }}</strong>
-                <p class="t-user-center__hint">{{ t('danger.export.hint') }}</p>
-                <NButton size="small" :loading="exporting" @click="exportData">
-                  <template #icon><TSvgIcon icon="mdi:download" :size="14" /></template>
-                  {{ t('danger.export.button') }}
-                </NButton>
-              </NAlert>
+                <NAlert type="info" :show-icon="false">
+                  <strong>{{ t('danger.export.title') }}</strong>
+                  <p class="t-user-center__hint">{{ t('danger.export.hint') }}</p>
+                  <NButton size="small" :loading="exporting" @click="exportData">
+                    <template #icon><TSvgIcon icon="mdi:download" :size="14" /></template>
+                    {{ t('danger.export.button') }}
+                  </NButton>
+                </NAlert>
 
-              <NAlert type="warning" :show-icon="false" style="margin-bottom: 12px">
-                <strong>{{ t('danger.deactivate.title') }}</strong>
-                <p class="t-user-center__hint">{{ t('danger.deactivate.hint') }}</p>
-                <NPopconfirm @positive-click="deactivateAccount">
-                  <template #trigger>
-                    <NButton size="small" type="warning" ghost :loading="deactivating">
-                      {{ t('danger.deactivate.button') }}
-                    </NButton>
-                  </template>
-                  {{ t('danger.deactivate.confirm') }}
-                </NPopconfirm>
-              </NAlert>
+                <NAlert type="warning" :show-icon="false">
+                  <strong>{{ t('danger.deactivate.title') }}</strong>
+                  <p class="t-user-center__hint">{{ t('danger.deactivate.hint') }}</p>
+                  <NPopconfirm @positive-click="deactivateAccount">
+                    <template #trigger>
+                      <NButton size="small" type="warning" ghost :loading="deactivating">
+                        {{ t('danger.deactivate.button') }}
+                      </NButton>
+                    </template>
+                    {{ t('danger.deactivate.confirm') }}
+                  </NPopconfirm>
+                </NAlert>
 
-              <NAlert type="error" :show-icon="false">
-                <strong>{{ t('danger.delete.title') }}</strong>
-                <p class="t-user-center__hint">{{ t('danger.delete.hint') }}</p>
-                <NPopconfirm @positive-click="deleteAccount">
-                  <template #trigger>
-                    <NButton size="small" type="error" :loading="deleting">
-                      {{ t('danger.delete.button') }}
-                    </NButton>
-                  </template>
-                  {{ t('danger.delete.confirm') }}
-                </NPopconfirm>
-              </NAlert>
-            </div>
+                <NAlert type="error" :show-icon="false">
+                  <strong>{{ t('danger.delete.title') }}</strong>
+                  <p class="t-user-center__hint">{{ t('danger.delete.hint') }}</p>
+                  <NPopconfirm @positive-click="deleteAccount">
+                    <template #trigger>
+                      <NButton size="small" type="error" :loading="deleting">
+                        {{ t('danger.delete.button') }}
+                      </NButton>
+                    </template>
+                    {{ t('danger.delete.confirm') }}
+                  </NPopconfirm>
+                </NAlert>
+                </div>
+              </div>
+            </section>
           </NSpin>
-        </section>
-      </div>
-    </NCard>
+        </div>
+      </template>
+    </TDetailLayout>
 
     <!-- Change email / phone (two-step verify) -->
-    <NModal v-model:show="changeModal.show" preset="card" style="width: 480px">
+    <NModal v-model:show="changeModal.show" preset="card" class="w-480px">
       <template #header>
         <span>{{ changeModalTitle }}</span>
       </template>
@@ -371,7 +375,7 @@
         <p class="t-user-center__hint">{{ t('changeModal.hint') }}</p>
       </NForm>
       <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
+        <div class="flex justify-end gap-8px">
           <NButton @click="changeModal.show = false">{{ t('changeModal.cancel') }}</NButton>
           <NButton
             v-if="changeModal.step === 'send'"
@@ -400,18 +404,16 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import type { DataTableColumns, MenuOption } from 'naive-ui'
+import type { DataTableColumns } from 'naive-ui'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import {
   NAlert,
   NButton,
-  NCard,
-  NDataTable,
   NDatePicker,
   NDivider,
   NForm,
   NFormItem,
   NInput,
-  NMenu,
   NModal,
   NPopconfirm,
   NSelect,
@@ -420,6 +422,8 @@ import {
   NTag,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import TDetailLayout from '../../components/detail/TDetailLayout.vue'
+import type { DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { deviceIconColor, parseDeviceInfo } from '../_shared/device-info'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
@@ -453,18 +457,20 @@ function logoutAndRedirect(): void {
   void router.replace({ name: 'login' }).catch(() => undefined)
 }
 
-// ---- Active tab -----------------------------------------------------------
-const activeTab = ref<'profile' | 'security' | 'sessions' | 'history' | 'linked' | 'danger'>(
-  'profile',
-)
+// ---- Active section -------------------------------------------------------
+const activeTab = ref<string>('profile')
 
-const navOptions = computed<MenuOption[]>(() => [
-  { key: 'profile', label: t('nav.profile'), icon: () => h(TSvgIcon, { icon: 'mdi:account-outline', size: 16 }) },
-  { key: 'security', label: t('nav.security'), icon: () => h(TSvgIcon, { icon: 'mdi:shield-lock-outline', size: 16 }) },
-  { key: 'sessions', label: t('nav.sessions'), icon: () => h(TSvgIcon, { icon: 'mdi:devices', size: 16 }) },
-  { key: 'history', label: t('nav.history'), icon: () => h(TSvgIcon, { icon: 'mdi:history', size: 16 }) },
-  { key: 'linked', label: t('nav.linked'), icon: () => h(TSvgIcon, { icon: 'mdi:link-variant', size: 16 }) },
-  { key: 'danger', label: t('nav.danger'), icon: () => h(TSvgIcon, { icon: 'mdi:alert-circle-outline', size: 16 }) },
+// Sections are grouped into three buckets in the left menu (BotDetail-style
+// grouped NMenu): Account (profile/security), Activity (sessions/history),
+// Advanced (linked/danger). `group` is the pre-translated label; TDetailLayout
+// renders one NMenu group header per distinct value, preserving first-seen order.
+const sections = computed<DetailSection[]>(() => [
+  { key: 'profile', label: t('nav.profile'), icon: 'mdi:account-outline', group: t('nav.groups.account') },
+  { key: 'security', label: t('nav.security'), icon: 'mdi:shield-lock-outline', group: t('nav.groups.account') },
+  { key: 'sessions', label: t('nav.sessions'), icon: 'mdi:devices', group: t('nav.groups.activity') },
+  { key: 'history', label: t('nav.history'), icon: 'mdi:history', group: t('nav.groups.activity') },
+  { key: 'linked', label: t('nav.linked'), icon: 'mdi:link-variant', group: t('nav.groups.advanced') },
+  { key: 'danger', label: t('nav.danger'), icon: 'mdi:alert-circle-outline', group: t('nav.groups.advanced') },
 ])
 
 // ---- Profile state --------------------------------------------------------
@@ -750,23 +756,20 @@ const sessionColumns = computed<DataTableColumns<UserSessionDto>>(() => [
     key: 'deviceInfo',
     title: t('sessions.cols.device'),
     render: (row) => {
-      // Same icon+label rendering as the admin SessionManagement page.
-      // Keeping the visual identical across "my sessions" and "user's
-      // sessions" makes the two surfaces feel coherent.
-      const profile = parseDeviceInfo(row.deviceInfo)
+      const deviceProfile = parseDeviceInfo(row.deviceInfo)
       return h(
         'span',
-        { style: 'display: inline-flex; align-items: center; gap: 6px' },
+        { class: 'inline-flex items-center gap-6px' },
         [
           h(TSvgIcon, {
-            icon: profile.icon,
+            icon: deviceProfile.icon,
             size: 16,
-            style: `color: ${deviceIconColor(profile.osFamily)}`,
+            style: `color: ${deviceIconColor(deviceProfile.osFamily)}`,
           }),
           h(
             'span',
-            { style: 'font-size: 13px', title: row.deviceInfo ?? '' },
-            profile.label,
+            { class: 'text-13px', title: row.deviceInfo ?? '' },
+            deviceProfile.label,
           ),
         ],
       )
@@ -943,111 +946,95 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Root uses shared `.t-stack-page` (height:100% + flex column) so the
-   single wrapping NCard can claim residual height and the right-pane
-   sections control their own scroll. Modals teleport to body so they
-   don't collide with these selectors; there's only one NCard inside
-   `.t-user-center` itself. */
-.t-user-center :deep(.n-card) {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.t-user-center :deep(.n-card-content) {
-  flex: 1 1 auto;
+.t-user-center {
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.t-user-center__layout {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 24px;
+/* Slim header (avatar + name + roles) rendered in TDetailLayout's #title. */
+.t-user-center__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.t-user-center__head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.t-user-center__head-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+  line-height: 1.2;
+}
+.t-user-center__head-meta {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* Right content panel — fills TDetailLayout's white panel card. The panel
+   itself never scrolls; each section owns a fixed bar + a scrolling (or
+   flex-height-filling) body, mirroring BotDetail's per-tab header + body. */
+.t-user-center__panel {
   flex: 1 1 auto;
   min-height: 0;
-}
-@media (max-width: 768px) {
-  .t-user-center__layout {
-    grid-template-columns: 1fr;
-  }
-}
-.t-user-center__nav {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 8px;
-  overflow-y: auto;
-  min-height: 0;
-}
-@media (max-width: 768px) {
-  .t-user-center__nav {
-    border-right: none;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-right: 0;
-    padding-bottom: 8px;
-    overflow-y: visible;
-  }
-}
-/* Right pane is a flex column. Each section decides whether to scroll
-   itself (--scroll: form / security / linked / danger) or let its
-   NDataTable handle scroll via flex-height (--table: sessions / history).
-   No overflow at this level so the table's flex-height has a definite
-   parent box to size against. */
-.t-user-center__content {
-  min-width: 0;
-  min-height: 0;
-  padding: 0 4px;
   display: flex;
   flex-direction: column;
 }
+.t-user-center__panel :deep(.n-spin-container),
+.t-user-center__panel :deep(.n-spin-content) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* A section = a fixed header bar + a body that claims the residual height. */
 .t-user-center__section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   flex: 1 1 auto;
   min-height: 0;
 }
-/* Form-heavy sections: scroll the section internally so deep forms
-   stay reachable without the whole page scrolling. */
-.t-user-center__section--scroll {
-  overflow-y: auto;
-}
-/* Table sections: NDataTable inside grows to fill residual height —
-   the table's built-in scroll body + pagination footer then handle
-   internal vertical overflow. */
-.t-user-center__section--table :deep(.n-data-table) {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* The NSpin wrapper inside the right pane is the only intermediate
-   node between `.t-user-center__content` and the active section. It
-   has to inherit flex/fill or the section can't claim the residual
-   height for `:flex-height` on the NDataTable to work. */
-.t-user-center__content :deep(.n-spin-container),
-.t-user-center__content :deep(.n-spin-content) {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.t-user-center__section-header {
+
+/* Fixed header bar: title (left) + section actions (right). Stays pinned
+   while the body scrolls underneath. */
+.t-user-center__section-bar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tnzi-border);
 }
-.t-user-center__section-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--tnzi-base-text);
-}
-.t-user-center__identity {
+
+/* Body: fills the remaining height. Forms / lists scroll here; table sections
+   add `--fill` so the flex-height NDataTable owns the scroll instead. */
+.t-user-center__section-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 0 4px;
+  flex-direction: column;
+  gap: 12px;
 }
+.t-user-center__section-body--fill {
+  overflow: hidden;
+}
+.t-user-center__table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .t-user-center__avatar {
   width: 64px;
   height: 64px;
@@ -1059,6 +1046,10 @@ onMounted(() => {
   overflow: hidden;
   flex-shrink: 0;
 }
+.t-user-center__avatar--sm {
+  width: 36px;
+  height: 36px;
+}
 .t-user-center__avatar-img {
   width: 100%;
   height: 100%;
@@ -1066,19 +1057,25 @@ onMounted(() => {
 }
 .t-user-center__avatar-initials {
   color: var(--tnzi-primary);
-  font-size: 28px;
   font-weight: 600;
   line-height: 1;
 }
-.t-user-center__user-name {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 600;
+.t-user-center__avatar--sm .t-user-center__avatar-initials {
+  font-size: 16px;
 }
-.t-user-center__user-meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+
+.t-user-center__section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+/* In-body sub-heading (password / 2FA blocks within the Security section). */
+.t-user-center__sub-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
 }
 .t-user-center__hint {
   color: var(--tnzi-base-text-muted);
@@ -1096,14 +1093,6 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 }
-/*
- * `:show-feedback="false"` strips the 24px feedback slot that normally
- * spaces consecutive NFormItems, so single-column form-items (bio /
- * address / website / change-password fields when stacked) collide
- * vertically. Restore explicit spacing. Inside the grid, the grid gap
- * already handles spacing — reset the per-item margin there to avoid
- * doubled gaps.
- */
 .t-user-center__section :deep(.n-form-item) {
   margin-bottom: 12px;
 }
@@ -1117,6 +1106,17 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+/* Form-end action bar (Save / Reset) — right-aligned within the capped
+   content column so the buttons line up with the form's right edge, never
+   floating out at the full panel width. Mirrors BotDetail's `.save-bar`. */
+.t-user-center__save-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--tnzi-border);
 }
 .t-user-center__row {
   display: flex;

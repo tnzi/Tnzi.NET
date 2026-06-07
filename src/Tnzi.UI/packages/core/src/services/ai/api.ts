@@ -729,6 +729,8 @@ export function useAdminWorkflowApi(client: HttpClient) {
 /** Admin MCP server management API */
 export function useAdminMcpApi(client: HttpClient) {
   const base = '/admin/mcp';
+  // External MCP server registry CRUD moved to AIMcpClientModule (Tnzi as MCP client)
+  const clientBase = '/admin/mcp/client/servers';
   return {
     /** Get MCP server status */
     getStatus: () =>
@@ -750,34 +752,34 @@ export function useAdminMcpApi(client: HttpClient) {
     removeAgent: (agentId: string) =>
       client.delete<void>(`${base}/agents/${agentId}`),
 
-    // ---- Entity-driven MCP Server Registration CRUD (Phase 5 backend prereq) ----
+    // ---- External MCP Server Registration CRUD ----
     // Catalog of EXTERNAL MCP servers Tnzi can connect to as a client. Auth tokens
-    // are encrypted server-side; DTOs only expose `hasAuthToken` boolean. Routes
-    // live under /admin/mcp/entities/* alongside the legacy hosting endpoints.
+    // are encrypted server-side; DTOs only expose `hasAuthToken` boolean. Backed by
+    // AIMcpClientModule's DefaultMcpClientAdminController at /admin/mcp/client/servers/*.
 
     /** Page MCP server registrations */
     getList: (query: McpServerRegistrationQueryDto) =>
-      client.post<PagedList<McpServerRegistrationDto>>(`${base}/entities/query`, query),
+      client.post<PagedList<McpServerRegistrationDto>>(`${clientBase}/query`, query),
 
     /** Get a single MCP server registration by id */
     getById: (id: string) =>
-      client.get<McpServerRegistrationDto>(`${base}/entities/${id}`),
+      client.get<McpServerRegistrationDto>(`${clientBase}/${id}`),
 
     /** Create a new MCP server registration */
     create: (data: CreateMcpServerRegistrationDto) =>
-      client.post<McpServerRegistrationDto>(`${base}/entities`, data),
+      client.post<McpServerRegistrationDto>(`${clientBase}`, data),
 
     /** Update an existing MCP server registration */
     update: (id: string, data: UpdateMcpServerRegistrationDto) =>
-      client.put<McpServerRegistrationDto>(`${base}/entities/${id}`, data),
+      client.put<McpServerRegistrationDto>(`${clientBase}/${id}`, data),
 
     /** Soft-delete an MCP server registration */
     delete: (id: string) =>
-      client.delete<void>(`${base}/entities/${id}`),
+      client.delete<void>(`${clientBase}/${id}`),
 
     /** Shallow probe — verifies entity is enabled, URI parses, credentials decrypt */
     test: (id: string) =>
-      client.post<McpServerTestResultDto>(`${base}/entities/${id}/test`, {}),
+      client.post<McpServerTestResultDto>(`${clientBase}/${id}/test`, {}),
   };
 }
 

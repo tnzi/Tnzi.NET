@@ -53,6 +53,8 @@ export interface AdminThemeSnapshotV1 {
     colourWeakness?: boolean
     /** Phase G addition — same versioning rules. */
     closeTabByMiddleClick?: boolean
+    /** Tab-bar active-tab auto-scroll animation (smooth vs instant). */
+    tabScrollAnimation?: boolean
     /** Phase H1 — scroll mode (content vs wrapper). */
     scrollMode?: 'content' | 'wrapper'
     /** Phase H2 — mix-layout specific widths + auto-select toggle. */

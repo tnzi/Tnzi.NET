@@ -1,4 +1,5 @@
 export * from './useColumnSettings'
+export * from './rowActions'
 export * from './useBatchActions'
 export * from './useFormModal'
 export * from './useCrudPage'
@@ -16,3 +17,5 @@ export * from './useBreakpoint'
 // derivations without mounting TAdminShell (e.g. building a custom
 // shell, headless E2E checks).
 export * from './useAdminShellLayout'
+export { useDetail } from './useDetail'
+export type { DetailMode, DetailAction, DetailLayout, DetailSection, UseDetailOptions, UseDetailReturn } from './useDetail'

@@ -9,35 +9,29 @@
     bottom of the visible card. Read-mostly; one destructive button
     (clear) gated by NPopconfirm.
     -->
-  <div class="t-perf-page t-stack-page">
-    <div class="t-perf-page__header">
-      <div class="t-perf-page__title">
-        <TSvgIcon icon="mdi:speedometer" :size="20" />
-        <h2>{{ t('title') }}</h2>
-      </div>
-      <div class="t-perf-page__toolbar">
-        <NSelect
-          v-model:value="windowMinutes"
-          :options="windowOptions"
-          size="medium"
-          style="width: 160px"
-          @update:value="refresh"
-        />
-        <NButton size="small" :loading="loading" @click="refresh">
-          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-          {{ t('actions.refresh') }}
-        </NButton>
-        <NPopconfirm @positive-click="clearAll">
-          <template #trigger>
-            <NButton size="small" type="warning" tertiary>
-              <template #icon><TSvgIcon icon="mdi:delete-sweep-outline" :size="14" /></template>
-              {{ t('actions.clear') }}
-            </NButton>
-          </template>
-          {{ t('clearConfirm') }}
-        </NPopconfirm>
-      </div>
-    </div>
+  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+    <template #actions>
+      <NSelect
+        v-model:value="windowMinutes"
+        :options="windowOptions"
+        size="small"
+        class="w-160px"
+        @update:value="refresh"
+      />
+      <NButton size="small" :loading="loading" @click="refresh">
+        <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+        {{ t('actions.refresh') }}
+      </NButton>
+      <NPopconfirm @positive-click="clearAll">
+        <template #trigger>
+          <NButton size="small" type="warning" tertiary>
+            <template #icon><TSvgIcon icon="mdi:delete-sweep-outline" :size="14" /></template>
+            {{ t('actions.clear') }}
+          </NButton>
+        </template>
+        {{ t('clearConfirm') }}
+      </NPopconfirm>
+    </template>
 
     <div class="t-perf-page__kpis">
       <NCard size="small" :bordered="false">
@@ -61,11 +55,11 @@
       <NTabPane name="endpoints" :tab="t('sections.endpoints')">
         <div class="t-table-tabs__pane">
           <div class="t-table-tabs__toolbar">
-            <NText depth="3" style="font-size: 12px">
+            <NText depth="3" class="text-12px">
               {{ t('sections.endpointsHint', { minutes: windowMinutes }) }}
             </NText>
           </div>
-          <NDataTable
+          <TResponsiveTable
             :columns="endpointColumns"
             :data="endpoints"
             :loading="loading"
@@ -80,11 +74,11 @@
       <NTabPane name="slow" :tab="t('sections.slow')">
         <div class="t-table-tabs__pane">
           <div class="t-table-tabs__toolbar">
-            <NText depth="3" style="font-size: 12px">
+            <NText depth="3" class="text-12px">
               {{ t('sections.slowHint') }}
             </NText>
           </div>
-          <NDataTable
+          <TResponsiveTable
             :columns="slowColumns"
             :data="slow"
             :loading="loading"
@@ -96,15 +90,15 @@
         </div>
       </NTabPane>
     </NTabs>
-  </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import {
   NButton,
   NCard,
-  NDataTable,
   NPopconfirm,
   NSelect,
   NStatistic,
@@ -125,6 +119,7 @@ import {
 } from '../../services/bridges/performance-bridge'
 import { interpolate, translatePageKey } from '../_shared/translate'
 import { methodTone } from '../_shared/http-method'
+import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createPerformanceBridge({ client: useAdminClient() })
 
@@ -161,7 +156,7 @@ const endpointColumns: DataTableColumns<EndpointStatsDto> = [
     title: () => t('cols.path'),
     key: 'path',
     ellipsis: { tooltip: true },
-    render: (row) => h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.path),
+    render: (row) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.path),
   },
   {
     title: () => t('cols.count'),
@@ -228,7 +223,7 @@ const slowColumns: DataTableColumns<SlowRequestRecordDto> = [
     title: () => t('cols.path'),
     key: 'path',
     ellipsis: { tooltip: true },
-    render: (row) => h('code', { style: 'font-family: var(--tnzi-font-mono); font-size: 12px;' }, row.path),
+    render: (row) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.path),
   },
   {
     title: () => t('cols.status'),
@@ -302,34 +297,8 @@ onMounted(() => {
 
 <style scoped>
 /* Page-specific decorations only — layout flex shell + table-card flex
-   sizing comes from the shared `.t-stack-page` + `.t-table-tabs`
+   sizing comes from TContentPage (scroll="fill") + shared `.t-table-tabs`
    utilities (styles/polish.css). */
-.t-perf-page__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  padding: 16px 20px;
-  background: var(--tnzi-container-bg);
-  border: 1px solid var(--tnzi-border);
-  border-radius: 8px;
-}
-.t-perf-page__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.t-perf-page__title h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-.t-perf-page__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .t-perf-page__kpis {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

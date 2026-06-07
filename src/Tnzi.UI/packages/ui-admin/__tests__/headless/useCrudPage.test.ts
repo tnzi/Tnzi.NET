@@ -273,4 +273,157 @@ describe('useCrudPage', () => {
     // No new fetch was triggered.
     expect(bridge.fetchData).toHaveBeenCalledTimes(1)
   })
+
+  it('canCreate/canUpdate/canDelete reflect which write callbacks were supplied', () => {
+    const readOnly = useCrudPage<{ id: number }>({
+      pageId: 'test.readonly',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    expect(readOnly.canCreate).toBe(false)
+    expect(readOnly.canUpdate).toBe(false)
+    expect(readOnly.canDelete).toBe(false)
+
+    const full = useCrudPage<{ id: number }>({
+      pageId: 'test.full',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+      createData: async (d) => ({ id: 1, ...d }) as { id: number },
+      updateData: async (_id, d) => ({ id: 1, ...d }) as { id: number },
+      deleteData: async () => undefined,
+    })
+    expect(full.canCreate).toBe(true)
+    expect(full.canUpdate).toBe(true)
+    expect(full.canDelete).toBe(true)
+  })
+
+  it('submit() is a no-op (returns null, no throw) when createData is absent', async () => {
+    const state = useCrudPage<{ id: number; name: string }>({
+      pageId: 'test.nocreate',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    state.openCreate()
+    const result = await state.submit()
+    expect(result).toBeNull()
+    expect(state.formModal.visible.value).toBe(false)
+  })
+
+  it('submit() is a no-op (returns null, no throw) in edit mode when updateData is absent', async () => {
+    const state = useCrudPage<{ id: number; name: string }>({
+      pageId: 'test.noupdate',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    state.openEdit({ id: 5, name: 'Existing' })
+    const result = await state.submit()
+    expect(result).toBeNull()
+    expect(state.formModal.visible.value).toBe(false)
+  })
+
+  it('handleDelete() is a no-op (no throw) when deleteData is absent', async () => {
+    const state = useCrudPage<{ id: number }>({
+      pageId: 'test.nodelete',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    await expect(state.handleDelete([1])).resolves.toBeUndefined()
+  })
+
+  it('openView opens the modal in view mode with a cloned copy', () => {
+    const state = useCrudPage<{ id: number; name: string }>({
+      pageId: 'test.view',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    const row = { id: 7, name: 'Vue' }
+    state.openView(row)
+    expect(state.formModal.visible.value).toBe(true)
+    expect(state.formModal.mode.value).toBe('view')
+    expect(state.formModal.formData.value).toEqual(row)
+    // cloned, not the same reference (modal edits don't mutate the source row)
+    expect(state.formModal.formData.value).not.toBe(row)
+  })
+
+  it('setSort updates sort fields without resetting the page', () => {
+    const state = useCrudPage<{ id: number }>({
+      pageId: 'test.sort',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    state.setPage(2)
+    state.setSort('name', 'asc')
+    expect(state.query.value.sortField).toBe('name')
+    expect(state.query.value.sortOrder).toBe('asc')
+    expect(state.query.value.pageIndex).toBe(2)
+  })
+
+  it('setFilters replaces filters and resets to page 1', () => {
+    const state = useCrudPage<{ id: number }>({
+      pageId: 'test.filters',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    state.setPage(3)
+    state.setFilters({ status: 2 })
+    expect(state.query.value.filters).toEqual({ status: 2 })
+    expect(state.query.value.pageIndex).toBe(1)
+  })
+
+  it('setPageSize updates pageSize and resets to page 1', () => {
+    const state = useCrudPage<{ id: number }>({
+      pageId: 'test.pagesize',
+      columns: [{ key: 'id', title: 'ID' }],
+      rowKey: (r) => r.id,
+      fetchData: async () => ({
+        items: [], totalCount: 0, pageIndex: 1, pageSize: 20,
+        totalPages: 0, hasPreviousPage: false, hasNextPage: false,
+      }),
+    })
+    state.setPage(3)
+    state.setPageSize(50)
+    expect(state.query.value.pageSize).toBe(50)
+    expect(state.query.value.pageIndex).toBe(1)
+  })
+
+  it('exposes the configured detailMode (default "modal")', () => {
+    const base = {
+      pageId: 't', columns: [], rowKey: (r: { id: number }) => r.id,
+      fetchData: async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 }),
+    }
+    expect(useCrudPage(base).detailMode.value).toBe('modal')
+    expect(useCrudPage({ ...base, detailMode: 'drawer' as const }).detailMode.value).toBe('drawer')
+  })
 })

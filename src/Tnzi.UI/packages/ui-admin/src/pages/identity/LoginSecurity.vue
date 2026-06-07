@@ -1,114 +1,122 @@
 <template>
   <!--
     LoginSecurity — surfaces /admin/login-security/{overview,frequent-failures}
-    for the Tnzi.Identity module. Read-only dashboard with KPI strip,
-    failure-rate progress bar, and a table of users currently hitting the
-    configured failure threshold (with their associated IP addresses).
+    for the Tnzi.Identity module. Read-only dashboard: KPI strip + failure-rate
+    bar + a table of users hitting the failure threshold. Built on TContentPage
+    (white page-header + small toolbar in #actions); the failures table fills
+    the residual height via the shared `t-table-card` + flex-height pattern.
   -->
-  <div class="t-sec-page">
-    <div class="t-sec-page__header">
-      <div class="t-sec-page__title">
-        <TSvgIcon icon="mdi:shield-account-outline" :size="20" />
-        <h2>{{ t('title') }}</h2>
-      </div>
-      <div class="t-sec-page__toolbar">
-        <NSelect
-          v-model:value="hours"
-          :options="windowOptions"
-          size="medium"
-          style="width: 150px"
-          @update:value="refresh"
-        />
-        <NInputNumber
-          v-model:value="minFailures"
-          :min="1"
-          :max="50"
-          size="medium"
-          style="width: 140px"
-          @update:value="refresh"
-        >
-          <template #prefix>{{ t('toolbar.minFailures') }}:</template>
-        </NInputNumber>
-        <NButton size="small" :loading="loading" @click="refresh">
-          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-          {{ t('actions.refresh') }}
-        </NButton>
-      </div>
-    </div>
-
-    <div class="t-sec-page__kpis">
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.success')" :value="overview?.successfulLogins ?? 0">
-          <template #suffix>
-            <TSvgIcon icon="mdi:check-circle-outline" :size="14" style="color: var(--tnzi-success)" />
-          </template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.failures')" :value="overview?.failedLogins ?? 0">
-          <template #suffix>
-            <TSvgIcon icon="mdi:alert-circle-outline" :size="14" style="color: var(--tnzi-error)" />
-          </template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.failureRate')">
-          <template #default>
-            <span :style="{ color: failureColor }">{{ formatPercent(overview?.failureRate) }}</span>
-          </template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.lockedOut')" :value="overview?.lockedOutUsers ?? 0">
-          <template #suffix>
-            <NTag v-if="(overview?.lockedOutUsers ?? 0) > 0" size="tiny" type="warning" :bordered="false">
-              {{ t('kpi.actionNeeded') }}
-            </NTag>
-          </template>
-        </NStatistic>
-      </NCard>
-    </div>
-
-    <NCard :title="t('sections.failureRate')" size="small" :bordered="false">
-      <div class="t-sec-page__progress-wrap">
-        <NProgress
-          type="line"
-          :percentage="Math.min(100, Math.max(0, overview?.failureRate ?? 0))"
-          :status="failureProgressStatus"
-          :indicator-placement="'inside'"
-          :height="22"
-        />
-        <div class="t-sec-page__progress-hint">
-          {{ t('sections.failureRateHint', { hours: overview?.timeRangeHours ?? hours }) }}
-        </div>
-      </div>
-    </NCard>
-
-    <NCard :title="t('sections.frequentFailures')" size="small" :bordered="false">
-      <template #header-extra>
-        <NTag :bordered="false" size="small">
-          {{ t('sections.threshold', { n: minFailures }) }}
-        </NTag>
-      </template>
-      <NDataTable
-        :columns="failuresColumns"
-        :data="failures"
-        :loading="loading"
-        :pagination="{ pageSize: 15 }"
-        :bordered="false"
+  <TContentPage
+    :title="t('title')"
+    icon="mdi:shield-account-outline"
+    :translate="t"
+    scroll="fill"
+  >
+    <template #actions>
+      <NSelect
+        v-model:value="hours"
+        :options="windowOptions"
         size="small"
+        class="w-140px"
+        @update:value="refresh"
       />
-    </NCard>
-  </div>
+      <NInputNumber
+        v-model:value="minFailures"
+        :min="1"
+        :max="50"
+        size="small"
+        class="w-150px"
+        @update:value="refresh"
+      >
+        <template #prefix>{{ t('toolbar.minFailures') }}:</template>
+      </NInputNumber>
+      <NButton size="small" :loading="loading" @click="refresh">
+        <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+        {{ t('actions.refresh') }}
+      </NButton>
+    </template>
+
+    <div class="t-sec-page">
+      <div class="t-sec-page__kpis">
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
+        </NCard>
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.success')" :value="overview?.successfulLogins ?? 0">
+            <template #suffix>
+              <TSvgIcon icon="mdi:check-circle-outline" :size="14" color="var(--tnzi-success)" />
+            </template>
+          </NStatistic>
+        </NCard>
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.failures')" :value="overview?.failedLogins ?? 0">
+            <template #suffix>
+              <TSvgIcon icon="mdi:alert-circle-outline" :size="14" color="var(--tnzi-error)" />
+            </template>
+          </NStatistic>
+        </NCard>
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.failureRate')">
+            <template #default>
+              <span :style="{ color: failureColor }">{{ formatPercent(overview?.failureRate) }}</span>
+            </template>
+          </NStatistic>
+        </NCard>
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
+        </NCard>
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
+        </NCard>
+        <NCard size="small" :bordered="false">
+          <NStatistic :label="t('kpi.lockedOut')" :value="overview?.lockedOutUsers ?? 0">
+            <template #suffix>
+              <NTag v-if="(overview?.lockedOutUsers ?? 0) > 0" size="tiny" type="warning" :bordered="false">
+                {{ t('kpi.actionNeeded') }}
+              </NTag>
+            </template>
+          </NStatistic>
+        </NCard>
+      </div>
+
+      <NCard :title="t('sections.failureRate')" size="small" :bordered="false">
+        <div class="t-sec-page__progress-wrap">
+          <NProgress
+            type="line"
+            :percentage="Math.min(100, Math.max(0, overview?.failureRate ?? 0))"
+            :status="failureProgressStatus"
+            :indicator-placement="'inside'"
+            :height="22"
+          />
+          <div class="t-sec-page__progress-hint">
+            {{ t('sections.failureRateHint', { hours: overview?.timeRangeHours ?? hours }) }}
+          </div>
+        </div>
+      </NCard>
+
+      <NCard
+        :title="t('sections.frequentFailures')"
+        size="small"
+        :bordered="false"
+        class="t-sec-page__table-card t-table-card"
+      >
+        <template #header-extra>
+          <NTag :bordered="false" size="small">
+            {{ t('sections.threshold', { n: minFailures }) }}
+          </NTag>
+        </template>
+        <TResponsiveTable
+          :columns="failuresColumns"
+          :data="failures"
+          :loading="loading"
+          :pagination="{ pageSize: 15 }"
+          :flex-height="true"
+          :bordered="false"
+          size="small"
+        />
+      </NCard>
+    </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
@@ -117,7 +125,6 @@ import { useRouter } from 'vue-router'
 import {
   NButton,
   NCard,
-  NDataTable,
   NInputNumber,
   NPopconfirm,
   NProgress,
@@ -127,9 +134,11 @@ import {
   NTag,
   NTooltip,
 } from 'naive-ui'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
+import TContentPage from '../../components/layout/TContentPage.vue'
 import { useAdminClient } from '../../plugin/client'
 import {
   createLoginSecurityBridge,
@@ -207,9 +216,7 @@ async function handleLock(row: UserFailedLoginSummaryDto): Promise<void> {
 
 function goToLoginLogs(row: UserFailedLoginSummaryDto): void {
   // Pre-filter the login-logs page by userId so admins can drill into the
-  // raw events behind a row's failure count in one click. The login-logs
-  // page reads `?userId=` from its query (if it does not, the param is
-  // harmless — falls back to the unfiltered list).
+  // raw events behind a row's failure count in one click.
   void router.push({ name: 'identity.loginLogs', query: { userId: row.userId } })
 }
 
@@ -247,7 +254,7 @@ const failuresColumns = computed<DataTableColumns<UserFailedLoginSummaryDto>>(()
     render: (row) =>
       h(
         'div',
-        { style: 'display: flex; flex-wrap: wrap; gap: 4px;' },
+        { class: 'flex flex-wrap gap-4px' },
         (row.ipAddresses ?? []).slice(0, 8).map((ip: string) =>
           h(NTag, { size: 'tiny', bordered: false }, () => ip),
         ),
@@ -325,9 +332,12 @@ async function refresh(): Promise<void> {
     ])
     overview.value = ov
     failures.value = fl
-  } catch {
+  } catch (e) {
+    // Surface the error so "no data" (genuinely empty) is distinguishable
+    // from a failing endpoint — previously this was swallowed silently.
     overview.value = null
     failures.value = []
+    message.error(e instanceof Error ? e.message : String(e))
   } finally {
     loading.value = false
   }
@@ -338,48 +348,30 @@ onMounted(() => { void refresh() })
 
 <style scoped>
 .t-sec-page {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  min-height: 0;
-}
-.t-sec-page__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  padding: 16px 20px;
-  background: var(--tnzi-container-bg);
-  border: 1px solid var(--tnzi-border);
-  border-radius: 8px;
-}
-.t-sec-page__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.t-sec-page__title h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-.t-sec-page__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 12px;
 }
 .t-sec-page__kpis {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 12px;
+  flex-shrink: 0;
 }
 @media (max-width: 1400px) {
   .t-sec-page__kpis { grid-template-columns: repeat(4, 1fr); }
 }
 @media (max-width: 768px) {
   .t-sec-page__kpis { grid-template-columns: repeat(2, 1fr); }
+}
+/* The failures table card claims the residual height; `t-table-card`
+   (polish.css) makes its NDataTable flex-fill so the built-in pager pins to
+   the card bottom. */
+.t-sec-page__table-card {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .t-sec-page__progress-wrap {
   display: flex;

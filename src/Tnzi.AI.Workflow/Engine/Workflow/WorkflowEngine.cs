@@ -181,51 +181,87 @@ public partial class WorkflowEngine
             foreach (var (stepId, nodeRecord, result, skipped) in results)
             {
                 completed.Add(stepId);
-                state.SetOutput(stepId, result.Output);
+
+                // 节点级错误策略：在失败时决定输出内容与是否中止
+                var step = prepared.First(p => string.Equals(p.StepId, stepId, StringComparison.OrdinalIgnoreCase)).Step;
+                var effectiveResult = result;
+                if (!result.IsSuccess && !skipped)
+                {
+                    switch (step.OnError)
+                    {
+                        case NodeErrorPolicy.Skip:
+                            // 跳过：空输出，不中止工作流
+                            effectiveResult = new WorkflowNodeResult
+                            {
+                                Output = string.Empty,
+                                IsSuccess = true,
+                                Error = result.Error,
+                                DurationMs = result.DurationMs
+                            };
+                            _logger.LogWarning("Workflow node '{StepId}' failed (OnError=Skip, continuing): {Error}", stepId, result.Error);
+                            break;
+
+                        case NodeErrorPolicy.Continue:
+                            // Continue：以错误文本作为输出，不中止工作流
+                            effectiveResult = new WorkflowNodeResult
+                            {
+                                Output = result.Output.Text.Length > 0 ? result.Output : new WorkflowStepOutput { Text = result.Error ?? string.Empty },
+                                IsSuccess = true,
+                                Error = result.Error,
+                                DurationMs = result.DurationMs,
+                                Usage = result.Usage
+                            };
+                            _logger.LogWarning("Workflow node '{StepId}' failed (OnError=Continue, continuing): {Error}", stepId, result.Error);
+                            break;
+
+                        default:
+                            // Fail（默认）：中止工作流
+                            failed = true;
+                            _logger.LogWarning("Workflow node '{StepId}' failed: {Error}", stepId, result.Error);
+                            break;
+                    }
+                }
+
+                state.SetOutput(stepId, effectiveResult.Output);
 
                 stepResults.Add(new WorkflowStepResultDto
                 {
                     StepId = stepId,
-                    Output = result.Output.Text,
+                    Output = effectiveResult.Output.Text,
                     Skipped = skipped
                 });
 
                 // 聚合 token 用量
-                if (result.Usage != null)
+                if (effectiveResult.Usage != null)
                 {
-                    totalInputTokens += result.Usage.InputTokens;
-                    totalOutputTokens += result.Usage.OutputTokens;
-                }
-
-                if (!result.IsSuccess)
-                {
-                    failed = true;
-                    _logger.LogWarning("Workflow node '{StepId}' failed: {Error}", stepId, result.Error);
+                    totalInputTokens += effectiveResult.Usage.InputTokens;
+                    totalOutputTokens += effectiveResult.Usage.OutputTokens;
                 }
 
                  if (!skipped)
                  {
+                     // 使用原始结果决定 RunNode 状态（Skip/Continue 策略下原始失败也记录为 Completed，让 Error 字段保留）
                      var nodeStatus = result.AwaitingApproval
                          ? AgentRunNodeStatus.AwaitingApproval
                          : result.AwaitingInterrupt != null
                              ? AgentRunNodeStatus.AwaitingApproval // 通用中断也使用 AwaitingApproval 状态
-                             : result.IsSuccess
+                             : effectiveResult.IsSuccess
                                  ? AgentRunNodeStatus.Completed
                                  : AgentRunNodeStatus.Failed;
 
-                     await UpdateRunNodeAsync(runStore, nodeRecord, nodeStatus, result, result.Error, cancellationToken);
+                     await UpdateRunNodeAsync(runStore, nodeRecord, nodeStatus, effectiveResult, result.Error, cancellationToken);
                  }
 
                 // 处理节点级审批暂停和通用中断
                 (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt, checkpointCreatedAt) =
                     await HandleApprovalInterruptAsync(
-                        result, stepId, failed, awaitingApproval, awaitingApprovalStepId, awaitingInterrupt,
+                        effectiveResult, stepId, failed, awaitingApproval, awaitingApprovalStepId, awaitingInterrupt,
                         checkpointStore, executionId, state, completed, checkpointCreatedAt, cancellationToken);
 
                 // 处理条件边路由
                 if (!skipped && !failed)
                 {
-                    await HandleConditionalEdgeAsync(graph, stepId, result, state, completed, runStore, run, nodeOrderIndex, cancellationToken);
+                    await HandleConditionalEdgeAsync(graph, stepId, effectiveResult, state, completed, runStore, run, nodeOrderIndex, cancellationToken);
                 }
 
                 // 处理循环
@@ -238,9 +274,7 @@ public partial class WorkflowEngine
             // 如果有节点请求审批暂停或通用中断，跳出主循环
             if (awaitingApproval || awaitingInterrupt != null) break;
 
-            // 默认失败策略：Fail Fast。
-            // 当前 DTO/配置尚未公开 ContinueOnError 等策略，因此只要本层有节点失败，
-            // 就在处理完当前就绪层后终止后续节点执行，避免把“失败后继续跑”变成隐式行为。
+            // 节点策略为 Fail 时，失败后终止工作流（Skip/Continue 策略的节点已在上方将 failed 置 false）
             if (failed) break;
 
             // HITL：检查本层是否有步骤需要人工审批

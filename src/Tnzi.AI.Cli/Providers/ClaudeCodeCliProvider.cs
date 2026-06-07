@@ -65,14 +65,23 @@ public class ClaudeCodeCliProvider : ICliAgentProvider
             psi.ArgumentList.Add(arg);
         }
 
-        // Host environment filtering — strip unwanted variables BEFORE applying
-        // provider/request overrides. When EnvironmentWhitelist is non-null, only
-        // listed keys survive. Null = legacy behavior (inherit everything).
-        if (providerOptions.EnvironmentWhitelist is not null)
+        // Host environment filtering — secure by default. Strip every variable not in
+        // the safe OS baseline (+ explicit EnvironmentWhitelist) BEFORE applying
+        // provider/request overrides, so host secrets never leak into the subprocess.
+        // Opt out with InheritAllHostEnvironment = true (legacy: inherit everything).
+        if (!providerOptions.InheritAllHostEnvironment)
         {
             var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-            var whitelist = new HashSet<string>(providerOptions.EnvironmentWhitelist, comparer);
-            var toRemove = psi.Environment.Keys.Where(k => !whitelist.Contains(k)).ToList();
+            var allowed = new HashSet<string>(CliProviderOptions.DefaultSafeEnvironmentKeys, comparer);
+            if (providerOptions.EnvironmentWhitelist is { Count: > 0 })
+            {
+                foreach (var key in providerOptions.EnvironmentWhitelist)
+                {
+                    allowed.Add(key);
+                }
+            }
+
+            var toRemove = psi.Environment.Keys.Where(k => !allowed.Contains(k)).ToList();
             foreach (var key in toRemove)
             {
                 psi.Environment.Remove(key);
@@ -151,7 +160,7 @@ public class ClaudeCodeCliProvider : ICliAgentProvider
             },
             CliEventType.ToolResult => new AgentStreamChunk { Text = evt.Content },
             CliEventType.Error => new AgentStreamChunk { Error = evt.Content },
-            CliEventType.Complete => new AgentStreamChunk { FinishReason = "stop" },
+            CliEventType.Complete => new AgentStreamChunk { FinishReason = "stop", Usage = evt.Usage },
             CliEventType.Status => null,
             _ => null
         };
@@ -325,13 +334,43 @@ public class ClaudeCodeCliProvider : ICliAgentProvider
             });
         }
 
-        // 第二个事件：完成标记
+        // 第二个事件：完成标记（携带归一化 Token 用量供 UsageLoggingMiddleware 记账）
         events.Add(new CliAgentEvent
         {
             EventType = CliEventType.Complete,
-            Metadata = metadata.Count > 0 ? metadata : null
+            Metadata = metadata.Count > 0 ? metadata : null,
+            Usage = ParseUsage(root)
         });
     }
+
+    /// <summary>
+    /// 从 result 事件的 usage 对象提取归一化 Token 用量。
+    /// Claude 字段: input_tokens / output_tokens / cache_read_input_tokens / cache_creation_input_tokens
+    /// </summary>
+    private static TokenUsageDto? ParseUsage(JsonElement root)
+    {
+        if (!root.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var input = GetInt(usage, "input_tokens");
+        var output = GetInt(usage, "output_tokens");
+        var cacheRead = GetInt(usage, "cache_read_input_tokens");
+        var cacheCreation = GetInt(usage, "cache_creation_input_tokens");
+
+        return new TokenUsageDto
+        {
+            InputTokens = input,
+            OutputTokens = output,
+            CachedInputTokens = cacheRead,
+            CacheCreationTokens = cacheCreation,
+            // Framework convention: TotalTokens = input + output only; cache tokens are
+            // tracked separately (matches AgentExecutor / ChatService / all providers).
+            TotalTokens = input + output
+        };
+    }
+
+    private static int GetInt(JsonElement obj, string name)
+        => obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
 
     /// <summary>
     /// 提取 tool_result 的 content（支持 string 和 array 两种格式）

@@ -182,7 +182,7 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
          four per row (6). This replaces the previous `:cols="kpis.length"`
          that forced 4 tiny tiles on phones and 3 (or 2) odd splits on
          dashboards with fewer KPIs. -->
-    <NGrid v-if="kpis.length" :x-gap="16" :y-gap="16" responsive="screen" item-responsive cols="24">
+    <NGrid v-if="kpis.length" :x-gap="12" :y-gap="12" responsive="screen" item-responsive cols="24">
       <NGi v-for="kpi in kpis" :key="kpi.key" :span="kpiSpan">
         <NCard
           size="small"
@@ -234,7 +234,7 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
          in the historical 2:1 split. Previously `:cols="3"` with hard
          spans forced both charts into the 2:1 ratio at every breakpoint
          which made the pie unreadable on phones / tablets. -->
-    <NGrid :x-gap="16" :y-gap="16" responsive="screen" item-responsive cols="24" class="t-dashboard-page__chart-row">
+    <NGrid :x-gap="12" :y-gap="12" responsive="screen" item-responsive cols="24" class="t-dashboard-page__chart-row">
       <NGi span="24 m:24 l:16">
         <NCard :title="lineTitle" size="small" class="t-dashboard-page__chart-card">
           <div v-if="lineHasData" ref="lineRef" class="t-dashboard-page__chart" />
@@ -260,9 +260,9 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
 .t-dashboard-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   /* No padding — the host page (Workbench / UsageDashboard) sits inside
-     TAdminContent which already supplies the 16px page-edge gutter. An
+     TAdminContent which already supplies the 12px page-edge gutter. An
      extra padding here was creating a transparent "凹陷" frame around
      the KPI + chart cards because this wrapper has no background of
      its own (the surrounding layout shows through). */
@@ -417,6 +417,6 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
 .t-dashboard-page__extras {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 </style>

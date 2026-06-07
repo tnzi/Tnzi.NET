@@ -87,7 +87,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'users',
             name: 'identity.users',
-            component: () => import('../pages/identity/UserManagement.vue'),
+            component: () => import('../pages/identity/Users.vue'),
             meta: {
               title: 'tnzi.admin.modules.identity.users.title',
               permission: 'user.view',
@@ -97,7 +97,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'roles',
             name: 'identity.roles',
-            component: () => import('../pages/identity/RoleManagement.vue'),
+            component: () => import('../pages/identity/Roles.vue'),
             meta: {
               title: 'tnzi.admin.modules.identity.roles.title',
               permission: 'role.view',
@@ -107,7 +107,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'tenants',
             name: 'identity.tenants',
-            component: () => import('../pages/identity/TenantManagement.vue'),
+            component: () => import('../pages/identity/Tenants.vue'),
             meta: {
               title: 'tnzi.admin.modules.identity.tenants.title',
               permission: 'tenant.view',
@@ -117,7 +117,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'login-logs',
             name: 'identity.loginLogs',
-            component: () => import('../pages/identity/LoginLog.vue'),
+            component: () => import('../pages/identity/LoginLogs.vue'),
             meta: {
               title: 'tnzi.admin.modules.identity.loginLogs.title',
               permission: 'identity.loginLog.view',
@@ -132,7 +132,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'organizations',
             name: 'identity.organizations',
-            component: () => import('../pages/identity/OrganizationManagement.vue'),
+            component: () => import('../pages/identity/Organizations.vue'),
             meta: {
               title: 'tnzi.admin.modules.identity.organizations.title',
               permission: 'organization.view',
@@ -142,7 +142,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'sessions',
             name: 'identity.sessions',
-            component: () => import('../pages/identity/SessionManagement.vue'),
+            component: () => import('../pages/identity/Sessions.vue'),
             meta: {
               title: 'tnzi.admin.modules.identity.sessions.title',
               permission: 'session.view',
@@ -171,7 +171,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'function-modules',
             name: 'authorization.functionModules',
-            component: () => import('../pages/authorization/FunctionModule.vue'),
+            component: () => import('../pages/authorization/FunctionModules.vue'),
             meta: {
               title: 'tnzi.admin.modules.authorization.functionModules.title',
               permission: 'authorization.functionModule.view',
@@ -181,7 +181,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'permissions',
             name: 'authorization.permissions',
-            component: () => import('../pages/authorization/Permission.vue'),
+            component: () => import('../pages/authorization/Permissions.vue'),
             meta: {
               title: 'tnzi.admin.modules.authorization.permissions.title',
               permission: 'authorization.permission.view',
@@ -191,7 +191,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'role-functions',
             name: 'authorization.roleFunctions',
-            component: () => import('../pages/authorization/RoleFunction.vue'),
+            component: () => import('../pages/authorization/RoleFunctions.vue'),
             meta: {
               title: 'tnzi.admin.modules.authorization.roleFunctions.title',
               permission: 'authorization.roleFunction.view',
@@ -201,7 +201,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'entity-roles',
             name: 'authorization.entityRoles',
-            component: () => import('../pages/authorization/EntityRole.vue'),
+            component: () => import('../pages/authorization/EntityRoles.vue'),
             meta: {
               title: 'tnzi.admin.modules.authorization.entityRoles.title',
               permission: 'authorization.entityRole.view',
@@ -220,7 +220,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'menus',
             name: 'system.menus',
-            component: () => import('../pages/system/MenuManagement.vue'),
+            component: () => import('../pages/system/Menus.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.menus.title',
               permission: 'system.menu.view',
@@ -230,7 +230,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'dictionaries',
             name: 'system.dictionaries',
-            component: () => import('../pages/system/DictionaryManagement.vue'),
+            component: () => import('../pages/system/Dictionaries.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.dictionaries.title',
               permission: 'system.dictionary.view',
@@ -240,7 +240,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'parameters',
             name: 'system.parameters',
-            component: () => import('../pages/system/ParameterManagement.vue'),
+            component: () => import('../pages/system/Parameters.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.parameters.title',
               permission: 'system.parameter.view',
@@ -250,7 +250,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'access-logs',
             name: 'system.accessLogs',
-            component: () => import('../pages/system/AccessLog.vue'),
+            component: () => import('../pages/system/AccessLogs.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.accessLogs.title',
               permission: 'system.accessLog.view',
@@ -260,7 +260,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'scheduled-jobs',
             name: 'system.scheduledJobs',
-            component: () => import('../pages/system/ScheduledJob.vue'),
+            component: () => import('../pages/system/ScheduledJobs.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.scheduledJobs.title',
               permission: 'system.scheduledJob.view',
@@ -270,7 +270,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'features',
             name: 'system.features',
-            component: () => import('../pages/system/FeatureManagement.vue'),
+            component: () => import('../pages/system/Features.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.features.title',
               permission: 'feature.view',
@@ -310,7 +310,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'localization',
             name: 'system.localization',
-            component: () => import('../pages/system/LocalizationMissing.vue'),
+            component: () => import('../pages/system/MissingTranslations.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.localization.title',
               permission: 'system.localization.view',
@@ -349,7 +349,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'files',
             name: 'storage.files',
-            component: () => import('../pages/storage/StorageFile.vue'),
+            component: () => import('../pages/storage/Files.vue'),
             meta: {
               title: 'tnzi.admin.modules.storage.files.title',
               permission: 'storage.file.view',
@@ -359,7 +359,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'chunks',
             name: 'storage.chunks',
-            component: () => import('../pages/storage/StorageChunk.vue'),
+            component: () => import('../pages/storage/Chunks.vue'),
             meta: {
               title: 'tnzi.admin.modules.storage.chunks.title',
               permission: 'storage.chunk.view',
@@ -369,7 +369,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'versions',
             name: 'storage.versions',
-            component: () => import('../pages/storage/StorageVersion.vue'),
+            component: () => import('../pages/storage/Versions.vue'),
             meta: {
               title: 'tnzi.admin.modules.storage.versions.title',
               permission: 'storage.version.view',
@@ -388,7 +388,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'logs',
             name: 'audit.logs',
-            component: () => import('../pages/audit/AuditLog.vue'),
+            component: () => import('../pages/audit/Logs.vue'),
             meta: {
               title: 'tnzi.admin.modules.audit.logs.title',
               permission: 'audit.log.view',
@@ -398,7 +398,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'operations',
             name: 'audit.operations',
-            component: () => import('../pages/audit/AuditOperation.vue'),
+            component: () => import('../pages/audit/Operations.vue'),
             meta: {
               title: 'tnzi.admin.modules.audit.operations.title',
               permission: 'audit.operation.view',
@@ -417,7 +417,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'templates',
             name: 'notification.templates',
-            component: () => import('../pages/notification/NotificationTemplate.vue'),
+            component: () => import('../pages/notification/Templates.vue'),
             meta: {
               title: 'tnzi.admin.modules.notification.templates.title',
               permission: 'notification.template.view',
@@ -427,7 +427,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'messages',
             name: 'notification.messages',
-            component: () => import('../pages/notification/NotificationMessage.vue'),
+            component: () => import('../pages/notification/Messages.vue'),
             meta: {
               title: 'tnzi.admin.modules.notification.messages.title',
               permission: 'notification.message.view',
@@ -437,7 +437,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'subscriptions',
             name: 'notification.subscriptions',
-            component: () => import('../pages/notification/NotificationSubscription.vue'),
+            component: () => import('../pages/notification/Subscriptions.vue'),
             meta: {
               title: 'tnzi.admin.modules.notification.subscriptions.title',
               permission: 'notification.subscription.view',
@@ -456,7 +456,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'sessions',
             name: 'chat.sessions',
-            component: () => import('../pages/chat/ChatSession.vue'),
+            component: () => import('../pages/chat/Sessions.vue'),
             meta: {
               title: 'tnzi.admin.modules.chat.sessions.title',
               permission: 'chat.session.view',
@@ -466,7 +466,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'messages',
             name: 'chat.messages',
-            component: () => import('../pages/chat/ChatMessage.vue'),
+            component: () => import('../pages/chat/Messages.vue'),
             meta: {
               title: 'tnzi.admin.modules.chat.messages.title',
               permission: 'chat.message.view',
@@ -485,7 +485,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'orders',
             name: 'payment.orders',
-            component: () => import('../pages/payment/PaymentOrder.vue'),
+            component: () => import('../pages/payment/Orders.vue'),
             meta: {
               title: 'tnzi.admin.modules.payment.orders.title',
               permission: 'payment.order.view',
@@ -495,7 +495,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'subscriptions',
             name: 'payment.subscriptions',
-            component: () => import('../pages/payment/PaymentSubscription.vue'),
+            component: () => import('../pages/payment/Subscriptions.vue'),
             meta: {
               title: 'tnzi.admin.modules.payment.subscriptions.title',
               permission: 'payment.subscription.view',
@@ -505,7 +505,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'refunds',
             name: 'payment.refunds',
-            component: () => import('../pages/payment/PaymentRefund.vue'),
+            component: () => import('../pages/payment/Refunds.vue'),
             meta: {
               title: 'tnzi.admin.modules.payment.refunds.title',
               permission: 'payment.refund.view',
@@ -515,7 +515,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'statistics',
             name: 'payment.statistics',
-            component: () => import('../pages/payment/PaymentStatistics.vue'),
+            component: () => import('../pages/payment/Statistics.vue'),
             meta: {
               title: 'tnzi.admin.modules.payment.statistics.title',
               permission: 'payment.statistics.view',
@@ -525,7 +525,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'invoices',
             name: 'payment.invoices',
-            component: () => import('../pages/payment/PaymentInvoice.vue'),
+            component: () => import('../pages/payment/Invoices.vue'),
             meta: {
               title: 'tnzi.admin.modules.payment.invoices.title',
               permission: 'payment.invoice.view',
@@ -535,7 +535,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'promotions',
             name: 'payment.promotions',
-            component: () => import('../pages/payment/PaymentPromotion.vue'),
+            component: () => import('../pages/payment/Promotions.vue'),
             meta: {
               title: 'tnzi.admin.modules.payment.promotions.title',
               permission: 'payment.promotion.view',
@@ -565,7 +565,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'agents',
             name: 'ai.agents',
-            component: () => import('../pages/ai/agents/AgentList.vue'),
+            component: () => import('../pages/ai/agents/Agents.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.agents.title',
               permission: 'ai.agent.view',
@@ -587,7 +587,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'agents/:agentId/runs/:runId?',
             name: 'ai.agents.runs',
-            component: () => import('../pages/ai/agents/RunMonitor.vue'),
+            component: () => import('../pages/ai/agents/AgentRunMonitor.vue'),
             props: true,
             meta: {
               title: 'tnzi.admin.modules.ai.runMonitor.title',
@@ -599,7 +599,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'personas',
             name: 'ai.personas',
-            component: () => import('../pages/ai/personas/PersonaList.vue'),
+            component: () => import('../pages/ai/personas/Personas.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.personas.title',
               permission: 'ai.persona.view',
@@ -609,7 +609,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'skills',
             name: 'ai.skills',
-            component: () => import('../pages/ai/skills/SkillList.vue'),
+            component: () => import('../pages/ai/skills/Skills.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.skills.title',
               permission: 'ai.skill.view',
@@ -619,7 +619,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'knowledge',
             name: 'ai.knowledge',
-            component: () => import('../pages/ai/knowledge/KbManager.vue'),
+            component: () => import('../pages/ai/knowledge/Knowledge.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.knowledge.title',
               permission: 'ai.knowledge.view',
@@ -631,7 +631,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'workflows',
             name: 'ai.workflows',
-            component: () => import('../pages/ai/workflows/WorkflowList.vue'),
+            component: () => import('../pages/ai/workflows/Workflows.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.workflows.title',
               permission: 'ai.workflow.view',
@@ -653,7 +653,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'workflow-runs',
             name: 'ai.workflowRuns',
-            component: () => import('../pages/ai/workflows/RunViewer.vue'),
+            component: () => import('../pages/ai/workflows/WorkflowRunViewer.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.workflowRuns.title',
               permission: 'ai.workflowRun.view',
@@ -663,7 +663,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'threads',
             name: 'ai.threads',
-            component: () => import('../pages/ai/threads/ThreadList.vue'),
+            component: () => import('../pages/ai/threads/Threads.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.threads.title',
               permission: 'ai.thread.view',
@@ -675,7 +675,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'providers',
             name: 'ai.providers',
-            component: () => import('../pages/ai/providers/ProviderConfig.vue'),
+            component: () => import('../pages/ai/providers/Providers.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.providers.title',
               permission: 'ai.provider.view',
@@ -685,7 +685,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'mcp',
             name: 'ai.mcp',
-            component: () => import('../pages/ai/mcp/McpServerList.vue'),
+            component: () => import('../pages/ai/mcp/McpServers.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.mcp.title',
               permission: 'ai.mcp.view',
@@ -695,7 +695,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'workspace-agents',
             name: 'ai.workspaceAgents',
-            component: () => import('../pages/ai/workspace/WorkspaceAgentList.vue'),
+            component: () => import('../pages/ai/workspace/WorkspaceAgents.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.workspaceAgents.title',
               permission: 'ai.agent.view',
@@ -705,7 +705,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'channels',
             name: 'ai.channels',
-            component: () => import('../pages/ai/channels/ChannelList.vue'),
+            component: () => import('../pages/ai/channels/Channels.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.channels.title',
               permission: 'ai.channels.view',
@@ -715,7 +715,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'devices',
             name: 'ai.devices',
-            component: () => import('../pages/ai/devices/DeviceList.vue'),
+            component: () => import('../pages/ai/devices/Devices.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.devices.title',
               permission: 'ai.devices.view',
@@ -738,7 +738,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'permissions',
             name: 'ai.permissions',
-            component: () => import('../pages/ai/permissions/PermissionRules.vue'),
+            component: () => import('../pages/ai/permissions/ToolPermissions.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.permissions.title',
               permission: 'ai.permissions.view',
@@ -748,7 +748,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'quota',
             name: 'ai.quota',
-            component: () => import('../pages/ai/quota/QuotaRules.vue'),
+            component: () => import('../pages/ai/quota/Quotas.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.quota.title',
               permission: 'ai.quota.view',
@@ -768,7 +768,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'evaluations',
             name: 'ai.evaluations',
-            component: () => import('../pages/ai/evaluations/EvalViewer.vue'),
+            component: () => import('../pages/ai/evaluations/EvaluationViewer.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.evaluations.title',
               permission: 'ai.evaluation.view',
@@ -787,7 +787,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'templates',
             name: 'template.templates',
-            component: () => import('../pages/template/TemplateManagement.vue'),
+            component: () => import('../pages/template/Templates.vue'),
             meta: {
               title: 'tnzi.admin.modules.template.templates.title',
               permission: 'template.template.view',
@@ -797,7 +797,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           {
             path: 'layouts',
             name: 'template.layouts',
-            component: () => import('../pages/template/TemplateLayout.vue'),
+            component: () => import('../pages/template/Layouts.vue'),
             meta: {
               title: 'tnzi.admin.modules.template.layouts.title',
               permission: 'template.layout.view',

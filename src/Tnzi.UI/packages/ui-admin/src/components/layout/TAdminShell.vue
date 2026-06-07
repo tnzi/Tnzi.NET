@@ -4,7 +4,7 @@ import { NMenu, type MenuOption } from 'naive-ui'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import TAdminSidebar from './TAdminSidebar.vue'
-import TAdminMixRail from './TAdminMixRail.vue'
+import TAdminMixNavRail from './TAdminMixNavRail.vue'
 import TAdminTopMenu from './TAdminTopMenu.vue'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import TAdminHeader from './TAdminHeader.vue'
@@ -221,6 +221,10 @@ const {
 })
 
 function onMenuSelect(menu: AdminMenuItem): void {
+  // On mobile, tapping a nav item should dismiss the drawer (standard
+  // mobile pattern) so the user lands on the content rather than being
+  // left staring at the still-open menu.
+  if (appStore.isMobile) appStore.setSiderCollapse(true)
   emit('menuSelect', menu)
 }
 
@@ -398,9 +402,9 @@ function onMixPrimarySelect(menu: AdminMenuItem): void {
   emit('menuSelect', menu)
 }
 
-/** TAdminMixRail emits a string `key`. Resolve to the menu item, then
+/** TAdminMixNavRail emits a string `key`. Resolve to the menu item, then
  *  funnel through the same select logic as if a parent surface called it. */
-function onMixRailSelect(key: string): void {
+function onMixNavRailSelect(key: string): void {
   const item = routeStore.menus.find((m) => m.key === key)
   if (!item) return
   onMixPrimarySelect(item)
@@ -438,6 +442,12 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 onMounted(() => {
   if (typeof window === 'undefined') return
   window.addEventListener('keydown', onGlobalKeydown)
+  // On initial mount at a mobile width, force the nav drawer closed. The
+  // persisted `siderCollapse` can carry a desktop "expanded" (false) value,
+  // which would otherwise render the drawer open over the content on a fresh
+  // phone load. The breakpoint watcher only fires on resize transitions, so
+  // it can't cover this first-paint case.
+  if (appStore.isMobile) appStore.setSiderCollapse(true)
 })
 onBeforeUnmount(() => {
   if (typeof window === 'undefined') return
@@ -487,21 +497,21 @@ function onMixMouseleave(): void {
       @mouseleave="onMixMouseleave"
     >
       <aside class="t-admin-shell__sider" :style="{ width: `${primarySiderWidth}px` }">
-        <TAdminMixRail
+        <TAdminMixNavRail
           :menus="menuCtx.firstLevelMenus.value"
           :active-menu-key="visibleFirstLevelKey"
           :inverted="siderInverted"
           :is-mini="appStore.siderCollapse"
           :theme-color="primaryColor"
           :on-toggle-collapse="() => appStore.toggleSiderCollapse()"
-          @select="onMixRailSelect"
+          @select="onMixNavRailSelect"
         >
           <template #header>
             <slot name="sider-header">
               <TSystemLogo :icon="sider.brandIcon" :icon-size="32" layout="icon-only" :title="''" />
             </slot>
           </template>
-        </TAdminMixRail>
+        </TAdminMixNavRail>
       </aside>
 
       <!-- Sub-sider: outer wrapper reserves layout space ONLY when pinned

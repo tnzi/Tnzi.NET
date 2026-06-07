@@ -32,8 +32,8 @@ public class ChannelManagerHostedService : IHostedService
             {
                 await adapter.SendAsync(outbound, CancellationToken.None);
 
-                // 发送附件
-                if (outbound.Attachments is { Count: > 0 })
+                // 发送附件（仅支持文件的适配器）
+                if (outbound.Attachments is { Count: > 0 } && adapter.SupportsFileAttachment)
                 {
                     foreach (var attachment in outbound.Attachments)
                     {

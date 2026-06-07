@@ -28,6 +28,7 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public string Name => "discord";
     public bool SupportsStreaming => false;
+    public bool SupportsFileAttachment => true;
 
     public DiscordChannelAdapter(
         ILogger<DiscordChannelAdapter> logger,

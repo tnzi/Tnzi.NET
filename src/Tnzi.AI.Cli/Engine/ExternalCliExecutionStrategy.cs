@@ -36,6 +36,7 @@ public class ExternalCliExecutionStrategy : IExternalCliExecutor
         var textBuilder = new StringBuilder();
         var reasoningBuilder = new StringBuilder();
         string? sessionId = null;
+        TokenUsageDto? usage = null;
 
         await foreach (var evt in _processManager.ExecuteAsync(
             provider, provider.BuildProcess(request, providerOptions),
@@ -54,6 +55,10 @@ public class ExternalCliExecutionStrategy : IExternalCliExecutor
                     break;
                 case CliEventType.Thinking:
                     reasoningBuilder.Append(evt.Content);
+                    break;
+                case CliEventType.Complete when evt.Usage != null:
+                    // 回填 Token 用量，否则 UsageLoggingMiddleware/FinOps 对 ExternalCli 永远记零
+                    usage = evt.Usage;
                     break;
                 case CliEventType.Error when evt.IsError:
                     _logger.LogWarning("CLI error during execution: {Error}", evt.Content);
@@ -79,7 +84,8 @@ public class ExternalCliExecutionStrategy : IExternalCliExecutor
             RunId = context.Run?.Id,
             FinishReason = "stop",
             Status = AgentRunStatus.Completed,
-            Reasoning = reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null
+            Reasoning = reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null,
+            Usage = usage
         };
     }
 

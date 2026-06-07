@@ -27,6 +27,7 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public string Name => "slack";
     public bool SupportsStreaming => false;
+    public bool SupportsFileAttachment => true;
 
     public SlackChannelAdapter(
         ILogger<SlackChannelAdapter> logger,

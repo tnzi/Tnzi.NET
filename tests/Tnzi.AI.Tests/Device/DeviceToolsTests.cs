@@ -2,6 +2,7 @@ using Tnzi.AI.Device;
 using Tnzi.AI.Device.Models;
 using Tnzi.AI.Device.Services;
 using Tnzi.AI.Device.Tools;
+using Tnzi.AI.Device.Transport;
 
 namespace Tnzi.AI.Tests.Device;
 
@@ -13,7 +14,7 @@ public class DeviceToolsTests
     public DeviceToolsTests()
     {
         _registry = new DeviceRegistry(NullLogger<DeviceRegistry>.Instance);
-        _tools = new DeviceTools(_registry, NullLogger<DeviceTools>.Instance);
+        _tools = new DeviceTools(_registry);
     }
 
     [Fact]
@@ -107,6 +108,21 @@ public class DeviceToolsTests
 
         result.Success.ShouldBeTrue();
         result.TextResult.ShouldBe("command output");
+    }
+
+    [Fact]
+    public async Task RunCommand_RealLocalNodeOnly_RejectsWithSandboxGuidance()
+    {
+        // Real runtime path (no mock): the local node must NOT execute a host shell —
+        // device_run resolves to LocalDeviceNode and returns an honest RCE-avoidance
+        // failure pointing at the Sandbox module instead of running the command.
+        _registry.Register(new LocalDeviceNode());
+
+        var result = await _tools.RunCommandAsync("echo pwned");
+
+        result.Success.ShouldBeFalse();
+        result.Error.ShouldNotBeNull();
+        result.Error!.ShouldContain("Sandbox");
     }
 
     [Fact]

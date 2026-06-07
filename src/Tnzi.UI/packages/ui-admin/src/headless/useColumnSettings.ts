@@ -6,6 +6,8 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
   visible?: boolean
   width?: number
   fixed?: 'left' | 'right'
+  /** Horizontal cell alignment. Forwarded to NDataTable's column `align`. */
+  align?: 'left' | 'center' | 'right'
   /**
    * Truncate long cell text with an ellipsis instead of wrapping. Pass
    * `true` for plain truncation; pass `{ tooltip: true }` to also show
@@ -24,6 +26,19 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
    * ```
    */
   render?: (row: TRow) => VNode | string | number | null
+  /**
+   * Mobile card hint: promote this column to the card **title** when the
+   * table collapses to the stacked card list on narrow viewports. When no
+   * column is flagged, the first visible column is used. Has no effect on
+   * the desktop table.
+   */
+  primary?: boolean
+  /**
+   * Mobile card hint: omit this column from the stacked card list on narrow
+   * viewports (e.g. a wide/secondary field that only matters on desktop).
+   * Still rendered in the desktop table.
+   */
+  mobileHidden?: boolean
 }
 
 export interface UseColumnSettingsOptions {

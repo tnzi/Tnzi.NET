@@ -46,7 +46,7 @@
          still pending. The edit + delete buttons are suppressed because
          the form is read-only and rejected requests must stay auditable. -->
     <template #rowActions="{ row }">
-      <TRowActions :row="row" :state="crud" :translate="t" :show-edit="false" :show-delete="false">
+      <TRowActions :row="(row as GdprRow)" :actions="rowActions" :translate="t">
         <template #prepend="{ row: r }">
           <template v-if="(r as GdprRow).status === 'pending'">
             <NPopconfirm @positive-click="handleApprove([(r as GdprRow).id ?? ''])">
@@ -77,6 +77,7 @@ import { NButton, NPopconfirm, useMessage } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { type RowAction } from '../../headless/rowActions'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
@@ -103,6 +104,11 @@ const crud = useCrudPage<GdprRequestDto>({
 
 
 crud.refresh().catch(() => undefined)
+
+// Approve/Reject are rendered by the page in the #prepend slot (pending rows
+// only); edit/delete are intentionally suppressed (requests stay auditable),
+// so the inner <TRowActions> has no built-in inline actions of its own.
+const rowActions: RowAction<GdprRow>[] = []
 
 const t = (key: string) => translatePageKey('identity.gdpr', key)
 

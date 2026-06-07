@@ -32,6 +32,7 @@ public class DeviceModule : TnziApplicationModule
         services.AddSingleton<IDeviceRegistry, DeviceRegistry>();
         services.AddSingleton<IDevicePairingService, DevicePairingService>();
         services.AddSingleton<DeviceTools>();
+        services.AddSingleton<WebSocketDeviceConnectionHandler>();
 
         return Task.CompletedTask;
     }
@@ -49,6 +50,13 @@ public class DeviceModule : TnziApplicationModule
         {
             var registry = context.ServiceProvider.GetRequiredService<IDeviceRegistry>();
             registry.Register(new LocalDeviceNode());
+        }
+
+        // Mount the /ws/device WebSocket endpoint via middleware (same pattern as GatewayMiddlewareExtensions)
+        var app = context.App;
+        if (app != null)
+        {
+            app.UseDeviceWebSocket(options.WebSocketPath);
         }
 
         // Scan and register AI tools (only when enabled)

@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -25,13 +24,11 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly HashSet<string> _allowedUsers;
     private readonly HashSet<string> _allowedOrganizations;
-
-    private string? _accessToken;
-    private DateTime _tokenExpiry = DateTime.MinValue;
-    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    private readonly TokenRefresher _tokenRefresher;
 
     public string Name => "dingtalk";
     public bool SupportsStreaming => false;
+    public bool SupportsFileAttachment => false;
 
     public DingtalkChannelAdapter(
         ILogger<DingtalkChannelAdapter> logger,
@@ -51,6 +48,7 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
         _allowedUsers = _options.AllowedUsers is { Count: > 0 } ? [.. _options.AllowedUsers] : [];
         _allowedOrganizations = _options.AllowedOrganizations is { Count: > 0 } ? [.. _options.AllowedOrganizations] : [];
+        _tokenRefresher = new TokenRefresher(RefreshAccessTokenAsync, _logger, Name);
     }
 
     /// <summary>检查用户是否被允许（空白名单=不限制）</summary>
@@ -261,11 +259,6 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
             if (string.IsNullOrWhiteSpace(text)) return;
 
-            // 会话类型: 1=单聊, 2=群聊
-            var conversationType = root.TryGetProperty("conversationType", out var ctEl)
-                ? ctEl.GetString()
-                : null;
-
             var isCommand = text.StartsWith('/');
             var inbound = new InboundMessage(
                 ChannelName: Name,
@@ -294,21 +287,23 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             ct);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// DingTalk robot API does not support file uploads. Check <see cref="SupportsFileAttachment"/>
+    /// before calling this method; it will always return false for this adapter.
+    /// </remarks>
     public Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-        => Task.FromResult(false); // 钉钉机器人 API 不直接支持文件上传
+        => Task.FromResult(false);
 
     public ValueTask DisposeAsync()
-    {
-        _tokenLock.Dispose();
-        return ValueTask.CompletedTask;
-    }
+        => _tokenRefresher.DisposeAsync();
 
     /// <summary>
     /// 通过钉钉机器人 API 发送 Markdown 消息到单聊
     /// </summary>
     private async Task PostMessageAsync(string conversationId, string content, CancellationToken ct)
     {
-        var token = await GetAccessTokenAsync(ct);
+        var token = await _tokenRefresher.GetTokenAsync(ct);
         var client = _httpClientFactory.CreateClient("Tnzi.AI.Dingtalk");
         client.DefaultRequestHeaders.Add("x-acs-dingtalk-access-token", token);
 
@@ -336,46 +331,29 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     }
 
     /// <summary>
-    /// 获取 access_token（双重检查锁定，有效期 2 小时，提前 5 分钟刷新）
+    /// 调用钉钉 v2.0 API 刷新 access_token。
     /// </summary>
-    private async Task<string> GetAccessTokenAsync(CancellationToken ct)
+    private async Task<(string Token, int ExpiresInSeconds)> RefreshAccessTokenAsync(CancellationToken ct)
     {
-        if (_accessToken != null && DateTime.UtcNow < _tokenExpiry)
-            return _accessToken;
+        var client = _httpClientFactory.CreateClient("Tnzi.AI.Dingtalk");
+        // 使用 v2.0 API，凭据通过 POST body 传递，避免 appSecret 泄漏在 URL query string / HTTP 日志中
+        var response = await client.PostAsJsonAsync(
+            $"{NewApiBaseUrl}/v2.0/oauth2/accessToken",
+            new { appKey = _options.AppKey, appSecret = _options.AppSecret }, ct);
 
-        await _tokenLock.WaitAsync(ct);
-        try
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // v2.0 API 返回 accessToken / expireIn（无 errcode）
+        if (!root.TryGetProperty("accessToken", out var tokenEl) || string.IsNullOrWhiteSpace(tokenEl.GetString()))
         {
-            if (_accessToken != null && DateTime.UtcNow < _tokenExpiry)
-                return _accessToken;
-
-            var client = _httpClientFactory.CreateClient("Tnzi.AI.Dingtalk");
-            // 使用 v2.0 API，凭据通过 POST body 传递，避免 appSecret 泄漏在 URL query string / HTTP 日志中
-            var response = await client.PostAsJsonAsync(
-                $"{NewApiBaseUrl}/v2.0/oauth2/accessToken",
-                new { appKey = _options.AppKey, appSecret = _options.AppSecret }, ct);
-
-            response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            // v2.0 API 返回 accessToken / expireIn（无 errcode）
-            if (!root.TryGetProperty("accessToken", out var tokenEl) || string.IsNullOrWhiteSpace(tokenEl.GetString()))
-            {
-                throw new HttpRequestException($"DingTalk v2.0 accessToken response missing accessToken field: {json}");
-            }
-
-            _accessToken = tokenEl.GetString()!;
-            var expireIn = root.TryGetProperty("expireIn", out var expEl) ? expEl.GetInt32() : 7200;
-            _tokenExpiry = DateTime.UtcNow.AddSeconds(expireIn - 300);
-
-            _logger.LogDebug("DingTalk access token refreshed, expires in {Seconds}s", expireIn);
-            return _accessToken;
+            throw new HttpRequestException($"DingTalk v2.0 accessToken response missing accessToken field: {json}");
         }
-        finally
-        {
-            _tokenLock.Release();
-        }
+
+        var token = tokenEl.GetString()!;
+        var expireIn = root.TryGetProperty("expireIn", out var expEl) ? expEl.GetInt32() : 7200;
+        return (token, expireIn);
     }
 }

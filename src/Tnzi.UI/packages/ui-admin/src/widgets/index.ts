@@ -22,7 +22,7 @@ export { default as TWidgetCard } from './shell/TWidgetCard.vue'
 
 // --- Built-in generic widgets (props-driven, no business deps) -------------
 export { default as TWidgetHeaderBanner } from './builtin/TWidgetHeaderBanner.vue'
-export { default as TWidgetStatsKpis } from './builtin/TWidgetStatsKpis.vue'
+export { default as TWidgetKpiStrip } from './builtin/TWidgetKpiStrip.vue'
 export { default as TWidgetActivityTimeline } from './builtin/TWidgetActivityTimeline.vue'
 export { default as TWidgetLineChart } from './builtin/TWidgetLineChart.vue'
 export { default as TWidgetPieChart } from './builtin/TWidgetPieChart.vue'
@@ -38,7 +38,7 @@ export { default as TWidgetAiUsage } from './builtin/TWidgetAiUsage.vue'
 export { default as TWidgetStorageUsage } from './builtin/TWidgetStorageUsage.vue'
 export { default as TWidgetNotificationStats } from './builtin/TWidgetNotificationStats.vue'
 export { default as TWidgetChatStats } from './builtin/TWidgetChatStats.vue'
-export { default as TWidgetOpsHealth } from './builtin/TWidgetOpsHealth.vue'
+export { default as TWidgetOpsSnapshot } from './builtin/TWidgetOpsSnapshot.vue'
 
 // --- Presets ---------------------------------------------------------------
 export {

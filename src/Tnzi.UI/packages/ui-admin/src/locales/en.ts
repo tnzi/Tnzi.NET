@@ -26,6 +26,7 @@ export const en = {
       createTitle: 'Create', editTitle: 'Edit', viewTitle: 'View',
       fetchError: 'Failed to load data',
       retry: 'Retry',
+      empty: 'No data',
     },
     tabs: {
       closeCurrent: 'Close current',
@@ -94,6 +95,7 @@ export const en = {
         tabStyleButton: 'Button',
         tabStyleSlider: 'Slider',
         closeTabByMiddleClick: 'Close tab on middle click',
+        tabScrollAnimation: 'Tab scroll animation',
         scrollMode: 'Scroll mode',
         scrollModeContent: 'Content (default)',
         scrollModeWrapper: 'Wrapper (whole page)',
@@ -650,6 +652,11 @@ export const en = {
             history: 'Login History',
             linked: 'Linked Accounts',
             danger: 'Danger Zone',
+            groups: {
+              account: 'Account',
+              activity: 'Activity',
+              advanced: 'Advanced',
+            },
           },
           profile: {
             noRoles: 'No roles assigned.',

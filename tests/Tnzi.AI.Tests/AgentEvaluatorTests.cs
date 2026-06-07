@@ -7,12 +7,14 @@ public class AgentEvaluatorTests
 {
     private readonly Mock<IChatService> _chatServiceMock;
     private readonly Mock<IRepository<EvaluationRun, Guid>> _repositoryMock;
+    private readonly Mock<IAiUtility> _aiUtilityMock;
     private readonly DefaultAgentEvaluator _evaluator;
 
     public AgentEvaluatorTests()
     {
         _chatServiceMock = new Mock<IChatService>();
         _repositoryMock = new Mock<IRepository<EvaluationRun, Guid>>();
+        _aiUtilityMock = new Mock<IAiUtility>();
         var loggerMock = new Mock<ILogger<DefaultAgentEvaluator>>();
 
         _repositoryMock.Setup(r => r.InsertAsync(It.IsAny<EvaluationRun>(), It.IsAny<CancellationToken>()))
@@ -20,7 +22,12 @@ public class AgentEvaluatorTests
         _repositoryMock.Setup(r => r.UpdateAsync(It.IsAny<EvaluationRun>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _evaluator = new DefaultAgentEvaluator(_chatServiceMock.Object, _repositoryMock.Object, loggerMock.Object);
+        // 默认 IAiUtility 返回 null（LLM 不可用）→ 评估器回退到字符串匹配。
+        // LLM-as-judge 路径由专门的测试通过 setup 覆盖。
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        _evaluator = new DefaultAgentEvaluator(_chatServiceMock.Object, _repositoryMock.Object, _aiUtilityMock.Object, loggerMock.Object);
     }
 
     [Fact]
@@ -66,7 +73,8 @@ public class AgentEvaluatorTests
         // Assert
         result.Passed.ShouldBeTrue();
         result.Score.ShouldBe(0.8);
-        result.Reason.ShouldBe("Contains expected output");
+        // LLM unavailable here (mock returns null) → string-match fallback
+        result.Reason.ShouldBe("Contains expected output (string-match fallback)");
     }
 
     [Fact]
@@ -88,7 +96,8 @@ public class AgentEvaluatorTests
         // Assert
         result.Passed.ShouldBeFalse();
         result.Score.ShouldBe(0.0);
-        result.Reason.ShouldBe("Output does not match expected");
+        // LLM unavailable here (mock returns null) → string-match fallback
+        result.Reason.ShouldBe("Output does not match expected (string-match fallback)");
     }
 
     [Fact]
@@ -298,5 +307,55 @@ public class AgentEvaluatorTests
         // Assert — 忽略大小写的精确匹配
         result.Passed.ShouldBeTrue();
         result.Score.ShouldBe(1.0);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_SemanticMatch_UsesLlmJudgeScore()
+    {
+        // Non-exact but semantically related → LLM judge scores it (not string match)
+        var evaluationCase = new EvaluationCase { Input = "Capital of France?", ExpectedOutput = "Paris" };
+
+        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "It is the City of Light." }));
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""{"score":0.92,"pass":true,"reason":"refers to Paris"}""");
+
+        var result = await _evaluator.EvaluateAsync(evaluationCase);
+
+        result.Passed.ShouldBeTrue();
+        result.Score.ShouldBe(0.92);
+        result.Reason.ShouldContain("LLM judge");
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_LlmJudgeMarkdownWrapped_IsParsed()
+    {
+        // LLM responses often wrap JSON in markdown fences — must still parse
+        var evaluationCase = new EvaluationCase { Input = "Q", ExpectedOutput = "Paris" };
+
+        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "unrelated wording" }));
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("```json\n{\"score\":0.2,\"pass\":false,\"reason\":\"unrelated\"}\n```");
+
+        var result = await _evaluator.EvaluateAsync(evaluationCase);
+
+        result.Passed.ShouldBeFalse();
+        result.Score.ShouldBe(0.2);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ExactMatch_DoesNotCallLlmJudge()
+    {
+        // Exact match is a zero-cost fast path — LLM judge must not be invoked
+        var evaluationCase = new EvaluationCase { Input = "What is 2+2?", ExpectedOutput = "4" };
+        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "4" }));
+
+        await _evaluator.EvaluateAsync(evaluationCase);
+
+        _aiUtilityMock.Verify(u => u.ExecuteAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

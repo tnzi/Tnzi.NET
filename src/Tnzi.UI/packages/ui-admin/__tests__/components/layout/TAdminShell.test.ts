@@ -103,10 +103,10 @@ describe('TAdminShell', () => {
     expect(wrapper.attributes('data-mode')).toBe('vertical')
   })
 
-  it('renders vertical-mix mode with TAdminMixRail (90px first-level rail) + sub-sider container', () => {
+  it('renders vertical-mix mode with TAdminMixNavRail (90px first-level rail) + sub-sider container', () => {
     forceMobile(false)
     const wrapper = mountShell({ mode: 'vertical-mix' })
-    // Phase G follow-up #4: vertical-mix uses TAdminMixRail (custom
+    // Phase G follow-up #4: vertical-mix uses TAdminMixNavRail (custom
     // div-based rail ported from soybean's first-level-menu.vue) instead
     // of TAdminSidebar — NMenu can't render the icon-on-top + label-below
     // geometry cleanly. So no TAdminSidebar instance is rendered in this
@@ -184,5 +184,29 @@ describe('TAdminShell', () => {
     sidebar.vm.$emit('menuSelect', payload)
     expect(wrapper.emitted('menuSelect')).toBeTruthy()
     expect(wrapper.emitted('menuSelect')![0]).toEqual([payload])
+  })
+
+  it('starts with the mobile drawer closed on a fresh mount even if siderCollapse was persisted open', () => {
+    forceMobile(true)
+    const app = useAdminAppStore()
+    // Simulate a persisted desktop "expanded" value carried into a phone load.
+    app.setSiderCollapse(false)
+    const wrapper = mountShell({ mode: 'vertical' })
+    // onMounted forces the drawer closed so it doesn't cover the content.
+    expect(app.siderCollapse).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('closes the mobile drawer when a nav item is selected', () => {
+    forceMobile(true)
+    const app = useAdminAppStore()
+    const wrapper = mountShell({ mode: 'vertical' })
+    // Open the drawer, then select a menu item — it should auto-dismiss.
+    app.setSiderCollapse(false)
+    const sidebar = wrapper.findComponent(TAdminSidebar)
+    sidebar.vm.$emit('menuSelect', { key: 'users', label: 'Users' } as AdminMenuItem)
+    expect(app.siderCollapse).toBe(true)
+    expect(wrapper.emitted('menuSelect')).toBeTruthy()
+    wrapper.unmount()
   })
 })
