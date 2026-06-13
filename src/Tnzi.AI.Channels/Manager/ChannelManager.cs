@@ -11,6 +11,7 @@ public class ChannelManager : IChannelManager
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ChannelsModuleOptions _options;
     private readonly SemaphoreSlim _concurrency;
+    private readonly Dictionary<string, IChannelAdapter> _adapterMap;
     private CancellationTokenSource? _cts;
     private Task? _consumeLoop;
 
@@ -18,13 +19,21 @@ public class ChannelManager : IChannelManager
         ILogger<ChannelManager> logger,
         IChannelMessageBus bus,
         IServiceScopeFactory scopeFactory,
-        IOptions<ChannelsModuleOptions> options)
+        IOptions<ChannelsModuleOptions> options,
+        IEnumerable<IChannelAdapter>? adapters = null)
     {
         _logger = Check.NotNull(logger);
         _bus = Check.NotNull(bus);
         _scopeFactory = Check.NotNull(scopeFactory);
         _options = Check.NotNull(options).Value;
         _concurrency = new SemaphoreSlim(_options.MaxConcurrency, _options.MaxConcurrency);
+
+        // 按名称索引适配器，用于解析消息来源渠道归属的租户（TryAdd：重名时先注册者生效）
+        _adapterMap = new Dictionary<string, IChannelAdapter>(StringComparer.OrdinalIgnoreCase);
+        foreach (var adapter in adapters ?? [])
+        {
+            _adapterMap.TryAdd(adapter.Name, adapter);
+        }
     }
 
     public Task StartAsync(CancellationToken ct = default)
@@ -92,6 +101,10 @@ public class ChannelManager : IChannelManager
         try
         {
             using var scope = _scopeFactory.CreateScope();
+            // 在处理作用域内建立消息来源渠道归属的租户上下文（AsyncLocal 沿调用链传播），
+            // 使 ChannelThreadMapping 等 IMultiTenant 实体的审计填充/全局过滤自然生效。
+            // 渠道未归属租户（TenantId=null）时不切换，行为与单租户部署完全一致。
+            using var tenantScope = ChangeTenantScope(scope.ServiceProvider, ResolveChannelTenantId(message.ChannelName));
             var threadStore = scope.ServiceProvider.GetRequiredService<IChannelThreadStore>();
             var runtime = scope.ServiceProvider.GetRequiredService<IAgentRuntime>();
             var threadService = scope.ServiceProvider.GetRequiredService<IAgentThreadService>();
@@ -272,7 +285,9 @@ public class ChannelManager : IChannelManager
                 UserId = message.UserId ?? "unknown",
                 TopicId = message.TopicId,
                 UserMessage = message.Text,
-                AgentId = _options.DefaultAgentId
+                AgentId = _options.DefaultAgentId,
+                // 按消息来源渠道解析归属租户，供 Gateway 做绑定规则租户分区 + 处理作用域租户上下文
+                TenantId = ResolveChannelTenantId(message.ChannelName)
             };
 
             var response = await gateway.ProcessAsync(request, ct);
@@ -299,6 +314,21 @@ public class ChannelManager : IChannelManager
             return false;
         }
     }
+
+    /// <summary>
+    /// 解析消息来源渠道归属的租户 ID（来自渠道 adapter options 配置）。
+    /// 未注册适配器或未配置租户时返回 null（单租户/全局行为）。
+    /// </summary>
+    private Guid? ResolveChannelTenantId(string channelName)
+        => _adapterMap.TryGetValue(channelName, out var adapter) ? adapter.TenantId : null;
+
+    /// <summary>
+    /// 在给定作用域内切换当前租户上下文；tenantId 为 null 时不做任何事（返回 null 供 using 安全释放）。
+    /// </summary>
+    private static IDisposable? ChangeTenantScope(IServiceProvider scopedProvider, Guid? tenantId)
+        => tenantId.HasValue
+            ? scopedProvider.GetService<ICurrentTenant>()?.Change(tenantId)
+            : null;
 
     private async Task PublishErrorReplyAsync(InboundMessage message, string errorText)
     {

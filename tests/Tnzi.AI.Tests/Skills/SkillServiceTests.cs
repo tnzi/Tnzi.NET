@@ -919,6 +919,99 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // GetUsageStatsAsync — dual-source merged counts
+    // -------------------------------------------------------------------------
+
+    private void SetupRepositoryQueryable(List<SkillEntity> data)
+    {
+        var mock = data.BuildMock();
+        _mockRepository.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(mock);
+    }
+
+    [Fact]
+    public async Task GetUsageStatsAsync_MergedDualSource_CountsFileAndDbSkills()
+    {
+        // Registry merged view: 2 enabled file-source (System) + 1 enabled DB (Tenant) + 1 disabled DB (User)
+        var fileSkillA = MakeSkill("file-a", "File A");
+        var fileSkillB = MakeSkill("file-b", "File B");
+        var dbSkillTenant = MakeSkill("db-tenant", "DB Tenant");
+        dbSkillTenant.Scope = SkillScope.Tenant;
+        dbSkillTenant.Source = SkillSource.Database;
+        var dbSkillUser = MakeSkill("db-user", "DB User", enabled: false);
+        dbSkillUser.Scope = SkillScope.User;
+        dbSkillUser.Source = SkillSource.Database;
+
+        _mockRegistry.Setup(r => r.GetAvailableSkillsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([fileSkillA, fileSkillB, dbSkillTenant, dbSkillUser]);
+
+        // DB rows carry the activation counters
+        SetupRepositoryQueryable(
+        [
+            new SkillEntity { Id = Guid.NewGuid(), Slug = "db-tenant", Scope = SkillScope.Tenant, Enabled = true, ActivationCount = 5 },
+            new SkillEntity { Id = Guid.NewGuid(), Slug = "db-user", Scope = SkillScope.User, Enabled = false, ActivationCount = 2 }
+        ]);
+
+        var service = CreateService();
+        var result = await service.GetUsageStatsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        var stats = result.Data;
+        stats.ShouldNotBeNull();
+        stats!.TotalSkills.ShouldBe(4);
+        stats.EnabledSkills.ShouldBe(3);
+        stats.DisabledSkills.ShouldBe(1);
+        stats.TenantScopeSkills.ShouldBe(1);
+        stats.UserScopeSkills.ShouldBe(1);
+        stats.TotalActivations.ShouldBe(7);
+    }
+
+    [Fact]
+    public async Task GetUsageStatsAsync_FileSourceOnly_EmptyDatabase_CountsFileSkills()
+    {
+        // Fresh install: no DB rows, but file-source skills exist (the original
+        // bug reported all-zero stats while the list showed 20 file skills).
+        var fileSkills = Enumerable.Range(1, 20)
+            .Select(i => MakeSkill($"file-{i}", $"File Skill {i}"))
+            .ToList();
+
+        _mockRegistry.Setup(r => r.GetAvailableSkillsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fileSkills);
+        SetupRepositoryQueryable([]);
+
+        var service = CreateService();
+        var result = await service.GetUsageStatsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        var stats = result.Data;
+        stats.ShouldNotBeNull();
+        stats!.TotalSkills.ShouldBe(20);
+        stats.EnabledSkills.ShouldBe(20);
+        stats.DisabledSkills.ShouldBe(0);
+        stats.TotalActivations.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task GetUsageStatsAsync_EmptyRegistryAndDatabase_ReturnsZeros()
+    {
+        _mockRegistry.Setup(r => r.GetAvailableSkillsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        SetupRepositoryQueryable([]);
+
+        var service = CreateService();
+        var result = await service.GetUsageStatsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        var stats = result.Data;
+        stats.ShouldNotBeNull();
+        stats!.TotalSkills.ShouldBe(0);
+        stats.EnabledSkills.ShouldBe(0);
+        stats.DisabledSkills.ShouldBe(0);
+        stats.TenantScopeSkills.ShouldBe(0);
+        stats.UserScopeSkills.ShouldBe(0);
+        stats.TotalActivations.ShouldBe(0);
+    }
+
+    // -------------------------------------------------------------------------
     // DeleteAsync — Ownership Check
     // -------------------------------------------------------------------------
 

@@ -18,6 +18,13 @@ public class SlackAdapterOptions
     /// <summary>Signing secret for webhook signature verification.</summary>
     public string? SigningSecret { get; set; }
 
+    /// <summary>
+    /// Owning tenant of this channel bot instance. Inbound messages from this
+    /// channel are processed under this tenant context (session binding rule
+    /// partitioning, thread mapping audit fill). Null = single-tenant / global.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>Allowed channel ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedChannels { get; set; } = [];
 
@@ -38,6 +45,7 @@ public class SlackAdapterOptions
         $"BotToken = {SecretMask.Mask(BotToken)}, " +
         $"AppToken = {SecretMask.Mask(AppToken)}, " +
         $"SigningSecret = {SecretMask.Mask(SigningSecret)}, " +
+        $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedChannels.Count = {AllowedChannels.Count}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +
         $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries}, MaxFileSize = {MaxFileSize} }}";

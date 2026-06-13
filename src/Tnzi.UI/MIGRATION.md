@@ -678,4 +678,4 @@ Then revert any code changes from sections 1–8 above.
 
 ## Questions
 
-File an issue at `https://github.com/tnzi/tnzi.net/issues` or consult the design spec at `docs/superpowers/specs/2026-04-12-ui-packages-production-readiness-design.md` for architectural context.
+File an issue at `https://github.com/tnzi/tnzi.net/issues` or consult the design spec at `.superpowers/specs/2026-04-12-ui-packages-production-readiness-design.md` for architectural context.

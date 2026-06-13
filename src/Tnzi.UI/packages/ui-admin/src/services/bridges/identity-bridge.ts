@@ -175,6 +175,17 @@ export interface IdentityBridge {
     ): Promise<CrudPageResult<UserListItemDto>>
   }
   sessions: {
+    /**
+     * Global paged session list (GET /admin/sessions). `userId` is an
+     * optional filter — omitted returns sessions across ALL users (sorted by
+     * last activity desc) with `userName` populated on every item.
+     */
+    list(params?: {
+      userId?: string | null
+      includeRevoked?: boolean
+      pageIndex?: number
+      pageSize?: number
+    }): Promise<PagedList<UserSessionDto>>
     /** Per-user session list (admin can pull any user's sessions). */
     listForUser(userId: string, includeRevoked?: boolean): Promise<UserSessionDto[]>
     /** Aggregate online/active/expired counts across all users. */
@@ -494,6 +505,24 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
 
   const sessions: IdentityBridge['sessions'] = sessionApi
     ? {
+        list: async (params) => {
+          const r = unwrap(
+            await sessionApi.getSessions({
+              userId: params?.userId ?? undefined,
+              includeRevoked: params?.includeRevoked,
+              pageIndex: params?.pageIndex,
+              pageSize: params?.pageSize,
+            }),
+          ) as PagedList<UserSessionDto>
+          // Normalize through createPagedList so totalPages / hasNextPage are
+          // always present even if the backend serializes a 4-field shape.
+          return createPagedList(
+            r.items ?? [],
+            r.totalCount ?? 0,
+            r.pageIndex ?? params?.pageIndex ?? 1,
+            r.pageSize ?? params?.pageSize ?? 20,
+          )
+        },
         listForUser: async (userId, includeRevoked) =>
           unwrap(await sessionApi.getUserSessions(userId, { includeRevoked })) as UserSessionDto[],
         statistics: async () => unwrap(await sessionApi.getStatistics()) as SessionStatisticsDto,
@@ -509,6 +538,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           unwrap(await sessionApi.cleanExpired(inactiveMinutes)) as number,
       }
     : {
+        list: () => missing('sessions.list'),
         listForUser: () => missing('sessions.listForUser'),
         statistics: () => missing('sessions.statistics'),
         activeUsers: () => missing('sessions.activeUsers'),

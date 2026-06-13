@@ -18,7 +18,6 @@ public class McpServerHttpSecurityMiddlewareTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"]
             }),
@@ -37,7 +36,6 @@ public class McpServerHttpSecurityMiddlewareTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"]
             }),
@@ -62,7 +60,6 @@ public class McpServerHttpSecurityMiddlewareTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"]
             }),
@@ -81,7 +78,6 @@ public class McpServerHttpSecurityMiddlewareTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"]
             }),
@@ -100,7 +96,7 @@ public class McpServerHttpSecurityMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_WithQueryFallback_CallsNextMiddleware()
+    public async Task InvokeAsync_WithQueryFallback_AuthenticatesButIgnoresQueryTenant()
     {
         var services = new ServiceCollection();
         using var serviceProvider = services.BuildServiceProvider();
@@ -111,7 +107,6 @@ public class McpServerHttpSecurityMiddlewareTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
                 RateLimitPerTenant = true,
@@ -132,7 +127,6 @@ public class McpServerHttpSecurityMiddlewareTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
                 RateLimitPerTenant = true,
@@ -147,7 +141,9 @@ public class McpServerHttpSecurityMiddlewareTests
         await middleware.InvokeAsync(context);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        context.Items[McpServerSecurityMiddleware.TenantHeaderName].ShouldBe("tenant-q");
+        // Query-string tenant extraction was removed (untrusted, log/cache-prone);
+        // only the X-Tenant-Id header is honored as a rate-limit partition hint.
+        context.Items[McpServerSecurityMiddleware.TenantHeaderName].ShouldBeNull();
         called.ShouldBeTrue();
     }
 }

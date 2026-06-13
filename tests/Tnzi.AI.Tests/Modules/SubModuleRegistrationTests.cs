@@ -7,9 +7,6 @@ using Tnzi.AI.Mcp;
 using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Server;
 using Tnzi.AI.Mcp.Services.Interfaces;
-using Tnzi.AI.McpClient;
-using Tnzi.AI.McpClient.Options;
-using Tnzi.AI.McpClient.Services.Interfaces;
 using Tnzi.AI.Sandbox;
 using Tnzi.AI.Sandbox.Middleware;
 using Tnzi.AI.Sandbox.Providers.Docker;
@@ -171,34 +168,6 @@ public class SubModuleRegistrationTests
             .ShouldBeTrue("IMcpToolAnalyticsService should be registered");
         services.Any(d => d.ServiceType == typeof(McpServerSecurityMiddleware))
             .ShouldBeTrue("McpServerSecurityMiddleware should be registered");
-    }
-
-    // =========================================================================
-    // AIMcpClientModule
-    // =========================================================================
-
-    [Fact]
-    public void AIMcpClientModule_LoadOrder_Is59()
-    {
-        // 59 = free slot avoiding AICoderModule's 54 (which the client module no longer collides with)
-        new AIMcpClientModule().LoadOrder.ShouldBe(59);
-    }
-
-    [Fact]
-    public void AIMcpClientModule_TableNamePrefix_IsAI()
-    {
-        new AIMcpClientModule().TableNamePrefix.ShouldBe("AI");
-    }
-
-    [Fact]
-    public void AIMcpClientModule_RegistersCoreServices()
-    {
-        var services = ConfigureMcpClientModule();
-
-        services.Any(d => d.ServiceType == typeof(IMcpServerRegistryService))
-            .ShouldBeTrue("IMcpServerRegistryService should be registered");
-        services.Any(d => d.ServiceType == typeof(IMcpOAuthTokenManager))
-            .ShouldBeTrue("IMcpOAuthTokenManager should be registered");
     }
 
     [Fact]
@@ -386,22 +355,6 @@ public class SubModuleRegistrationTests
 
         var context = new ServiceConfigurationContext(services, config);
         new AIMcpModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
-        return services;
-    }
-
-    private static ServiceCollection ConfigureMcpClientModule()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
-            .Build();
-
-        services.AddOptions<McpClientOAuthOptions>()
-            .Bind(config.GetSection("AI:McpClient:OAuth"));
-
-        var context = new ServiceConfigurationContext(services, config);
-        new AIMcpClientModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
         return services;
     }
 

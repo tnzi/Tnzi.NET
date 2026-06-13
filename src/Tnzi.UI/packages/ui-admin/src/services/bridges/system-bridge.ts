@@ -22,6 +22,7 @@ import {
   useAdminMenuApi,
   useAdminSettingApi,
   useAdminAccessLogApi,
+  useAdminSettingsCenterApi,
   type MenuInfoDto,
   type CreateMenuDto,
   type UpdateMenuDto,
@@ -31,6 +32,7 @@ import {
   type UpdateSettingDto,
   type AccessLogInfoDto,
   type AccessLogQueryDto,
+  type SettingsCenterGroupDto,
 } from '@tnzi/core/services/system'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
@@ -42,6 +44,7 @@ export interface SystemBridgeDeps {
   menuApi?: ReturnType<typeof useAdminMenuApi>
   settingApi?: ReturnType<typeof useAdminSettingApi>
   accessLogApi?: ReturnType<typeof useAdminAccessLogApi>
+  settingsCenterApi?: ReturnType<typeof useAdminSettingsCenterApi>
 }
 
 export interface SystemBridge {
@@ -73,6 +76,12 @@ export interface SystemBridge {
    * backend follow-up.
    */
   features: BridgeCrudContract<FeatureDto, CreateFeatureDto, UpdateFeatureDto>
+  /** Settings center — schema-driven module settings (definitions / save / reset). */
+  settingsCenter: {
+    getDefinitions(): Promise<SettingsCenterGroupDto[]>
+    saveGroup(groupKey: string, changedValues: Record<string, string | null>): Promise<SettingsCenterGroupDto>
+    resetGroup(groupKey: string): Promise<SettingsCenterGroupDto>
+  }
 }
 
 /**
@@ -143,8 +152,9 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
   const menuApi = deps.menuApi ?? (deps.client ? useAdminMenuApi(deps.client) : null)
   const settingApi = deps.settingApi ?? (deps.client ? useAdminSettingApi(deps.client) : null)
   const accessLogApi = deps.accessLogApi ?? (deps.client ? useAdminAccessLogApi(deps.client) : null)
+  const settingsCenterApi = deps.settingsCenterApi ?? (deps.client ? useAdminSettingsCenterApi(deps.client) : null)
 
-  if (!menuApi || !settingApi || !accessLogApi) {
+  if (!menuApi || !settingApi || !accessLogApi || !settingsCenterApi) {
     const noOp = () => Promise.reject(new Error('createSystemBridge: no deps provided'))
     return {
       menus: {
@@ -166,6 +176,11 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
         create: noOp as never,
         update: noOp as never,
         delete: noOp as never,
+      },
+      settingsCenter: {
+        getDefinitions: noOp as never,
+        saveGroup: noOp as never,
+        resetGroup: noOp as never,
       },
     }
   }
@@ -294,5 +309,14 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     },
   }
 
-  return { menus, settings, accessLogs, scheduledJobs, features }
+  const settingsCenter: SystemBridge['settingsCenter'] = {
+    getDefinitions: async () =>
+      unwrap<SettingsCenterGroupDto[]>(await settingsCenterApi.getDefinitions()),
+    saveGroup: async (groupKey, changedValues) =>
+      unwrap<SettingsCenterGroupDto>(await settingsCenterApi.saveGroup(groupKey, changedValues)),
+    resetGroup: async (groupKey) =>
+      unwrap<SettingsCenterGroupDto>(await settingsCenterApi.resetGroup(groupKey)),
+  }
+
+  return { menus, settings, accessLogs, scheduledJobs, features, settingsCenter }
 }

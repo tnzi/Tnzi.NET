@@ -9,12 +9,12 @@ public interface IExecutionStrategy
     /// <summary>
     /// 非流式执行
     /// </summary>
-    Task<ExecutionResult> ExecuteAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct);
+    Task<ExecutionResult> ExecuteAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct);
 
     /// <summary>
     /// 流式执行
     /// </summary>
-    IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct);
+    IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct);
 }
 
 /// <summary>

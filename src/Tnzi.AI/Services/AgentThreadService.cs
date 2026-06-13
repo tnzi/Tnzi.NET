@@ -31,9 +31,10 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     public async Task<Result<AgentThreadDto>> CreateAsync(CreateAgentThreadDto input)
     {
         // 仅当提供 AgentId 时验证 Agent 存在
+        Agent? agent = null;
         if (input.AgentId.HasValue)
         {
-            var agent = await _agentRepository.GetAsync(input.AgentId.Value);
+            agent = await _agentRepository.GetAsync(input.AgentId.Value);
             if (agent == null)
             {
                 return Fail<AgentThreadDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
@@ -51,7 +52,9 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         Logger.LogInformation("Agent thread created: {ThreadId}, AgentId: {AgentId}", entity.Id, entity.AgentId);
 
-        return Ok(entity.MapTo<AgentThreadDto>());
+        var dto = entity.MapTo<AgentThreadDto>();
+        dto.AgentName = agent?.Name;
+        return Ok(dto);
     }
 
     public async Task<bool> IsOwnerAsync(Guid threadId, Guid userId)
@@ -69,6 +72,13 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         var dto = entity.MapTo<AgentThreadDto>();
         dto.MessageCount = await _messageRepository.Where(m => m.ThreadId == id).CountAsync();
+
+        if (entity.AgentId.HasValue)
+        {
+            var agent = await _agentRepository.GetAsync(entity.AgentId.Value);
+            dto.AgentName = agent?.Name;
+        }
+
         return Ok(dto);
     }
 
@@ -141,10 +151,38 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             q = q.Where(t => t.LastActivityTime <= query.EndTime.Value);
         }
 
+        // Project explicitly so AgentName resolves through the Agent navigation
+        // (LEFT JOIN; null when the agent was deleted or the thread is agent-less).
         var pagedList = await q
             .OrderByDescending(t => t.LastActivityTime)
-            .ProjectTo<AgentThread, AgentThreadDto>()
+            .Select(t => new AgentThreadDto
+            {
+                Id = t.Id,
+                AgentId = t.AgentId,
+                AgentName = t.Agent != null ? t.Agent.Name : null,
+                Title = t.Title,
+                LastActivityTime = t.LastActivityTime,
+                CreationTime = t.CreationTime
+            })
             .CreateAsync(query);
+
+        // Batch-resolve message counts for the current page with a single GROUP BY
+        // query (avoids a per-thread COUNT N+1).
+        var threadIds = pagedList.Items.Select(t => t.Id).ToList();
+        if (threadIds.Count > 0)
+        {
+            var messageCounts = await _messageRepository
+                .Where(m => threadIds.Contains(m.ThreadId))
+                .GroupBy(m => m.ThreadId)
+                .Select(g => new { ThreadId = g.Key, Count = g.Count() })
+                .ToListAsync();
+            var countByThreadId = messageCounts.ToDictionary(c => c.ThreadId, c => c.Count);
+
+            foreach (var dto in pagedList.Items)
+            {
+                dto.MessageCount = countByThreadId.GetValueOrDefault(dto.Id);
+            }
+        }
 
         return Ok(pagedList);
     }

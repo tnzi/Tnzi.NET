@@ -22,12 +22,12 @@ public class WorkflowIntegrationTests
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(),
                 It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((string? _, string? _, string? _, string? name,
                 IEnumerable<string>? _, double? _, int? _,
                 AgentExecutorOptions? _, IEnumerable<string>? _,
-                Guid? _, CancellationToken _) =>
+                IEnumerable<string>? _, Guid? _, CancellationToken _) =>
             {
                 var responseText = responses.GetValueOrDefault(name ?? "", "default response");
 
@@ -378,12 +378,12 @@ public class WorkflowIntegrationTests
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(),
                 It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((string? _, string? _, string? _, string? name,
                 IEnumerable<string>? _, double? _, int? _,
                 AgentExecutorOptions? _, IEnumerable<string>? _,
-                Guid? _, CancellationToken _) =>
+                IEnumerable<string>? _, Guid? _, CancellationToken _) =>
             {
                 var mockClient = new Mock<IChatClient>();
 

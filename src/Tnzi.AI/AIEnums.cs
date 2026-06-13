@@ -60,10 +60,7 @@ public enum AgentExecutionMode
     AgentAsTools = 2,
 
     /// <summary>路由 Agent 选择最合适的目标 Agent</summary>
-    Router = 3,
-
-    /// <summary>委托给外部 CLI Agent 子进程执行（Claude Code, Codex 等）</summary>
-    ExternalCli = 4
+    Router = 3
 }
 
 /// <summary>

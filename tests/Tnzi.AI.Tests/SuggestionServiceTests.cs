@@ -16,7 +16,7 @@ public class SuggestionServiceTests
 
     private SuggestionService CreateService(SuggestionOptions? options = null)
     {
-        var opts = Microsoft.Extensions.Options.Options.Create(options ?? new SuggestionOptions { AutoGenerate = true });
+        var opts = TestHelpers.CreateOptionsMonitor(options ?? new SuggestionOptions { AutoGenerate = true });
         return new SuggestionService(
             _aiUtility.Object,
             BuildScopeFactory(),

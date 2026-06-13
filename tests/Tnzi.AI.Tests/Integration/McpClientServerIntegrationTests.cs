@@ -595,9 +595,10 @@ public class McpClientServerIntegrationTests
         var resourceLogger = new Mock<ILogger<McpResourceProvider>>();
         var promptLogger = new Mock<ILogger<McpPromptProvider>>();
 
-        var toolProvider = new McpToolProvider(options.Object, _clientFactory.Object, _loggerFactory.Object, toolLogger.Object);
-        var resourceProvider = new McpResourceProvider(options.Object, _clientFactory.Object, resourceLogger.Object);
-        var promptProvider = new McpPromptProvider(options.Object, _clientFactory.Object, promptLogger.Object);
+        var catalog = new OptionsBackedMcpServerCatalog(options.Object);
+        var toolProvider = new McpToolProvider(options.Object, catalog, _clientFactory.Object, _loggerFactory.Object, toolLogger.Object);
+        var resourceProvider = new McpResourceProvider(catalog, _clientFactory.Object, resourceLogger.Object);
+        var promptProvider = new McpPromptProvider(catalog, _clientFactory.Object, promptLogger.Object);
 
         return (toolProvider, resourceProvider, promptProvider);
     }
@@ -664,7 +665,7 @@ public class McpClientServerIntegrationTests
         options.Setup(x => x.Value).Returns(aiOptions);
 
         var logger = new Mock<ILogger<McpToolProvider>>();
-        return new McpToolProvider(options.Object, _clientFactory.Object, _loggerFactory.Object, logger.Object);
+        return new McpToolProvider(options.Object, new OptionsBackedMcpServerCatalog(options.Object), _clientFactory.Object, _loggerFactory.Object, logger.Object);
     }
 
     private McpResourceProvider CreateResourceProvider(params McpServerConfig[] servers)
@@ -682,7 +683,7 @@ public class McpClientServerIntegrationTests
         options.Setup(x => x.Value).Returns(aiOptions);
 
         var logger = new Mock<ILogger<McpResourceProvider>>();
-        return new McpResourceProvider(options.Object, _clientFactory.Object, logger.Object);
+        return new McpResourceProvider(new OptionsBackedMcpServerCatalog(options.Object), _clientFactory.Object, logger.Object);
     }
 
     private McpPromptProvider CreatePromptProvider(params McpServerConfig[] servers)
@@ -700,7 +701,7 @@ public class McpClientServerIntegrationTests
         options.Setup(x => x.Value).Returns(aiOptions);
 
         var logger = new Mock<ILogger<McpPromptProvider>>();
-        return new McpPromptProvider(options.Object, _clientFactory.Object, logger.Object);
+        return new McpPromptProvider(new OptionsBackedMcpServerCatalog(options.Object), _clientFactory.Object, logger.Object);
     }
 
     /// <summary>

@@ -315,7 +315,7 @@ public class AgentAsToolsExecutionStrategyTests
                 It.IsAny<double?>(),
                 It.IsAny<int?>(),
                 It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 childAgentId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(childExecutor);
@@ -327,7 +327,7 @@ public class AgentAsToolsExecutionStrategyTests
         {
             AgentFactory = agentFactory.Object,
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             ExecutionContextAccessor = accessor,
             Logger = Mock.Of<ILogger>()
         };
@@ -365,7 +365,7 @@ public class AgentAsToolsExecutionStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = Mock.Of<IRepository<Agent, Guid>>(),
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             ExecutionContextAccessor = null,
             Logger = Mock.Of<ILogger>()
         };

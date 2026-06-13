@@ -3,7 +3,7 @@ namespace Tnzi.AI.Channels.Gateway;
 /// <summary>
 /// 在线状态追踪器 — 管理 Gateway 连接的上下线状态
 /// </summary>
-[ExperimentalApi(Reason = "Gateway/Device/Workspace API under active development")]
+[ExperimentalApi(Reason = "Gateway API under active development")]
 public interface IPresenceTracker
 {
     /// <summary>追踪新连接</summary>

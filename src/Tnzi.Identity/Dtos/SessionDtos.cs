@@ -18,6 +18,12 @@ public class UserSessionDto
     public Guid UserId { get; set; }
 
     /// <summary>
+    /// 用户名 — 全局会话列表（GetSessionsAsync）批量关联用户表填充；
+    /// 按用户查询的旧路径（GetUserSessionsAsync）不填充（调用方已知用户）。
+    /// </summary>
+    public string? UserName { get; set; }
+
+    /// <summary>
     /// 设备信息
     /// </summary>
     public string? DeviceInfo { get; set; }
@@ -51,6 +57,22 @@ public class UserSessionDto
     /// 撤销时间
     /// </summary>
     public DateTime? RevokedAt { get; set; }
+}
+
+/// <summary>
+/// 会话分页查询 DTO — userId 可选；不传时分页列出全部会话（按最后活动时间倒序）
+/// </summary>
+public class SessionQueryDto : PagedQueryDto
+{
+    /// <summary>
+    /// 用户ID（可选）— 传入时仅返回该用户的会话
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// 是否包含已撤销的会话（默认 false，仅活跃会话）
+    /// </summary>
+    public bool IncludeRevoked { get; set; }
 }
 
 /// <summary>

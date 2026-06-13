@@ -74,8 +74,9 @@ public class AgentExecutorOptions
     public bool StripTextFromToolCallMessages { get; set; }
 
     /// <summary>
-    /// 系统提示词段落提供器列表 — Build 时动态注入额外提示词段落。
-    /// 由 AgentFactory 从 DI 中解析并注入（Scoped 感知）。
+    /// 浅拷贝克隆 — 基于 <see cref="object.MemberwiseClone"/>，自动复制全部成员；
+    /// 新增选项属性无需手动同步到克隆逻辑（曾因手抄字段清单漏掉
+    /// <see cref="Logger"/> 与 <see cref="StripTextFromToolCallMessages"/>）。
     /// </summary>
-    public IReadOnlyList<ISystemPromptSectionProvider>? SectionProviders { get; set; }
+    public AgentExecutorOptions Clone() => (AgentExecutorOptions)MemberwiseClone();
 }

@@ -16,6 +16,12 @@ export type {
   KnowledgeBaseUpdateParams,
   SearchTestParams,
   ReindexResultDto,
+  DocumentQueryParams,
+  DocumentStatus,
+  KnowledgeBaseDto,
+  KnowledgeDocumentDto,
+  DocumentUploadResultDto,
+  SearchResultDto,
 } from './rag';
 
 // Permission rule engine (admin/permissions)
@@ -46,16 +52,6 @@ export type {
   GatewayConnectionInfo,
   SessionBindingRuleDto,
 } from './channels';
-
-// Devices (admin/devices) — Tnzi.AI.Device
-export { useDeviceAdminApi } from './device';
-export type {
-  DevicePlatform,
-  DeviceConnectionState,
-  DeviceNodeDto,
-  PairingRequestDto,
-  DevicePairingInfoDto,
-} from './device';
 
 // Sandbox (admin/sandbox) — Tnzi.AI.Sandbox
 export { useSandboxAdminApi } from './sandbox';

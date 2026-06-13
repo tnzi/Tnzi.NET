@@ -146,26 +146,6 @@ public class ClarificationMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldSkipMiddleware_PassesThrough()
-    {
-        var middleware = CreateMiddleware();
-        var context = new AiMiddlewareContext
-        {
-            Request = new AgentRunRequest { UserMessage = "test" },
-            Agent = AgentResolution.Success(null!, "TestProvider", "test-model", null,
-                executionMode: AgentExecutionMode.ExternalCli),
-            ServiceProvider = new ServiceCollection().BuildServiceProvider(),
-            Messages = []
-        };
-
-        var result = await middleware.InvokeAsync(context,
-            (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "pass" }),
-            CancellationToken.None);
-
-        Assert.Equal("pass", result.Response);
-    }
-
-    [Fact]
     public async Task InvokeAsync_WithOptions_FormatsNumberedList()
     {
         var accessor = new AgentExecutionContextAccessor();

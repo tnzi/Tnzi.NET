@@ -3,6 +3,7 @@
     :state="props.state"
     :title="title"
     :mode="mode"
+    :show-header="showHeader"
     :show-search="showSearch"
     :show-default-search="showDefaultSearch"
     :search-fields="searchFields"
@@ -39,6 +40,7 @@
     </template>
 
     <template v-if="$slots.header" #header><slot name="header" /></template>
+    <template v-if="$slots.kpis" #kpis><slot name="kpis" /></template>
     <template v-if="$slots.search" #search><slot name="search" /></template>
     <template v-if="$slots.primary" #primary><slot name="primary" /></template>
     <template v-if="$slots.toolbar" #toolbar><slot name="toolbar" /></template>
@@ -69,6 +71,10 @@ export interface TCardPageProps<T, TId extends string | number = string | number
   cols?: number | { xs?: number; sm?: number; md?: number; lg?: number; xl?: number }
   gap?: number
   cardKey?: (row: T) => string | number
+  /** When false the shell's white header card is not rendered — for card
+      grids nested under an outer header (e.g. inside TContentPage tabs)
+      where the shell's TPageHeader would duplicate the title bar. */
+  showHeader?: boolean
   showSearch?: boolean
   showDefaultSearch?: boolean
   searchFields?: FormSchemaItem[]
@@ -98,6 +104,7 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   cols: () => ({ xs: 1, sm: 2, md: 3, lg: 4 }),
   gap: 16,
   cardKey: undefined,
+  showHeader: true,
   showSearch: true,
   showDefaultSearch: true,
   searchFields: undefined,
@@ -118,6 +125,7 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
 
 defineSlots<{
   header?: () => unknown
+  kpis?: () => unknown
   card?: (props: { item: T; index: number; selected: boolean; toggleSelect: () => void }) => unknown
   empty?: () => unknown
   search?: () => unknown

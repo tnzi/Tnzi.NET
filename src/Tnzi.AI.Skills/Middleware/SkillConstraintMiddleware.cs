@@ -31,9 +31,6 @@ public class SkillConstraintMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-            return await next(context, cancellationToken);
-
         ApplyConstraints(context);
         return await next(context, cancellationToken);
     }
@@ -43,13 +40,6 @@ public class SkillConstraintMiddleware : IAiMiddleware
         AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-        {
-            await foreach (var chunk in next(context, cancellationToken))
-                yield return chunk;
-            yield break;
-        }
-
         ApplyConstraints(context);
         await foreach (var chunk in next(context, cancellationToken))
             yield return chunk;

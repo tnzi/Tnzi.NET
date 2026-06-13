@@ -159,6 +159,20 @@ export function maybeTranslate(value: string | undefined | null): string {
 }
 
 /**
+ * Resolve a backend-provided i18n key, falling back to the backend display
+ * string on a dictionary miss. `translatePageKey` never echoes the raw key —
+ * it returns `humanise(key)` when the dictionary misses — so a miss is
+ * detected by comparing against the humanised form. Used by the settings
+ * center where every group/field ships both an `i18nKey` and an English
+ * `label`/`displayName` fallback.
+ */
+export function resolveBackendLabel(i18nKey: string | null | undefined, fallback: string): string {
+  if (!i18nKey) return fallback
+  const resolved = translatePageKey('', i18nKey)
+  return resolved && resolved !== humanise(i18nKey) ? resolved : fallback
+}
+
+/**
  * Decide whether `value` is an i18n key (translate it) or a human literal
  * (show verbatim). A "key" is a dotted lowerCamel path like `admin.crud.list`.
  * When `value` is empty, translate `fallback` instead. Mirrors the heuristic

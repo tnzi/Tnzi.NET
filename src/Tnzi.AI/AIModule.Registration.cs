@@ -4,11 +4,114 @@ namespace Tnzi.AI;
 
 /// <summary>
 /// AIModule 的服务注册细分（partial）。
-/// <see cref="ConfigureServicesAsync"/> 仅作瘦编排器，按原有顺序依次调用下列私有方法；
-/// 各方法之间的相对顺序必须保持，以维持 TryAdd「先注册者胜」与 Add 覆盖语义不变。
+/// <para>
+/// 引擎注册：<see cref="AIModule.ConfigureServicesAsync"/> 仅作瘦编排器，按原有顺序依次调用下列私有
+/// 方法；各方法之间的相对顺序必须保持，以维持 TryAdd「先注册者胜」语义不变。
+/// </para>
+/// <para>
+/// NoOp 回退：<see cref="RegisterOptionalSubmoduleFallbacks"/> 由
+/// <see cref="AIModule.PostConfigureServicesAsync"/> 调用（所有模块 Configure 之后）——
+/// 子模块（Workflow/Skills/Rag）在 Configure 阶段的任意注册（TryAdd 或 Add）都先于回退，
+/// 回退的 TryAdd 见已存在即跳过，因此真实实现永远胜出，无须 RemoveAll+Add 约定。
+/// </para>
 /// </summary>
 public partial class AIModule
 {
+    // ───────────────────────── 可选子模块 NoOp 回退（PostConfigure 阶段） ─────────────────────────
+
+    private static void RegisterOptionalSubmoduleFallbacks(IServiceCollection services)
+    {
+        // 可选子模块回退实现：允许不加载子模块时仍能解析核心服务
+        services.TryAddScoped<IWorkflowService, NoOpWorkflowService>();
+        services.TryAddScoped<ISkillLoadTracker, NoOpSkillLoadTracker>();
+
+        // Workflow 子接口转发 — NoOpWorkflowService 已实现 IWorkflowService
+        //（继承 IWorkflowExecutionControlService + IWorkflowExecutionQueryService），
+        // 但 DI 不会自动转发子接口，需显式注册以消除 GetService<T>() null-check 脆弱性
+        services.TryAddScoped<IWorkflowExecutionControlService>(sp =>
+            (IWorkflowExecutionControlService)sp.GetRequiredService<IWorkflowService>());
+        services.TryAddScoped<IWorkflowExecutionQueryService>(sp =>
+            (IWorkflowExecutionQueryService)sp.GetRequiredService<IWorkflowService>());
+
+        // 其他 Category D NoOp 回退 — 已在核心被 GetService<T>() 消费
+        services.TryAddScoped<IWorkflowExecutionMailbox, NoOpWorkflowExecutionMailbox>();
+        services.TryAddScoped<IAgentStreamForwarder, NoOpAgentStreamForwarder>();
+
+        // Category C NoOp 回退 — 接口在核心定义、实现在子模块，防止 DI 解析失败
+        services.TryAddScoped<ISkillService, NoOpSkillService>();
+        services.TryAddScoped<ISkillStore, NoOpSkillStore>();
+        services.TryAddScoped<ISkillTemplateEngine, NoOpSkillTemplateEngine>();
+        services.TryAddScoped<ISkillConstraintEnforcer, NoOpSkillConstraintEnforcer>();
+        services.TryAddScoped<ISkillSearchService, NoOpSkillSearchService>();
+        services.TryAddScoped<ISkillRequirementsValidator, NoOpSkillRequirementsValidator>();
+        services.TryAddScoped<IVectorStore, NoOpVectorStore>();
+
+        // RAG 文本检索回退 — 用户/子模块（Tnzi.AI.Rag）可注册真实 ITextSearchService 连接向量存储
+        services.TryAddScoped<ITextSearchService, NoOpTextSearchService>();
+    }
+
+    // ───────────────────────── 引擎注册助手 ─────────────────────────
+
+    private static void AddAiMiddleware<T>(IServiceCollection services)
+        where T : class, IAiMiddleware
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddAiMiddlewareSingleton<T>(IServiceCollection services,
+        bool forwardAsSingleton = false)
+        where T : class, IAiMiddleware
+    {
+        services.AddSingleton<T>();
+        if (forwardAsSingleton)
+            services.AddSingleton<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+        else
+            services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddToolMiddleware<T>(IServiceCollection services)
+        where T : class, IAiMiddleware, IToolExecutionMiddleware
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddInputGuardrail<T>(IServiceCollection services)
+        where T : class, IInputGuardrail, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddOutputGuardrail<T>(IServiceCollection services)
+        where T : class, IOutputGuardrail, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddDualGuardrail<T>(IServiceCollection services)
+        where T : class, IInputGuardrail, IOutputGuardrail, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<T>());
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    private static void AddProviderOnlyGuardrail<T>(IServiceCollection services)
+        where T : class, IGuardrailProvider
+    {
+        services.AddScoped<T>();
+        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
+    }
+
+    // ───────────────────────── 引擎服务注册（Configure 阶段） ─────────────────────────
+
     // Per-provider resilience pipelines — Polly keys its circuit state by HttpClient
     // name, so giving each provider a unique name isolates their breakers. A 429 on
     // one provider cannot open circuits on the others.
@@ -57,6 +160,13 @@ public partial class AIModule
 
         // OAuth 令牌请求专用 HttpClient（无重试/熔断，令牌端点自行处理错误）
         services.AddHttpClient("Tnzi.AI.OAuth");
+
+        // DuckDuckGo 搜索专用 HttpClient（浏览器 UA，30 秒超时）
+        services.AddHttpClient(DuckDuckGoSearchProvider.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; TnziAgent/1.0)");
+        });
     }
 
     private static void RegisterChatClientsAndProcessors(IServiceCollection services)
@@ -92,46 +202,28 @@ public partial class AIModule
         services.TryAddSingleton<IToolRegistry, ToolRegistry>();
 
         // MCP：连接工厂与工具提供者（启用 AI:Mcp:Enabled 时生效）。IMcpToolProvider/McpClientFactory 为 Singleton（无请求级状态），Scoped ToolResolver 可安全注入它们。
+        // IMcpServerCatalog 合并部署配置（AI:Mcp:Servers）与 DB 注册表（McpServerRegistration）为有效服务器列表。
         services.TryAddSingleton<McpOAuthClientHandler>();
         services.AddSingleton<IMcpClientFactory, McpClientFactory>();
+        services.AddSingleton<IMcpServerCatalog, McpServerCatalog>();
         services.AddSingleton<IMcpToolProvider, McpToolProvider>();
         services.TryAddSingleton<IMcpResourceProvider, McpResourceProvider>();
         services.TryAddSingleton<IMcpPromptProvider, McpPromptProvider>();
 
+        // MCP Client 管理面：外部 MCP Server 注册表 CRUD（运行时凭证经 IMcpServerCatalog 消费）。
+        // Data Protection — 模块内唯一注册点（幂等，内部 TryAdd，与应用注册共存）；
+        // 消费方：McpServerRegistryService/McpServerCatalog（MCP AuthToken）、ProviderService/ChatClientFactory（Provider ApiKey）。
+        services.AddDataProtection();
+        services.AddScoped<IMcpServerRegistryService, McpServerRegistryService>();
+
         // Token 估算器（TryAdd：允许用户注册 tiktoken 等精确实现）
         services.TryAddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
 
+        // Web 搜索提供者（DuckDuckGo 默认实现，TryAdd: 用户可替换为商业 API）
+        services.TryAddSingleton<IWebSearchProvider, DuckDuckGoSearchProvider>();
+
         // 注册 Agent 解析器
         services.AddScoped<IAgentResolver, AgentResolver>();
-    }
-
-    private static void RegisterOptionalSubmoduleFallbacks(IServiceCollection services)
-    {
-        // 可选子模块回退实现：允许只加载 AIModule 时仍能解析核心服务
-        services.TryAddScoped<IWorkflowService, NoOpWorkflowService>();
-        services.TryAddScoped<ISkillLoadTracker, NoOpSkillLoadTracker>();
-
-        // Workflow 子接口转发 — NoOpWorkflowService 已实现 IWorkflowService
-        //（继承 IWorkflowExecutionControlService + IWorkflowExecutionQueryService），
-        // 但 DI 不会自动转发子接口，需显式注册以消除 GetService<T>() null-check 脆弱性
-        services.TryAddScoped<IWorkflowExecutionControlService>(sp =>
-            (IWorkflowExecutionControlService)sp.GetRequiredService<IWorkflowService>());
-        services.TryAddScoped<IWorkflowExecutionQueryService>(sp =>
-            (IWorkflowExecutionQueryService)sp.GetRequiredService<IWorkflowService>());
-
-        // 其他 Category D NoOp 回退 — 已在核心被 GetService<T>() 消费
-        services.TryAddScoped<IExternalCliExecutor, NoOpExternalCliExecutor>();
-        services.TryAddScoped<IWorkflowExecutionMailbox, NoOpWorkflowExecutionMailbox>();
-        services.TryAddScoped<IAgentStreamForwarder, NoOpAgentStreamForwarder>();
-
-        // Category C NoOp 回退 — 接口在核心定义、实现在子模块，防止 DI 解析失败
-        services.TryAddScoped<ISkillService, NoOpSkillService>();
-        services.TryAddScoped<ISkillStore, NoOpSkillStore>();
-        services.TryAddScoped<ISkillTemplateEngine, NoOpSkillTemplateEngine>();
-        services.TryAddScoped<ISkillConstraintEnforcer, NoOpSkillConstraintEnforcer>();
-        services.TryAddScoped<ISkillSearchService, NoOpSkillSearchService>();
-        services.TryAddScoped<ISkillRequirementsValidator, NoOpSkillRequirementsValidator>();
-        services.TryAddScoped<IVectorStore, NoOpVectorStore>();
     }
 
     private static void RegisterConversationMemoryAndContext(IServiceCollection services)
@@ -146,16 +238,12 @@ public partial class AIModule
         services.TryAddScoped<IEntityMemoryStore, DatabaseEntityMemoryStore>();
         services.AddScoped<LlmEntityExtractor>();
 
-        // 注册项目上下文提供器（从 DI 获取 IProjectContextLoader）
-        services.AddScoped<ProjectContextProvider>();
-
         // 注册上下文提供器贡献者（DI 驱动，取代 AgentExecutorOptionsBuilder 中硬编码 new）
         services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.TextSearchContributor>();
         services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.ChatHistoryMemoryContributor>();
         services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.MemoryContributor>();
         services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.EntityMemoryContributor>();
         services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.SkillContributor>();
-        services.AddScoped<IContextProviderContributor, Infrastructure.ContextProviders.Contributors.ProjectContextContributor>();
 
         // 注册 Prompt 模板引擎（TryAdd：允许用户注册自定义模板引擎）
         services.TryAddScoped<IPromptTemplateEngine, SimplePromptTemplateEngine>();
@@ -172,12 +260,12 @@ public partial class AIModule
         services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
 
         // Provider entity CRUD (Phase 5 backend prereq) — entity-driven provider management
-        // with encrypted credential storage. IDataProtectionProvider is provided by the host
-        // (added automatically when ASP.NET Core is referenced).
-        services.AddDataProtection();
+        // with encrypted credential storage. IDataProtectionProvider 由 RegisterToolAndAgentInfrastructure
+        // 中的单次 AddDataProtection() 提供（本方法在其后执行，无需重复注册）。
         services.AddScoped<IProviderService, ProviderService>();
         services.AddScoped<IBudgetService, BudgetService>();
         services.AddScoped<IAgentService, AgentService>();
+        services.AddScoped<IAgentMemoryService, AgentMemoryService>();
         services.AddScoped<IAgentVersionRouter, AgentVersionRouter>();
         services.AddScoped<AgentThreadService>();
         services.AddScoped<IAgentThreadService>(sp => sp.GetRequiredService<AgentThreadService>());
@@ -187,15 +275,11 @@ public partial class AIModule
         services.AddScoped<IEmbeddingService, EmbeddingService>();
         services.AddScoped<IStructuredOutputService, StructuredOutputService>();
 
-        // 注册 RAG 相关服务（使用 TryAdd 允许用户覆盖）
-        // 用户可以注册自己的 ITextSearchService 实现来连接到向量存储（Redis、Qdrant、Pinecone 等）
-        services.TryAddScoped<ITextSearchService, NoOpTextSearchService>();
-
         // 注册工具审批处理器（使用 TryAdd 允许用户覆盖）
         // 用户可以注册自己的 IToolApprovalHandler 实现来实现自定义审批逻辑
         services.TryAddSingleton<IToolApprovalHandler, AutoApprovalHandler>();
         services.TryAddSingleton<IToolPermissionEvaluator, ConfiguredToolPermissionEvaluator>();
-        services.TryAddSingleton<IShellCommandAnalyzer, ShellCommandAnalyzer>();
+        // IShellCommandAnalyzer 在 ConfigureServicesAsync 主方法中注册（被 Sandbox 子模块消费的核心工具）
 
         // 注册工具权限规则持久化存储（Scoped：需要 IRepository）
         services.AddScoped<IToolPermissionRuleStore, DatabaseToolPermissionRuleStore>();
@@ -294,6 +378,9 @@ public partial class AIModule
         services.AddScoped<IAgentTraceService, AgentTraceService>();
         services.AddScoped<IAgentRunSignalDispatcher, AgentRunSignalDispatcher>();
         services.AddScoped<IAgentRuntimeControlService, AgentRuntimeControlService>();
+
+        // 注册 Agent 授权服务（工具/技能/知识库 junction grant 的投影、reconcile、反向查询）
+        services.AddScoped<IAgentGrantService, AgentGrantService>();
 
         // 注册 Agent 验证服务（配置有效性检查）
         services.AddScoped<IAgentValidationService, AgentValidationService>();

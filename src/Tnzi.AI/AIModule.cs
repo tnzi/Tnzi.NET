@@ -1,9 +1,13 @@
-using McpClientFactory = Tnzi.AI.Infrastructure.Mcp.McpClientFactory;
-
 namespace Tnzi.AI;
 
 /// <summary>
-/// AI 模块 - 基于 Microsoft.Extensions.AI 的自定义 Agent 引擎
+/// AI 模块 — 开箱即用的 AI 集成：契约、实体、DTO、Options，以及 Agent 执行引擎
+/// （Runtime/Executor/Resolver/Factory、中间件管道、内置工具、Guardrails、Agent/Chat/Run 服务、控制器）。
+/// <para>
+/// 可选子模块（Workflow/Skills/Rag 等）的接口在本模块定义并带 NoOp 回退
+/// （在 <see cref="PostConfigureServicesAsync"/> 注册，子模块 Configure 期注册必胜）；
+/// 加载相应子模块获得真实实现。应用 <c>[DependsOn(typeof(AIModule))]</c> 即获得完整 AI 能力。
+/// </para>
 /// </summary>
 [DependsOn(typeof(EFCoreModule))]
 [DependsOn(typeof(AspNetCoreModule))]
@@ -65,74 +69,15 @@ public partial class AIModule : TnziApplicationModule
             .ValidateWith<TOptions, TValidator>();
     }
 
-    private static void AddAiMiddleware<T>(IServiceCollection services)
-        where T : class, IAiMiddleware
-    {
-        services.AddScoped<T>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
-    }
-
-    private static void AddAiMiddlewareSingleton<T>(IServiceCollection services,
-        bool forwardAsSingleton = false)
-        where T : class, IAiMiddleware
-    {
-        services.AddSingleton<T>();
-        if (forwardAsSingleton)
-            services.AddSingleton<IAiMiddleware>(sp => sp.GetRequiredService<T>());
-        else
-            services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
-    }
-
-    private static void AddToolMiddleware<T>(IServiceCollection services)
-        where T : class, IAiMiddleware, IToolExecutionMiddleware
-    {
-        services.AddScoped<T>();
-        services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<T>());
-        services.AddScoped<IToolExecutionMiddleware>(sp => sp.GetRequiredService<T>());
-    }
-
-    private static void AddInputGuardrail<T>(IServiceCollection services)
-        where T : class, IInputGuardrail, IGuardrailProvider
-    {
-        services.AddScoped<T>();
-        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<T>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
-    }
-
-    private static void AddOutputGuardrail<T>(IServiceCollection services)
-        where T : class, IOutputGuardrail, IGuardrailProvider
-    {
-        services.AddScoped<T>();
-        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<T>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
-    }
-
-    private static void AddDualGuardrail<T>(IServiceCollection services)
-        where T : class, IInputGuardrail, IOutputGuardrail, IGuardrailProvider
-    {
-        services.AddScoped<T>();
-        services.AddScoped<IInputGuardrail>(sp => sp.GetRequiredService<T>());
-        services.AddScoped<IOutputGuardrail>(sp => sp.GetRequiredService<T>());
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
-    }
-
-    private static void AddProviderOnlyGuardrail<T>(IServiceCollection services)
-        where T : class, IGuardrailProvider
-    {
-        services.AddScoped<T>();
-        services.AddScoped<IGuardrailProvider>(sp => sp.GetRequiredService<T>());
-    }
-
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var services = context.Services;
 
-        // 注册分组按关注点拆分到 AIModule.Registration.cs（partial）。
-        // ⚠️ 调用顺序必须保持：TryAdd「先注册者胜」与 Add 覆盖语义依赖于此顺序不变。
+        // 引擎服务注册 — 拆分到 AIModule.Registration.cs（partial）。
+        // ⚠️ 调用顺序必须保持：TryAdd「先注册者胜」语义依赖于此顺序不变。
         ConfigureHttpClients(context, services);
         RegisterChatClientsAndProcessors(services);
         RegisterToolAndAgentInfrastructure(services);
-        RegisterOptionalSubmoduleFallbacks(services);
         RegisterConversationMemoryAndContext(services);
         RegisterCoreServices(services);
         RegisterBuiltInToolsAndGuardrails(services);
@@ -141,6 +86,23 @@ public partial class AIModule : TnziApplicationModule
         RegisterUtilitiesWorkspaceAndEvents(context, services);
         RegisterSqlToolSuite(services);
 
+        // 核心工具：Shell 命令分析器 — 纯字符串解析工具，被 Sandbox 子模块消费
+        services.TryAddSingleton<IShellCommandAnalyzer, ShellCommandAnalyzer>();
+
+        // 配置中心：声明 AI 模块可热更新的配置组（System 模块未加载时惰性无害）
+        services.AddSingleton<ISettingDefinitionProvider, AISettingDefinitionProvider>();
+
+        return Task.CompletedTask;
+    }
+
+    public override Task PostConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        // 可选子模块 NoOp 回退注册在 PostConfigure 阶段（框架生命周期：所有模块 Configure 之后才进入
+        // PostConfigure）。任何子模块/应用在 Configure 阶段的注册——无论 TryAdd 还是 Add——都先于这里的
+        // TryAdd 回退，回退见「已存在」即跳过 → 结构性消灭「先注册的 NoOp 抢占子模块 TryAdd」整类
+        // bug（ced3e778），子模块不需要 RemoveAll+Add 约定，用任意常规注册方式即可。
+        RegisterOptionalSubmoduleFallbacks(context.Services);
+
         return Task.CompletedTask;
     }
 
@@ -148,15 +110,20 @@ public partial class AIModule : TnziApplicationModule
     {
         var serviceProvider = context.ServiceProvider;
         var logger = serviceProvider.GetRequiredService<ILogger<AIModule>>();
-        ValidateRuntimeConfiguration(serviceProvider, logger);
+
+        // 探测可选子模块的 NoOp 回退是否仍生效（信息级日志 + ITextSearch 有条件硬错误）。
+        ValidateNoOpFallbacks(serviceProvider, logger);
+
+        // 校验引擎运行时配置（启用了需要 LLM Provider 的功能时必须存在已启用的 Provider）
+        ValidateProviderRuntimeConfiguration(serviceProvider, logger);
 
         // 扫描并注册工具（在应用初始化阶段执行一次）
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
         var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();
 
-        // 扫描自身程序集
+        // 扫描自身程序集（共享助手 AIToolRegistration — 与子模块同一条扫描-注册-容错路径）
         var assembly = Assembly.GetExecutingAssembly();
-        RegisterTools(toolRegistry, toolScanner, assembly, logger);
+        AIToolRegistration.ScanAndRegisterAITools(toolRegistry, toolScanner, assembly, logger);
 
         // 扫描应用程序集（排除框架程序集和系统程序集）
         var appAssemblies = AppDomain.CurrentDomain.GetAssemblies()
@@ -169,7 +136,7 @@ public partial class AIModule : TnziApplicationModule
 
         foreach (var appAssembly in appAssemblies)
         {
-            RegisterTools(toolRegistry, toolScanner, appAssembly, logger);
+            AIToolRegistration.ScanAndRegisterAITools(toolRegistry, toolScanner, appAssembly, logger);
         }
 
         // 校验 [RequiresSkill] 引用的 slug 是否存在
@@ -247,7 +214,8 @@ public partial class AIModule : TnziApplicationModule
         }
     }
 
-    // Validation and tool-registration helpers live in AIModule.Validation.cs
-    // (partial class) to keep this file focused on module wiring.
-    // Service registration is split by concern into AIModule.Registration.cs (partial).
+    // Service registration is split into AIModule.Registration.cs (partial):
+    //   - engine registrations (ConfigureServicesAsync orchestration targets)
+    //   - optional sub-module NoOp fallbacks (PostConfigureServicesAsync)
+    // Validation/probing helpers live in AIModule.Validation.cs (partial).
 }

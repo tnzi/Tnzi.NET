@@ -168,10 +168,10 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         var threadDir = translator.GetThreadDirectory(_threadId);
         await using var sandbox = new LocalSandbox("test", threadDir,
             TimeSpan.FromSeconds(10), 1024);
-        var tools = new SandboxTools(translator, NullLogger<SandboxTools>.Instance);
+        var tools = CreateTools(translator, sandbox);
 
         // 3. 用 read_file 读取提取的脚本
-        var result = await tools.ReadFileAsync(sandbox, _threadId, "/mnt/skills/data-analysis/scripts/analyze.py");
+        var result = await tools.ReadFileAsync("/mnt/skills/data-analysis/scripts/analyze.py");
         var json = JsonSerializer.Serialize(result);
         json.ToLower().ShouldContain("duckdb");
     }
@@ -198,9 +198,9 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         var threadDir = translator.GetThreadDirectory(_threadId);
         await using var sandbox = new LocalSandbox("test", threadDir,
             TimeSpan.FromSeconds(10), 1024);
-        var tools = new SandboxTools(translator, NullLogger<SandboxTools>.Instance);
+        var tools = CreateTools(translator, sandbox);
 
-        var result = await tools.ListDirectoryAsync(sandbox, _threadId, "/mnt/skills");
+        var result = await tools.ListDirectoryAsync("/mnt/skills");
         var json = JsonSerializer.Serialize(result);
         json.ShouldContain("data-analysis");
     }
@@ -227,9 +227,9 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         var threadDir = translator.GetThreadDirectory(_threadId);
         await using var sandbox = new LocalSandbox("test", Path.Combine(threadDir, "workspace"),
             TimeSpan.FromSeconds(10), 4096);
-        var tools = new SandboxTools(translator, NullLogger<SandboxTools>.Instance);
+        var tools = CreateTools(translator, sandbox);
 
-        var result = await tools.BashAsync(sandbox, _threadId,
+        var result = await tools.BashAsync(
             "cat /mnt/skills/data-analysis/scripts/analyze.py | head -5");
         var json = JsonSerializer.Serialize(result);
         json.ShouldNotContain("No such file");
@@ -257,22 +257,22 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         var threadDir = translator.GetThreadDirectory(_threadId);
         await using var sandbox = new LocalSandbox("test", Path.Combine(threadDir, "workspace"),
             TimeSpan.FromSeconds(10), 4096);
-        var tools = new SandboxTools(translator, NullLogger<SandboxTools>.Instance);
+        var tools = CreateTools(translator, sandbox);
 
         if (OperatingSystem.IsWindows())
         {
-            await tools.WriteFileAsync(sandbox, _threadId, "/mnt/workspace/test.cmd", "@echo off\r\necho skill-pipeline-ok\r\n");
+            await tools.WriteFileAsync("/mnt/workspace/test.cmd", "@echo off\r\necho skill-pipeline-ok\r\n");
         }
         else
         {
-            await tools.WriteFileAsync(sandbox, _threadId, "/mnt/workspace/test.sh", "#!/bin/bash\necho 'skill-pipeline-ok'");
+            await tools.WriteFileAsync("/mnt/workspace/test.sh", "#!/bin/bash\necho 'skill-pipeline-ok'");
         }
 
         var command = OperatingSystem.IsWindows()
             ? "call /mnt/workspace/test.cmd"
             : "bash /mnt/workspace/test.sh";
 
-        var result = await tools.BashAsync(sandbox, _threadId, command);
+        var result = await tools.BashAsync(command);
         var json = JsonSerializer.Serialize(result);
         json.ShouldContain("skill-pipeline-ok");
     }
@@ -345,6 +345,18 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         if (Directory.Exists(fallback)) return fallback;
 
         throw new DirectoryNotFoundException("Cannot find BuiltIn skills directory");
+    }
+
+    /// <summary>
+    /// 创建 SandboxTools 并在当前测试的异步流上发布沙箱环境
+    /// （模拟 SandboxMiddleware 的发布动作）。
+    /// </summary>
+    private SandboxTools CreateTools(VirtualPathTranslator translator, ISandbox sandbox)
+    {
+        var accessor = new AgentExecutionContextAccessor();
+        accessor.Properties[SandboxPropertyKeys.ToolEnvironment] =
+            new SandboxToolEnvironment(sandbox, _threadId);
+        return new SandboxTools(translator, NullLogger<SandboxTools>.Instance, accessor);
     }
 
     private static AiMiddlewareContext CreateFakeMiddlewareContext(Guid threadId)

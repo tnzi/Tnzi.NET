@@ -31,6 +31,12 @@ import type {
   AgentVersionQueryDto,
   AgentValidationResultDto,
   AgentHealthSummaryDto,
+  ConfigureAbTestDto,
+  ToolGroupDto,
+  AgentMemoryDto,
+  AgentMemoryListQueryDto,
+  CreateAgentMemoryDto,
+  UpdateAgentMemoryDto,
   // Threads
   AgentThreadDto,
   CreateAgentThreadDto,
@@ -52,6 +58,7 @@ import type {
   UserQuotaQueryDto,
   SetQuotaDto,
   ResetQuotaDto,
+  BudgetSummaryDto,
   // Usage Analytics
   UsageSummaryDto,
   UsageSummaryQueryDto,
@@ -66,6 +73,8 @@ import type {
   CostSummaryDto,
   // Providers
   ProviderDefaultModelDto,
+  ProviderOptionDto,
+  ProviderModelsDto,
   ProviderDto,
   ProviderQueryDto,
   CreateProviderDto,
@@ -78,6 +87,8 @@ import type {
   CreateEvaluationRunDto,
   BatchEvaluationDto,
   BatchEvaluationResultDto,
+  EvaluationTrendDto,
+  VersionComparisonDto,
   // Skills
   SkillSummaryDto,
   SkillDetailDto,
@@ -311,6 +322,34 @@ export function useAdminAgentApi(client: HttpClient) {
     /** Get agent health summary */
     getHealth: () =>
       client.get<AgentHealthSummaryDto>(`${base}/health`),
+
+    /** Configure A/B test (route a traffic slice to version B). Returns the updated agent. */
+    configureAbTest: (id: string, data: ConfigureAbTestDto) =>
+      client.post<AgentDto>(`${base}/${id}/ab-test`, data),
+
+    /** Stop the A/B test on an agent. Returns the updated agent. */
+    stopAbTest: (id: string) =>
+      client.delete<AgentDto>(`${base}/${id}/ab-test`),
+
+    /** List assignable tool groups (catalog from the in-process tool registry) */
+    getToolGroups: () =>
+      client.get<ToolGroupDto[]>(`${base}/tool-groups`),
+
+    /** List an agent's (admin-curated) memory entries, paged */
+    getMemory: (id: string, data?: AgentMemoryListQueryDto) =>
+      client.post<PagedList<AgentMemoryDto>>(`${base}/${id}/memory/query`, data ?? {}),
+
+    /** Create a memory entry for an agent */
+    createMemory: (id: string, data: CreateAgentMemoryDto) =>
+      client.post<AgentMemoryDto>(`${base}/${id}/memory`, data),
+
+    /** Update an agent memory entry */
+    updateMemory: (id: string, memoryId: string, data: UpdateAgentMemoryDto) =>
+      client.put<AgentMemoryDto>(`${base}/${id}/memory/${memoryId}`, data),
+
+    /** Delete an agent memory entry */
+    deleteMemory: (id: string, memoryId: string) =>
+      client.delete<void>(`${base}/${id}/memory/${memoryId}`),
   };
 }
 
@@ -436,6 +475,14 @@ export function useAdminQuotaApi(client: HttpClient) {
     /** Reset user quota */
     resetQuota: (data: ResetQuotaDto) =>
       client.post<void>(`${base}/reset`, data),
+
+    /**
+     * Get the USD cost budget summary for a tenant/time-range.
+     * All params optional — omit `tenantId` for the global view; start/end
+     * default to the current calendar month on the backend.
+     */
+    getBudgetSummary: (params?: { tenantId?: string; startTime?: string; endTime?: string }) =>
+      client.get<BudgetSummaryDto>(`${base}/budget/summary`, params ? { params } : undefined),
   };
 }
 
@@ -455,6 +502,14 @@ export function useAdminProviderApi(client: HttpClient) {
     /** Get default model for a provider */
     getDefaultModel: (providerName: string) =>
       client.get<ProviderDefaultModelDto>(`${base}/${providerName}/default-model`),
+
+    /** Provider dropdown options (enabled only) — for the Agent config Provider select */
+    getOptions: () =>
+      client.get<ProviderOptionDto[]>(`${base}/options`),
+
+    /** List models for a provider entity (live /v1/models + static fallback) */
+    listModels: (id: string) =>
+      client.get<ProviderModelsDto>(`${base}/entities/${id}/models`),
 
     // ---- Entity-driven CRUD (Phase 5 backend prereq) ----------------------
 
@@ -555,6 +610,16 @@ export function useAdminEvaluationApi(client: HttpClient) {
     /** Run a batch evaluation across multiple agents/versions */
     runBatch: (data: BatchEvaluationDto) =>
       client.post<BatchEvaluationResultDto>(`${base}/batch`, data),
+
+    /** Get an agent's evaluation score trend over its last N runs. */
+    getTrend: (agentId: string, lastNRuns = 10) =>
+      client.get<EvaluationTrendDto>(`${base}/agents/${agentId}/trend`, { params: { lastNRuns } }),
+
+    /** Compare two agent versions' aggregate evaluation stats. */
+    compareVersions: (agentId: string, versionA: number, versionB: number) =>
+      client.get<VersionComparisonDto>(`${base}/agents/${agentId}/compare`, {
+        params: { versionA, versionB },
+      }),
   };
 }
 

@@ -13,7 +13,6 @@ public class ViewImageMiddlewareTests
     }
 
     private static AiMiddlewareContext CreateContext(
-        AgentExecutionMode mode = AgentExecutionMode.Single,
         List<(string MimeType, string Base64)>? viewedImages = null,
         bool alreadyInjected = false)
     {
@@ -24,8 +23,7 @@ public class ViewImageMiddlewareTests
             {
                 Agent = null!,
                 Provider = "test",
-                Model = "test",
-                ExecutionMode = mode
+                Model = "test"
             },
             ServiceProvider = new Mock<IServiceProvider>().Object
         };
@@ -141,24 +139,4 @@ public class ViewImageMiddlewareTests
 
     #endregion
 
-    #region ShouldSkipMiddleware: pass through
-
-    [Fact]
-    public async Task ShouldSkipMiddleware_PassesThrough()
-    {
-        var middleware = CreateMiddleware();
-        var images = new List<(string MimeType, string Base64)>
-        {
-            ("image/png", Convert.ToBase64String(new byte[] { 1, 2, 3 }))
-        };
-        var context = CreateContext(mode: AgentExecutionMode.ExternalCli, viewedImages: images);
-
-        await middleware.InvokeAsync(context, SuccessNext);
-
-        // ExternalCli 模式跳过中间件，不应注入图片
-        context.Messages.Count.ShouldBe(0);
-        context.Properties.ContainsKey(ViewImageTool.ViewedImagesInjectedKey).ShouldBeFalse();
-    }
-
-    #endregion
 }

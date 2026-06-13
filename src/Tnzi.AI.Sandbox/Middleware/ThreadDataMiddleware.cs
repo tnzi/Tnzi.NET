@@ -48,8 +48,6 @@ public class ThreadDataMiddleware : IAiMiddleware
 
     private async Task SetupThreadDataAsync(AiMiddlewareContext context, CancellationToken ct)
     {
-        if (context.ShouldSkipMiddleware) return;
-
         var threadId = context.Request.ThreadId;
         if (threadId is null) return;
 

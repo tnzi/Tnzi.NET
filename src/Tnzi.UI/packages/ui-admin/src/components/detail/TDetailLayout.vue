@@ -166,6 +166,8 @@ const menuOptions = computed(() => {
 }
 @media (max-width: 767px) {
   .t-detail-layout__split { flex-direction: column; }
-  .t-detail-layout__nav { width: 100%; }
+  /* 移动堆叠：nav 必须限高且可收缩（flex 0 1 auto + max-height），否则在
+     column 方向上 flex-shrink:0 的 nav 吃满容器高度，把 panel 压成 0 高。 */
+  .t-detail-layout__nav { width: 100%; flex: 0 1 auto; max-height: 40%; }
 }
 </style>

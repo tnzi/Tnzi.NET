@@ -43,20 +43,14 @@ const bridge = createSystemBridge({ client: useAdminClient() })
 const t = (key: string) => translatePageKey('system.scheduledJobs', key)
 const message = useSafeMessage()
 
-const readOnlyFn = async (): Promise<never> => {
-  // Hangfire recurring jobs are registered in code via
-  // IBackgroundJobManager.CreateRecurring. The admin UI does not create/update
-  // them — only list, trigger, and delete.
-  throw new Error('ScheduledJob: create/update are not supported for Hangfire recurring jobs')
-}
-
 const crud = useCrudPage<ScheduledJobDto>({
   pageId: 'system.scheduledJobs',
   columns: scheduledJobColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.scheduledJobs.fetch(query),
-  createData: readOnlyFn,
-  updateData: readOnlyFn,
+  // Hangfire recurring jobs are registered in code via
+  // IBackgroundJobManager.CreateRecurring — no create/update here; the admin
+  // surface is list / trigger / delete only.
   deleteData: async (ids) => {
     for (const id of ids) {
       await bridge.scheduledJobs.delete(String(id))

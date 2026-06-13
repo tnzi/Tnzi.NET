@@ -238,16 +238,6 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
           {
-            path: 'parameters',
-            name: 'system.parameters',
-            component: () => import('../pages/system/Parameters.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.system.parameters.title',
-              permission: 'system.parameter.view',
-              keepAlive: true,
-            },
-          },
-          {
             path: 'access-logs',
             name: 'system.accessLogs',
             component: () => import('../pages/system/AccessLogs.vue'),
@@ -338,6 +328,19 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
         ],
+      },
+
+      // ── Settings Center ──────────────────────────────────────
+      // Reached via the sidebar bottom icon (Task 14); not in the menu tree.
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('../pages/system/Settings.vue'),
+        meta: {
+          title: 'tnzi.admin.modules.system.settings.title',
+          permission: 'system.parameter.view',
+          hideInMenu: true,
+        },
       },
 
       // ── Storage ───────────────────────────────────────────────
@@ -712,17 +715,6 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
-          {
-            path: 'devices',
-            name: 'ai.devices',
-            component: () => import('../pages/ai/devices/Devices.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.ai.devices.title',
-              permission: 'ai.devices.view',
-              keepAlive: true,
-            },
-          },
-
           {
             path: 'sandbox',
             name: 'ai.sandbox',

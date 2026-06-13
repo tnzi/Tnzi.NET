@@ -24,15 +24,6 @@ public class AbTestConfig
 }
 
 /// <summary>
-/// A/B 测试配置包装（嵌入到 Agent.Configuration JSON）
-/// </summary>
-internal class AbTestConfigWrapper
-{
-    [JsonPropertyName("abTest")]
-    public AbTestConfig? AbTest { get; set; }
-}
-
-/// <summary>
 /// 配置 A/B 测试请求 DTO
 /// </summary>
 public class ConfigureAbTestDto

@@ -8,6 +8,8 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
     private readonly IRepository<DocumentChunk, Guid> _chunkRepository;
+    private readonly IRepository<KnowledgeGraphNode, Guid> _graphNodeRepository;
+    private readonly IRepository<KnowledgeGraphEdge, Guid> _graphEdgeRepository;
     private readonly IDocumentIngestionService _ingestionService;
     private readonly IVectorStore _vectorStore;
     private readonly IEmbeddingService _embeddingService;
@@ -19,6 +21,8 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         IRepository<KnowledgeBase, Guid> kbRepository,
         IRepository<KnowledgeDocument, Guid> docRepository,
         IRepository<DocumentChunk, Guid> chunkRepository,
+        IRepository<KnowledgeGraphNode, Guid> graphNodeRepository,
+        IRepository<KnowledgeGraphEdge, Guid> graphEdgeRepository,
         IDocumentIngestionService ingestionService,
         IVectorStore vectorStore,
         IEmbeddingService embeddingService,
@@ -30,6 +34,8 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         _kbRepository = Check.NotNull(kbRepository);
         _docRepository = Check.NotNull(docRepository);
         _chunkRepository = Check.NotNull(chunkRepository);
+        _graphNodeRepository = Check.NotNull(graphNodeRepository);
+        _graphEdgeRepository = Check.NotNull(graphEdgeRepository);
         _ingestionService = Check.NotNull(ingestionService);
         _vectorStore = Check.NotNull(vectorStore);
         _embeddingService = Check.NotNull(embeddingService);
@@ -100,10 +106,30 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 await _docRepository.DeleteManyAsync(docs, ct);
             }
 
+            // 图谱数据与 chunk/doc 同等显式删除：KB 是软删（MultiTenantAuditedEntity），
+            // KnowledgeGraphNode/Edge 的 FK 级联只在 KB 物理删除时触发，软删后图谱表会永久残留悬挂数据。
+            // 先删边（边对节点有 FK），再删节点。
+            var edges = await _graphEdgeRepository.AsQueryable()
+                .Where(e => e.KnowledgeBaseId == id)
+                .ToListAsync(ct);
+            if (edges.Count > 0)
+            {
+                await _graphEdgeRepository.DeleteManyAsync(edges, ct);
+            }
+
+            var nodes = await _graphNodeRepository.AsQueryable()
+                .Where(n => n.KnowledgeBaseId == id)
+                .ToListAsync(ct);
+            if (nodes.Count > 0)
+            {
+                await _graphNodeRepository.DeleteManyAsync(nodes, ct);
+            }
+
             await _kbRepository.DeleteAsync(entity, ct);
 
-            Logger.LogInformation("Deleted knowledge base {Id}: {Name} ({DocCount} documents)",
-                id, entity.Name, docs.Count);
+            Logger.LogInformation(
+                "Deleted knowledge base {Id}: {Name} ({DocCount} documents, {NodeCount} graph nodes, {EdgeCount} graph edges)",
+                id, entity.Name, docs.Count, nodes.Count, edges.Count);
         }, ct);
 
         return Ok();
@@ -330,11 +356,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         }
 
         // 生成查询向量（provider/model 与摄取对齐）
-        var embeddingOptions = new EmbeddingOptions
-        {
-            Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
-            Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
-        };
+        var embeddingOptions = RagEmbeddingOptionsResolver.Resolve(kb, _options);
         var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, embeddingOptions, ct);
         if (!embeddingResult.Succeeded)
         {
@@ -376,11 +398,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
 
         // 生成查询向量：跨库搜索使用全局默认 embedding provider/model
         // （此前漏传 options 致回退到 AI 顶层 DefaultProvider，可能无 embedding 能力）。
-        var embeddingOptions = new EmbeddingOptions
-        {
-            Provider = _options.DefaultEmbeddingProvider,
-            Model = _options.DefaultEmbeddingModel
-        };
+        var embeddingOptions = RagEmbeddingOptionsResolver.ResolveDefault(_options);
         var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, embeddingOptions, ct);
         if (!embeddingResult.Succeeded)
         {
@@ -493,11 +511,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 });
             }
 
-            var embeddingOptions = new EmbeddingOptions
-            {
-                Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
-                Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
-            };
+            var embeddingOptions = RagEmbeddingOptionsResolver.Resolve(kb, _options);
 
             var documentCount = allChunks.Select(c => c.DocumentId).Distinct().Count();
             var totalProcessed = 0;

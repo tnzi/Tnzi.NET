@@ -10,7 +10,7 @@
  * Phase I.7.1 only wires `translate` and `toggleLoginModule` (callbacks are
  * empty placeholders that the modules don't yet invoke).
  */
-import { inject, provide, ref, type InjectionKey, type Ref } from 'vue'
+import { inject, provide, reactive, ref, type InjectionKey, type Ref } from 'vue'
 
 export type LoginModule =
   | 'pwd-login'
@@ -127,6 +127,56 @@ export interface LoginCallbacks {
 }
 
 /**
+ * Visual style hints derived from the shell's `layout` (2026-06-11 redesign).
+ * Modules read these instead of hardcoding form chrome so the same module
+ * renders correctly in both layouts:
+ *   - `wave`  → `{ labeled: false, pill: true }` — icon-less compact inputs,
+ *     pill (round) primary buttons; the direct evolution of the legacy page.
+ *   - `split` → `{ labeled: true, pill: false }` — careercompass-style
+ *     stacked labels above each input, squared buttons.
+ */
+export interface LoginUiStyle {
+  /** Render a stacked label above each form input. */
+  labeled: boolean
+  /** Render primary/secondary action buttons as pills (`round`). */
+  pill: boolean
+}
+
+/**
+ * Live form-interaction signals for decorative shell elements (the split
+ * layout's animated characters watch these). `PwdLogin` writes; the brand
+ * panel reads. All fields are plain reactive state on a `reactive({})`
+ * object provided by the shell:
+ *   - `typing` — the username field has focus (characters lean in to peek)
+ *   - `passwordVisible` — the password is shown in clear text (characters
+ *     politely look away… mostly)
+ *   - `passwordLength` — characters of password typed so far
+ */
+export interface LoginSceneState {
+  typing: boolean
+  passwordVisible: boolean
+  passwordLength: number
+}
+
+/**
+ * A third-party sign-in provider rendered by `PwdLogin` as a round icon
+ * button under an "Or continue with" divider. Purely consumer-driven —
+ * the shell ships no OAuth flow; `onClick` typically starts a redirect.
+ */
+export interface LoginThirdPartyProvider {
+  /** Stable key — also the data-key attribute. */
+  key: string
+  /** Iconify icon name (e.g. `'mdi:wechat'`, `'mdi:github'`). */
+  icon: string
+  /** Accessible label / tooltip. Falls back to `key`. */
+  label?: string
+  /** Brand color for the icon (e.g. `'#07C160'` for WeChat). */
+  color?: string
+  /** Start the provider's sign-in flow (usually an OAuth redirect). */
+  onClick: () => void | Promise<void>
+}
+
+/**
  * A demo account quick-fill button rendered under the password form. The
  * label is shown on the button, and clicking pre-fills the username +
  * password (and Phase I.7.2+ may also auto-submit, matching soybean's
@@ -158,6 +208,21 @@ export interface LoginContext {
    * file ships no accounts).
    */
   demoAccounts: LoginDemoAccount[]
+  /**
+   * Layout-derived form chrome hints (labels / pill buttons). See
+   * {@link LoginUiStyle}. Provided by `TLoginPage` from its `layout` prop.
+   */
+  ui: LoginUiStyle
+  /**
+   * Third-party sign-in providers rendered by `PwdLogin`. Empty array hides
+   * the "Or continue with" section.
+   */
+  thirdParty: LoginThirdPartyProvider[]
+  /**
+   * Live form-interaction signals (see {@link LoginSceneState}). Reactive —
+   * modules assign fields directly; decorative shell elements react.
+   */
+  scene: LoginSceneState
   /**
    * Outstanding 2FA challenge. `null` when no challenge is active.
    * Populated by `pwdLogin` / `codeLogin` callbacks via
@@ -192,6 +257,9 @@ export function useLoginContext(): LoginContext {
     toggleLoginModule: () => undefined,
     callbacks: {},
     demoAccounts: [],
+    ui: { labeled: false, pill: true },
+    thirdParty: [],
+    scene: reactive({ typing: false, passwordVisible: false, passwordLength: 0 }),
     pendingTwoFactor,
     helpers: {
       setTwoFactorRequired: (c) => {

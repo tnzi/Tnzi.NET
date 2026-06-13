@@ -38,16 +38,13 @@ const bridge = createStorageBridge({ client: useAdminClient() })
 const t = (key: string) => translatePageKey('storage.versions', key)
 const message = useSafeMessage()
 
-const readOnlyFn = async (): Promise<never> => { throw new Error('Version: read-only resource') }
-
 const crud = useCrudPage<FileVersionAuditDto>({
   pageId: 'storage.versions',
   columns: versionColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.versions.fetch(query),
-  createData: readOnlyFn,
-  updateData: readOnlyFn,
-  deleteData: readOnlyFn,
+  // Versions are produced by the file lifecycle — read-only here; the only
+  // admin operation is the per-row Restore action below.
 })
 
 crud.refresh().catch(() => undefined)

@@ -10,7 +10,6 @@
     :all-columns="paymentSubscriptionColumns"
     :title="t('title')"
     :translate="t"
-    :show-create="false"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
@@ -69,9 +68,9 @@ const crud = useCrudPage<SubscriptionDto, string>({
   columns: paymentSubscriptionColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.subscriptions.fetch(query),
-  createData: async () => { throw new Error('Subscriptions are initiated by users, not admins') },
+  // Subscriptions are initiated by users and never hard-deleted (use cancel);
+  // admins may only edit billing metadata.
   updateData: (id, data) => bridge.subscriptions.update(id, data),
-  deleteData: async () => { throw new Error('Subscriptions cannot be deleted; use cancel') },
 })
 
 

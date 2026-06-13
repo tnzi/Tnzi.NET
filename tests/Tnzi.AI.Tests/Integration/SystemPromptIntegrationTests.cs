@@ -9,30 +9,25 @@ namespace Tnzi.AI.Tests.Integration;
 public class SystemPromptIntegrationTests
 {
     /// <summary>
-    /// 验证 SystemPromptTemplateBuilder 生成的完整 prompt 可作为 ChatMessage 注入
+    /// 验证 SystemPromptTemplateBuilder 包装的 instructions 可作为 ChatMessage 注入
     /// </summary>
     [Fact]
-    public async Task FullPrompt_CanBeUsedAsChatMessage()
+    public void WrappedInstructions_CanBeUsedAsChatMessage()
     {
-        var builder = new SystemPromptTemplateBuilder();
-        builder.AddSection(SystemPromptTemplateBuilder.Tags.Soul, "You are Tnzi, a helpful AI assistant.", order: 0);
-        builder.AddSection(SystemPromptTemplateBuilder.Tags.Instructions, "Always respond in English.", order: 30);
-        builder.AddSection(SystemPromptTemplateBuilder.Tags.CurrentDate, DateTime.UtcNow.ToString("yyyy-MM-dd"), order: 120);
-
-        var prompt = await builder.BuildAsync();
+        var prompt = SystemPromptTemplateBuilder.WrapInstructions("Always respond in English.");
 
         var message = new ChatMessage(ChatRole.System, prompt);
         message.Role.ShouldBe(ChatRole.System);
-        message.Text.ShouldContain("<soul>");
         message.Text.ShouldContain("<instructions>");
-        message.Text.ShouldContain("<current_date>");
+        message.Text.ShouldContain("Always respond in English.");
+        message.Text.ShouldContain("</instructions>");
     }
 
     /// <summary>
-    /// 验证 SubAgentRegistry 的 general-purpose 定义可生成 orchestration section
+    /// 验证 SubAgentRegistry 的内置定义可生成委派摘要文本
     /// </summary>
     [Fact]
-    public async Task SubAgentRegistry_CanGenerateOrchestrationSection()
+    public void SubAgentRegistry_CanGenerateDelegationSummary()
     {
         var registry = new SubAgentRegistry();
         var types = registry.GetAll();
@@ -44,14 +39,10 @@ public class SystemPromptIntegrationTests
             sb.AppendLine($"- **{t.Name}**: {t.Description} (max {t.MaxTurns} turns)");
         }
 
-        var builder = new SystemPromptTemplateBuilder();
-        builder.AddSection(SystemPromptTemplateBuilder.Tags.SubAgentOrchestration, sb.ToString().TrimEnd(), order: 70);
-
-        var prompt = await builder.BuildAsync();
-        prompt.ShouldContain("<sub_agent_orchestration>");
-        prompt.ShouldContain("general-purpose");
-        prompt.ShouldContain("bash");
-        prompt.ShouldContain("researcher");
+        var summary = sb.ToString();
+        summary.ShouldContain("general-purpose");
+        summary.ShouldContain("bash");
+        summary.ShouldContain("researcher");
     }
 
     /// <summary>

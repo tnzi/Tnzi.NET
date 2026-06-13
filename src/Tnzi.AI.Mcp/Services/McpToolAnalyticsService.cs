@@ -1,5 +1,3 @@
-using Tnzi.AI.Mcp.Dtos;
-
 namespace Tnzi.AI.Mcp.Services;
 
 /// <summary>

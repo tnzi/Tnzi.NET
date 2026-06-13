@@ -40,6 +40,7 @@ public class AgentFactoryToolDefinitionsTests
             .Setup(r => r.ResolveToolsAsync(
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([aiTool]);
 
@@ -73,6 +74,7 @@ public class AgentFactoryToolDefinitionsTests
         var toolResolver = new Mock<IToolResolver>();
         toolResolver
             .Setup(r => r.ResolveToolsAsync(
+                It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<CancellationToken>()))
@@ -111,6 +113,7 @@ public class AgentFactoryToolDefinitionsTests
         var toolResolver = new Mock<IToolResolver>();
         toolResolver
             .Setup(r => r.ResolveToolsAsync(
+                It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<CancellationToken>()))
@@ -185,7 +188,7 @@ public class AgentFactoryToolDefinitionsTests
     /// Reads ToolDefinitions from an AgentExecutor via the internal options.
     /// Uses reflection because AgentExecutorOptions.ToolDefinitions is internal to the executor.
     /// </summary>
-    private static IReadOnlyDictionary<string, ToolDefinition>? GetToolDefinitions(AgentExecutor executor)
+    private static IReadOnlyDictionary<string, ToolDefinition>? GetToolDefinitions(IAgentExecutor executor)
     {
         var optionsField = typeof(AgentExecutor)
             .GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

@@ -131,7 +131,18 @@ public class McpServerSecurityMiddleware
     }
 
     /// <summary>
-    /// 从 HTTP 请求中提取租户标识。
+    /// 从 HTTP 请求中提取租户标识（仅读取 <c>X-Tenant-Id</c> 请求头，不读取 query string）。
+    /// <para>
+    /// <b>UNTRUSTED partition hint.</b> The value is self-reported by the client and is
+    /// NOT validated against any tenant store. It is used ONLY to partition rate-limit
+    /// buckets (see <see cref="BuildClientKey"/>) and as an analytics dimension — it MUST
+    /// NEVER be used for data isolation or authorization decisions.
+    /// </para>
+    /// <para>
+    /// Query-string extraction (<c>?tenantId=</c>/<c>?tenant=</c>) was deliberately removed:
+    /// query values leak into access logs/proxies and made it trivial to spoof another
+    /// tenant's rate-limit partition via a crafted URL.
+    /// </para>
     /// </summary>
     public string? ExtractTenantId(HttpRequest request)
     {
@@ -140,24 +151,6 @@ public class McpServerSecurityMiddleware
         if (request.Headers.TryGetValue(TenantHeaderName, out var tenantValues))
         {
             var tenantId = tenantValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(tenantId))
-            {
-                return tenantId;
-            }
-        }
-
-        if (request.Query.TryGetValue("tenantId", out var tenantQueryValues))
-        {
-            var tenantId = tenantQueryValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(tenantId))
-            {
-                return tenantId;
-            }
-        }
-
-        if (request.Query.TryGetValue("tenant", out var legacyTenantQueryValues))
-        {
-            var tenantId = legacyTenantQueryValues.FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(tenantId))
             {
                 return tenantId;

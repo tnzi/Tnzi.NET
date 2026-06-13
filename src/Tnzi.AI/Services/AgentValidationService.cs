@@ -8,12 +8,14 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
     private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IToolRegistry _toolRegistry;
+    private readonly IAgentGrantService _grantService;
     private readonly ISkillRegistry? _skillRegistry;
 
     public AgentValidationService(
         IRepository<Agent, Guid> agentRepository,
         IChatClientFactory chatClientFactory,
         IToolRegistry toolRegistry,
+        IAgentGrantService grantService,
         IServiceProvider serviceProvider,
         ISkillRegistry? skillRegistry = null)
         : base(serviceProvider)
@@ -21,6 +23,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         _agentRepository = Check.NotNull(agentRepository);
         _chatClientFactory = Check.NotNull(chatClientFactory);
         _toolRegistry = Check.NotNull(toolRegistry);
+        _grantService = Check.NotNull(grantService);
         _skillRegistry = skillRegistry;
     }
 
@@ -71,8 +74,9 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         // Check 2: Model availability
         checks.Add(ValidateModel(agent));
 
-        // Check 3: Tool groups registered
-        checks.Add(ValidateToolGroups(agent));
+        // Check 3: Tool groups registered (sourced from the authoritative grant junction)
+        var grants = await _grantService.GetGrantsAsync(agent.Id);
+        checks.Add(ValidateToolGroups(grants.ToolGroups));
 
         // Check 4: Handoff targets exist (for Handoff/AgentAsTools modes)
         if (agent.ExecutionMode is AgentExecutionMode.Handoff or AgentExecutionMode.AgentAsTools)
@@ -133,9 +137,9 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         };
     }
 
-    private ValidationCheckDto ValidateToolGroups(Agent agent)
+    private ValidationCheckDto ValidateToolGroups(IReadOnlyList<string> toolGroups)
     {
-        if (agent.ToolGroups == null || agent.ToolGroups.Count == 0)
+        if (toolGroups.Count == 0)
         {
             return new ValidationCheckDto
             {
@@ -146,14 +150,14 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         }
 
         var registeredGroups = _toolRegistry.GetAllGroupNames().ToList();
-        var missingGroups = agent.ToolGroups.Where(g => !registeredGroups.Contains(g, StringComparer.OrdinalIgnoreCase)).ToList();
+        var missingGroups = toolGroups.Where(g => !registeredGroups.Contains(g, StringComparer.OrdinalIgnoreCase)).ToList();
 
         return new ValidationCheckDto
         {
             Name = "tool_groups",
             Passed = missingGroups.Count == 0,
             Details = missingGroups.Count == 0
-                ? $"All {agent.ToolGroups.Count} tool groups are registered"
+                ? $"All {toolGroups.Count} tool groups are registered"
                 : $"Missing tool groups: {string.Join(", ", missingGroups)}"
         };
     }

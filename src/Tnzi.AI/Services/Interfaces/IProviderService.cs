@@ -31,4 +31,13 @@ public interface IProviderService
 
     /// <summary>测试 Provider 连接（轻量探针）</summary>
     Task<Result<ProviderTestResultDto>> TestConnectionAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>获取启用的 Provider 下拉选项（供前端 Agent 配置下拉框）</summary>
+    Task<Result<List<ProviderOptionDto>>> GetOptionsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// 列出指定 Provider 可用的模型 — 优先调用第三方 OpenAI 兼容 <c>/v1/models</c>，
+    /// 失败时按 ProviderType 返回静态精选兜底列表。
+    /// </summary>
+    Task<Result<ProviderModelsDto>> ListModelsAsync(Guid id, CancellationToken ct = default);
 }

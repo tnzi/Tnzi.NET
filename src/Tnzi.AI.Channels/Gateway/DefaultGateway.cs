@@ -37,6 +37,8 @@ public class DefaultGateway : IGateway
             }
 
             using var scope = _scopeFactory.CreateScope();
+            // 在 Gateway 处理作用域内建立租户上下文（请求归属租户为 null 时不切换，行为不变）
+            using var tenantScope = ChangeTenantScope(scope.ServiceProvider, request.TenantId);
             var runtime = scope.ServiceProvider.GetRequiredService<IAgentRuntime>();
             var threadStore = scope.ServiceProvider.GetRequiredService<IChannelThreadStore>();
 
@@ -104,6 +106,8 @@ public class DefaultGateway : IGateway
         }
 
         using var scope = _scopeFactory.CreateScope();
+        // 在 Gateway 处理作用域内建立租户上下文（请求归属租户为 null 时不切换，行为不变）
+        using var tenantScope = ChangeTenantScope(scope.ServiceProvider, request.TenantId);
         var runtime = scope.ServiceProvider.GetRequiredService<IAgentRuntime>();
         var threadStore = scope.ServiceProvider.GetRequiredService<IChannelThreadStore>();
 
@@ -172,11 +176,22 @@ public class DefaultGateway : IGateway
             ChatId = request.ChatId,
             UserId = request.UserId,
             PeerKind = request.PeerKind,
-            ExplicitAgentId = request.AgentId?.ToString()
+            ExplicitAgentId = request.AgentId?.ToString(),
+            // 透传渠道归属租户 — 带 TenantId 的绑定规则按租户分区命中（null = 部署级全局）
+            TenantId = request.TenantId
         };
 
         return _binder.Resolve(context);
     }
+
+    /// <summary>
+    /// 在给定作用域内切换当前租户上下文；tenantId 为 null 时不做任何事（返回 null 供 using 安全释放）。
+    /// 使 IChannelThreadStore 等作用域服务的多租户审计填充/全局过滤生效。
+    /// </summary>
+    private static IDisposable? ChangeTenantScope(IServiceProvider scopedProvider, Guid? tenantId)
+        => tenantId.HasValue
+            ? scopedProvider.GetService<ICurrentTenant>()?.Change(tenantId)
+            : null;
 
     private void TrackSession(SessionBinding binding, Guid? threadId, string channel, string peerId)
     {

@@ -124,14 +124,29 @@ public class HangfireModule : TnziInfrastructureModule
     /// </summary>
     public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
-        var app = context.App;
-        if (app == null)
+        var options = context.ServiceProvider.GetRequiredService<IOptions<HangfireOptions>>().Value;
+        if (!options.Enabled)
         {
             return Task.CompletedTask;
         }
 
-        var options = context.ServiceProvider.GetRequiredService<IOptions<HangfireOptions>>().Value;
-        if (!options.Enabled)
+        // Eagerly initialize Hangfire's global JobStorage.Current during application initialization.
+        //
+        // Hangfire's static facade (BackgroundJob.*, RecurringJob.*, JobStorage.Current) reads the
+        // global JobStorage.Current, which AddHangfire only assigns the first time the JobStorage
+        // service is resolved. With AddHangfireServer (hosted-service model) that first resolution
+        // happens when the server's IHostedService starts — AFTER app.Run(), i.e. AFTER every
+        // module's OnApplicationInitializationAsync has already run. The Dashboard middleware below
+        // would also trigger it, but only when the Dashboard is enabled. As a result, any module that
+        // registers a recurring job at init time via IBackgroundJobManager.CreateRecurring (which
+        // calls the static RecurringJob.AddOrUpdate) would throw "JobStorage.Current ... has not been
+        // initialized" whenever the Dashboard is disabled. Resolving JobStorage here runs that
+        // configuration now and assigns the global instance, making the static API usable for the
+        // remaining modules' initialization regardless of host type or Dashboard state.
+        JobStorage.Current = context.ServiceProvider.GetRequiredService<JobStorage>();
+
+        var app = context.App;
+        if (app == null)
         {
             return Task.CompletedTask;
         }

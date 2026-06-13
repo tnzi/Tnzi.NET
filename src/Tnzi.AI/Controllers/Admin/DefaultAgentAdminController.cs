@@ -1,3 +1,5 @@
+using Tnzi.AI.Tools;
+
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
@@ -10,14 +12,16 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentService AgentService;
     protected readonly IAgentValidationService ValidationService;
+    protected readonly IToolRegistry ToolRegistry;
 
     /// <summary>
     /// 初始化 Agent 管理控制器
     /// </summary>
-    public DefaultAgentAdminController(IAgentService agentService, IAgentValidationService validationService)
+    public DefaultAgentAdminController(IAgentService agentService, IAgentValidationService validationService, IToolRegistry toolRegistry)
     {
         AgentService = Check.NotNull(agentService);
         ValidationService = Check.NotNull(validationService);
+        ToolRegistry = Check.NotNull(toolRegistry);
     }
 
     /// <summary>
@@ -172,5 +176,27 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     {
         var result = await ValidationService.GetHealthSummaryAsync();
         return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取可分配的工具组目录（供 Agent 配置的工具组多选选择器，替代自由文本）
+    /// </summary>
+    [HttpGet("tool-groups")]
+    public virtual ApiResult<List<ToolGroupDto>> GetToolGroups()
+    {
+        var groups = ToolRegistry.GetAllGroupNames()
+            .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var tools = ToolRegistry.GetToolsByGroup(g);
+                return new ToolGroupDto
+                {
+                    Name = g,
+                    ToolCount = tools.Count,
+                    ToolNames = tools.Select(t => t.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()
+                };
+            })
+            .ToList();
+        return ApiResult<List<ToolGroupDto>>.Ok(groups);
     }
 }

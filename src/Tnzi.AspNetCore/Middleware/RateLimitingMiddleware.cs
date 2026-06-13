@@ -8,59 +8,46 @@ namespace Tnzi.AspNetCore.Middleware;
 public class RateLimitingMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly RateLimitOptions _options;
-    private readonly IRateLimitService _rateLimitService;
+    private readonly IOptionsMonitor<AspNetCoreOptions> _optionsMonitor;
     private readonly ILogger<RateLimitingMiddleware> _logger;
-
-    /// <summary>
-    /// 缓存按路径长度降序排序的规则列表，避免每次请求重新排序
-    /// </summary>
-    private readonly List<KeyValuePair<string, RateLimitRule>>? _sortedPathRules;
 
     /// <summary>
     /// 初始化一个<see cref="RateLimitingMiddleware"/>类型的新实例
     /// </summary>
     public RateLimitingMiddleware(
         RequestDelegate next,
-        IOptions<AspNetCoreOptions> aspNetCoreOptions,
-        IRateLimitService rateLimitService,
+        IOptionsMonitor<AspNetCoreOptions> optionsMonitor,
         ILogger<RateLimitingMiddleware> logger)
     {
         _next = Check.NotNull(next);
-        _options = Check.NotNull(aspNetCoreOptions).Value.RateLimit ?? new RateLimitOptions();
-        _rateLimitService = Check.NotNull(rateLimitService);
+        _optionsMonitor = Check.NotNull(optionsMonitor);
         _logger = Check.NotNull(logger);
-
-        // 预排序路径规则，避免每次请求排序
-        if (_options.ByPath != null && _options.ByPath.Count > 0)
-        {
-            _sortedPathRules = _options.ByPath
-                .OrderByDescending(kvp => kvp.Key.Length)
-                .ToList();
-        }
     }
 
     /// <summary>
-    /// 处理请求
+    /// 处理请求。IRateLimitService 是 scoped 服务，约定中间件本身是单例 —
+    /// 必须经 InvokeAsync 参数按请求解析（构造注入会在 root provider 校验时失败）。
     /// </summary>
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context, IRateLimitService rateLimitService)
     {
+        var options = _optionsMonitor.CurrentValue.RateLimit ?? new RateLimitOptions();
+
         // 检查是否启用限流
-        if (!_options.Enabled)
+        if (!options.Enabled)
         {
             await _next(context);
             return;
         }
 
         // 检查路径是否需要限流
-        if (ShouldExcludePath(context.Request.Path))
+        if (ShouldExcludePath(context.Request.Path, options))
         {
             await _next(context);
             return;
         }
 
         // 获取限流规则（同时获取匹配的路径）
-        var (rule, matchedPath) = GetRateLimitRuleWithPath(context);
+        var (rule, matchedPath) = GetRateLimitRuleWithPath(context, options);
         if (rule == null)
         {
             await _next(context);
@@ -80,7 +67,7 @@ public class RateLimitingMiddleware
         {
             var currentUser = context.RequestServices.GetService<ICurrentUser>();
             var identifier = currentUser?.Id?.ToString() ?? context.Request.GetClientIp() ?? string.Empty;
-            
+
             if (rule.Whitelist.Contains(identifier, StringComparer.OrdinalIgnoreCase))
             {
                 await _next(context);
@@ -92,14 +79,14 @@ public class RateLimitingMiddleware
         {
             // 先递增计数（原子操作），然后检查是否超过限流
             // 这样可以避免竞态条件：两个请求同时检查都通过，然后都递增导致超过限制
-            var count = await _rateLimitService.IncrementAndGetAsync(key, rule.WindowSeconds, rule.Algorithm);
-            
+            var count = await rateLimitService.IncrementAndGetAsync(key, rule.WindowSeconds, rule.Algorithm);
+
             if (count > rule.Limit)
             {
                 _logger.LogWarning(
                     "Rate limit exceeded - Key: {Key}, Count: {Count}, Limit: {Limit}, Window: {Window} seconds, Path: {Path}, IP: {IP}",
                     key, count, rule.Limit, rule.WindowSeconds, context.Request.Path, context.Request.GetClientIp());
-                
+
                 context.Response.StatusCode = 429; // Too Many Requests
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Retry-After"] = rule.WindowSeconds.ToString();
@@ -111,12 +98,12 @@ public class RateLimitingMiddleware
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, 
+            _logger.LogError(ex,
                 "Rate limiting middleware error - Path: {Path}, Method: {Method}",
                 context.Request.Path, context.Request.Method);
-            
+
             // 根据配置决定故障时的策略
-            if (_options.AllowOnFailure)
+            if (options.AllowOnFailure)
             {
                 // 允许通过（fail-open）
                 await _next(context);
@@ -138,27 +125,28 @@ public class RateLimitingMiddleware
     /// <summary>
     /// 检查路径是否排除限流
     /// </summary>
-    private bool ShouldExcludePath(PathString path)
+    private static bool ShouldExcludePath(PathString path, RateLimitOptions options)
     {
-        if (_options.ExcludePaths == null || _options.ExcludePaths.Length == 0)
+        if (options.ExcludePaths == null || options.ExcludePaths.Length == 0)
             return false;
 
         var pathValue = path.Value ?? string.Empty;
-        return _options.ExcludePaths.Any(excludePath => 
+        return options.ExcludePaths.Any(excludePath =>
             pathValue.StartsWith(excludePath, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
     /// 获取限流规则（同时返回匹配的路径）
     /// </summary>
-    private (RateLimitRule? rule, string? matchedPath) GetRateLimitRuleWithPath(HttpContext context)
+    private static (RateLimitRule? rule, string? matchedPath) GetRateLimitRuleWithPath(HttpContext context, RateLimitOptions options)
     {
         var path = context.Request.Path.Value ?? string.Empty;
 
-        // 优先检查路径限流（使用最长匹配原则，已预排序）
-        if (_sortedPathRules != null)
+        // 优先检查路径限流（使用最长匹配原则）
+        if (options.ByPath != null && options.ByPath.Count > 0)
         {
-            foreach (var pathRule in _sortedPathRules)
+            var sortedPathRules = options.ByPath.OrderByDescending(kvp => kvp.Key.Length);
+            foreach (var pathRule in sortedPathRules)
             {
                 if (path.StartsWith(pathRule.Key, StringComparison.OrdinalIgnoreCase))
                 {
@@ -169,24 +157,24 @@ public class RateLimitingMiddleware
 
         // 检查用户限流
         var currentUser = context.RequestServices.GetService<ICurrentUser>();
-        if (_options.ByUser != null && currentUser?.Id != null)
+        if (options.ByUser != null && currentUser?.Id != null)
         {
-            return (_options.ByUser, null);
+            return (options.ByUser, null);
         }
 
         // 检查 IP 限流
-        if (_options.ByIp != null)
+        if (options.ByIp != null)
         {
-            return (_options.ByIp, null);
+            return (options.ByIp, null);
         }
 
         // 使用默认限流
-        if (_options.DefaultLimit > 0)
+        if (options.DefaultLimit > 0)
         {
             return (new RateLimitRule
             {
-                Limit = _options.DefaultLimit,
-                WindowSeconds = _options.DefaultWindowSeconds
+                Limit = options.DefaultLimit,
+                WindowSeconds = options.DefaultWindowSeconds
             }, null);
         }
 

@@ -20,6 +20,18 @@ public class DefaultSessionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 分页查询会话列表 — userId 可选；不传时返回全局会话列表（按最后活动时间倒序，含 userName）
+    /// </summary>
+    /// <param name="query">查询条件（userId 可选 + includeRevoked + pageIndex/pageSize）</param>
+    /// <returns>分页会话列表</returns>
+    [HttpGet]
+    public virtual async Task<ApiResult<IPagedList<UserSessionDto>>> GetSessions([FromQuery] SessionQueryDto query)
+    {
+        var result = await SessionService.GetSessionsAsync(query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取用户的所有会话
     /// </summary>
     /// <param name="userId">用户ID</param>

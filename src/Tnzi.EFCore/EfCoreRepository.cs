@@ -580,12 +580,20 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     {
         Check.NotNull(entity);
 
-        if (DbContext.Entry(entity).State == EntityState.Detached)
+        var entry = DbContext.Entry(entity);
+        if (entry.State == EntityState.Detached)
         {
             DbSet.Attach(entity);
         }
-        DbContext.Entry(entity).State = EntityState.Modified;
-        
+
+        // 尚未持久化的新实体（Added）必须保持 Added：
+        // 强行改为 Modified 会让 INSERT 变成 UPDATE（影响 0 行），在事务延迟保存模式下
+        // 该行从未插入，依赖它的子表在事务提交 flush 时触发外键违反
+        if (entry.State != EntityState.Added)
+        {
+            entry.State = EntityState.Modified;
+        }
+
         // 智能保存：如果应该立即保存，则保存更改
         if (ShouldSaveImmediately())
         {
@@ -599,23 +607,26 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
 
         // 优化批量更新：对于大量实体，分批处理
         var entityList = entities as ICollection<TEntity> ?? entities.ToList();
+
+        // 尚未持久化的新实体（Added）必须保持 Added，不能被 UpdateRange 降级为 Modified（见 UpdateAsync）
+        var toUpdate = entityList.Where(e => DbContext.Entry(e).State != EntityState.Added).ToList();
         var batchSize = GetBatchSize();
 
         // 对于大量实体（超过批次大小），分批处理
-        if (entityList.Count > batchSize)
+        if (toUpdate.Count > batchSize)
         {
-            var batches = entityList.Chunk(batchSize);
+            var batches = toUpdate.Chunk(batchSize);
 
             foreach (var batch in batches)
             {
                 DbSet.UpdateRange(batch);
             }
         }
-        else
+        else if (toUpdate.Count > 0)
         {
-            DbSet.UpdateRange(entityList);
+            DbSet.UpdateRange(toUpdate);
         }
-        
+
         // 批量操作：延迟保存（在方法结束时统一保存）
         if (ShouldSaveImmediately())
         {

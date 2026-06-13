@@ -193,9 +193,9 @@ public class ThreadResourceQuotaTests : IDisposable
     public async Task BashAsync_NoQuotaInjected_ExecutesNormally()
     {
         await using var fixture = new SandboxToolsFixture(_threadId);
-        var tools = new SandboxTools(fixture.Translator, NullLogger<SandboxTools>.Instance, quota: null);
+        var tools = CreateTools(fixture, quota: null);
 
-        var result = await tools.BashAsync(fixture.Sandbox, _threadId, "echo no-quota");
+        var result = await tools.BashAsync("echo no-quota");
 
         result.ToString()!.ShouldContain("no-quota");
     }
@@ -205,10 +205,10 @@ public class ThreadResourceQuotaTests : IDisposable
     {
         await using var fixture = new SandboxToolsFixture(_threadId);
         var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 10 });
-        var tools = new SandboxTools(fixture.Translator, NullLogger<SandboxTools>.Instance, quota: quota);
+        var tools = CreateTools(fixture, quota: quota);
 
-        await tools.BashAsync(fixture.Sandbox, _threadId, "echo first");
-        await tools.BashAsync(fixture.Sandbox, _threadId, "echo second");
+        await tools.BashAsync("echo first");
+        await tools.BashAsync("echo second");
 
         var usage = await quota.GetUsageAsync(_threadId);
         usage.CommandCount.ShouldBe(2);
@@ -221,19 +221,15 @@ public class ThreadResourceQuotaTests : IDisposable
         await using var fixture = new SandboxToolsFixture(_threadId);
         var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 1 });
         var bus = new CapturingEventBus();
-        var tools = new SandboxTools(
-            fixture.Translator,
-            NullLogger<SandboxTools>.Instance,
-            eventBus: bus,
-            quota: quota);
+        var tools = CreateTools(fixture, quota: quota, eventBus: bus);
 
         // First call succeeds — fills the single-command quota.
-        await tools.BashAsync(fixture.Sandbox, _threadId, "echo first");
+        await tools.BashAsync("echo first");
         bus.Captured.OfType<SandboxCommandExecutedEvent>().Single().Denied.ShouldBeFalse();
 
         // Second call is denied by the quota pre-flight check.
         bus.Captured.Clear();
-        var secondResult = await tools.BashAsync(fixture.Sandbox, _threadId, "echo second");
+        var secondResult = await tools.BashAsync("echo second");
 
         secondResult.ToString()!.ShouldContain("Command denied", Case.Insensitive);
         var deniedEvent = bus.Captured.OfType<SandboxCommandExecutedEvent>().Single();
@@ -245,6 +241,23 @@ public class ThreadResourceQuotaTests : IDisposable
     // ------------------------------------------------------------------ //
     // Helpers
     // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// 创建 SandboxTools 并在当前测试的异步流上发布沙箱环境
+    /// （模拟 SandboxMiddleware 的发布动作 — 必须在测试方法体内调用）。
+    /// </summary>
+    private SandboxTools CreateTools(SandboxToolsFixture fixture, IThreadResourceQuota? quota, IEventBus? eventBus = null)
+    {
+        var accessor = new AgentExecutionContextAccessor();
+        accessor.Properties[SandboxPropertyKeys.ToolEnvironment] =
+            new SandboxToolEnvironment(fixture.Sandbox, _threadId);
+        return new SandboxTools(
+            fixture.Translator,
+            NullLogger<SandboxTools>.Instance,
+            accessor,
+            eventBus: eventBus,
+            quota: quota);
+    }
 
     private sealed class SandboxToolsFixture : IAsyncDisposable
     {

@@ -59,7 +59,6 @@ public class AIModuleOptionalDependencyTests
     [InlineData(typeof(IWorkflowExecutionControlService))]
     [InlineData(typeof(IWorkflowExecutionQueryService))]
     [InlineData(typeof(IWorkflowExecutionMailbox))]
-    [InlineData(typeof(IExternalCliExecutor))]
     [InlineData(typeof(IAgentStreamForwarder))]
     [InlineData(typeof(IVectorStore))]
     [InlineData(typeof(ISkillLoadTracker))]
@@ -99,7 +98,7 @@ public class AIModuleOptionalDependencyTests
         {
             typeof(IWorkflowService), typeof(IWorkflowExecutionControlService),
             typeof(IWorkflowExecutionQueryService), typeof(IWorkflowExecutionMailbox),
-            typeof(IExternalCliExecutor), typeof(IAgentStreamForwarder), typeof(IVectorStore),
+            typeof(IAgentStreamForwarder), typeof(IVectorStore),
             typeof(ISkillLoadTracker), typeof(ISkillService), typeof(ISkillStore),
             typeof(ISkillTemplateEngine), typeof(ISkillConstraintEnforcer),
             typeof(ISkillSearchService), typeof(ISkillRequirementsValidator),
@@ -164,7 +163,7 @@ public class AIModuleOptionalDependencyTests
     private static void InvokeValidateRuntimeConfiguration(IServiceProvider provider, ILogger logger)
     {
         var method = typeof(AIModule).GetMethod(
-            "ValidateRuntimeConfiguration",
+            "ValidateNoOpFallbacks",
             BindingFlags.NonPublic | BindingFlags.Static);
         method.ShouldNotBeNull();
         method.Invoke(null, [provider, logger]);
@@ -225,8 +224,11 @@ public class AIModuleOptionalDependencyTests
         services.AddOptions<TodoOptions>().Bind(configuration.GetSection("AI:Todo"));
         services.AddOptions<PortAllocatorOptions>().Bind(configuration.GetSection("AI:PortAllocator"));
 
-        var context = new Tnzi.Modules.ServiceConfigurationContext(services, configuration);
-        new AIModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
+        // AIModule registers the engine impls in Configure and the NoOp fallbacks in PostConfigure.
+        // Bootstrap through the real phase semantics so the engine is resolvable while the OPTIONAL
+        // sub-modules (Workflow/Skills/Rag) remain at their NoOp fallbacks — exactly the
+        // "core loaded, sub-modules absent" scenario these tests assert.
+        TestHelpers.ConfigureModules(services, configuration, new AIModule());
         return services;
     }
 }

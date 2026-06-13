@@ -53,4 +53,23 @@ describe('TCardPage', () => {
     })
     expect(wrapper.find('.t-list-shell__create').exists()).toBe(false)
   })
+
+  it('forwards show-header=false to the shell (no white header card)', () => {
+    const wrapper = mount(TCardPage, {
+      props: { state: makeState() as any, title: 'Cards', showHeader: false },
+      slots: { card: '<div />' },
+      global: { stubs },
+    })
+    expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(false)
+    expect(wrapper.find('.t-page-header__title').exists()).toBe(false)
+  })
+
+  it('renders the shell header card by default', () => {
+    const wrapper = mount(TCardPage, {
+      props: { state: makeState() as any, title: 'Cards' },
+      slots: { card: '<div />' },
+      global: { stubs },
+    })
+    expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(true)
+  })
 })

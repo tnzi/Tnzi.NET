@@ -26,10 +26,33 @@ export { default as TPageHeader } from './layout/TPageHeader.vue'
 export { default as TContentPage } from './layout/TContentPage.vue'
 export { default as TDarkModeContainer } from './layout/TDarkModeContainer.vue'
 
+// Data primitives — responsive table (auto card-stacking on phones) and the
+// card-list primitive underneath it. Public per the content-page standard
+// (docs/coding-standards/ui-content-page.md §5.5): consumers replacing a raw
+// NDataTable are told to import TResponsiveTable from the package root.
+export { default as TResponsiveTable } from './data/TResponsiveTable.vue'
+export type { TResponsiveTableProps, TResponsivePagination } from './data/TResponsiveTable.vue'
+export { default as TDataCardList } from './data/TDataCardList.vue'
+export type { CardColumn } from './data/TDataCardList.vue'
+// KPI primitives — unified stat card + responsive KPI strip (one per page,
+// rendered between the page header and the list/content per the content-page
+// standard). TEmpty is the unified empty-state visual used by the card
+// renderers and available to bespoke pages.
+export { default as TStatCard } from './data/TStatCard.vue'
+export type { TStatCardProps, TStatCardTone } from './data/TStatCard.vue'
+export { default as TKpiRow } from './data/TKpiRow.vue'
+export { default as TEmpty } from './data/TEmpty.vue'
+export type { TEmptyProps, TEmptySize } from './data/TEmpty.vue'
+
 // Detail primitives — 3-mode (modal/drawer/page) detail host + skeleton.
 export { default as TDetailLayout } from './detail/TDetailLayout.vue'
 export { default as TDetailHost } from './detail/TDetailHost.vue'
 export type { TDetailHostProps } from './detail/TDetailHost.vue'
+
+// Settings center — schema-driven module settings page (side-nav shell) +
+// the per-group auto-rendered form panel it composes.
+export { default as TSettingsPage } from './settings/TSettingsPage.vue'
+export { default as TSettingsGroupPanel } from './settings/TSettingsGroupPanel.vue'
 export { default as TAdminRouterView } from './layout/TAdminRouterView.vue'
 // 0.2.72+ (A1): one-shot wrapper that mounts the 5-provider naive-ui stack
 // (Config / LoadingBar / Message / Notification / Dialog) and pipes the

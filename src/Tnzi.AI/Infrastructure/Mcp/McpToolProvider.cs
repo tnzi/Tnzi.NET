@@ -2,12 +2,14 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// 从已配置的 MCP 服务器拉取工具，按 AllowedTools 过滤并按每服务器 ApprovalMode 做审批包装后返回。
-/// 读取 AI:Mcp 配置（通过 AIOptions.Mcp），与 AgentFactory 一致；单个服务器不可用时记录警告并跳过，不阻塞整体。
+/// 从有效 MCP 服务器（IMcpServerCatalog：部署配置 + DB 注册表合并）拉取工具，
+/// 按 AllowedTools 过滤并按每服务器 ApprovalMode 做审批包装后返回。
+/// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
 public class McpToolProvider : IMcpToolProvider
 {
     private readonly IOptions<AIOptions> _options;
+    private readonly IMcpServerCatalog _serverCatalog;
     private readonly IMcpClientFactory _clientFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IToolApprovalHandler? _approvalHandler;
@@ -23,6 +25,7 @@ public class McpToolProvider : IMcpToolProvider
 
     public McpToolProvider(
         IOptions<AIOptions> options,
+        IMcpServerCatalog serverCatalog,
         IMcpClientFactory clientFactory,
         ILoggerFactory loggerFactory,
         ILogger<McpToolProvider> logger,
@@ -34,6 +37,7 @@ public class McpToolProvider : IMcpToolProvider
         IEventBus? eventBus = null)
     {
         _options = Check.NotNull(options);
+        _serverCatalog = Check.NotNull(serverCatalog);
         _clientFactory = Check.NotNull(clientFactory);
         _loggerFactory = Check.NotNull(loggerFactory);
         _logger = Check.NotNull(logger);
@@ -48,16 +52,18 @@ public class McpToolProvider : IMcpToolProvider
     /// <inheritdoc />
     public async Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken ct = default)
     {
-        var mcp = _options.Value.Mcp;
-        if (mcp == null || !mcp.Enabled || mcp.Servers == null || mcp.Servers.Count == 0)
+        // 有效服务器 = 部署配置 + DB 注册表合并（catalog 内部处理 AI:Mcp:Enabled 总开关）
+        var servers = await _serverCatalog.GetEffectiveServersAsync(ct).ConfigureAwait(false);
+        if (servers.Count == 0)
         {
             return Array.Empty<AITool>();
         }
 
+        var toolCacheSeconds = _options.Value.Mcp?.ToolCacheSeconds ?? 300;
         var allTools = new List<AITool>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var server in mcp.Servers)
+        foreach (var server in servers)
         {
             if (string.IsNullOrWhiteSpace(server.Name))
             {
@@ -66,7 +72,7 @@ public class McpToolProvider : IMcpToolProvider
 
             try
             {
-                var tools = await GetToolsForServerAsync(server, mcp.ToolCacheSeconds, ct).ConfigureAwait(false);
+                var tools = await GetToolsForServerAsync(server, toolCacheSeconds, ct).ConfigureAwait(false);
 
                 // Filter by AllowedTools (empty = allow all)
                 var allowedSet = BuildNameSet(server.AllowedTools, server.Name, server.PrefixToolNameWithServer);

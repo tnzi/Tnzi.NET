@@ -34,6 +34,9 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     public bool SupportsStreaming => true;
     public bool SupportsFileAttachment => false;
 
+    /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
+    public Guid? TenantId => _options.TenantId;
+
     public FeishuChannelAdapter(
         ILogger<FeishuChannelAdapter> logger,
         IChannelMessageBus bus,

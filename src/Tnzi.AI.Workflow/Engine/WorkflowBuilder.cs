@@ -30,9 +30,8 @@ public interface IWorkflowBuilder
     /// 添加一个工作流步骤
     /// </summary>
     /// <param name="stepId">步骤唯一 ID</param>
-    /// <param name="agentId">Agent ID（可选，与 agentExecutor 二选一）</param>
-    /// <param name="agentExecutor">直接提供 AgentExecutor（可选，与 agentId 二选一）</param>
-    IWorkflowStepBuilder AddStep(string stepId, Guid? agentId = null, AgentExecutor? agentExecutor = null);
+    /// <param name="agentId">Agent ID（可选）</param>
+    IWorkflowStepBuilder AddStep(string stepId, Guid? agentId = null);
 
     /// <summary>添加 Review 步骤（nodeType = "review"）</summary>
     IWorkflowStepBuilder AddReviewStep(string stepId, Guid? agentId = null);
@@ -112,10 +111,10 @@ public class WorkflowBuilder : IWorkflowBuilder
     private readonly Dictionary<string, LoopDefinition> _loops = new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
-    public IWorkflowStepBuilder AddStep(string stepId, Guid? agentId = null, AgentExecutor? agentExecutor = null)
+    public IWorkflowStepBuilder AddStep(string stepId, Guid? agentId = null)
     {
         Check.NotNullOrWhiteSpace(stepId);
-        var entry = new StepBuilderEntry(this, stepId, agentId, agentExecutor);
+        var entry = new StepBuilderEntry(this, stepId, agentId);
         _steps.Add(entry);
         return entry;
     }
@@ -246,7 +245,7 @@ public class WorkflowBuilder : IWorkflowBuilder
     private IWorkflowStepBuilder AddTypedStep(string stepId, string nodeType, Guid? agentId)
     {
         Check.NotNullOrWhiteSpace(stepId);
-        var entry = new StepBuilderEntry(this, stepId, agentId, null);
+        var entry = new StepBuilderEntry(this, stepId, agentId);
         entry.ConfigurationValues["nodeType"] = nodeType;
         _steps.Add(entry);
         return entry;
@@ -288,7 +287,6 @@ public class WorkflowBuilder : IWorkflowBuilder
 
         public string StepId { get; }
         public Guid? AgentId { get; }
-        public AgentExecutor? AgentExecutor { get; }
         public List<string>? DependsOnList { get; private set; }
         public string? Condition { get; private set; }
         public string? Instructions { get; private set; }
@@ -300,12 +298,11 @@ public class WorkflowBuilder : IWorkflowBuilder
         public bool RequiresApprovalValue { get; private set; }
         public Dictionary<string, string> ConfigurationValues { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public StepBuilderEntry(WorkflowBuilder parent, string stepId, Guid? agentId, AgentExecutor? agentExecutor)
+        public StepBuilderEntry(WorkflowBuilder parent, string stepId, Guid? agentId)
         {
             _parent = parent;
             StepId = stepId;
             AgentId = agentId;
-            AgentExecutor = agentExecutor;
         }
 
         public WorkflowStepDto ToDto(int order) => new()
@@ -382,7 +379,7 @@ public class WorkflowBuilder : IWorkflowBuilder
         }
 
         // Forward IWorkflowBuilder methods to parent
-        public IWorkflowStepBuilder AddStep(string stepId, Guid? agentId = null, AgentExecutor? agentExecutor = null) => _parent.AddStep(stepId, agentId, agentExecutor);
+        public IWorkflowStepBuilder AddStep(string stepId, Guid? agentId = null) => _parent.AddStep(stepId, agentId);
         public IWorkflowStepBuilder AddReviewStep(string stepId, Guid? agentId = null) => _parent.AddReviewStep(stepId, agentId);
         public IWorkflowStepBuilder AddRouterStep(string stepId, Guid? agentId = null) => _parent.AddRouterStep(stepId, agentId);
         public IWorkflowStepBuilder AddParallelStep(string stepId, Guid? agentId = null) => _parent.AddParallelStep(stepId, agentId);

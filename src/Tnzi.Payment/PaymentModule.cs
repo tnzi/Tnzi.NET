@@ -46,6 +46,9 @@ public class PaymentModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // 注册配置中心
+        context.Services.AddSingleton<ISettingDefinitionProvider, PaymentSettingDefinitionProvider>();
+
         // 注册服务
         context.Services.AddScoped<IPaymentService, PaymentService>();
         context.Services.AddScoped<IRefundService, RefundService>();

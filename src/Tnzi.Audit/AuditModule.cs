@@ -27,6 +27,9 @@ public class AuditModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // 注册配置中心
+        context.Services.AddSingleton<ISettingDefinitionProvider, AuditSettingDefinitionProvider>();
+
         // 注册请求体脱敏工具（无状态，可单例）
         context.Services.AddSingleton<RequestBodyRedactor>();
 

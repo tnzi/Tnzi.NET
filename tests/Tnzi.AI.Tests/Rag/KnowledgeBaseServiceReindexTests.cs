@@ -11,6 +11,8 @@ public class KnowledgeBaseServiceReindexTests
     private readonly Mock<IRepository<KnowledgeBase, Guid>> _kbRepoMock = new();
     private readonly Mock<IRepository<KnowledgeDocument, Guid>> _docRepoMock = new();
     private readonly Mock<IRepository<DocumentChunk, Guid>> _chunkRepoMock = new();
+    private readonly Mock<IRepository<KnowledgeGraphNode, Guid>> _graphNodeRepoMock = new();
+    private readonly Mock<IRepository<KnowledgeGraphEdge, Guid>> _graphEdgeRepoMock = new();
     private readonly Mock<IDocumentIngestionService> _ingestionServiceMock = new();
     private readonly Mock<IVectorStore> _vectorStoreMock = new();
     private readonly Mock<IEmbeddingService> _embeddingServiceMock = new();
@@ -36,6 +38,8 @@ public class KnowledgeBaseServiceReindexTests
             _kbRepoMock.Object,
             _docRepoMock.Object,
             _chunkRepoMock.Object,
+            _graphNodeRepoMock.Object,
+            _graphEdgeRepoMock.Object,
             _ingestionServiceMock.Object,
             _vectorStoreMock.Object,
             _embeddingServiceMock.Object,

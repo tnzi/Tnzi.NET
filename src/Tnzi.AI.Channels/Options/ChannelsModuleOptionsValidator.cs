@@ -30,6 +30,9 @@ public class ChannelsModuleOptionsValidator : OptionsValidatorBase<ChannelsModul
         if (options.Discord.Enabled && string.IsNullOrWhiteSpace(options.Discord.BotToken))
             errors.Add("Discord.BotToken is required when Discord adapter is enabled");
 
+        if (options.Discord.Enabled && string.IsNullOrWhiteSpace(options.Discord.PublicKey))
+            errors.Add("Discord.PublicKey is required when the Discord adapter is enabled (inbound webhook signatures cannot be verified otherwise)");
+
         if (options.Dingtalk.Enabled)
         {
             if (string.IsNullOrWhiteSpace(options.Dingtalk.AppKey))

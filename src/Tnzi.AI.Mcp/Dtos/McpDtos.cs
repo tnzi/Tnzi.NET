@@ -8,9 +8,6 @@ public class McpServerStatusDto
     /// <summary>Whether MCP server is enabled</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>Transport mode (stdio/http)</summary>
-    public string Transport { get; set; } = string.Empty;
-
     /// <summary>HTTP/SSE endpoint path</summary>
     public string Endpoint { get; set; } = string.Empty;
 

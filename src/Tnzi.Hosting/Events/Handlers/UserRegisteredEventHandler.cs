@@ -11,7 +11,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
 {
     private readonly INotificationService _notificationService;
     private readonly ISettingService? _settingService;
-    private readonly IOptions<IdentityOptions>? _identityOptions;
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptions;
     private readonly IRegistrationService? _registrationService;
     private readonly ILogger<UserRegisteredEventHandler> _logger;
 
@@ -19,7 +19,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
         INotificationService notificationService,
         ILogger<UserRegisteredEventHandler> logger,
         ISettingService? settingService = null,
-        IOptions<IdentityOptions>? identityOptions = null,
+        IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IRegistrationService? registrationService = null)
     {
         _notificationService = Check.NotNull(notificationService);
@@ -44,7 +44,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
             var (appName, frontendUrl, apiBaseUrl) = await GetApplicationConfigAsync();
 
             // 2. 获取注册配置
-            var requireEmailConfirmation = _identityOptions?.Value?.Registration?.RequireConfirmedEmail ?? false;
+            var requireEmailConfirmation = _identityOptions?.CurrentValue?.Registration?.RequireConfirmedEmail ?? false;
 
             // 3. 生成邮箱确认链接（如果需要）
             var confirmationUrl = requireEmailConfirmation

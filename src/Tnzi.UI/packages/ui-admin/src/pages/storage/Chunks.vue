@@ -4,8 +4,8 @@
        see TCrudPage `titleHelp` prop. The banner was always-visible chrome
        that pushed the data table down on every visit; the popover is just
        as discoverable on hover/click and stays out of the way otherwise. -->
-  <!-- Read-only diagnostics view: hide create/delete buttons because chunks
-       are owned by the upload lifecycle. -->
+  <!-- Read-only diagnostics view: chunks are owned by the upload lifecycle.
+       No create/update/delete callbacks → affordances auto-hidden. -->
   <TCrudPage
     :state="crud"
     :all-columns="chunkColumns"
@@ -13,8 +13,6 @@
     :title-help="t('banner.body')"
     :title-help-title="t('banner.title')"
     :translate="t"
-    :show-create="false"
-    :show-batch-delete="false"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
@@ -41,17 +39,12 @@ const title = 'title'
 // (Plan E, 2026-04-14). Supports optional uploadSessionId filter via query.filters.
 const bridge = createStorageBridge({ client: useAdminClient() })
 
-const readOnlyFn = async (): Promise<never> => { throw new Error('Chunk: read-only resource') }
-
 const crud = useCrudPage<FileChunkAuditDto>({
   pageId: 'storage.chunks',
   columns: chunkColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.chunks.fetch(query),
   // Chunks are owned by the upload lifecycle — no admin write surface.
-  createData: readOnlyFn,
-  updateData: readOnlyFn,
-  deleteData: readOnlyFn,
 })
 
 

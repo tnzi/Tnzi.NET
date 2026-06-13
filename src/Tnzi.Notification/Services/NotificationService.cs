@@ -13,12 +13,14 @@ public class NotificationService : ApplicationService, INotificationService
     private readonly IPushSender _pushSender;
     private readonly INotificationQueueService? _queueService;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly NotificationOptions _options;
+    private readonly IOptionsMonitor<NotificationOptions> _optionsMonitor;
     private readonly ITemplateRenderService? _templateRenderService;
 
     // 静态信号量，确保跨请求的并发控制真正生效
     private static SemaphoreSlim? _sendSemaphore;
     private static readonly object _semaphoreLock = new();
+
+    private NotificationOptions Options => _optionsMonitor.CurrentValue;
 
     public NotificationService(
         IRepository<Message, Guid> notificationRepository,
@@ -26,7 +28,7 @@ public class NotificationService : ApplicationService, INotificationService
         ISmsSender smsSender,
         IPushSender pushSender,
         IUnitOfWork unitOfWork,
-        IOptions<NotificationOptions> options,
+        IOptionsMonitor<NotificationOptions> optionsMonitor,
         IServiceProvider serviceProvider,
         INotificationQueueService? queueService = null,
         ITemplateRenderService? templateRenderService = null)
@@ -37,11 +39,11 @@ public class NotificationService : ApplicationService, INotificationService
         _smsSender = Check.NotNull(smsSender);
         _pushSender = Check.NotNull(pushSender);
         _unitOfWork = Check.NotNull(unitOfWork);
-        _options = Check.NotNull(options).Value;
+        _optionsMonitor = Check.NotNull(optionsMonitor);
         _queueService = queueService;
         _templateRenderService = templateRenderService;
 
-        EnsureSemaphoreInitialized(_options.MaxConcurrency);
+        EnsureSemaphoreInitialized(Options.MaxConcurrency);
     }
 
     public async Task<Result<NotificationInfo>> CreateAndSendAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
@@ -636,7 +638,7 @@ public class NotificationService : ApplicationService, INotificationService
     private async Task<SendResult> SendToRecipientAsync(Message notification, Recipient recipient, CancellationToken cancellationToken)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(_options.SendTimeoutSeconds));
+        cts.CancelAfter(TimeSpan.FromSeconds(Options.SendTimeoutSeconds));
 
         return notification.Type switch
         {

@@ -98,6 +98,8 @@ public class RagPipelineIntegrationTests : IDisposable
             _kbRepoMock.Object,
             _docRepoMock.Object,
             _chunkRepoMock.Object,
+            new Mock<IRepository<KnowledgeGraphNode, Guid>>().Object,
+            new Mock<IRepository<KnowledgeGraphEdge, Guid>>().Object,
             _ingestionService,
             _vectorStore,
             _embeddingServiceMock.Object,

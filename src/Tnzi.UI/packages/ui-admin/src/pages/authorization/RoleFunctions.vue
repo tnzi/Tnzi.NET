@@ -604,25 +604,43 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* Fill-height chain (content-page iron rule): TContentPage scroll="fill"
+   → card flex-fills the body → n-card__content flex column → layout grid
+   claims the residual height → each pane scrolls internally. The white
+   container always reaches the viewport bottom; no dead grey canvas. */
 .t-role-func-page__card {
-  height: 100%;
-  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.t-role-func-page__card :deep(.n-card__content) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .t-role-func-page__layout {
   display: grid;
   grid-template-columns: 280px 1fr;
+  /* Single explicit row capped to the container so the panes (grid items)
+     get a definite height and their own overflow-y can engage. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
-  min-height: 520px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .t-role-func-page__roles {
   border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
+  min-height: 0;
+  overflow-y: auto;
 }
-/* Phone: stack the role list above the function matrix. */
+/* Phone: stack the role list above the function matrix. The layout itself
+   becomes the single scroller (rows go back to natural auto height). */
 @media (max-width: 767px) {
   .t-role-func-page__layout {
     grid-template-columns: 1fr;
-    min-height: 0;
+    grid-template-rows: none;
+    overflow-y: auto;
   }
   .t-role-func-page__roles {
     border-right: none;
@@ -669,6 +687,15 @@ onMounted(async () => {
 }
 .t-role-func-page__tree {
   padding: 0 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Phone: the stacked layout is the single scroller — the pane itself
+   must not trap the scroll. After the base rule so the override wins. */
+@media (max-width: 767px) {
+  .t-role-func-page__tree {
+    overflow: visible;
+  }
 }
 .t-role-func-page__placeholder {
   color: var(--tnzi-base-text-muted);

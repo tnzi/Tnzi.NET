@@ -50,4 +50,14 @@ public sealed class ContextProviderCreationContext
     /// 当前用户 ID（可选）
     /// </summary>
     public Guid? UserId { get; init; }
+
+    /// <summary>
+    /// 该 Agent 分配的知识库 ID 列表（RAG 检索按此范围；空/null = 跨所有启用知识库）
+    /// </summary>
+    public IReadOnlyList<Guid>? KnowledgeBaseIds { get; init; }
+
+    /// <summary>
+    /// 该 Agent 分配的技能 slug 列表（非空时仅这些技能对 Agent 可见）
+    /// </summary>
+    public IReadOnlyList<string>? SkillSlugs { get; init; }
 }

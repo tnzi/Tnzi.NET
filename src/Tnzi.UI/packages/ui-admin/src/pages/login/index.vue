@@ -100,12 +100,18 @@ const activeTranslate = computed(() => config.translate ?? defaultTranslate)
   <TLoginPage
     :module="activeModule"
     :module-components="moduleComponents"
+    :layout="config.layout ?? 'wave'"
     :brand="config.brand ?? 'Tnzi Admin'"
     :brand-icon="config.brandIcon"
     :brand-icon-size="config.brandIconSize"
+    :tagline="config.tagline"
+    :tagline-sub="config.taglineSub"
+    :copyright="config.copyright"
     :translate="activeTranslate"
     :callbacks="config.callbacks ?? {}"
     :demo-accounts="config.demoAccounts ?? []"
+    :third-party="config.thirdParty ?? []"
+    :qr-component="config.qrComponent"
     :on-toggle-module="toggleLoginModule"
   />
 </template>

@@ -40,10 +40,9 @@ public class StreamingIntegrationTests
                     NullLogger<InputGuardrailMiddleware>.Instance));
 
             // LoopDetection
-            services.AddSingleton(MsOptions.Create(new LoopDetectionOptions { Enabled = true }));
-            services.AddSingleton<IAiMiddleware>(sp =>
+            services.AddSingleton<IAiMiddleware>(_ =>
                 new LoopDetectionMiddleware(
-                    sp.GetRequiredService<IOptions<LoopDetectionOptions>>(),
+                    TestHelpers.CreateOptionsMonitor(new LoopDetectionOptions { Enabled = true }),
                     NullLogger<LoopDetectionMiddleware>.Instance));
 
             // 顺序追踪中间件（验证中间件都被流式管道调用）

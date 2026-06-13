@@ -8,6 +8,7 @@ public class AuditOperationServiceTests
 {
     private readonly Mock<IRepository<AuditOperation, Guid>> _repositoryMock;
     private readonly Mock<IAuditStore> _auditStoreMock;
+    private readonly Mock<IOptionsMonitor<AuditOptions>> _optionsMonitorMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly AuditOperationService _service;
 
@@ -15,8 +16,10 @@ public class AuditOperationServiceTests
     {
         _repositoryMock = new Mock<IRepository<AuditOperation, Guid>>();
         _auditStoreMock = new Mock<IAuditStore>();
+        _optionsMonitorMock = new Mock<IOptionsMonitor<AuditOptions>>();
+        _optionsMonitorMock.Setup(x => x.CurrentValue).Returns(new AuditOptions());
         _serviceProviderMock = new Mock<IServiceProvider>();
-        _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _serviceProviderMock.Object);
+        _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _optionsMonitorMock.Object, _serviceProviderMock.Object);
     }
 
     #region GetUserOperationsAsync Tests
@@ -69,14 +72,14 @@ public class AuditOperationServiceTests
     public void Constructor_Should_Throw_When_Repository_Is_Null()
     {
         // Act & Assert
-        Should.Throw<ArgumentNullException>(() => new AuditOperationService(null!, _auditStoreMock.Object, _serviceProviderMock.Object));
+        Should.Throw<ArgumentNullException>(() => new AuditOperationService(null!, _auditStoreMock.Object, _optionsMonitorMock.Object, _serviceProviderMock.Object));
     }
 
     [Fact]
     public void Constructor_Should_Initialize_Successfully()
     {
         // Act
-        var service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _serviceProviderMock.Object);
+        var service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _optionsMonitorMock.Object, _serviceProviderMock.Object);
 
         // Assert
         service.ShouldNotBeNull();

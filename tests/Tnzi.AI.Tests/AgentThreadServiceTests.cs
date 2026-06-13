@@ -133,6 +133,42 @@ public class AgentThreadServiceTests
     }
 
     [Fact]
+    public async Task GetByIdAsync_WithAgent_PopulatesAgentName()
+    {
+        var threadId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var thread = MakeThread(threadId, agentId: agentId);
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        _agentRepo.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Agent { Id = agentId, Name = "Helper Bot" });
+        SetupMessageQueryable([]);
+
+        var service = CreateService();
+        var result = await service.GetByIdAsync(threadId);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.AgentName.ShouldBe("Helper Bot");
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_AgentDeleted_AgentNameIsNull()
+    {
+        var threadId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var thread = MakeThread(threadId, agentId: agentId);
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        _agentRepo.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync((Agent?)null);
+        SetupMessageQueryable([]);
+
+        var service = CreateService();
+        var result = await service.GetByIdAsync(threadId);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.AgentName.ShouldBeNull();
+        result.Data.AgentId.ShouldBe(agentId);
+    }
+
+    [Fact]
     public async Task GetByIdAsync_NotFound_Returns404()
     {
         var threadId = Guid.NewGuid();
@@ -143,6 +179,80 @@ public class AgentThreadServiceTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(404);
+    }
+
+    // -------------------------------------------------------------------------
+    // GetListAsync
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetListAsync_PopulatesMessageCountAndAgentName()
+    {
+        var agentId = Guid.NewGuid();
+        var agent = new Agent { Id = agentId, Name = "Helper Bot" };
+
+        var threadWithAgent = MakeThread(agentId: agentId, title: "Agent Thread");
+        threadWithAgent.Agent = agent;
+        var agentLessThread = MakeThread(title: "Agent-less Thread");
+
+        SetupThreadQueryable([threadWithAgent, agentLessThread]);
+        SetupMessageQueryable(
+        [
+            MakeMessage(threadWithAgent.Id, order: 1),
+            MakeMessage(threadWithAgent.Id, order: 2),
+            MakeMessage(threadWithAgent.Id, order: 3),
+            MakeMessage(agentLessThread.Id, order: 1)
+        ]);
+
+        var service = CreateService();
+        var result = await service.GetListAsync(new ThreadListQueryDto());
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldNotBeNull();
+        result.Data!.Items.Count.ShouldBe(2);
+
+        var dtoWithAgent = result.Data.Items.Single(i => i.Id == threadWithAgent.Id);
+        dtoWithAgent.MessageCount.ShouldBe(3);
+        dtoWithAgent.AgentName.ShouldBe("Helper Bot");
+        dtoWithAgent.AgentId.ShouldBe(agentId);
+
+        var dtoAgentLess = result.Data.Items.Single(i => i.Id == agentLessThread.Id);
+        dtoAgentLess.MessageCount.ShouldBe(1);
+        dtoAgentLess.AgentName.ShouldBeNull();
+        dtoAgentLess.AgentId.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetListAsync_AgentDeleted_AgentNameIsNull()
+    {
+        // AgentId still set but the Agent row is gone (navigation resolves to null)
+        var orphanThread = MakeThread(agentId: Guid.NewGuid(), title: "Orphan Thread");
+
+        SetupThreadQueryable([orphanThread]);
+        SetupMessageQueryable([]);
+
+        var service = CreateService();
+        var result = await service.GetListAsync(new ThreadListQueryDto());
+
+        result.Succeeded.ShouldBeTrue();
+        var dto = result.Data!.Items.Single();
+        dto.AgentId.ShouldBe(orphanThread.AgentId);
+        dto.AgentName.ShouldBeNull();
+        dto.MessageCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task GetListAsync_NoThreads_ReturnsEmptyPage()
+    {
+        SetupThreadQueryable([]);
+        SetupMessageQueryable([]);
+
+        var service = CreateService();
+        var result = await service.GetListAsync(new ThreadListQueryDto());
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Items.ShouldBeEmpty();
+        result.Data.TotalCount.ShouldBe(0);
     }
 
     // -------------------------------------------------------------------------

@@ -126,10 +126,15 @@ public class AgentServiceRunTests
 
     private static AgentService CreateService(IAgentRuntime runtime)
     {
+        var grantService = new Mock<IAgentGrantService>();
+        grantService.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection());
+
         return new AgentService(
             Mock.Of<IRepository<Agent, Guid>>(),
             Mock.Of<IRepository<AgentVersion, Guid>>(),
             runtime,
+            grantService.Object,
             new ServiceCollection()
                 .AddLogging()
                 .BuildServiceProvider());

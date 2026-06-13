@@ -66,10 +66,13 @@ describe('ScheduledJobs page (Phase 3.16)', () => {
     expect(mockFetch).toHaveBeenCalled()
   })
 
-  it('shows Create button (jobs are writable once backend ships)', async () => {
+  it('hides Create button (Hangfire jobs are registered in code, not via admin)', async () => {
     const wrapper = mount(ScheduledJobs, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.t-crud-page__create').exists()).toBe(true)
+    // No createData callback → canCreate=false → neither TCrudPage's own
+    // create button nor TListShell's fallback may render.
+    expect(wrapper.find('.t-crud-page__create').exists()).toBe(false)
+    expect(wrapper.find('.t-list-shell__create').exists()).toBe(false)
   })
 })

@@ -11,7 +11,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
 {
     private readonly INotificationService _notificationService;
     private readonly ISettingService? _settingService;
-    private readonly IOptions<IdentityOptions>? _identityOptions;
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptions;
     private readonly IResetPasswordUrlGenerator? _urlGenerator;
     private readonly ILogger<PasswordResetRequestedEventHandler> _logger;
 
@@ -19,7 +19,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         INotificationService notificationService,
         ILogger<PasswordResetRequestedEventHandler> logger,
         ISettingService? settingService = null,
-        IOptions<IdentityOptions>? identityOptions = null,
+        IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IResetPasswordUrlGenerator? urlGenerator = null)
     {
         _notificationService = Check.NotNull(notificationService);
@@ -47,7 +47,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
             var resetUrl = GenerateResetPasswordUrl(@event.Email, @event.ResetToken, apiBaseUrl, frontendUrl);
 
             // 3. 获取过期时间（从配置中读取，默认 30 分钟）
-            var expirationMinutes = _identityOptions?.Value?.Recovery?.ResetTokenExpirationMinutes ?? 30;
+            var expirationMinutes = _identityOptions?.CurrentValue?.Recovery?.ResetTokenExpirationMinutes ?? 30;
 
             // 4. 发送密码重置邮件
             await SendPasswordResetEmailAsync(@event, appName, resetUrl, expirationMinutes, cancellationToken);
@@ -111,7 +111,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         }
 
         // 2. 如果配置了 ResetPasswordRoute，使用前端URL + ResetPasswordRoute
-        var resetPasswordRoute = _identityOptions?.Value?.Recovery?.ResetPasswordRoute;
+        var resetPasswordRoute = _identityOptions?.CurrentValue?.Recovery?.ResetPasswordRoute;
         if (!string.IsNullOrEmpty(resetPasswordRoute) && !string.IsNullOrEmpty(frontendUrl))
         {
             var resetUrl = $"{frontendUrl.TrimEnd('/')}{resetPasswordRoute}?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";

@@ -120,6 +120,56 @@ import {
 } from '@tnzi/core/services/ai'
 import { useAdminKnowledgeBaseApi, useAdminWorkspaceAgentApi } from '@tnzi/core/services/ai'
 import type { WorkspaceAgentDto } from '@tnzi/core/services/ai'
+// --- Production-grade widening (2026-06-07): surface deeper admin capabilities ---
+import { useAdminSkillCategoryApi, useAdminMcpToolAnalyticsApi } from '@tnzi/core/services/ai'
+import type {
+  AgentVersionDto,
+  AgentVersionQueryDto,
+  AgentValidationResultDto,
+  AgentHealthSummaryDto,
+  ConfigureAbTestDto,
+  ToolGroupDto,
+  AgentMemoryDto,
+  AgentMemoryListQueryDto,
+  CreateAgentMemoryDto,
+  UpdateAgentMemoryDto,
+  EvaluationTrendDto,
+  VersionComparisonDto,
+  BudgetSummaryDto,
+  AgentThreadDetailDto,
+  ThreadExportDto,
+  UsageLogDto,
+  UsageLogQueryDto,
+  AgentFeedbackStatsDto,
+  CostSummaryDto,
+  SkillUsageStatsDto,
+  PopularSkillDto,
+  SkillExportDto,
+  SkillImportRequestDto,
+  SkillImportResultDto,
+  SkillScope,
+  SkillCategoryDto,
+  CreateSkillCategoryDto,
+  UpdateSkillCategoryDto,
+  McpServerStatusDto,
+  McpToolInfoDto,
+  McpToolExposureOptionsDto,
+  McpToolStatsDto,
+  McpToolPopularityDto,
+  McpToolErrorDto,
+  ProviderDefaultModelDto,
+  ProviderOptionDto,
+  ProviderModelsDto,
+  KnowledgeBaseDto,
+  KnowledgeDocumentDto,
+  DocumentUploadResultDto,
+  SearchResultDto,
+  ReindexResultDto,
+  DocumentQueryParams,
+  SearchTestParams,
+  KnowledgeBaseCreateParams,
+  KnowledgeBaseUpdateParams,
+} from '@tnzi/core/services/ai'
 import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
@@ -169,8 +219,44 @@ export type McpServerRow = McpServerRegistrationDto
 export type ProviderRow = ProviderDto
 
 export interface AiBridge {
-  agents: BridgeCrudContract<AgentDto, CreateAgentDto, UpdateAgentDto>
-  threads: BridgeCrudContract<AgentThreadDto, CreateAgentThreadDto, Partial<AgentThreadDto>>
+  agents: BridgeCrudContract<AgentDto, CreateAgentDto, UpdateAgentDto> & {
+    /** Fetch a single agent by id. */
+    getById(id: string): Promise<AgentDto>
+    /** Deep-copy an agent (optionally with a new name). */
+    clone(id: string, name?: string): Promise<AgentDto>
+    /** Paged version-snapshot history. */
+    getVersions(id: string, query?: AgentVersionQueryDto): Promise<PagedList<AgentVersionDto>>
+    /** Fetch a single version snapshot. */
+    getVersion(id: string, version: number): Promise<AgentVersionDto>
+    /** Roll the agent back to a prior version snapshot. */
+    rollbackToVersion(id: string, version: number): Promise<AgentDto>
+    /** Validate the agent's configuration (provider/model/tools/handoff/skills). */
+    validate(id: string): Promise<AgentValidationResultDto>
+    /** Cross-agent health summary (healthy/unhealthy counts + details). */
+    getHealth(): Promise<AgentHealthSummaryDto>
+    /** Configure an A/B test (route a traffic slice to version B). */
+    configureAbTest(id: string, data: ConfigureAbTestDto): Promise<AgentDto>
+    /** Stop the A/B test on an agent. */
+    stopAbTest(id: string): Promise<AgentDto>
+    /** Assignable tool-group catalog (for the per-agent Tools picker). */
+    getToolGroups(): Promise<ToolGroupDto[]>
+    /** Paged list of an agent's admin-curated memory entries. */
+    getMemory(id: string, query?: AgentMemoryListQueryDto): Promise<PagedList<AgentMemoryDto>>
+    /** Create a memory entry for an agent. */
+    createMemory(id: string, data: CreateAgentMemoryDto): Promise<AgentMemoryDto>
+    /** Update an agent memory entry. */
+    updateMemory(id: string, memoryId: string, data: UpdateAgentMemoryDto): Promise<AgentMemoryDto>
+    /** Delete an agent memory entry. */
+    deleteMemory(id: string, memoryId: string): Promise<void>
+  }
+  threads: BridgeCrudContract<AgentThreadDto, CreateAgentThreadDto, Partial<AgentThreadDto>> & {
+    /** Thread detail incl. recent messages. */
+    getDetail(id: string, messageLimit?: number): Promise<AgentThreadDetailDto>
+    /** Export a thread as a JSON payload. */
+    exportJson(id: string): Promise<ThreadExportDto>
+    /** Resolve the markdown export URL (file download — caller opens it). */
+    getExportMarkdownUrl(id: string): string
+  }
   agentRuns: Pick<BridgeCrudContract<AgentRunDto>, 'fetch'> & {
     cancel(id: string): Promise<void>
     tail(id: string): Promise<ReadableStream<Uint8Array>>
@@ -217,18 +303,75 @@ export interface AiBridge {
   skills: BridgeCrudContract<SkillSummaryDto, CreateSkillDto, UpdateSkillDto> & {
     activate(id: string): Promise<void>
     deactivate(id: string): Promise<void>
+    /** Fetch full skill detail (content + constraints) by slug. */
+    getBySlug(slug: string): Promise<SkillDetailDto>
+    /** Keyword + semantic-fallback search. */
+    search(query: string, maxResults?: number): Promise<SkillSummaryDto[]>
+    /** Catalog usage statistics (counts by scope + activations). */
+    getUsageStats(): Promise<SkillUsageStatsDto>
+    /** Most-activated skills ranking. */
+    getPopular(topN?: number): Promise<PopularSkillDto[]>
+    /** Export skills (optionally scoped) as a portable JSON array.
+     *  Named `exportSkills` (not `export`) to avoid the reserved CSV/Blob
+     *  `export?` member on BridgeCrudContract. */
+    exportSkills(scope?: SkillScope): Promise<SkillExportDto[]>
+    /** Import skills from a portable JSON array.
+     *  Named `importSkills` (not `import`) to avoid the reserved file-`import?`
+     *  member on BridgeCrudContract. */
+    importSkills(data: SkillImportRequestDto): Promise<SkillImportResultDto>
+  }
+  /** Skill category tree (admin/ai/skill-categories). */
+  skillCategories: {
+    getTree(): Promise<SkillCategoryDto[]>
+    create(data: CreateSkillCategoryDto): Promise<SkillCategoryDto>
+    update(id: string, data: UpdateSkillCategoryDto): Promise<SkillCategoryDto>
+    delete(id: string): Promise<void>
+    getSkills(categoryId: string): Promise<SkillSummaryDto[]>
   }
   providers: BridgeCrudContract<ProviderRow, CreateProviderDto, UpdateProviderDto> & {
     test(id: string): Promise<{ ok: boolean; latency: number; error?: string }>
+    /** Names of all enabled providers (config-driven). */
+    getProviders(): Promise<string[]>
+    /** Default model resolved for a provider name. */
+    getDefaultModel(providerName: string): Promise<ProviderDefaultModelDto>
+    /** Enabled provider dropdown options (id + name + type + default model). */
+    getOptions(): Promise<ProviderOptionDto[]>
+    /** Models for a provider entity (live /v1/models + static fallback). */
+    listModels(id: string): Promise<ProviderModelsDto>
   }
   usage: {
     summary(query: CrudPageQuery): Promise<UsageSummary>
     byAgent(query: CrudPageQuery): Promise<AgentUsageDto[]>
     byModel(query: CrudPageQuery): Promise<ModelUsageDto[]>
     byDay(query: CrudPageQuery): Promise<UsageTrendPointDto[]>
+    /** Paged usage log query (OperationType/provider/model/agent/success filters). */
+    getLogs(query: CrudPageQuery): Promise<PagedList<UsageLogDto>>
+    /** Usage aggregated by provider. */
+    byProvider(query: CrudPageQuery): Promise<ProviderUsageDto[]>
+    /** Per-agent feedback (good-rate + tag distribution). */
+    feedbackStats(topN?: number): Promise<AgentFeedbackStatsDto[]>
+    /** USD cost summary grouped by provider/model. */
+    costSummary(query: CrudPageQuery): Promise<CostSummaryDto>
   }
-  knowledge: BridgeCrudContract<Record<string, unknown>> & {
-    reindex(id: string): Promise<void>
+  knowledge: BridgeCrudContract<
+    KnowledgeBaseDto,
+    KnowledgeBaseCreateParams,
+    KnowledgeBaseUpdateParams
+  > & {
+    /** Fetch a single knowledge base by id. */
+    getById(id: string): Promise<KnowledgeBaseDto>
+    /** Trigger full re-vectorization; returns chunk/document counts + duration. */
+    reindex(id: string): Promise<ReindexResultDto>
+    /** Paged document list for a knowledge base. */
+    getDocuments(kbId: string, query?: DocumentQueryParams): Promise<PagedList<KnowledgeDocumentDto>>
+    /** Poll a single document's ingestion status. */
+    getDocumentStatus(kbId: string, docId: string): Promise<KnowledgeDocumentDto>
+    /** Upload a document (multipart); ingestion is async — poll status by docId. */
+    uploadDocument(kbId: string, file: File): Promise<DocumentUploadResultDto>
+    /** Delete a document from a knowledge base. */
+    deleteDocument(kbId: string, docId: string): Promise<void>
+    /** Search-test a knowledge base (returns ranked chunk hits). */
+    searchTest(kbId: string, data: SearchTestParams): Promise<SearchResultDto[]>
   }
   mcpServers: BridgeCrudContract<
     McpServerRow,
@@ -237,13 +380,35 @@ export interface AiBridge {
   > & {
     test(id: string): Promise<{ ok: boolean; latency: number; error?: string }>
   }
-  quota: BridgeCrudContract<UserQuotaDto, SetQuotaDto, SetQuotaDto>
+  /** Tnzi's own MCP server (status + tool list + agent exposure). */
+  mcp: {
+    getStatus(): Promise<McpServerStatusDto>
+    getTools(): Promise<McpToolInfoDto[]>
+    getExposedAgents(): Promise<string[]>
+    exposeAgent(agentId: string, options?: McpToolExposureOptionsDto): Promise<void>
+    removeAgent(agentId: string): Promise<void>
+  }
+  /** MCP tool-call analytics (admin/ai/mcp/tool-analytics). */
+  mcpToolAnalytics: {
+    getToolStats(toolName: string, from?: string, to?: string): Promise<McpToolStatsDto>
+    getMostUsedTools(top?: number, from?: string, to?: string): Promise<McpToolPopularityDto[]>
+    getToolErrors(toolName: string, top?: number): Promise<McpToolErrorDto[]>
+    cleanup(retentionDays?: number): Promise<number>
+  }
+  quota: BridgeCrudContract<UserQuotaDto, SetQuotaDto, SetQuotaDto> & {
+    /** USD cost budget summary for a tenant/time-range. */
+    getBudgetSummary(params?: { tenantId?: string; startTime?: string; endTime?: string }): Promise<BudgetSummaryDto>
+  }
   personas: BridgeCrudContract<AgentPersonaDto, CreateAgentPersonaDto, UpdateAgentPersonaDto>
   evaluations: BridgeCrudContract<EvaluationRunDto, CreateEvaluationRunDto, Partial<EvaluationRunDto>> & {
     run(id: string): Promise<{ runId: string }>
     runBatch(data: BatchEvaluationDto): Promise<BatchEvaluationResultDto>
     /** Fetch an EvaluationRun with its full resultsJson (drives the diff drawer). */
     getDetail(id: string): Promise<EvaluationRunDetailDto>
+    /** An agent's evaluation score trend over its last N runs. */
+    getTrend(agentId: string, lastNRuns?: number): Promise<EvaluationTrendDto>
+    /** Side-by-side comparison of two agent versions' evaluation stats. */
+    compareVersions(agentId: string, versionA: number, versionB: number): Promise<VersionComparisonDto>
   }
 }
 
@@ -276,6 +441,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const personaApi = deps.personaApi ?? (deps.client ? useAdminPersonaApi(deps.client) : null)
   const evaluationApi =
     deps.evaluationApi ?? (deps.client ? useAdminEvaluationApi(deps.client) : null)
+  // New capability factories (client-derived; production always passes `client`).
+  const skillCategoryApi = deps.client ? useAdminSkillCategoryApi(deps.client) : null
+  const mcpAnalyticsApi = deps.client ? useAdminMcpToolAnalyticsApi(deps.client) : null
 
   // Construction-time guard — fail fast instead of deferring errors to first async call.
   // Matches identity-bridge pattern. Production callers pass `client`; tests may inject
@@ -302,7 +470,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   }
 
   // ---- agents -------------------------------------------------------------
-  const agents: BridgeCrudContract<AgentDto, CreateAgentDto, UpdateAgentDto> = {
+  const agents: AiBridge['agents'] = {
     fetch: async (q) =>
       toCrudResult(
         unwrap<PagedList<AgentDto>>(await agentApi.getList(mapQuery(q) as unknown as AgentListQueryDto)),
@@ -312,14 +480,33 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     delete: async (ids) => {
       for (const id of ids) await agentApi.delete(String(id))
     },
+    getById: async (id) => unwrap<AgentDto>(await agentApi.getById(String(id))),
+    clone: async (id, name) => unwrap<AgentDto>(await agentApi.clone(String(id), name)),
+    getVersions: async (id, query) =>
+      unwrap<PagedList<AgentVersionDto>>(await agentApi.getVersions(String(id), query)),
+    getVersion: async (id, version) =>
+      unwrap<AgentVersionDto>(await agentApi.getVersion(String(id), version)),
+    rollbackToVersion: async (id, version) =>
+      unwrap<AgentDto>(await agentApi.rollbackToVersion(String(id), version)),
+    validate: async (id) => unwrap<AgentValidationResultDto>(await agentApi.validate(String(id))),
+    getHealth: async () => unwrap<AgentHealthSummaryDto>(await agentApi.getHealth()),
+    configureAbTest: async (id, data) =>
+      unwrap<AgentDto>(await agentApi.configureAbTest(String(id), data)),
+    stopAbTest: async (id) => unwrap<AgentDto>(await agentApi.stopAbTest(String(id))),
+    getToolGroups: async () => unwrap<ToolGroupDto[]>(await agentApi.getToolGroups()),
+    getMemory: async (id, query) =>
+      unwrap<PagedList<AgentMemoryDto>>(await agentApi.getMemory(String(id), query)),
+    createMemory: async (id, data) =>
+      unwrap<AgentMemoryDto>(await agentApi.createMemory(String(id), data)),
+    updateMemory: async (id, memoryId, data) =>
+      unwrap<AgentMemoryDto>(await agentApi.updateMemory(String(id), String(memoryId), data)),
+    deleteMemory: async (id, memoryId) => {
+      await agentApi.deleteMemory(String(id), String(memoryId))
+    },
   }
 
   // ---- threads ------------------------------------------------------------
-  const threads: BridgeCrudContract<
-    AgentThreadDto,
-    CreateAgentThreadDto,
-    Partial<AgentThreadDto>
-  > = {
+  const threads: AiBridge['threads'] = {
     fetch: async (q) =>
       toCrudResult(
         unwrap<PagedList<AgentThreadDto>>(await threadApi.getList(
@@ -334,6 +521,10 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     delete: async (ids) => {
       for (const id of ids) await threadApi.delete(String(id))
     },
+    getDetail: async (id, messageLimit) =>
+      unwrap<AgentThreadDetailDto>(await threadApi.getDetail(String(id), messageLimit)),
+    exportJson: async (id) => unwrap<ThreadExportDto>(await threadApi.exportJson(String(id))),
+    getExportMarkdownUrl: (id) => threadApi.getExportMarkdownUrl(String(id)),
   }
 
   // ---- agentRuns ----------------------------------------------------------
@@ -452,6 +643,42 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     deactivate: async (id: string) => {
       await skillApi.batchDisable([String(id)])
     },
+    getBySlug: async (slug: string) => unwrap<SkillDetailDto>(await skillApi.getBySlug(slug)),
+    search: async (query: string, maxResults?: number) => {
+      const items = unwrap<SkillSummaryDto[] | undefined>(await skillApi.search(query, maxResults))
+      return Array.isArray(items) ? items : []
+    },
+    getUsageStats: async () => unwrap<SkillUsageStatsDto>(await skillApi.getUsageStats()),
+    getPopular: async (topN?: number) => {
+      const items = unwrap<PopularSkillDto[] | undefined>(await skillApi.getPopular(topN))
+      return Array.isArray(items) ? items : []
+    },
+    exportSkills: async (scope?: SkillScope) => {
+      const items = unwrap<SkillExportDto[] | undefined>(await skillApi.export(scope))
+      return Array.isArray(items) ? items : []
+    },
+    importSkills: async (data: SkillImportRequestDto) =>
+      unwrap<SkillImportResultDto>(await skillApi.import(data)),
+  }
+
+  // ---- skill categories ---------------------------------------------------
+  const skillCategories: AiBridge['skillCategories'] = {
+    getTree: async () => {
+      const items = unwrap<SkillCategoryDto[] | undefined>(await skillCategoryApi!.getTree())
+      return Array.isArray(items) ? items : []
+    },
+    create: async (data) => unwrap<SkillCategoryDto>(await skillCategoryApi!.create(data)),
+    update: async (id, data) =>
+      unwrap<SkillCategoryDto>(await skillCategoryApi!.update(String(id), data)),
+    delete: async (id) => {
+      await skillCategoryApi!.delete(String(id))
+    },
+    getSkills: async (categoryId) => {
+      const items = unwrap<SkillSummaryDto[] | undefined>(
+        await skillCategoryApi!.getSkillsByCategory(String(categoryId)),
+      )
+      return Array.isArray(items) ? items : []
+    },
   }
 
   // ---- providers ----------------------------------------------------------
@@ -480,6 +707,14 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         error: result.success ? undefined : result.message ?? undefined,
       }
     },
+    getProviders: async () => {
+      const items = unwrap<string[] | undefined>(await providerApi.getProviders())
+      return Array.isArray(items) ? items : []
+    },
+    getDefaultModel: async (providerName: string) =>
+      unwrap<ProviderDefaultModelDto>(await providerApi.getDefaultModel(providerName)),
+    getOptions: async () => unwrap<ProviderOptionDto[]>(await providerApi.getOptions()),
+    listModels: async (id: string) => unwrap<ProviderModelsDto>(await providerApi.listModels(String(id))),
   }
 
   // ---- usage --------------------------------------------------------------
@@ -533,40 +768,92 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       }))
       return Array.isArray(items) ? items : []
     },
+    getLogs: async (q: CrudPageQuery): Promise<PagedList<UsageLogDto>> => {
+      const filters = (q.filters ?? {}) as Record<string, unknown>
+      return unwrap<PagedList<UsageLogDto>>(await usageApi.getLogs({
+        pageIndex: q.pageIndex ?? 1,
+        pageSize: q.pageSize ?? 20,
+        startTime: (filters.startTime as string | undefined) ?? undefined,
+        endTime: (filters.endTime as string | undefined) ?? undefined,
+        provider: filters.provider as string | undefined,
+        model: filters.model as string | undefined,
+        operationType: filters.operationType as string | undefined,
+        isSuccess: filters.isSuccess as boolean | undefined,
+        agentId: filters.agentId as string | undefined,
+      } as unknown as UsageLogQueryDto))
+    },
+    byProvider: async (q: CrudPageQuery): Promise<ProviderUsageDto[]> => {
+      const filters = (q.filters ?? {}) as Record<string, unknown>
+      const items = unwrap<ProviderUsageDto[] | undefined>(await usageApi.getByProvider(
+        String(filters.startTime ?? ''),
+        String(filters.endTime ?? ''),
+      ))
+      return Array.isArray(items) ? items : []
+    },
+    feedbackStats: async (topN?: number): Promise<AgentFeedbackStatsDto[]> => {
+      const items = unwrap<AgentFeedbackStatsDto[] | undefined>(await usageApi.getAgentFeedbackStats(topN))
+      return Array.isArray(items) ? items : []
+    },
+    costSummary: async (q: CrudPageQuery): Promise<CostSummaryDto> => {
+      const filters = (q.filters ?? {}) as Record<string, unknown>
+      return unwrap<CostSummaryDto>(await usageApi.getCostSummary(
+        String(filters.startTime ?? ''),
+        String(filters.endTime ?? ''),
+        filters.provider as string | undefined,
+        filters.model as string | undefined,
+      ))
+    },
   }
 
   // ---- knowledge ----------------------------------------------------------
-  const knowledge = {
-    fetch: async (q: CrudPageQuery): Promise<CrudPageResult<Record<string, unknown>>> => {
+  const knowledge: AiBridge['knowledge'] = {
+    fetch: async (q: CrudPageQuery): Promise<CrudPageResult<KnowledgeBaseDto>> => {
       const result = unwrap<unknown>(await kbApi.getList({
         pageIndex: q.pageIndex ?? 1,
         pageSize: q.pageSize ?? 20,
+        keyword: q.searchText || undefined,
       }))
       // Backend may return either a plain array or PagedList<KbDto> — handle both.
       if (Array.isArray(result)) {
         return createPagedList(
-          result as Record<string, unknown>[],
+          result as KnowledgeBaseDto[],
           result.length,
           q.pageIndex ?? 1,
           q.pageSize ?? 20,
         )
       }
-      const paged = result as PagedList<Record<string, unknown>>
-      return toCrudResult(paged ?? { items: [], totalCount: 0, pageIndex: q.pageIndex ?? 1, pageSize: q.pageSize ?? 20, totalPages: 0, hasNextPage: false, hasPreviousPage: false })
+      const paged = result as PagedList<KnowledgeBaseDto>
+      return toCrudResult(
+        paged ?? {
+          items: [],
+          totalCount: 0,
+          pageIndex: q.pageIndex ?? 1,
+          pageSize: q.pageSize ?? 20,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      )
     },
-    create: async (data: Record<string, unknown>) =>
-      unwrap<Record<string, unknown>>(
-        (await kbApi.create(data as never)) as unknown as Record<string, unknown>,
-      ),
-    update: async (id: string, data: Record<string, unknown>) =>
-      unwrap<Record<string, unknown>>(
-        (await kbApi.update(String(id), data as never)) as unknown as Record<string, unknown>,
-      ),
-    delete: async (ids: string[]) => {
+    create: async (data) => unwrap<KnowledgeBaseDto>(await kbApi.create(data)),
+    update: async (id, data) => unwrap<KnowledgeBaseDto>(await kbApi.update(String(id), data)),
+    delete: async (ids) => {
       for (const id of ids) await kbApi.delete(String(id))
     },
-    reindex: async (id: string): Promise<void> => {
-      await kbApi.reindex(String(id))
+    getById: async (id) => unwrap<KnowledgeBaseDto>(await kbApi.getById(String(id))),
+    reindex: async (id) => unwrap<ReindexResultDto>(await kbApi.reindex(String(id))),
+    getDocuments: async (kbId, query) =>
+      unwrap<PagedList<KnowledgeDocumentDto>>(await kbApi.getDocuments(String(kbId), query)),
+    getDocumentStatus: async (kbId, docId) =>
+      unwrap<KnowledgeDocumentDto>(await kbApi.getDocumentStatus(String(kbId), String(docId))),
+    uploadDocument: async (kbId, file) =>
+      unwrap<DocumentUploadResultDto>(await kbApi.uploadDocument(String(kbId), file)),
+    deleteDocument: async (kbId, docId) => {
+      await kbApi.deleteDocument(String(kbId), String(docId))
+    },
+    searchTest: async (kbId, data) => {
+      const items = unwrap<SearchResultDto[] | undefined>(await kbApi.searchTest(String(kbId), data))
+      return Array.isArray(items) ? items : []
     },
   }
 
@@ -605,8 +892,46 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     },
   }
 
+  // ---- mcp (Tnzi's own MCP server) ---------------------------------------
+  const mcp: AiBridge['mcp'] = {
+    getStatus: async () => unwrap<McpServerStatusDto>(await mcpApi.getStatus()),
+    getTools: async () => {
+      const items = unwrap<McpToolInfoDto[] | undefined>(await mcpApi.getTools())
+      return Array.isArray(items) ? items : []
+    },
+    getExposedAgents: async () => {
+      const items = unwrap<string[] | undefined>(await mcpApi.getExposedAgents())
+      return Array.isArray(items) ? items : []
+    },
+    exposeAgent: async (agentId, options) => {
+      await mcpApi.exposeAgent(String(agentId), options)
+    },
+    removeAgent: async (agentId) => {
+      await mcpApi.removeAgent(String(agentId))
+    },
+  }
+
+  // ---- mcp tool analytics -------------------------------------------------
+  const mcpToolAnalytics: AiBridge['mcpToolAnalytics'] = {
+    getToolStats: async (toolName, from, to) =>
+      unwrap<McpToolStatsDto>(await mcpAnalyticsApi!.getToolStats(toolName, from, to)),
+    getMostUsedTools: async (top, from, to) => {
+      const items = unwrap<McpToolPopularityDto[] | undefined>(
+        await mcpAnalyticsApi!.getMostUsedTools(top, from, to),
+      )
+      return Array.isArray(items) ? items : []
+    },
+    getToolErrors: async (toolName, top) => {
+      const items = unwrap<McpToolErrorDto[] | undefined>(
+        await mcpAnalyticsApi!.getToolErrors(toolName, top),
+      )
+      return Array.isArray(items) ? items : []
+    },
+    cleanup: async (retentionDays) => unwrap<number>(await mcpAnalyticsApi!.cleanup(retentionDays)),
+  }
+
   // ---- quota --------------------------------------------------------------
-  const quota: BridgeCrudContract<UserQuotaDto, SetQuotaDto, SetQuotaDto> = {
+  const quota: AiBridge['quota'] = {
     // Backend exposes a paged query at POST /admin/quotas/query (Phase 5 prereq).
     fetch: async (q): Promise<CrudPageResult<UserQuotaDto>> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
@@ -625,6 +950,8 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     create: async (data) => unwrap<UserQuotaDto>(await quotaApi.setQuota(data)),
     update: async (_id, data) => unwrap<UserQuotaDto>(await quotaApi.setQuota(data)),
     delete: notImplemented('quota.delete') as (ids: string[]) => Promise<void>,
+    getBudgetSummary: async (params) =>
+      unwrap<BudgetSummaryDto>(await quotaApi.getBudgetSummary(params)),
   }
 
   // ---- personas -----------------------------------------------------------
@@ -677,6 +1004,10 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrap<BatchEvaluationResultDto>(await evaluationApi.runBatch(data)),
     getDetail: async (id: string): Promise<EvaluationRunDetailDto> =>
       unwrap<EvaluationRunDetailDto>(await evaluationApi.getById(id)),
+    getTrend: async (agentId: string, lastNRuns?: number) =>
+      unwrap<EvaluationTrendDto>(await evaluationApi.getTrend(agentId, lastNRuns)),
+    compareVersions: async (agentId: string, versionA: number, versionB: number) =>
+      unwrap<VersionComparisonDto>(await evaluationApi.compareVersions(agentId, versionA, versionB)),
   }
 
   return {
@@ -686,10 +1017,13 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     workflows,
     workflowRuns,
     skills,
+    skillCategories,
     providers,
     usage,
     knowledge,
     mcpServers,
+    mcp,
+    mcpToolAnalytics,
     quota,
     personas,
     evaluations,

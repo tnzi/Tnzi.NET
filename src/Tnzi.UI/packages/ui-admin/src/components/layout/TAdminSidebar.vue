@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, ref, watch, getCurrentInstance } from 'vue'
-import { useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
+import { useRoute, type RouteLocationNormalizedLoaded, type Router } from 'vue-router'
 import { NMenu } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import {
@@ -63,6 +63,12 @@ interface Props {
    * level items themselves).
    */
   items?: AdminMenuItem[]
+  /**
+   * Render the built-in settings entry in the sidebar footer (gear icon →
+   * `router.push({ name: 'settings' })`). Only shows when the `settings`
+   * route exists; a consumer-provided `footer` slot fully replaces it.
+   */
+  showSettingsEntry?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -75,6 +81,7 @@ const props = withDefaults(defineProps<Props>(), {
   activeMenuKeyOverride: undefined,
   inverted: false,
   items: undefined,
+  showSettingsEntry: true,
 })
 
 const emit = defineEmits<{
@@ -102,6 +109,26 @@ function safeUseRoute(): { name: unknown } | null {
   }
 }
 const route = safeUseRoute()
+
+function safeUseRouter(): Router | null {
+  const instance = getCurrentInstance()
+  const router = instance?.appContext.config.globalProperties.$router as Router | undefined
+  return router ?? null
+}
+const router = safeUseRouter()
+
+const hasSettingsRoute = computed(() => !!router?.hasRoute('settings'))
+const isSettingsActive = computed(() => route?.name === 'settings')
+const settingsLabel = computed(() => resolveLabel('admin.common.settings'))
+
+function goSettings(): void {
+  if (!router) return
+  void router.push({ name: 'settings' })
+  // 以合成菜单项走 menuSelect 通道，让 TAdminShell 的移动端抽屉收起逻辑生效。
+  const path = typeof router.resolve === 'function' ? router.resolve({ name: 'settings' }).path : '/settings'
+  emit('menuSelect', { key: 'settings', label: settingsLabel.value, path })
+}
+
 const activeMenuKey = computed<string>(() => {
   if (props.activeMenuKeyOverride) return props.activeMenuKeyOverride
   const name = route?.name
@@ -263,6 +290,22 @@ function onSelect(key: string): void {
     <div v-if="$slots.footer" class="t-admin-sidebar__footer">
       <slot name="footer" />
     </div>
+    <div
+      v-else-if="showSettingsEntry && hasSettingsRoute"
+      class="t-admin-sidebar__footer t-admin-sidebar__footer--default"
+    >
+      <button
+        type="button"
+        class="t-admin-sidebar__settings"
+        :class="{ 'is-active': isSettingsActive, 't-admin-sidebar__settings--collapsed': isHeaderCompact }"
+        :title="settingsLabel"
+        @click="goSettings"
+      >
+        <TSvgIcon icon="mdi:cog-outline" :size="18" />
+        <!-- vertical-mix 窄轨（~90px）与折叠态都只显图标 — 与 isHeaderCompact 同口径 -->
+        <span v-if="!isHeaderCompact" class="t-admin-sidebar__settings-label">{{ settingsLabel }}</span>
+      </button>
+    </div>
   </aside>
 </template>
 
@@ -403,5 +446,40 @@ function onSelect(key: string): void {
 }
 .t-admin-sidebar--inverted .t-admin-sidebar__footer {
   border-top-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+}
+.t-admin-sidebar--inverted .t-admin-sidebar__settings {
+  color: var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92));
+}
+
+.t-admin-sidebar__footer--default {
+  padding: 8px;
+}
+.t-admin-sidebar__settings {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  background: transparent;
+  color: var(--tnzi-base-text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.t-admin-sidebar__settings:hover {
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.06);
+  color: var(--tnzi-primary);
+}
+.t-admin-sidebar__settings.is-active {
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.1);
+  color: var(--tnzi-primary);
+  font-weight: 500;
+}
+.t-admin-sidebar__settings--collapsed {
+  justify-content: center;
+  padding: 8px 0;
 }
 </style>

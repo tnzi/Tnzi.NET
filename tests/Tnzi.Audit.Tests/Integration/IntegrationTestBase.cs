@@ -51,6 +51,9 @@ public abstract class IntegrationTestBase : IntegratedTestBase<AuditTestDbContex
         services.AddScoped<Tnzi.Domain.Repositories.IRepository<AuditPropertyEntry, Guid>,
             Tnzi.EFCore.EFCoreRepository<AuditTestDbContext, AuditPropertyEntry, Guid>>();
 
+        // AuditOperationService 注入 IOptionsMonitor<AuditOptions>（RetentionDays 热读）
+        services.AddOptions<Tnzi.Audit.Options.AuditOptions>();
+
         // 注册服务
         services.AddScoped<Tnzi.Audit.Services.IAuditOperationService,
             Tnzi.Audit.Services.AuditOperationService>();

@@ -37,8 +37,10 @@ public class AIOptionsValidatorTests
     }
 
     [Fact]
-    public void Validate_ShouldFailMcp_WhenProvidersEmpty()
+    public void Validate_McpEnabledWithEmptyServers_DoesNotFailOnMcp()
     {
+        // MCP servers may be supplied entirely by the database registry (McpServerRegistration),
+        // so Enabled=true with an empty deployment server list is a valid configuration.
         var result = ValidateOptions(new AIOptions
         {
             Providers = new(),
@@ -49,8 +51,7 @@ public class AIOptionsValidatorTests
             }
         });
 
-        result.Failed.ShouldBeTrue();
-        result.Failures.ShouldContain(x => x.Contains("MCP is enabled but Servers is null or empty.", StringComparison.Ordinal));
+        result.Failures?.ShouldNotContain(x => x.Contains("MCP", StringComparison.Ordinal));
     }
 
     [Fact]

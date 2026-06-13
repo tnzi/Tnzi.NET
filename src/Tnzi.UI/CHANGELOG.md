@@ -2160,7 +2160,7 @@ Maintenance pre-release. Aligns all five packages on a single version, removes r
 
 ## [0.2.0-preview.1] — 2026-04-13
 
-The first pre-release of the 0.2 line. Delivers the structural refactor planned in `docs/superpowers/specs/2026-04-12-ui-packages-production-readiness-design.md` across seven phases (0–6). Consumers upgrading from 0.1 should read [MIGRATION.md](./MIGRATION.md) first.
+The first pre-release of the 0.2 line. Delivers the structural refactor planned in `.superpowers/specs/2026-04-12-ui-packages-production-readiness-design.md` across seven phases (0–6). Consumers upgrading from 0.1 should read [MIGRATION.md](./MIGRATION.md) first.
 
 ### Highlights
 

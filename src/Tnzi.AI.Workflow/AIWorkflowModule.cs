@@ -40,9 +40,11 @@ public class AIWorkflowModule : TnziApplicationModule
         services.AddScoped<IWorkflowExecutionControlService>(sp => sp.GetRequiredService<WorkflowService>());
         services.AddScoped<IWorkflowExecutionQueryService>(sp => sp.GetRequiredService<WorkflowService>());
 
-        // 注册工作流检查点存储（TryAdd：允许用户注册自定义实现）
+        // 注册工作流检查点存储（TryAdd：允许更早 Configure 的模块注册自定义实现）
         services.TryAddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();
-        services.TryAddScoped<IWorkflowExecutionMailbox, WorkflowExecutionMailboxService>();
+        // AIModule 的 NoOpWorkflowExecutionMailbox 回退在 PostConfigure 阶段才 TryAdd，
+        // 本模块 Configure 阶段的注册必然先于回退 → 真实实现永远胜出，无须 RemoveAll。
+        services.AddScoped<IWorkflowExecutionMailbox, WorkflowExecutionMailboxService>();
 
         // 注册工作流引擎组件
         services.AddScoped<IWorkflowNodeServiceContext, WorkflowNodeServiceContext>();

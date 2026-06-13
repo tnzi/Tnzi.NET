@@ -73,7 +73,7 @@ public class ChatSessionService : ApplicationService, IChatSessionService
             .ToList();
 
         var dtos = items.Select(ToListItemDto).ToList();
-        var paged = new PagedList<ChatSessionListItemDto>(dtos, total, query.PageIndex, query.PageSize);
+        var paged = new PagedList<ChatSessionListItemDto>(dtos, query.PageIndex, query.PageSize, total);
         return Ok<IPagedList<ChatSessionListItemDto>>(paged);
     }
 

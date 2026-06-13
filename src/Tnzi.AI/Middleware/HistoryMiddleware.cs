@@ -23,9 +23,6 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-            return await next(context, cancellationToken);
-
         // Before: 自动创建线程（如果 ThreadId 为 null）
         await EnsureThreadAsync(context, cancellationToken);
 
@@ -132,13 +129,6 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-        {
-            await foreach (var chunk in next(context, cancellationToken))
-                yield return chunk;
-            yield break;
-        }
-
         // Before: 自动创建线程（如果 ThreadId 为 null）
         await EnsureThreadAsync(context, cancellationToken);
 

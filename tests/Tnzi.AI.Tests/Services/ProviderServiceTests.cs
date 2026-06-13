@@ -3,12 +3,14 @@ using Microsoft.AspNetCore.DataProtection;
 namespace Tnzi.AI.Tests.Services;
 
 /// <summary>
-/// ProviderService 单元测试 — 覆盖 CRUD、加密、HasApiKey 暴露语义、以及 TestConnection 探针
+/// ProviderService 单元测试 — 覆盖 CRUD、加密、HasApiKey 暴露语义、TestConnection 探针
+/// 以及 ResourceScope 多租户可见性合并逻辑。
 /// </summary>
 public class ProviderServiceTests
 {
     private readonly Mock<IRepository<Provider, Guid>> _repository = new();
     private readonly StubDataProtectionProvider _dataProtection = new();
+    private readonly Mock<IHttpClientFactory> _httpClientFactory = new();
     private readonly IServiceProvider _serviceProvider;
 
     public ProviderServiceTests()
@@ -22,7 +24,8 @@ public class ProviderServiceTests
         _serviceProvider = services.BuildServiceProvider();
     }
 
-    private ProviderService CreateService() => new(_repository.Object, _dataProtection, _serviceProvider);
+    private ProviderService CreateService(ICurrentTenant? currentTenant = null) =>
+        new(_repository.Object, _dataProtection, _httpClientFactory.Object, _serviceProvider, currentTenant);
 
     private void SetupQueryable(List<Provider> data)
     {
@@ -39,7 +42,9 @@ public class ProviderServiceTests
         string name = "openai",
         string type = "OpenAI",
         bool isEnabled = true,
-        string? apiKeyEncrypted = null) => new()
+        string? apiKeyEncrypted = null,
+        ResourceScope scope = ResourceScope.System,
+        Guid? tenantId = null) => new()
     {
         Id = Guid.NewGuid(),
         Name = name,
@@ -50,8 +55,129 @@ public class ProviderServiceTests
         IsEnabled = isEnabled,
         Description = "test provider",
         ApiKeyEncrypted = apiKeyEncrypted,
-        CreationTime = DateTime.UtcNow
+        CreationTime = DateTime.UtcNow,
+        Scope = scope,
+        TenantId = tenantId
     };
+
+    // -------------------------------------------------------------------------
+    // Visibility (ResourceScope) tests
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetPagedListAsync_WithTenant_ReturnsSystemAndOwnTenantOnly()
+    {
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        SetupQueryable(new List<Provider>
+        {
+            MakeProvider("system-1", scope: ResourceScope.System),
+            MakeProvider("tenant-a", scope: ResourceScope.Tenant, tenantId: tenantA),
+            MakeProvider("tenant-b", scope: ResourceScope.Tenant, tenantId: tenantB),
+        });
+
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.GetPagedListAsync(new ProviderQueryDto { PageIndex = 1, PageSize = 10 });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.TotalCount.ShouldBe(2);
+        result.Data.Items.Select(p => p.Name).ShouldContain("system-1");
+        result.Data.Items.Select(p => p.Name).ShouldContain("tenant-a");
+        result.Data.Items.Select(p => p.Name).ShouldNotContain("tenant-b");
+    }
+
+    [Fact]
+    public async Task GetPagedListAsync_NoTenant_ReturnsAll()
+    {
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        SetupQueryable(new List<Provider>
+        {
+            MakeProvider("system-1", scope: ResourceScope.System),
+            MakeProvider("tenant-a", scope: ResourceScope.Tenant, tenantId: tenantA),
+            MakeProvider("tenant-b", scope: ResourceScope.Tenant, tenantId: tenantB),
+        });
+
+        // No ICurrentTenant injected — single-tenant mode, return all
+        var svc = CreateService(currentTenant: null);
+
+        var result = await svc.GetPagedListAsync(new ProviderQueryDto { PageIndex = 1, PageSize = 10 });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.TotalCount.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task GetOptionsAsync_WithTenant_ReturnsSystemAndOwnTenantOnly()
+    {
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        SetupQueryable(new List<Provider>
+        {
+            MakeProvider("system-1", scope: ResourceScope.System),
+            MakeProvider("tenant-a", scope: ResourceScope.Tenant, tenantId: tenantA),
+            MakeProvider("tenant-b", scope: ResourceScope.Tenant, tenantId: tenantB),
+        });
+
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.GetOptionsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Count.ShouldBe(2);
+        result.Data.Select(p => p.Name).ShouldContain("system-1");
+        result.Data.Select(p => p.Name).ShouldContain("tenant-a");
+        result.Data.Select(p => p.Name).ShouldNotContain("tenant-b");
+    }
+
+    [Fact]
+    public async Task ProviderDto_ContainsScope_AfterCreate()
+    {
+        SetupQueryable(new List<Provider>());
+        _repository.Setup(r => r.InsertAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var tenantA = Guid.NewGuid();
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.CreateAsync(new CreateProviderDto
+        {
+            Name = "my-provider",
+            ProviderType = "OpenAI"
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Scope.ShouldBe(ResourceScope.Tenant);
+        result.Data.TenantId.ShouldBe(tenantA);
+    }
+
+    [Fact]
+    public async Task CreateAsync_NoTenant_DefaultsToSystemScope()
+    {
+        SetupQueryable(new List<Provider>());
+        _repository.Setup(r => r.InsertAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var svc = CreateService(currentTenant: null);
+
+        var result = await svc.CreateAsync(new CreateProviderDto
+        {
+            Name = "global-provider",
+            ProviderType = "Anthropic"
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Scope.ShouldBe(ResourceScope.System);
+        result.Data.TenantId.ShouldBeNull();
+    }
+
+    // -------------------------------------------------------------------------
+    // Existing CRUD / encryption tests (unchanged)
+    // -------------------------------------------------------------------------
 
     [Fact]
     public async Task GetPagedListAsync_EmptyRepository_ReturnsEmpty()
@@ -137,10 +263,12 @@ public class ProviderServiceTests
     [Fact]
     public async Task CreateAsync_DuplicateName_ReturnsConflict()
     {
-        SetupQueryable(new List<Provider> { MakeProvider("dup") });
+        var tenantId = Guid.NewGuid();
+        // Seed a System-scope provider; creating another with same name + System scope conflicts
+        SetupQueryable(new List<Provider> { MakeProvider("dup", scope: ResourceScope.System) });
         var svc = CreateService();
 
-        var result = await svc.CreateAsync(new CreateProviderDto { Name = "dup", ProviderType = "OpenAI" });
+        var result = await svc.CreateAsync(new CreateProviderDto { Name = "dup", ProviderType = "OpenAI", Scope = ResourceScope.System });
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(409);
@@ -195,6 +323,102 @@ public class ProviderServiceTests
 
         result.Succeeded.ShouldBeTrue();
         existing.ApiKeyEncrypted.ShouldBeNull();
+    }
+
+    // -------------------------------------------------------------------------
+    // Write-path isolation tests (cross-tenant + system-tamper guard)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task UpdateAsync_TenantA_OnTenantBProvider_Returns404()
+    {
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var tenantBProvider = MakeProvider("b-provider", scope: ResourceScope.Tenant, tenantId: tenantB);
+        SetupQueryable(new List<Provider> { tenantBProvider });
+
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.UpdateAsync(tenantBProvider.Id, new UpdateProviderDto { Description = "hacked" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(404);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_TenantA_OnTenantBProvider_Returns404()
+    {
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var tenantBProvider = MakeProvider("b-provider", scope: ResourceScope.Tenant, tenantId: tenantB);
+        SetupQueryable(new List<Provider> { tenantBProvider });
+
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.DeleteAsync(tenantBProvider.Id);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(404);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_TenantA_OnSystemProvider_Returns403()
+    {
+        var tenantA = Guid.NewGuid();
+        var systemProvider = MakeProvider("shared-system", scope: ResourceScope.System);
+        SetupQueryable(new List<Provider> { systemProvider });
+
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.UpdateAsync(systemProvider.Id, new UpdateProviderDto { Description = "tampered" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_TenantA_OnSystemProvider_Returns403()
+    {
+        var tenantA = Guid.NewGuid();
+        var systemProvider = MakeProvider("shared-system", scope: ResourceScope.System);
+        SetupQueryable(new List<Provider> { systemProvider });
+
+        var svc = CreateService(new StubCurrentTenant(tenantA));
+
+        var result = await svc.DeleteAsync(systemProvider.Id);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_SingleTenantMode_CanUpdateSystemProvider()
+    {
+        var systemProvider = MakeProvider("global-system", scope: ResourceScope.System);
+        SetupQueryable(new List<Provider> { systemProvider });
+        _repository.Setup(r => r.UpdateAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // No ICurrentTenant — single-tenant mode, no guard applies
+        var svc = CreateService(currentTenant: null);
+
+        var result = await svc.UpdateAsync(systemProvider.Id, new UpdateProviderDto { Description = "admin update" });
+
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task DeleteAsync_SingleTenantMode_CanDeleteSystemProvider()
+    {
+        var systemProvider = MakeProvider("global-system", scope: ResourceScope.System);
+        SetupQueryable(new List<Provider> { systemProvider });
+
+        // No ICurrentTenant — single-tenant mode, no guard applies
+        var svc = CreateService(currentTenant: null);
+
+        var result = await svc.DeleteAsync(systemProvider.Id);
+
+        result.Succeeded.ShouldBeTrue();
     }
 
     [Fact]
@@ -265,6 +489,10 @@ public class ProviderServiceTests
         result.Data.Message!.ShouldContain("decrypt");
     }
 
+    // -------------------------------------------------------------------------
+    // Stubs
+    // -------------------------------------------------------------------------
+
     /// <summary>
     /// Stub IDataProtectionProvider — wraps plaintext with a marker prefix so tests can
     /// assert ciphertext shape without depending on real DataProtection key infrastructure.
@@ -286,5 +514,18 @@ public class ProviderServiceTests
                 return System.Text.Encoding.UTF8.GetBytes(s.Substring(Marker.Length));
             }
         }
+    }
+
+    /// <summary>
+    /// Stub ICurrentTenant — 返回固定租户 ID。
+    /// </summary>
+    private sealed class StubCurrentTenant : ICurrentTenant
+    {
+        public StubCurrentTenant(Guid tenantId) { Id = tenantId; }
+        public Guid? Id { get; }
+        public string? Name => null;
+        public bool IsAvailable => true;
+        public IDisposable Change(Guid? tenantId, string? tenantName = null) => new NoOpDisposable();
+        private sealed class NoOpDisposable : IDisposable { public void Dispose() { } }
     }
 }

@@ -43,6 +43,10 @@ public class AgentDto
     public int CostTier { get; set; }
     /// <summary>Persona ID — FK to AgentPersona for soul / role injection (optional).</summary>
     public Guid? PersonaId { get; set; }
+    /// <summary>Assigned knowledge base IDs (RAG). Retrieval is scoped to these.</summary>
+    public List<Guid>? KnowledgeBaseIds { get; set; }
+    /// <summary>Assigned skill slugs. Only these skills are visible to the agent.</summary>
+    public List<string>? SkillSlugs { get; set; }
     /// <summary>Creation time</summary>
     public DateTime CreationTime { get; set; }
     /// <summary>Last modification time</summary>
@@ -117,6 +121,12 @@ public class CreateAgentDto
 
     /// <summary>Persona ID — FK to AgentPersona (optional).</summary>
     public Guid? PersonaId { get; set; }
+
+    /// <summary>Assigned knowledge base IDs (RAG).</summary>
+    public List<Guid>? KnowledgeBaseIds { get; set; }
+
+    /// <summary>Assigned skill slugs.</summary>
+    public List<string>? SkillSlugs { get; set; }
 }
 
 /// <summary>
@@ -186,6 +196,12 @@ public class UpdateAgentDto
     /// <summary>Persona ID — FK to AgentPersona; pass Guid.Empty to clear.</summary>
     public Guid? PersonaId { get; set; }
 
+    /// <summary>Assigned knowledge base IDs (RAG). Pass an empty list to clear all.</summary>
+    public List<Guid>? KnowledgeBaseIds { get; set; }
+
+    /// <summary>Assigned skill slugs. Pass an empty list to clear all.</summary>
+    public List<string>? SkillSlugs { get; set; }
+
     /// <summary>Change note for version tracking</summary>
     [MaxLength(500)]
     public string? ChangeNote { get; set; }
@@ -211,8 +227,6 @@ public class AgentExecutionConfigDto
     /// <summary>AgentAsTools 配置</summary>
     public AgentAsToolsExecutionConfigDto? AgentAsTools { get; set; }
 
-    /// <summary>ExternalCli 模式配置</summary>
-    public ExternalCliExecutionConfigDto? ExternalCli { get; set; }
 
     /// <summary>
     /// 序列化为 JSON 字符串（存入 Agent.Configuration）
@@ -220,7 +234,7 @@ public class AgentExecutionConfigDto
     public static string? Serialize(AgentExecutionConfigDto? config)
     {
         if (config == null) return null;
-        if (config.Handoff == null && config.Router == null && config.AgentAsTools == null && config.ExternalCli == null) return null;
+        if (config.Handoff == null && config.Router == null && config.AgentAsTools == null) return null;
         return JsonSerializer.Serialize(config, CamelCaseOptions);
     }
 
@@ -234,7 +248,7 @@ public class AgentExecutionConfigDto
         {
             var config = JsonSerializer.Deserialize<AgentExecutionConfigDto>(json, CamelCaseOptions);
             if (config == null) return null;
-            return config.Handoff == null && config.Router == null && config.AgentAsTools == null && config.ExternalCli == null
+            return config.Handoff == null && config.Router == null && config.AgentAsTools == null
                 ? null
                 : config;
         }
@@ -286,18 +300,6 @@ public class AgentAsToolsExecutionConfigDto
 
     /// <summary>单个子 Agent 超时秒数（默认 900 = 15 分钟）</summary>
     public int? SubAgentTimeoutSeconds { get; set; }
-}
-
-/// <summary>
-/// ExternalCli 执行配置 DTO
-/// </summary>
-public class ExternalCliExecutionConfigDto
-{
-    /// <summary>CLI 提供者名称（对应 AI:Cli:Providers 的 key）</summary>
-    public string Provider { get; set; } = string.Empty;
-
-    /// <summary>默认工作目录</summary>
-    public string? WorkingDirectory { get; set; }
 }
 
 /// <summary>
@@ -451,4 +453,17 @@ public class AgentVersionDto
 public class AgentVersionQueryDto : PagedQueryDto
 {
     protected override int DefaultPageSize => 20;
+}
+
+/// <summary>
+/// 工具组目录 DTO — 供前端 Agent 配置的工具组多选选择器（替代自由文本）
+/// </summary>
+public class ToolGroupDto
+{
+    /// <summary>工具组名称（写入 Agent.ToolGroups 的值）</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>该组内工具数量</summary>
+    public int ToolCount { get; set; }
+    /// <summary>该组内工具名称列表（用于 tooltip 预览）</summary>
+    public List<string> ToolNames { get; set; } = [];
 }

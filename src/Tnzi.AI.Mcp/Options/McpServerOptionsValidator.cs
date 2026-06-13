@@ -7,16 +7,6 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
 {
     protected override void ValidateOptions(McpServerOptions options, List<string> errors)
     {
-        if (string.IsNullOrWhiteSpace(options.Transport))
-        {
-            AddError(errors, nameof(options.Transport), "Transport is required. Must be 'stdio' or 'sse'.");
-        }
-        else if (options.Transport is not ("stdio" or "sse"))
-        {
-            AddError(errors, nameof(options.Transport),
-                $"Unsupported transport: '{options.Transport}'. Must be 'stdio' or 'sse'.");
-        }
-
         if (!string.IsNullOrWhiteSpace(options.Endpoint)
             && !options.Endpoint.StartsWith("/", StringComparison.Ordinal))
         {
@@ -24,10 +14,13 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
                 "Endpoint must start with '/'.");
         }
 
-        if (string.IsNullOrWhiteSpace(options.Endpoint))
+        // Required-checks are gated on Enabled — a disabled server's incomplete
+        // configuration must not block application startup. Format checks above
+        // still apply whenever a value is provided.
+        if (options.Enabled && string.IsNullOrWhiteSpace(options.Endpoint))
         {
             AddError(errors, nameof(options.Endpoint),
-                "Endpoint is required for MCP HTTP/SSE transport.");
+                "Endpoint is required.");
         }
 
         if (options.RateLimitPerMinute < 0)
@@ -36,21 +29,33 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
                 "Rate limit must be >= 0.");
         }
 
-        if (options.RequireAuthentication && options.AllowedApiKeys.Count == 0 && options.Transport == "sse")
+        // Only enforce API keys when the server is actually enabled — a disabled
+        // server must not block application startup over missing credentials.
+        if (options.Enabled && options.RequireAuthentication && options.AllowedApiKeys.Count == 0)
         {
             AddError(errors, nameof(options.AllowedApiKeys),
-                "RequireAuthentication is enabled with SSE transport but no AllowedApiKeys are configured.");
+                "RequireAuthentication is enabled but no AllowedApiKeys are configured.");
         }
 
+        // The rate-limit tracking table needs at least one slot, otherwise every
+        // request hits the "table full" rejection path and the limiter degenerates
+        // into a deny-all. Only enforced when rate limiting is actually in effect
+        // (server enabled + a positive per-minute limit).
+        if (options.Enabled && options.RateLimitPerMinute > 0 && options.RateLimitTrackingMaxEntries < 1)
+        {
+            AddError(errors, nameof(options.RateLimitTrackingMaxEntries),
+                "RateLimitTrackingMaxEntries must be >= 1 when rate limiting is enabled.");
+        }
     }
 
     protected override void CollectWarnings(McpServerOptions options, List<string> warnings)
     {
-        if (options.RequireAuthentication && options.Transport == "stdio")
+        if (options.Enabled && !options.RequireAuthentication)
         {
             AddWarning(warnings, nameof(options.RequireAuthentication),
-                "RequireAuthentication has limited effect with stdio transport. " +
-                "Authentication is enforced at the process boundary. Use SSE transport for HTTP-level API key authentication.");
+                "MCP server is enabled without authentication; all requests will be accepted " +
+                "without an API key. Ensure the endpoint is not reachable from untrusted networks, " +
+                "or set RequireAuthentication=true with AllowedApiKeys.");
         }
 
         if (options.AllowApiKeyInQuery)

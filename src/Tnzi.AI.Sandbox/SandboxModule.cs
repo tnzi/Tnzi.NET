@@ -73,13 +73,23 @@ public class SandboxModule : TnziApplicationModule
     public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
         var logger = context.ServiceProvider.GetRequiredService<ILogger<SandboxModule>>();
-        AIToolRegistration.ScanAndRegisterAITools(context.ServiceProvider, typeof(SandboxModule).Assembly, logger);
+        var options = context.ServiceProvider.GetRequiredService<IOptions<SandboxModuleOptions>>().Value;
+
+        // Register sandbox tools only when the sandbox is enabled — a disabled
+        // sandbox must not surface tools that can never obtain an environment.
+        if (options.Enabled)
+        {
+            AIToolRegistration.ScanAndRegisterAITools(context.ServiceProvider, typeof(SandboxModule).Assembly, logger);
+        }
+        else
+        {
+            logger.LogInformation("Sandbox is disabled (AI:Sandbox:Enabled=false); sandbox tools were not registered");
+        }
 
         // Populate the shared skill resource root once at startup so that
         // ThreadDataMiddleware can symlink each thread to it rather than
         // copying every skill's files for every new thread.
         var skillStore = context.ServiceProvider.GetService<ISkillStore>();
-        var options = context.ServiceProvider.GetRequiredService<IOptions<SandboxModuleOptions>>().Value;
         if (skillStore != null && options.Enabled && !string.IsNullOrWhiteSpace(options.DataRoot))
         {
             await SharedSkillExtractor.ExtractAsync(skillStore, options.DataRoot, logger);

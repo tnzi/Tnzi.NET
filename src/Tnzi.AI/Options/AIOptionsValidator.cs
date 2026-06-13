@@ -27,12 +27,8 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             }
         }
 
-        // MCP：Enabled 时必须有至少一个 Server；再校验各服务器配置（名称、连接方式与必填字段）
-        if (options.Mcp != null && options.Mcp.Enabled && (options.Mcp.Servers == null || options.Mcp.Servers.Count == 0))
-        {
-            errors.Add("MCP is enabled but Servers is null or empty. Configure at least one server under AI:Mcp:Servers.");
-        }
-
+        // MCP：Enabled 时允许 Servers 为空 — 服务器也可由数据库注册表（McpServerRegistration，
+        // admin 运行时录入，经 IMcpServerCatalog 物化）提供；下方仅校验已声明的部署配置服务器。
         ValidatePermissionRules(options.Permissions, errors);
         ValidateMemoryOptions(options.ContextProviders?.Memory, errors);
 

@@ -9,7 +9,7 @@ namespace Tnzi.AI.Entities;
 /// 数据库为空时回退到 appsettings.json 配置，保持向后兼容。
 /// API Key 通过 <c>IDataProtectionProvider</c> 加密存储于 <see cref="ApiKeyEncrypted"/>。
 /// </remarks>
-public class Provider : FullAuditedEntity<Guid>
+public class Provider : FullAuditedEntity<Guid>, IScopedResource
 {
     /// <summary>
     /// Single source of truth for the IDataProtectionProvider purpose string used to
@@ -59,4 +59,15 @@ public class Provider : FullAuditedEntity<Guid>
     /// Description (nullable)
     /// </summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// 可见性作用域 — System（全局共享）或 Tenant（租户私有）。
+    /// 实体有意不实现 IMultiTenant，可见性通过服务层联合过滤（System ∪ 当前租户）强制。
+    /// </summary>
+    public ResourceScope Scope { get; set; } = ResourceScope.System;
+
+    /// <summary>
+    /// 所属租户 ID — Scope=Tenant 时非空；System 行为 null。
+    /// </summary>
+    public Guid? TenantId { get; set; }
 }

@@ -12,6 +12,13 @@ public class TelegramAdapterOptions
     /// <summary>Bot token. Inject via env var AI__CHANNELS__TELEGRAM__BOTTOKEN.</summary>
     public string? BotToken { get; set; }
 
+    /// <summary>
+    /// Owning tenant of this channel bot instance. Inbound messages from this
+    /// channel are processed under this tenant context (session binding rule
+    /// partitioning, thread mapping audit fill). Null = single-tenant / global.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>Allowed user ID allowlist (empty = unrestricted).</summary>
     public List<long> AllowedUsers { get; set; } = [];
 
@@ -30,6 +37,7 @@ public class TelegramAdapterOptions
     public override string ToString() =>
         $"TelegramAdapterOptions {{ Enabled = {Enabled}, " +
         $"BotToken = {SecretMask.Mask(BotToken)}, " +
+        $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +
         $"PollingTimeoutSeconds = {PollingTimeoutSeconds}, MaxRetries = {MaxRetries}, " +
         $"MaxPhotoSize = {MaxPhotoSize}, MaxDocumentSize = {MaxDocumentSize} }}";

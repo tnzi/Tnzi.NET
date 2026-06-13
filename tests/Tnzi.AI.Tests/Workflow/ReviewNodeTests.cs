@@ -162,7 +162,7 @@ public class ReviewNodeTests
             .Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 

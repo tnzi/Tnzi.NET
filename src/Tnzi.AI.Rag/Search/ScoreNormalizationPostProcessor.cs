@@ -39,28 +39,43 @@ public class ScoreNormalizationPostProcessor : ISearchPostProcessor
         var maxScore = results.Max(r => r.Score);
         var range = maxScore - minScore;
 
-        // Normalize scores to [0, 1]
-        foreach (var result in results)
-        {
-            result.Score = range > 0
-                ? (result.Score - minScore) / range
-                : 1.0; // All scores equal, normalize to 1.0
-        }
+        // Normalize scores to [0, 1] — 创建新实例，不修改入参对象
+        // （immutable pattern，与 WeightedDiminishingReranker 一致）
+        var normalized = results
+            .Select(r => CloneWithScore(r, range > 0
+                ? (r.Score - minScore) / range
+                : 1.0)) // All scores equal, normalize to 1.0
+            .ToList();
 
         // Filter by minimum score threshold
-        var filtered = results;
+        var filtered = normalized;
         if (_minScoreThreshold > 0)
         {
-            var originalCount = results.Count;
-            filtered = results.Where(r => r.Score >= _minScoreThreshold).ToList();
+            filtered = normalized.Where(r => r.Score >= _minScoreThreshold).ToList();
 
-            if (filtered.Count < originalCount)
+            if (filtered.Count < normalized.Count)
             {
                 _logger.LogDebug("Score normalization filtered {Removed} results below threshold {Threshold}",
-                    originalCount - filtered.Count, _minScoreThreshold);
+                    normalized.Count - filtered.Count, _minScoreThreshold);
             }
         }
 
         return Task.FromResult(filtered);
     }
+
+    /// <summary>
+    /// 复制结果并替换得分（保持入参不可变）
+    /// </summary>
+    private static VectorSearchResult CloneWithScore(VectorSearchResult source, double score) => new()
+    {
+        Id = source.Id,
+        Content = source.Content,
+        DocumentId = source.DocumentId,
+        KnowledgeBaseId = source.KnowledgeBaseId,
+        ChunkIndex = source.ChunkIndex,
+        Metadata = source.Metadata,
+        ParentChunkId = source.ParentChunkId,
+        ContentHash = source.ContentHash,
+        Score = score
+    };
 }

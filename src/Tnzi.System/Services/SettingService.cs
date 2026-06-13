@@ -8,7 +8,7 @@ public class SettingService : ApplicationService, ISettingService
     private static readonly DateTime _startTime = DateTime.UtcNow;
 
     private readonly IRepository<Setting, Guid> _settingRepository;
-    private readonly ApplicationOptions _applicationOptions;
+    private readonly IOptionsMonitor<ApplicationOptions> _applicationOptions;
     private readonly ICache _cache;
     private readonly IEnumerable<ISettingProvider> _settingProviders;
     private readonly ISettingEncryptor? _settingEncryptor;
@@ -28,7 +28,7 @@ public class SettingService : ApplicationService, ISettingService
     public SettingService(
         IServiceProvider serviceProvider,
         IRepository<Setting, Guid> settingRepository,
-        IOptions<ApplicationOptions> applicationOptions,
+        IOptionsMonitor<ApplicationOptions> applicationOptions,
         IOptions<SettingEncryptionOptions> encryptionOptions,
         ICache cache,
         IEnumerable<ISettingProvider> settingProviders,
@@ -38,7 +38,7 @@ public class SettingService : ApplicationService, ISettingService
         : base(serviceProvider)
     {
         _settingRepository = Check.NotNull(settingRepository);
-        _applicationOptions = Check.NotNull(applicationOptions).Value;
+        _applicationOptions = Check.NotNull(applicationOptions);
         _encryptionOptions = Check.NotNull(encryptionOptions).Value;
         _cache = Check.NotNull(cache);
         _settingProviders = Check.NotNull(settingProviders);
@@ -50,14 +50,14 @@ public class SettingService : ApplicationService, ISettingService
     /// <inheritdoc />
     public ApplicationOptions GetApplicationOptions()
     {
-        return _applicationOptions;
+        return _applicationOptions.CurrentValue;
     }
 
     /// <inheritdoc />
     public async Task<Result<string>> GetAppNameAsync()
     {
         var result = await GetSettingAsync(KeyAppName);
-        var value = result.Data ?? _applicationOptions.AppName;
+        var value = result.Data ?? _applicationOptions.CurrentValue.AppName;
         return Ok<string>(value);
     }
 
@@ -65,7 +65,7 @@ public class SettingService : ApplicationService, ISettingService
     public async Task<Result<string>> GetSiteNameAsync()
     {
         var result = await GetSettingAsync(KeySiteName);
-        var value = result.Data ?? _applicationOptions.SiteName;
+        var value = result.Data ?? _applicationOptions.CurrentValue.SiteName;
         return Ok<string>(value);
     }
 
@@ -522,7 +522,7 @@ public class SettingService : ApplicationService, ISettingService
 
         var info = new SystemInfoDto
         {
-            AppName = _applicationOptions.AppName,
+            AppName = _applicationOptions.CurrentValue.AppName,
             FrameworkVersion = frameworkAssembly.GetName().Version?.ToString() ?? "0.0.0",
             RuntimeVersion = RuntimeInformation.FrameworkDescription,
             OperatingSystem = RuntimeInformation.OSDescription,

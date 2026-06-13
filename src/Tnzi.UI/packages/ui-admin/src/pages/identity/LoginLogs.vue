@@ -1,13 +1,13 @@
 <template>
-  <!-- Read-only page: showCreate=false hides the Create button; no-op handlers ensure
-       useCrudPage's required callbacks are satisfied without being reachable from the UI. -->
+  <!-- Read-only page: createData/updateData/deleteData are omitted, so
+       canCreate/canUpdate/canDelete are false and the shell hides all
+       mutating affordances automatically. -->
   <TCrudPage
     :state="crud"
     :all-columns="loginLogColumns"
     :search-fields="loginLogSearchFields"
     :title="title"
     :translate="t"
-    :show-create="false"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
@@ -33,18 +33,12 @@ import type { LoginLogDto } from '@tnzi/core/services/identity'
 const title = 'title'
 const bridge = createIdentityBridge({ client: useAdminClient() })
 
-// No-op handlers: login logs are read-only; these callbacks are required by useCrudPage
-// but the UI never triggers them because showCreate=false and row actions are view-only.
-const readOnlyFn = async (): Promise<never> => { throw new Error('Login Log is read-only') }
-
 const crud = useCrudPage<LoginLogDto, string>({
   pageId: 'identity.loginLogs',
   columns: loginLogColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.loginLogs.fetch(query),
-  createData: readOnlyFn,
-  updateData: readOnlyFn,
-  deleteData: readOnlyFn,
+  // read-only: no create/update/delete callbacks → affordances auto-hidden
 })
 
 

@@ -52,21 +52,6 @@ public class ContextProvidersOptions
     /// </summary>
     public EntityMemoryOptions EntityMemory { get; set; } = new();
 
-    /// <summary>
-    /// 项目上下文配置（通过 IProjectContextLoader 加载项目指令）
-    /// </summary>
-    public ProjectContextOptions ProjectContext { get; set; } = new();
-}
-
-/// <summary>
-/// 项目上下文配置选项
-/// </summary>
-public class ProjectContextOptions
-{
-    /// <summary>
-    /// 是否启用项目上下文注入
-    /// </summary>
-    public bool Enabled { get; set; }
 }
 
 /// <summary>

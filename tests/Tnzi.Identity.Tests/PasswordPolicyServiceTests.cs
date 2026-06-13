@@ -7,7 +7,7 @@ public class PasswordPolicyServiceTests
 {
     private readonly Mock<IRepository<PasswordHistory, Guid>> _repositoryMock;
     private readonly Mock<UserManager<User>> _userManagerMock;
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<ILogger<PasswordPolicyService>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
@@ -20,8 +20,8 @@ public class PasswordPolicyServiceTests
         var store = new Mock<IUserStore<User>>();
         _userManagerMock = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
 
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock = new Mock<IOptionsMonitor<IdentityOptions>>();
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             PasswordPolicy = new PasswordPolicyOptions
             {
@@ -262,7 +262,7 @@ public class PasswordPolicyServiceTests
     public async Task CheckPasswordHistoryAsync_WhenHistoryDisabled_ReturnsFalse()
     {
         // Arrange
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             PasswordPolicy = new PasswordPolicyOptions { PasswordHistoryCount = 0 }
         });

@@ -11,7 +11,6 @@
     :all-columns="refundColumns"
     :title="t('title')"
     :translate="t"
-    :show-create="false"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
@@ -100,9 +99,8 @@ const crud = useCrudPage<RefundDto>({
   columns: refundColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.refunds.fetch(query),
-  createData: async () => { throw new Error('Refund requests are initiated by users, not admins') },
-  updateData: async () => { throw new Error('Refund records are immutable; use approve/reject') },
-  deleteData: async () => { throw new Error('Refunds cannot be deleted; use cancel to void') },
+  // Refund records are immutable — lifecycle moves via approve/reject/cancel
+  // row actions, never via create/update/delete.
 })
 
 

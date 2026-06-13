@@ -83,12 +83,8 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
             Logger.LogDebug("Chunked into {Count} chunks (size={ChunkSize}, overlap={Overlap})",
                 chunks.Count, chunkSize, chunkOverlap);
 
-            // 4. 批量生成嵌入
-            var embeddingOptions = new EmbeddingOptions
-            {
-                Provider = kb.EmbeddingProvider == "default" ? _options.DefaultEmbeddingProvider : kb.EmbeddingProvider,
-                Model = kb.EmbeddingModel ?? _options.DefaultEmbeddingModel
-            };
+            // 4. 批量生成嵌入（provider/model 解析与查询路径共用同一 helper，保证向量空间一致）
+            var embeddingOptions = RagEmbeddingOptionsResolver.Resolve(kb, _options);
 
             var allEmbeddings = new List<float[]>();
             var batchSize = _options.EmbeddingBatchSize;

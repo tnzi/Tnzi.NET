@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Hosting;
 
 /// <summary>
@@ -22,7 +22,6 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(AISkillsModule))]
 [OptionalDependsOn(typeof(AIWorkflowModule))]
 [OptionalDependsOn(typeof(AIMcpModule))]
-[OptionalDependsOn(typeof(AIMcpClientModule))]
 [OptionalDependsOn(typeof(AuditModule))]
 [OptionalDependsOn(typeof(SystemModule))]
 [OptionalDependsOn(typeof(HangfireModule))]
@@ -30,11 +29,8 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(ChatModule))]
 [OptionalDependsOn(typeof(PaymentModule))]
 [OptionalDependsOn(typeof(RagModule))]
-[OptionalDependsOn(typeof(AICoderModule))]
-[OptionalDependsOn(typeof(AICliModule))]
 [OptionalDependsOn(typeof(Tnzi.AI.Sandbox.SandboxModule))]
 [OptionalDependsOn(typeof(ChannelsModule))]
-[OptionalDependsOn(typeof(Tnzi.AI.Device.DeviceModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：

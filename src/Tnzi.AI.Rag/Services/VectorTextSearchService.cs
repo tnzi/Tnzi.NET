@@ -8,6 +8,11 @@ namespace Tnzi.AI.Rag.Services;
 /// <para>
 /// 搜索管线：查询改写 → 生成嵌入 → 向量搜索 → 重排序 → 相关性评分 → 结果映射
 /// </para>
+/// <para>
+/// 支持按知识库范围过滤：当 <see cref="TextSearchFilter.KnowledgeBaseIds"/> 非空时，检索仅限
+/// 这些知识库（逐库查询后合并重排）；为空时跨所有启用知识库（向后兼容）。
+/// 该范围由 Agent 的 <c>KnowledgeBaseIds</c> 分配经 TextSearchProvider 传入。
+/// </para>
 /// </remarks>
 public class VectorTextSearchService : ApplicationService, ITextSearchService
 {
@@ -15,6 +20,8 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
     private readonly IVectorStore _vectorStore;
     private readonly IReranker _reranker;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
+    private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
+    private readonly AIRagOptions _ragOptions;
     private readonly IQueryRewriter? _queryRewriter;
     private readonly IRelevanceGrader? _relevanceGrader;
     private readonly IEnumerable<ISearchPostProcessor> _postProcessors;
@@ -25,7 +32,9 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
         IVectorStore vectorStore,
         IReranker reranker,
         IRepository<KnowledgeDocument, Guid> docRepository,
+        IRepository<KnowledgeBase, Guid> kbRepository,
         IEnumerable<ISearchPostProcessor> postProcessors,
+        IOptions<AIRagOptions> ragOptions,
         IQueryRewriter? queryRewriter = null,
         IRelevanceGrader? relevanceGrader = null) : base(serviceProvider)
     {
@@ -33,16 +42,33 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
         _vectorStore = Check.NotNull(vectorStore);
         _reranker = Check.NotNull(reranker);
         _docRepository = Check.NotNull(docRepository);
+        _kbRepository = Check.NotNull(kbRepository);
         _postProcessors = Check.NotNull(postProcessors);
+        _ragOptions = Check.NotNull(ragOptions).Value;
         _queryRewriter = queryRewriter;
         _relevanceGrader = relevanceGrader;
     }
 
     /// <inheritdoc />
-    public async Task<IEnumerable<TextSearchResult>> SearchAsync(
+    public Task<IEnumerable<TextSearchResult>> SearchAsync(
         string query,
         int maxResults = 5,
         CancellationToken ct = default)
+        => SearchCoreAsync(query, knowledgeBaseIds: null, maxResults, ct);
+
+    /// <inheritdoc />
+    public Task<IEnumerable<TextSearchResult>> SearchAsync(
+        string query,
+        TextSearchFilter? filter,
+        int maxResults = 5,
+        CancellationToken ct = default)
+        => SearchCoreAsync(query, filter?.KnowledgeBaseIds, maxResults, ct);
+
+    private async Task<IEnumerable<TextSearchResult>> SearchCoreAsync(
+        string query,
+        IReadOnlyList<Guid>? knowledgeBaseIds,
+        int maxResults,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -62,16 +88,59 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
                 }
             }
 
-            // 2. 生成查询向量
-            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(searchQuery, ct: ct);
-            if (!embeddingResult.Succeeded)
+            // 2+3. 生成查询向量并执行向量搜索 — 有知识库范围时按 per-KB 嵌入配置分组逐库检索后合并；
+            // 否则使用全局默认嵌入配置跨所有启用知识库（query 向量须与摄取 provider/model 对齐，
+            // 与 KnowledgeBaseService.SearchAsync 同范式）。
+            List<VectorSearchResult> rawResults;
+            if (knowledgeBaseIds is { Count: > 0 })
             {
-                Logger.LogWarning("Embedding generation failed for text search: {Message}", embeddingResult.Message);
-                return [];
+                var kbIds = knowledgeBaseIds.Distinct().ToList();
+                var knowledgeBases = await _kbRepository.AsQueryable()
+                    .Where(kb => kbIds.Contains(kb.Id))
+                    .ToListAsync(ct);
+
+                if (knowledgeBases.Count < kbIds.Count)
+                {
+                    Logger.LogWarning(
+                        "Vector text search skipped {Missing} of {Requested} requested knowledge bases (not found or not accessible)",
+                        kbIds.Count - knowledgeBases.Count, kbIds.Count);
+                }
+
+                var merged = new List<VectorSearchResult>();
+                foreach (var (embeddingOptions, groupKbIds) in RagEmbeddingOptionsResolver.GroupByEmbeddingConfig(knowledgeBases, _ragOptions))
+                {
+                    var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(searchQuery, embeddingOptions, ct);
+                    if (!embeddingResult.Succeeded)
+                    {
+                        Logger.LogWarning(
+                            "Embedding generation failed for text search (provider={Provider}, model={Model}): {Message}",
+                            embeddingOptions.Provider, embeddingOptions.Model, embeddingResult.Message);
+                        continue;
+                    }
+
+                    foreach (var kbId in groupKbIds)
+                    {
+                        var perKb = await _vectorStore.SearchAsync(embeddingResult.Data!, maxResults, kbId, ct);
+                        merged.AddRange(perKb);
+                    }
+                }
+
+                // 合并后按分数降序取候选交给重排（重排会二次裁剪到 maxResults）
+                rawResults = merged.OrderByDescending(r => r.Score).Take(maxResults * kbIds.Count).ToList();
+            }
+            else
+            {
+                var defaultOptions = RagEmbeddingOptionsResolver.ResolveDefault(_ragOptions);
+                var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(searchQuery, defaultOptions, ct);
+                if (!embeddingResult.Succeeded)
+                {
+                    Logger.LogWarning("Embedding generation failed for text search: {Message}", embeddingResult.Message);
+                    return [];
+                }
+
+                rawResults = await _vectorStore.SearchAsync(embeddingResult.Data!, maxResults, ct: ct);
             }
 
-            // 3. 向量搜索（跨所有启用的知识库）+ 重排序
-            var rawResults = await _vectorStore.SearchAsync(embeddingResult.Data!, maxResults, ct: ct);
             var results = await _reranker.RerankAsync(query, rawResults, maxResults, ct);
 
             // 3.5 Run post-processors in order
@@ -113,8 +182,8 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
                 searchResults = graded.Where(g => g.IsRelevant).Select(g => g.Result).ToList();
             }
 
-            Logger.LogDebug("VectorTextSearchService returned {Count} results for query length {Length}",
-                searchResults.Count, query.Length);
+            Logger.LogDebug("VectorTextSearchService returned {Count} results for query length {Length} (kbScope={KbScope})",
+                searchResults.Count, query.Length, knowledgeBaseIds is { Count: > 0 } ? knowledgeBaseIds.Count : 0);
 
             return searchResults;
         }

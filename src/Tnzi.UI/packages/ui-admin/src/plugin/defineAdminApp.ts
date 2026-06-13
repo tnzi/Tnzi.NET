@@ -50,6 +50,7 @@ import {
 } from './index'
 import type { AdminLoginConfig } from './loginConfig'
 import type { AdminWorkbenchConfig } from './workbenchConfig'
+import type { AdminSettingsConfig } from './settingsConfig'
 import {
   useAdminRouteStore,
   type AdminRouteRecord,
@@ -227,6 +228,12 @@ export interface DefineAdminAppOptions {
    * stats + activity timeline + tips).
    */
   workbench?: AdminWorkbenchConfig
+
+  /**
+   * Configuration for the built-in Settings Center page — register custom
+   * sections / hide built-in groups. See `AdminSettingsConfig`.
+   */
+  settings?: AdminSettingsConfig
 
   /** Replace the placeholder `/403` forbidden component. */
   forbiddenComponent?: Component
@@ -581,6 +588,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       pinia,
       login: options.login,
       workbench: options.workbench,
+      settings: options.settings,
     })
 
     // Attach the soybean-style route progress bar if a router is provided.

@@ -85,8 +85,6 @@ public class GatewayWebSocketTests
     [InlineData("session.list")]
     [InlineData("session.get")]
     [InlineData("session.prune")]
-    [InlineData("device.register")]
-    [InlineData("device.invoke")]
     public void IsValidMethod_KnownMethods_ReturnsTrue(string method)
     {
         GatewayWebSocketHandler.IsValidMethod(method).ShouldBeTrue();
@@ -95,6 +93,7 @@ public class GatewayWebSocketTests
     [Theory]
     [InlineData("unknown.method")]
     [InlineData("chat.delete")]
+    [InlineData("device.register")]
     [InlineData("")]
     [InlineData("foo")]
     public void IsValidMethod_UnknownMethod_ReturnsFalse(string method)

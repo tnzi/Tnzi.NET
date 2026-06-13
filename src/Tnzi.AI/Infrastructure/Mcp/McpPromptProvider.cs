@@ -8,10 +8,10 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 public class McpPromptProvider : McpProviderBase<McpPromptProvider>, IMcpPromptProvider
 {
     public McpPromptProvider(
-        IOptions<AIOptions> options,
+        IMcpServerCatalog serverCatalog,
         IMcpClientFactory clientFactory,
         ILogger<McpPromptProvider> logger)
-        : base(options, clientFactory, logger)
+        : base(serverCatalog, clientFactory, logger)
     {
     }
 

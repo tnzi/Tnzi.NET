@@ -17,10 +17,17 @@ public class SubAgentTypeConfiguration : EntityTypeConfigurationBase<SubAgentTyp
             .IsRequired()
             .HasMaxLength(500);
 
-        builder.Property(e => e.ToolGroupsJson)
+        // JSON 值转换列（与 AgentConfiguration 的 Domains/Roles 同模式）
+        builder.Property(e => e.ToolGroups)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
+                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
             .HasMaxLength(2000);
 
-        builder.Property(e => e.ExcludedToolGroupsJson)
+        builder.Property(e => e.ExcludedToolGroups)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
+                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
             .HasMaxLength(2000);
 
         builder.Property(e => e.Instructions)
@@ -29,7 +36,10 @@ public class SubAgentTypeConfiguration : EntityTypeConfigurationBase<SubAgentTyp
         builder.Property(e => e.DefaultModel)
             .HasMaxLength(200);
 
-        builder.Property(e => e.CapabilityTagsJson)
+        builder.Property(e => e.CapabilityTags)
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
+                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
             .HasMaxLength(1000);
 
         // 唯一索引：(TenantId, Name)

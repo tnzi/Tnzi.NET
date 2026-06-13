@@ -1,4 +1,5 @@
 using Moq.Protected;
+using Tnzi.AI.Channels.Adapters.Discord;
 using Tnzi.AI.Channels.Adapters.Feishu;
 using Tnzi.AI.Channels.Adapters.Slack;
 using Tnzi.AI.Channels.Bus;
@@ -114,6 +115,61 @@ public class ChannelsModuleOptionsValidatorTests
         {
             Enabled = true,
             Feishu = new FeishuAdapterOptions { Enabled = false, AppId = "cli_app", AppSecret = "s", EncryptKey = null }
+        });
+
+        result.Failed.ShouldBeFalse();
+    }
+
+    // ─── Discord PublicKey ───────────────────────────────────────────────────
+
+    [Fact]
+    public void Validate_DiscordEnabled_NoPublicKey_Fails()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot-token", PublicKey = null }
+        });
+
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains("Discord.PublicKey is required when the Discord adapter is enabled",
+            StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_DiscordEnabled_EmptyPublicKey_Fails()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot-token", PublicKey = "   " }
+        });
+
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains("Discord.PublicKey is required when the Discord adapter is enabled",
+            StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_DiscordEnabled_PublicKeyPresent_Passes()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot-token", PublicKey = "ed25519-public-key" }
+        });
+
+        result.Failed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Validate_DiscordDisabled_NoPublicKey_Passes()
+    {
+        // Disabled adapter — no webhook traffic, so no requirement.
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Discord = new DiscordAdapterOptions { Enabled = false, BotToken = null, PublicKey = null }
         });
 
         result.Failed.ShouldBeFalse();

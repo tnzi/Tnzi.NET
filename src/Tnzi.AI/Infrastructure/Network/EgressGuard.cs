@@ -78,7 +78,7 @@ public static class EgressGuard
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="address"/> is a blocked
     /// (loopback, private, link-local, or IPv4-mapped equivalent) address.
-    /// Ported from <c>Tnzi.AI.Coder.Tools.Web.WebTools.IsBlockedAddress</c>.
+    /// SSRF guard for outbound HTTP requests.
     /// </summary>
     internal static bool IsBlockedAddress(IPAddress address)
     {

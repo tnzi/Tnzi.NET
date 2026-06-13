@@ -1,51 +1,48 @@
-import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 
 /**
- * Phase 5 Task 5.13 — Personas page config (sibling of Personas.vue).
+ * Personas page config (sibling of Personas.vue).
  *
- * Shape derives from @tnzi/core/services/ai AgentPersonaDto /
- * CreateAgentPersonaDto / UpdateAgentPersonaDto.
- *
- * Plan deviations vs the task sketch:
- *   - The plan listed `avatarUrl` and `isEnabled` columns/fields, but the
- *     real DTO has neither. The persona shape is { name, slug, content,
- *     description, isSystem }. `content` is the system prompt body itself.
- *     Config follows backend reality (canonical-compact rule from Task 5.2).
+ * Persona shape derives from @tnzi/core/services/ai AgentPersonaDto:
+ *   { id, name, slug, content, description, scope (ResourceScope: System=0 shared / Tenant=1 private) }
+ * `content` IS the soul/system-prompt body injected as a `<soul>` block by the
+ * backend ContextInjectionMiddleware. Personas render as a TCardPage grid; the
+ * card + detail drawer own presentation, so there are no table columns — only
+ * the create/edit form schema + the keyword search field.
  */
-export const personaColumns: ColumnDef[] = [
-  { key: 'name', title: 'columns.name' },
-  { key: 'slug', title: 'columns.slug' },
-  { key: 'description', title: 'columns.description' },
-  { key: 'isSystem', title: 'columns.isSystem' },
-  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
-]
-
 export const personaFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
-  { key: 'slug', labelKey: 'form.slug', label: 'Slug', type: 'text', required: true },
+  {
+    key: 'slug',
+    labelKey: 'form.slug',
+    label: 'Slug',
+    type: 'text',
+    required: true,
+    placeholder: 'lower-kebab-case, unique within tenant',
+  },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
-  { key: 'content', labelKey: 'form.content', label: 'Persona Content', type: 'textarea', required: true },
-  { key: 'isSystem', labelKey: 'form.isSystem', label: 'System Persona', type: 'switch' },
+  {
+    key: 'content',
+    labelKey: 'form.content',
+    label: 'Persona Content',
+    type: 'textarea',
+    required: true,
+    placeholder: 'The soul/system-prompt body injected as a <soul> block before every conversation.',
+  },
+  {
+    key: 'scope',
+    labelKey: 'form.scope',
+    label: 'Scope',
+    type: 'select',
+    placeholder: 'Inferred from session when omitted (tenant -> Tenant, host -> System)',
+    options: [
+      { label: 'System (shared)', value: 0 },
+      { label: 'Tenant (private)', value: 1 },
+    ],
+  },
 ]
 
-/**
- * i18n keys (Task 5.16 will sweep into tnzi.admin.modules.ai.persona.*):
- *
- * Page meta:
- *   modules.ai.persona.pageTitle
- *
- * Columns:
- *   modules.ai.persona.columns.name
- *   modules.ai.persona.columns.slug
- *   modules.ai.persona.columns.description
- *   modules.ai.persona.columns.isSystem
- *   modules.ai.persona.columns.lastModificationTime
- *
- * Form fields:
- *   modules.ai.persona.form.name
- *   modules.ai.persona.form.slug
- *   modules.ai.persona.form.description
- *   modules.ai.persona.form.content
- *   modules.ai.persona.form.isSystem
- */
+/** Keyword search over name / slug / description. */
+export const personaSearchFields: FormSchemaItem[] = [
+  { key: 'keyword', labelKey: 'search.keyword', label: 'Keyword', type: 'text' },
+]

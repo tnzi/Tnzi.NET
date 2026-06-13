@@ -45,12 +45,13 @@ public class FileStorageServiceComprehensiveTests
 
     private FileStorageService CreateStorageService()
     {
-        var optionsWrapper = Microsoft.Extensions.Options.Options.Create(_options);
+        var optionsMonitor = new Mock<IOptionsMonitor<StorageOptions>>();
+        optionsMonitor.Setup(x => x.CurrentValue).Returns(_options);
         return new FileStorageService(
             _mockFileRepository.Object,
             _mockReferenceRepository.Object,
             _mockStorage.Object,
-            optionsWrapper,
+            optionsMonitor.Object,
             _mockServiceProvider.Object);
     }
 

@@ -337,6 +337,12 @@ export interface RoleListQueryDto extends PagedQueryDto {
 export interface UserSessionDto {
   id: string;
   userId: string;
+  /**
+   * User name — populated by the global session list (GET /admin/sessions,
+   * batch-joined against the user table); the per-user endpoints leave it
+   * null (the caller already knows the user).
+   */
+  userName?: string | null;
   deviceInfo?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;

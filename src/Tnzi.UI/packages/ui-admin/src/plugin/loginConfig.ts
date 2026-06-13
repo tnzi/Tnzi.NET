@@ -28,20 +28,53 @@
  * The factory forwards `login` to `createTnziUiAdmin()`, which provides
  * `LOGIN_CONFIG_KEY` on the app so the route's `setup()` can inject it.
  */
-import type { App, InjectionKey } from 'vue'
+import type { App, Component, InjectionKey } from 'vue'
 import { inject } from 'vue'
 import type {
   LoginCallbacks,
   LoginDemoAccount,
+  LoginThirdPartyProvider,
 } from '../pages/login/useLoginContext'
 
 export interface AdminLoginConfig {
+  /**
+   * Page layout (2026-06-11 redesign):
+   *   - `'wave'` (default) — brand-tinted background with drifting aurora
+   *     blobs + animated dual-layer waves, centered card.
+   *   - `'split'` — brand narrative panel (flowing aurora + tagline) on the
+   *     left, white form pane with stacked field labels on the right.
+   */
+  layout?: 'wave' | 'split'
   /** Brand title shown next to the logo. */
   brand?: string
   /** Iconify icon name for the brand logo. */
   brandIcon?: string
   /** Pixel size of the brand logo. */
   brandIconSize?: number
+  /**
+   * Split-layout headline. Defaults to the `admin.login.tagline` locale
+   * entry; pass an empty string `''` to hide it entirely.
+   */
+  tagline?: string
+  /** Supporting line under the tagline. Empty string `''` hides it. */
+  taglineSub?: string
+  /**
+   * Copyright line on the login page. Defaults to `© {year} {brand}`;
+   * empty string `''` hides it.
+   */
+  copyright?: string
+  /**
+   * Third-party sign-in providers rendered by the password module as round
+   * icon buttons under an "Or continue with" divider. Empty/omitted hides
+   * the section — the shell ships no OAuth flow of its own.
+   */
+  thirdParty?: LoginThirdPartyProvider[]
+  /**
+   * Consumer-rendered QR sign-in panel (fetches + polls its own QR token).
+   * When provided, a corner-fold toggle appears on the pwd-login /
+   * code-login screens that swaps the form for this component.
+   */
+  qrComponent?: Component
   /** Translation function (locale-reactive). */
   translate?: (key: string, fallback?: string) => string
   /** Auth callbacks for each module — `pwdLogin` is the minimum useful set. */

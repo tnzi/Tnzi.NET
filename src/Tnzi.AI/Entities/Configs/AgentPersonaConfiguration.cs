@@ -1,14 +1,14 @@
 namespace Tnzi.AI.Entities.Configs;
 
 /// <summary>
-/// AgentPersona 实体配置类
+/// AgentPersona 实体配置类。
+/// 镜像 SkillEntityConfiguration 的 ResourceScope 模式 — 不使用 IMultiTenant，
+/// 可见性通过 Scope + TenantId 组合在服务层强制执行。
 /// </summary>
 public class AgentPersonaConfiguration : EntityTypeConfigurationBase<AgentPersona, Guid>
 {
     public override void Configure(EntityTypeBuilder<AgentPersona> builder)
     {
-        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
-
         builder.Property(e => e.Name)
             .IsRequired()
             .HasMaxLength(200);
@@ -24,18 +24,15 @@ public class AgentPersonaConfiguration : EntityTypeConfigurationBase<AgentPerson
         builder.Property(e => e.Description)
             .HasMaxLength(1000);
 
-        // 唯一索引：(TenantId, Slug)
-        if (multiTenancyEnabled)
-        {
-            builder.HasIndex(e => new { e.TenantId, e.Slug })
-                .IsUnique();
-        }
-        else
-        {
-            builder.HasIndex(e => e.Slug)
-                .IsUnique();
-        }
+        builder.Property(e => e.Scope)
+            .IsRequired();
 
-        builder.HasIndex(e => e.IsSystem);
+        // 唯一索引：同一作用域+租户下的 Slug 唯一（软删除行排除，与 Provider 的过滤索引一致）。
+        builder.HasIndex(e => new { e.Slug, e.Scope, e.TenantId })
+            .IsUnique()
+            .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
+
+        // 租户查询索引
+        builder.HasIndex(e => new { e.Scope, e.TenantId });
     }
 }

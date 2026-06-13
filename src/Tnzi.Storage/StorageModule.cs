@@ -32,6 +32,9 @@ public class StorageModule : TnziApplicationModule
     {
         var services = context.Services;
 
+        // 注册配置中心分组定义
+        services.AddSingleton<ISettingDefinitionProvider, StorageSettingDefinitionProvider>();
+
         // 注册存储服务（默认使用 LocalStorage）
         // 用户可以通过配置选择不同的存储提供者（Local, S3, R2, Azure 等）
         // 自定义提供者: 在模块的 PreConfigureServicesAsync 中调用 StorageProviderFactory.Register()

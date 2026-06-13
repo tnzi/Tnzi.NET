@@ -24,6 +24,14 @@ public interface ISessionService
     Task<Result<IEnumerable<UserSessionDto>>> GetUserSessionsAsync(Guid userId, bool includeRevoked = false);
 
     /// <summary>
+    /// 分页查询会话列表 — UserId 可选；不传时返回全局会话列表（按最后活动时间倒序），
+    /// 返回的 DTO 含 UserName（批量关联用户表）。
+    /// </summary>
+    /// <param name="query">查询条件（UserId 可选 + IncludeRevoked + 分页）</param>
+    /// <returns>分页会话列表</returns>
+    Task<Result<IPagedList<UserSessionDto>>> GetSessionsAsync(SessionQueryDto query);
+
+    /// <summary>
     /// 撤销会话
     /// </summary>
     /// <param name="sessionId">会话ID</param>

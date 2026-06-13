@@ -3,9 +3,27 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Phase 5 Task 5.12 — Quotas integration test.
- * Standard CRUD page; mirrors Personas.test.ts.
+ * Quotas integration test — budget cost dashboard + per-user quota CRUD.
+ *
+ * Asserts:
+ *  - the quota rules table still renders its rows;
+ *  - the budget dashboard (getBudgetSummary) renders its KPI cards +
+ *    per-agent breakdown;
+ *  - the create form modal still opens.
  */
+const getBudgetSummary = vi.fn(async () => ({
+  periodStart: '2026-04-01T00:00:00Z',
+  periodEnd: '2026-04-30T23:59:59Z',
+  currentSpendUsd: 42.5,
+  budgetLimitUsd: 100,
+  usagePercentage: 0.425,
+  status: 1,
+  byAgent: [
+    { agentId: 'a1', agentName: 'Support Bot', spendUsd: 30, requestCount: 1200, agentBudgetLimitUsd: 60 },
+    { agentId: 'a2', agentName: 'Sales Bot', spendUsd: 12.5, requestCount: 400, agentBudgetLimitUsd: null },
+  ],
+}))
+
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
@@ -55,7 +73,7 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       })),
       create: vi.fn(async (data: unknown) => ({ id: 'q3', ...(data as object) })),
       update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
-      delete: vi.fn(async () => undefined),
+      getBudgetSummary,
     },
   }),
 }))
@@ -119,23 +137,61 @@ const stubs = {
     props: ['show'],
     template: '<div><slot name="trigger" /><slot /></div>',
   },
+  Card: {
+    name: 'Card',
+    props: ['title'],
+    template: '<div class="n-card-stub"><slot name="header-extra" /><slot /></div>',
+  },
+  Statistic: {
+    name: 'Statistic',
+    props: ['label'],
+    template: '<div class="n-statistic-stub"><span class="n-statistic-stub__label">{{ label }}</span><slot /></div>',
+  },
+  Progress: {
+    name: 'Progress',
+    props: ['percentage', 'status'],
+    template: '<div class="n-progress-stub" :data-percentage="percentage" :data-status="status"></div>',
+  },
+  Tag: { name: 'Tag', template: '<span class="n-tag-stub"><slot /></span>' },
   Checkbox: { name: 'Checkbox', template: '<input type="checkbox" />' },
   Form: { name: 'Form', template: '<form><slot /></form>' },
   FormItem: { name: 'FormItem', template: '<div class="form-item"><slot /></div>' },
   VueDraggable: { name: 'VueDraggable', template: '<div><slot /></div>' },
 }
 
-describe('Quotas page (Phase 5 Task 5.12)', () => {
+describe('Quotas page (budget dashboard + quota CRUD)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    getBudgetSummary.mockClear()
   })
 
   it('mounts, fetches quotas on mount, and displays rows', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    const table = wrapper.find('.n-data-table-stub')
-    expect(table.exists()).toBe(true)
-    expect(table.attributes('data-rows')).toBe('2')
+    const tables = wrapper.findAll('.n-data-table-stub')
+    // The quota rules table is the one bound with the 2 quota rows.
+    const quotaTable = tables.find((tw) => tw.attributes('data-rows') === '2')
+    expect(quotaTable).toBeTruthy()
+  })
+
+  it('renders the budget dashboard KPI cards from getBudgetSummary', async () => {
+    const wrapper = mount(Quotas, { global: { stubs } })
+    await flushPromises()
+    expect(getBudgetSummary).toHaveBeenCalled()
+    // KPI cards render their labels + the formatted spend/limit values.
+    const text = wrapper.text()
+    expect(text).toContain('$42.50')
+    expect(text).toContain('$100.00')
+    expect(text).toContain('42.5%')
+    // The usage KPI card renders a progress bar reflecting the 42.5% spend,
+    // coloured `warning` because the budget status is WarningThreshold (1).
+    const progress = wrapper.find('.n-progress-stub')
+    expect(progress.exists()).toBe(true)
+    expect(progress.attributes('data-status')).toBe('warning')
+    // Two data-tables render: the per-agent breakdown (2 agents) + the quota
+    // rules table (2 rows) — both via the DataTable stub with data-rows="2".
+    const tables = wrapper.findAll('.n-data-table-stub')
+    expect(tables.length).toBe(2)
   })
 
   it('create button opens form modal in create mode', async () => {

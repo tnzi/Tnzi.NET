@@ -46,7 +46,7 @@ public class SubAgentSpawnedEventTests
                 It.IsAny<string?>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
         return resolver.Object;
     }
 

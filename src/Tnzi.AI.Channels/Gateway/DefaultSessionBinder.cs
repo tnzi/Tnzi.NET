@@ -6,7 +6,11 @@ namespace Tnzi.AI.Channels.Gateway;
 /// 带缓存按 TTL 刷新；绝不在每次 Resolve 时查库）。同优先级下配置规则胜出。
 /// </summary>
 /// <remarks>
-/// SessionBindingRule 非 <c>IMultiTenant</c>，因此数据库规则被视为全局规则。
+/// 数据库规则（<see cref="SessionBindingRule"/>）是 <c>IMultiTenant</c> 实体，按 <c>context.TenantId</c> 分区：
+/// 一条带 TenantId 的 DB 规则只匹配同租户的上下文；TenantId=null 的 DB 规则（单租户部署）与
+/// 配置规则（<c>GatewayOptions.BindingRules</c>）均为部署级全局规则，匹配任意上下文。
+/// 后台缓存在无当前租户的全新作用域里加载全部 DB 规则（临时禁用多租户过滤器），
+/// 隔离改在匹配时强制——缓存为服务器内部数据，不对外暴露。
 /// </remarks>
 public class DefaultSessionBinder : ISessionBinder
 {
@@ -112,10 +116,22 @@ public class DefaultSessionBinder : ISessionBinder
                 return [];
             }
 
-            // 仅加载启用的规则；非 IMultiTenant → 视为全局规则。
+            // SessionBindingRule 是 IMultiTenant：这个全新作用域没有当前租户，
+            // 多租户全局过滤器会变成 e.TenantId == null，从而隐藏所有带租户的规则。
+            // 在此临时禁用多租户过滤器，把所有租户的规则一并加载进缓存；
+            // 真正的隔离由 MatchesRule 在匹配时按 context.TenantId 强制（缓存是服务器内部数据）。
             // 同步阻塞：Resolve 是同步签名，且此查询每 TTL 周期最多一次。
-            var rules = repository.ToListAsync(r => r.IsEnabled).GetAwaiter().GetResult();
-            return rules;
+            var filterManager = scope.ServiceProvider.GetService<IDataFilterManager>();
+            if (filterManager != null)
+            {
+                using (filterManager.Disable<IMultiTenantFilter>())
+                {
+                    return repository.ToListAsync(r => r.IsEnabled).GetAwaiter().GetResult();
+                }
+            }
+
+            // 没有过滤器管理器（极少见）→ 直接查询；多租户开启时只会拿到 null 租户规则。
+            return repository.ToListAsync(r => r.IsEnabled).GetAwaiter().GetResult();
         }
         catch
         {
@@ -126,6 +142,13 @@ public class DefaultSessionBinder : ISessionBinder
 
     private static bool MatchesRule(SessionBindingRule rule, SessionBindingContext context)
     {
+        // 租户分区：带 TenantId 的 DB 规则只命中同租户的上下文；
+        // TenantId=null 的规则（配置规则 + 单租户部署的 DB 规则）为部署级全局规则，匹配任意上下文。
+        if (rule.TenantId.HasValue && rule.TenantId != context.TenantId)
+        {
+            return false;
+        }
+
         // Channel: null 匹配所有
         if (rule.Channel is not null &&
             !string.Equals(rule.Channel, context.Channel, StringComparison.OrdinalIgnoreCase))

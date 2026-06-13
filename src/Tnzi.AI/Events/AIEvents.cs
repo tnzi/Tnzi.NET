@@ -119,7 +119,7 @@ public class AgentRunStartedEvent : EventBase
     public string? Model { get; set; }
     /// <summary>Whether this is a streaming call</summary>
     public bool IsStreaming { get; set; }
-    /// <summary>Execution mode (Single, Handoff, AgentAsTools, Router, ExternalCli)</summary>
+    /// <summary>Execution mode (Single, Handoff, AgentAsTools, Router)</summary>
     public string ExecutionMode { get; set; } = string.Empty;
 }
 

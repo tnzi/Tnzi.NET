@@ -62,15 +62,13 @@ public class SubAgentRegistry : ISubAgentRegistry
             var definition = new SubAgentTypeDefinition(
                 Name: entity.Name,
                 Description: entity.Description,
-                ToolGroups: entity.ToolGroupsJson.FromJsonString<List<string>>() ?? [],
-                ExcludedToolGroups: entity.ExcludedToolGroupsJson.FromJsonString<List<string>>() ?? [],
+                ToolGroups: entity.ToolGroups ?? [],
+                ExcludedToolGroups: entity.ExcludedToolGroups ?? [],
                 MaxTurns: entity.MaxTurns,
                 Instructions: entity.Instructions,
                 DefaultModel: entity.DefaultModel,
-                DefaultApprovalMode: entity.DefaultApprovalMode.HasValue
-                    ? (ToolApprovalMode)entity.DefaultApprovalMode.Value
-                    : null,
-                CapabilityTags: entity.CapabilityTagsJson.FromJsonString<List<string>>() ?? []);
+                DefaultApprovalMode: entity.DefaultApprovalMode,
+                CapabilityTags: entity.CapabilityTags ?? []);
 
             Register(definition);
         }

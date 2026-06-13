@@ -1,29 +1,38 @@
 <template>
-  <div class="t-workspace-agent-page">
-    <TCardPage
-      :state="crud"
-      mode="page"
-      :title="t('title')"
-      :title-help="t('banner')"
-      :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
-      :show-search="false"
-      :show-pagination="false"
-      :translate="t"
+  <TContentPage
+    :title="t('title')"
+    :help="t('banner')"
+    :translate="t"
+    scroll="fill"
+  >
+    <!-- Scope filter as a tab bar (All / Global / Project) — sits right under
+         the page-header bar; the panes are empty (they only drive the filter). -->
+    <NTabs
+      :value="scopeFilter"
+      type="line"
+      class="t-workspace-agent-page__scope"
+      @update:value="onScopeChange"
     >
-      <template #toolbarLeft>
-        <NRadioGroup
-          :value="scopeFilter"
-          size="small"
-          @update:value="onScopeChange"
-        >
-          <NRadioButton value="all">{{ t('scope.all') }}</NRadioButton>
-          <NRadioButton value="Global">{{ t('scope.global') }}</NRadioButton>
-          <NRadioButton value="Project">{{ t('scope.project') }}</NRadioButton>
-        </NRadioGroup>
-      </template>
+      <NTabPane name="all" :tab="t('scope.all')" />
+      <NTabPane name="Global" :tab="t('scope.global')" />
+      <NTabPane name="Project" :tab="t('scope.project')" />
+    </NTabs>
 
-      <template #card="{ item }">
-        <NCard size="small" class="t-workspace-agent-page__agent-card">
+    <div class="t-workspace-agent-page__list">
+      <!-- show-header=false suppresses the shell's header bar — the title/help
+           live on the outer TContentPage (otherwise the shell falls back to
+           the route meta title and renders a duplicate bar). -->
+      <TCardPage
+        :state="crud"
+        mode="page"
+        :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
+        :show-header="false"
+        :show-search="false"
+        :show-pagination="false"
+        :translate="t"
+      >
+        <template #card="{ item }">
+          <TEntityCard clickable @click="openDetail(item)">
           <div class="t-workspace-agent-page__card-header">
             <span class="t-workspace-agent-page__card-name">{{ item.name }}</span>
             <NTag
@@ -66,17 +75,15 @@
               :bordered="false"
             >{{ t('detail.persona') }}</NTag>
           </div>
-          <div class="t-workspace-agent-page__card-actions">
-            <NButton size="small" type="primary" ghost @click="openDetail(item)">
-              {{ t('actions.view') }}
-            </NButton>
+          <template #actions>
             <NButton size="small" ghost @click="copyPath(item.filePath)">
               {{ t('actions.copyPath') }}
             </NButton>
-          </div>
-        </NCard>
-      </template>
-    </TCardPage>
+          </template>
+        </TEntityCard>
+        </template>
+      </TCardPage>
+    </div>
 
     <!-- Detail drawer — read-only view of AGENT.md + PERSONA.md content. -->
     <NDrawer
@@ -121,18 +128,17 @@
         </div>
       </NDrawerContent>
     </NDrawer>
-  </div>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import {
   NButton,
-  NCard,
   NDrawer,
   NDrawerContent,
-  NRadioButton,
-  NRadioGroup,
+  NTabPane,
+  NTabs,
   NTag,
   useMessage,
 } from 'naive-ui'
@@ -141,7 +147,9 @@ import { createWorkspaceAgentsBridge } from '../../../services/bridges/ai-bridge
 import type { WorkspaceAgentDto } from '@tnzi/core/services/ai'
 import { translatePageKey } from '../../_shared/translate'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import TContentPage from '../../../components/layout/TContentPage.vue'
 import TCardPage from '../../../components/crud/TCardPage.vue'
+import TEntityCard from '../../../components/data/TEntityCard.vue'
 
 const t = (key: string) => translatePageKey('ai.workspaceAgents', key)
 const message = (() => {
@@ -175,9 +183,10 @@ const crud = useCrudPage<WorkspaceAgentDto>({
 })
 crud.refresh().catch(() => undefined)
 
-function onScopeChange(value: 'all' | 'Global' | 'Project'): void {
-  scopeFilter.value = value
-  crud.setFilters({ scope: value })
+function onScopeChange(value: string | number): void {
+  const scope = String(value) as 'all' | 'Global' | 'Project'
+  scopeFilter.value = scope
+  crud.setFilters({ scope })
   crud.refresh().catch(() => undefined)
 }
 
@@ -201,20 +210,18 @@ function openDetail(row: WorkspaceAgentDto): void {
 </script>
 
 <style scoped>
-.t-workspace-agent-page {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
+/* Scope tab bar: just the headers (the panes are empty — they only drive the
+   scope filter), so collapse the empty pane wrapper away. */
+.t-workspace-agent-page__scope {
+  flex-shrink: 0;
+}
+.t-workspace-agent-page__scope :deep(.n-tabs-pane-wrapper) {
+  display: none;
+}
+/* Card grid claims the residual height (TCardPage page mode scrolls inside). */
+.t-workspace-agent-page__list {
+  flex: 1 1 auto;
   min-height: 0;
-}
-.t-workspace-agent-page__agent-card {
-  border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-  transition: box-shadow 0.15s ease;
-}
-.t-workspace-agent-page__agent-card:hover {
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
 }
 .t-workspace-agent-page__card-header {
   display: flex;
@@ -259,11 +266,6 @@ function openDetail(row: WorkspaceAgentDto): void {
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 8px;
-}
-.t-workspace-agent-page__card-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
 }
 .t-workspace-agent-page__detail-meta {
   display: flex;

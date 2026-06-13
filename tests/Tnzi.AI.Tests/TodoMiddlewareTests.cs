@@ -152,7 +152,7 @@ public class TodoMiddlewareTests
         var opts = new TodoOptions { Enabled = false };
         var middleware = new TodoMiddleware(
             new AgentExecutionContextAccessor(),
-            Microsoft.Extensions.Options.Options.Create(opts),
+            TestHelpers.CreateOptionsMonitor(opts),
             NullLogger<TodoMiddleware>.Instance);
         var context = CreateContext(planMode: true);
 
@@ -199,7 +199,7 @@ public class TodoMiddlewareTests
     {
         return new TodoMiddleware(
             accessor ?? new AgentExecutionContextAccessor(),
-            Microsoft.Extensions.Options.Options.Create(new TodoOptions()),
+            TestHelpers.CreateOptionsMonitor(new TodoOptions()),
             NullLogger<TodoMiddleware>.Instance);
     }
 

@@ -54,7 +54,7 @@ public class SubAgentExecutionServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
 
         var runStore = new Mock<IRunStore>();
         runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
@@ -122,7 +122,7 @@ public class SubAgentExecutionServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", null, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", null, null, AgentExecutionMode.Single));
 
         var runStore = new Mock<IRunStore>();
         runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
@@ -193,7 +193,7 @@ public class SubAgentExecutionServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
 
         var runStore = new Mock<IRunStore>();
         runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
@@ -350,7 +350,7 @@ public class SubAgentExecutionServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
 
         var runStore = new Mock<IRunStore>();
         runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
@@ -427,7 +427,7 @@ public class SubAgentExecutionServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
 
         var runStore = new Mock<IRunStore>();
         runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))
@@ -502,7 +502,7 @@ public class SubAgentExecutionServiceTests
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(
                 agentId, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", agentId, null, AgentExecutionMode.Single));
 
         var runStore = new Mock<IRunStore>();
         runStore.Setup(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()))

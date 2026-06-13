@@ -9,6 +9,8 @@ public class AgentThreadDto
     public Guid Id { get; set; }
     /// <summary>Agent ID (null for agent-less threads)</summary>
     public Guid? AgentId { get; set; }
+    /// <summary>Agent name (null for agent-less threads or when the agent was deleted)</summary>
+    public string? AgentName { get; set; }
     /// <summary>Thread title</summary>
     public string? Title { get; set; }
     /// <summary>Message count</summary>

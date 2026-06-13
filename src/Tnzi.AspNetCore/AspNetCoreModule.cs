@@ -199,16 +199,18 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册 AjaxOnlyFilter（供 [ServiceFilter(typeof(AjaxOnlyFilter))] 使用）
         context.Services.AddScoped<AjaxOnlyFilter>();
 
+        // 注册配置中心定义提供者
+        context.Services.AddSingleton<ISettingDefinitionProvider, Settings.AspNetCoreSettingDefinitionProvider>();
+
         // 注册请求验证服务（如果启用）
         if (aspNetCoreOptions.RequestValidation?.Enabled == true)
         {
             context.Services.AddScoped<IRequestValidator, Security.RequestValidator>();
         }
-        // 注册限流服务（如果启用）
-        if (aspNetCoreOptions.RateLimit?.Enabled == true)
-        {
-            context.Services.TryAddScoped<IRateLimitService, Security.RateLimitService>();
-        }
+        // 注册限流服务 — 无条件注册：RateLimitingMiddleware 在 Invoke 内按
+        // IOptionsMonitor.CurrentValue.Enabled 热判断，boot 门控会让配置中心
+        // 的 web-ratelimit 组在默认关闭部署下永远无法热开启。
+        context.Services.TryAddScoped<IRateLimitService, Security.RateLimitService>();
 
         // 注册异常统计服务（如果启用）
         if (aspNetCoreOptions.ExceptionHandling?.EnableMetrics == true)
@@ -344,17 +346,13 @@ public class AspNetCoreModule : TnziFrameworkModule
                 app.UseMiddleware<HostHttpCryptoMiddleware>();
             }
 
-            // 6. 安全头部中间件（如果启用）
-            if (aspNetCoreOptions.SecurityHeaders?.EnableSecurityHeaders == true)
-            {
-                app.UseMiddleware<SecurityHeadersMiddleware>();
-            }
+            // 6. 安全头部中间件 — 无条件加入管道：中间件 Invoke 内按
+            // IOptionsMonitor.CurrentValue.EnableSecurityHeaders 热判断（支持配置中心热开/热关）。
+            app.UseMiddleware<SecurityHeadersMiddleware>();
 
             // 7. 限流中间件（在请求验证之前，先拦截恶意高频流量，避免无效请求消耗验证资源）
-            if (aspNetCoreOptions.RateLimit?.Enabled == true)
-            {
-                app.UseMiddleware<RateLimitingMiddleware>();
-            }
+            // 无条件加入管道：Invoke 内按 CurrentValue.Enabled 热判断。
+            app.UseMiddleware<RateLimitingMiddleware>();
 
             // 8. 请求验证中间件（在限流之后，只对通过限流检查的请求进行验证）
             if (aspNetCoreOptions.RequestValidation?.Enabled == true)

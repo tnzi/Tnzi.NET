@@ -14,7 +14,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
         _config = Check.NotNull(config);
     }
 
-    public async Task<ExecutionResult> ExecuteAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct)
+    public async Task<ExecutionResult> ExecuteAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct)
     {
         var handoffPath = new List<string> { agent.Name };
         var currentAgent = agent;
@@ -96,7 +96,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             handoffPath, currentAgent.Name, totalInputTokens, totalOutputTokens);
     }
 
-    public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, [EnumeratorCancellation] CancellationToken ct)
     {
         // 策略：流式执行（含 handoff 工具），通过闭包捕获 handoff 决策。
         // 工具调用阶段（文本到达之前）缓冲 chunk，检测到 handoff 则丢弃缓冲并转向目标 agent 流式；
@@ -233,7 +233,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
     /// <param name="agent">要注入工具的 Agent</param>
     /// <param name="availableTargets">可用的转接目标名称</param>
     /// <param name="onHandoff">工具被调用时的回调（流式模式用于捕获 handoff 决策）</param>
-    internal static AgentExecutor InjectHandoffTool(AgentExecutor agent, IEnumerable<string> availableTargets, Action<string>? onHandoff = null)
+    internal static IAgentExecutor InjectHandoffTool(IAgentExecutor agent, IEnumerable<string> availableTargets, Action<string>? onHandoff = null)
     {
         var targetList = availableTargets.ToList();
         var targetDescription = targetList.Count > 0

@@ -4,6 +4,8 @@
       :state="props.state"
       :title="title"
       :mode="mode"
+      :show-header="showHeader"
+      :show-create="showCreate"
       :show-search="true"
       :show-default-search="showDefaultSearch"
       :search-fields="searchFields"
@@ -38,11 +40,11 @@
         </TTableRenderer>
       </template>
 
-      <!-- TCrudPage fully owns the create button via this #primary override
-           (it carries the legacy `t-crud-page__create` class plus the
-           showCreate / canCreate gating), so `show-create` is intentionally
-           NOT forwarded to TListShell — its default #primary is always
-           displaced here. -->
+      <!-- TCrudPage owns the create button via this #primary override (it
+           carries the legacy `t-crud-page__create` class). `show-create` MUST
+           also be forwarded to TListShell: when the v-if below renders nothing,
+           Vue's renderSlot falls back to TListShell's default #primary button,
+           which would otherwise use its own showCreate default (true). -->
       <template #primary>
         <slot name="primary">
           <NButton
@@ -77,6 +79,7 @@
       </template>
 
       <template v-if="$slots.header" #header><slot name="header" /></template>
+      <template v-if="$slots.kpis" #kpis><slot name="kpis" /></template>
       <template v-if="$slots.search" #search><slot name="search" /></template>
       <template v-if="$slots.toolbarLeft" #toolbarLeft><slot name="toolbarLeft" /></template>
       <template v-if="$slots.toolbarRight" #toolbarRight><slot name="toolbarRight" /></template>
@@ -112,6 +115,10 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   rowKey?: (row: T) => TId
   /** `page` (default) fills the page height; `container` is content-sized. */
   mode?: 'page' | 'container'
+  /** When false the shell's white header card is not rendered — for pages that
+      nest the CRUD block under an outer header (e.g. inside TContentPage tabs)
+      where the shell's TPageHeader would duplicate the title bar. */
+  showHeader?: boolean
   showCreate?: boolean
   showBatchDelete?: boolean
   showExport?: boolean
@@ -126,8 +133,10 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   defaultAdvancedMode?: boolean
   hideSimpleMode?: boolean
   formModalWidth?: number
-  /** Fixed operation-column width — only used with the legacy `#rowActions`
-      slot. Prefer the declarative `rowActions` prop (auto-sizes the column). */
+  /** Explicit operation-column width. When set it always wins — including
+      over the declarative `rowActions` auto-estimate. Leave unset (default)
+      to let declarative actions auto-size the column; the legacy
+      `#rowActions` slot falls back to a fixed 150px when unset. */
   rowActionsWidth?: number
   /** Declarative operation actions. The framework renders `TRowActions` in the
       table cell + mobile card footer and auto-sizes the operation column.
@@ -146,6 +155,7 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
   title: undefined,
   rowKey: undefined,
   mode: 'page',
+  showHeader: true,
   showCreate: true,
   showBatchDelete: true,
   showExport: false,
@@ -157,7 +167,9 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
   defaultAdvancedMode: false,
   hideSimpleMode: false,
   formModalWidth: 560,
-  rowActionsWidth: 150,
+  // No default width — undefined lets the renderer auto-size declarative
+  // rowActions (the old fixed 150 was the source of clipped action cells).
+  rowActionsWidth: undefined,
   rowActions: undefined,
   rowActionsMaxInline: 2,
   rowActionsCollapse: true,
@@ -168,6 +180,7 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
 
 defineSlots<{
   header?: () => unknown
+  kpis?: () => unknown
   search?: () => unknown
   primary?: () => unknown
   toolbarLeft?: () => unknown

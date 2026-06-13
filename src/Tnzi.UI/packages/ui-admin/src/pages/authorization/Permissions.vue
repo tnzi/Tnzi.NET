@@ -1,10 +1,10 @@
 <template>
-  <TContentPage :title="t('title')" :translate="t" scroll="auto">
+  <TContentPage :title="t('title')" :translate="t" scroll="fill">
     <template #actions>
       <NButton size="small" @click="loadModules">{{ t('refresh') }}</NButton>
     </template>
 
-    <NCard :bordered="false">
+    <NCard :bordered="false" class="t-permission-page__card">
       <div class="t-permission-page__layout">
         <!-- Left: function-module tree -->
         <aside class="t-permission-page__tree">
@@ -61,7 +61,6 @@
                 :row-key="(r: PermissionRow) => r.id ?? ''"
                 size="small"
                 :bordered="false"
-                :max-height="600"
               />
             </NSpin>
           </div>
@@ -234,34 +233,35 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Fill-height chain (content-page iron rule): TContentPage scroll="fill"
+   → card flex-fills the body → n-card__content flex column → layout grid
+   claims the residual height → each pane scrolls internally. The white
+   container always reaches the viewport bottom; no dead grey canvas. */
+.t-permission-page__card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.t-permission-page__card :deep(.n-card__content) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .t-permission-page__layout {
   display: grid;
   grid-template-columns: 320px 1fr;
+  /* Single explicit row capped to the container so the panes (grid items)
+     get a definite height and their own overflow-y can engage. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
-  min-height: 520px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .t-permission-page__tree {
   border-right: 1px solid var(--tnzi-border);
   padding-right: 16px;
-}
-/* Phone: stack the module tree above the permission list. */
-@media (max-width: 767px) {
-  .t-permission-page__layout {
-    grid-template-columns: 1fr;
-    min-height: 0;
-  }
-  .t-permission-page__tree {
-    border-right: none;
-    padding-right: 0;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-bottom: 12px;
-  }
-  .t-permission-page__naive-tree {
-    max-height: 36vh;
-  }
-  .t-permission-page__detail {
-    padding: 0;
-  }
+  min-height: 0;
+  overflow-y: auto;
 }
 .t-permission-page__naive-tree {
   margin-top: 8px;
@@ -270,6 +270,33 @@ onMounted(() => {
 }
 .t-permission-page__detail {
   padding: 0 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Phone: stack the module tree above the permission list. The layout itself
+   becomes the single scroller (rows go back to natural auto height), so the
+   panes drop their own scrollbars. Declared after the base rules so the
+   equal-specificity overrides win. */
+@media (max-width: 767px) {
+  .t-permission-page__layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    overflow-y: auto;
+  }
+  .t-permission-page__tree {
+    border-right: none;
+    padding-right: 0;
+    border-bottom: 1px solid var(--tnzi-border);
+    padding-bottom: 12px;
+    overflow: visible;
+  }
+  .t-permission-page__naive-tree {
+    max-height: 36vh;
+  }
+  .t-permission-page__detail {
+    padding: 0;
+    overflow: visible;
+  }
 }
 .t-permission-page__placeholder {
   color: var(--tnzi-base-text-muted);

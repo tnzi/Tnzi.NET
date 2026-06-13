@@ -2,97 +2,54 @@
   <!--
     Orders — Phase 3.32
     Admin view of payment orders. Read-only (payment records are immutable for admin).
-    Includes a statistics banner above the table showing key payment metrics.
-    Statistics are fetched on mount and refreshed whenever filters change.
+    A KPI row (payment statistics) renders between the page header and the
+    list card via TCrudPage's #kpis slot (content-page standard: header →
+    KPI row → list). Statistics are fetched on mount and refreshed whenever
+    filters change.
   -->
-  <div class="orders-page">
-    <!-- Statistics banner -->
-    <div class="orders-page__stats">
-      <Grid :cols="4" class="gap-12px">
-        <GridItem>
-          <Card>
-            <Statistic label="Total Revenue" :value="stats.totalRevenue" />
-          </Card>
-        </GridItem>
-        <GridItem>
-          <Card>
-            <Statistic label="Order Count" :value="stats.totalTransactions" />
-          </Card>
-        </GridItem>
-        <GridItem>
-          <Card>
-            <Statistic
-              label="Average Amount"
-              :value="stats.totalTransactions > 0
-                ? Math.round((stats.totalRevenue / stats.totalTransactions) * 100) / 100
-                : 0"
-            />
-          </Card>
-        </GridItem>
-        <GridItem>
-          <Card>
-            <Statistic
-              label="Paid %"
-              :value="stats.totalTransactions > 0
-                ? Math.round((stats.successfulTransactions / stats.totalTransactions) * 10000) / 100
-                : 0"
-            />
-          </Card>
-        </GridItem>
-      </Grid>
-    </div>
+  <TCrudPage
+    :state="crud"
+    :all-columns="orderColumns"
+    :title="t('title')"
+    :translate="t"
+    :form-modal-width="760"
+    :row-actions="rowActions"
+  >
+    <template #kpis>
+      <TKpiRow class="orders-page__stats">
+        <TStatCard :label="t('kpi.totalRevenue')" :value="totalRevenueDisplay" />
+        <TStatCard :label="t('kpi.orderCount')" :value="stats.totalTransactions" />
+        <TStatCard :label="t('kpi.averageAmount')" :value="averageAmountDisplay" />
+        <TStatCard :label="t('kpi.paidRate')" :value="paidRateDisplay" suffix="%" />
+      </TKpiRow>
+    </template>
 
-    <div class="orders-page__list">
-    <TCrudPage
-      :state="crud"
-      :all-columns="orderColumns"
-      :title="t('title')"
-      :translate="t"
-      :show-create="false"
-      :form-modal-width="760"
-      :row-actions="rowActions"
-    >
-      <template #form="{ formData, mode }">
-        <TFormSchemaRenderer
-          :schema="orderFormSchema"
-          :model="(formData ?? {}) as Record<string, unknown>"
-          :readonly="mode === 'view'"
-          :translate="t"
-          :columns="2"
-        />
-      </template>
-    </TCrudPage>
-    </div>
-  </div>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="orderFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+        :translate="t"
+        :columns="2"
+      />
+    </template>
+  </TCrudPage>
 </template>
 
-<style scoped>
-/* The page stacks a stats banner above the CRUD list; make the root a flex
-   column so the list fills the residual height (TCrudPage is height:100% and
-   needs a definite-height parent). */
-.orders-page {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.orders-page__stats { flex-shrink: 0; }
-.orders-page__list { flex: 1 1 auto; min-height: 0; }
-</style>
-
 <script setup lang="ts">
-import { ref, watchEffect, onMounted } from 'vue'
+import { computed, ref, watchEffect, onMounted } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TStatCard from '../../components/data/TStatCard.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { deleteAction, type RowAction } from '../../headless/rowActions'
+import { type RowAction } from '../../headless/rowActions'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { orderColumns, orderFormSchema } from './order-config'
 import { translatePageKey } from '../_shared/translate'
+import { formatCurrency } from '@tnzi/core'
 import type { PaymentDto, PaymentStatisticsDto } from '@tnzi/core/services/payment'
-import { NCard as Card, NStatistic as Statistic, NGrid as Grid, NGridItem as GridItem } from 'naive-ui'
 
 // Wired to /admin/payments + /admin/payment-statistics via Plan C
 // 2026-04-14. Client is injected by createTnziUiAdmin({ client }).
@@ -114,19 +71,31 @@ const defaultStats: PaymentStatisticsDto = {
 
 const stats = ref<PaymentStatisticsDto>({ ...defaultStats })
 
+const averageAmount = computed(() =>
+  stats.value.totalTransactions > 0
+    ? stats.value.totalRevenue / stats.value.totalTransactions
+    : 0,
+)
+// KPI display values — money formats through @tnzi/core's formatCurrency
+// ("$1,234.56"); the paid rate keeps one decimal place. TStatCard renders
+// string values verbatim (no number animation), which is intended here.
+const totalRevenueDisplay = computed(() => formatCurrency(stats.value.totalRevenue))
+const averageAmountDisplay = computed(() => formatCurrency(averageAmount.value))
+const paidRateDisplay = computed(() =>
+  stats.value.totalTransactions > 0
+    ? ((stats.value.successfulTransactions / stats.value.totalTransactions) * 100).toFixed(1)
+    : '0.0',
+)
+
 const crud = useCrudPage<PaymentDto>({
   pageId: 'payment.orders',
   columns: orderColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.orders.fetch(query),
-  createData: async () => { throw new Error('Payment orders are read-only from admin') },
-  updateData: async () => { throw new Error('Payment orders are read-only from admin') },
-  deleteData: async () => { throw new Error('Payment orders cannot be deleted from admin') },
+  // Payment orders are an immutable financial ledger — read-only from admin.
 })
 
-const rowActions: RowAction<PaymentDto>[] = [
-  deleteAction(crud),
-]
+const rowActions: RowAction<PaymentDto>[] = []
 
 
 async function refreshStats(): Promise<void> {

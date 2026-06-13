@@ -10,19 +10,21 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
     private readonly IRepository<Message, Guid> _notificationRepository;
     private readonly INotificationService _notificationService;
     private readonly INotificationQueueService? _queueService;
-    private readonly NotificationOptions _options;
+    private readonly IOptionsMonitor<NotificationOptions> _optionsMonitor;
+
+    private NotificationOptions Options => _optionsMonitor.CurrentValue;
 
     public NotificationRetryService(
         IRepository<Message, Guid> notificationRepository,
         INotificationService notificationService,
-        IOptions<NotificationOptions> options,
+        IOptionsMonitor<NotificationOptions> optionsMonitor,
         IServiceProvider serviceProvider,
         INotificationQueueService? queueService = null)
         : base(serviceProvider)
     {
         _notificationRepository = Check.NotNull(notificationRepository);
         _notificationService = Check.NotNull(notificationService);
-        _options = Check.NotNull(options).Value;
+        _optionsMonitor = Check.NotNull(optionsMonitor);
         _queueService = queueService;
     }
 
@@ -127,8 +129,8 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
 
     private int CalculateRetryDelay(int retryCount)
     {
-        var delaySeconds = _options.Retry.RetryDelaySeconds;
-        if (_options.Retry.EnableExponentialBackoff)
+        var delaySeconds = Options.Retry.RetryDelaySeconds;
+        if (Options.Retry.EnableExponentialBackoff)
             delaySeconds = (int)(delaySeconds * Math.Pow(2, retryCount));
 
         const int maxDelaySeconds = 86400;

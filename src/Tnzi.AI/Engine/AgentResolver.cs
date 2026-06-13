@@ -11,6 +11,7 @@ public class AgentResolver : IAgentResolver
     private readonly IToolRegistry _toolRegistry;
     private readonly IPromptTemplateEngine _templateEngine;
     private readonly IAgentVersionRouter _versionRouter;
+    private readonly IAgentGrantService _grantService;
     private readonly IPermissionChecker? _permissionChecker;
     private readonly IWorkspaceAgentProvider? _workspaceAgentProvider;
     private readonly ILogger<AgentResolver> _logger;
@@ -22,6 +23,7 @@ public class AgentResolver : IAgentResolver
         IToolRegistry toolRegistry,
         IPromptTemplateEngine templateEngine,
         IAgentVersionRouter versionRouter,
+        IAgentGrantService grantService,
         ILogger<AgentResolver> logger,
         IPermissionChecker? permissionChecker = null,
         IWorkspaceAgentProvider? workspaceAgentProvider = null)
@@ -32,13 +34,14 @@ public class AgentResolver : IAgentResolver
         _toolRegistry = Check.NotNull(toolRegistry);
         _templateEngine = Check.NotNull(templateEngine);
         _versionRouter = Check.NotNull(versionRouter);
+        _grantService = Check.NotNull(grantService);
         _logger = Check.NotNull(logger);
         _permissionChecker = permissionChecker;
         _workspaceAgentProvider = workspaceAgentProvider;
     }
 
     /// <inheritdoc />
-    public async Task<AgentResolution> ResolveAgentAsync(Guid? agentId, string? provider, string? model, List<string>? toolGroups, CancellationToken ct)
+    public async Task<AgentResolution> ResolveAgentAsync(Guid? agentId, string? provider, string? model, List<string>? toolGroups, CancellationToken ct, List<string>? toolNames = null)
     {
         var defaultProvider = provider ?? _options.Value.DefaultProvider;
 
@@ -58,7 +61,7 @@ public class AgentResolver : IAgentResolver
                         var wsProvider = wsAgent.Provider ?? defaultProvider;
                         var wsModel = model ?? wsAgent.Model;
                         var wsInstructions = wsAgent.Instructions ?? string.Empty;
-                        // Honor workspace AGENT.md frontmatter `executionMode: Handoff|AgentAsTools|Router|ExternalCli|Single`.
+                        // Honor workspace AGENT.md frontmatter `executionMode: Handoff|AgentAsTools|Router|Single`.
                         // Unknown / missing values fall back to Single (default for DB agents).
                         var wsExecutionMode = ParseExecutionMode(wsAgent.ExecutionMode);
                         // wsAgent.Temperature is float? but the factory takes double? — widen safely.
@@ -92,23 +95,27 @@ public class AgentResolver : IAgentResolver
             var routeResult = await _versionRouter.RouteAsync(entity, ct);
             entity = routeResult.Agent;
 
-            var entityToolGroups = entity.ToolGroups;
+            // 资源授权（junction grant）是工具组/单工具/技能/知识库的唯一权威来源（JSON 列已删除）。
+            // A/B 路由时，变体的资源来自版本快照（routeResult.SnapshotGrants）而非 live junction——
+            // 否则路由到变体 B 却静默使用 live 资源，A/B 实验对资源配置失效。passthrough 时 SnapshotGrants
+            // 为 null，回退读取 live grants（保持既有行为）。
+            var grants = routeResult.SnapshotGrants ?? await _grantService.GetGrantsAsync(entity.Id, ct);
+            var entityToolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
+            // per-tool 授权（GrantType=Tool）：展开为单工具，与工具组并行流入 factory。
+            var entityToolNames = grants.ToolNames.Count > 0 ? grants.ToolNames.ToList() : null;
+            // null-when-empty (load-bearing): SkillSlugs/KnowledgeBaseIds MUST be null — not [] — when there are
+            // no grants. An empty list ≠ null downstream: a populated skill list = whitelist; null =
+            // "no per-agent whitelist → fall back to SkillDefinition.Agents name-wildcard filtering"; [] = "whitelist
+            // of nothing". So collapse empty → null here.
+            var knowledgeBaseIds = NullIfEmpty(grants.KnowledgeBaseIds);
+            var skillSlugs = NullIfEmpty(grants.SkillSlugs);
 
-            var userPermissions = await ResolveUserPermissionsAsync(entityToolGroups, ct);
+            var userPermissions = await ResolveUserPermissionsAsync(entityToolGroups, ct, entityToolNames);
 
             // 渲染 Agent Instructions 模板变量（{{date}}, {{user.name}} 等）
             var renderedInstructions = _templateEngine.Render(
                 entity.Instructions ?? string.Empty,
                 new Dictionary<string, string> { ["agent.name"] = entity.Name });
-
-            // ExternalCli 模式不需要 AgentExecutor — 跳过 ChatClient 创建
-            if (entity.ExecutionMode == AgentExecutionMode.ExternalCli)
-            {
-                return AgentResolution.SuccessWithoutExecutor(
-                    entity.Provider, model ?? entity.Model, agentId,
-                    entity.Configuration, entity.ExecutionMode,
-                    personaId: entity.PersonaId);
-            }
 
             // model param acts as an override (e.g. think-model auto-switch); fall back to entity default
             var effectiveModel = model ?? entity.Model;
@@ -122,21 +129,26 @@ public class AgentResolver : IAgentResolver
                 entity.MaxTokens,
                 options: null,
                 userPermissions: userPermissions,
+                toolNames: entityToolNames,
                 agentId: entity.Id,
                 ct: ct);
-            var creationParams = new AgentCreationParameters(renderedInstructions, entity.Name, entityToolGroups, entity.Temperature, entity.MaxTokens, userPermissions);
-            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaId: entity.PersonaId);
+            var creationParams = new AgentCreationParameters(renderedInstructions, entity.Name, entityToolGroups, entity.Temperature, entity.MaxTokens, userPermissions, entityToolNames);
+            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaId: entity.PersonaId, knowledgeBaseIds: knowledgeBaseIds, skillSlugs: skillSlugs);
         }
 
-        // 2. 使用 ToolGroups（无 AgentId 但有工具组）
-        if (toolGroups != null && toolGroups.Count > 0)
+        // 2. 使用 ToolGroups / ToolNames（无 AgentId 但有工具组或 per-request 单工具覆盖）
+        var hasToolGroups = toolGroups is { Count: > 0 };
+        var hasToolNames = toolNames is { Count: > 0 };
+        if (hasToolGroups || hasToolNames)
         {
-            var userPermissions = await ResolveUserPermissionsAsync(toolGroups, ct);
-            var executor = await _agentFactory.CreateAgentAsync(defaultProvider, model, null, null, toolGroups, options: null, userPermissions: userPermissions, ct: ct);
+            var adHocGroups = hasToolGroups ? toolGroups : null;
+            var adHocNames = hasToolNames ? toolNames : null;
+            var userPermissions = await ResolveUserPermissionsAsync(adHocGroups, ct, adHocNames);
+            var executor = await _agentFactory.CreateAgentAsync(defaultProvider, model, null, null, adHocGroups, options: null, userPermissions: userPermissions, toolNames: adHocNames, ct: ct);
             return AgentResolution.Success(executor, defaultProvider, model, null);
         }
 
-        // 3. 仅 Provider/Model（无 AgentId 也无 ToolGroups）
+        // 3. 仅 Provider/Model（无 AgentId 也无 ToolGroups/ToolNames）
         var defaultExecutor = await _agentFactory.CreateAgentAsync(defaultProvider, model, options: null, ct: ct);
         return AgentResolution.Success(defaultExecutor, defaultProvider, model, null);
     }
@@ -197,6 +209,13 @@ public class AgentResolver : IAgentResolver
     }
 
     /// <summary>
+    /// Collapse an empty (or null) resource list to <c>null</c> so the load-bearing
+    /// null-vs-empty downstream semantics are preserved (see resolver DB-agent branch).
+    /// </summary>
+    private static IReadOnlyList<T>? NullIfEmpty<T>(IReadOnlyList<T>? list)
+        => list is { Count: > 0 } ? list : null;
+
+    /// <summary>
     /// Parse a workspace `executionMode` frontmatter value (case-insensitive) into the
     /// AgentExecutionMode enum. Unknown / empty values fall back to Single.
     /// </summary>
@@ -210,27 +229,34 @@ public class AgentResolver : IAgentResolver
     }
 
     /// <summary>
-    /// 解析当前用户已授权的工具权限集合
+    /// 解析当前用户已授权的工具权限集合（汇总工具组 + 单工具两路声明的权限要求）。
     /// </summary>
-    private async Task<IEnumerable<string>?> ResolveUserPermissionsAsync(IEnumerable<string>? toolGroups, CancellationToken ct)
+    private async Task<IEnumerable<string>?> ResolveUserPermissionsAsync(IEnumerable<string>? toolGroups, CancellationToken ct, IEnumerable<string>? toolNames = null)
     {
-        if (toolGroups == null) return null;
+        if (toolGroups == null && toolNames == null) return null;
 
         if (_permissionChecker == null) return null;
 
-        var toolDefinitions = _toolRegistry.GetToolsByGroups(toolGroups);
+        // 收集工具组 + 单工具两路声明的权限要求（按工具名去重，再展开权限）
+        var requiredPermissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (toolGroups != null)
+        {
+            foreach (var t in _toolRegistry.GetToolsByGroups(toolGroups))
+                foreach (var p in t.RequiredPermissions)
+                    requiredPermissions.Add(p);
+        }
+        if (toolNames != null)
+        {
+            foreach (var t in _toolRegistry.GetToolsByNames(toolNames))
+                foreach (var p in t.RequiredPermissions)
+                    requiredPermissions.Add(p);
+        }
 
-        // 收集所有工具声明的权限要求
-        var allRequiredPermissions = toolDefinitions
-            .SelectMany(t => t.RequiredPermissions)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (allRequiredPermissions.Count == 0) return null;
+        if (requiredPermissions.Count == 0) return null;
 
         // 逐一检查权限，构建已授权集合
         var grantedPermissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var permission in allRequiredPermissions)
+        foreach (var permission in requiredPermissions)
         {
             if (await _permissionChecker.IsGrantedAsync(permission))
             {

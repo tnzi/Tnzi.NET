@@ -56,6 +56,54 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
+    public async Task<Result<IPagedList<UserSessionDto>>> GetSessionsAsync(SessionQueryDto query)
+    {
+        Check.NotNull(query);
+
+        var queryable = _repository.AsQueryable()
+            .WhereIf(us => us.UserId == query.UserId!.Value, query.UserId.HasValue)
+            .WhereIf(us => !us.IsRevoked, !query.IncludeRevoked)
+            .OrderByDescending(us => us.LastActivityTime)
+            .ThenByDescending(us => us.CreationTime);
+
+        var totalCount = await queryable.CountAsync();
+        var sessions = await queryable
+            .Skip((query.PageIndex - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .ProjectTo<UserSession, UserSessionDto>()
+            .ToListAsync();
+
+        await PopulateUserNamesAsync(sessions);
+
+        var paged = new PagedList<UserSessionDto>(sessions, query.PageIndex, query.PageSize, totalCount);
+        return Ok<IPagedList<UserSessionDto>>(paged);
+    }
+
+    /// <summary>
+    /// 批量填充会话 DTO 的 UserName。单独查询（非 JOIN），避免 User 表软删过滤器
+    /// 静默丢掉软删用户的会话行（此时 UserName 保持 null）。
+    /// </summary>
+    private async Task PopulateUserNamesAsync(List<UserSessionDto> sessions)
+    {
+        if (sessions.Count == 0 || _userRepository == null)
+        {
+            return;
+        }
+
+        var userIds = sessions.Select(s => s.UserId).Distinct().ToList();
+        var users = await _userRepository
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.UserName })
+            .ToListAsync();
+        var nameMap = users.ToDictionary(u => u.Id, u => u.UserName);
+
+        foreach (var session in sessions)
+        {
+            session.UserName = nameMap.GetValueOrDefault(session.UserId);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<Result> RevokeSessionAsync(Guid sessionId)
     {
         var session = await _repository.GetAsync(sessionId);

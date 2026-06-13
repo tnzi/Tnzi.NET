@@ -288,46 +288,6 @@ public class AgentRuntimeWorkflowDispatchTests
     }
 
     [Fact]
-    public async Task RunStreamingAsync_ExternalCli_AnnotatesChunksWithResolvedModel()
-    {
-        var resolver = new Mock<IAgentResolver>();
-        resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor(
-                "test-provider",
-                "gpt-5-think",
-                null,
-                null,
-                AgentExecutionMode.ExternalCli));
-
-        var cliExecutor = new Mock<IExternalCliExecutor>();
-        cliExecutor.Setup(x => x.ExecuteCliStreamingAsync(It.IsAny<AiMiddlewareContext>(), It.IsAny<CancellationToken>()))
-            .Returns(ToAsyncEnumerable(
-            [
-                new AgentStreamChunk { Text = "hello" },
-                new AgentStreamChunk { FinishReason = FinishReasons.Stop }
-            ]));
-
-        var serviceProvider = new ServiceCollection()
-            .AddSingleton<IExternalCliExecutor>(cliExecutor.Object)
-            .BuildServiceProvider();
-
-        var runtime = CreateRuntime(resolver: resolver.Object, serviceProvider: serviceProvider);
-        var chunks = new List<AgentStreamChunk>();
-
-        await foreach (var chunk in runtime.RunStreamingAsync(new AgentRunRequest
-        {
-            UserMessage = "hello"
-        }))
-        {
-            chunks.Add(chunk);
-        }
-
-        chunks.Count.ShouldBe(2);
-        chunks[0].Model.ShouldBe("gpt-5-think");
-        chunks[1].Model.ShouldBe("gpt-5-think");
-    }
-
-    [Fact]
     public async Task RunAsync_EnableRunTracking_WhenFinishReasonIsFailure_MarksRunFailed()
     {
         var updatedRuns = new List<AgentRun>();
@@ -336,7 +296,7 @@ public class AgentRuntimeWorkflowDispatchTests
         var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("test-provider", "gpt-5", null, null, AgentExecutionMode.ExternalCli));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "test-provider", "gpt-5", null));
 
         var serviceProvider = new ServiceCollection()
             .AddSingleton<IAiMiddleware>(new StaticResultMiddleware(new AgentRunResult
@@ -378,7 +338,7 @@ public class AgentRuntimeWorkflowDispatchTests
         var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("test-provider", "gpt-5", null, null, AgentExecutionMode.ExternalCli));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "test-provider", "gpt-5", null));
 
         var serviceProvider = new ServiceCollection()
             .AddSingleton<IAiMiddleware>(new StaticStreamingMiddleware(
@@ -421,7 +381,7 @@ public class AgentRuntimeWorkflowDispatchTests
         var publishedEvents = new List<AgentRunCompletedEvent>();
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("resolved-provider", "gpt-5-think", null, null, AgentExecutionMode.ExternalCli));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "resolved-provider", "gpt-5-think", null));
 
         var eventBus = new Mock<IEventBus>();
         eventBus.Setup(x => x.PublishAsync(It.IsAny<AgentRunCompletedEvent>(), It.IsAny<CancellationToken>()))
@@ -500,7 +460,7 @@ public class AgentRuntimeWorkflowDispatchTests
     {
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(null, null, null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("resolved-provider", "gpt-5", null, null, AgentExecutionMode.ExternalCli));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "resolved-provider", "gpt-5", null));
 
         var scopeFactory = new Mock<IServiceScopeFactory>();
         var serviceProvider = new ServiceCollection()
@@ -606,15 +566,6 @@ public class AgentRuntimeWorkflowDispatchTests
             TotalInputTokens = run.TotalInputTokens,
             TotalOutputTokens = run.TotalOutputTokens
         };
-    }
-
-    private static async IAsyncEnumerable<AgentStreamChunk> ToAsyncEnumerable(IEnumerable<AgentStreamChunk> items)
-    {
-        foreach (var item in items)
-        {
-            yield return item;
-            await Task.CompletedTask;
-        }
     }
 
     private static async IAsyncEnumerable<WorkflowExecutionResultDto> StreamWorkflowResults()

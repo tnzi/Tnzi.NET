@@ -18,7 +18,7 @@ import { useLoginContext } from '../useLoginContext'
 
 defineOptions({ name: 'CodeLogin' })
 
-const { translate, toggleLoginModule, callbacks, helpers } = useLoginContext()
+const { translate, toggleLoginModule, callbacks, ui, helpers } = useLoginContext()
 const { rules: r } = useFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
@@ -82,11 +82,11 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
-  <NForm ref="formRef" :model="model" :rules="rules" size="large" :show-label="false" @keyup.enter="handleSubmit">
-    <NFormItem path="account">
+  <NForm ref="formRef" :model="model" :rules="rules" size="large" :show-label="ui.labeled" :show-require-mark="false" label-placement="top" @keyup.enter="handleSubmit">
+    <NFormItem path="account" :label="translate('admin.login.labels.phone', 'Phone / Email')">
       <NInput v-model:value="model.account" :placeholder="translate('admin.login.phonePlaceholder', 'Enter phone or email')" />
     </NFormItem>
-    <NFormItem path="code">
+    <NFormItem path="code" :label="translate('admin.login.labels.code', 'Verification code')">
       <div class="w-full flex-y-center gap-16px">
         <NInput v-model:value="model.code" :placeholder="translate('admin.login.codePlaceholder', 'Enter verification code')" />
         <NButton size="large" :disabled="isCounting || sending" :loading="sending" @click="handleSendCode">
@@ -95,10 +95,10 @@ async function handleSubmit(): Promise<void> {
       </div>
     </NFormItem>
     <NSpace vertical :size="18" class="w-full">
-      <NButton type="primary" size="large" round block :loading="submitting" @click="handleSubmit">
+      <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
         {{ translate('admin.login.submit', 'Sign in') }}
       </NButton>
-      <NButton size="large" round block @click="toggleLoginModule('pwd-login')">
+      <NButton size="large" :round="ui.pill" block @click="toggleLoginModule('pwd-login')">
         {{ translate('admin.login.back', 'Back') }}
       </NButton>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>

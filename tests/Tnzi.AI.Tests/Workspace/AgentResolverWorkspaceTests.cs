@@ -13,8 +13,16 @@ public class AgentResolverWorkspaceTests
     private readonly Mock<IToolRegistry> _toolRegistry = new();
     private readonly Mock<IPromptTemplateEngine> _templateEngine = new();
     private readonly Mock<IAgentVersionRouter> _versionRouter = new();
+    private readonly Mock<IAgentGrantService> _grantService = new();
     private readonly Mock<IWorkspaceAgentProvider> _workspaceProvider = new();
     private readonly Mock<ILogger<AgentResolver>> _logger = new();
+
+    public AgentResolverWorkspaceTests()
+    {
+        // No grants seeded by default → empty projection → resolver read-fallback to entity JSON columns.
+        _grantService.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection());
+    }
 
     private AgentResolver CreateResolver(AIOptions? options = null)
     {
@@ -26,6 +34,7 @@ public class AgentResolverWorkspaceTests
             _toolRegistry.Object,
             _templateEngine.Object,
             _versionRouter.Object,
+            _grantService.Object,
             _logger.Object,
             permissionChecker: null,
             workspaceAgentProvider: _workspaceProvider.Object);
@@ -57,7 +66,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
@@ -102,7 +111,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
@@ -191,7 +200,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
@@ -202,40 +211,6 @@ public class AgentResolverWorkspaceTests
         result.IsSuccess.ShouldBeTrue();
         result.PersonaId.ShouldBe(personaId);
         result.PersonaContent.ShouldBeNull();
-    }
-
-    /// <summary>
-    /// ExternalCli mode bypasses ChatClient creation but the PersonaId still flows
-    /// through to AgentResolution so downstream telemetry/inspection can see it.
-    /// </summary>
-    [Fact]
-    public async Task ResolveAgentAsync_ExternalCliAgentWithPersonaId_PropagatesPersonaId()
-    {
-        var agentId = Guid.NewGuid();
-        var personaId = Guid.NewGuid();
-        var entity = new Agent
-        {
-            Id = agentId,
-            Name = "cli-agent",
-            Provider = "claude-code",
-            IsEnabled = true,
-            ExecutionMode = AgentExecutionMode.ExternalCli,
-            PersonaId = personaId
-        };
-
-        _agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(entity);
-        _versionRouter.Setup(v => v.RouteAsync(entity, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentVersionRouteResult.Passthrough(entity));
-        _templateEngine.Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, string>>()))
-            .Returns(string.Empty);
-
-        var resolver = CreateResolver();
-
-        var result = await resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
-
-        result.IsSuccess.ShouldBeTrue();
-        result.PersonaId.ShouldBe(personaId);
     }
 
     /// <summary>
@@ -267,7 +242,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
@@ -311,7 +286,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
@@ -350,7 +325,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentExecutor(new Mock<IChatClient>().Object, new AgentExecutorOptions()));
 
@@ -360,6 +335,150 @@ public class AgentResolverWorkspaceTests
 
         result.IsSuccess.ShouldBeTrue();
         result.ExecutionMode.ShouldBe(AgentExecutionMode.Single);
+    }
+
+    /// <summary>
+    /// CRITICAL (A/B routing honors versioned grants): when the version router A/B-routes to a
+    /// variant, the variant's resource grants come from the route result's SnapshotGrants — NOT the
+    /// agent's CURRENT live grants. Seed DIFFERENT live grants to prove the SNAPSHOT wins: the
+    /// resolution's KnowledgeBaseIds/SkillSlugs and the factory's toolGroups/toolNames must reflect
+    /// the snapshot, and GetGrantsAsync must NOT be consulted for the resource lists.
+    /// </summary>
+    [Fact]
+    public async Task ResolveAgentAsync_AbRoutedWithSnapshotGrants_UsesSnapshotNotLive()
+    {
+        var agentId = Guid.NewGuid();
+        var snapshotKbId = Guid.NewGuid();
+        var liveKbId = Guid.NewGuid();
+
+        var entity = new Agent
+        {
+            Id = agentId,
+            Name = "ab-agent",
+            Provider = "OpenAI",
+            Model = "gpt-4o",
+            IsEnabled = true,
+            ExecutionMode = AgentExecutionMode.Single
+        };
+
+        _agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entity);
+
+        // Router A/B-routes to a variant and exposes the SNAPSHOT's grants.
+        _versionRouter.Setup(v => v.RouteAsync(entity, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentVersionRouteResult
+            {
+                Agent = entity,
+                IsAbTestRouted = true,
+                SelectedVersion = 2,
+                SelectedVariant = "B",
+                SnapshotGrants = new AgentGrantsProjection
+                {
+                    ToolGroups = new[] { "snapshot_group" },
+                    ToolNames = new[] { "snapshot_tool" },
+                    SkillSlugs = new[] { "snapshot_skill" },
+                    KnowledgeBaseIds = new[] { snapshotKbId }
+                }
+            });
+
+        // LIVE grants are DIFFERENT — if the resolver wrongly reads live, the asserts below fail.
+        _grantService.Setup(s => s.GetGrantsAsync(agentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection
+            {
+                ToolGroups = new[] { "live_group" },
+                ToolNames = new[] { "live_tool" },
+                SkillSlugs = new[] { "live_skill" },
+                KnowledgeBaseIds = new[] { liveKbId }
+            });
+
+        _templateEngine.Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, string>>()))
+            .Returns(string.Empty);
+
+        IEnumerable<string>? capturedToolGroups = null;
+        IEnumerable<string>? capturedToolNames = null;
+        var executor = new AgentExecutor(new Mock<IChatClient>().Object, new AgentExecutorOptions());
+        _agentFactory.Setup(f => f.CreateAgentAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback((string? _, string? _, string? _, string? _, IEnumerable<string>? toolGroups, double? _, int? _,
+                AgentExecutorOptions? _, IEnumerable<string>? _, IEnumerable<string>? toolNames, Guid? _, CancellationToken _) =>
+            {
+                capturedToolGroups = toolGroups;
+                capturedToolNames = toolNames;
+            })
+            .ReturnsAsync(executor);
+
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
+
+        result.IsSuccess.ShouldBeTrue();
+
+        // Resolution-level resource lists reflect the SNAPSHOT, not live.
+        result.KnowledgeBaseIds.ShouldBe(new[] { snapshotKbId });
+        result.SkillSlugs.ShouldBe(new[] { "snapshot_skill" });
+
+        // Tool grants flow through the factory call → also from the snapshot.
+        capturedToolGroups.ShouldBe(new[] { "snapshot_group" });
+        capturedToolNames.ShouldBe(new[] { "snapshot_tool" });
+
+        // The live junction must NOT be consulted when SnapshotGrants is present.
+        _grantService.Verify(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Passthrough (SnapshotGrants == null) keeps the existing behavior: the resolver reads the
+    /// LIVE grants via GetGrantsAsync.
+    /// </summary>
+    [Fact]
+    public async Task ResolveAgentAsync_PassthroughNullSnapshotGrants_UsesLiveGrants()
+    {
+        var agentId = Guid.NewGuid();
+        var liveKbId = Guid.NewGuid();
+        var entity = new Agent
+        {
+            Id = agentId,
+            Name = "passthrough-agent",
+            Provider = "OpenAI",
+            Model = "gpt-4o",
+            IsEnabled = true,
+            ExecutionMode = AgentExecutionMode.Single
+        };
+
+        _agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entity);
+        _versionRouter.Setup(v => v.RouteAsync(entity, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AgentVersionRouteResult.Passthrough(entity)); // SnapshotGrants == null
+
+        _grantService.Setup(s => s.GetGrantsAsync(agentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection
+            {
+                SkillSlugs = new[] { "live_skill" },
+                KnowledgeBaseIds = new[] { liveKbId }
+            });
+
+        _templateEngine.Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, string>>()))
+            .Returns(string.Empty);
+        var executor = new AgentExecutor(new Mock<IChatClient>().Object, new AgentExecutorOptions());
+        _agentFactory.Setup(f => f.CreateAgentAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(executor);
+
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
+
+        result.IsSuccess.ShouldBeTrue();
+        result.SkillSlugs.ShouldBe(new[] { "live_skill" });
+        result.KnowledgeBaseIds.ShouldBe(new[] { liveKbId });
+
+        // Passthrough → live grants ARE consulted.
+        _grantService.Verify(s => s.GetGrantsAsync(agentId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>
@@ -391,7 +510,7 @@ public class AgentResolverWorkspaceTests
         _agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 

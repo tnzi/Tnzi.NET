@@ -18,6 +18,13 @@ public class DiscordAdapterOptions
     /// <summary>Application public key for webhook signature verification (Ed25519).</summary>
     public string? PublicKey { get; set; }
 
+    /// <summary>
+    /// Owning tenant of this channel bot instance. Inbound messages from this
+    /// channel are processed under this tenant context (session binding rule
+    /// partitioning, thread mapping audit fill). Null = single-tenant / global.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>Allowed guild ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedGuilds { get; set; } = [];
 
@@ -41,6 +48,7 @@ public class DiscordAdapterOptions
         $"BotToken = {SecretMask.Mask(BotToken)}, " +
         $"ApplicationId = {ApplicationId ?? "<null>"}, " +
         $"PublicKey = {SecretMask.Mask(PublicKey)}, " +
+        $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedGuilds.Count = {AllowedGuilds.Count}, " +
         $"AllowedChannels.Count = {AllowedChannels.Count}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +

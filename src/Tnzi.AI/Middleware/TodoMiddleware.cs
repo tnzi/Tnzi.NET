@@ -7,12 +7,12 @@ namespace Tnzi.AI.Middleware;
 public class TodoMiddleware : IAiMiddleware
 {
     private readonly IAgentExecutionContextAccessor _contextAccessor;
-    private readonly IOptions<TodoOptions> _options;
+    private readonly IOptionsMonitor<TodoOptions> _options;
     private readonly ILogger<TodoMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.Todo;
 
-    public TodoMiddleware(IAgentExecutionContextAccessor contextAccessor, IOptions<TodoOptions> options, ILogger<TodoMiddleware> logger)
+    public TodoMiddleware(IAgentExecutionContextAccessor contextAccessor, IOptionsMonitor<TodoOptions> options, ILogger<TodoMiddleware> logger)
     {
         _contextAccessor = Check.NotNull(contextAccessor);
         _options = Check.NotNull(options);
@@ -21,7 +21,7 @@ public class TodoMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware || !context.Request.PlanMode || !_options.Value.Enabled)
+        if (!context.Request.PlanMode || !_options.CurrentValue.Enabled)
             return await next(context, cancellationToken);
 
         // Before: 注入已有 Todo 状态提醒
@@ -41,7 +41,7 @@ public class TodoMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware || !context.Request.PlanMode || !_options.Value.Enabled)
+        if (!context.Request.PlanMode || !_options.CurrentValue.Enabled)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;

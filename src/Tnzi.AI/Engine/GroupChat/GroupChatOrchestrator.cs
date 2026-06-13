@@ -15,7 +15,7 @@ namespace Tnzi.AI.Engine.GroupChat;
 /// </remarks>
 public class GroupChatOrchestrator
 {
-    private readonly List<AgentExecutor> _agents = [];
+    private readonly List<IAgentExecutor> _agents = [];
     private readonly ILogger _logger;
 
     public GroupChatOrchestrator(ILogger logger)
@@ -31,7 +31,7 @@ public class GroupChatOrchestrator
     /// <summary>
     /// 添加参与讨论的 Agent
     /// </summary>
-    public GroupChatOrchestrator AddAgent(AgentExecutor agent)
+    public GroupChatOrchestrator AddAgent(IAgentExecutor agent)
     {
         Check.NotNull(agent);
         _agents.Add(agent);
@@ -160,7 +160,7 @@ public class GroupChatOrchestrator
     /// <summary>
     /// 选择下一个发言的 Agent
     /// </summary>
-    private AgentExecutor SelectNextAgent(int round, int currentIndex, string lastSpeaker, List<GroupChatMessage> history)
+    private IAgentExecutor SelectNextAgent(int round, int currentIndex, string lastSpeaker, List<GroupChatMessage> history)
     {
         return Options.SelectionStrategy switch
         {
@@ -175,7 +175,7 @@ public class GroupChatOrchestrator
     /// <summary>
     /// 为 Agent 构建带上下文的消息列表
     /// </summary>
-    private static List<ChatMessage> BuildAgentMessages(AgentExecutor agent, List<ChatMessage> sharedMessages, List<GroupChatMessage> history)
+    private static List<ChatMessage> BuildAgentMessages(IAgentExecutor agent, List<ChatMessage> sharedMessages, List<GroupChatMessage> history)
     {
         var messages = new List<ChatMessage>(sharedMessages);
 
@@ -236,7 +236,7 @@ public class GroupChatOptions
     public Func<List<GroupChatMessage>, bool>? TerminationCondition { get; set; }
 
     /// <summary>自定义 Agent 选择器</summary>
-    public Func<List<AgentExecutor>, List<GroupChatMessage>, string, AgentExecutor?>? CustomSelector { get; set; }
+    public Func<List<IAgentExecutor>, List<GroupChatMessage>, string, IAgentExecutor?>? CustomSelector { get; set; }
 }
 
 /// <summary>

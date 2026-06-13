@@ -29,7 +29,7 @@ internal sealed class TextSearchContributor : IContextProviderContributor
         try
         {
             var logger = _loggerFactory.CreateLogger<TextSearchProvider>();
-            return new TextSearchProvider(_textSearchService, _options.Value.ContextProviders.TextSearch, logger);
+            return new TextSearchProvider(_textSearchService, _options.Value.ContextProviders.TextSearch, logger, context.KnowledgeBaseIds);
         }
         catch (Exception ex)
         {

@@ -17,6 +17,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
     private readonly IVectorStore _vectorStore;
     private readonly IReranker _reranker;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
+    private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
     private readonly List<ISearchPostProcessor> _sortedProcessors;
     private readonly AIRagOptions _ragOptions;
     private readonly IQueryRewriter? _queryRewriter;
@@ -30,6 +31,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
         IVectorStore vectorStore,
         IReranker reranker,
         IRepository<KnowledgeDocument, Guid> docRepository,
+        IRepository<KnowledgeBase, Guid> kbRepository,
         IEnumerable<ISearchPostProcessor> postProcessors,
         IOptions<AIRagOptions> ragOptions,
         IQueryRewriter? queryRewriter = null,
@@ -41,6 +43,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
         _vectorStore = Check.NotNull(vectorStore);
         _reranker = Check.NotNull(reranker);
         _docRepository = Check.NotNull(docRepository);
+        _kbRepository = Check.NotNull(kbRepository);
         Check.NotNull(postProcessors);
         _sortedProcessors = postProcessors.OrderBy(p => p.Order).ToList();
         _ragOptions = Check.NotNull(ragOptions).Value;
@@ -73,16 +76,8 @@ public class RagRetriever : ApplicationService, IRagRetriever
                 }
             }
 
-            // 2. 生成查询向量
-            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(searchQuery, ct: ct);
-            if (!embeddingResult.Succeeded)
-            {
-                Logger.LogWarning("Embedding generation failed for RAG retrieval: {Message}", embeddingResult.Message);
-                return [];
-            }
-
-            // 3. 向量搜索（支持多知识库）+ 图谱搜索并行
-            var vectorTask = SearchVectorAsync(embeddingResult.Data!, options, ct);
+            // 2+3. 向量搜索（含 per-KB 对齐的查询向量生成，支持多知识库）+ 图谱搜索并行
+            var vectorTask = SearchVectorAsync(searchQuery, options, ct);
             var graphTask = SearchGraphAsync(searchQuery, options, ct);
 
             await Task.WhenAll(vectorTask, graphTask);
@@ -214,37 +209,71 @@ public class RagRetriever : ApplicationService, IRagRetriever
     }
 
     /// <summary>
-    /// 执行向量搜索（支持多知识库并行）
+    /// 执行向量搜索（含查询向量生成，支持多知识库并行）。
+    /// <para>
+    /// query 向量必须与各知识库摄取时使用相同的 embedding provider/model，否则向量空间不一致、
+    /// 检索结果无意义（与 <c>KnowledgeBaseService.SearchAsync</c> 同范式）。多 KB 且嵌入配置不一致时，
+    /// 按 (provider, model) 分组逐组生成 query 向量后分别检索；未指定 KB（search-all）时使用全局默认配置。
+    /// </para>
     /// </summary>
     private async Task<List<VectorSearchResult>> SearchVectorAsync(
-        float[] embedding, RagRetrievalOptions options, CancellationToken ct)
+        string searchQuery, RagRetrievalOptions options, CancellationToken ct)
     {
-        var allResults = new List<VectorSearchResult>();
-
         if (options.KnowledgeBaseIds is { Count: > 0 })
         {
-            // 并行搜索多个指定知识库
-            var tasks = options.KnowledgeBaseIds.Select(kbId =>
-                _vectorStore.SearchAsync(embedding, options.TopK, kbId, ct));
-            var resultSets = await Task.WhenAll(tasks);
-            foreach (var resultSet in resultSets)
+            // 加载 KB 嵌入配置（经 EF 全局过滤器自动应用租户隔离；缺失的 KB 直接跳过）
+            var kbIds = options.KnowledgeBaseIds.Distinct().ToList();
+            var knowledgeBases = await _kbRepository.AsQueryable()
+                .Where(kb => kbIds.Contains(kb.Id))
+                .ToListAsync(ct);
+
+            if (knowledgeBases.Count < kbIds.Count)
             {
-                allResults.AddRange(resultSet);
+                Logger.LogWarning(
+                    "RAG retrieval skipped {Missing} of {Requested} requested knowledge bases (not found or not accessible)",
+                    kbIds.Count - knowledgeBases.Count, kbIds.Count);
+            }
+
+            var allResults = new List<VectorSearchResult>();
+
+            // 按嵌入配置分组：同空间共用一个 query 向量，组内多 KB 并行检索
+            foreach (var (embeddingOptions, groupKbIds) in RagEmbeddingOptionsResolver.GroupByEmbeddingConfig(knowledgeBases, _ragOptions))
+            {
+                var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(searchQuery, embeddingOptions, ct);
+                if (!embeddingResult.Succeeded)
+                {
+                    Logger.LogWarning(
+                        "Embedding generation failed for RAG retrieval (provider={Provider}, model={Model}): {Message}",
+                        embeddingOptions.Provider, embeddingOptions.Model, embeddingResult.Message);
+                    continue;
+                }
+
+                var tasks = groupKbIds.Select(kbId =>
+                    _vectorStore.SearchAsync(embeddingResult.Data!, options.TopK, kbId, ct));
+                var resultSets = await Task.WhenAll(tasks);
+                foreach (var resultSet in resultSets)
+                {
+                    allResults.AddRange(resultSet);
+                }
             }
 
             // 跨知识库结果按得分排序并截取 TopK
-            allResults = allResults
+            return allResults
                 .OrderByDescending(r => r.Score)
                 .Take(options.TopK)
                 .ToList();
         }
-        else
+
+        // 搜索全部启用的知识库：使用全局默认 embedding provider/model
+        var defaultOptions = RagEmbeddingOptionsResolver.ResolveDefault(_ragOptions);
+        var defaultEmbedding = await _embeddingService.GenerateEmbeddingAsync(searchQuery, defaultOptions, ct);
+        if (!defaultEmbedding.Succeeded)
         {
-            // 搜索全部启用的知识库
-            allResults = await _vectorStore.SearchAsync(embedding, options.TopK, ct: ct);
+            Logger.LogWarning("Embedding generation failed for RAG retrieval: {Message}", defaultEmbedding.Message);
+            return [];
         }
 
-        return allResults;
+        return await _vectorStore.SearchAsync(defaultEmbedding.Data!, options.TopK, ct: ct);
     }
 
     /// <summary>

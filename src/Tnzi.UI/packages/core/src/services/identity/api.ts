@@ -568,6 +568,14 @@ export function useAdminOrganizationApi(client: HttpClient) {
 
 export function useAdminSessionApi(client: HttpClient) {
   return {
+    /**
+     * Paged session list — `userId` optional; omitted returns the global
+     * list across all users (sorted by last activity desc) with `userName`
+     * populated on every item.
+     */
+    getSessions: (params?: { userId?: string; includeRevoked?: boolean; pageIndex?: number; pageSize?: number }) =>
+      client.get<PagedList<UserSessionDto>>(ADMIN_SESSION_BASE, { params }),
+
     /** Get user sessions */
     getUserSessions: (userId: string, params?: { includeRevoked?: boolean }) =>
       client.get<UserSessionDto[]>(`${ADMIN_SESSION_BASE}/user/${userId}`, { params }),

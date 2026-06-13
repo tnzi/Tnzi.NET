@@ -223,4 +223,38 @@ public class ToolRegistry : IToolRegistry
 
         return filteredTools;
     }
+
+    /// <summary>
+    /// 按工具名称解析单个工具（per-tool 授权），并按用户权限过滤。
+    /// 使用 <c>_toolsByName</c> 索引按名称 O(1) 查找，未知名称跳过；权限不足的工具被排除。
+    /// </summary>
+    public IReadOnlyList<ToolDefinition> GetToolsByNames(
+        IEnumerable<string> toolNames,
+        IEnumerable<string>? userPermissions = null)
+    {
+        Check.NotNull(toolNames);
+
+        var permissionsSet = userPermissions != null
+            ? new HashSet<string>(userPermissions, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        var result = new List<ToolDefinition>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in toolNames)
+        {
+            if (string.IsNullOrWhiteSpace(name) || !seen.Add(name)) continue;
+            if (!_toolsByName.TryGetValue(name, out var tool)) continue; // 未知名称跳过
+
+            // 权限门控：无权限要求或用户拥有全部必需权限时放行
+            if (permissionsSet == null || permissionsSet.Count == 0
+                || tool.RequiredPermissions.Count == 0
+                || tool.RequiredPermissions.All(permissionsSet.Contains))
+            {
+                result.Add(tool);
+            }
+        }
+
+        return result;
+    }
 }

@@ -14,6 +14,10 @@ import type {
   AgentUsageDto,
   ModelUsageDto,
   UsageTrendPointDto,
+  ProviderCostDto,
+  ModelCostDto,
+  CostSummaryDto,
+  AgentFeedbackStatsDto,
 } from '@tnzi/core/services/ai'
 
 /** Bridge UsageSummary shape (re-declared to avoid a runtime import cycle). */
@@ -43,12 +47,12 @@ export const STAT_CARDS: StatCardDefinition[] = [
 ]
 
 /**
- * Default time range — last 7 days. Returned as ISO strings so callers can
+ * Default time range — last 30 days. Returned as ISO strings so callers can
  * feed straight into the bridge without further conversion.
  */
 export function defaultDateRange(now: Date = new Date()): { startTime: string; endTime: string } {
   const end = now
-  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000)
   return { startTime: start.toISOString(), endTime: end.toISOString() }
 }
 
@@ -107,6 +111,69 @@ export function buildModelBarSpec(rows: ModelUsageDto[]): ChartSpec {
   }
 }
 
+// ---- Cost breakdown helpers ----------------------------------------------
+
+/** Empty CostSummary placeholder so the page never reads off `null`. */
+export const EMPTY_COST_SUMMARY: CostSummaryDto = {
+  totalCostUsd: 0,
+  totalRequests: 0,
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  averageCostPerRequest: 0,
+  byProvider: [],
+  byModel: [],
+}
+
+/** Providers sorted by spend descending (drives the cost table + pie). */
+export function sortProviderCosts(rows: ProviderCostDto[]): ProviderCostDto[] {
+  return [...rows].sort((a, b) => b.totalCostUsd - a.totalCostUsd)
+}
+
+/** Models belonging to a provider, sorted by spend descending. Used to
+ *  populate the expandable `byModel` rows under each provider. The backend
+ *  ships a FLAT `byModel` array on CostSummary (not nested under each
+ *  provider), so we filter by `provider` here. */
+export function modelCostsForProvider(
+  models: ModelCostDto[],
+  provider: string,
+): ModelCostDto[] {
+  return models
+    .filter((m) => m.provider === provider)
+    .sort((a, b) => b.totalCostUsd - a.totalCostUsd)
+}
+
+// ---- Agent feedback helpers ----------------------------------------------
+
+/** Naive progress-bar status from a positive-feedback rate (0-1 or 0-100). */
+export function feedbackBarStatus(positiveRate: number): 'success' | 'warning' | 'error' {
+  const pct = positiveRate <= 1 ? positiveRate * 100 : positiveRate
+  if (pct >= 80) return 'success'
+  if (pct >= 50) return 'warning'
+  return 'error'
+}
+
+/** Normalise a 0-1 OR 0-100 positive-rate into an integer percentage. */
+export function toPercent(rate: number): number {
+  const pct = rate <= 1 ? rate * 100 : rate
+  return Math.round(pct)
+}
+
+/** Flatten a tag-distribution record into sorted `{ tag, count }` rows so the
+ *  template can `v-for` them into NTag chips without re-sorting inline. */
+export function tagDistributionEntries(
+  dist: Record<string, number> | null | undefined,
+): Array<{ tag: string; count: number }> {
+  if (!dist) return []
+  return Object.entries(dist)
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count)
+}
+
+/** Feedback rows sorted by total-rated descending so the busiest agents lead. */
+export function sortFeedbackStats(rows: AgentFeedbackStatsDto[]): AgentFeedbackStatsDto[] {
+  return [...rows].sort((a, b) => b.totalRated - a.totalRated)
+}
+
 /**
  * i18n key catalog — populated as comments only. Locale entries are added in
  * Phase 5 cleanup task 5.16. translatePageKey() falls back to the bare key
@@ -127,6 +194,10 @@ export function buildModelBarSpec(rows: ModelUsageDto[]): ChartSpec {
  * admin.modules.ai.usageDashboard.charts.byAgent
  * admin.modules.ai.usageDashboard.charts.byModel
  * admin.modules.ai.usageDashboard.charts.placeholder
+ * admin.modules.ai.usageDashboard.tabs.{overview,cost,feedback,logs}
+ * admin.modules.ai.usageDashboard.cost.{title,totalCost,byProvider,provider,share,requests,model,empty}
+ * admin.modules.ai.usageDashboard.feedback.{title,agent,positiveRate,totalRated,tags,empty}
+ * admin.modules.ai.usageDashboard.logs.{title,time,operation,model,agent,tokens,cost,duration,result,success,failed,empty}
  */
 export const I18N_KEYS = [
   'title',
@@ -144,4 +215,34 @@ export const I18N_KEYS = [
   'charts.byAgent',
   'charts.byModel',
   'charts.placeholder',
+  'tabs.overview',
+  'tabs.cost',
+  'tabs.feedback',
+  'tabs.logs',
+  'cost.title',
+  'cost.totalCost',
+  'cost.byProvider',
+  'cost.provider',
+  'cost.share',
+  'cost.requests',
+  'cost.model',
+  'cost.empty',
+  'feedback.title',
+  'feedback.agent',
+  'feedback.positiveRate',
+  'feedback.totalRated',
+  'feedback.tags',
+  'feedback.empty',
+  'logs.title',
+  'logs.time',
+  'logs.operation',
+  'logs.model',
+  'logs.agent',
+  'logs.tokens',
+  'logs.cost',
+  'logs.duration',
+  'logs.result',
+  'logs.success',
+  'logs.failed',
+  'logs.empty',
 ] as const

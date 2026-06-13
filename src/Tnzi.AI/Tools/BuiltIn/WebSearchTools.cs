@@ -4,7 +4,7 @@ namespace Tnzi.AI.Tools.BuiltIn;
 /// Built-in web search tool — delegates to IWebSearchProvider for AI agents
 /// </summary>
 /// <remarks>
-/// Default implementation provided by Tnzi.AI.Coder module (DuckDuckGo).
+/// Default implementation is DuckDuckGoSearchProvider (registered by AIModule via TryAdd).
 /// Register a custom IWebSearchProvider for commercial search APIs.
 /// </remarks>
 [AIToolGroup("websearch", "Web Search", "Search the web for up-to-date information")]

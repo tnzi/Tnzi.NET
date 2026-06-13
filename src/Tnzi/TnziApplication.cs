@@ -47,6 +47,7 @@ public class TnziApplication : ITnziApplication
     private readonly IConfiguration _configuration;
     private bool _servicesConfigured = false;
     private Dictionary<Type, List<ServiceDescriptor>>? _moduleServiceMap;
+    private IReadOnlyList<(Type Consumer, Type Wanted)> _skippedOptionalDependencies = [];
 
     /// <summary>
     /// 创建 Tnzi 应用程序实例
@@ -64,6 +65,7 @@ public class TnziApplication : ITnziApplication
 
         var loader = new ModuleLoader();
         Modules = loader.LoadModules(services, startupModuleType);
+        _skippedOptionalDependencies = loader.SkippedOptionalDependencies;
     }
 
     /// <inheritdoc />
@@ -109,12 +111,25 @@ public class TnziApplication : ITnziApplication
         }
 
         // 第三阶段：PostConfigureServices（所有模块）
-        // 用于覆盖或补充其他模块的配置
+        // 用于覆盖或补充其他模块的配置（注册增量同样计入模块服务映射 — Manifest/依赖审计不留盲区）
         foreach (var module in Modules)
         {
             try
             {
+                var beforeCount = _services.Count;
                 await module.Instance.PostConfigureServicesAsync(context);
+                if (_services.Count > beforeCount)
+                {
+                    var newServices = _services.Skip(beforeCount).ToList();
+                    if (moduleServiceMap.TryGetValue(module.Type, out var existing))
+                    {
+                        existing.AddRange(newServices);
+                    }
+                    else
+                    {
+                        moduleServiceMap[module.Type] = newServices;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -132,6 +147,28 @@ public class TnziApplication : ITnziApplication
     public async Task InitializeAsync(IServiceProvider serviceProvider, IApplicationBuilder? app = null, IWebHostEnvironment? env = null, WebApplication? webApp = null)
     {
         ServiceProvider = Check.NotNull(serviceProvider);
+
+        // 延迟诊断：模块加载发生在 DI 容器构建之前（无 logger 可用），此处聚合输出
+        // 「[OptionalDependsOn] 目标类型可解析（程序集已引用）但模块未加载」的情况 —
+        // OptionalDependsOn 只对已加载模块排序、从不加载模块；需要某模块时必须将其纳入
+        // 启动模块的 [DependsOn] 闭包。此日志帮助发现该常见误解（一行聚合，Information 级）。
+        if (_skippedOptionalDependencies.Count > 0)
+        {
+            var diagLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
+            if (diagLogger != null)
+            {
+                var details = string.Join("; ", _skippedOptionalDependencies
+                    .GroupBy(s => s.Wanted)
+                    .Select(g => $"{g.Key.Name} (wanted by {string.Join(", ", g.Select(x => x.Consumer.Name).Distinct())})"));
+                diagLogger.LogInformation(
+                    "Optional module dependencies referenced but NOT loaded: {Details}. " +
+                    "[OptionalDependsOn] only orders already-loaded modules — it never loads them. " +
+                    "If a capability is expected, add [DependsOn(typeof(TheModule))] to your startup module.",
+                    details);
+            }
+
+            _skippedOptionalDependencies = [];
+        }
 
         // 模块依赖审计（通过 TnziOptions 配置启用，建议仅在开发环境使用）
         if (_moduleServiceMap != null)

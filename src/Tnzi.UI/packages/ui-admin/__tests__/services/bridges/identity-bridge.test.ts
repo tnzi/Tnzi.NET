@@ -176,4 +176,65 @@ describe('identity-bridge', () => {
     expect(typeof bridge.roles.update).toBe('function')
     expect(typeof bridge.roles.delete).toBe('function')
   })
+
+  // -- sessions.list (global paged session list, GET /admin/sessions) --------
+
+  function mockSessionApi() {
+    return {
+      getSessions: vi.fn(async () => ({
+        items: [
+          {
+            id: 's1',
+            userId: 'u1',
+            userName: 'alice',
+            isRevoked: false,
+            creationTime: '2026-01-01T00:00:00Z',
+            lastActivityTime: '2026-01-01T01:00:00Z',
+          },
+        ],
+        totalCount: 1,
+        pageIndex: 1,
+        pageSize: 20,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      })),
+      getUserSessions: vi.fn(async () => []),
+      revokeSession: vi.fn(async () => undefined),
+      revokeAllSessions: vi.fn(async () => undefined),
+      updateActivityTime: vi.fn(async () => undefined),
+      cleanExpired: vi.fn(async () => 0),
+      getStatistics: vi.fn(async () => ({ activeSessionCount: 0, onlineUserCount: 0, topDevices: [] })),
+      getActiveUsers: vi.fn(async () => []),
+    } as any
+  }
+
+  it('sessions.list calls sessionApi.getSessions with filters and returns paged items incl. userName', async () => {
+    const sessionApi = mockSessionApi()
+    const bridge = makeBridge({ sessionApi })
+    const result = await bridge.sessions.list({ userId: 'u1', includeRevoked: true, pageIndex: 2, pageSize: 50 })
+    expect(sessionApi.getSessions).toHaveBeenCalledWith({
+      userId: 'u1',
+      includeRevoked: true,
+      pageIndex: 2,
+      pageSize: 50,
+    })
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]?.userName).toBe('alice')
+    expect(result.totalCount).toBe(1)
+  })
+
+  it('sessions.list maps null userId to undefined (global, unfiltered list)', async () => {
+    const sessionApi = mockSessionApi()
+    const bridge = makeBridge({ sessionApi })
+    await bridge.sessions.list({ userId: null, includeRevoked: false, pageIndex: 1, pageSize: 20 })
+    expect(sessionApi.getSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: undefined }),
+    )
+  })
+
+  it('sessions.list rejects with a clear error when no sessionApi is wired', async () => {
+    const bridge = makeBridge()
+    await expect(bridge.sessions.list()).rejects.toThrow(/sessions\.list/)
+  })
 })

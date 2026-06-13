@@ -30,7 +30,7 @@ public class AgentFactory : IAgentFactory
     }
 
     /// <inheritdoc />
-    public async Task<AgentExecutor> CreateAgentAsync(
+    public async Task<IAgentExecutor> CreateAgentAsync(
         string? providerName = null,
         string? model = null,
         string? instructions = null,
@@ -40,6 +40,7 @@ public class AgentFactory : IAgentFactory
         int? maxTokens = null,
         AgentExecutorOptions? options = null,
         IEnumerable<string>? userPermissions = null,
+        IEnumerable<string>? toolNames = null,
         Guid? agentId = null,
         CancellationToken ct = default)
     {
@@ -60,26 +61,36 @@ public class AgentFactory : IAgentFactory
         var meaiChatClient = _chatClientFactory.GetChatClient(providerName, model);
         var resolvedModel = model ?? providerConfig.DefaultModel;
 
-        // 3. 解析工具（C# + MCP 合并，按用户权限过滤）
-        var tools = await _toolResolver.ResolveToolsAsync(toolGroups, userPermissions, ct);
+        // 3. 解析工具（C# + MCP 合并，按用户权限过滤；toolNames 提供 per-tool 授权/请求覆盖）
+        var toolNamesList = toolNames as IReadOnlyCollection<string> ?? toolNames?.ToList();
+        var hasToolNames = toolNamesList is { Count: > 0 };
+        var tools = await _toolResolver.ResolveToolsAsync(toolGroups, userPermissions, toolNamesList, ct);
 
         // 4. 构建 AgentExecutorOptions
         var executorOptions = _optionsBuilder.Build(options, name, instructions, tools, temperature, maxTokens, agentId, agentName: name);
 
         // 5b. 从 IToolRegistry 填充 ToolDefinitions（供并行执行守卫和 GracefulShutdown 中断路径使用）
-        // 仅当调用方指定了 toolGroups 时才查询：MCP/OpenAPI 工具无注册表元数据，不在此填充，
+        // 仅当调用方指定了 toolGroups 或 toolNames 时才查询：MCP/OpenAPI 工具无注册表元数据，不在此填充，
         // executor 遇到未知工具时自动降级为顺序执行（fail-closed 安全默认）。
-        if (toolGroups != null)
+        if (toolGroups != null || hasToolNames)
         {
-            var toolGroupsList = toolGroups.ToList();
-            var toolDefs = _toolRegistry.GetToolsByGroupsWithPermissions(toolGroupsList, userPermissions);
-            if (toolDefs.Count > 0)
+            var dict = new Dictionary<string, ToolDefinition>(StringComparer.OrdinalIgnoreCase);
+            if (toolGroups != null)
             {
-                var dict = new Dictionary<string, ToolDefinition>(StringComparer.OrdinalIgnoreCase);
-                foreach (var td in toolDefs)
+                foreach (var td in _toolRegistry.GetToolsByGroupsWithPermissions(toolGroups.ToList(), userPermissions))
                 {
                     dict.TryAdd(td.Name, td);
                 }
+            }
+            if (hasToolNames)
+            {
+                foreach (var td in _toolRegistry.GetToolsByNames(toolNamesList!, userPermissions))
+                {
+                    dict.TryAdd(td.Name, td);
+                }
+            }
+            if (dict.Count > 0)
+            {
                 executorOptions.ToolDefinitions = dict;
             }
         }

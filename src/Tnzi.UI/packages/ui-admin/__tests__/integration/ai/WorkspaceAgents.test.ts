@@ -110,7 +110,7 @@ describe('WorkspaceAgents page (TCardPage card grid)', () => {
     const wrapper = mount(WorkspaceAgents, { global: { stubs } })
     await flushPromises()
     // Each agent card renders inside .t-workspace-agent-page__agent-card
-    const cards = wrapper.findAll('.t-workspace-agent-page__agent-card')
+    const cards = wrapper.findAll('.t-entity-card')
     expect(cards).toHaveLength(2)
   })
 
@@ -142,7 +142,7 @@ describe('WorkspaceAgents page (TCardPage card grid)', () => {
     // list() should have been called again
     expect(mockList).toHaveBeenCalledTimes(2)
     // Only the Project-scoped agent should appear
-    const cards = wrapper.findAll('.t-workspace-agent-page__agent-card')
+    const cards = wrapper.findAll('.t-entity-card')
     expect(cards).toHaveLength(1)
     expect(wrapper.text()).toContain('Reviewer')
     expect(wrapper.text()).not.toContain('Planner')

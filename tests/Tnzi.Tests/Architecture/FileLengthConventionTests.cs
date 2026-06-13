@@ -26,7 +26,6 @@ public class FileLengthConventionTests
         "src/Tnzi.EFCore/EfCoreRepository.cs",
         "src/Tnzi.AI/Infrastructure/Mcp/McpClientAdapter.cs",
         "src/Tnzi.AI.Workflow/Services/WorkflowService.Execution.cs",
-        "src/Tnzi.AI/Engine/AgentExecutor.cs",
         "src/Tnzi.Authorization/Services/DataAuthService.cs",
     };
 

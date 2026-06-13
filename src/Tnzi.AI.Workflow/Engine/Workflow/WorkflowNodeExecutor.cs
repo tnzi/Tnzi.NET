@@ -130,7 +130,6 @@ public class WorkflowNodeExecutor
                     Error = result.Error,
                     RouteTo = result.RouteTo,
                     AwaitingApproval = result.AwaitingApproval,
-                    DynamicSteps = result.DynamicSteps,
                     DurationMs = sw.ElapsedMilliseconds
                 };
             }

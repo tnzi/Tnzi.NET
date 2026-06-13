@@ -4,10 +4,9 @@ namespace Tnzi.AI.WebSearch;
 /// Web 搜索提供者抽象 — 可插拔的联网搜索能力
 /// </summary>
 /// <remarks>
-/// <para>默认实现由 Tnzi.AI.Coder 模块提供（DuckDuckGo HTML 抓取）。</para>
+/// <para>默认实现由 Tnzi.AI 模块提供（DuckDuckGo HTML 抓取）。</para>
 /// <para>生产环境建议替换为商业搜索 API（Bing Search API, Google Custom Search, Tavily 等）。</para>
 /// </remarks>
-[ExperimentalApi(Reason = "AI abstractions are evolving")]
 public interface IWebSearchProvider
 {
     /// <summary>
@@ -23,7 +22,6 @@ public interface IWebSearchProvider
 /// <summary>
 /// Web 搜索结果
 /// </summary>
-[ExperimentalApi(Reason = "AI abstractions are evolving")]
 public class WebSearchResult
 {
     /// <summary>

@@ -17,7 +17,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
         ValidateNoDuplicateToolNames();
     }
 
-    public async Task<ExecutionResult> ExecuteAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct)
+    public async Task<ExecutionResult> ExecuteAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct)
     {
         var childInvocations = new ConcurrentQueue<(string Name, int Input, int Output)>();
 
@@ -29,7 +29,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
         return BuildResult(response, agent.Name, childInvocations);
     }
 
-    public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, [EnumeratorCancellation] CancellationToken ct)
     {
         var childInvocations = new ConcurrentQueue<(string Name, int Input, int Output)>();
 
@@ -215,7 +215,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
     /// Execute child agent with streaming, forwarding each delta chunk through the forwarder.
     /// </summary>
     private static async Task<string> ExecuteChildStreamingAsync(
-        AgentExecutor childAgent, string childName, List<ChatMessage> childMessages,
+        IAgentExecutor childAgent, string childName, List<ChatMessage> childMessages,
         IAgentStreamForwarder forwarder, ConcurrentQueue<(string, int, int)> invocations, CancellationToken ct)
     {
         var sb = new StringBuilder();

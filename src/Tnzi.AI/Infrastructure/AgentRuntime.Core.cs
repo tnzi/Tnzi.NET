@@ -27,7 +27,7 @@ public partial class AgentRuntime
         var effectiveModel = ResolveThinkingModel(request);
 
         var resolution = await _agentResolver.ResolveAgentAsync(
-            request.AgentId, request.Provider, effectiveModel, request.ToolGroups, ct);
+            request.AgentId, request.Provider, effectiveModel, request.ToolGroups, ct, request.ToolNames);
 
         if (!resolution.IsSuccess)
         {
@@ -61,12 +61,6 @@ public partial class AgentRuntime
     private async Task<AgentRunResult> ExecuteCoreAsync(AiMiddlewareContext context, CancellationToken ct)
     {
         var resolution = context.Agent;
-
-        if (resolution.ExecutionMode == AgentExecutionMode.ExternalCli)
-        {
-            var cliExecutor = _serviceProvider.GetRequiredService<IExternalCliExecutor>();
-            return await cliExecutor.ExecuteCliAsync(context, ct);
-        }
 
         var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
@@ -126,16 +120,6 @@ public partial class AgentRuntime
     {
         var resolution = context.Agent;
 
-        if (resolution.ExecutionMode == AgentExecutionMode.ExternalCli)
-        {
-            var cliExecutor = _serviceProvider.GetRequiredService<IExternalCliExecutor>();
-            await foreach (var chunk in cliExecutor.ExecuteCliStreamingAsync(context, ct))
-            {
-                yield return chunk;
-            }
-            yield break;
-        }
-
         var agent = await ApplyModelOverrideAsync(resolution, context, ct);
 
         var messages = new List<ChatMessage>(context.Messages);
@@ -180,9 +164,11 @@ public partial class AgentRuntime
 
     /// <summary>
     /// Apply EffectiveModel/Provider override set by SkillConstraintMiddleware.
-    /// Rebuilds AgentExecutor if Model or Provider changed; returns original otherwise.
+    /// Rebuilds the executor if Model or Provider changed; returns original otherwise.
+    /// Operates entirely on <see cref="IAgentExecutor"/> — custom resolver/factory
+    /// implementations returning their own executors flow through without casts.
     /// </summary>
-    private async Task<AgentExecutor> ApplyModelOverrideAsync(AgentResolution resolution, AiMiddlewareContext context, CancellationToken ct)
+    private async Task<IAgentExecutor> ApplyModelOverrideAsync(AgentResolution resolution, AiMiddlewareContext context, CancellationToken ct)
     {
         var originalAgent = resolution.Agent!;
         var effectiveModel = context.EffectiveModel;
@@ -217,13 +203,13 @@ public partial class AgentRuntime
         return await _agentFactory.CreateAgentAsync(
             newProvider, newModel, p.Instructions, p.Name, p.ToolGroups,
             p.Temperature, p.MaxTokens, options: null, userPermissions: p.UserPermissions,
-            agentId: resolution.AgentId, ct: ct);
+            toolNames: p.ToolNames, agentId: resolution.AgentId, ct: ct);
     }
 
     /// <summary>
     /// Merge middleware-injected tools into Agent, deduplicating by name.
     /// </summary>
-    private static AgentExecutor MergeAdditionalTools(AgentExecutor agent, AiMiddlewareContext context)
+    private static IAgentExecutor MergeAdditionalTools(IAgentExecutor agent, AiMiddlewareContext context)
     {
         if (context.AdditionalTools.Count == 0)
             return agent;

@@ -35,6 +35,16 @@ public class AgentVersionRouteResult
     public string? SelectedVariant { get; init; }
 
     /// <summary>
+    /// 路由后变体的资源授权投影（来自版本快照，而非当前 live junction）。
+    /// 仅 A/B 路由时有值；passthrough 时为 <c>null</c>，此时 resolver 回退读取 live grants。
+    /// 资源列（ToolGroups/ToolNames/SkillSlugs/KnowledgeBaseIds）已从 Agent 实体删除（grant 化），
+    /// 无法随 Agent 对象传递，故必须经此字段单独携带——否则 A/B 路由静默使用 live 资源而非变体快照。
+    /// The routed variant's grant projection sourced from the version SNAPSHOT (not the live junction).
+    /// Non-null only when A/B-routed; null on passthrough → resolver falls back to reading live grants.
+    /// </summary>
+    public AgentGrantsProjection? SnapshotGrants { get; init; }
+
+    /// <summary>
     /// 创建 passthrough 结果（无 A/B 测试）
     /// </summary>
     public static AgentVersionRouteResult Passthrough(Agent agent) =>

@@ -17,30 +17,14 @@
       </NButton>
     </template>
 
-    <div class="t-signalr-page__kpis">
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? 0">
-          <template #suffix><TSvgIcon icon="mdi:account-group" :size="14" /></template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? 0">
-          <template #suffix><TSvgIcon icon="mdi:lan-connect" :size="14" /></template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.hubs')" :value="hubCount">
-          <template #suffix><TSvgIcon icon="mdi:hub" :size="14" /></template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.groups')" :value="groupCount">
-          <template #suffix><TSvgIcon icon="mdi:account-group-outline" :size="14" /></template>
-        </NStatistic>
-      </NCard>
-    </div>
+    <TKpiRow class="t-signalr-page__kpis">
+      <TStatCard :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? 0" icon="mdi:account-group" />
+      <TStatCard :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? 0" icon="mdi:lan-connect" />
+      <TStatCard :label="t('kpi.hubs')" :value="hubCount" icon="mdi:hub" />
+      <TStatCard :label="t('kpi.groups')" :value="groupCount" icon="mdi:account-group-outline" />
+    </TKpiRow>
 
-    <NCard :title="t('sections.users')" size="small" :bordered="false">
+    <NCard :title="t('sections.users')" size="small" :bordered="false" class="t-signalr-page__list-card">
       <template #header-extra>
         <NInput
           v-model:value="filterText"
@@ -79,10 +63,11 @@ import {
   NDataTable,
   NInput,
   NPopconfirm,
-  NStatistic,
   NTag,
   NText,
 } from 'naive-ui'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TStatCard from '../../components/data/TStatCard.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
@@ -280,30 +265,26 @@ onMounted(() => { void refresh() })
    the residual area and the table's built-in pagination stays anchored
    at the bottom. Naive UI's content wrapper class is `n-card-content`
    (dash, NOT BEM `n-card__content`) — must be a flex column with
-   min-height: 0 for `flex-height` to compute correctly. */
-:deep(.n-card:last-of-type) {
+   min-height: 0 for `flex-height` to compute correctly. Targeted by an
+   explicit class so the TStatCard NCards in the KPI strip stay untouched. */
+:deep(.t-signalr-page__list-card) {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-:deep(.n-card:last-of-type > .n-card-content) {
+:deep(.t-signalr-page__list-card > .n-card-content) {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-:deep(.n-card:last-of-type .n-data-table) {
+:deep(.t-signalr-page__list-card .n-data-table) {
   flex: 1 1 auto;
   min-height: 0;
 }
 .t-signalr-page__kpis {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-@media (max-width: 900px) {
-  .t-signalr-page__kpis { grid-template-columns: repeat(2, 1fr); }
+  flex-shrink: 0;
 }
 .t-signalr-page__conns {
   padding: 8px 16px 12px;

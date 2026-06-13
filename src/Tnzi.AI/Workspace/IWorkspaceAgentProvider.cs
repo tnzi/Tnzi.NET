@@ -3,7 +3,7 @@ namespace Tnzi.AI.Workspace;
 /// <summary>
 /// Discovers and loads workspace-based agent definitions from AGENT.md files
 /// </summary>
-[ExperimentalApi(Reason = "Gateway/Device/Workspace API under active development")]
+[ExperimentalApi(Reason = "Workspace agent API under active development")]
 public interface IWorkspaceAgentProvider
 {
     /// <summary>

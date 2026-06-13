@@ -13,7 +13,7 @@ public class RouterExecutionStrategy : IExecutionStrategy
         _config = Check.NotNull(config);
     }
 
-    public async Task<ExecutionResult> ExecuteAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct)
+    public async Task<ExecutionResult> ExecuteAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, CancellationToken ct)
     {
         var routerAgent = InjectRouteTool(agent, _config.Targets.Keys);
         var routerResponse = await routerAgent.ExecuteAsync(messages, ct);
@@ -58,7 +58,7 @@ public class RouterExecutionStrategy : IExecutionStrategy
         return BuildResult(targetResponse, [agent.Name, targetAgent.Name], targetAgent.Name, promptTokens, completionTokens);
     }
 
-    public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(AgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(IAgentExecutor agent, List<ChatMessage> messages, ExecutionStrategyContext context, [EnumeratorCancellation] CancellationToken ct)
     {
         string? detectedRoute = null;
         var routerAgent = InjectRouteTool(agent, _config.Targets.Keys, target => detectedRoute = target);
@@ -119,7 +119,7 @@ public class RouterExecutionStrategy : IExecutionStrategy
         }
     }
 
-    internal static AgentExecutor InjectRouteTool(AgentExecutor agent, IEnumerable<string> availableTargets, Action<string>? onRoute = null)
+    internal static IAgentExecutor InjectRouteTool(IAgentExecutor agent, IEnumerable<string> availableTargets, Action<string>? onRoute = null)
     {
         var targetList = availableTargets.ToList();
         var targetDescription = targetList.Count > 0

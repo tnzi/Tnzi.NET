@@ -6,8 +6,9 @@
  * total notification count (totalCount header), plus the count of
  * failed messages via a quick filter pass. Backend gap: there's no
  * dedicated `/stats` endpoint, so the failed count uses a status
- * filter that may or may not be honoured by the API; falls back to em
- * dash silently.
+ * filter that may or may not be honoured by the API; an unfetchable
+ * count renders as 0 (count semantics — an em dash read as a broken
+ * widget).
  */
 import { ref } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
@@ -39,7 +40,9 @@ function t(key: string, fallback: string): string {
 }
 
 function fmt(n: number | null): string {
-  return n === null ? '—' : n.toLocaleString()
+  // Count semantics: a null (request failed / field missing) reads better as
+  // 0 than as an em dash, which looked like a rendering bug on the workbench.
+  return (n ?? 0).toLocaleString()
 }
 </script>
 

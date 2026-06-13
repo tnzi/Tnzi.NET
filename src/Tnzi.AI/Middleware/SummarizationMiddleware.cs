@@ -48,9 +48,6 @@ public class SummarizationMiddleware : IAiMiddleware
         AiMiddlewareDelegate next,
         CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-            return await next(context, cancellationToken);
-
         ApplyMicroCompact(context);
         await TrySummarizeAsync(context, cancellationToken);
 
@@ -62,11 +59,8 @@ public class SummarizationMiddleware : IAiMiddleware
         AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!context.ShouldSkipMiddleware)
-        {
-            ApplyMicroCompact(context);
-            await TrySummarizeAsync(context, cancellationToken);
-        }
+        ApplyMicroCompact(context);
+        await TrySummarizeAsync(context, cancellationToken);
 
         await foreach (var chunk in next(context, cancellationToken))
         {

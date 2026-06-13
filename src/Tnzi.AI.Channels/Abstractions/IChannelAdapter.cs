@@ -18,6 +18,13 @@ public interface IChannelAdapter : IAsyncDisposable
     /// </summary>
     bool SupportsFileAttachment => false;
 
+    /// <summary>
+    /// 此渠道 Bot 实例归属的租户 ID（来自渠道 adapter options）。
+    /// 多租户部署下用于将入站消息打上租户上下文（会话绑定规则分区、线程映射审计填充）。
+    /// 默认 null = 单租户部署 / 渠道不归属任何租户（行为与既往完全一致）。
+    /// </summary>
+    Guid? TenantId => null;
+
     /// <summary>启动监听</summary>
     Task StartAsync(CancellationToken ct = default);
 

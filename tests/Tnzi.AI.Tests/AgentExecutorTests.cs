@@ -219,16 +219,13 @@ public class AgentExecutorTests
         toolDetails[0].Error.ShouldContain("InvalidOperationException");
     }
 
+    // ── 回归锁定：系统提示最终形态必须与 13-tag 接缝删除前逐字节一致 ──────────
+    // 删除前由 SystemPromptTemplateBuilder 装配（无 SectionProviders 的生产路径），
+    // 快照为 "<instructions>\n{content}\n</instructions>"。
+
     [Fact]
-    public async Task ExecuteAsync_WithSectionProvider_IncludesSectionInInstructions()
+    public async Task ExecuteAsync_StaticInstructions_ProducesExactWrappedSystemPrompt()
     {
-        // Arrange: a section provider that emits a known tag + content
-        const string sectionTag = "bot_skills";
-        const string sectionContent = "You have access to skill: email_outreach";
-
-        var provider = new TestSystemPromptSectionProvider(
-            new SystemPromptSection(sectionTag, sectionContent, 40));
-
         var mockClient = new Mock<IChatClient>();
         ChatOptions? capturedOptions = null;
         mockClient.Setup(c => c.GetResponseAsync(
@@ -241,35 +238,43 @@ public class AgentExecutorTests
                 return new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done"));
             });
 
-        var options = new AgentExecutorOptions
+        var executor = new AgentExecutor(mockClient.Object, new AgentExecutorOptions
         {
             Name = "TestAgent",
-            Instructions = "Base instructions.",
-            SectionProviders = [provider]
-        };
+            Instructions = "Base instructions."
+        });
 
-        var executor = new AgentExecutor(mockClient.Object, options);
+        await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "Hello")], CancellationToken.None);
 
-        // Act
-        var messages = new List<ChatMessage> { new(ChatRole.User, "Hello") };
-        await executor.ExecuteAsync(messages, CancellationToken.None);
-
-        // Assert: the assembled Instructions should contain both the static section and the provider section
         capturedOptions.ShouldNotBeNull();
-        capturedOptions!.Instructions.ShouldNotBeNullOrWhiteSpace();
-        capturedOptions.Instructions.ShouldContain($"<{sectionTag}>");
-        capturedOptions.Instructions.ShouldContain(sectionContent);
-        capturedOptions.Instructions.ShouldContain("<instructions>");
-        capturedOptions.Instructions.ShouldContain("Base instructions.");
+        capturedOptions!.Instructions.ShouldBe("<instructions>\nBase instructions.\n</instructions>");
     }
 
-    /// <summary>
-    /// Test double for ISystemPromptSectionProvider
-    /// </summary>
-    private sealed class TestSystemPromptSectionProvider(SystemPromptSection section) : ISystemPromptSectionProvider
+    [Fact]
+    public async Task ExecuteAsync_WhitespaceInstructions_LeavesSystemPromptNull()
     {
-        public Task<SystemPromptSection?> GetSectionAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<SystemPromptSection?>(section);
+        var mockClient = new Mock<IChatClient>();
+        ChatOptions? capturedOptions = null;
+        mockClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<ChatMessage> _, ChatOptions? opts, CancellationToken _) =>
+            {
+                capturedOptions = opts;
+                return new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done"));
+            });
+
+        var executor = new AgentExecutor(mockClient.Object, new AgentExecutorOptions
+        {
+            Name = "TestAgent",
+            Instructions = "   "
+        });
+
+        await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "Hello")], CancellationToken.None);
+
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions!.Instructions.ShouldBeNull();
     }
 
     // ── C2: immutability — caller's messages list must not be mutated ─────────

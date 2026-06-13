@@ -39,8 +39,14 @@ public static class GatewayMiddlewareExtensions
                     return;
                 }
 
+                // 从已认证连接的租户上下文解析归属租户（匿名连接 = null，单租户行为不变）。
+                // ICurrentTenant 由框架按请求作用域从用户声明解析；服务端解析，绝不信任客户端输入。
+                var tenantId = !string.IsNullOrEmpty(userId)
+                    ? context.RequestServices.GetService<ICurrentTenant>()?.Id
+                    : null;
+
                 using var ws = await context.WebSockets.AcceptWebSocketAsync();
-                await handler.HandleAsync(ws, userId, context.RequestAborted);
+                await handler.HandleAsync(ws, userId, context.RequestAborted, tenantId);
             }
             else
             {

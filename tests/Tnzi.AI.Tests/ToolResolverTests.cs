@@ -10,7 +10,19 @@ public class ToolResolverTests
     private sealed class DummyToolProvider
     {
         public string Echo() => "ok";
+        public string ReadFile() => "read";
+        public string WriteFile() => "write";
+        public string DeleteFile() => "delete";
     }
+
+    private static ToolDefinition MakeToolDef(string name, string group, string methodName, IReadOnlyList<string>? perms = null) => new()
+    {
+        Name = name,
+        GroupName = group,
+        ProviderType = typeof(DummyToolProvider),
+        MethodInfo = typeof(DummyToolProvider).GetMethod(methodName)!,
+        RequiredPermissions = perms ?? []
+    };
 
     // ------------------------------------------------------------------
     // Helpers
@@ -330,6 +342,65 @@ public class ToolResolverTests
         result!.Count.ShouldBe(1);
         result[0].ShouldBeOfType<ApprovalToolWrapper>();
     }
+
+    // ------------------------------------------------------------------
+    // A4.T5: per-tool names resolved + unioned with group tools
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ResolveToolsAsync_ToolNamesOnly_ResolvesIndividualTools()
+    {
+        // A real registry holding two tools in group "fs"; we only name "read_file".
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+        registry.Register(MakeToolDef("read_file", "fs", nameof(DummyToolProvider.ReadFile)));
+        registry.Register(MakeToolDef("write_file", "fs", nameof(DummyToolProvider.WriteFile)));
+
+        var resolver = CreateResolver(toolRegistry: registry, serviceProvider: BuildServiceProvider());
+
+        var result = await resolver.ResolveToolsAsync(toolGroups: null, userPermissions: null, toolNames: ["read_file"]);
+
+        result.ShouldNotBeNull();
+        result!.Select(t => t.Name).ShouldBe(["read_file"]);
+    }
+
+    [Fact]
+    public async Task ResolveToolsAsync_GroupPlusToolNames_Unioned_Deduplicated()
+    {
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+        registry.Register(MakeToolDef("read_file", "fs", nameof(DummyToolProvider.ReadFile)));
+        registry.Register(MakeToolDef("write_file", "fs", nameof(DummyToolProvider.WriteFile)));
+        registry.Register(MakeToolDef("delete_file", "danger", nameof(DummyToolProvider.DeleteFile)));
+
+        var resolver = CreateResolver(toolRegistry: registry, serviceProvider: BuildServiceProvider());
+
+        // group "fs" → {read_file, write_file}; named "delete_file" + "read_file" (dup)
+        var result = await resolver.ResolveToolsAsync(
+            toolGroups: ["fs"], userPermissions: null, toolNames: ["delete_file", "read_file"]);
+
+        result.ShouldNotBeNull();
+        result!.Select(t => t.Name).OrderBy(x => x).ToArray()
+            .ShouldBe(["delete_file", "read_file", "write_file"]);
+    }
+
+    [Fact]
+    public async Task ResolveToolsAsync_NamedTool_RespectsPermissions()
+    {
+        // Named tool requires a permission the user lacks → must NOT be resolved.
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+        registry.Register(MakeToolDef("read_file", "fs", nameof(DummyToolProvider.ReadFile)));
+        registry.Register(MakeToolDef("delete_file", "danger", nameof(DummyToolProvider.DeleteFile), perms: ["perm.delete"]));
+
+        var resolver = CreateResolver(toolRegistry: registry, serviceProvider: BuildServiceProvider());
+
+        var result = await resolver.ResolveToolsAsync(
+            toolGroups: null, userPermissions: ["perm.read"], toolNames: ["read_file", "delete_file"]);
+
+        result.ShouldNotBeNull();
+        result!.Select(t => t.Name).ShouldBe(["read_file"]);
+    }
+
+    private static IServiceProvider BuildServiceProvider()
+        => new ServiceCollection().AddLogging().BuildServiceProvider();
 
     // ------------------------------------------------------------------
     // Null name tools are excluded

@@ -22,6 +22,9 @@ public class TelegramChannelAdapter : IChannelAdapter
     public bool SupportsStreaming => false;
     public bool SupportsFileAttachment => true;
 
+    /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
+    public Guid? TenantId => _options.TenantId;
+
     public TelegramChannelAdapter(
         ILogger<TelegramChannelAdapter> logger,
         IChannelMessageBus bus,

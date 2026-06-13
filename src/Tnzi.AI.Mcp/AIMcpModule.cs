@@ -6,8 +6,8 @@ using TnziMcpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 namespace Tnzi.AI.Mcp;
 
 /// <summary>
-/// MCP Server 模块 — 将 Tnzi.AI Agent 暴露为 MCP Server，支持 HTTP/SSE 和 stdio 传输。
-/// Client 侧管理（外部 MCP Server 注册表、OAuth Token）由 AIMcpClientModule 负责。
+/// MCP Server 模块 — 将 Tnzi.AI Agent 通过 HTTP/SSE 暴露为 MCP Server。
+/// Client 侧管理（外部 MCP Server 注册表、OAuth Token）由 Tnzi.AI 核心提供。
 /// </summary>
 [DependsOn(typeof(AIModule))]
 public class AIMcpModule : TnziApplicationModule
@@ -51,9 +51,8 @@ public class AIMcpModule : TnziApplicationModule
         // McpServerHttpSecurityMiddleware is convention-based ASP.NET middleware (RequestDelegate ctor)
         // — instantiated by UseMiddleware<T>(), NOT by DI container
         services.TryAddSingleton<IMcpServerHost, McpServerHost>();
-        services.AddHostedService<McpServerHostedService>();
 
-        if (mcpServerOptions.Enabled && !string.Equals(mcpServerOptions.Transport, "stdio", StringComparison.OrdinalIgnoreCase))
+        if (mcpServerOptions.Enabled)
         {
             services.AddMcpServer(serverOptions =>
                 {
@@ -80,7 +79,7 @@ public class AIMcpModule : TnziApplicationModule
         var logger = serviceProvider.GetRequiredService<ILogger<AIMcpModule>>();
         var mcpServerOptions = serviceProvider.GetRequiredService<IOptions<TnziMcpServerOptions>>().Value;
 
-        if (mcpServerOptions.Enabled && !string.Equals(mcpServerOptions.Transport, "stdio", StringComparison.OrdinalIgnoreCase))
+        if (mcpServerOptions.Enabled)
         {
             var mcpServiceProviderAccessor = serviceProvider.GetRequiredService<McpServerServiceProviderAccessor>();
             mcpServiceProviderAccessor.ServiceProvider = serviceProvider;
@@ -99,9 +98,7 @@ public class AIMcpModule : TnziApplicationModule
             }
             else
             {
-                logger.LogWarning(
-                    "MCP Server transport '{Transport}' is enabled but no WebApplication is available. HTTP/SSE endpoint was not mapped.",
-                    mcpServerOptions.Transport);
+                logger.LogWarning("MCP Server is enabled but no WebApplication is available. HTTP/SSE endpoint was not mapped.");
             }
         }
 

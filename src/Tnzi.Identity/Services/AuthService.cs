@@ -9,7 +9,7 @@ public class AuthService : ApplicationService, IAuthService
     private readonly UserManager<User> _userManager;
     private readonly SignInManager<User> _signInManager;
     private readonly ITokenService _tokenService;
-    private readonly IdentityOptions _identityOptions;
+    private readonly IOptionsMonitor<IdentityOptions> _identityOptionsMonitor;
     private readonly IEventBus? _eventBus;
     private readonly ICaptchaService? _captchaService;
     private readonly IAuthTokenService? _authTokenService;
@@ -20,11 +20,13 @@ public class AuthService : ApplicationService, IAuthService
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
+    private IdentityOptions IdentityOptions => _identityOptionsMonitor.CurrentValue;
+
     public AuthService(
         UserManager<User> userManager,
         SignInManager<User> signInManager,
         ITokenService tokenService,
-        IOptions<IdentityOptions> identityOptions,
+        IOptionsMonitor<IdentityOptions> identityOptions,
         IServiceProvider serviceProvider,
         IEventBus? eventBus = null,
         ICaptchaService? captchaService = null,
@@ -40,7 +42,7 @@ public class AuthService : ApplicationService, IAuthService
         _userManager = Check.NotNull(userManager);
         _signInManager = Check.NotNull(signInManager);
         _tokenService = Check.NotNull(tokenService);
-        _identityOptions = Check.NotNull(identityOptions).Value;
+        _identityOptionsMonitor = Check.NotNull(identityOptions);
         _eventBus = eventBus;
         _captchaService = captchaService;
         _authTokenService = authTokenService;
@@ -91,7 +93,7 @@ public class AuthService : ApplicationService, IAuthService
 
     public async Task<Result<TokenResult>> LoginWithRefreshTokenAsync(LoginDto input)
     {
-        var jwtOptions = _identityOptions.Jwt;
+        var jwtOptions = IdentityOptions.Jwt;
 
         // 检查是否启用 RefreshToken
         if (!jwtOptions.EnableRefreshToken)
@@ -143,10 +145,11 @@ public class AuthService : ApplicationService, IAuthService
     {
         var ipAddress = ScopedContext?.ClientIpAddress;
         var userAgent = ScopedContext?.UserAgent;
-        var signInOptions = _identityOptions.SignIn;
-        var multiLoginOptions = _identityOptions.MultiLogin;
-        var captchaOptions = _identityOptions.Captcha;
-        var registrationOptions = _identityOptions.Registration;
+        var options = IdentityOptions;
+        var signInOptions = options.SignIn;
+        var multiLoginOptions = options.MultiLogin;
+        var captchaOptions = options.Captcha;
+        var registrationOptions = options.Registration;
         var loginIdentifier = ipAddress ?? input.UserName;
 
         // 1. 验证码校验
@@ -176,7 +179,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 3. 密码验证（lockoutOnFailure 由配置决定）
-        var signInResult = await _signInManager.CheckPasswordSignInAsync(user, input.Password, _identityOptions.AccountSecurity.EnableLockout);
+        var signInResult = await _signInManager.CheckPasswordSignInAsync(user, input.Password, options.AccountSecurity.EnableLockout);
         if (!signInResult.Succeeded)
         {
             if (_captchaService != null)
@@ -431,7 +434,7 @@ public class AuthService : ApplicationService, IAuthService
     private async Task<TokenResult> GenerateAndSaveTokenResultAsync(User user, bool enableRefreshToken = true)
     {
         var roles = await GetRolesWithTenantContextAsync(user);
-        var jwtOptions = _identityOptions.Jwt;
+        var jwtOptions = IdentityOptions.Jwt;
 
         // 生成AccessToken
         var accessToken = _tokenService.GenerateToken(user, roles);
@@ -615,7 +618,7 @@ public class AuthService : ApplicationService, IAuthService
 
     private async Task CheckAndPublishAbnormalLoginAsync(User user, string? ipAddress, string? userAgent)
     {
-        if (_loginSecurityService == null || !_identityOptions.AccountSecurity.EnableAbnormalLoginDetection) return;
+        if (_loginSecurityService == null || !IdentityOptions.AccountSecurity.EnableAbnormalLoginDetection) return;
         var result = await _loginSecurityService.DetectAbnormalLoginAsync(user.Id, ipAddress, userAgent);
         if (result.IsAbnormal && _eventBus != null)
         {
@@ -684,7 +687,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 检查配置
-        var otpOptions = _identityOptions.Otp;
+        var otpOptions = IdentityOptions.Otp;
         if (input.Type == TwoFactorType.Email && !otpOptions.EnableEmail)
         {
             return Fail<string>("Email verification is not enabled", 400);
@@ -727,8 +730,9 @@ public class AuthService : ApplicationService, IAuthService
 
         var ipAddress = ScopedContext?.ClientIpAddress;
         var userAgent = ScopedContext?.UserAgent;
-        var jwtOptions = _identityOptions.Jwt;
-        var registrationOptions = _identityOptions.Registration;
+        var codeLoginOptions = IdentityOptions;
+        var jwtOptions = codeLoginOptions.Jwt;
+        var registrationOptions = codeLoginOptions.Registration;
 
         // 验证输入
         var address = input.Type == TwoFactorType.Email ? input.Email : input.PhoneNumber;
@@ -819,7 +823,7 @@ public class AuthService : ApplicationService, IAuthService
                     IdentityConstants.TokenProvider.Identity,
                     IdentityConstants.TokenName.SetPassword,
                     setPasswordToken,
-                    DateTime.UtcNow.AddMinutes(_identityOptions.Registration.SetPasswordTokenExpirationMinutes));
+                    DateTime.UtcNow.AddMinutes(IdentityOptions.Registration.SetPasswordTokenExpirationMinutes));
             }
         }
 
@@ -849,7 +853,7 @@ public class AuthService : ApplicationService, IAuthService
     /// </summary>
     private async Task<Result<User>> AutoRegisterByCodeAsync(string? email, string? phoneNumber, TwoFactorType type)
     {
-        var registrationOptions = _identityOptions.Registration;
+        var registrationOptions = IdentityOptions.Registration;
 
         // 确定基础用户名
         string baseUserName;
@@ -903,8 +907,8 @@ public class AuthService : ApplicationService, IAuthService
     /// </summary>
     public async Task<Result<string>> SendPasswordRecoveryCodeAsync(SendPasswordRecoveryCodeDto input)
     {
-        var otpOptions = _identityOptions.Otp;
-        var recoveryOptions = _identityOptions.Recovery;
+        var otpOptions = IdentityOptions.Otp;
+        var recoveryOptions = IdentityOptions.Recovery;
 
         // 验证类型是否启用
         if (input.Type == TwoFactorType.Email && !otpOptions.EnableEmail)

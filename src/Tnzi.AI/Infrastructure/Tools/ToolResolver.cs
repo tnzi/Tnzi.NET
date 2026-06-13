@@ -11,9 +11,10 @@ public interface IToolResolver
     /// </summary>
     /// <param name="toolGroups">工具组列表（为空时仅合并 MCP 工具）</param>
     /// <param name="userPermissions">用户权限列表（为空时不过滤权限，返回所有工具）</param>
+    /// <param name="toolNames">单个工具名称列表（per-tool 授权/请求覆盖；在工具组之外额外解析，按名称去重合并；权限仍门控）</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>合并后的工具列表，无工具时返回 null</returns>
-    Task<IList<AITool>?> ResolveToolsAsync(IEnumerable<string>? toolGroups, IEnumerable<string>? userPermissions = null, CancellationToken ct = default);
+    Task<IList<AITool>?> ResolveToolsAsync(IEnumerable<string>? toolGroups, IEnumerable<string>? userPermissions = null, IEnumerable<string>? toolNames = null, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -80,13 +81,35 @@ public class ToolResolver : IToolResolver, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<IList<AITool>?> ResolveToolsAsync(IEnumerable<string>? toolGroups, IEnumerable<string>? userPermissions = null, CancellationToken ct = default)
+    public async Task<IList<AITool>?> ResolveToolsAsync(IEnumerable<string>? toolGroups, IEnumerable<string>? userPermissions = null, IEnumerable<string>? toolNames = null, CancellationToken ct = default)
     {
-        // C# 工具：仅当 toolGroups 非空时从 Registry 获取
+        // C# 工具：当 toolGroups 非空（组解析）或 toolNames 非空（per-tool 授权/请求覆盖）时从 Registry 获取。
+        // 两路按工具名去重合并为一个 ToolDefinition 集合，再统一转换/审批包装，使 per-tool 授权与组授权
+        // 共享同一条权限过滤 + 审批管道。权限不足的工具在 Registry 层已被排除（授权≠绕过权限）。
         IList<AITool>? csharpTools = null;
-        if (toolGroups != null)
+        var toolNamesList = toolNames as IReadOnlyCollection<string> ?? toolNames?.ToList();
+        var hasToolNames = toolNamesList is { Count: > 0 };
+        if (toolGroups != null || hasToolNames)
         {
-            var toolDefinitions = _toolRegistry.GetToolsByGroupsWithPermissions(toolGroups, userPermissions);
+            var toolDefMap = new Dictionary<string, ToolDefinition>(StringComparer.OrdinalIgnoreCase);
+
+            if (toolGroups != null)
+            {
+                foreach (var td in _toolRegistry.GetToolsByGroupsWithPermissions(toolGroups, userPermissions))
+                {
+                    toolDefMap.TryAdd(td.Name, td);
+                }
+            }
+
+            if (hasToolNames)
+            {
+                foreach (var td in _toolRegistry.GetToolsByNames(toolNamesList!, userPermissions))
+                {
+                    toolDefMap.TryAdd(td.Name, td);
+                }
+            }
+
+            var toolDefinitions = (IReadOnlyList<ToolDefinition>)toolDefMap.Values.ToList();
             csharpTools = ToolAdapter.ConvertToAITools(toolDefinitions, _serviceProvider, _toolAdapterLogger);
 
             if (csharpTools.Count > 0 && ShouldWrapWithApproval())

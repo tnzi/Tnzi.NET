@@ -11,7 +11,7 @@ public class LoopDetectionMiddlewareTests
     };
 
     private LoopDetectionMiddleware CreateMiddleware() =>
-        new(Microsoft.Extensions.Options.Options.Create(_options), NullLogger<LoopDetectionMiddleware>.Instance);
+        new(TestHelpers.CreateOptionsMonitor(_options), NullLogger<LoopDetectionMiddleware>.Instance);
 
     [Fact]
     public void Order_ReturnsLoopDetectionOrder()
@@ -69,7 +69,7 @@ public class LoopDetectionMiddlewareTests
     {
         var opts = new LoopDetectionOptions { Enabled = false };
         var middleware = new LoopDetectionMiddleware(
-            Microsoft.Extensions.Options.Options.Create(opts),
+            TestHelpers.CreateOptionsMonitor(opts),
             NullLogger<LoopDetectionMiddleware>.Instance);
         var context = TestHelpers.CreateMinimalContext();
 

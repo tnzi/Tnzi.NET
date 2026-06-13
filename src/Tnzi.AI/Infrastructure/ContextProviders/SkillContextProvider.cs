@@ -23,6 +23,8 @@ public sealed class SkillContextProvider : IContextProvider
     private readonly ISkillLoadTracker? _skillLoadTracker;
     private readonly ILogger<SkillContextProvider> _logger;
     private readonly string? _agentName;
+    /// <summary>该 Agent 显式分配的技能 slug 白名单（非空时仅这些技能可见）。</summary>
+    private readonly HashSet<string>? _restrictToSlugs;
 
     // 按需工具（仅当 InjectionMode 为 OnDemandTools 或 Both 时非空）
     private readonly AITool[] _skillTools;
@@ -46,7 +48,8 @@ public sealed class SkillContextProvider : IContextProvider
         ILogger<SkillContextProvider> logger,
         ISkillConstraintEnforcer? constraintEnforcer = null,
         ISkillLoadTracker? skillLoadTracker = null,
-        string? agentName = null)
+        string? agentName = null,
+        IEnumerable<string>? restrictToSlugs = null)
     {
         _registry = Check.NotNull(registry);
         _templateEngine = Check.NotNull(templateEngine);
@@ -55,6 +58,8 @@ public sealed class SkillContextProvider : IContextProvider
         _constraintEnforcer = constraintEnforcer;
         _skillLoadTracker = skillLoadTracker;
         _agentName = agentName;
+        var slugSet = restrictToSlugs?.Where(s => !string.IsNullOrWhiteSpace(s)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _restrictToSlugs = slugSet is { Count: > 0 } ? slugSet : null;
 
         var mode = options.InjectionMode;
         if (mode is SkillInjectionMode.OnDemandTools or SkillInjectionMode.Both)
@@ -364,12 +369,20 @@ public sealed class SkillContextProvider : IContextProvider
     /// </summary>
     private IReadOnlyList<SkillDefinition> FilterByAgent(IReadOnlyList<SkillDefinition> skills)
     {
+        IEnumerable<SkillDefinition> filtered;
+
         // 内部技能不暴露给 Agent（仅作为共享资源依赖存在）
         // 无 agent 上下文时，只返回无 agents 限制的 skill
         if (string.IsNullOrWhiteSpace(_agentName))
-            return skills.Where(s => !s.IsInternal && s.Agents is not { Count: > 0 }).ToList();
+            filtered = skills.Where(s => !s.IsInternal && s.Agents is not { Count: > 0 });
+        else
+            filtered = skills.Where(s => !s.IsInternal && IsAgentAllowed(s, _agentName));
 
-        return skills.Where(s => !s.IsInternal && IsAgentAllowed(s, _agentName)).ToList();
+        // Agent 显式分配了技能白名单时，仅保留白名单内的技能（精确分配优先于名称通配）。
+        if (_restrictToSlugs != null)
+            filtered = filtered.Where(s => _restrictToSlugs.Contains(s.Slug));
+
+        return filtered.ToList();
     }
 
     /// <summary>

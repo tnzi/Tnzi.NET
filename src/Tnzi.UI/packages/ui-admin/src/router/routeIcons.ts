@@ -45,7 +45,6 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   // ── System sub-routes ───────────────────────────────────────────
   'system.menus': 'mdi:menu',
   'system.dictionaries': 'mdi:book-alphabet',
-  'system.parameters': 'mdi:tune-variant',
   'system.accessLogs': 'mdi:eye-outline',
   'system.scheduledJobs': 'mdi:clock-outline',
   'system.features': 'mdi:toggle-switch-outline',
@@ -97,7 +96,6 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'ai.threads': 'mdi:chat-processing-outline',
   'ai.workspaceAgents': 'mdi:folder-account-outline',
   'ai.channels': 'mdi:connection',
-  'ai.devices': 'mdi:devices',
   'ai.permissions': 'mdi:shield-key-outline',
   'ai.sandbox': 'mdi:cube-outline',
 

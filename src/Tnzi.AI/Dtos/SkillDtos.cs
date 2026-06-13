@@ -248,22 +248,22 @@ public class SkillActivateDto
 /// </summary>
 public class SkillUsageStatsDto
 {
-    /// <summary>Total number of database skills</summary>
+    /// <summary>Total number of skills (dual-source merged: database + file sources)</summary>
     public int TotalSkills { get; set; }
 
-    /// <summary>Enabled skills count</summary>
+    /// <summary>Enabled skills count (dual-source merged)</summary>
     public int EnabledSkills { get; set; }
 
-    /// <summary>Disabled skills count</summary>
+    /// <summary>Disabled skills count (dual-source merged)</summary>
     public int DisabledSkills { get; set; }
 
-    /// <summary>Tenant-scoped skills count</summary>
+    /// <summary>Tenant-scoped skills count (dual-source merged)</summary>
     public int TenantScopeSkills { get; set; }
 
-    /// <summary>User-scoped skills count</summary>
+    /// <summary>User-scoped skills count (dual-source merged)</summary>
     public int UserScopeSkills { get; set; }
 
-    /// <summary>Total activations across all skills</summary>
+    /// <summary>Total activations across all skills (database-tracked skills only)</summary>
     public long TotalActivations { get; set; }
 }
 

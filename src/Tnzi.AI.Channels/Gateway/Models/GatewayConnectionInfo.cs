@@ -16,11 +16,11 @@ public class GatewayConnectionInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? UserId { get; init; }
 
-    /// <summary>客户端类型（如 cli, web, device）</summary>
+    /// <summary>客户端类型（当前 WebSocket 入口固定为 "websocket"；"device" 类型已随 2026-06-10 服务端重定位移除，字段保留给未来客户端类型）</summary>
     [JsonPropertyName("clientType")]
     public string ClientType { get; init; } = string.Empty;
 
-    /// <summary>设备节点 ID（用于分布式场景）</summary>
+    /// <summary>设备节点 ID（Device 模块已移除；字段保留供分布式部署标识连接来源节点）</summary>
     [JsonPropertyName("deviceNodeId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DeviceNodeId { get; init; }

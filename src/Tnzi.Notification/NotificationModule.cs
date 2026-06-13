@@ -32,6 +32,9 @@ public class NotificationModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // 注册配置中心分组定义
+        context.Services.AddSingleton<ISettingDefinitionProvider, NotificationSettingDefinitionProvider>();
+
         // 注册通知服务（拆分后的 5 个服务）
         context.Services.AddScoped<INotificationService, NotificationService>();
         context.Services.AddScoped<INotificationQueryService, NotificationQueryService>();

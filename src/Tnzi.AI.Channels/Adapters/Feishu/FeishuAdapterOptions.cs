@@ -28,10 +28,18 @@ public class FeishuAdapterOptions
     /// <summary>Allowed sender open_id list (empty = unrestricted).</summary>
     public List<string> AllowedUserIds { get; set; } = [];
 
+    /// <summary>
+    /// Owning tenant of this channel bot instance. Inbound messages from this
+    /// channel are processed under this tenant context (session binding rule
+    /// partitioning, thread mapping audit fill). Null = single-tenant / global.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     public override string ToString() =>
         $"FeishuAdapterOptions {{ Enabled = {Enabled}, AppId = {AppId}, " +
         $"AppSecret = {SecretMask.Mask(AppSecret)}, " +
         $"VerificationToken = {SecretMask.Mask(VerificationToken)}, " +
         $"EncryptKey = {SecretMask.Mask(EncryptKey)}, " +
+        $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedUserIds.Count = {AllowedUserIds.Count} }}";
 }

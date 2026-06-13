@@ -8,20 +8,22 @@ public class FileStorageService : ApplicationService, IFileStorageService
     private readonly IRepository<FileRecord, Guid> _repository;
     private readonly IRepository<FileReference, Guid> _referenceRepository;
     private readonly IFileStorage _storage;
-    private readonly StorageOptions _options;
+    private readonly IOptionsMonitor<StorageOptions> _optionsMonitor;
+
+    private StorageOptions Options => _optionsMonitor.CurrentValue;
 
     public FileStorageService(
         IRepository<FileRecord, Guid> repository,
         IRepository<FileReference, Guid> referenceRepository,
         IFileStorage storage,
-        IOptions<StorageOptions> options,
+        IOptionsMonitor<StorageOptions> optionsMonitor,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _referenceRepository = Check.NotNull(referenceRepository);
         _storage = Check.NotNull(storage);
-        _options = options?.Value ?? new StorageOptions();
+        _optionsMonitor = Check.NotNull(optionsMonitor);
     }
 
     public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false)
@@ -58,7 +60,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         // 2. 如果是图片，生成缩略图
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsImage(extension) && _options.AutoGenerateThumbnail)
+        if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
         {
             thumbnailPath = await GenerateThumbnailAsync(filePath, fileName);
         }
@@ -228,7 +230,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var filePath = await _storage.UploadAsync(newFileName, stream, contentType);
 
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsImage(extension) && _options.AutoGenerateThumbnail)
+        if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
         {
             thumbnailPath = await GenerateThumbnailAsync(filePath, newFileName);
         }
@@ -336,7 +338,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var newFilePath = await _storage.UploadAsync(copyFileName, sourceStream, sourceFile.ContentType);
 
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsImage(extension) && _options.AutoGenerateThumbnail)
+        if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
         {
             thumbnailPath = await GenerateThumbnailAsync(newFilePath, copyFileName);
         }
@@ -867,16 +869,16 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// </summary>
     private Result<T>? ValidateFile<T>(string fileName, Stream stream)
     {
-        if (stream.Length > _options.MaxFileSize)
+        if (stream.Length > Options.MaxFileSize)
         {
-            return Fail<T>($"File size ({stream.Length} bytes) exceeds maximum allowed size ({_options.MaxFileSize} bytes).", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail<T>($"File size ({stream.Length} bytes) exceeds maximum allowed size ({Options.MaxFileSize} bytes).", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         var extension = Path.GetExtension(fileName);
-        if (_options.AllowedExtensions.Any() &&
-            !_options.AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        if (Options.AllowedExtensions.Any() &&
+            !Options.AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
         {
-            return Fail<T>($"File type '{extension}' is not allowed. Allowed types: {string.Join(", ", _options.AllowedExtensions)}", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail<T>($"File type '{extension}' is not allowed. Allowed types: {string.Join(", ", Options.AllowedExtensions)}", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         return null;
@@ -913,7 +915,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             existing.Path = newFilePath;
             existing.ReferenceCount++;
 
-            if (FileTypeHelper.IsImage(existing.Extension ?? "") && _options.AutoGenerateThumbnail)
+            if (FileTypeHelper.IsImage(existing.Extension ?? "") && Options.AutoGenerateThumbnail)
             {
                 stream.Position = 0;
                 existing.ThumbnailPath = await GenerateThumbnailAsync(newFilePath, existing.FileName);
@@ -932,11 +934,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
             using var originalStream = await _storage.DownloadAsync(originalPath);
 
             using var image = await Image.LoadAsync<Rgba32>(originalStream);
-            var thumbnailSize = _options.ThumbnailSize;
+            var thumbnailSize = Options.ThumbnailSize;
             var thumbnail = image.GenerateSquareThumbnail(Math.Max(thumbnailSize.Width, thumbnailSize.Height));
 
             using var thumbnailStream = new MemoryStream();
-            var quality = _options.ImageCompressionQuality;
+            var quality = Options.ImageCompressionQuality;
             await thumbnail.SaveAsJpegAsync(thumbnailStream, new JpegEncoder { Quality = quality });
             thumbnailStream.Position = 0;
 

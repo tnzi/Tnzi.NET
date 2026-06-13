@@ -3,49 +3,99 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Phase 5 Task 5.10 — Knowledge integration test.
- * Mirrors Agents.test.ts plus a 4th reindex-wiring test.
+ * Knowledge integration test — production-grade card grid (TCardPage) with a
+ * create/edit modal, a per-card Reindex action, and a document-management
+ * drawer (Documents + Search test tabs).
  *
- * KB DTO is intentionally untyped at the bridge boundary
- * (`Record<string, unknown>`) — the underlying backend KnowledgeBase entity
- * is not exported from @tnzi/core/services/ai. Mock rows therefore mirror
- * what the backend likely returns: id/name/description/embeddingModel.
+ * The drawer's "open manage" flow calls bridge.knowledge.getDocuments, and the
+ * card Reindex action calls bridge.knowledge.reindex — both sub-contracts are
+ * mocked. KB rows mirror @tnzi/core KnowledgeBaseDto.
  */
-const reindexMock = vi.fn(async (_id: string) => undefined)
+vi.mock('../../../src/plugin/client', () => ({
+  useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), upload: vi.fn() }),
+}))
 
-vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
+const knowledgeFetch = vi.fn(async () => ({
+  items: [
+    {
+      id: 'kb1',
+      name: 'Product Docs',
+      description: 'Customer-facing product documentation',
+      embeddingProvider: 'openai',
+      embeddingModel: 'text-embedding-3-small',
+      chunkSize: 1000,
+      chunkOverlap: 200,
+      documentCount: 87,
+      chunkCount: 1024,
+      isEnabled: true,
+      creationTime: '2026-04-01T00:00:00Z',
+    },
+    {
+      id: 'kb2',
+      name: 'Internal Wiki',
+      description: 'Engineering knowledge base',
+      embeddingProvider: 'openai',
+      embeddingModel: 'text-embedding-3-large',
+      chunkSize: 1500,
+      chunkOverlap: 300,
+      documentCount: 312,
+      chunkCount: 4096,
+      isEnabled: false,
+      creationTime: '2026-04-02T00:00:00Z',
+    },
+  ],
+  totalCount: 2,
+  pageIndex: 1,
+  pageSize: 20,
+}))
+
+const getDocuments = vi.fn(async () => ({
+  items: [
+    {
+      id: 'doc1',
+      knowledgeBaseId: 'kb1',
+      fileName: 'guide.pdf',
+      contentType: 'application/pdf',
+      fileSize: 524288,
+      chunkCount: 42,
+      status: 1,
+      version: 1,
+      creationTime: '2026-04-01T00:00:00Z',
+    },
+  ],
+  totalCount: 1,
+  pageIndex: 1,
+  pageSize: 20,
+}))
+
+const reindexMock = vi.fn(async (_id: string) => ({
+  knowledgeBaseId: 'kb1',
+  chunkCount: 1024,
+  documentCount: 87,
+  durationMs: 1500,
+}))
+
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     knowledge: {
-      fetch: vi.fn(async () => ({
-        items: [
-          {
-            id: 'kb1',
-            name: 'Product Docs',
-            description: 'Customer-facing product documentation',
-            embeddingModel: 'text-embedding-3-small',
-            chunkCount: 1024,
-            documentCount: 87,
-            lastModificationTime: '2026-04-01T00:00:00Z',
-          },
-          {
-            id: 'kb2',
-            name: 'Internal Wiki',
-            description: 'Engineering knowledge base',
-            embeddingModel: 'text-embedding-3-large',
-            chunkCount: 4096,
-            documentCount: 312,
-            lastModificationTime: '2026-04-02T00:00:00Z',
-          },
-        ],
-        totalCount: 2,
-        pageIndex: 1,
-        pageSize: 20,
-      })),
+      fetch: knowledgeFetch,
       create: vi.fn(async (data: unknown) => ({ id: 'kb3', ...(data as object) })),
       update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
       delete: vi.fn(async () => undefined),
       reindex: reindexMock,
+      getDocuments,
+      getDocumentStatus: vi.fn(async (_kbId: string, _docId: string) => ({ id: 'doc1', status: 1 })),
+      uploadDocument: vi.fn(async () => ({
+        documentId: 'doc2',
+        fileName: 'new.txt',
+        status: 0,
+        chunkCount: 0,
+        isDuplicate: false,
+      })),
+      deleteDocument: vi.fn(async () => undefined),
+      searchTest: vi.fn(async () => [
+        { content: 'matched chunk', sourceName: 'guide.pdf', score: 0.92, chunkIndex: 0 },
+      ]),
     },
   }),
 }))
@@ -53,17 +103,8 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
 import Knowledge from '../../../src/pages/ai/knowledge/Knowledge.vue'
 
 const stubs = {
-  DataTable: {
-    name: 'DataTable',
-    props: ['data', 'columns', 'loading'],
-    template: '<div class="n-data-table-stub" :data-rows="data.length"></div>',
-  },
-  Pagination: {
-    name: 'Pagination',
-    props: ['page', 'itemCount', 'pageSize'],
-    emits: ['update:page', 'update:pageSize'],
-    template: '<div class="n-pagination-stub"></div>',
-  },
+  DataTable: { name: 'DataTable', props: ['data'], template: '<div class="n-data-table-stub" />' },
+  Pagination: { name: 'Pagination', template: '<div class="n-pagination-stub" />' },
   Input: {
     name: 'Input',
     props: ['value'],
@@ -77,90 +118,80 @@ const stubs = {
     emits: ['update:value'],
     template: '<input type="number" class="n-input-number-stub" :value="value" />',
   },
-  Switch: {
-    name: 'Switch',
-    props: ['value'],
-    emits: ['update:value'],
-    template: '<button class="n-switch-stub" />',
-  },
-  Select: {
-    name: 'Select',
-    props: ['value', 'options'],
-    emits: ['update:value'],
-    template: '<select class="n-select-stub" />',
-  },
-  DatePicker: {
-    name: 'DatePicker',
-    props: ['value'],
-    emits: ['update:value'],
-    template: '<input type="date" class="n-date-picker-stub" />',
-  },
-  Button: {
-    name: 'Button',
-    template: '<button @click="$emit(\'click\')"><slot /></button>',
-  },
+  Switch: { name: 'Switch', props: ['value'], emits: ['update:value'], template: '<button class="n-switch-stub" />' },
+  Select: { name: 'Select', props: ['value', 'options'], emits: ['update:value'], template: '<select class="n-select-stub" />' },
+  Button: { name: 'Button', template: '<button @click="$emit(\'click\')"><slot /></button>' },
   Modal: {
     name: 'Modal',
     props: ['show'],
     emits: ['update:show'],
-    template:
-      '<div v-if="show" class="n-modal-stub"><slot /><slot name="footer" /></div>',
+    template: '<div v-if="show" class="n-modal-stub"><slot /><slot name="footer" /></div>',
   },
-  Popover: {
-    name: 'Popover',
-    props: ['show'],
-    template: '<div><slot name="trigger" /><slot /></div>',
-  },
+  Popover: { name: 'Popover', template: '<div><slot name="trigger" /><slot /></div>' },
+  Popconfirm: { name: 'Popconfirm', template: '<div><slot name="trigger" /><slot /></div>' },
+  Drawer: { name: 'Drawer', props: ['show'], emits: ['update:show'], template: '<div v-if="show" class="n-drawer-stub"><slot /></div>' },
+  DrawerContent: { name: 'DrawerContent', template: '<div class="n-drawer-content-stub"><slot /></div>' },
+  Tabs: { name: 'Tabs', props: ['value'], emits: ['update:value'], template: '<div class="n-tabs-stub"><slot /></div>' },
+  TabPane: { name: 'TabPane', props: ['name', 'tab'], template: '<div class="n-tab-pane-stub"><slot /></div>' },
+  Progress: { name: 'Progress', props: ['percentage'], template: '<div class="n-progress-stub" />' },
+  Tag: { name: 'Tag', template: '<span class="n-tag-stub"><slot /></span>' },
   Checkbox: { name: 'Checkbox', template: '<input type="checkbox" />' },
   Form: { name: 'Form', template: '<form><slot /></form>' },
   FormItem: { name: 'FormItem', template: '<div class="form-item"><slot /></div>' },
-  VueDraggable: { name: 'VueDraggable', template: '<div><slot /></div>' },
 }
 
-describe('Knowledge page (Phase 5 Task 5.10)', () => {
+describe('Knowledge page (TCardPage card grid + document drawer)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    knowledgeFetch.mockClear()
+    getDocuments.mockClear()
     reindexMock.mockClear()
   })
 
-  it('mounts, fetches knowledge bases on mount, and displays rows', async () => {
-    const wrapper = mount(Knowledge, { global: { stubs } })
+  it('mounts and fetches knowledge bases on mount', async () => {
+    mount(Knowledge, { global: { stubs } })
     await flushPromises()
-    const table = wrapper.find('.n-data-table-stub')
-    expect(table.exists()).toBe(true)
-    expect(table.attributes('data-rows')).toBe('2')
+    expect(knowledgeFetch).toHaveBeenCalledTimes(1)
   })
 
-  it('create button opens form modal in create mode', async () => {
+  it('renders one card per knowledge base', async () => {
     const wrapper = mount(Knowledge, { global: { stubs } })
     await flushPromises()
-    await wrapper.find('.t-crud-page__create').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('form').exists()).toBe(true)
+    expect(wrapper.findAll('.t-entity-card')).toHaveLength(2)
   })
 
-  it('page title contains "Knowledge Bases"', async () => {
+  it('cards show knowledge base names and the page title', async () => {
     const wrapper = mount(Knowledge, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Knowledge Bases')
+    expect(wrapper.text()).toContain('Product Docs')
+    expect(wrapper.text()).toContain('Internal Wiki')
+    expect(wrapper.text()).toContain('Knowledge')
   })
 
-  it('reindex action calls bridge.knowledge.reindex with the row id and records success', async () => {
+  it('openManage opens the drawer and loads the knowledge base documents', async () => {
     const wrapper = mount(Knowledge, { global: { stubs } })
     await flushPromises()
-    // Invoke the page-exposed onReindex directly — TCrudPage edit-mode
-    // wiring is exercised by the canonical edit/delete tests; here we
-    // only need to verify the reindex bridge call + status update.
-    // defineExpose unwraps refs at the template/instance boundary, so
-    // `vm.reindexStatus` IS the inner value (object | null), not a Ref.
     const vm = wrapper.vm as unknown as {
-      onReindex: (id: string) => Promise<void>
-      reindexStatus: { kind: string; message: string } | null
+      openManage: (row: { id: string; name: string }) => Promise<void>
+      manageVisible: boolean
+      managed: { id: string } | null
     }
-    await vm.onReindex('kb1')
+    await vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    await flushPromises()
+    expect(vm.manageVisible).toBe(true)
+    expect(vm.managed?.id).toBe('kb1')
+    expect(getDocuments).toHaveBeenCalledTimes(1)
+    expect(getDocuments).toHaveBeenCalledWith('kb1')
+  })
+
+  it('reindex action calls bridge.knowledge.reindex with the row id', async () => {
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      onReindex: (row: { id: string }) => Promise<void>
+    }
+    await vm.onReindex({ id: 'kb1' })
     await flushPromises()
     expect(reindexMock).toHaveBeenCalledWith('kb1')
-    expect(vm.reindexStatus).not.toBeNull()
-    expect(vm.reindexStatus?.kind).toBe('success')
   })
 })

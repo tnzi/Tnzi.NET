@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace Tnzi.AI.Tests.Rag;
@@ -113,6 +114,95 @@ public class RagTenantSqlFilterTests
         var sql = PgFullTextSearchProvider.BuildSearchSql("RAG_DocumentChunk", "RAG_KnowledgeBase", hasKnowledgeBaseId: false, tenantId: TenantId);
 
         sql.ShouldContain("AND c.\"TenantId\" = @tenantId");
+    }
+
+    #endregion
+
+    #region EnsureTenantScopeForSearchAll (MT host-context search-all fail-closed)
+
+    [Fact]
+    public void EnsureTenantScope_MtEnabled_NullTenant_NoKbScope_Throws()
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            RagTenantSqlFilter.EnsureTenantScopeForSearchAll(
+                multiTenancyEnabled: true, tenantId: null, hasKnowledgeBaseScope: false));
+
+        ex.Message.ShouldContain("tenant context");
+        ex.Message.ShouldContain("multi-tenancy");
+    }
+
+    [Fact]
+    public void EnsureTenantScope_MtEnabled_NullTenant_WithKbScope_DoesNotThrow()
+    {
+        Should.NotThrow(() =>
+            RagTenantSqlFilter.EnsureTenantScopeForSearchAll(
+                multiTenancyEnabled: true, tenantId: null, hasKnowledgeBaseScope: true));
+    }
+
+    [Fact]
+    public void EnsureTenantScope_MtEnabled_WithTenant_NoKbScope_DoesNotThrow()
+    {
+        Should.NotThrow(() =>
+            RagTenantSqlFilter.EnsureTenantScopeForSearchAll(
+                multiTenancyEnabled: true, tenantId: TenantId, hasKnowledgeBaseScope: false));
+    }
+
+    [Fact]
+    public void EnsureTenantScope_MtDisabled_NullTenant_NoKbScope_DoesNotThrow()
+    {
+        // 单租户部署：维持现状，search-all 不受影响
+        Should.NotThrow(() =>
+            RagTenantSqlFilter.EnsureTenantScopeForSearchAll(
+                multiTenancyEnabled: false, tenantId: null, hasKnowledgeBaseScope: false));
+    }
+
+    [Fact]
+    public async Task PgVectorStore_MtEnabled_HostContext_SearchAll_FailsClosed()
+    {
+        // host 上下文（ICurrentTenant 解析为 null）+ MT 启用 + 无 KB 范围 → 守卫先于连接打开抛出
+        var store = new PgVectorStore(
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(new AIRagOptions()),
+            NullLogger<PgVectorStore>.Instance,
+            BuildServiceProvider(tenantId: null),
+            Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = true }));
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            () => store.SearchAsync([0.1f], topK: 5, knowledgeBaseId: null));
+
+        ex.Message.ShouldContain("tenant context");
+    }
+
+    [Fact]
+    public async Task PgFullTextSearchProvider_MtEnabled_HostContext_SearchAll_FailsClosed()
+    {
+        var provider = new PgFullTextSearchProvider(
+            BuildConfiguration(),
+            Microsoft.Extensions.Options.Options.Create(new AIRagOptions()),
+            NullLogger<PgFullTextSearchProvider>.Instance,
+            currentTenant: null,
+            Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = true }));
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            () => provider.SearchAsync("query", topK: 5, knowledgeBaseId: null));
+
+        ex.Message.ShouldContain("tenant context");
+    }
+
+    private static IConfiguration BuildConfiguration() => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Default"] = "Host=localhost;Database=test"
+        })
+        .Build();
+
+    private static IServiceProvider BuildServiceProvider(Guid? tenantId)
+    {
+        var services = new ServiceCollection();
+        var tenantMock = new Mock<Tnzi.MultiTenancy.ICurrentTenant>();
+        tenantMock.SetupGet(t => t.Id).Returns(tenantId);
+        services.AddScoped(_ => tenantMock.Object);
+        return services.BuildServiceProvider();
     }
 
     #endregion

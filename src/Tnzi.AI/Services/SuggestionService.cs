@@ -7,13 +7,13 @@ public class SuggestionService : ISuggestionService
 {
     private readonly IAiUtility _aiUtility;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IOptions<SuggestionOptions> _options;
+    private readonly IOptionsMonitor<SuggestionOptions> _options;
     private readonly ILogger<SuggestionService> _logger;
 
     public SuggestionService(
         IAiUtility aiUtility,
         IServiceScopeFactory scopeFactory,
-        IOptions<SuggestionOptions> options,
+        IOptionsMonitor<SuggestionOptions> options,
         ILogger<SuggestionService> logger)
     {
         _aiUtility = Check.NotNull(aiUtility);
@@ -51,7 +51,7 @@ public class SuggestionService : ISuggestionService
             var isChinese = userContents.Any(ContainsChinese);
 
             // 3. 构建提示词
-            var config = _options.Value;
+            var config = _options.CurrentValue;
             var effectiveCount = count > 0 ? count : config.Count;
             var (systemPrompt, userMessage) = BuildPrompt(messages, isChinese, effectiveCount, config);
 

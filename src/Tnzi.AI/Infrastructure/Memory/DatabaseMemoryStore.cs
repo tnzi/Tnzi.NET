@@ -122,10 +122,11 @@ public partial class DatabaseMemoryStore : IMemoryStore
         {
             Scope = scope,
             Content = content,
+            ContentHash = MemoryContentHasher.Compute(content),
             Source = "write",
             EmbeddingVector = await TryGenerateEmbeddingAsync(content, ct)
         };
-        await _repository.InsertAsync(entry);
+        await InsertWithDuplicateGuardAsync(entry, ct);
     }
 
     /// <inheritdoc />
@@ -134,14 +135,20 @@ public partial class DatabaseMemoryStore : IMemoryStore
         Check.NotNullOrWhiteSpace(scope);
         Check.NotNullOrWhiteSpace(entry);
 
+        var contentHash = MemoryContentHasher.Compute(entry);
+        if (await TrySkipDuplicateAsync(scope, contentHash, ct))
+            return;
+
         var memoryEntry = new MemoryEntry
         {
             Scope = scope,
             Content = entry,
+            ContentHash = contentHash,
             Source = "append",
             EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
         };
-        await _repository.InsertAsync(memoryEntry);
+        if (!await InsertWithDuplicateGuardAsync(memoryEntry, ct))
+            return;
 
         _logger.LogDebug("Appended memory for scope {Scope}, length: {Length}", scope, entry.Length);
 
@@ -157,16 +164,22 @@ public partial class DatabaseMemoryStore : IMemoryStore
         Check.NotNullOrWhiteSpace(scope);
         Check.NotNullOrWhiteSpace(entry);
 
+        var contentHash = MemoryContentHasher.Compute(entry);
+        if (await TrySkipDuplicateAsync(scope, contentHash, ct))
+            return;
+
         var memoryEntry = new MemoryEntry
         {
             Scope = scope,
             Content = entry,
+            ContentHash = contentHash,
             Source = "append",
             Importance = importance,
             Category = category,
             EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
         };
-        await _repository.InsertAsync(memoryEntry);
+        if (!await InsertWithDuplicateGuardAsync(memoryEntry, ct))
+            return;
 
         _logger.LogDebug("Appended memory for scope {Scope} with importance {Importance}, category {Category}", scope, importance, category);
 
@@ -412,6 +425,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
         }
 
         entry.Content = newContent;
+        entry.ContentHash = MemoryContentHasher.Compute(newContent);
         entry.EmbeddingVector = await TryGenerateEmbeddingAsync(newContent, ct);
         await _repository.UpdateAsync(entry);
         _logger.LogDebug("Updated memory entry {Id} in scope {Scope}", entryId, scope);
@@ -446,10 +460,15 @@ public partial class DatabaseMemoryStore : IMemoryStore
         Check.NotNullOrWhiteSpace(entry);
 
         var scopeKey = scope.ToScopeKey();
+        var contentHash = MemoryContentHasher.Compute(entry);
+        if (await TrySkipDuplicateAsync(scopeKey, contentHash, ct))
+            return;
+
         var memoryEntry = new MemoryEntry
         {
             Scope = scopeKey,
             Content = entry,
+            ContentHash = contentHash,
             Source = "append",
             Importance = importance,
             Category = category,
@@ -457,7 +476,8 @@ public partial class DatabaseMemoryStore : IMemoryStore
             AgentId = scope.AgentId,
             EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
         };
-        await _repository.InsertAsync(memoryEntry);
+        if (!await InsertWithDuplicateGuardAsync(memoryEntry, ct))
+            return;
 
         _logger.LogDebug("Appended memory for scope {Scope} with importance {Importance}, category {Category}", scopeKey, importance, category);
 
@@ -507,17 +527,22 @@ public partial class DatabaseMemoryStore : IMemoryStore
         Check.NotNullOrWhiteSpace(entry);
 
         var scopeKey = scope.ToScopeKey();
+        var contentHash = MemoryContentHasher.Compute(entry);
+        if (await TrySkipDuplicateAsync(scopeKey, contentHash, ct))
+            return;
 
         var memoryEntry = new MemoryEntry
         {
             Scope = scopeKey,
             Content = entry,
+            ContentHash = contentHash,
             Source = "append",
             UserId = scope.UserId,
             AgentId = scope.AgentId,
             EmbeddingVector = await TryGenerateEmbeddingAsync(entry, ct)
         };
-        await _repository.InsertAsync(memoryEntry);
+        if (!await InsertWithDuplicateGuardAsync(memoryEntry, ct))
+            return;
 
         _logger.LogDebug("Appended memory for scope {Scope}, length: {Length}", scopeKey, entry.Length);
 
@@ -547,12 +572,72 @@ public partial class DatabaseMemoryStore : IMemoryStore
         {
             Scope = scope,
             Content = content,
+            ContentHash = MemoryContentHasher.Compute(content),
             Source = "write",
             UserId = userId,
             AgentId = agentId,
             EmbeddingVector = await TryGenerateEmbeddingAsync(content, ct)
         };
-        await _repository.InsertAsync(entry);
+        await InsertWithDuplicateGuardAsync(entry, ct);
+    }
+
+    // --- 精确重复硬防线（(Scope, ContentHash) 唯一索引 + 插入前查重）---
+
+    /// <summary>
+    /// 插入前查重：同一 scope 下已存在相同 ContentHash 的条目时返回 true（调用方跳过插入），
+    /// 并顺带更新该条目的 LastAccessedTime/AccessCount（best-effort，失败不阻断）。
+    /// </summary>
+    private async Task<bool> TrySkipDuplicateAsync(string scopeKey, string? contentHash, CancellationToken ct)
+    {
+        if (contentHash == null)
+            return false;
+
+        var existingId = await _repository.AsQueryable()
+            .Where(e => e.Scope == scopeKey && e.ContentHash == contentHash)
+            .Select(e => (Guid?)e.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (existingId == null)
+            return false;
+
+        try
+        {
+            await _repository.AsQueryable()
+                .Where(e => e.Id == existingId.Value)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(e => e.LastAccessedTime, DateTime.UtcNow)
+                    .SetProperty(e => e.AccessCount, e => e.AccessCount + 1), ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to touch duplicate memory entry {EntryId}", existingId);
+        }
+
+        _logger.LogDebug("Skipped exact-duplicate memory entry for scope {Scope}", scopeKey);
+        return true;
+    }
+
+    /// <summary>
+    /// 插入并捕获唯一索引冲突（并发兜底）：冲突且确认重复行已存在时静默跳过并返回 false；
+    /// 非重复原因的 DbUpdateException 原样抛出。
+    /// </summary>
+    private async Task<bool> InsertWithDuplicateGuardAsync(MemoryEntry entry, CancellationToken ct)
+    {
+        try
+        {
+            await _repository.InsertAsync(entry, ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (entry.ContentHash != null)
+        {
+            var duplicateExists = await _repository.AsQueryable()
+                .AnyAsync(e => e.Scope == entry.Scope && e.ContentHash == entry.ContentHash && e.Id != entry.Id, ct);
+            if (!duplicateExists)
+                throw;
+
+            _logger.LogDebug(ex, "Concurrent duplicate memory entry skipped for scope {Scope}", entry.Scope);
+            return false;
+        }
     }
 
     /// <summary>

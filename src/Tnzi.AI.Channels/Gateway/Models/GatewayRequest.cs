@@ -47,4 +47,13 @@ public class GatewayRequest
     [JsonPropertyName("metadata")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, object>? Metadata { get; init; }
+
+    /// <summary>
+    /// 渠道归属租户 ID — 由服务端按渠道配置（adapter options）或已认证连接的租户上下文解析填充，
+    /// 透传给 <see cref="SessionBindingContext"/> 用于绑定规则的租户分区。
+    /// [JsonIgnore]：信任边界字段，绝不接受客户端 JSON 注入，也不向客户端回写。
+    /// null = 单租户部署 / 渠道未归属租户（行为与引入该字段前完全一致）。
+    /// </summary>
+    [JsonIgnore]
+    public Guid? TenantId { get; init; }
 }

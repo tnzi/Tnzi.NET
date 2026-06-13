@@ -7,7 +7,7 @@ namespace Tnzi.Identity.Services;
 public class RegistrationService : ApplicationService, IRegistrationService
 {
     private readonly UserManager<User> _userManager;
-    private readonly IdentityOptions _identityOptions;
+    private readonly IOptionsMonitor<IdentityOptions> _identityOptionsMonitor;
     private readonly IEventBus? _eventBus;
     private readonly ICaptchaService? _captchaService;
     private readonly ITwoFactorService? _twoFactorService;
@@ -18,9 +18,11 @@ public class RegistrationService : ApplicationService, IRegistrationService
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
+    private IdentityOptions IdentityOptions => _identityOptionsMonitor.CurrentValue;
+
     public RegistrationService(
         UserManager<User> userManager,
-        IOptions<IdentityOptions> identityOptions,
+        IOptionsMonitor<IdentityOptions> identityOptions,
         IServiceProvider serviceProvider,
         IEventBus? eventBus = null,
         ICaptchaService? captchaService = null,
@@ -34,7 +36,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
-        _identityOptions = Check.NotNull(identityOptions).Value;
+        _identityOptionsMonitor = Check.NotNull(identityOptions);
         _eventBus = eventBus;
         _captchaService = captchaService;
         _twoFactorService = twoFactorService;
@@ -48,9 +50,9 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
     public async Task<Result<TokenResult>> RegisterAsync(RegisterDto input)
     {
-        var registrationOptions = _identityOptions.Registration;
-        var captchaOptions = _identityOptions.Captcha;
-        var jwtOptions = _identityOptions.Jwt;
+        var registrationOptions = IdentityOptions.Registration;
+        var captchaOptions = IdentityOptions.Captcha;
+        var jwtOptions = IdentityOptions.Jwt;
 
         // 验证码校验（如果启用）
         if (captchaOptions.EnableCaptchaOnRegister)
@@ -193,8 +195,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
     public async Task<Result<string>> SendQuickRegisterCodeAsync(SendQuickRegisterCodeDto input)
     {
-        var registrationOptions = _identityOptions.Registration;
-        var otpOptions = _identityOptions.Otp;
+        var registrationOptions = IdentityOptions.Registration;
+        var otpOptions = IdentityOptions.Otp;
 
         // 检查快速注册是否启用
         var isEmailRequest = !string.IsNullOrWhiteSpace(input.Email);
@@ -252,7 +254,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
     public async Task<Result<QuickRegisterResultDto>> QuickRegisterAsync(QuickRegisterDto input)
     {
-        var registrationOptions = _identityOptions.Registration;
+        var registrationOptions = IdentityOptions.Registration;
 
         // 检查快速注册是否启用
         var isEmailRequest = !string.IsNullOrWhiteSpace(input.Email);
@@ -350,7 +352,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
                 IdentityConstants.TokenProvider.Identity,
                 IdentityConstants.TokenName.SetPassword,
                 setPasswordToken,
-                DateTime.UtcNow.AddMinutes(_identityOptions.Registration.SetPasswordTokenExpirationMinutes)
+                DateTime.UtcNow.AddMinutes(IdentityOptions.Registration.SetPasswordTokenExpirationMinutes)
             );
         }
 

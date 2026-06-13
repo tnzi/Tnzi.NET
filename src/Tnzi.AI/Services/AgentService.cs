@@ -14,17 +14,20 @@ public class AgentService : ApplicationService, IAgentService
     private readonly IRepository<Agent, Guid> _repository;
     private readonly IRepository<AgentVersion, Guid> _versionRepository;
     private readonly IAgentRuntime _runtime;
+    private readonly IAgentGrantService _grantService;
 
     public AgentService(
         IRepository<Agent, Guid> repository,
         IRepository<AgentVersion, Guid> versionRepository,
         IAgentRuntime runtime,
+        IAgentGrantService grantService,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _versionRepository = Check.NotNull(versionRepository);
         _runtime = Check.NotNull(runtime);
+        _grantService = Check.NotNull(grantService);
     }
 
     public async Task<Result<AgentDto>> CreateAsync(CreateAgentDto input)
@@ -33,8 +36,23 @@ public class AgentService : ApplicationService, IAgentService
         var entity = input.MapTo<Agent>();
         entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
 
-        await _repository.InsertAsync(entity);
-        return Ok(MapToDto(entity));
+        // Atomic write: the entity insert + the three grant reconciles must commit (or roll back) as a unit.
+        // Global UoW is OFF by default, so without this an exception after the entity insert leaves the
+        // entity persisted without its grants. The insert's SaveChanges inside the txn assigns entity.Id
+        // before the reconciles read it. (Mapster does not map ToolGroups/SkillSlugs/KnowledgeBaseIds onto
+        // the entity — those columns no longer exist; grants are the sole source of truth.)
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await _repository.InsertAsync(entity, ct);
+
+            // Junction grants are authoritative.
+            // populated list = create grants, null = no grants, [] = clear (no-op on fresh row).
+            await _grantService.ReconcileToolGroupsAsync(entity.Id, input.ToolGroups, ct);
+            await _grantService.ReconcileSkillsAsync(entity.Id, input.SkillSlugs, ct);
+            await _grantService.ReconcileKnowledgeAsync(entity.Id, input.KnowledgeBaseIds, ct);
+        });
+
+        return Ok(await MapToDtoAsync(entity));
     }
 
     public async Task<Result<AgentDto>> UpdateAsync(Guid id, UpdateAgentDto input)
@@ -51,7 +69,6 @@ public class AgentService : ApplicationService, IAgentService
         if (input.Instructions != null) entity.Instructions = input.Instructions;
         if (input.Provider != null) entity.Provider = input.Provider;
         if (input.Model != null) entity.Model = input.Model;
-        if (input.ToolGroups != null) entity.ToolGroups = input.ToolGroups;
         if (input.Temperature.HasValue) entity.Temperature = input.Temperature;
         if (input.MaxTokens.HasValue) entity.MaxTokens = input.MaxTokens;
         if (input.TimeoutSeconds.HasValue) entity.TimeoutSeconds = input.TimeoutSeconds;
@@ -61,6 +78,8 @@ public class AgentService : ApplicationService, IAgentService
         if (input.QualityTier.HasValue) entity.QualityTier = input.QualityTier.Value;
         if (input.LatencyTier.HasValue) entity.LatencyTier = input.LatencyTier.Value;
         if (input.CostTier.HasValue) entity.CostTier = input.CostTier.Value;
+        // Resource assignments (ToolGroups/SkillSlugs/KnowledgeBaseIds) are written ONLY to the grant
+        // junctions below — the entity no longer carries those columns.
         // PersonaId — accept Guid.Empty as the "unlink persona" sentinel so the
         // PATCH-style update can both set and clear the link.
         if (input.PersonaId.HasValue)
@@ -71,8 +90,18 @@ public class AgentService : ApplicationService, IAgentService
         if (input.ExecutionMode.HasValue) entity.ExecutionMode = input.ExecutionMode.Value;
         if (input.ExecutionConfig != null || executionModeChanged) entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
 
-        await _repository.UpdateAsync(entity);
-        return Ok(MapToDto(entity));
+        // Atomic write: entity update + grant reconciles commit/roll back as a unit (see CreateAsync).
+        // Snapshot was already captured ABOVE (outside the txn) so it reflects pre-mutation state regardless.
+        // tri-state: null = no change, [] = clear, populated = replace.
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await _repository.UpdateAsync(entity, ct);
+            await _grantService.ReconcileToolGroupsAsync(entity.Id, input.ToolGroups, ct);
+            await _grantService.ReconcileSkillsAsync(entity.Id, input.SkillSlugs, ct);
+            await _grantService.ReconcileKnowledgeAsync(entity.Id, input.KnowledgeBaseIds, ct);
+        });
+
+        return Ok(await MapToDtoAsync(entity));
     }
 
     public async Task<Result> DeleteAsync(Guid id)
@@ -87,7 +116,7 @@ public class AgentService : ApplicationService, IAgentService
     {
         var entity = await _repository.GetAsync(id);
         if (entity == null) return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
-        return Ok(MapToDto(entity));
+        return Ok(await MapToDtoAsync(entity));
     }
 
     public async Task<Result<AgentDto>> CloneAsync(Guid id, string? newName = null)
@@ -102,7 +131,6 @@ public class AgentService : ApplicationService, IAgentService
             Instructions = source.Instructions,
             Provider = source.Provider,
             Model = source.Model,
-            ToolGroups = source.ToolGroups?.ToList(),
             Temperature = source.Temperature,
             MaxTokens = source.MaxTokens,
             TimeoutSeconds = source.TimeoutSeconds,
@@ -117,12 +145,27 @@ public class AgentService : ApplicationService, IAgentService
             // Carry the persona link to the clone — the soul/role template
             // is a meaningful part of the agent's identity, not transient state.
             PersonaId = source.PersonaId,
+            // Resource assignments (tool groups / skills / knowledge) are carried via the grant
+            // reconcile from sourceGrants below — the entity no longer holds those columns.
         };
 
-        await _repository.InsertAsync(clone);
+        // Read the source's authoritative grants (a read of a DIFFERENT agent — safe outside the txn).
+        var sourceGrants = await _grantService.GetGrantsAsync(source.Id);
+
+        // Atomic write: the clone insert + the three grant reconciles commit/roll back as a unit (see CreateAsync).
+        // The insert's SaveChanges inside the txn assigns clone.Id before the reconciles read it.
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await _repository.InsertAsync(clone, ct);
+
+            // Carry the source agent's grants to the clone (junction is authoritative).
+            await _grantService.ReconcileToolGroupsAsync(clone.Id, sourceGrants.ToolGroups, ct);
+            await _grantService.ReconcileSkillsAsync(clone.Id, sourceGrants.SkillSlugs, ct);
+            await _grantService.ReconcileKnowledgeAsync(clone.Id, sourceGrants.KnowledgeBaseIds, ct);
+        });
 
         Logger.LogInformation("Agent cloned: {SourceId} -> {CloneId}, Name: {Name}", id, clone.Id, clone.Name);
-        return Ok(MapToDto(clone));
+        return Ok(await MapToDtoAsync(clone));
     }
 
     public async Task<Result<IPagedList<AgentVersionDto>>> GetVersionsAsync(Guid agentId, AgentVersionQueryDto query)
@@ -178,7 +221,6 @@ public class AgentService : ApplicationService, IAgentService
         agent.Instructions = snapshot.Instructions;
         agent.Provider = snapshot.Provider;
         agent.Model = snapshot.Model;
-        agent.ToolGroups = snapshot.ToolGroups;
         agent.Temperature = snapshot.Temperature;
         agent.MaxTokens = snapshot.MaxTokens;
         agent.TimeoutSeconds = snapshot.TimeoutSeconds;
@@ -191,11 +233,26 @@ public class AgentService : ApplicationService, IAgentService
         agent.LatencyTier = snapshot.LatencyTier;
         agent.CostTier = snapshot.CostTier;
         agent.PersonaId = snapshot.PersonaId;
+        // ToolGroups/SkillSlugs/KnowledgeBaseIds are restored ONLY into the grant junctions below
+        // (the snapshot still carries them) — the entity no longer holds those columns.
 
-        await _repository.UpdateAsync(agent);
+        // Atomic write: entity update + grant reconciles commit/roll back as a unit (see CreateAsync).
+        // Snapshot of the pre-rollback state was already captured ABOVE (outside the txn).
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await _repository.UpdateAsync(agent, ct);
+
+            // Restore the grants from the snapshot lists so the junction matches the rolled-back resources.
+            // Tool groups (GrantType=Group) and per-tool grants (GrantType=Tool) are reconciled
+            // independently so neither clobbers the other.
+            await _grantService.ReconcileToolGroupsAsync(agent.Id, snapshot.ToolGroups, ct);
+            await _grantService.ReconcileToolNamesAsync(agent.Id, snapshot.ToolNames, ct);
+            await _grantService.ReconcileSkillsAsync(agent.Id, snapshot.SkillSlugs, ct);
+            await _grantService.ReconcileKnowledgeAsync(agent.Id, snapshot.KnowledgeBaseIds, ct);
+        });
 
         Logger.LogInformation("Agent {AgentId} rolled back to version {Version}", agentId, version);
-        return Ok(MapToDto(agent));
+        return Ok(await MapToDtoAsync(agent));
     }
 
     public async Task<Result<IPagedList<AgentDto>>> GetListAsync(AgentListQueryDto query)
@@ -216,6 +273,8 @@ public class AgentService : ApplicationService, IAgentService
         if (!hasJsonFilter)
         {
             var pagedList = await queryable.ProjectTo<Agent, AgentDto>().CreateAsync(query);
+            // ProjectTo maps the JSON columns into the DTO; override with the authoritative grants.
+            await ApplyGrantsToPageAsync(pagedList.Items);
             return Ok(pagedList);
         }
 
@@ -228,13 +287,26 @@ public class AgentService : ApplicationService, IAgentService
             .ToList();
 
         var totalCount = filtered.Count;
-        var pagedItems = filtered
+        var pagedEntities = filtered
             .Skip((query.PageIndex - 1) * query.PageSize)
             .Take(query.PageSize)
-            .Select(MapToDto)
             .ToList();
+        var pagedItems = new List<AgentDto>(pagedEntities.Count);
+        foreach (var entity in pagedEntities)
+            pagedItems.Add(await MapToDtoAsync(entity));
 
         return Ok<IPagedList<AgentDto>>(new PagedList<AgentDto>(pagedItems, query.PageIndex, query.PageSize, totalCount));
+    }
+
+    /// <summary>
+    /// Set each DTO's resource lists from the authoritative grant projection.
+    /// NOTE (perf): one grant query per page item (N+1). Acceptable for the admin list page's
+    /// small page size; revisit with a batched multi-agent grant fetch if this becomes hot.
+    /// </summary>
+    private async Task ApplyGrantsToPageAsync(IEnumerable<AgentDto> items)
+    {
+        foreach (var dto in items)
+            await OverrideDtoGrantsAsync(dto);
     }
 
     public async Task<Result<AgentResponseDto>> RunAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default)
@@ -412,7 +484,7 @@ public class AgentService : ApplicationService, IAgentService
             "A/B test configured for Agent {AgentId}: VersionA={VersionA}, VersionB={VersionB}, TrafficPercentB={TrafficPercentB}",
             agentId, input.VersionA, input.VersionB, input.TrafficPercentB);
 
-        return Ok(MapToDto(agent));
+        return Ok(await MapToDtoAsync(agent));
     }
 
     public async Task<Result<AgentDto>> StopAbTestAsync(Guid agentId)
@@ -431,7 +503,7 @@ public class AgentService : ApplicationService, IAgentService
         await _repository.UpdateAsync(agent);
 
         Logger.LogInformation("A/B test stopped for Agent {AgentId}", agentId);
-        return Ok(MapToDto(agent));
+        return Ok(await MapToDtoAsync(agent));
     }
 
     private async Task CreateVersionSnapshotAsync(Agent entity, string? changeNote)
@@ -447,6 +519,15 @@ public class AgentService : ApplicationService, IAgentService
             var nextVersion = (latestVersion ?? 0) + 1;
 
             var snapshot = entity.MapTo<AgentConfigSnapshot>();
+
+            // Resources (ToolGroups/SkillSlugs/KnowledgeBaseIds) no longer live on the entity — they are
+            // owned by the grant junctions. Capture them from the authoritative grant projection so version
+            // history (and the rollback that restores grants from these lists) stays intact.
+            var grants = await _grantService.GetGrantsAsync(entity.Id);
+            snapshot.ToolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
+            snapshot.ToolNames = grants.ToolNames.Count > 0 ? grants.ToolNames.ToList() : null;
+            snapshot.SkillSlugs = grants.SkillSlugs.Count > 0 ? grants.SkillSlugs.ToList() : null;
+            snapshot.KnowledgeBaseIds = grants.KnowledgeBaseIds.Count > 0 ? grants.KnowledgeBaseIds.ToList() : null;
 
             var versionEntity = new AgentVersion
             {
@@ -465,11 +546,30 @@ public class AgentService : ApplicationService, IAgentService
         }
     }
 
-    private static AgentDto MapToDto(Agent entity)
+    /// <summary>
+    /// Maps an Agent entity to its DTO. The resource lists (ToolGroups/SkillSlugs/KnowledgeBaseIds)
+    /// are projected SOLELY from the junction grants — the entity no longer carries those columns,
+    /// so the wire-shape lists on the DTO are filled exclusively from the grant projection.
+    /// </summary>
+    private async Task<AgentDto> MapToDtoAsync(Agent entity)
     {
         var dto = entity.MapTo<AgentDto>();
         dto.ExecutionConfig = AgentExecutionConfigDto.Deserialize(entity.Configuration);
+        await OverrideDtoGrantsAsync(dto);
         return dto;
+    }
+
+    /// <summary>
+    /// Set a DTO's resource lists from the authoritative grant projection (in place).
+    /// Grants are the sole source of truth: an empty projection collapses to null (preserving the
+    /// downstream null-when-empty semantics — no per-agent whitelist vs. a whitelist of nothing).
+    /// </summary>
+    private async Task OverrideDtoGrantsAsync(AgentDto dto)
+    {
+        var grants = await _grantService.GetGrantsAsync(dto.Id);
+        dto.ToolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
+        dto.SkillSlugs = grants.SkillSlugs.Count > 0 ? grants.SkillSlugs.ToList() : null;
+        dto.KnowledgeBaseIds = grants.KnowledgeBaseIds.Count > 0 ? grants.KnowledgeBaseIds.ToList() : null;
     }
 }
 
@@ -484,6 +584,8 @@ internal class AgentConfigSnapshot
     public string Provider { get; set; } = string.Empty;
     public string? Model { get; set; }
     public List<string>? ToolGroups { get; set; }
+    /// <summary>Per-tool grants (GrantType=Tool) at snapshot time so rollback / A/B routing restore single-tool authorizations.</summary>
+    public List<string>? ToolNames { get; set; }
     public double? Temperature { get; set; }
     public int? MaxTokens { get; set; }
     public int? TimeoutSeconds { get; set; }
@@ -497,4 +599,8 @@ internal class AgentConfigSnapshot
     public int CostTier { get; set; }
     /// <summary>Persona FK at snapshot time so rollback restores the soul link.</summary>
     public Guid? PersonaId { get; set; }
+    /// <summary>Knowledge base assignments at snapshot time.</summary>
+    public List<Guid>? KnowledgeBaseIds { get; set; }
+    /// <summary>Skill assignments at snapshot time.</summary>
+    public List<string>? SkillSlugs { get; set; }
 }

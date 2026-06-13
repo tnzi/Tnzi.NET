@@ -1,6 +1,6 @@
 <template>
   <div class="t-row-actions">
-    <slot name="prepend" :row="row" />
+    <slot name="prepend" :row="(row as T)" />
 
     <!-- Inline action buttons. Actions flagged `confirm` are wrapped in a
          popconfirm so destructive ops still gate before firing. -->
@@ -35,7 +35,7 @@
       </NButton>
     </template>
 
-    <slot name="middle" :row="row" />
+    <slot name="middle" :row="(row as T)" />
 
     <!-- Overflow → More▾ dropdown. -->
     <NDropdown
@@ -49,7 +49,7 @@
       </NButton>
     </NDropdown>
 
-    <slot name="append" :row="row" />
+    <slot name="append" :row="(row as T)" />
   </div>
 </template>
 

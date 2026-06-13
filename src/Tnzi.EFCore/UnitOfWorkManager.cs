@@ -92,15 +92,44 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             return;
         }
 
-        // 如果事务深度 > 1，说明是嵌套调用，只减少深度，不真正提交
+        // 如果事务深度 > 1，说明是嵌套调用：flush 待保存的变更（审计字段/ID 在此填充，
+        // 数据在物理事务内对后续读取可见），但不提交物理事务——提交/回滚由最外层决定。
+        // 若不 flush，内层 ExecuteInUnitOfWorkAsync "提交" 后的代码（DTO 映射、事务内查询）
+        // 会观察到未持久化的实体（审计字段为 default、数据不可查）
         if (_transactionDepth > 1)
         {
+            // 为有变更的 DbContext 确保 UnitOfWork 存在（GetUnitOfWork 会同步事务深度），
+            // 必须在 Decrement 之前创建，使新 UnitOfWork 继承当前嵌套深度
+            var changedTypes = new HashSet<Type>();
+            foreach (var dbContextType in GetAllRegisteredDbContextTypes())
+            {
+                if (_serviceProvider.GetService(dbContextType) is not DbContext dbContext)
+                {
+                    continue;
+                }
+
+                if (dbContext.ChangeTracker.HasChanges())
+                {
+                    changedTypes.Add(dbContextType);
+                    if (!_unitOfWorks.ContainsKey(dbContextType))
+                    {
+                        GetUnitOfWork(dbContextType);
+                    }
+                }
+            }
+
             Interlocked.Decrement(ref _transactionDepth);
 
-            // 为所有 UnitOfWork 也执行嵌套提交
-            foreach (var unitOfWork in _unitOfWorks.Values)
+            foreach (var kvp in _unitOfWorks)
             {
-                await unitOfWork.CommitTransactionAsync();
+                if (changedTypes.Contains(kvp.Key))
+                {
+                    // flush 进物理事务（延迟开启），物理事务保持打开
+                    await kvp.Value.SaveChangesAsync(cancellationToken);
+                }
+
+                // 嵌套提交：仅递减 UnitOfWork 的事务深度
+                await kvp.Value.CommitTransactionAsync(cancellationToken);
             }
             return;
         }
@@ -295,8 +324,11 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
         {
             _unitOfWorks.TryAdd(dbContextType, unitOfWork);
 
-            // 如果已启用事务，为新创建的 UnitOfWork 也启用事务
-            if (IsEnabledTransaction)
+            // 与管理器的事务深度同步：新创建的 UnitOfWork 必须继承当前嵌套深度。
+            // 若只启用一层（深度 1），嵌套提交会把它当成最外层而提前提交物理事务，
+            // 破坏外层的回滚能力，并因 _hasCommitted 标记导致后续变更被静默丢弃
+            var depth = TransactionDepth;
+            for (var i = 0; i < depth; i++)
             {
                 unitOfWork.EnableTransaction();
             }

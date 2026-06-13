@@ -28,18 +28,22 @@ public sealed class TextSearchProvider : IContextProvider
     private readonly ILogger<TextSearchProvider> _logger;
     private readonly AITool[] _tools;
     private readonly Queue<string> _recentMessagesText = new();
+    private readonly IReadOnlyList<Guid>? _knowledgeBaseIds;
 
     /// <summary>
     /// 初始化 TextSearchProvider
     /// </summary>
+    /// <param name="knowledgeBaseIds">该 Agent 分配的知识库 ID（非空时检索仅限这些知识库）</param>
     public TextSearchProvider(
         ITextSearchService textSearchService,
         TextSearchOptions options,
-        ILogger<TextSearchProvider> logger)
+        ILogger<TextSearchProvider> logger,
+        IReadOnlyList<Guid>? knowledgeBaseIds = null)
     {
         _textSearchService = Check.NotNull(textSearchService);
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
+        _knowledgeBaseIds = knowledgeBaseIds is { Count: > 0 } ? knowledgeBaseIds : null;
 
         // 创建按需搜索工具（仅在 OnDemandFunctionCalling 模式下使用）
         _tools =
@@ -69,9 +73,10 @@ public sealed class TextSearchProvider : IContextProvider
                 return ContextInjection.Empty;
             }
 
-            // 执行搜索
+            // 执行搜索（按 Agent 分配的知识库范围过滤）
             var results = await _textSearchService.SearchAsync(
                 inputText,
+                BuildFilter(),
                 maxResults: 5,
                 ct: ct);
 
@@ -161,7 +166,7 @@ public sealed class TextSearchProvider : IContextProvider
             return string.Empty;
         }
 
-        var results = await _textSearchService.SearchAsync(userQuestion, maxResults: 5, ct: cancellationToken);
+        var results = await _textSearchService.SearchAsync(userQuestion, BuildFilter(), maxResults: 5, ct: cancellationToken);
         var resultList = results.ToList();
 
         _logger.LogDebug(
@@ -170,6 +175,12 @@ public sealed class TextSearchProvider : IContextProvider
 
         return FormatResults(resultList);
     }
+
+    /// <summary>构建按 Agent 分配知识库范围过滤的检索条件（无分配时返回 null = 跨所有知识库）。</summary>
+    private TextSearchFilter? BuildFilter()
+        => _knowledgeBaseIds is { Count: > 0 }
+            ? new TextSearchFilter { KnowledgeBaseIds = _knowledgeBaseIds.ToList() }
+            : null;
 
     /// <summary>
     /// 构建搜索输入文本

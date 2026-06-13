@@ -140,11 +140,6 @@ public class AIOptions
     public ToolResultBudgetOptions ToolResultBudget { get; set; } = new();
 
     /// <summary>
-    /// 执行效率监控配置（diminishing returns 检测）
-    /// </summary>
-    public ExecutionBudgetOptions ExecutionBudget { get; set; } = new();
-
-    /// <summary>
     /// 对话摘要配置
     /// </summary>
     /// <remarks>

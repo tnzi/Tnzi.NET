@@ -6,7 +6,6 @@ namespace Tnzi.AI.Middleware;
 public class ContextInjectionMiddleware : IAiMiddleware
 {
     private static readonly ConcurrentDictionary<string, bool> _contextDisabledCache = new();
-    private static readonly ConcurrentDictionary<string, Guid?> _personaIdCache = new();
     /// <summary>
     /// Persona content cache, keyed by (TenantId, PersonaId). TenantId is included so the
     /// cache cannot leak content across tenants if a SuperAdmin / no-tenant code path ever
@@ -72,16 +71,12 @@ public class ContextInjectionMiddleware : IAiMiddleware
     public static void ClearAllCachesForTesting()
     {
         _personaContentCache.Clear();
-        _personaIdCache.Clear();
         _contextDisabledCache.Clear();
         _personaLoadLocks.Clear();
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-            return await next(context, cancellationToken);
-
         // Before: 注入上下文
         await InjectContextAsync(context, cancellationToken);
         try
@@ -99,13 +94,6 @@ public class ContextInjectionMiddleware : IAiMiddleware
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware)
-        {
-            await foreach (var chunk in next(context, cancellationToken))
-                yield return chunk;
-            yield break;
-        }
-
         // Before: 注入上下文（与非流式路径相同逻辑）
         await InjectContextAsync(context, cancellationToken);
 
@@ -170,7 +158,10 @@ public class ContextInjectionMiddleware : IAiMiddleware
             {
                 AgentId = context.Agent.AgentId,
                 AgentName = context.Agent.Agent?.Name,
-                UserId = context.Request.UserId
+                UserId = context.Request.UserId,
+                // Per-agent resource assignments → scope RAG retrieval + skill visibility at runtime.
+                KnowledgeBaseIds = context.Agent.KnowledgeBaseIds,
+                SkillSlugs = context.Agent.SkillSlugs
             });
             if (compositeProvider is not null)
             {
@@ -236,7 +227,6 @@ public class ContextInjectionMiddleware : IAiMiddleware
     /// 优先级（任一命中即注入）：
     ///   1. AgentResolution.PersonaContent — 内联内容（workspace PERSONA.md 等场景，无需 DB）
     ///   2. AgentResolution.PersonaId — DB Persona FK，走 IAgentPersonaService（带 5min TTL 缓存 + 事件失效）
-    ///   3. AgentConfiguration JSON 的 "personaId" 字段 — 向后兼容旧测试 / 外部写入路径
     /// </summary>
     private async Task InjectPersonaAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
     {
@@ -251,12 +241,10 @@ public class ContextInjectionMiddleware : IAiMiddleware
                 return;
             }
 
-            // 2/3. PersonaId from AgentResolution (canonical DB path) or JSON fallback.
+            // 2. PersonaId from AgentResolution — the canonical DB path.
             // Treat Guid.Empty as "unset" — legacy snapshot rows / pre-normalization Clone
             // paths can carry Guid.Empty which would otherwise produce N wasted DB roundtrips.
-            var resolvedId = context.Agent.PersonaId;
-            if (resolvedId == Guid.Empty) resolvedId = null;
-            var personaId = resolvedId ?? GetPersonaIdFromConfiguration(context);
+            var personaId = context.Agent.PersonaId;
             if (personaId == null || personaId == Guid.Empty) return;
 
             var personaService = context.ServiceProvider.GetService<IAgentPersonaService>();
@@ -361,33 +349,6 @@ public class ContextInjectionMiddleware : IAiMiddleware
         {
             _logger.LogWarning(ex, "Failed to inject user profile, continuing without it");
         }
-    }
-
-    /// <summary>
-    /// Backwards-compatible fallback: parse personaId from AgentConfiguration JSON.
-    /// Production AgentService never writes personaId into this blob (it lives on
-    /// Agent.PersonaId), but external callers may still rely on this shape.
-    /// </summary>
-    private static Guid? GetPersonaIdFromConfiguration(AiMiddlewareContext context)
-    {
-        var config = context.Agent.AgentConfiguration;
-        if (string.IsNullOrEmpty(config)) return null;
-
-        return _personaIdCache.GetOrAdd(config, static cfg =>
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(cfg);
-                if (doc.RootElement.TryGetProperty("personaId", out var prop)
-                    && prop.ValueKind == JsonValueKind.String
-                    && Guid.TryParse(prop.GetString(), out var id))
-                {
-                    return id;
-                }
-            }
-            catch { /* ignore parse errors */ }
-            return null;
-        });
     }
 
     /// <summary>

@@ -110,7 +110,6 @@ public class McpServerHttpEndToEndTests
             ["AI:Providers:Test:DefaultModel"] = "test-model",
             ["AI:Providers:DeepSeek:Enabled"] = "false",
             ["AI:McpServer:Enabled"] = "true",
-            ["AI:McpServer:Transport"] = "sse",
             ["AI:McpServer:Endpoint"] = "/mcp",
             ["AI:McpServer:RequireAuthentication"] = "true",
             ["AI:McpServer:AllowedApiKeys:0"] = "secret",

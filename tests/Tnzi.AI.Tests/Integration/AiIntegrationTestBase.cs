@@ -125,6 +125,14 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
         // 5. 基础设施 Mock
         services.AddSingleton<IAgentExecutionContextAccessor, AgentExecutionContextAccessor>();
 
+        // AgentGrantService — resource grants are the sole source of truth for tool groups/skills/
+        // knowledge. The multi-agent strategy loader resolves it from DI to load a sub-agent's tool
+        // groups; an empty projection (no grants) is sufficient for these orchestration tests.
+        var grantServiceMock = new Mock<IAgentGrantService>();
+        grantServiceMock.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection());
+        services.AddScoped(_ => grantServiceMock.Object);
+
         // ToolRegistry / ToolScanner — 空实现即可
         services.AddSingleton<IToolScanner, ToolScanner>();
         services.AddSingleton<IToolRegistry, ToolRegistry>();
@@ -132,7 +140,7 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
         // ToolResolver — 返回空工具列表
         var toolResolverMock = new Mock<IToolResolver>();
         toolResolverMock.Setup(r => r.ResolveToolsAsync(
-                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IList<AITool>?)null);
         services.AddScoped(_ => toolResolverMock.Object);
 
@@ -144,10 +152,10 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
                     It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                     It.IsAny<string?>(), It.IsAny<IEnumerable<string>?>(),
                     It.IsAny<double?>(), It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(),
-                    It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string? provider, string? model, string? instructions, string? name,
                     IEnumerable<string>? toolGroups, double? temperature, int? maxTokens,
-                    AgentExecutorOptions? options, IEnumerable<string>? perms, Guid? agentId, CancellationToken ct) =>
+                    AgentExecutorOptions? options, IEnumerable<string>? perms, IEnumerable<string>? toolNames, Guid? agentId, CancellationToken ct) =>
                 {
                     var client = MockProvider.CreateChatClient(
                         new ProviderOptions { Enabled = true }, model ?? "mock-model");
@@ -168,9 +176,9 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
             var resolverMock = new Mock<IAgentResolver>();
             resolverMock.Setup(r => r.ResolveAgentAsync(
                     It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                    It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<List<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<List<string>?>()))
                 .ReturnsAsync((Guid? agentId, string? provider, string? model,
-                    List<string>? toolGroups, CancellationToken ct) =>
+                    List<string>? toolGroups, CancellationToken ct, List<string>? toolNames) =>
                 {
                     var client = MockProvider.CreateChatClient(
                         new ProviderOptions { Enabled = true }, model ?? "mock-model");

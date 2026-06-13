@@ -75,7 +75,7 @@ public record MemoryScope(string Name, Guid? UserId = null, Guid? AgentId = null
 /// </summary>
 /// <remarks>
 /// 默认实现为 DatabaseMemoryStore（使用 EF Core，由 Tnzi.AI 模块提供）。
-/// Tnzi.AI.Coder 模块提供 FileMemoryStore 替代实现（文件系统存储）。
+/// 应用可注册自定义 IMemoryStore 实现替换（如文件系统存储）。
 /// </remarks>
 [ExperimentalApi(Reason = "AI abstractions are evolving")]
 public interface IMemoryStore

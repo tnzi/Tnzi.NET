@@ -24,7 +24,7 @@ import { createPinia, setActivePinia } from 'pinia'
 const pagedOne = (id: string) => ({
   items: [{
     id, name: 'x', code: 'x', title: 'x', description: 'x',
-    isEnabled: true, slug: 'x', content: 'x', isSystem: false,
+    isEnabled: true, slug: 'x', content: 'x', scope: 1,
     userName: 'x', roles: [], createdAt: '2026-01-01', creationTime: '2026-01-01',
   }],
   totalCount: 1, pageIndex: 1, pageSize: 20,
@@ -45,6 +45,10 @@ const mkCrud = (seedId = '1') => ({
   run: vi.fn(async () => undefined),
   runBatch: vi.fn(async () => undefined),
   summary: vi.fn(async () => ({ totalCalls: 0, totalTokens: 0, totalCost: 0 })),
+  getBudgetSummary: vi.fn(async () => ({
+    periodStart: '2026-01-01', periodEnd: '2026-01-31',
+    currentSpendUsd: 0, budgetLimitUsd: 0, usagePercentage: 0, status: 0, byAgent: [],
+  })),
   tail: vi.fn(() => ({ close: vi.fn() })),
   changeStatus: vi.fn(async () => undefined),
   enable: vi.fn(async () => undefined),
@@ -102,6 +106,12 @@ vi.mock('../../src/services/bridges/storage-bridge', () => ({
 vi.mock('../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
     accessLogs: mkCrud(), menus: mkCrud(), dictionaries: mkCrud(), parameters: mkCrud(), scheduledJobs: mkCrud(),
+    features: mkCrud(),
+    settingsCenter: {
+      getDefinitions: vi.fn(async () => []),
+      saveGroup: vi.fn(async () => ({ key: 'g', displayName: 'G', i18nKey: '', icon: '', moduleName: '', fields: [] })),
+      resetGroup: vi.fn(async () => ({ key: 'g', displayName: 'G', i18nKey: '', icon: '', moduleName: '', fields: [] })),
+    },
   }),
 }))
 

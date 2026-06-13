@@ -1,4 +1,5 @@
 import { h } from 'vue'
+import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
@@ -72,7 +73,16 @@ export const workflowColumns: ColumnDef[] = [
         },
       }),
   },
-  { key: 'lastModificationTime', title: 'columns.lastModificationTime', width: 160 },
+  {
+    key: 'lastModificationTime',
+    title: 'columns.lastModificationTime',
+    width: 160,
+    render: (row) =>
+      formatDateTime(
+        (row as { lastModificationTime?: string | null }).lastModificationTime,
+        { fallback: '—' },
+      ),
+  },
 ]
 
 /** Minimal create-form schema — `steps` is edited on WorkflowEditor.vue. */

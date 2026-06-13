@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { hasInjectionContext, inject, ref, watch } from 'vue'
+import { THEME_CONTEXT_KEY } from '@tnzi/ui'
 import 'pinia-plugin-persistedstate'
 
 /**
@@ -46,6 +47,17 @@ export type PageTransition =
 // active accent is a 2px bottom border + 10% primary bg fill).
 export type TabStyle = 'chrome' | 'button' | 'slider'
 
+/**
+ * Theme color schema (light / dark / auto). The LIVE value is owned by the
+ * `@tnzi/ui` theme context (`settings.mode` — header cycle button and theme
+ * drawer mutate it via `setMode`), but that context has no persistence of its
+ * own, so a dark-mode choice used to revert to the app default on every full
+ * page reload. This store keeps a persisted mirror and replays it into the
+ * context on hydration. `null` = "user never chose" → the app default from
+ * `createTnziUi()` / `createTnziUiAdmin()` wins.
+ */
+export type AdminThemeSchema = 'light' | 'dark' | 'auto'
+
 export interface WatermarkSettings {
   enabled: boolean
   text: string
@@ -76,6 +88,7 @@ const VALID_TRANSITIONS: PageTransition[] = [
   'none',
 ]
 const VALID_TAB_STYLES: TabStyle[] = ['chrome', 'button', 'slider']
+const VALID_THEME_SCHEMAS: AdminThemeSchema[] = ['light', 'dark', 'auto']
 
 const DEFAULT_WATERMARK: WatermarkSettings = {
   enabled: false,
@@ -94,8 +107,18 @@ const DEFAULT_WATERMARK: WatermarkSettings = {
  * layout mode, sider/header/tab sizing, watermark, page transition style.
  */
 export const useAdminThemeStore = defineStore('admin-theme', () => {
+  // The `@tnzi/ui` theme context is provided at app level (`createTnziUi()`
+  // or the `createTnziUiAdmin()` fallback). Pinia runs this setup inside the
+  // app's injection context when the store is first used from a component,
+  // so `inject()` resolves; bare test pinias (no app) skip the wiring.
+  const themeCtx = hasInjectionContext() ? inject(THEME_CONTEXT_KEY, undefined) : undefined
+
   // Layout mode
   const layoutMode = ref<AdminLayoutMode>('vertical')
+
+  // Theme schema (light / dark / auto) — persisted mirror of the theme
+  // context's `settings.mode`; see the `AdminThemeSchema` type doc above.
+  const themeSchema = ref<AdminThemeSchema | null>(null)
 
   // Visibility toggles
   const headerVisible = ref(true)
@@ -204,6 +227,14 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   function setLayoutMode(mode: AdminLayoutMode): void {
     if (VALID_LAYOUT_MODES.includes(mode)) {
       layoutMode.value = mode
+    }
+  }
+
+  function setThemeSchema(mode: AdminThemeSchema): void {
+    if (!VALID_THEME_SCHEMAS.includes(mode)) return
+    themeSchema.value = mode
+    if (themeCtx && themeCtx.settings.value.mode !== mode) {
+      themeCtx.setMode(mode)
     }
   }
 
@@ -390,6 +421,8 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
 
   function reset(): void {
     layoutMode.value = 'vertical'
+    // Back to "no explicit user choice" — the app default mode wins again.
+    themeSchema.value = null
     themeRadius.value = 4
     headerVisible.value = true
     tabVisible.value = true
@@ -462,9 +495,39 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     )
   }
 
+  // ── Theme-schema ⇄ @tnzi/ui context sync ──
+  // The context owns the live mode but persists nothing; this store persists
+  // the mirror but renders nothing. Two watchers keep them aligned (each one
+  // no-ops when already in sync, so there is no feedback loop):
+  if (themeCtx) {
+    // Persisted mirror → context. Fires on persisted-state hydration (which
+    // bypasses setters) so a saved "dark" survives a full page reload.
+    watch(
+      themeSchema,
+      (mode) => {
+        if (mode && themeCtx.settings.value.mode !== mode) {
+          themeCtx.setMode(mode)
+        }
+      },
+      { immediate: true },
+    )
+    // Context → persisted mirror. Captures every mutation path that talks to
+    // the context directly (header schema cycle button, theme drawer, app
+    // code), so the user's last choice is the one that persists.
+    watch(
+      () => themeCtx.settings.value.mode,
+      (mode) => {
+        if (mode && mode !== themeSchema.value) {
+          themeSchema.value = mode
+        }
+      },
+    )
+  }
+
   return {
     // state
     layoutMode,
+    themeSchema,
     headerVisible,
     tabVisible,
     footerVisible,
@@ -503,6 +566,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     scrollMode,
     // setters
     setLayoutMode,
+    setThemeSchema,
     setHeaderVisible,
     setTabVisible,
     setFooterVisible,
@@ -548,6 +612,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     key: 'tnzi-admin-theme',
     pick: [
       'layoutMode',
+      'themeSchema',
       'headerVisible',
       'tabVisible',
       'footerVisible',

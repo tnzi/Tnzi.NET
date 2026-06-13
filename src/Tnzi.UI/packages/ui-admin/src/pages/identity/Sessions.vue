@@ -12,42 +12,25 @@
 
     <div class="t-session-page">
     <!-- KPI cards -->
-    <NGrid responsive="screen" cols="1 s:2 m:3" :x-gap="16" :y-gap="16" class="t-session-page__stats">
-      <NGi>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('stats.activeSessions')">
-            <NNumberAnimation :from="0" :to="stats?.activeSessionCount ?? 0" />
-          </NStatistic>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('stats.onlineUsers')">
-            <NNumberAnimation :from="0" :to="stats?.onlineUserCount ?? 0" />
-          </NStatistic>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('stats.topDevice')">
-            <span class="text-16px">
-              {{ stats?.topDevices?.[0]?.deviceInfo ?? '—' }}
-              <small v-if="stats?.topDevices?.[0]?.count" class="text-muted ml-4px">
-                × {{ stats.topDevices[0].count }}
-              </small>
-            </span>
-          </NStatistic>
-        </NCard>
-      </NGi>
-    </NGrid>
+    <TKpiRow class="t-session-page__stats" cols="1 s:2 m:3" :gap="16">
+      <TStatCard :label="t('stats.activeSessions')" :value="stats?.activeSessionCount ?? 0" />
+      <TStatCard :label="t('stats.onlineUsers')" :value="stats?.onlineUserCount ?? 0" />
+      <TStatCard
+        :label="t('stats.topDevice')"
+        :value="stats?.topDevices?.[0]?.deviceInfo ?? null"
+        :suffix="stats?.topDevices?.[0]?.count ? `× ${stats.topDevices[0].count}` : undefined"
+      />
+    </TKpiRow>
 
-    <!-- Toolbar -->
+    <!-- Toolbar: the user picker is an OPTIONAL filter — the page lists all
+         active sessions globally; picking a user narrows the list to them. -->
     <NCard size="small" :bordered="false" class="t-session-page__toolbar">
       <NSpace align="center" :wrap-item="false">
-        <!-- Active-users picker: lets admins pick from currently-signed-in
-             users without pasting a userId. Falls back gracefully when the
+        <!-- Active-users picker (optional filter): lets admins narrow to one
+             user without pasting a userId. Falls back gracefully when the
              list is empty (e.g. KeepDatabaseAuditLog disabled). The select's
-             filter input still allows typing a raw userId for power users. -->
+             filter input still allows typing a raw userId for power users.
+             Clearing it returns to the global list. -->
         <NSelect
           v-model:value="targetUserId"
           :options="activeUserOptions"
@@ -57,25 +40,27 @@
           :tag="true"
           clearable
           class="w-360px max-w-full"
-          @update:value="onUserPicked"
+          @update:value="onFilterChanged"
         />
-        <NCheckbox v-model:checked="includeRevoked">{{ t('toolbar.includeRevoked') }}</NCheckbox>
-        <NButton type="primary" :loading="loading" :disabled="!targetUserId" @click="loadSessions">
+        <NCheckbox v-model:checked="includeRevoked" @update:checked="onFilterChanged">
+          {{ t('toolbar.includeRevoked') }}
+        </NCheckbox>
+        <NButton type="primary" :loading="loading" @click="onFilterChanged">
           {{ t('toolbar.fetch') }}
         </NButton>
       </NSpace>
     </NCard>
 
-    <!-- Session list for chosen user -->
+    <!-- Session list — global by default, narrowed when a user is picked -->
     <NCard
-      v-if="targetUserId && (sessions.length || hasFetched)"
       size="small"
       :bordered="false"
-      :title="t('list.titleFor', { userId: selectedUserLabel })"
+      :title="listTitle"
       class="t-session-page__list"
     >
       <template #header-extra>
-        <NPopconfirm @positive-click="handleRevokeAll">
+        <!-- Revoke-all is a per-user operation — only offered when filtered. -->
+        <NPopconfirm v-if="targetUserId" @positive-click="handleRevokeAll">
           <template #trigger>
             <NButton size="small" type="error" ghost :disabled="!sessions.length">
               {{ t('list.revokeAll') }}
@@ -88,10 +73,22 @@
         :data="sessions"
         :columns="columns"
         :row-key="(r: UserSessionRow) => r.id"
+        :loading="loading"
         size="small"
         :bordered="false"
         :flex-height="true"
       />
+      <div class="t-session-page__pagination">
+        <NPagination
+          v-model:page="pageIndex"
+          :item-count="totalCount"
+          :page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          show-size-picker
+          @update:page="loadSessions"
+          @update:page-size="onPageSizeChange"
+        />
+      </div>
     </NCard>
     </div>
   </TContentPage>
@@ -101,10 +98,12 @@
 import { computed, h, ref, onMounted } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
-  NCard, NGrid, NGi, NStatistic, NNumberAnimation, NSpace, NButton, NSelect,
+  NCard, NSpace, NButton, NSelect, NPagination,
   NCheckbox, NPopconfirm, NTag,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TStatCard from '../../components/data/TStatCard.vue'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -126,7 +125,11 @@ const sessions = ref<UserSessionRow[]>([])
 const targetUserId = ref<string | null>(null)
 const includeRevoked = ref(false)
 const loading = ref(false)
-const hasFetched = ref(false)
+
+// Server-side pagination over GET /admin/sessions.
+const pageIndex = ref(1)
+const pageSize = ref(20)
+const totalCount = ref(0)
 
 // Active users picker — loaded once on mount + manually refreshable.
 const activeUsers = ref<ActiveUserSummaryDto[]>([])
@@ -147,6 +150,12 @@ const selectedUserLabel = computed<string>(() => {
   const match = activeUsers.value.find((u) => u.userId === id)
   return match?.userName ?? id
 })
+
+const listTitle = computed<string>(() =>
+  targetUserId.value
+    ? t('list.titleFor', { userId: selectedUserLabel.value })
+    : t('list.titleAll'),
+)
 
 async function refreshStats(): Promise<void> {
   try {
@@ -169,29 +178,38 @@ async function refreshActiveUsers(): Promise<void> {
 }
 
 async function refreshAll(): Promise<void> {
-  await Promise.all([refreshStats(), refreshActiveUsers()])
+  await Promise.all([refreshStats(), refreshActiveUsers(), loadSessions()])
 }
 
-// Picking from the dropdown immediately loads that user's sessions —
-// removes the extra "Fetch" click for the common case.
-function onUserPicked(value: string | null): void {
-  if (value) void loadSessions()
-  else {
-    sessions.value = []
-    hasFetched.value = false
-  }
+// Any filter change (user picked/cleared, includeRevoked toggled, explicit
+// Fetch click) resets to page 1 and reloads — the list is always live, no
+// "pick a user first" gate.
+function onFilterChanged(): void {
+  pageIndex.value = 1
+  void loadSessions()
+}
+
+function onPageSizeChange(size: number): void {
+  pageSize.value = size
+  pageIndex.value = 1
+  void loadSessions()
 }
 
 async function loadSessions(): Promise<void> {
-  const userId = targetUserId.value
-  if (!userId) return
   loading.value = true
   try {
-    sessions.value = await bridge.sessions.listForUser(userId, includeRevoked.value)
-    hasFetched.value = true
+    const page = await bridge.sessions.list({
+      userId: targetUserId.value,
+      includeRevoked: includeRevoked.value,
+      pageIndex: pageIndex.value,
+      pageSize: pageSize.value,
+    })
+    sessions.value = page.items
+    totalCount.value = page.totalCount
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
     sessions.value = []
+    totalCount.value = 0
   } finally {
     loading.value = false
   }
@@ -223,7 +241,7 @@ async function handleCleanExpired(): Promise<void> {
   try {
     const n = await bridge.sessions.cleanExpired()
     message.success(t('cleanExpiredSuccess', { count: n }))
-    await refreshStats()
+    await Promise.all([refreshStats(), loadSessions()])
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
@@ -240,6 +258,15 @@ function formatTime(v: string | Date | null | undefined): string {
 
 const columns = computed<DataTableColumns<UserSessionRow>>(() => [
   { key: 'id', title: t('columns.sessionId'), width: 180, ellipsis: { tooltip: true } },
+  {
+    key: 'userName',
+    title: t('columns.user'),
+    width: 140,
+    ellipsis: { tooltip: true },
+    // userName is populated by the global list endpoint; fall back to the
+    // raw userId so per-user rows (or older payloads) still identify the owner.
+    render: (row) => row.userName ?? row.userId ?? '—',
+  },
   {
     key: 'deviceInfo',
     title: t('columns.device'),
@@ -352,5 +379,13 @@ onMounted(() => {
 .t-session-page__list :deep(.n-data-table) {
   flex: 1 1 auto;
   min-height: 0;
+}
+/* Pagination pinned below the table; stays visible while the table area
+   flexes. Matches the Files.vue footer-row pattern. */
+.t-session-page__pagination {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 4px 0;
 }
 </style>

@@ -7,20 +7,22 @@ public class PaymentService : ApplicationService, IPaymentService
 {
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
-    private readonly IOptions<PaymentOptions> _paymentOptions;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
     private readonly ICache? _cache;
+
+    private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
     public PaymentService(
         IRepository<PaymentEntity, Guid> paymentRepository,
         IPaymentProviderFactory paymentProviderFactory,
-        IOptions<PaymentOptions> paymentOptions,
+        IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider,
         ICache? cache = null)
         : base(serviceProvider)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
-        _paymentOptions = Check.NotNull(paymentOptions);
+        _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
         _cache = cache;
     }
 
@@ -47,7 +49,7 @@ public class PaymentService : ApplicationService, IPaymentService
             OriginalAmount = request.Amount,
             PaidAmount = 0,
             DiscountAmount = 0,
-            Currency = request.Currency ?? _paymentOptions.Value.DefaultCurrency,
+            Currency = request.Currency ?? PaymentOptions.DefaultCurrency,
             Status = PaymentStatus.Pending,
             ChannelCode = request.ChannelCode ?? PaymentConstants.DefaultPaymentChannel,
             PaymentMethod = request.PaymentMethod ?? PaymentMethod.CreditCard,
@@ -68,7 +70,7 @@ public class PaymentService : ApplicationService, IPaymentService
 
         // 使用 DefaultNotifyUrl 作为回调地址的 fallback
         if (string.IsNullOrEmpty(request.ReturnUrl))
-            request.ReturnUrl = _paymentOptions.Value.DefaultNotifyUrl;
+            request.ReturnUrl = PaymentOptions.DefaultNotifyUrl;
 
         // 创建渠道支付订单
         var input = new PaymentProviderCreateDto
@@ -321,7 +323,7 @@ public class PaymentService : ApplicationService, IPaymentService
     public async Task<Result<int>> CloseExpiredPaymentsAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        var globalExpireTime = now.AddMinutes(-_paymentOptions.Value.AutoCloseExpireMinutes);
+        var globalExpireTime = now.AddMinutes(-PaymentOptions.AutoCloseExpireMinutes);
 
         // 优先使用订单级 ExpireTime，没设置时按全局配置 + CreationTime 兜底
         var expiredPayments = await _paymentRepository

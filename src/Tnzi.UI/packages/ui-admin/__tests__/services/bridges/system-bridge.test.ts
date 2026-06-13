@@ -56,12 +56,22 @@ function mockAccessLogApi() {
   }
 }
 
+function mockSettingsCenterApi() {
+  const group = { key: 'g', moduleName: 'M', displayName: 'G', order: 0, fields: [] }
+  return {
+    getDefinitions: vi.fn(async () => ({ success: true, data: [group] })),
+    saveGroup: vi.fn(async () => ({ success: true, data: group })),
+    resetGroup: vi.fn(async () => ({ success: true, data: group })),
+  }
+}
+
 describe('system-bridge', () => {
-  it('exposes menus / settings / accessLogs / scheduledJobs sub-contracts', () => {
+  it('exposes menus / settings / accessLogs / scheduledJobs / settingsCenter sub-contracts', () => {
     const bridge = createSystemBridge({
       menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     expect(typeof bridge.menus.fetch).toBe('function')
     expect(typeof bridge.menus.reorder).toBe('function')
@@ -69,6 +79,9 @@ describe('system-bridge', () => {
     expect(typeof bridge.accessLogs.fetch).toBe('function')
     expect(typeof bridge.scheduledJobs.fetch).toBe('function')
     expect(typeof bridge.scheduledJobs.trigger).toBe('function')
+    expect(typeof bridge.settingsCenter.getDefinitions).toBe('function')
+    expect(typeof bridge.settingsCenter.saveGroup).toBe('function')
+    expect(typeof bridge.settingsCenter.resetGroup).toBe('function')
   })
 
   it('menus.fetch calls menuApi.getList and returns paged items', async () => {
@@ -77,6 +90,7 @@ describe('system-bridge', () => {
       menuApi: menuApi as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     const result = await bridge.menus.fetch({ pageIndex: 1, pageSize: 10, searchText: '', filters: {} })
     expect(menuApi.getList).toHaveBeenCalled()
@@ -90,6 +104,7 @@ describe('system-bridge', () => {
       menuApi: mockMenuApi() as never,
       settingApi: settingApi as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     const result = await bridge.settings.fetch({
       pageIndex: 1,
@@ -108,6 +123,7 @@ describe('system-bridge', () => {
       menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     const result = await bridge.settings.fetch({
       pageIndex: 1,
@@ -124,6 +140,7 @@ describe('system-bridge', () => {
       menuApi: mockMenuApi() as never,
       settingApi: settingApi as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     await bridge.settings.delete(['s1', 's2'])
     expect(settingApi.batchDelete).toHaveBeenCalledWith(['s1', 's2'])
@@ -135,6 +152,7 @@ describe('system-bridge', () => {
       menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: accessLogApi as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     const result = await bridge.accessLogs.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
     expect(accessLogApi.getList).toHaveBeenCalled()
@@ -150,6 +168,7 @@ describe('system-bridge', () => {
       menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     await expect(bridge.scheduledJobs.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} }))
       .rejects.toThrow(/HttpClient.*required/)
@@ -166,10 +185,38 @@ describe('system-bridge', () => {
       menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
     })
     const result = await bridge.scheduledJobs.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
     expect(mockClient.get).toHaveBeenCalledWith('/admin/scheduled-jobs')
     expect(result.items).toHaveLength(1)
     expect(result.items[0].id).toBe('job-1')
+  })
+})
+
+describe('system-bridge settingsCenter', () => {
+  it('unwraps definitions / saveGroup / resetGroup', async () => {
+    const group = { key: 'g', moduleName: 'M', displayName: 'G', order: 0, fields: [] }
+    const settingsCenterApi = {
+      getDefinitions: vi.fn().mockResolvedValue({ success: true, data: [group] }),
+      saveGroup: vi.fn().mockResolvedValue({ success: true, data: group }),
+      resetGroup: vi.fn().mockResolvedValue({ success: true, data: group }),
+    }
+    const bridge = createSystemBridge({
+      menuApi: mockMenuApi() as never,
+      settingApi: mockSettingApi() as never,
+      accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: settingsCenterApi as never,
+    })
+
+    expect(await bridge.settingsCenter.getDefinitions()).toEqual([group])
+    expect(await bridge.settingsCenter.saveGroup('g', { 'A:B': '1' })).toEqual(group)
+    expect(settingsCenterApi.saveGroup).toHaveBeenCalledWith('g', { 'A:B': '1' })
+    expect(await bridge.settingsCenter.resetGroup('g')).toEqual(group)
+  })
+
+  it('rejects when constructed without deps', async () => {
+    const bridge = createSystemBridge()
+    await expect(bridge.settingsCenter.getDefinitions()).rejects.toThrow()
   })
 })

@@ -8,20 +8,22 @@ public class RefundService : ApplicationService, IRefundService
     private readonly IRepository<Refund, Guid> _refundRepository;
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
-    private readonly IOptions<PaymentOptions> _paymentOptions;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
+
+    private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
     public RefundService(
         IRepository<Refund, Guid> refundRepository,
         IRepository<PaymentEntity, Guid> paymentRepository,
         IPaymentProviderFactory paymentProviderFactory,
-        IOptions<PaymentOptions> paymentOptions,
+        IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _refundRepository = Check.NotNull(refundRepository);
         _paymentRepository = Check.NotNull(paymentRepository);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
-        _paymentOptions = Check.NotNull(paymentOptions);
+        _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
     }
 
     public async Task<Result<RefundDto>> CreateRefundAsync(CreateRefundDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
@@ -35,7 +37,7 @@ public class RefundService : ApplicationService, IRefundService
         if (payment.Status != PaymentStatus.Succeeded)
             return Fail<RefundDto>(ErrorCodes.PaymentCannotRefund, 400);
 
-        var options = _paymentOptions.Value;
+        var options = PaymentOptions;
 
         // 事务保护：退款金额校验 + 退款记录创建原子操作，防止并发超退
         var refund = await ExecuteInUnitOfWorkAsync(async ct =>

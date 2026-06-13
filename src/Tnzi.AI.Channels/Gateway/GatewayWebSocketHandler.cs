@@ -15,9 +15,6 @@ public class GatewayWebSocketHandler
         "session.list",
         "session.get",
         "session.prune",
-        "device.register",
-        "device.invoke",
-        "device.result",
         "heartbeat"
     };
 
@@ -44,8 +41,12 @@ public class GatewayWebSocketHandler
         _requireAuthentication = requireAuthentication;
     }
 
-    /// <summary>处理 WebSocket 连接的完整生命周期</summary>
-    public async Task HandleAsync(WebSocket ws, string? userId, CancellationToken ct)
+    /// <summary>
+    /// 处理 WebSocket 连接的完整生命周期。
+    /// <paramref name="tenantId"/> 来自已认证连接的租户上下文（连接建立时由中间件解析），
+    /// 随每条 chat.send 填入 <see cref="GatewayRequest.TenantId"/>；null = 单租户/匿名连接。
+    /// </summary>
+    public async Task HandleAsync(WebSocket ws, string? userId, CancellationToken ct, Guid? tenantId = null)
     {
         // 要求认证时，拒绝匿名连接
         if (_requireAuthentication && string.IsNullOrEmpty(userId))
@@ -126,7 +127,7 @@ public class GatewayWebSocketHandler
 
                 if (msg == null) continue;
 
-                await HandleMessageAsync(ws, msg, userId, ct);
+                await HandleMessageAsync(ws, msg, userId, tenantId, ct);
             }
         }
         catch (OperationCanceledException) { /* expected on shutdown */ }
@@ -175,7 +176,7 @@ public class GatewayWebSocketHandler
         }
     }
 
-    private async Task HandleMessageAsync(WebSocket ws, GatewayMessage msg, string? userId, CancellationToken ct)
+    private async Task HandleMessageAsync(WebSocket ws, GatewayMessage msg, string? userId, Guid? tenantId, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(msg.Method) || !IsValidMethod(msg.Method))
         {
@@ -187,7 +188,7 @@ public class GatewayWebSocketHandler
         switch (msg.Method.ToLowerInvariant())
         {
             case "chat.send":
-                await HandleChatSendAsync(ws, msg, userId, ct);
+                await HandleChatSendAsync(ws, msg, userId, tenantId, ct);
                 break;
 
             case "session.list":
@@ -202,17 +203,10 @@ public class GatewayWebSocketHandler
                 await HandleSessionPruneAsync(ws, msg, ct);
                 break;
 
-            case "device.register":
-            case "device.invoke":
-            case "device.result":
-                // 预留方法 — DeviceModule 加载后通过 DI 处理
-                var notImpl = BuildResponseMessage(msg.Id, msg.Method, error: $"Method '{msg.Method}' is not yet implemented. Load DeviceModule to enable device features.");
-                await SendAsync(ws, notImpl, ct);
-                break;
         }
     }
 
-    private async Task HandleChatSendAsync(WebSocket ws, GatewayMessage msg, string? userId, CancellationToken ct)
+    private async Task HandleChatSendAsync(WebSocket ws, GatewayMessage msg, string? userId, Guid? tenantId, CancellationToken ct)
     {
         var payload = msg.Payload;
         var text = payload?.TryGetProperty("text", out var textElem) == true ? textElem.GetString() : null;
@@ -231,7 +225,9 @@ public class GatewayWebSocketHandler
             Channel = channel ?? "web",
             ChatId = chatId,
             UserId = userId ?? "anonymous",
-            UserMessage = text
+            UserMessage = text,
+            // 来自已认证连接的租户上下文（服务端解析），绝不信任客户端 payload
+            TenantId = tenantId
         };
 
         await foreach (var chunk in _gateway.ProcessStreamingAsync(request, ct))

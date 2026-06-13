@@ -36,9 +36,9 @@ internal static class WorkflowNodeHelper
     }
 
     /// <summary>
-    /// 解析 Agent 配置并创建 AgentExecutor（封装完整的 resolve → create 流程）
+    /// 解析 Agent 配置并创建 IAgentExecutor（封装完整的 resolve → create 流程）
     /// </summary>
-    internal static async Task<AgentExecutor> CreateAgentExecutorAsync(
+    internal static async Task<IAgentExecutor> CreateAgentExecutorAsync(
         Guid? agentId,
         IWorkflowNodeServiceContext serviceContext,
         string? provider,

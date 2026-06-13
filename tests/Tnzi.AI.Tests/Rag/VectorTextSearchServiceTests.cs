@@ -11,11 +11,13 @@ public class VectorTextSearchServiceTests
     private readonly Mock<IVectorStore> _vectorStoreMock = new();
     private readonly Mock<IReranker> _rerankerMock = new();
     private readonly Mock<IRepository<KnowledgeDocument, Guid>> _docRepoMock = new();
+    private readonly Mock<IRepository<KnowledgeBase, Guid>> _kbRepoMock = new();
 
     private VectorTextSearchService CreateService(
         IQueryRewriter? queryRewriter = null,
         IRelevanceGrader? relevanceGrader = null,
-        IEnumerable<ISearchPostProcessor>? postProcessors = null)
+        IEnumerable<ISearchPostProcessor>? postProcessors = null,
+        AIRagOptions? ragOptions = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
@@ -27,7 +29,13 @@ public class VectorTextSearchServiceTests
             _vectorStoreMock.Object,
             _rerankerMock.Object,
             _docRepoMock.Object,
+            _kbRepoMock.Object,
             postProcessors ?? Enumerable.Empty<ISearchPostProcessor>(),
+            Microsoft.Extensions.Options.Options.Create(ragOptions ?? new AIRagOptions
+            {
+                DefaultEmbeddingProvider = "openai",
+                DefaultEmbeddingModel = "text-embedding-3-small"
+            }),
             queryRewriter,
             relevanceGrader);
     }
@@ -342,4 +350,179 @@ public class VectorTextSearchServiceTests
 
         results.ShouldBeEmpty();
     }
+
+    #region Per-KB embedding provider/model alignment (query 向量须与摄取空间一致)
+
+    private void SetupPassthroughReranker()
+    {
+        _rerankerMock
+            .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, List<VectorSearchResult> results, int topK, CancellationToken _) =>
+                results.Take(topK).ToList());
+    }
+
+    [Fact]
+    public async Task SearchAsync_NoKbScope_UsesDefaultEmbeddingProviderAndModel()
+    {
+        var queryVector = new float[] { 0.1f };
+        EmbeddingOptions? capturedOptions = null;
+
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, EmbeddingOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        SetupPassthroughReranker();
+
+        var service = CreateService();
+
+        await service.SearchAsync("query");
+
+        // 跨库搜索必须使用 RAG 全局默认 embedding 配置，而非回退到 AI 顶层 DefaultProvider
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions!.Provider.ShouldBe("openai");
+        capturedOptions.Model.ShouldBe("text-embedding-3-small");
+    }
+
+    [Fact]
+    public async Task SearchAsync_KbScoped_UsesPerKbEmbeddingProviderAndModel()
+    {
+        var kbId = Guid.NewGuid();
+        var queryVector = new float[] { 0.1f };
+        EmbeddingOptions? capturedOptions = null;
+
+        var kbs = new List<KnowledgeBase>
+        {
+            new() { Id = kbId, Name = "KB", EmbeddingProvider = "custom-provider", EmbeddingModel = "custom-model" }
+        };
+        _kbRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(kbs.BuildMock());
+
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, EmbeddingOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), kbId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        SetupPassthroughReranker();
+
+        var service = CreateService();
+
+        await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbId] });
+
+        // query 向量必须与该 KB 摄取时的 provider/model 对齐
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions!.Provider.ShouldBe("custom-provider");
+        capturedOptions.Model.ShouldBe("custom-model");
+        _vectorStoreMock.Verify(v => v.SearchAsync(queryVector, It.IsAny<int>(), kbId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchAsync_MultiKbWithDifferentProviders_GeneratesEmbeddingPerGroup()
+    {
+        var kbA = Guid.NewGuid();
+        var kbB = Guid.NewGuid();
+        var vectorA = new float[] { 0.1f };
+        var vectorB = new float[] { 0.9f };
+
+        var kbs = new List<KnowledgeBase>
+        {
+            new() { Id = kbA, Name = "A", EmbeddingProvider = "provider-a", EmbeddingModel = "model-a" },
+            new() { Id = kbB, Name = "B", EmbeddingProvider = "provider-b", EmbeddingModel = "model-b" }
+        };
+        _kbRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(kbs.BuildMock());
+
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.Is<EmbeddingOptions?>(o => o != null && o.Provider == "provider-a"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(vectorA));
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.Is<EmbeddingOptions?>(o => o != null && o.Provider == "provider-b"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(vectorB));
+
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        SetupPassthroughReranker();
+
+        var service = CreateService();
+
+        await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbA, kbB] });
+
+        // 每个嵌入空间各生成一次 query 向量，且各 KB 用自己空间的向量检索
+        _embeddingServiceMock.Verify(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _vectorStoreMock.Verify(v => v.SearchAsync(vectorA, It.IsAny<int>(), kbA, It.IsAny<CancellationToken>()), Times.Once);
+        _vectorStoreMock.Verify(v => v.SearchAsync(vectorB, It.IsAny<int>(), kbB, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchAsync_MultiKbWithSameProvider_GeneratesSingleEmbedding()
+    {
+        var kbA = Guid.NewGuid();
+        var kbB = Guid.NewGuid();
+        var queryVector = new float[] { 0.5f };
+
+        var kbs = new List<KnowledgeBase>
+        {
+            new() { Id = kbA, Name = "A", EmbeddingProvider = "shared", EmbeddingModel = "model" },
+            new() { Id = kbB, Name = "B", EmbeddingProvider = "shared", EmbeddingModel = "model" }
+        };
+        _kbRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(kbs.BuildMock());
+
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        SetupPassthroughReranker();
+
+        var service = CreateService();
+
+        await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbA, kbB] });
+
+        // 同一嵌入空间只生成一次 query 向量
+        _embeddingServiceMock.Verify(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Once);
+        _vectorStoreMock.Verify(v => v.SearchAsync(queryVector, It.IsAny<int>(), kbA, It.IsAny<CancellationToken>()), Times.Once);
+        _vectorStoreMock.Verify(v => v.SearchAsync(queryVector, It.IsAny<int>(), kbB, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchAsync_KbWithDefaultSentinelProvider_FallsBackToRagDefaults()
+    {
+        var kbId = Guid.NewGuid();
+        var queryVector = new float[] { 0.1f };
+        EmbeddingOptions? capturedOptions = null;
+
+        var kbs = new List<KnowledgeBase>
+        {
+            new() { Id = kbId, Name = "KB", EmbeddingProvider = "default", EmbeddingModel = null }
+        };
+        _kbRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(kbs.BuildMock());
+
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, EmbeddingOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        SetupPassthroughReranker();
+
+        var service = CreateService();
+
+        await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbId] });
+
+        // "default" 哨兵值回退到 RAG 全局默认（与摄取路径一致）
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions!.Provider.ShouldBe("openai");
+        capturedOptions.Model.ShouldBe("text-embedding-3-small");
+    }
+
+    #endregion
 }

@@ -50,6 +50,26 @@ public class DefaultProviderAdminController : ApiAdminControllerBase
         return ApiResult<ProviderDefaultModelDto>.Ok(new ProviderDefaultModelDto { ProviderName = providerName, DefaultModel = model });
     }
 
+    /// <summary>
+    /// 获取启用的 Provider 下拉选项（供 Agent 配置的 Provider 下拉框，替代自由文本输入）
+    /// </summary>
+    [HttpGet("options")]
+    public virtual async Task<ApiResult<List<ProviderOptionDto>>> GetOptions()
+    {
+        var result = await ProviderService.GetOptionsAsync(HttpContext.RequestAborted);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 列出指定 Provider 可用的模型（优先实时 /v1/models，失败按类型静态兜底）
+    /// </summary>
+    [HttpGet("entities/{id:guid}/models")]
+    public virtual async Task<ApiResult<ProviderModelsDto>> ListModels(Guid id)
+    {
+        var result = await ProviderService.ListModelsAsync(id, HttpContext.RequestAborted);
+        return result.ToApiResult();
+    }
+
     // ---- Entity-driven CRUD (Phase 5 backend prereq) -------------------------
 
     /// <summary>

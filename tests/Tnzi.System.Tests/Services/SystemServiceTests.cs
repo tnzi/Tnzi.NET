@@ -237,7 +237,7 @@ public class SettingServiceTests
 {
     private readonly Mock<IRepository<Setting, Guid>> _settingRepositoryMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
-    private readonly Mock<IOptions<ApplicationOptions>> _applicationOptionsMock;
+    private readonly Mock<IOptionsMonitor<ApplicationOptions>> _applicationOptionsMock;
     private readonly Mock<ICache> _cacheMock;
     private readonly SettingService _service;
 
@@ -250,8 +250,8 @@ public class SettingServiceTests
 
         _settingRepositoryMock = new Mock<IRepository<Setting, Guid>>();
         _serviceProviderMock = new Mock<IServiceProvider>();
-        _applicationOptionsMock = new Mock<IOptions<ApplicationOptions>>();
-        _applicationOptionsMock.Setup(x => x.Value).Returns(new ApplicationOptions { AppName = "TestApp", SiteName = "TestSite" });
+        _applicationOptionsMock = new Mock<IOptionsMonitor<ApplicationOptions>>();
+        _applicationOptionsMock.SetupGet(x => x.CurrentValue).Returns(new ApplicationOptions { AppName = "TestApp", SiteName = "TestSite" });
         _cacheMock = new Mock<ICache>();
 
         var loggerFactoryMock = new Mock<ILoggerFactory>();

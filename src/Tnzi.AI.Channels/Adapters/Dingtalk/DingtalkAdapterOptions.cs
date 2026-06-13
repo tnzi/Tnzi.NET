@@ -23,6 +23,13 @@ public class DingtalkAdapterOptions
     /// <summary>Robot code (used for receive-side routing).</summary>
     public string? RobotCode { get; set; }
 
+    /// <summary>
+    /// Owning tenant of this channel bot instance. Inbound messages from this
+    /// channel are processed under this tenant context (session binding rule
+    /// partitioning, thread mapping audit fill). Null = single-tenant / global.
+    /// </summary>
+    public Guid? TenantId { get; set; }
+
     /// <summary>Allowed user ID allowlist (empty = unrestricted).</summary>
     public List<string> AllowedUsers { get; set; } = [];
 
@@ -51,6 +58,7 @@ public class DingtalkAdapterOptions
         $"AppKey = {SecretMask.Mask(AppKey)}, " +
         $"AppSecret = {SecretMask.Mask(AppSecret)}, " +
         $"RobotCode = {RobotCode ?? "<null>"}, " +
+        $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +
         $"AllowedOrganizations.Count = {AllowedOrganizations.Count}, " +
         $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries}, " +

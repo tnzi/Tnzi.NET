@@ -12,6 +12,14 @@ public class ModuleLoader
     private static readonly ConcurrentDictionary<Type, Func<ITnziModule>> _moduleFactories = new();
 
     /// <summary>
+    /// 「类型可解析但模块未加载」的可选依赖列表 —— <c>[OptionalDependsOn]</c> 目标的程序集已被引用
+    /// （typeof 解析成功）但该模块不在启动模块的 <c>[DependsOn]</c> 闭包内，因此不会被加载。
+    /// 加载期没有 logger（先于 DI 容器构建），由 <c>TnziApplication.InitializeAsync</c> 延迟聚合输出
+    /// 诊断日志，帮助开发者发现「以为 OptionalDependsOn 会加载模块」的常见误解。
+    /// </summary>
+    public IReadOnlyList<(Type Consumer, Type Wanted)> SkippedOptionalDependencies { get; private set; } = [];
+
+    /// <summary>
     /// 加载模块
     /// </summary>
     /// <param name="services">服务集合</param>
@@ -22,7 +30,7 @@ public class ModuleLoader
         Type startupModuleType)
     {
         var modules = GetDescriptors(services, startupModuleType);
-        
+
         // 使用带优先级的拓扑排序（Kahn算法变体）
         // 在满足依赖的前提下，优先加载高优先级（数值小）的模块
         return TopologicalSortWithPriority(modules);
@@ -42,7 +50,7 @@ public class ModuleLoader
         Fill(services, modulesDict, modulesList, startupModuleType, visiting, new List<Type>());
 
         // 第二遍：解析可选依赖（所有模块已加载完毕，避免处理顺序导致的遗漏）
-        ResolveOptionalDependencies(modulesDict, modulesList);
+        SkippedOptionalDependencies = ResolveOptionalDependencies(modulesDict, modulesList);
 
         return modulesList.Cast<IModuleDescriptor>().ToList();
     }
@@ -154,10 +162,13 @@ public class ModuleLoader
     /// 解析可选依赖（第二遍遍历）
     /// 在所有模块加载完毕后统一处理，避免 Fill() 递归顺序导致可选依赖遗漏
     /// </summary>
-    private static void ResolveOptionalDependencies(
+    /// <returns>「类型可解析但模块未加载」的可选依赖（消费者模块, 期望模块）对列表</returns>
+    private static List<(Type Consumer, Type Wanted)> ResolveOptionalDependencies(
         Dictionary<Type, ModuleDescriptor> modulesDict,
         List<ModuleDescriptor> modulesList)
     {
+        var skipped = new List<(Type Consumer, Type Wanted)>();
+
         foreach (var descriptor in modulesList)
         {
             IEnumerable<OptionalDependsOnAttribute> optionalAttributes;
@@ -180,14 +191,21 @@ public class ModuleLoader
                     if (dependedModuleType == null || !typeof(ITnziModule).IsAssignableFrom(dependedModuleType))
                         continue;
 
-                    // 模块存在则添加依赖边（确保加载顺序），不存在则静默忽略
+                    // 模块已加载则添加依赖边（确保加载顺序）；
+                    // 类型可解析但模块未加载 → 记录下来供启动期聚合诊断（OptionalDependsOn 只排序、不加载）
                     if (modulesDict.TryGetValue(dependedModuleType, out var dependedDescriptor))
                     {
                         descriptor.AddDependency(dependedDescriptor);
                     }
+                    else
+                    {
+                        skipped.Add((descriptor.Type, dependedModuleType));
+                    }
                 }
             }
         }
+
+        return skipped;
     }
 
     /// <summary>

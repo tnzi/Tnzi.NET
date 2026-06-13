@@ -267,7 +267,7 @@ public class SingleAgentStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = Mock.Of<IRepository<Agent, Guid>>(),
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
     }

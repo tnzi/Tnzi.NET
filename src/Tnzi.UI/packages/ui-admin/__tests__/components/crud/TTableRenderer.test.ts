@@ -2,12 +2,15 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, computed, nextTick } from 'vue'
 import TTableRenderer from '../../../src/components/crud/renderers/TTableRenderer.vue'
+import { estimateRowActionsWidth, type RowAction } from '../../../src/headless/rowActions'
 
 const stubs = {
   DataTable: {
     name: 'DataTable',
     props: ['data', 'columns', 'loading', 'flexHeight', 'scrollX'],
-    template: '<div class="n-data-table-stub" :data-rows="data.length" :data-flex="String(flexHeight)" :data-cols="columns.length" :data-scrollx="String(scrollX)" :data-aligns="columns.map(c => c.align || \'\').join(\',\')" />',
+    // Mirrors the real NDataTable contract: the #empty slot renders only
+    // when there are no rows (needed by the empty-state CTA tests).
+    template: '<div class="n-data-table-stub" :data-rows="data.length" :data-flex="String(flexHeight)" :data-cols="columns.length" :data-scrollx="String(scrollX)" :data-aligns="columns.map(c => c.align || \'\').join(\',\')" :data-actions-width="String((columns.find(c => c.key === \'__row_actions__\') || {}).width)"><slot v-if="!data.length" name="empty" /></div>',
   },
 }
 
@@ -137,5 +140,126 @@ describe('TTableRenderer', () => {
     await nextTick()
     expect(wrapper.find('.n-data-table-stub').exists()).toBe(true)
     expect(wrapper.find('.t-data-cards').exists()).toBe(false)
+  })
+
+  describe('operation column width', () => {
+    const actions: RowAction[] = [{ key: 'edit' }, { key: 'delete' }]
+
+    it('auto-estimates the width for declarative rowActions when no explicit width is given', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeState() as any, rowActions: actions },
+        global: { stubs },
+      })
+      const expected = estimateRowActionsWidth(actions, { maxInline: 2, collapse: true })
+      expect(wrapper.find('.n-data-table-stub').attributes('data-actions-width')).toBe(String(expected))
+    })
+
+    it('an explicit rowActionsWidth overrides the declarative auto-estimate', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeState() as any, rowActions: actions, rowActionsWidth: 220 },
+        global: { stubs },
+      })
+      expect(wrapper.find('.n-data-table-stub').attributes('data-actions-width')).toBe('220')
+    })
+
+    it('the legacy #rowActions slot keeps the historical 150px when no width is given', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeState() as any },
+        slots: { rowActions: '<button>Edit</button>' },
+        global: { stubs },
+      })
+      expect(wrapper.find('.n-data-table-stub').attributes('data-actions-width')).toBe('150')
+    })
+
+    it('an explicit rowActionsWidth also applies to the legacy #rowActions slot', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeState() as any, rowActionsWidth: 200 },
+        slots: { rowActions: '<button>Edit</button>' },
+        global: { stubs },
+      })
+      expect(wrapper.find('.n-data-table-stub').attributes('data-actions-width')).toBe('200')
+    })
+
+    it('renders no operation column at all without actions (width attr is undefined)', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeState() as any },
+        global: { stubs },
+      })
+      expect(wrapper.find('.n-data-table-stub').attributes('data-actions-width')).toBe('undefined')
+    })
+  })
+
+  describe('empty-state create CTA', () => {
+    /** First-load empty creatable state: no rows, no keyword/filters. */
+    function makeCreatableEmptyState() {
+      const state = makeState() as any
+      state.items.value = []
+      state.canCreate = true
+      state.openCreate = vi.fn()
+      return state
+    }
+
+    it('shows the Create CTA on a first-load empty creatable list and opens create on click', async () => {
+      const state = makeCreatableEmptyState()
+      const wrapper = mount(TTableRenderer, {
+        props: { state, translate: (k: string) => k },
+        global: { stubs },
+      })
+      const cta = wrapper.find('.t-crud-empty-cta')
+      expect(cta.exists()).toBe(true)
+      expect(cta.text()).toBe('admin.crud.create')
+      await cta.trigger('click')
+      expect(state.openCreate).toHaveBeenCalledTimes(1)
+    })
+
+    it('falls back to a plain "Create" label without a translator', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeCreatableEmptyState() },
+        global: { stubs },
+      })
+      expect(wrapper.find('.t-crud-empty-cta').text()).toBe('Create')
+    })
+
+    it('hides the CTA when a search keyword is active (search miss, not first-load empty)', () => {
+      const state = makeCreatableEmptyState()
+      state.query.value = { ...state.query.value, searchText: 'nothing matches' }
+      const wrapper = mount(TTableRenderer, { props: { state }, global: { stubs } })
+      expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
+    })
+
+    it('hides the CTA when an advanced filter is active', () => {
+      const state = makeCreatableEmptyState()
+      state.query.value = { ...state.query.value, filters: { status: 'Failed' } }
+      const wrapper = mount(TTableRenderer, { props: { state }, global: { stubs } })
+      expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
+    })
+
+    it('hides the CTA on read-only lists (canCreate=false)', () => {
+      const state = makeCreatableEmptyState()
+      state.canCreate = false
+      const wrapper = mount(TTableRenderer, { props: { state }, global: { stubs } })
+      expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
+      // The unified empty visual itself still renders.
+      expect(wrapper.find('.t-empty').exists()).toBe(true)
+    })
+
+    it('hides the CTA when the state has no openCreate (duck-typed partial state)', () => {
+      const state = makeState() as any
+      state.items.value = []
+      const wrapper = mount(TTableRenderer, { props: { state }, global: { stubs } })
+      expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
+    })
+
+    it('also offers the CTA in the mobile stacked card list', async () => {
+      setViewport(375)
+      const state = makeCreatableEmptyState()
+      const wrapper = mount(TTableRenderer, { props: { state }, global: { stubs } })
+      await nextTick()
+      expect(wrapper.find('.t-data-cards').exists()).toBe(true)
+      const cta = wrapper.find('.t-crud-empty-cta')
+      expect(cta.exists()).toBe(true)
+      await cta.trigger('click')
+      expect(state.openCreate).toHaveBeenCalledTimes(1)
+    })
   })
 })

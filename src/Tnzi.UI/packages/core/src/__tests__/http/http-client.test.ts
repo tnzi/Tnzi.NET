@@ -616,4 +616,283 @@ describe('HttpClient', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
+
+  // ------------------------------------------
+  // Request timeout
+  // ------------------------------------------
+
+  /** Mock fetch that never settles unless its abort signal fires (rejects with DOM AbortError). */
+  function hangingFetch() {
+    mockFetch.mockImplementation((_url: string, opts: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError')),
+        );
+      }),
+    );
+  }
+
+  describe('request timeout', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should fail with REQUEST_TIMEOUT when the default 30s timeout elapses', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+
+      const p = client.get('/slow');
+      await vi.advanceTimersByTimeAsync(30000);
+      const result = await p;
+
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(408);
+      expect(result.errorCode).toBe('REQUEST_TIMEOUT');
+    });
+
+    it('should honor per-request timeout override', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+
+      const p = client.get('/slow', { timeout: 50 });
+      await vi.advanceTimersByTimeAsync(50);
+      const result = await p;
+
+      expect(result.succeeded).toBe(false);
+      expect(result.errorCode).toBe('REQUEST_TIMEOUT');
+    });
+
+    it('per-request timeout larger than default should not fire early', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+
+      let settled = false;
+      const p = client.get('/slow', { timeout: 60000 }).then((r) => {
+        settled = true;
+        return r;
+      });
+
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(30000);
+      const result = await p;
+      expect(result.errorCode).toBe('REQUEST_TIMEOUT');
+    });
+
+    it('should honor instance-level timeout config', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+
+      const c = new HttpClient({ baseUrl: '/api', timeout: 100 });
+      const p = c.get('/slow');
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await p;
+
+      expect(result.errorCode).toBe('REQUEST_TIMEOUT');
+    });
+
+    it('timeout: 0 should disable the timeout (no signal attached)', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({ ok: true }));
+      const c = new HttpClient({ baseUrl: '/api', timeout: 0 });
+
+      const result = await c.get('/no-timeout');
+
+      expect(result.succeeded).toBe(true);
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.signal).toBeUndefined();
+    });
+
+    it('should pass a TimeoutError to errorInterceptor on timeout', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+      const errorInterceptor = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', timeout: 10, errorInterceptor });
+
+      const p = c.get('/slow');
+      await vi.advanceTimersByTimeAsync(10);
+      await p;
+
+      expect(errorInterceptor).toHaveBeenCalledTimes(1);
+      expect(errorInterceptor.mock.calls[0][0].name).toBe('TimeoutError');
+    });
+
+    it('user abort should NOT be reported as timeout', async () => {
+      hangingFetch();
+      const ac = new AbortController();
+
+      const p = client.get('/slow', { signal: ac.signal });
+      ac.abort();
+      const result = await p;
+
+      expect(result.succeeded).toBe(false);
+      expect(result.errorCode).not.toBe('REQUEST_TIMEOUT');
+      expect(result.code).toBe(500); // legacy mapping for non-timeout failures unchanged
+    });
+
+    it('timed-out GET should be removed from dedup map so the next GET retries', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+
+      const p = client.get('/list', { timeout: 20 });
+      await vi.advanceTimersByTimeAsync(20);
+      const r1 = await p;
+      expect(r1.errorCode).toBe('REQUEST_TIMEOUT');
+
+      vi.useRealTimers();
+      mockFetch.mockResolvedValue(apiSuccessResponse({ ok: 1 }));
+      const r2 = await client.get('/list');
+
+      expect(r2.succeeded).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ------------------------------------------
+  // Download timeout exemption
+  // ------------------------------------------
+
+  describe('download timeout exemption', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('download should not attach the default timeout signal', async () => {
+      const blob = new Blob(['x']);
+      mockFetch.mockResolvedValue({ ok: true, status: 200, blob: () => Promise.resolve(blob) });
+
+      const result = await client.download('/big-file');
+
+      expect(result.succeeded).toBe(true);
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.signal).toBeUndefined();
+    });
+
+    it('download should pass the user signal through unchanged', async () => {
+      const blob = new Blob(['x']);
+      mockFetch.mockResolvedValue({ ok: true, status: 200, blob: () => Promise.resolve(blob) });
+      const ac = new AbortController();
+
+      await client.download('/big-file', { signal: ac.signal });
+
+      const [, opts] = mockFetch.mock.calls[0];
+      expect(opts.signal).toBe(ac.signal);
+    });
+
+    it('download should honor an explicit per-request timeout', async () => {
+      vi.useFakeTimers();
+      hangingFetch();
+
+      const p = client.download('/big-file', { timeout: 50 });
+      await vi.advanceTimersByTimeAsync(50);
+      const result = await p;
+
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(408);
+      expect(result.errorCode).toBe('REQUEST_TIMEOUT');
+    });
+  });
+
+  // ------------------------------------------
+  // Refresh timeout and mutex reset
+  // ------------------------------------------
+
+  describe('refresh timeout and mutex reset', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should settle the waiter with the original 401 when refreshTokenFn never settles', async () => {
+      vi.useFakeTimers();
+      const refreshFn = vi.fn().mockReturnValue(new Promise<string>(() => {}));
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn, onUnauthorized });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401, message: 'Unauthorized' }, 401));
+
+      const p = c.get('/protected');
+      await vi.advanceTimersByTimeAsync(30000);
+      const result = await p;
+
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(401);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reset the refresh mutex after timeout so later requests can retry refresh', async () => {
+      vi.useFakeTimers();
+      const refreshFn = vi.fn()
+        .mockReturnValueOnce(new Promise<string>(() => {})) // first refresh: hangs forever
+        .mockResolvedValueOnce('recovered-token'); // second refresh: succeeds
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn, onUnauthorized });
+
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      const p1 = c.get('/first');
+      await vi.advanceTimersByTimeAsync(30000);
+      const r1 = await p1;
+      expect(r1.code).toBe(401);
+
+      vi.useRealTimers();
+      mockFetch.mockReset();
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 401 }, 401))
+        .mockResolvedValueOnce(apiSuccessResponse({ id: 7 }));
+
+      const r2 = await c.get('/second');
+
+      expect(refreshFn).toHaveBeenCalledTimes(2); // mutex was reset, refresh retried
+      expect(r2.succeeded).toBe(true);
+      expect(c.getAccessToken()).toBe('recovered-token');
+    });
+
+    it('concurrent waiters during a hung refresh all receive their original 401', async () => {
+      vi.useFakeTimers();
+      const refreshFn = vi.fn().mockReturnValue(new Promise<string>(() => {}));
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn, onUnauthorized });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      const p1 = c.get('/a');
+      const p2 = c.get('/b');
+      await vi.advanceTimersByTimeAsync(30000);
+      const [r1, r2] = await Promise.all([p1, p2]);
+
+      expect(refreshFn).toHaveBeenCalledTimes(1); // mutex: single refresh call shared
+      expect(r1.code).toBe(401);
+      expect(r2.code).toBe(401);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1); // dedup guard intact
+    });
+
+    it('refresh timeout should follow the instance timeout config', async () => {
+      vi.useFakeTimers();
+      const refreshFn = vi.fn().mockReturnValue(new Promise<string>(() => {}));
+      const c = new HttpClient({
+        baseUrl: '/api',
+        timeout: 100,
+        refreshTokenFn: refreshFn,
+        onUnauthorized: vi.fn(),
+      });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      const p = c.get('/x');
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await p;
+
+      expect(result.code).toBe(401);
+    });
+
+    it('refresh resolving normally is unaffected by the timeout wrapper', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('fresh-token');
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn });
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 401 }, 401))
+        .mockResolvedValueOnce(apiSuccessResponse({ id: 1 }));
+
+      const result = await c.get<{ id: number }>('/protected');
+
+      expect(result.succeeded).toBe(true);
+      expect(c.getAccessToken()).toBe('fresh-token');
+    });
+  });
 });

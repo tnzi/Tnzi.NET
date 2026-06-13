@@ -11,12 +11,7 @@ public class McpServerOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// 传输模式: "stdio" 或 "sse"
-    /// </summary>
-    public string Transport { get; set; } = "stdio";
-
-    /// <summary>
-    /// HTTP/SSE 端点路径（仅在非 stdio 传输时使用）
+    /// HTTP/SSE 端点路径
     /// </summary>
     public string Endpoint { get; set; } = "/mcp";
 

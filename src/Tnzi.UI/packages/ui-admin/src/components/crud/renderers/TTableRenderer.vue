@@ -14,7 +14,7 @@
     :show-selection="props.showSelection"
     :selected-keys="checkedRowKeys"
     :serial-start="serialStart"
-    :empty-text="t('admin.crud.empty')"
+    :empty-text="emptyText"
     @toggle="onToggleOne"
   >
     <template v-if="hasRowActions" #actions="{ row }">
@@ -27,6 +27,20 @@
         :translate="props.translate"
       />
       <slot v-else name="rowActions" :row="(row as T)" />
+    </template>
+    <template #empty>
+      <TEmpty :text="emptyText">
+        <NButton
+          v-if="showCreateCta"
+          class="t-crud-empty-cta"
+          size="small"
+          tertiary
+          type="primary"
+          @click="onEmptyCreate"
+        >
+          {{ createCtaLabel }}
+        </NButton>
+      </TEmpty>
     </template>
   </TDataCardList>
 
@@ -47,24 +61,46 @@
     :scroll-x="scrollX"
     remote
     @update:checked-row-keys="onUpdateCheckedRowKeys"
-  />
+  >
+    <!-- Unified empty visual (TEmpty) instead of Naive's default NEmpty.
+         A first-load empty list on a creatable page also offers a small
+         Create call-to-action (hidden for search/filter misses). -->
+    <template #empty>
+      <TEmpty :text="emptyText">
+        <NButton
+          v-if="showCreateCta"
+          class="t-crud-empty-cta"
+          size="small"
+          tertiary
+          type="primary"
+          @click="onEmptyCreate"
+        >
+          {{ createCtaLabel }}
+        </NButton>
+      </TEmpty>
+    </template>
+  </NDataTable>
 </template>
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed, h, useSlots } from 'vue'
-import { NDataTable } from 'naive-ui'
+import { NButton, NDataTable } from 'naive-ui'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import TDataCardList, { type CardColumn } from '../../data/TDataCardList.vue'
+import TEmpty from '../../data/TEmpty.vue'
 import TRowActions from '../TRowActions.vue'
 import { estimateRowActionsWidth, type RowAction } from '../../../headless/rowActions'
+import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
 
 export interface TTableRendererProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
   mode?: 'page' | 'container'
   showSelection?: boolean
-  /** Fixed operation-column width — only used for the legacy `#rowActions`
-      slot. The declarative `rowActions` path auto-sizes the column instead. */
+  /** Explicit operation-column width. When set it always wins — including
+      over the declarative `rowActions` auto-estimate. Leave unset (default)
+      to let declarative actions auto-size the column; the legacy
+      `#rowActions` slot falls back to a fixed 150px when unset. */
   rowActionsWidth?: number
   /** Declarative operation actions — when supplied the renderer draws
       `TRowActions` itself (table cell + card footer) and the operation column
@@ -86,7 +122,7 @@ export interface TTableRendererProps<T, TId extends string | number = string | n
 const props = withDefaults(defineProps<TTableRendererProps<T, TId>>(), {
   mode: 'page',
   showSelection: true,
-  rowActionsWidth: 150,
+  rowActionsWidth: undefined,
   rowActions: undefined,
   rowActionsMaxInline: 2,
   rowActionsCollapse: true,
@@ -107,16 +143,24 @@ const useCards = computed(() => !props.disableMobileCards && bp.isSm.value)
 const hasDeclarativeActions = computed(() => (props.rowActions?.length ?? 0) > 0)
 const hasRowActions = computed(() => hasDeclarativeActions.value || !!slots.rowActions)
 
-/** Operation column width: auto-fit for declarative actions, else the fixed
- *  legacy width for the `#rowActions` slot. */
-const actionColumnWidth = computed<number>(() =>
-  hasDeclarativeActions.value
-    ? estimateRowActionsWidth(props.rowActions ?? [], {
-        maxInline: props.rowActionsMaxInline,
-        collapse: props.rowActionsCollapse,
-      })
-    : props.rowActionsWidth,
-)
+/** Legacy fixed width for the `#rowActions` slot when no explicit width is
+ *  given — the fixed-right operation column needs a concrete width. */
+const LEGACY_ROW_ACTIONS_WIDTH = 150
+
+/** Operation column width: an explicit `rowActionsWidth` always wins (even
+ *  over the declarative auto-estimate); without it declarative actions
+ *  auto-fit via `estimateRowActionsWidth` and the legacy `#rowActions` slot
+ *  keeps its historical fixed 150px. */
+const actionColumnWidth = computed<number>(() => {
+  if (props.rowActionsWidth != null) return props.rowActionsWidth
+  if (hasDeclarativeActions.value) {
+    return estimateRowActionsWidth(props.rowActions ?? [], {
+      maxInline: props.rowActionsMaxInline,
+      collapse: props.rowActionsCollapse,
+    })
+  }
+  return LEGACY_ROW_ACTIONS_WIDTH
+})
 
 function renderRowActions(row: T): ReturnType<typeof h> {
   return h(TRowActions, {
@@ -131,6 +175,18 @@ function renderRowActions(row: T): ReturnType<typeof h> {
 function t(key: string): string {
   return props.translate ? props.translate(key) : key
 }
+
+/** Translated empty text; without a translator let TEmpty/TDataCardList fall
+ *  back to 'No data' instead of leaking the raw `admin.crud.empty` key. */
+const emptyText = computed(() => (props.translate ? t('admin.crud.empty') : undefined))
+
+/** First-load empty on a creatable list → offer a small Create CTA inside the
+ *  empty state (table + mobile cards). Search/filter misses stay plain. */
+const { showCreateCta, createCtaLabel, onEmptyCreate } = useEmptyCreateCta<T, TId>(
+  () => props.state,
+  () => props.translate,
+)
+
 function maybeTranslate(value: string | undefined, fallback: string): string {
   if (!value) return fallback
   if (/^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)*$/.test(value)) return t(value)

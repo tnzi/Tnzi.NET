@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -40,12 +40,9 @@
     <ProjectReference Include="..\..\src\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
-    <ProjectReference Include="..\..\src\Tnzi.AI.McpClient\Tnzi.AI.McpClient.csproj" />
-    <ProjectReference Include="..\..\src\Tnzi.AI.Coder\Tnzi.AI.Coder.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" />
-    <ProjectReference Include="..\..\src\Tnzi.AI.Device\Tnzi.AI.Device.csproj" />
   </ItemGroup>
 
 </Project>

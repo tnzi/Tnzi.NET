@@ -6,6 +6,14 @@
     in Tnzi.Notification). Preview hits /admin/notifications/preview which
     renders via ITemplateRenderService; Test-send hits create-and-send.
   -->
+  <!--
+    row-actions-max-inline=3: read-only (file-system) rows hide Edit/Delete
+    via `show`, leaving exactly Preview + Send Test visible — with the
+    default maxInline=2 the auto-width estimator sizes the column for the
+    collapsed worst case ([Edit][More]), which is narrower than two fully
+    inline buttons, so they wrapped vertically. 3 sizes the column for
+    [Edit][Preview][More] and keeps both variants on one line.
+  -->
   <TCrudPage
     :state="crud"
     :all-columns="notificationTemplateColumns"
@@ -13,6 +21,7 @@
     :translate="t"
     :form-modal-width="760"
     :row-actions="rowActions"
+    :row-actions-max-inline="3"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer

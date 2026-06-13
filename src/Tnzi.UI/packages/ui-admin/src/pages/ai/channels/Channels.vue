@@ -1,12 +1,16 @@
 <template>
   <!--
     Channels — surfaces /admin/channels/* and /admin/gateway/* exposed by
-    `Tnzi.AI.Channels`. Two tabs:
-      • Adapters — Tnzi.AI.Channels module status + per-adapter capabilities
-      • Gateway  — IGateway control-plane (WebSocket connections + session
-                   binding rules)
+    `Tnzi.AI.Channels`. A KPI strip plus three tabs:
+      • Adapters    — registered channel adapters (name + streaming capability)
+      • Connections — IGateway live WebSocket connections (control plane)
+      • Bindings    — ISessionBinder 4-scope session-binding rules
+
+    The module is an optional sub-module of Tnzi.AI; when it is not loaded the
+    bridge surfaces `null`/empty values and the page renders a friendly
+    "module not enabled" notice instead of failing.
   -->
-  <TContentPage :title="t('title')" :translate="t" card scroll="fill">
+  <TContentPage :title="t('title')" :translate="t" :card="false" scroll="fill">
     <template #actions>
       <NButton size="small" :loading="loading" @click="refresh">
         <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
@@ -15,101 +19,134 @@
     </template>
 
     <template #default>
-      <div class="t-channels-page__kpis">
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.adapters')" :value="channelStatus?.adapters.length ?? 0">
-            <template #suffix>
-              <NTag size="small" :type="channelStatus?.enabled ? 'success' : 'default'" :bordered="false">
-                {{ channelStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
-              </NTag>
-            </template>
-          </NStatistic>
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.gatewayConn')" :value="gatewayStatus?.connectedWebSocketCount ?? 0">
-            <template #suffix>
-              <NTag size="small" :type="gatewayStatus?.enabled ? 'success' : 'default'" :bordered="false">
-                {{ gatewayStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
-              </NTag>
-            </template>
-          </NStatistic>
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.activeSessions')" :value="gatewayStatus?.activeSessionCount ?? 0" />
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.bindings')" :value="bindings.length" />
-        </NCard>
-      </div>
-
+      <!-- Module not loaded (getStatus → null / 404): friendly "unavailable" state. -->
       <NAlert
-        v-if="channelStatus && !channelStatus.enabled"
-        :title="t('disabled.channels.title')"
-        type="warning"
+        v-if="!loading && !moduleLoaded"
+        :title="t('disabled.notLoaded.title')"
+        type="info"
         :closable="false"
-        class="mb-12px"
       >
-        {{ t('disabled.channels.body') }}
+        {{ t('disabled.notLoaded.body') }}
       </NAlert>
 
-      <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
-        <NTabPane name="adapters" :tab="t('tabs.adapters')">
-          <div class="t-table-tabs__pane">
-            <TResponsiveTable
-              :columns="adapterColumns"
-              :data="channelStatus?.adapters ?? []"
-              :loading="loading"
-              :pagination="false"
-              :bordered="false"
-              size="small"
-              :flex-height="true"
-            />
-            <div v-if="channelStatus" class="t-channels-page__meta">
-              <span>{{ t('meta.maxConcurrency', { n: channelStatus.maxConcurrency }) }}</span>
-              <span>·</span>
-              <span>{{ t('meta.throttle', { ms: channelStatus.streamingThrottleMs }) }}</span>
+      <template v-else>
+        <div class="t-channels-page__kpis">
+          <NCard size="small" :bordered="false">
+            <NStatistic :label="t('kpi.adapters')" :value="adapters.length">
+              <template #suffix>
+                <NTag size="small" :type="channelStatus?.enabled ? 'success' : 'default'" :bordered="false">
+                  {{ channelStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
+                </NTag>
+              </template>
+            </NStatistic>
+          </NCard>
+          <NCard size="small" :bordered="false">
+            <NStatistic :label="t('kpi.gatewayConn')" :value="gatewayStatus?.connectedWebSocketCount ?? 0">
+              <template #suffix>
+                <NTag size="small" :type="gatewayStatus?.enabled ? 'success' : 'default'" :bordered="false">
+                  {{ gatewayStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
+                </NTag>
+              </template>
+            </NStatistic>
+          </NCard>
+          <NCard size="small" :bordered="false">
+            <NStatistic :label="t('kpi.activeSessions')" :value="gatewayStatus?.activeSessionCount ?? 0" />
+          </NCard>
+          <NCard size="small" :bordered="false">
+            <NStatistic :label="t('kpi.bindings')" :value="bindings.length" />
+          </NCard>
+        </div>
+
+        <!-- Channels loaded but disabled by configuration. -->
+        <NAlert
+          v-if="channelStatus && !channelStatus.enabled"
+          :title="t('disabled.channels.title')"
+          type="warning"
+          :closable="false"
+          class="mt-12px"
+        >
+          {{ t('disabled.channels.body') }}
+        </NAlert>
+
+        <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
+          <NTabPane name="adapters" :tab="t('tabs.adapters')">
+            <div class="t-table-tabs__pane">
+              <NEmpty
+                v-if="!loading && adapters.length === 0"
+                :description="t('empty.adapters')"
+                class="my-32px"
+              />
+              <template v-else>
+                <TResponsiveTable
+                  :columns="adapterColumns"
+                  :data="adapters"
+                  :loading="loading"
+                  :pagination="false"
+                  :bordered="false"
+                  size="small"
+                  :flex-height="true"
+                />
+                <div v-if="channelStatus" class="t-channels-page__meta">
+                  <span>{{ t('meta.maxConcurrency', { n: channelStatus.maxConcurrency }) }}</span>
+                  <span>·</span>
+                  <span>{{ t('meta.throttle', { ms: channelStatus.streamingThrottleMs }) }}</span>
+                </div>
+              </template>
             </div>
-          </div>
-        </NTabPane>
+          </NTabPane>
 
-        <NTabPane name="connections" :tab="t('tabs.connections')">
-          <div class="t-table-tabs__pane">
-            <TResponsiveTable
-              :columns="connectionColumns"
-              :data="connections"
-              :loading="loading"
-              :pagination="{ pageSize: 15 }"
-              :bordered="false"
-              size="small"
-              :flex-height="true"
-            />
-          </div>
-        </NTabPane>
+          <NTabPane name="connections" :tab="t('tabs.connections')">
+            <div class="t-table-tabs__pane">
+              <NEmpty
+                v-if="!loading && connections.length === 0"
+                :description="t('empty.connections')"
+                class="my-32px"
+              />
+              <TResponsiveTable
+                v-else
+                :columns="connectionColumns"
+                :data="connections"
+                :loading="loading"
+                :pagination="{ pageSize: 15 }"
+                :bordered="false"
+                size="small"
+                :flex-height="true"
+              />
+            </div>
+          </NTabPane>
 
-        <NTabPane name="bindings" :tab="t('tabs.bindings')">
-          <div class="t-table-tabs__pane">
-            <TResponsiveTable
-              :columns="bindingColumns"
-              :data="bindings"
-              :loading="loading"
-              :pagination="{ pageSize: 15 }"
-              :bordered="false"
-              size="small"
-              :flex-height="true"
-            />
-          </div>
-        </NTabPane>
-      </NTabs>
+          <NTabPane name="bindings" :tab="t('tabs.bindings')">
+            <div class="t-table-tabs__pane">
+              <NEmpty
+                v-if="!loading && bindings.length === 0"
+                :description="t('empty.bindings')"
+                class="my-32px"
+              />
+              <TResponsiveTable
+                v-else
+                :columns="bindingColumns"
+                :data="bindings"
+                :loading="loading"
+                :pagination="{ pageSize: 15 }"
+                :bordered="false"
+                size="small"
+                :flex-height="true"
+              />
+            </div>
+          </NTabPane>
+        </NTabs>
+      </template>
     </template>
   </TContentPage>
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
   NCard,
+  NEmpty,
   NStatistic,
   NTabPane,
   NTabs,
@@ -139,8 +176,16 @@ const loading = ref(false)
 const activeTab = ref<'adapters' | 'connections' | 'bindings'>('adapters')
 const channelStatus = ref<ChannelModuleStatusDto | null>(null)
 const gatewayStatus = ref<GatewayStatusDto | null>(null)
+const adapters = ref<ChannelAdapterDto[]>([])
 const connections = ref<GatewayConnectionInfo[]>([])
 const bindings = ref<SessionBindingRuleDto[]>([])
+
+/**
+ * The module counts as "loaded" when either control plane reports a status.
+ * `Tnzi.AI.Channels` not loaded → both statuses are null (bridge swallows the
+ * 404), and we show the "module not enabled" notice instead of the tabs.
+ */
+const moduleLoaded = computed(() => channelStatus.value !== null || gatewayStatus.value !== null)
 
 function scopeLabel(s: number): string {
   // SessionScope enum: 0=Global / 1=PerPeer / 2=PerChannelPeer / 3=PerThread
@@ -244,19 +289,23 @@ const bindingColumns: DataTableColumns<SessionBindingRuleDto> = [
 async function refresh(): Promise<void> {
   loading.value = true
   try {
-    const [cs, gs, conns, binds] = await Promise.all([
+    const [cs, ads, gs, conns, binds] = await Promise.all([
       bridge.channels.getStatus(),
+      bridge.channels.getAdapters(),
       bridge.gateway.getStatus(),
       bridge.gateway.getConnections(),
       bridge.gateway.getBindings(),
     ])
     channelStatus.value = cs
     gatewayStatus.value = gs
+    // Prefer the dedicated adapters endpoint; fall back to the status payload.
+    adapters.value = ads.length > 0 ? ads : (cs?.adapters ?? [])
     connections.value = conns
     bindings.value = binds
   } catch {
     channelStatus.value = null
     gatewayStatus.value = null
+    adapters.value = []
     connections.value = []
     bindings.value = []
   } finally {
@@ -265,6 +314,8 @@ async function refresh(): Promise<void> {
 }
 
 onMounted(() => { void refresh() })
+
+defineExpose({ refresh, channelStatus, gatewayStatus, adapters, connections, bindings, moduleLoaded })
 </script>
 
 <style scoped>

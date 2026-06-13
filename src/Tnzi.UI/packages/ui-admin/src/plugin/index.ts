@@ -19,6 +19,10 @@ import {
   provideAdminWorkbenchConfig,
   type AdminWorkbenchConfig,
 } from './workbenchConfig'
+import {
+  provideAdminSettingsConfig,
+  type AdminSettingsConfig,
+} from './settingsConfig'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -73,6 +77,12 @@ export interface TnziUiAdminOptions {
    * widget components for app-specific cards.
    */
   workbench?: AdminWorkbenchConfig
+  /**
+   * Configuration for the built-in Settings Center page (`/admin/settings`).
+   * Pass `sections` to append app-specific sections, `hideGroups` to hide
+   * built-in schema groups. When omitted the page renders framework groups only.
+   */
+  settings?: AdminSettingsConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -100,6 +110,13 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // config supplied so the page falls back to the bundled default deck.
   if (options.workbench) {
     provideAdminWorkbenchConfig(app, options.workbench)
+  }
+
+  // Settings Center — install the consumer-supplied section registry so the
+  // built-in Settings page can surface app-specific sections alongside the
+  // framework schema groups. Only provided when the consumer opts in.
+  if (options.settings) {
+    provideAdminSettingsConfig(app, options.settings)
   }
 
   // Install global directives (v-permission, etc).
@@ -166,6 +183,13 @@ export {
   useAdminWorkbenchConfig,
   type AdminWorkbenchConfig,
 } from './workbenchConfig'
+export {
+  ADMIN_SETTINGS_CONFIG_KEY,
+  provideAdminSettingsConfig,
+  useAdminSettingsConfig,
+  type AdminSettingsConfig,
+  type AdminSettingsSection,
+} from './settingsConfig'
 export {
   fetchAdminManifest,
   type AdminManifest,

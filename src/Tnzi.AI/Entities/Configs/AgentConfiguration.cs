@@ -40,12 +40,7 @@ public class AgentConfiguration : EntityTypeConfigurationBase<Agent, Guid>
         builder.HasIndex(e => e.IsEnabled);
 
         // v2.1 能力标签字段（JSON 值转换）
-        builder.Property(e => e.ToolGroups)
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
-                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
-            .HasMaxLength(2000);
-
+        // 注意：ToolGroups/SkillSlugs/KnowledgeBaseIds 不再是 Agent 列——已迁移到 junction grant。
         builder.Property(e => e.Domains)
             .HasConversion(
                 v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
@@ -81,5 +76,12 @@ public class AgentConfiguration : EntityTypeConfigurationBase<Agent, Guid>
             .WithMany()
             .HasForeignKey(e => e.PersonaId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        // Provider 关联 FK（过渡期，与遗留字符串 Provider 并存）
+        builder.HasOne(e => e.ProviderEntity)
+            .WithMany()
+            .HasForeignKey(e => e.ProviderId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(e => e.ProviderId);
     }
 }

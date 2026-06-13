@@ -6,8 +6,20 @@
 
     <div v-else-if="!hasItems" class="t-card-renderer__empty">
       <slot name="empty">
-        <TSvgIcon icon="mdi:inbox-outline" :size="40" />
-        <span class="t-card-renderer__empty-text">{{ t('admin.crud.empty') }}</span>
+        <!-- First-load empty on a creatable list → small Create CTA;
+             search/filter misses keep the plain empty visual. -->
+        <TEmpty :text="emptyText">
+          <NButton
+            v-if="showCreateCta"
+            class="t-crud-empty-cta"
+            size="small"
+            tertiary
+            type="primary"
+            @click="onEmptyCreate"
+          >
+            {{ createCtaLabel }}
+          </NButton>
+        </TEmpty>
       </slot>
     </div>
 
@@ -41,9 +53,12 @@
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed } from 'vue'
+import { NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import TEmpty from '../../data/TEmpty.vue'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
+import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
 
 export interface TCardRendererProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
@@ -73,6 +88,17 @@ const bp = useBreakpoint()
 function t(key: string): string {
   return props.translate ? props.translate(key) : key
 }
+
+/** Translated empty text; without a translator let TEmpty fall back to
+ *  'No data' instead of leaking the raw `admin.crud.empty` key. */
+const emptyText = computed(() => (props.translate ? t('admin.crud.empty') : undefined))
+
+/** First-load empty on a creatable list → offer a small Create CTA inside
+ *  the default empty visual. Search/filter misses stay plain. */
+const { showCreateCta, createCtaLabel, onEmptyCreate } = useEmptyCreateCta<T, TId>(
+  () => props.state,
+  () => props.translate,
+)
 
 const items = computed<T[]>(() => props.state.items.value)
 const hasItems = computed(() => items.value.length > 0)
@@ -107,6 +133,17 @@ function toggle(row: T): void {
 
 <style scoped>
 .t-card-renderer { width: 100%; }
+/* In page mode the shell gives the renderer a bounded height via the flex chain
+   (`.t-list-shell--page .t-list-shell__body` is `flex:1; min-height:0; overflow:hidden`).
+   The table renderer scrolls its own NDataTable, but the card grid has no internal
+   scroller — so it must fill the body and own the scroll itself, or the overflowing
+   cards get clipped. Scoped to page mode only (ancestor class match) so container-mode
+   card grids stay content-height and let the outer page scroll. */
+.t-list-shell--page .t-card-renderer {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 .t-card-renderer__grid { display: grid; }
 .t-card-renderer__cell { position: relative; }
 .t-card-renderer__cell--selected { outline: 2px solid var(--tnzi-primary, #646cff); outline-offset: 2px; border-radius: var(--tnzi-admin-radius-md, 8px); }
@@ -122,9 +159,8 @@ function toggle(row: T): void {
   background-size: 200% 100%; animation: t-card-skel 1.2s ease-in-out infinite;
 }
 @keyframes t-card-skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+/* Visuals live in TEmpty; this wrapper only centers custom #empty content. */
 .t-card-renderer__empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; padding: 48px 0; color: var(--tnzi-base-text-muted, #9ca3af);
 }
-.t-card-renderer__empty-text { font-size: 13px; }
 </style>

@@ -11,11 +11,11 @@ public class SubAgentType : AuditedEntity<Guid>, IMultiTenant
     /// <summary>Type description</summary>
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>Tool groups (JSON array)</summary>
-    public string? ToolGroupsJson { get; set; }
+    /// <summary>Tool groups（JSON 值转换列，与 Agent.Domains/Roles 同模式）</summary>
+    public List<string>? ToolGroups { get; set; }
 
-    /// <summary>Excluded tool groups (JSON array)</summary>
-    public string? ExcludedToolGroupsJson { get; set; }
+    /// <summary>Excluded tool groups（JSON 值转换列）</summary>
+    public List<string>? ExcludedToolGroups { get; set; }
 
     /// <summary>Maximum turns</summary>
     public int MaxTurns { get; set; } = 50;
@@ -26,11 +26,11 @@ public class SubAgentType : AuditedEntity<Guid>, IMultiTenant
     /// <summary>Default model</summary>
     public string? DefaultModel { get; set; }
 
-    /// <summary>Default approval mode (int mapping to ToolApprovalMode enum)</summary>
-    public int? DefaultApprovalMode { get; set; }
+    /// <summary>Default approval mode</summary>
+    public ToolApprovalMode? DefaultApprovalMode { get; set; }
 
-    /// <summary>Capability tags (JSON array)</summary>
-    public string? CapabilityTagsJson { get; set; }
+    /// <summary>Capability tags（JSON 值转换列）</summary>
+    public List<string>? CapabilityTags { get; set; }
 
     /// <summary>Whether this type is enabled</summary>
     public bool IsEnabled { get; set; } = true;

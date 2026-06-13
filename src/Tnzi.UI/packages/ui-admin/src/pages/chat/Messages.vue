@@ -13,7 +13,6 @@
     :search-fields="chatMessageSearchFields"
     :title="title"
     :translate="t"
-    :show-create="false"
   >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
@@ -42,16 +41,12 @@ const title = 'title'
 const route = useRoute()
 const bridge = createChatBridge({ client: useAdminClient() })
 
-// Admin view is read-only; messages are created by users only.
-const readOnlyFn = async (): Promise<never> => { throw new Error('Chat messages are read-only from admin') }
-
 const crud = useCrudPage<MessageListItemDto>({
   pageId: 'chat.messages',
   columns: chatMessageColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.messages.fetch(query),
-  createData: readOnlyFn,
-  updateData: readOnlyFn,
+  // Messages are created by users only — no create/update from admin.
   deleteData: (ids) => bridge.messages.delete(ids.map(String)),
 })
 

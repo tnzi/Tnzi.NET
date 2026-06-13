@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import TAdminSidebar from '../../../src/components/layout/TAdminSidebar.vue'
@@ -145,5 +145,60 @@ describe('TAdminSidebar', () => {
     )
     expect(wrapper.find('.slot-header').exists()).toBe(true)
     expect(wrapper.find('.slot-footer').exists()).toBe(true)
+  })
+})
+
+describe('built-in settings footer', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    useAdminRouteStore().setConstantRoutes(seedRoutes())
+  })
+
+  function mountWithRouter(routerOverrides: Record<string, unknown> = {}, props: Record<string, unknown> = {}) {
+    const push = vi.fn()
+    const router = { hasRoute: (name: string) => name === 'settings', push, ...routerOverrides }
+    const wrapper = mount(TAdminSidebar, {
+      props,
+      global: {
+        stubs: { NMenu: menuStub, TSystemLogo: true, TSvgIcon: true },
+        config: { globalProperties: { $router: router } },
+      },
+    })
+    return { wrapper, push }
+  }
+
+  it('renders default settings entry when no footer slot', () => {
+    const { wrapper } = mountWithRouter()
+    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(true)
+  })
+
+  it('navigates to settings route on click', async () => {
+    const { wrapper, push } = mountWithRouter()
+    await wrapper.find('.t-admin-sidebar__settings').trigger('click')
+    expect(push).toHaveBeenCalledWith({ name: 'settings' })
+  })
+
+  it('hides entry when settings route is absent', () => {
+    const { wrapper } = mountWithRouter({ hasRoute: () => false })
+    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(false)
+  })
+
+  it('hides entry when showSettingsEntry=false', () => {
+    const { wrapper } = mountWithRouter({}, { showSettingsEntry: false })
+    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(false)
+  })
+
+  it('footer slot overrides the default entry', () => {
+    const push = vi.fn()
+    const router = { hasRoute: () => true, push }
+    const wrapper = mount(TAdminSidebar, {
+      slots: { footer: '<div class="custom-footer">x</div>' },
+      global: {
+        stubs: { NMenu: menuStub, TSystemLogo: true, TSvgIcon: true },
+        config: { globalProperties: { $router: router } },
+      },
+    })
+    expect(wrapper.find('.custom-footer').exists()).toBe(true)
+    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(false)
   })
 })

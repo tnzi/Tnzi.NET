@@ -516,18 +516,22 @@ public partial class WorkflowService
     {
         Check.NotNull(query);
 
-        var pagedList = await _executionRepository.AsQueryable()
+        var pagedEntities = await _executionRepository.AsQueryable()
             .WhereIf(e => e.WorkflowDefinitionId == query.WorkflowDefinitionId!.Value, query.WorkflowDefinitionId.HasValue)
             .WhereIf(e => e.Status == query.Status!.Value, query.Status.HasValue)
             .OrderByDescending(e => e.CreationTime)
+            .CreateAsync(query);
+
+        // 分页后在内存中反序列化 JSON 列，得出真实的步骤计数（每页条目少，成本可接受）
+        var items = pagedEntities.Items
             .Select(e => new WorkflowExecutionSummaryDto
             {
                 Id = e.Id,
                 ExecutionId = e.ExecutionId,
                 WorkflowDefinitionId = e.WorkflowDefinitionId,
                 Status = e.Status,
-                CompletedStepCount = e.CompletedSteps.Length > 2 ? e.CompletedSteps.Length : 0, // rough estimation from JSON
-                AwaitingApprovalCount = e.StepsAwaitingApproval.Length > 2 ? 1 : 0, // rough flag
+                CompletedStepCount = DeserializeJsonList(e.CompletedSteps).Count,
+                AwaitingApprovalCount = DeserializeJsonList(e.StepsAwaitingApproval).Count,
                 StartedAt = e.StartedAt,
                 DurationMs = e.DurationMs,
                 CreationTime = e.CreationTime,
@@ -536,7 +540,10 @@ public partial class WorkflowService
                 PendingSignalCount = e.PendingSignalCount,
                 CurrentWaitReason = e.CurrentWaitReason
             })
-            .CreateAsync(query);
+            .ToList();
+
+        IPagedList<WorkflowExecutionSummaryDto> pagedList = new PagedList<WorkflowExecutionSummaryDto>(
+            items, pagedEntities.PageIndex, pagedEntities.PageSize, pagedEntities.TotalCount);
 
         return Ok(pagedList);
     }

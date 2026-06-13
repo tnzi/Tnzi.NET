@@ -93,9 +93,53 @@ describe('TListShell', () => {
     expect(wrapper.text()).toContain('boom')
   })
 
+  it('renders the #kpis slot between the header card and the list card', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, title: 'Roles' },
+      slots: { renderer: '<div/>', kpis: '<div class="kpi-marker">K</div>' },
+      global: { stubs },
+    })
+    expect(wrapper.find('.t-list-shell__kpis .kpi-marker').exists()).toBe(true)
+    const html = wrapper.html()
+    expect(html.indexOf('t-list-shell__header-card')).toBeLessThan(html.indexOf('t-list-shell__kpis'))
+    expect(html.indexOf('t-list-shell__kpis')).toBeLessThan(html.indexOf('t-list-shell__list-card'))
+  })
+
+  it('omits the kpis wrapper when no #kpis slot is provided', () => {
+    const wrapper = mount(TListShell, { props: { state: makeState() as any }, slots: { renderer: '<div/>' }, global: { stubs } })
+    expect(wrapper.find('.t-list-shell__kpis').exists()).toBe(false)
+  })
+
   it('renders the page title in a TPageHeader above the list', () => {
     const wrapper = mount(TListShell, { props: { state: makeState() as any, title: 'Roles' }, slots: { renderer: '<div/>' }, global: { stubs } })
     expect(wrapper.find('.t-page-header__title').text()).toBe('Roles')
+  })
+
+  it('show-header=false drops the whole white header card (no TPageHeader, no search)', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, title: 'Roles', showHeader: false },
+      slots: { renderer: '<div/>' },
+      global: { stubs },
+    })
+    expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(false)
+    expect(wrapper.find('.t-page-header__title').exists()).toBe(false)
+    expect(wrapper.find('.t-list-shell__search').exists()).toBe(false)
+    // The list card (toolbar/body/footer) keeps rendering.
+    expect(wrapper.find('.t-list-shell__list-card').exists()).toBe(true)
+  })
+
+  it('show-header=false suppresses a consumer #header slot too', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, showHeader: false },
+      slots: { renderer: '<div/>', header: '<div class="custom-header">H</div>' },
+      global: { stubs },
+    })
+    expect(wrapper.find('.custom-header').exists()).toBe(false)
+  })
+
+  it('renders the header card by default (showHeader defaults to true)', () => {
+    const wrapper = mount(TListShell, { props: { state: makeState() as any, title: 'Roles' }, slots: { renderer: '<div/>' }, global: { stubs } })
+    expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(true)
   })
 
   it('still renders the create button (now inside the header actions)', () => {

@@ -1,93 +1,185 @@
 <template>
   <!--
-    Providers — Phase 5 Task 5.8. Entity-driven CRUD over LLM providers
-    (AI_Provider table) plus a per-row "Test Connection" action surfaced
-    inside the edit form.
+    Providers — LLM provider catalogue rendered as a TCardPage grid.
 
-    Follows the Knowledge canonical pattern (Task 5.10). Test status is
-    exposed via a small inline panel in the #form slot rather than a Naive UI
-    message provider — ui-admin doesn't currently wrap the shell with
-    NMessageProvider, so useMessage() is unavailable. Inline status keeps
-    the page test-friendly and avoids an unmounted-provider warn.
+    Each card shows a provider-type glyph, name, default model, an enabled
+    badge and a live connection-status badge (idle → testing → ok | error).
+    The "Test" button calls bridge.providers.test(id) and surfaces latency on
+    success or the error text on failure. Test state is per-card (a reactive
+    Map keyed by provider id) so several providers can be probed in parallel.
 
-    API key tri-state UX (Stage 3a backend semantics):
-      - Create: apiKey is required.
-      - Update: blank (undefined / empty after trim) = keep existing cipher;
-        non-empty = rotate. Setting it to literal '' to clear the key is a
-        rare admin operation and is achieved by the dedicated cipher-clear
-        flow on the backend, not surfaced here.
-
-    The form's apiKey field always renders empty when opening edit mode;
-    the form-shape -> DTO adapters (toCreateDto / toUpdateDto) handle the
-    "blank means keep" rule at the boundary.
+    Create/edit go through the standard CRUD modal (#form slot). API key is
+    tri-state: required on create; on edit a blank entry keeps the existing
+    cipher, a non-empty entry rotates it. The toCreateDto / toUpdateDto
+    adapters enforce the "blank means keep" rule at the form → DTO boundary.
   -->
-  <TCrudPage
-    :state="crud"
-    :all-columns="providerColumns"
-    :title="title"
-    :translate="t"
-    :form-modal-width="760"
-    :row-actions="rowActions"
-  >
-    <template #form="{ formData, mode }">
-      <TFormSchemaRenderer
-        :schema="providerFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
-        :translate="t"
-        :columns="2"
-      />
-      <p v-if="mode === 'edit'" class="providers__hint">
-        Leave <strong>API Key</strong> blank to keep the existing key. Enter a new
-        value to rotate it.
-      </p>
-      <div
-        v-if="mode === 'edit' && (formData as Record<string, unknown>)?.id"
-        class="providers__test"
-      >
-        <button
-          type="button"
-          class="providers__btn"
-          :disabled="testBusy"
-          @click="onTestConnection((formData as Record<string, unknown>).id as string)"
-        >
-          {{ testBusy ? 'Testing…' : 'Test Connection' }}
-        </button>
-        <span
-          v-if="testStatus"
-          class="providers__status"
-          :data-status="testStatus.kind"
-        >
-          {{ testStatus.message }}
-        </span>
-      </div>
-    </template>
-  </TCrudPage>
+  <div class="ai-provider-page">
+    <TCardPage
+      :state="crud"
+      mode="page"
+      :title="t('title')"
+      :title-help="t('banner')"
+      :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
+      :search-fields="searchFields"
+      :search-placeholder="t('search.placeholder')"
+      :form-modal-width="760"
+      :translate="t"
+    >
+      <template #card="{ item }">
+        <TEntityCard>
+          <div class="flex items-center gap-8px mb-6px">
+            <span class="ai-provider-card__icon">
+              <TSvgIcon :icon="providerIcon(item.providerType || item.name)" :size="18" />
+            </span>
+            <span class="ai-provider-card__name flex-1">{{ item.name }}</span>
+            <!-- Configuration-sourced entries (appsettings AI:Providers) get a
+                 source badge — same muted style as the Skills page's 'File' tag. -->
+            <NTag
+              v-if="isConfigSource(item)"
+              size="small"
+              type="default"
+              :bordered="false"
+            >
+              {{ t('source.configuration') }}
+            </NTag>
+            <NTag
+              v-if="item.scope === ResourceScope.System"
+              size="small"
+              type="warning"
+              :bordered="false"
+            >
+              {{ t('badge.system') }}
+            </NTag>
+            <NTag
+              size="small"
+              :type="item.isEnabled ? 'success' : 'default'"
+              :bordered="false"
+            >
+              {{ item.isEnabled ? t('badge.enabled') : t('badge.disabled') }}
+            </NTag>
+          </div>
+
+          <div class="ai-provider-card__type font-mono">{{ item.providerType }}</div>
+
+          <div class="ai-provider-card__model flex items-center gap-4px">
+            <TSvgIcon icon="mdi:cube-outline" :size="13" color="var(--tnzi-base-text-muted, #888)" />
+            <span>{{ item.defaultModel || t('card.noModel') }}</span>
+          </div>
+
+          <!-- Connection test is rejected (400) for Configuration entries —
+               hide the status row alongside the Test action. -->
+          <div v-if="!isConfigSource(item)" class="flex items-center gap-6px mt-8px">
+            <span class="ai-provider-card__status-label text-12px text-muted">{{ t('test.label') }}:</span>
+            <NTag
+              size="small"
+              :type="statusTagType(testStateOf(item.id).status)"
+              :bordered="false"
+            >
+              {{ t(`badge.${testStateOf(item.id).status}`) }}
+            </NTag>
+            <span
+              v-if="testStateOf(item.id).status === 'ok'"
+              class="text-12px text-success font-mono"
+            >
+              ✓ {{ testStateOf(item.id).latency }}ms
+            </span>
+            <span
+              v-else-if="testStateOf(item.id).status === 'error'"
+              class="ai-provider-card__err text-12px text-error"
+              :title="testStateOf(item.id).error || ''"
+            >
+              ✗ {{ testStateOf(item.id).error || t('test.failed') }}
+            </span>
+          </div>
+
+          <!-- Configuration entries are read-only (backend rejects update /
+               delete / testConnection with 400) — omit the actions footer
+               entirely so no dead buttons render. -->
+          <template v-if="!isConfigSource(item)" #actions>
+            <NButton
+              size="small"
+              type="primary"
+              ghost
+              :loading="testStateOf(item.id).status === 'testing'"
+              @click="testOne(item)"
+            >
+              {{ t('actions.test') }}
+            </NButton>
+            <NButton size="small" ghost :disabled="isLocked(item)" @click="crud.openEdit(item)">
+              {{ t('actions.edit') }}
+            </NButton>
+            <NPopconfirm :disabled="isLocked(item)" @positive-click="removeOne(item)">
+              <template #trigger>
+                <NButton size="small" type="error" ghost :disabled="isLocked(item)">{{ t('actions.delete') }}</NButton>
+              </template>
+              {{ t('deleteConfirm') }}
+            </NPopconfirm>
+          </template>
+        </TEntityCard>
+      </template>
+
+      <template #form="{ formData, mode }">
+        <TFormSchemaRenderer
+          :schema="providerFormSchema"
+          :model="(formData ?? {}) as Record<string, unknown>"
+          :readonly="mode === 'view'"
+          :translate="t"
+          :columns="2"
+        />
+        <p v-if="mode === 'edit'" class="ai-provider-form__hint text-12px text-muted mt-8px">
+          {{ t('form.apiKeyHint') }}
+        </p>
+      </template>
+    </TCardPage>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import { reactive } from 'vue'
+import { NButton, NPopconfirm, NTag } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TCardPage from '../../../components/crud/TCardPage.vue'
+import TEntityCard from '../../../components/data/TEntityCard.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
-import { editAction, deleteAction, type RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
+import { ResourceScope } from '@tnzi/core/services/ai'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
-import { providerColumns, providerFormSchema } from './provider-config'
+import {
+  providerFormSchema,
+  providerIcon,
+  providerSearchFields as searchFields,
+} from './provider-config'
 import type {
   ProviderDto,
   CreateProviderDto,
   UpdateProviderDto,
 } from '@tnzi/core/services/ai'
 
-const title = 'title'
+const t = (key: string) => translatePageKey('ai.providers', key)
 
 const bridge = createAiBridge({ client: useAdminClient() })
+const authStore = useAdminAuthStore()
+
+// Mirrors the backend write guard (ProviderService): system providers are locked only for
+// tenant-scoped sessions; without tenant context (host admin / MT off) they remain editable.
+function isLocked(item: ProviderDto): boolean {
+  return item.scope === ResourceScope.System && !!authStore.currentTenantId
+}
+
+// Configuration-sourced entries (appsettings AI:Providers, synthetic stable id)
+// are read-only: the backend rejects update/delete/testConnection with 400.
+// The card shows a source badge instead of the edit/delete/test actions.
+function isConfigSource(item: ProviderDto): boolean {
+  return item.source === 'Configuration'
+}
+
 
 /**
- * Form -> CreateProviderDto adapter. apiKey trimmed; empty becomes null so
- * the backend validator can flag the missing-key error consistently.
+ * Form → CreateProviderDto adapter. apiKey trimmed; empty becomes null so the
+ * backend validator can flag the missing-key error consistently.
  */
 function toCreateDto(form: Record<string, unknown>): CreateProviderDto {
   const apiKey = String(form.apiKey ?? '').trim()
@@ -104,8 +196,9 @@ function toCreateDto(form: Record<string, unknown>): CreateProviderDto {
 }
 
 /**
- * Form -> UpdateProviderDto adapter. Tri-state apiKey: blank entry means
- * "keep existing", so we omit the field entirely from the payload.
+ * Form → UpdateProviderDto adapter. Tri-state apiKey: a blank entry means
+ * "keep existing", so we omit the field entirely from the payload; a non-empty
+ * entry rotates the key.
  */
 function toUpdateDto(form: Record<string, unknown>): UpdateProviderDto {
   const apiKeyRaw = String(form.apiKey ?? '')
@@ -126,7 +219,7 @@ function toUpdateDto(form: Record<string, unknown>): UpdateProviderDto {
 
 const crud = useCrudPage<ProviderDto>({
   pageId: 'ai.providers',
-  columns: providerColumns,
+  columns: [],
   rowKey: (p) => p.id,
   fetchData: (query) => bridge.providers.fetch(query),
   createData: (data) => bridge.providers.create(toCreateDto(data as Record<string, unknown>)),
@@ -134,68 +227,95 @@ const crud = useCrudPage<ProviderDto>({
     bridge.providers.update(String(id), toUpdateDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.providers.delete(ids.map(String)),
 })
-
-const rowActions: RowAction<ProviderDto>[] = [editAction(crud), deleteAction(crud)]
-
-
 crud.refresh().catch(() => undefined)
 
-const testBusy = ref(false)
-const testStatus = ref<{ kind: 'success' | 'error'; message: string } | null>(null)
+// --- per-card connection-test state -----------------------------------------
+type TestStatus = 'idle' | 'testing' | 'ok' | 'error'
+interface TestState {
+  status: TestStatus
+  latency?: number
+  error?: string
+}
 
-async function onTestConnection(id: string) {
-  if (!id || testBusy.value) return
-  testBusy.value = true
-  testStatus.value = null
+const testStates = reactive(new Map<string, TestState>())
+
+function testStateOf(id: string): TestState {
+  return testStates.get(id) ?? { status: 'idle' }
+}
+
+function statusTagType(status: TestStatus): 'default' | 'info' | 'success' | 'error' {
+  if (status === 'ok') return 'success'
+  if (status === 'error') return 'error'
+  if (status === 'testing') return 'info'
+  return 'default'
+}
+
+async function testOne(item: ProviderDto): Promise<void> {
+  if (testStateOf(item.id).status === 'testing') return
+  testStates.set(item.id, { status: 'testing' })
   try {
-    const result = await bridge.providers.test(id)
+    const result = await bridge.providers.test(item.id)
     if (result.ok) {
-      testStatus.value = {
-        kind: 'success',
-        message: `Connection OK (${result.latency}ms)`,
-      }
+      testStates.set(item.id, { status: 'ok', latency: result.latency })
     } else {
-      testStatus.value = {
-        kind: 'error',
-        message: result.error || 'Connection failed',
-      }
+      testStates.set(item.id, { status: 'error', error: result.error || t('test.failed') })
     }
   } catch (err) {
-    testStatus.value = {
-      kind: 'error',
-      message: err instanceof Error ? err.message : 'Connection test failed',
-    }
-  } finally {
-    testBusy.value = false
+    testStates.set(item.id, {
+      status: 'error',
+      error: err instanceof Error ? err.message : t('test.failed'),
+    })
   }
 }
 
-const t = (key: string) => translatePageKey('ai.providers', key)
+async function removeOne(item: ProviderDto): Promise<void> {
+  await crud.handleDelete([item.id])
+}
 
-defineExpose({ onTestConnection, testBusy, testStatus, toCreateDto, toUpdateDto })
+defineExpose({ testOne, testStateOf, testStates, toCreateDto, toUpdateDto, isConfigSource })
 </script>
 
 <style scoped>
-.providers__hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.8rem;
-  color: var(--tnzi-base-text-muted, #888);
-}
-.providers__test {
+.ai-provider-page {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
-.providers__btn {
-  padding: 0.4rem 0.9rem;
-  cursor: pointer;
+.ai-provider-card__icon {
+  display: inline-flex;
+  color: var(--tnzi-primary, #6d5ce7);
 }
-.providers__btn:disabled {
-  cursor: wait;
-  opacity: 0.6;
+.ai-provider-card__name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--tnzi-base-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.providers__status[data-status='error'] {
-  color: var(--tnzi-error, #d03050);
+.ai-provider-card__type {
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted, #888);
+  margin-bottom: 6px;
+}
+.ai-provider-card__model {
+  font-size: 13px;
+  color: var(--tnzi-base-text-muted, #888);
+  line-height: 1.45;
+  min-width: 0;
+}
+.ai-provider-card__model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-provider-card__err {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

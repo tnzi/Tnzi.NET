@@ -40,6 +40,8 @@ public class SystemModule : TnziApplicationModule
 
         // 注册配置服务
         services.AddScoped<ISettingService, SettingService>();
+        services.AddScoped<ISettingsCenterService, SettingsCenterService>();
+        services.AddSingleton<ISettingDefinitionProvider, SystemSettingDefinitionProvider>();
 
         // 注册配置加密器（仅在启用加密时注册）
         var encryptionOptions = context.Configuration

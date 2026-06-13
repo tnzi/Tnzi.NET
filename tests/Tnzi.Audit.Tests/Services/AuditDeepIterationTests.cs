@@ -8,6 +8,7 @@ public class AuditDeepIterationTests
 {
     private readonly Mock<IRepository<AuditOperation, Guid>> _repositoryMock;
     private readonly Mock<IAuditStore> _auditStoreMock;
+    private readonly Mock<IOptionsMonitor<AuditOptions>> _optionsMonitorMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly AuditOperationService _service;
 
@@ -15,8 +16,10 @@ public class AuditDeepIterationTests
     {
         _repositoryMock = new Mock<IRepository<AuditOperation, Guid>>();
         _auditStoreMock = new Mock<IAuditStore>();
+        _optionsMonitorMock = new Mock<IOptionsMonitor<AuditOptions>>();
+        _optionsMonitorMock.Setup(x => x.CurrentValue).Returns(new AuditOptions());
         _serviceProviderMock = new Mock<IServiceProvider>();
-        _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _serviceProviderMock.Object);
+        _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _optionsMonitorMock.Object, _serviceProviderMock.Object);
     }
 
     private void SetupOperationQueryable(List<AuditOperation> operations)

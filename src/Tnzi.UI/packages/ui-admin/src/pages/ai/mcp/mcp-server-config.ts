@@ -1,38 +1,33 @@
 import { h } from 'vue'
+import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+import type {
+  CreateMcpServerRegistrationDto,
+  UpdateMcpServerRegistrationDto,
+} from '@tnzi/core/services/ai'
 
 /**
- * Phase 5 Task 5.11 — McpServers page config.
+ * McpServers page config — EXTERNAL MCP server registrations (Tab 1 of the
+ * rebuilt three-tab MCP page).
  *
- * Backed by entity-driven CRUD on AI_McpServerRegistration table. Types come
- * from @tnzi/core/services/ai (McpServerRegistrationDto / Create... /
- * Update... / McpServerTestResultDto, added by Stage 3b backend prereq commit
- * 95a5401a).
+ * Backed by entity-driven CRUD on AI_McpServerRegistration. Types come from
+ * @tnzi/core/services/ai (McpServerRegistrationDto / Create… / Update…).
  *
  * SEMANTIC NOTE — these are EXTERNAL MCP servers Tnzi connects to as a
- * client. Self-hosted MCP server settings (Tnzi exposing its own tools as an
- * MCP server) live in appsettings.json under McpServerOptions and are not
- * editable from this page. The page header callout reinforces this so admins
- * don't conflate the two.
+ * CLIENT. Tnzi's own self-hosted MCP server (exposing Tnzi's tools to external
+ * MCP clients) is surfaced read-only in Tab 2 «This Server», driven by
+ * bridge.mcp.getStatus(). The two are intentionally distinct.
  *
- * AuthToken tri-state semantic (per Stage 3b):
+ * AuthToken tri-state semantic:
  *   - Create: authToken plaintext (encrypted at rest); optional.
  *   - Update: null/omitted = keep existing cipher; '' = clear; non-empty =
  *     rotate. The form leaves authToken blank in edit mode and uses the
- *     toUpdateDto adapter to drop the field when blank, matching the
- *     Providers apiKey pattern.
- *
- * Arguments / Tags serialization:
- *   Both fields are stored as a single string column on the entity (the
- *   backend treats them as opaque text blobs that downstream tooling can
- *   parse). The form accepts a newline-separated value for ergonomics; the
- *   page-level adapter joins/splits with '\n'. Operators who need JSON
- *   semantics can paste a JSON literal — the backend stores it verbatim.
+ *     toUpdateDto adapter to drop the field when blank.
  */
 export const mcpServerColumns: ColumnDef[] = [
-  { key: 'name', title: 'columns.name' },
+  { key: 'name', title: 'columns.name', primary: true },
   { key: 'transport', title: 'columns.transport' },
   { key: 'serverUrl', title: 'columns.serverUrl' },
   { key: 'authType', title: 'columns.authType' },
@@ -51,13 +46,27 @@ export const mcpServerColumns: ColumnDef[] = [
       }),
   },
   { key: 'hasAuthToken', title: 'columns.hasAuthToken' },
-  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
+  {
+    key: 'lastModificationTime',
+    title: 'columns.lastModificationTime',
+    width: 160,
+    render: (row) =>
+      formatDateTime(
+        (row as { lastModificationTime?: string | null }).lastModificationTime,
+        { fallback: '—' },
+      ),
+  },
 ]
 
+/**
+ * Allowed transports for runtime-registered servers. stdio is intentionally
+ * absent — the backend rejects it (stdio = spawning a local process, which is
+ * only allowed via deployment configuration AI:Mcp, never via the admin UI).
+ */
 export const mcpTransportOptions: Array<{ label: string; value: string }> = [
-  { label: 'stdio', value: 'stdio' },
   { label: 'SSE', value: 'sse' },
   { label: 'Streamable HTTP', value: 'streamable-http' },
+  { label: 'HTTP', value: 'http' },
 ]
 
 export const mcpAuthTypeOptions: Array<{ label: string; value: string }> = [
@@ -68,31 +77,51 @@ export const mcpAuthTypeOptions: Array<{ label: string; value: string }> = [
 ]
 
 /**
- * Form schema — `command` field uses the visible() predicate so it only
- * appears when transport === 'stdio'. TFormSchemaRenderer supports the
- * predicate (form-schema.ts line 56).
+ * Maps an MCP transport string to a mdi icon name for the external-server
+ * card grid. sse/http = a network stream. The stdio case only renders for
+ * legacy rows created before the registry became HTTP-only.
+ */
+export function mcpTransportIcon(transport: string | null | undefined): string {
+  switch ((transport ?? '').toLowerCase()) {
+    case 'stdio':
+      return 'mdi:console-line'
+    case 'sse':
+      return 'mdi:rss'
+    case 'streamable-http':
+    case 'http':
+      return 'mdi:web'
+    default:
+      return 'mdi:server-network'
+  }
+}
+
+/**
+ * Form schema — HTTP-family transports only; the backend rejects stdio
+ * registrations, so no command/arguments fields exist anymore.
  */
 export const mcpServerFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
-  { key: 'serverUrl', labelKey: 'form.serverUrl', label: 'Server URL', type: 'text', required: true, placeholder: 'https://... or stdio://...' },
-  { key: 'transport', labelKey: 'form.transport', label: 'Transport', type: 'select', options: mcpTransportOptions, required: true },
   {
-    key: 'command',
-    labelKey: 'form.command', label: 'Command (stdio only)',
+    key: 'serverUrl',
+    labelKey: 'form.serverUrl',
+    label: 'Server URL',
     type: 'text',
-    placeholder: 'e.g. node ./mcp-server.js',
-    visible: (model) => (model.transport as string | undefined) === 'stdio',
+    required: true,
+    placeholder: 'https://...',
   },
   {
-    key: 'arguments',
-    labelKey: 'form.arguments', label: 'Arguments',
-    type: 'textarea',
-    placeholder: 'One argument per line. Stored verbatim — JSON literals also accepted.',
+    key: 'transport',
+    labelKey: 'form.transport',
+    label: 'Transport',
+    type: 'select',
+    options: mcpTransportOptions,
+    required: true,
   },
   { key: 'authType', labelKey: 'form.authType', label: 'Auth Type', type: 'select', options: mcpAuthTypeOptions },
   {
     key: 'authToken',
-    labelKey: 'form.authToken', label: 'Auth Token',
+    labelKey: 'form.authToken',
+    label: 'Auth Token',
     type: 'text',
     placeholder: 'Leave blank on edit to keep existing token',
   },
@@ -101,44 +130,52 @@ export const mcpServerFormSchema: FormSchemaItem[] = [
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
   {
     key: 'tags',
-    labelKey: 'form.tags', label: 'Tags',
+    labelKey: 'form.tags',
+    label: 'Tags',
     type: 'textarea',
     placeholder: 'One tag per line. Stored verbatim.',
   },
 ]
 
 /**
- * i18n keys (Task 5.16 will sweep into tnzi.admin.modules.ai.mcp.*):
- *
- * Page meta:
- *   modules.ai.mcp.pageTitle
- *   modules.ai.mcp.headerNote
- *   modules.ai.mcp.testConnection
- *   modules.ai.mcp.testing
- *   modules.ai.mcp.testSuccess
- *   modules.ai.mcp.testFailure
- *   modules.ai.mcp.authTokenHint
- *
- * Columns:
- *   modules.ai.mcp.columns.name
- *   modules.ai.mcp.columns.transport
- *   modules.ai.mcp.columns.serverUrl
- *   modules.ai.mcp.columns.authType
- *   modules.ai.mcp.columns.priority
- *   modules.ai.mcp.columns.isEnabled
- *   modules.ai.mcp.columns.hasAuthToken
- *   modules.ai.mcp.columns.lastModificationTime
- *
- * Form fields:
- *   modules.ai.mcp.form.name
- *   modules.ai.mcp.form.serverUrl
- *   modules.ai.mcp.form.transport
- *   modules.ai.mcp.form.command
- *   modules.ai.mcp.form.arguments
- *   modules.ai.mcp.form.authType
- *   modules.ai.mcp.form.authToken
- *   modules.ai.mcp.form.priority
- *   modules.ai.mcp.form.isEnabled
- *   modules.ai.mcp.form.description
- *   modules.ai.mcp.form.tags
+ * Form -> CreateMcpServerRegistrationDto adapter. Trims string fields and
+ * normalizes blank-strings to null so backend validation handles the
+ * required/optional distinction consistently.
  */
+export function toCreateMcpServerDto(form: Record<string, unknown>): CreateMcpServerRegistrationDto {
+  const authToken = String(form.authToken ?? '').trim()
+  return {
+    name: String(form.name ?? '').trim(),
+    serverUrl: String(form.serverUrl ?? '').trim(),
+    transport: String(form.transport ?? '').trim(),
+    authType: (form.authType as string | undefined) || null,
+    authToken: authToken || null,
+    priority: (form.priority as number | undefined) ?? 0,
+    isEnabled: (form.isEnabled as boolean | undefined) ?? true,
+    description: (form.description as string | undefined) || null,
+    tags: (form.tags as string | undefined) || null,
+  }
+}
+
+/**
+ * Form -> UpdateMcpServerRegistrationDto adapter. Tri-state authToken:
+ * blank means "keep existing", so we omit the field entirely; a non-empty
+ * value rotates the encrypted token.
+ */
+export function toUpdateMcpServerDto(form: Record<string, unknown>): UpdateMcpServerRegistrationDto {
+  const authTokenRaw = String(form.authToken ?? '')
+  const dto: UpdateMcpServerRegistrationDto = {
+    name: (form.name as string | undefined) ?? null,
+    serverUrl: (form.serverUrl as string | undefined) ?? null,
+    transport: (form.transport as string | undefined) ?? null,
+    authType: (form.authType as string | undefined) ?? null,
+    priority: (form.priority as number | undefined) ?? null,
+    isEnabled: (form.isEnabled as boolean | undefined) ?? null,
+    description: (form.description as string | undefined) ?? null,
+    tags: (form.tags as string | undefined) ?? null,
+  }
+  if (authTokenRaw.trim().length > 0) {
+    dto.authToken = authTokenRaw
+  }
+  return dto
+}

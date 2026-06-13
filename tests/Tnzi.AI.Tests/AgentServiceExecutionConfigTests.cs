@@ -16,6 +16,19 @@ public class AgentServiceExecutionConfigTests
         MapperExtensions.SetMapper(mapper);
     }
 
+    /// <summary>
+    /// A grant service mock whose <c>GetGrantsAsync</c> returns an empty projection (no grants),
+    /// so the AgentService read-fallback surfaces the legacy JSON-column values and reconcile
+    /// writes are accepted as no-ops. Mirrors agents seeded without explicit grants.
+    /// </summary>
+    private static IAgentGrantService EmptyGrantService()
+    {
+        var mock = new Mock<IAgentGrantService>();
+        mock.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection());
+        return mock.Object;
+    }
+
     [Fact]
     public async Task CreateAsync_StoresAndReturnsTypedExecutionConfig()
     {
@@ -34,6 +47,7 @@ public class AgentServiceExecutionConfigTests
             repository.Object,
             Mock.Of<IRepository<AgentVersion, Guid>>(),
             Mock.Of<IAgentRuntime>(),
+            EmptyGrantService(),
             new ServiceCollection()
                 .AddLogging()
                 .BuildServiceProvider());
@@ -101,6 +115,7 @@ public class AgentServiceExecutionConfigTests
             repository.Object,
             versionRepository.Object,
             Mock.Of<IAgentRuntime>(),
+            EmptyGrantService(),
             new ServiceCollection()
                 .AddLogging()
                 .BuildServiceProvider());
@@ -135,6 +150,7 @@ public class AgentServiceExecutionConfigTests
             repository.Object,
             Mock.Of<IRepository<AgentVersion, Guid>>(),
             Mock.Of<IAgentRuntime>(),
+            EmptyGrantService(),
             new ServiceCollection()
                 .AddLogging()
                 .BuildServiceProvider());

@@ -8,18 +8,21 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
 {
     private readonly IRepository<PasswordHistory, Guid> _repository;
     private readonly UserManager<User> _userManager;
-    private readonly PasswordPolicyOptions _passwordPolicyOptions;
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptionsMonitor;
+
+    private PasswordPolicyOptions PasswordPolicyOptions =>
+        _identityOptionsMonitor?.CurrentValue.PasswordPolicy ?? new PasswordPolicyOptions();
 
     public PasswordPolicyService(
         IRepository<PasswordHistory, Guid> repository,
         UserManager<User> userManager,
         IServiceProvider serviceProvider,
-        IOptions<IdentityOptions>? identityOptions = null)
+        IOptionsMonitor<IdentityOptions>? identityOptions = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _userManager = Check.NotNull(userManager);
-        _passwordPolicyOptions = identityOptions?.Value.PasswordPolicy ?? new PasswordPolicyOptions();
+        _identityOptionsMonitor = identityOptions;
     }
 
     public string? ValidatePasswordStrength(string password)
@@ -29,7 +32,7 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
             return "Password cannot be empty";
         }
 
-        var options = _passwordPolicyOptions;
+        var options = PasswordPolicyOptions;
 
         // 检查最小长度
         if (password.Length < options.MinLength)
@@ -70,7 +73,7 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
 
     public async Task<bool> CheckPasswordHistoryAsync(Guid userId, string newPassword)
     {
-        var options = _passwordPolicyOptions;
+        var options = PasswordPolicyOptions;
 
         // 如果未启用密码历史检查，直接返回false
         if (options.PasswordHistoryCount <= 0)
@@ -109,7 +112,7 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
 
     public async Task SavePasswordHistoryAsync(Guid userId, string passwordHash)
     {
-        var options = _passwordPolicyOptions;
+        var options = PasswordPolicyOptions;
 
         // 如果未启用密码历史，不保存
         if (options.PasswordHistoryCount <= 0)
@@ -146,7 +149,7 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
 
     public async Task<PasswordExpirationResult> CheckPasswordExpirationAsync(Guid userId)
     {
-        var options = _passwordPolicyOptions;
+        var options = PasswordPolicyOptions;
 
         // 如果未启用密码过期，直接返回
         if (options.PasswordExpirationDays <= 0)
@@ -207,7 +210,7 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
         }
 
         var score = 0;
-        var options = _passwordPolicyOptions;
+        var options = PasswordPolicyOptions;
 
         // 长度评分（最高30分）
         var lengthScore = Math.Min(password.Length * 3, 30);

@@ -9,6 +9,9 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 {
     private readonly IRepository<AuditOperation, Guid> _operationRepository;
     private readonly IAuditStore _auditStore;
+    private readonly IOptionsMonitor<AuditOptions> _optionsMonitor;
+
+    private AuditOptions Options => _optionsMonitor.CurrentValue;
 
     /// <summary>
     /// 初始化一个<see cref="AuditOperationService"/>类型的新实例
@@ -16,11 +19,13 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     public AuditOperationService(
         IRepository<AuditOperation, Guid> operationRepository,
         IAuditStore auditStore,
+        IOptionsMonitor<AuditOptions> optionsMonitor,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _operationRepository = Check.NotNull(operationRepository);
         _auditStore = Check.NotNull(auditStore);
+        _optionsMonitor = Check.NotNull(optionsMonitor);
     }
 
     /// <summary>
@@ -74,12 +79,31 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     }
 
     /// <summary>
-    /// 获取操作审计列表（分页）
+    /// 变更类（写操作）HTTP 方法集合 — Logs/Operations 语义分流的判别依据。
+    /// AuditMiddleware 写入的 HttpMethod 为大写（context.Request.Method）。
     /// </summary>
-    public async Task<Result<IPagedList<AuditOperationDto>>> GetOperationsAsync(AuditOperationQueryDto query)
-    {
-        var queryable = _operationRepository.AsQueryable();
+    private static readonly string[] WriteHttpMethods = ["POST", "PUT", "PATCH", "DELETE"];
 
+    /// <summary>
+    /// 应用查询过滤条件（GetOperationsAsync 与导出共用）。
+    /// </summary>
+    /// <remarks>
+    /// Logs / Operations 语义分流在查询端实现：写入端是单一管道、单一表
+    /// （AuditMiddleware → Audit_Operation），两个 admin 视图读取同一存储 —
+    /// 若在写入端丢弃 GET 类请求，则请求级审计日志（Logs 视图）会丢失数据。
+    /// 因此 Operations 视图通过 <see cref="AuditOperationQueryDto.IsWriteOperation"/>=true
+    /// 在查询端过滤出 POST/PUT/PATCH/DELETE 变更类记录。
+    /// <para>
+    /// 伪读 POST 排除：框架有两类语义上纯读的 POST，写操作视图均排除、读视图包含 —
+    /// (1) query-via-POST 列表查询惯例（<c>POST .../query</c>，如 <c>POST /admin/agents/query</c>）。
+    /// Url 字段存储的是 Path + QueryString，故同时匹配 "/query" 结尾与 "/query?" 中缀；
+    /// (2) 约定无副作用的 <c>Get*</c> 控制器方法（FunctionName 形如
+    /// <c>DefaultUserAdmin.GetList</c>，按 ".Get" 段判别），它们可能经
+    /// <c>POST .../list</c>、<c>POST .../summary</c> 等非 /query 路径暴露。
+    /// </para>
+    /// </remarks>
+    private static IQueryable<AuditOperation> ApplyQueryFilters(IQueryable<AuditOperation> queryable, AuditOperationQueryDto query)
+    {
         if (!string.IsNullOrEmpty(query.FunctionName))
         {
             var functionNameLower = query.FunctionName.ToLower();
@@ -116,7 +140,41 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
             queryable = queryable.Where(o => o.Ip == query.Ip);
         }
 
-        queryable = queryable.OrderByDescending(o => o.CreationTime);
+        if (!string.IsNullOrEmpty(query.HttpMethod))
+        {
+            var method = query.HttpMethod.ToUpper();
+            queryable = queryable.Where(o => o.HttpMethod != null && o.HttpMethod.ToUpper() == method);
+        }
+
+        if (query.IsWriteOperation.HasValue)
+        {
+            // 写方法 + 非"伪读 POST"才算写操作。框架有两类语义上纯读的 POST：
+            // 1. query-via-POST 列表查询惯例（POST .../query）；
+            // 2. 约定无副作用的 Get* 控制器方法（FunctionName 形如 "DefaultUserAdmin.GetList"，
+            //    可能经 POST .../list、POST .../summary 等路径暴露 — 按 ".Get" 段判别）。
+            queryable = query.IsWriteOperation.Value
+                ? queryable.Where(o => o.HttpMethod != null
+                    && WriteHttpMethods.Contains(o.HttpMethod.ToUpper())
+                    && !(o.HttpMethod.ToUpper() == "POST"
+                        && ((o.Url != null && (o.Url.ToLower().EndsWith("/query") || o.Url.ToLower().Contains("/query?")))
+                            || o.FunctionName.Contains(".Get"))))
+                : queryable.Where(o => o.HttpMethod == null
+                    || !WriteHttpMethods.Contains(o.HttpMethod.ToUpper())
+                    || (o.HttpMethod.ToUpper() == "POST"
+                        && ((o.Url != null && (o.Url.ToLower().EndsWith("/query") || o.Url.ToLower().Contains("/query?")))
+                            || o.FunctionName.Contains(".Get"))));
+        }
+
+        return queryable;
+    }
+
+    /// <summary>
+    /// 获取操作审计列表（分页）
+    /// </summary>
+    public async Task<Result<IPagedList<AuditOperationDto>>> GetOperationsAsync(AuditOperationQueryDto query)
+    {
+        var queryable = ApplyQueryFilters(_operationRepository.AsQueryable(), query)
+            .OrderByDescending(o => o.CreationTime);
 
         var paged = await queryable.CreateAsync(query.PageIndex, query.PageSize);
         var dtoItems = paged.Items.MapToList<AuditOperationDto>();
@@ -176,13 +234,14 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// <summary>
     /// 删除过期操作审计
     /// </summary>
-    public async Task<Result<int>> DeleteExpiredOperationsAsync(int days = 90)
+    public async Task<Result<int>> DeleteExpiredOperationsAsync(int? days = null)
     {
-        if (days <= 0)
+        var retentionDays = days ?? Options.RetentionDays;
+        if (retentionDays <= 0)
             return Fail<int>("Days must be greater than 0", 400, AuditErrorCodes.AuditDeleteExpiredFailed);
 
-        var count = await _auditStore.DeleteExpiredAsync(days);
-        LogInformation("Deleted {Count} expired audit operations (older than {Days} days)", count, days);
+        var count = await _auditStore.DeleteExpiredAsync(retentionDays);
+        LogInformation("Deleted {Count} expired audit operations (older than {Days} days)", count, retentionDays);
         return Ok(count, $"Deleted {count} expired audit operations");
     }
 
@@ -244,45 +303,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     private async Task<List<AuditOperation>> GetFilteredOperationsAsync(AuditOperationQueryDto query, CancellationToken cancellationToken)
     {
-        var queryable = _operationRepository.AsQueryable();
-
-        if (!string.IsNullOrEmpty(query.FunctionName))
-        {
-            var functionNameLower = query.FunctionName.ToLower();
-            queryable = queryable.Where(o => o.FunctionName.ToLower().Contains(functionNameLower));
-        }
-
-        if (!string.IsNullOrEmpty(query.PermissionName))
-        {
-            queryable = queryable.Where(o => o.PermissionName == query.PermissionName);
-        }
-
-        if (query.UserId.HasValue)
-        {
-            queryable = queryable.Where(o => o.UserId == query.UserId.Value);
-        }
-
-        if (query.ResultType.HasValue)
-        {
-            queryable = queryable.Where(o => o.ResultType == query.ResultType.Value);
-        }
-
-        if (query.StartDate.HasValue)
-        {
-            queryable = queryable.Where(o => o.CreationTime >= query.StartDate.Value);
-        }
-
-        if (query.EndDate.HasValue)
-        {
-            queryable = queryable.Where(o => o.CreationTime <= query.EndDate.Value);
-        }
-
-        if (!string.IsNullOrEmpty(query.Ip))
-        {
-            queryable = queryable.Where(o => o.Ip == query.Ip);
-        }
-
-        return await queryable
+        return await ApplyQueryFilters(_operationRepository.AsQueryable(), query)
             .OrderByDescending(o => o.CreationTime)
             .Take(10000) // Export safety limit
             .ToListAsync(cancellationToken);

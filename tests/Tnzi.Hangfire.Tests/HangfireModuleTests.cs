@@ -1,3 +1,4 @@
+using Hangfire;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.BackgroundJobs;
@@ -70,4 +71,47 @@ public class HangfireModuleTests
 
         Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(IBackgroundJobManager));
     }
+
+    [Fact]
+    public async Task OnApplicationInitializationAsync_InitializesJobStorageCurrent_SoInitTimeRecurringRegistrationWorks()
+    {
+        // Regression (static-API init-timing bug): a business module that registers a recurring job
+        // in its own OnApplicationInitializationAsync via IBackgroundJobManager.CreateRecurring
+        // (→ static RecurringJob.AddOrUpdate → JobStorage.Current) must succeed during init.
+        // Before the fix, JobStorage.Current was only set lazily when the Hangfire server
+        // hosted-service started (after app.Run(), i.e. AFTER every module's init ran), so with the
+        // Dashboard disabled it threw "JobStorage.Current property value has not been initialized".
+        JobStorage.Current = null!;
+
+        var module = new HangfireModule();
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Hangfire:Enabled"] = "true",
+                ["Hangfire:StorageType"] = "Memory",
+                ["Hangfire:Dashboard:Enabled"] = "false",
+            })
+            .Build();
+
+        var context = new ServiceConfigurationContext(services, configuration);
+        await module.PreConfigureServicesAsync(context);
+        await module.ConfigureServicesAsync(context);
+
+        using var provider = services.BuildServiceProvider();
+
+        // app == null mirrors a non-web host and proves JobStorage init does not depend on the
+        // Dashboard middleware (previously the only init-time code path that set JobStorage.Current).
+        var initContext = new ApplicationInitializationContext(provider);
+        await module.OnApplicationInitializationAsync(initContext);
+
+        Assert.NotNull(JobStorage.Current);
+
+        var jobManager = provider.GetRequiredService<IBackgroundJobManager>();
+        var exception = Record.Exception(() =>
+            jobManager.CreateRecurring("tnzi-hangfire-init-timing-regression", new TestRecurringJobArgs(), "* * * * *"));
+        Assert.Null(exception);
+    }
+
+    private sealed class TestRecurringJobArgs;
 }

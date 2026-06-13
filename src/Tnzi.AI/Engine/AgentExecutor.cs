@@ -10,7 +10,7 @@ namespace Tnzi.AI.Engine;
 /// 支持非流式和流式两种模式，集成 ContextProvider 和 HistoryReducer。
 /// </para>
 /// </remarks>
-public class AgentExecutor
+public class AgentExecutor : IAgentExecutor
 {
     /// <summary>
     /// GracefulShutdown 模式下，外部取消后给工具的宽限时间
@@ -37,7 +37,8 @@ public class AgentExecutor
     public IReadOnlyList<AITool> Tools => _options.Tools?.AsReadOnly() ?? (IReadOnlyList<AITool>)[];
 
     /// <summary>
-    /// 创建一个包含额外工具的新 AgentExecutor（不修改原实例）
+    /// 创建一个包含额外工具的新 AgentExecutor（不修改原实例）。
+    /// 选项经 <see cref="AgentExecutorOptions.Clone"/> 全量复制（含 Logger、StripTextFromToolCallMessages 等）。
     /// </summary>
     public AgentExecutor WithAdditionalTools(IEnumerable<AITool> additionalTools)
     {
@@ -45,43 +46,23 @@ public class AgentExecutor
         if (_options.Tools != null) mergedTools.AddRange(_options.Tools);
         mergedTools.AddRange(additionalTools);
 
-        var newOptions = new AgentExecutorOptions
-        {
-            Name = _options.Name,
-            Instructions = _options.Instructions,
-            Tools = mergedTools,
-            Temperature = _options.Temperature,
-            MaxOutputTokens = _options.MaxOutputTokens,
-            MaxToolIterations = _options.MaxToolIterations,
-            ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
-            HistoryReducer = _options.HistoryReducer,
-            Middlewares = _options.Middlewares,
-            ToolDefinitions = _options.ToolDefinitions,
-            SectionProviders = _options.SectionProviders
-        };
+        var newOptions = _options.Clone();
+        newOptions.Tools = mergedTools;
 
         return new AgentExecutor(_chatClient, newOptions);
     }
 
+    IAgentExecutor IAgentExecutor.WithAdditionalTools(IEnumerable<AITool> additionalTools)
+        => WithAdditionalTools(additionalTools);
+
     /// <summary>
-    /// 创建一个使用指定工具列表的新 AgentExecutor（替换原有工具，不修改原实例）
+    /// 创建一个使用指定工具列表的新 AgentExecutor（替换原有工具，不修改原实例）。
+    /// 选项经 <see cref="AgentExecutorOptions.Clone"/> 全量复制。
     /// </summary>
     public AgentExecutor WithFilteredTools(IEnumerable<AITool> tools)
     {
-        var newOptions = new AgentExecutorOptions
-        {
-            Name = _options.Name,
-            Instructions = _options.Instructions,
-            Tools = tools.ToList(),
-            Temperature = _options.Temperature,
-            MaxOutputTokens = _options.MaxOutputTokens,
-            MaxToolIterations = _options.MaxToolIterations,
-            ToolTimeoutSeconds = _options.ToolTimeoutSeconds,
-            HistoryReducer = _options.HistoryReducer,
-            Middlewares = _options.Middlewares,
-            ToolDefinitions = _options.ToolDefinitions,
-            SectionProviders = _options.SectionProviders
-        };
+        var newOptions = _options.Clone();
+        newOptions.Tools = tools.ToList();
 
         return new AgentExecutor(_chatClient, newOptions);
     }
@@ -103,7 +84,7 @@ public class AgentExecutor
         working = await ReduceHistoryAsync(working, ct);
 
         // 构建 ChatOptions（输出合并后的完整工具列表）
-        var (chatOptions, allTools) = await BuildChatOptionsAsync(ct);
+        var (chatOptions, allTools) = BuildChatOptions();
 
         // 工具调用循环
         var totalInputTokens = 0;
@@ -202,7 +183,7 @@ public class AgentExecutor
 
         // 构建 ChatOptions（输出合并后的完整工具列表）
         // Context injection is owned by ContextInjectionMiddleware (already ran before us).
-        var (chatOptions, allTools) = await BuildChatOptionsAsync(ct);
+        var (chatOptions, allTools) = BuildChatOptions();
 
         // 工具调用循环（流式版本）
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
@@ -402,36 +383,20 @@ public class AgentExecutor
     }
 
     /// <summary>
-    /// 异步构建 ChatOptions，同时返回合并后的完整工具列表。
+    /// 构建 ChatOptions，同时返回合并后的完整工具列表。
     /// Tool injection from ContextProvider is now handled at the runtime layer
     /// (AgentRuntime.MergeAdditionalTools) before this executor is called.
-    /// System prompt sections contributed by registered ISystemPromptSectionProvider instances
-    /// are assembled here and merged with the static Instructions string.
     /// </summary>
-    private async Task<(ChatOptions Options, IList<AITool> AllTools)> BuildChatOptionsAsync(CancellationToken ct = default)
+    private (ChatOptions Options, IList<AITool> AllTools) BuildChatOptions()
     {
         var chatOptions = new ChatOptions();
 
-        // Assemble system prompt: start with static Instructions, then overlay dynamic sections.
-        var builder = new SystemPromptTemplateBuilder();
-
-        if (!string.IsNullOrWhiteSpace(_options.Instructions))
+        // System prompt: wrap the static Instructions in an <instructions> XML section.
+        // Dynamic context (soul/profile/memory/skills) is injected upstream by ContextInjectionMiddleware.
+        var instructions = SystemPromptTemplateBuilder.WrapInstructions(_options.Instructions);
+        if (instructions != null)
         {
-            builder.AddSection(SystemPromptTemplateBuilder.Tags.Instructions, _options.Instructions, 30);
-        }
-
-        if (_options.SectionProviders is { Count: > 0 })
-        {
-            foreach (var provider in _options.SectionProviders)
-            {
-                builder.AddSectionProvider(provider);
-            }
-        }
-
-        var assembled = await builder.BuildAsync(ct);
-        if (!string.IsNullOrWhiteSpace(assembled))
-        {
-            chatOptions.Instructions = assembled;
+            chatOptions.Instructions = instructions;
         }
 
         if (_options.Temperature.HasValue)

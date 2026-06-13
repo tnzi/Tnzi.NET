@@ -13,6 +13,7 @@
       <template v-if="actionColumns.length" #actions="{ row, index }">
         <ActionCell :row="row" :index="index" />
       </template>
+      <template v-if="$slots.empty" #empty><slot name="empty" /></template>
     </TDataCardList>
 
     <div v-if="paginationConfig" class="t-responsive-table__pager">
@@ -41,11 +42,18 @@
     :pagination="pagination"
     :scroll-x="scrollX"
     v-bind="$attrs"
-  />
+  >
+    <!-- Forward consumer slots (#empty, #loading, …) to the underlying
+         NDataTable so near-drop-in migrations keep their custom empty
+         states. The cards branch wires #empty into TDataCardList above. -->
+    <template v-for="(_, name) in forwardedSlots" :key="name" #[name]="slotProps">
+      <slot :name="name" v-bind="slotProps ?? {}" />
+    </template>
+  </NDataTable>
 </template>
 
 <script setup lang="ts" generic="T = any">
-import { computed, defineComponent, h, type PropType, type VNodeChild } from 'vue'
+import { computed, defineComponent, h, useSlots, type PropType, type VNodeChild } from 'vue'
 import { NDataTable, NPagination, type DataTableColumns } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import TDataCardList, { type CardColumn } from './TDataCardList.vue'
@@ -78,6 +86,10 @@ export interface TResponsiveTableProps<T = unknown> {
   mobile?: 'cards' | 'scroll'
   emptyText?: string
 }
+
+// $slots 的 Readonly 推断类型在声明产物（vite-plugin-dts）下无法用动态键
+// 索引（TS7053）——经 useSlots() 显式放宽为字符串记录后再转发。
+const forwardedSlots = useSlots() as Record<string, ((props: Record<string, unknown>) => unknown) | undefined>
 
 type Row = Record<string, unknown>
 /** A loose superset of naive's column shape — we only read a handful of

@@ -1,3 +1,5 @@
+using Tnzi.AI.Enums;
+
 namespace Tnzi.AI.Entities;
 
 /// <summary>
@@ -6,7 +8,7 @@ namespace Tnzi.AI.Entities;
 /// 技能需要同时支持 Tenant scope（按 TenantId 过滤）和 User scope（按 OwnerUserId 过滤），
 /// DatabaseSkillStore 已有显式联合过滤逻辑。
 /// </summary>
-public class SkillEntity : FullAuditedEntity<Guid>
+public class SkillEntity : FullAuditedEntity<Guid>, IScopedResource
 {
     /// <summary>租户 ID（Tenant scope 时非空）</summary>
     public Guid? TenantId { get; set; }
@@ -63,4 +65,11 @@ public class SkillEntity : FullAuditedEntity<Guid>
 
     /// <summary>最近一次激活时间</summary>
     public DateTime? LastActivatedAt { get; set; }
+
+    /// <summary>
+    /// <see cref="IScopedResource.Scope"/> 的显式实现 — 把领域 <see cref="SkillScope"/>
+    /// 投影为框架统一的 <see cref="ResourceScope"/>（两者底层值一致: System=0/Tenant=1/User=2）。
+    /// 仅为标记接口提供契约视图，非 EF 映射属性（不生成数据库列），持久化仍走 <see cref="Scope"/>。
+    /// </summary>
+    ResourceScope IScopedResource.Scope => (ResourceScope)(int)Scope;
 }

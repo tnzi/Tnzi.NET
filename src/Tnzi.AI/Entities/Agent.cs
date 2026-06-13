@@ -25,15 +25,16 @@ public class Agent : MultiTenantAuditedEntity<Guid>
     /// </summary>
     public string Provider { get; set; } = string.Empty;
 
+    /// <summary>FK 指向 Provider 定义。过渡期字段——遗留的字符串 <see cref="Provider"/> 在解析器切换前仍是解析键，ProviderId 是权威引用。</summary>
+    public Guid? ProviderId { get; set; }
+
+    /// <summary>导航到解析的 Provider 实体。</summary>
+    public virtual Provider? ProviderEntity { get; set; }
+
     /// <summary>
     /// 模型名称
     /// </summary>
     public string? Model { get; set; }
-
-    /// <summary>
-    /// 工具组列表
-    /// </summary>
-    public List<string>? ToolGroups { get; set; }
 
     /// <summary>
     /// 温度参数
@@ -97,4 +98,11 @@ public class Agent : MultiTenantAuditedEntity<Guid>
 
     /// <summary>关联的人格</summary>
     public virtual AgentPersona? Persona { get; set; }
+
+    // === 资源关联 ===
+    // 工具组/技能/知识库的分配现在由 junction grant 实体（AgentToolGrant/AgentSkillGrant/
+    // AgentKnowledgeGrant）独占持有，经 IAgentGrantService 读写。原 JSON 列
+    // (ToolGroups/SkillSlugs/KnowledgeBaseIds) 已删除——grant 是唯一权威来源。
+    // Resource assignments (tool groups / skills / knowledge bases) are owned exclusively by the
+    // junction grant entities via IAgentGrantService; the former JSON columns are dropped.
 }

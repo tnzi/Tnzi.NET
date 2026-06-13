@@ -18,6 +18,7 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
 {
     private readonly ILogger<PgFullTextSearchProvider> _logger;
     private readonly ICurrentTenant? _currentTenant;
+    private readonly bool _multiTenancyEnabled;
     private readonly string _connectionString;
     private readonly string _chunkTable;
     private readonly string _knowledgeBaseTable;
@@ -26,11 +27,13 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
         IConfiguration configuration,
         IOptions<AIRagOptions> options,
         ILogger<PgFullTextSearchProvider> logger,
-        ICurrentTenant? currentTenant = null)
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         Check.NotNull(configuration);
         _logger = Check.NotNull(logger);
         _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _connectionString = RagConnectionStringResolver.Resolve(configuration, nameof(PgFullTextSearchProvider));
 
         var prefix = Check.NotNull(options).Value.TableNamePrefix;
@@ -47,14 +50,17 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
             return [];
         }
 
+        // 多租户隔离：仅当存在非空租户上下文时追加 TenantId 谓词（单租户 / host 不追加，见 RagTenantSqlFilter）。
+        // fail-closed：MT 启用且无租户上下文时禁止无 KB 范围的跨库搜索（守卫先于连接打开）。
+        var tenantId = _currentTenant?.Id;
+        RagTenantSqlFilter.EnsureTenantScopeForSearchAll(_multiTenancyEnabled, tenantId, knowledgeBaseId.HasValue);
+
         var sw = Stopwatch.StartNew();
         var results = new List<KeywordSearchResult>();
 
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        // 多租户隔离：仅当存在非空租户上下文时追加 TenantId 谓词（单租户 / host 不追加，见 RagTenantSqlFilter）
-        var tenantId = _currentTenant?.Id;
         var sql = BuildSearchSql(_chunkTable, _knowledgeBaseTable, knowledgeBaseId.HasValue, tenantId);
 
         await using var cmd = new NpgsqlCommand(sql, connection);

@@ -43,36 +43,39 @@ export interface RoleRow {
 export const roleColumns: ColumnDef<RoleRow>[] = [
   { key: 'name', title: 'columns.name', width: 200, fixed: 'left' },
   { key: 'description', title: 'columns.description' },
+  // Binary flags render positive-state-only: a grey "Custom"/"User" tag on
+  // every ordinary row is visual noise — show a tag only when the flag is
+  // set, an em dash otherwise.
   {
     key: 'isDefault',
     title: 'columns.isDefault',
     width: 110,
     render: (row) =>
-      h(TStatusBadge, {
-        value: row.isDefault ?? false,
-        mapping: {
-          true: { type: 'info', labelKey: 'admin.shared.status.default' },
-          false: { type: 'default', labelKey: 'admin.shared.status.custom' },
-        },
-      }),
+      row.isDefault
+        ? h(TStatusBadge, {
+            value: true,
+            mapping: { true: { type: 'success', labelKey: 'admin.shared.status.default' } },
+          })
+        : h('span', { class: 'text-muted' }, '—'),
   },
   {
     key: 'isSystem',
     title: 'columns.isSystem',
     width: 110,
     render: (row) =>
-      h(TStatusBadge, {
-        value: row.isSystem ?? false,
-        mapping: {
-          true: { type: 'warning', labelKey: 'admin.shared.status.system' },
-          false: { type: 'default', labelKey: 'admin.shared.status.user' },
-        },
-      }),
+      row.isSystem
+        ? h(TStatusBadge, {
+            value: true,
+            mapping: { true: { type: 'info', labelKey: 'admin.shared.status.system' } },
+          })
+        : h('span', { class: 'text-muted' }, '—'),
   },
   {
     key: 'creationTime',
     title: 'columns.creationTime',
-    width: 140,
+    // 170 — absolute timestamps ("05/12/2026, 00:03:58") wrap onto two
+    // lines at the previous 140.
+    width: 170,
     fixed: 'right',
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },

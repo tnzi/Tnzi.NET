@@ -21,9 +21,7 @@ public class SummarizationMiddlewareTests
             Mock.Of<ILogger<SummarizationMiddleware>>());
     }
 
-    private static AiMiddlewareContext CreateContext(
-        List<ChatMessage>? messages = null,
-        AgentExecutionMode executionMode = AgentExecutionMode.Single)
+    private static AiMiddlewareContext CreateContext(List<ChatMessage>? messages = null)
     {
         return new AiMiddlewareContext
         {
@@ -32,8 +30,7 @@ public class SummarizationMiddlewareTests
                 agent: null!,
                 provider: "test",
                 model: "test-model",
-                agentId: null,
-                executionMode: executionMode),
+                agentId: null),
             Messages = messages ?? [],
             ServiceProvider = new Mock<IServiceProvider>().Object
         };
@@ -227,37 +224,6 @@ public class SummarizationMiddlewareTests
 
             return Task.FromResult(new AgentRunResult { Response = "ok" });
         });
-    }
-
-    #endregion
-
-    #region ShouldSkipMiddleware (ExternalCli)
-
-    [Fact]
-    public async Task ExternalCli_PassesThroughUnchanged()
-    {
-        var middleware = CreateMiddleware(o =>
-        {
-            o.Summarization.Enabled = true;
-            o.Summarization.Trigger.Type = SummarizationTriggerType.Messages;
-            o.Summarization.Trigger.MessageThreshold = 1;
-        });
-
-        var messages = CreateMessages(100);
-        var originalCount = messages.Count;
-        var context = CreateContext(
-            messages: messages,
-            executionMode: AgentExecutionMode.ExternalCli);
-        var nextCalled = false;
-
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-        {
-            nextCalled = true;
-            ctx.Messages.Count.ShouldBe(originalCount);
-            return Task.FromResult(new AgentRunResult { Response = "ok" });
-        });
-
-        nextCalled.ShouldBeTrue();
     }
 
     #endregion

@@ -25,7 +25,7 @@ public class RefundServiceTests
     private readonly Mock<IRepository<Refund, Guid>> _refundRepositoryMock;
     private readonly Mock<IRepository<PaymentEntity, Guid>> _paymentRepositoryMock;
     private readonly Mock<IPaymentProviderFactory> _providerFactoryMock;
-    private readonly Mock<IOptions<PaymentOptions>> _optionsMock;
+    private readonly Mock<IOptionsMonitor<PaymentOptions>> _optionsMock;
     private readonly RefundService _service;
 
     public RefundServiceTests()
@@ -38,9 +38,9 @@ public class RefundServiceTests
         _refundRepositoryMock = new Mock<IRepository<Refund, Guid>>();
         _paymentRepositoryMock = new Mock<IRepository<PaymentEntity, Guid>>();
         _providerFactoryMock = new Mock<IPaymentProviderFactory>();
-        _optionsMock = new Mock<IOptions<PaymentOptions>>();
+        _optionsMock = new Mock<IOptionsMonitor<PaymentOptions>>();
 
-        _optionsMock.Setup(x => x.Value).Returns(new PaymentOptions
+        _optionsMock.Setup(x => x.CurrentValue).Returns(new PaymentOptions
         {
             EnableRefundApproval = true,
             RefundApprovalThreshold = 1000m,

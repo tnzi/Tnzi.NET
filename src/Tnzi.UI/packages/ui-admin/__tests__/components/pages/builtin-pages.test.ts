@@ -1,10 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { createApp, defineComponent, h } from 'vue'
+import { createApp, defineComponent, h, ref } from 'vue'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
 import TExceptionPage from '../../../src/components/pages/TExceptionPage.vue'
 import TLoginPage from '../../../src/components/pages/TLoginPage.vue'
 import TDashboardPage from '../../../src/components/pages/TDashboardPage.vue'
+import PwdLogin from '../../../src/pages/login/modules/PwdLogin.vue'
+import { reactive } from 'vue'
+import {
+  LOGIN_CONTEXT_KEY,
+  type LoginContext,
+} from '../../../src/pages/login/useLoginContext'
 
 function themeProvide() {
   const ctx = createThemeContext(mergeThemeSettings({}))
@@ -137,6 +143,133 @@ describe('TLoginPage', () => {
     expect(wrapper.find('[data-test="t-login-page-module-label"]').text()).toBe(
       'Custom Welcome',
     )
+  })
+
+  // ---- 2026-06-11 redesign: split layout (方案 B) ----
+
+  it('split layout renders the brand panel with tagline instead of waves', () => {
+    const wrapper = mount(TLoginPage, {
+      props: {
+        layout: 'split',
+        brand: 'Acme',
+        tagline: 'Build admin apps fast',
+        moduleComponents: fullModuleMap,
+      },
+      global: { provide: themeProvide() },
+    })
+    expect(wrapper.find('[data-test="t-login-page-brand-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="t-login-page-brand"]').text()).toBe('Acme')
+    expect(wrapper.text()).toContain('Build admin apps fast')
+    expect(wrapper.find('[data-test="t-login-page-waves"]').exists()).toBe(false)
+    expect(wrapper.find('.pwd-stub').exists()).toBe(true)
+  })
+
+  it('split layout shows the welcome heading on pwd-login and module label elsewhere', async () => {
+    const wrapper = mount(TLoginPage, {
+      props: { layout: 'split', moduleComponents: fullModuleMap },
+      global: { provide: themeProvide() },
+    })
+    expect(wrapper.find('[data-test="t-login-page-module-label"]').text()).toBe('Welcome back!')
+    await wrapper.setProps({ module: 'register' })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="t-login-page-module-label"]').text()).toBe('Register')
+  })
+
+  it('hides the QR corner without qrComponent and toggles the QR panel with one', async () => {
+    const qrStub = defineComponent({
+      name: 'QrStub',
+      render() {
+        return h('div', { class: 'qr-stub' }, 'qr')
+      },
+    })
+    const plain = mount(TLoginPage, {
+      props: { moduleComponents: fullModuleMap },
+      global: { provide: themeProvide() },
+    })
+    expect(plain.find('[data-test="t-login-page-qr-toggle"]').exists()).toBe(false)
+
+    const wrapper = mount(TLoginPage, {
+      props: { moduleComponents: fullModuleMap, qrComponent: qrStub },
+      global: { provide: themeProvide() },
+    })
+    const toggle = wrapper.find('[data-test="t-login-page-qr-toggle"]')
+    expect(toggle.exists()).toBe(true)
+    expect(wrapper.find('[data-test="t-login-page-qr-panel"]').exists()).toBe(false)
+    await toggle.trigger('click')
+    expect(wrapper.find('[data-test="t-login-page-qr-panel"]').exists()).toBe(true)
+    expect(wrapper.find('.qr-stub').exists()).toBe(true)
+    expect(wrapper.find('.pwd-stub').exists()).toBe(false)
+    await toggle.trigger('click')
+    expect(wrapper.find('.pwd-stub').exists()).toBe(true)
+  })
+
+  it('QR corner only renders on pwd-login / code-login modules', () => {
+    const qrStub = defineComponent({ render: () => h('div') })
+    const wrapper = mount(TLoginPage, {
+      props: { module: 'register', moduleComponents: fullModuleMap, qrComponent: qrStub },
+      global: { provide: themeProvide() },
+    })
+    expect(wrapper.find('[data-test="t-login-page-qr-toggle"]').exists()).toBe(false)
+  })
+
+  function makeLoginContext(overrides: Partial<LoginContext> = {}): LoginContext {
+    return {
+      translate: (key, fallback) => fallback ?? key,
+      toggleLoginModule: () => undefined,
+      callbacks: {},
+      demoAccounts: [],
+      ui: { labeled: false, pill: true },
+      thirdParty: [],
+      scene: reactive({ typing: false, passwordVisible: false, passwordLength: 0 }),
+      pendingTwoFactor: ref(null),
+      helpers: { setTwoFactorRequired: () => undefined, clearTwoFactor: () => undefined },
+      ...overrides,
+    }
+  }
+
+  it('PwdLogin renders third-party provider buttons from the context', async () => {
+    const onClick = vi.fn()
+    const ctx = makeLoginContext({
+      thirdParty: [{ key: 'github', icon: 'mdi:github', label: 'GitHub', onClick }],
+    })
+    const wrapper = mount(PwdLogin, {
+      global: {
+        provide: {
+          ...themeProvide(),
+          [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx,
+        },
+      },
+    })
+    const row = wrapper.find('[data-test="pwd-login-third-party"]')
+    expect(row.exists()).toBe(true)
+    await row.find('button').trigger('click')
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('PwdLogin feeds typing / password signals into the scene state', async () => {
+    const ctx = makeLoginContext()
+    const wrapper = mount(PwdLogin, {
+      global: {
+        provide: {
+          ...themeProvide(),
+          [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx,
+        },
+      },
+    })
+    const userInput = wrapper.findAll('input')[0]!
+    await userInput.trigger('focus')
+    expect(ctx.scene.typing).toBe(true)
+    await userInput.trigger('blur')
+    expect(ctx.scene.typing).toBe(false)
+
+    const pwdInput = wrapper.find('input[type="password"]')
+    await pwdInput.setValue('secret')
+    expect(ctx.scene.passwordLength).toBe(6)
+    expect((pwdInput.element as HTMLInputElement).type).toBe('password')
+
+    await wrapper.find('.t-pwd-login__eye-toggle').trigger('click')
+    expect(ctx.scene.passwordVisible).toBe(true)
+    expect((pwdInput.element as HTMLInputElement).type).toBe('text')
   })
 })
 

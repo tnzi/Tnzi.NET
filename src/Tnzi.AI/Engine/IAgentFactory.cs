@@ -17,9 +17,11 @@ public interface IAgentFactory
     /// <param name="maxTokens">最大 Token 数</param>
     /// <param name="options">自定义 AgentExecutorOptions（可选，用于注入 HistoryReducer/ContextProvider）；不会原地修改，内部使用副本合并参数</param>
     /// <param name="userPermissions">用户权限列表（为空时不过滤工具权限）</param>
+    /// <param name="toolNames">单个工具名称列表（per-tool 授权/请求覆盖；在 toolGroups 之外额外解析并按名称合并，权限仍门控）</param>
     /// <param name="ct">取消令牌</param>
-    /// <returns>AgentExecutor 实例</returns>
-    Task<AgentExecutor> CreateAgentAsync(
+    /// <returns>IAgentExecutor 实例。运行时与多 Agent 策略只通过接口消费返回值（无具体类型转换），
+    /// 自定义工厂/装饰器可安全返回任意 <see cref="IAgentExecutor"/> 实现。</returns>
+    Task<IAgentExecutor> CreateAgentAsync(
         string? providerName = null,
         string? model = null,
         string? instructions = null,
@@ -29,6 +31,7 @@ public interface IAgentFactory
         int? maxTokens = null,
         AgentExecutorOptions? options = null,
         IEnumerable<string>? userPermissions = null,
+        IEnumerable<string>? toolNames = null,
         Guid? agentId = null,
         CancellationToken ct = default);
 }

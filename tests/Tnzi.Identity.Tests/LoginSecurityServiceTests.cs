@@ -4,7 +4,7 @@ namespace Tnzi.Identity.Tests;
 
 public class LoginSecurityServiceTests
 {
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<IRepository<LoginLog, Guid>> _loginLogRepositoryMock;
     private readonly Mock<ILogger<LoginSecurityService>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
@@ -13,8 +13,8 @@ public class LoginSecurityServiceTests
 
     public LoginSecurityServiceTests()
     {
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock = new Mock<IOptionsMonitor<IdentityOptions>>();
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             AccountSecurity = new AccountSecurityOptions
             {
@@ -41,7 +41,7 @@ public class LoginSecurityServiceTests
     public async Task DetectAbnormalLoginAsync_WhenDetectionDisabled_ReturnsNormal()
     {
         // Arrange
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             AccountSecurity = new AccountSecurityOptions
             {

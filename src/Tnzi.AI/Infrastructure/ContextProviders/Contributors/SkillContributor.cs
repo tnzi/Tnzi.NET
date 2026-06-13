@@ -40,7 +40,7 @@ internal sealed class SkillContributor : IContextProviderContributor
         {
             var skillsOptions = _options.Value.ContextProviders.Skills;
             var logger = _loggerFactory.CreateLogger<SkillContextProvider>();
-            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillConstraintEnforcer, _skillLoadTracker, context.AgentName);
+            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillConstraintEnforcer, _skillLoadTracker, context.AgentName, context.SkillSlugs);
         }
         catch (Exception ex)
         {

@@ -229,36 +229,4 @@ public class PerSkillAllowedToolsTests
         // Assert: both tools should be injected
         context.AdditionalTools.Count.ShouldBe(2);
     }
-
-    [Fact]
-    public async Task InvokeAsync_ShouldSkipMiddleware_SkipsInjection()
-    {
-        // Arrange: ExternalCli mode should skip
-        var skill = new SkillDefinition
-        {
-            Slug = "my-skill",
-            Name = "My Skill",
-            Priority = 1,
-            AllowedTools = ["test-tool"]
-        };
-
-        var toolDef = MakeToolDef("test-tool");
-        var registry = CreateToolRegistry(toolDef);
-        var middleware = CreateMiddleware(registry);
-
-        var context = new AiMiddlewareContext
-        {
-            Request = new AgentRunRequest { UserMessage = "test" },
-            Agent = new AgentResolution { ExecutionMode = AgentExecutionMode.ExternalCli },
-            ServiceProvider = CreateServiceProvider()
-        };
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
-
-        // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: no injection when skipping
-        context.AdditionalTools.Count.ShouldBe(0);
-    }
 }

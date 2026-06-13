@@ -40,11 +40,17 @@ public class ProviderConfiguration : EntityTypeConfigurationBase<Provider, Guid>
             .IsRequired()
             .HasDefaultValue(true);
 
-        // 唯一索引：同名 Provider 在未删除集合内只能存在一条
-        builder.HasIndex(e => e.Name)
+        builder.Property(e => e.Scope)
+            .IsRequired();
+
+        // 唯一索引：同一作用域 + 租户下同名 Provider 在未删除集合内只能存在一条
+        builder.HasIndex(e => new { e.Name, e.Scope, e.TenantId })
             .IsUnique()
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
 
         builder.HasIndex(e => e.ProviderType);
+
+        // 可见性查询索引 — 加速 Scope/TenantId 联合查询
+        builder.HasIndex(e => new { e.Scope, e.TenantId });
     }
 }

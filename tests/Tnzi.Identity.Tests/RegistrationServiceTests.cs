@@ -6,7 +6,7 @@ namespace Tnzi.Identity.Tests;
 public class RegistrationServiceTests
 {
     private readonly Mock<UserManager<User>> _userManagerMock;
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<ICaptchaService> _captchaServiceMock;
     private readonly Mock<ITwoFactorService> _twoFactorServiceMock;
@@ -21,8 +21,8 @@ public class RegistrationServiceTests
         var store = new Mock<IUserStore<User>>();
         _userManagerMock = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
 
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock = new Mock<IOptionsMonitor<IdentityOptions>>();
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             Registration = new RegistrationOptions
             {
@@ -125,7 +125,7 @@ public class RegistrationServiceTests
     public async Task RegisterAsync_WithCaptchaEnabled_ValidatesCaptcha()
     {
         // Arrange
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             Registration = new RegistrationOptions(),
             Captcha = new CaptchaOptions

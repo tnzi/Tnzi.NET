@@ -6,8 +6,8 @@
  * audit data is immutable — create/update/delete always reject.
  *
  * Sub-contracts:
- *   - logs       → useAdminAuditApi.getList  (operation log view)
- *   - operations → useAdminAuditApi.getList  (operation management view)
+ *   - logs       → useAdminAuditApi.getList  (request-level audit log view: ALL audited requests)
+ *   - operations → useAdminAuditApi.getList + isWriteOperation: true (change-type operations view)
  *
  * BACKEND NOTE:
  *   There is only one backend admin API factory (useAdminAuditApi) covering
@@ -63,8 +63,16 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   // Capture narrowed reference so nested async functions can use it without TS null checks
   const api = auditApi
 
-  async function fetchOperations(query: CrudPageQuery): Promise<CrudPageResult<AuditOperationDto>> {
-    const params = mapQueryToListRequest(query) as unknown as AuditOperationQueryDto
+  // Both page views query the same endpoint but with different semantics:
+  //   - Logs       = request-level audit trail: EVERY audited HTTP request
+  //                  (reads + writes), no extra server-side filter.
+  //   - Operations = change-type operations only: forces `isWriteOperation: true`
+  //                  so the backend returns just POST/PUT/PATCH/DELETE entries
+  //                  (the "business operations" view).
+  // `extra` is spread AFTER the mapped query so the forced semantics cannot be
+  // overridden by page-level filters.
+  async function fetchAudit(query: CrudPageQuery, extra?: Partial<AuditOperationQueryDto>): Promise<CrudPageResult<AuditOperationDto>> {
+    const params = { ...(mapQueryToListRequest(query) as unknown as AuditOperationQueryDto), ...extra }
     const result = unwrap<{ items: AuditOperationDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await api.getList(params),
     )
@@ -77,7 +85,8 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   }
 
   const logs: AuditBridge['logs'] = {
-    fetch: fetchOperations,
+    // Request-level full view — no implicit filter.
+    fetch: (query) => fetchAudit(query),
     create: readOnlyReject,
     update: readOnlyReject,
     delete: readOnlyReject,
@@ -85,7 +94,8 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   }
 
   const operations: AuditBridge['operations'] = {
-    fetch: fetchOperations,
+    // Change-type operations view — write methods only.
+    fetch: (query) => fetchAudit(query, { isWriteOperation: true }),
     create: readOnlyReject,
     update: readOnlyReject,
     delete: readOnlyReject,

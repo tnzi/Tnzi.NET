@@ -32,6 +32,8 @@ export {
   type LoginCallbacks,
   type LoginCallbackHelpers,
   type LoginDemoAccount,
+  type LoginThirdPartyProvider,
+  type LoginUiStyle,
   type PwdLoginPayload,
   type CodeLoginPayload,
   type RegisterPayload,

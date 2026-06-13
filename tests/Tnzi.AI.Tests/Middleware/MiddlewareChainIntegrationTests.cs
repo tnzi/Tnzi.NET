@@ -23,7 +23,7 @@ public class MiddlewareChainIntegrationTests
     public void LoopDetectionMiddleware_Order_IsCorrect()
     {
         var mw = new LoopDetectionMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new LoopDetectionOptions()),
+            TestHelpers.CreateOptionsMonitor(new LoopDetectionOptions()),
             NullLogger<LoopDetectionMiddleware>.Instance);
         mw.Order.ShouldBe(AiMiddlewareOrders.LoopDetection);
     }

@@ -6,9 +6,13 @@ namespace Tnzi.Performance.Options;
 public class PerformanceOptions
 {
     /// <summary>
-    /// 获取或设置 是否启用性能分析
+    /// 获取或设置 是否启用性能分析。
+    /// 默认启用（opt-out）：加载 PerformanceModule 本身已是显式选择，
+    /// 默认关闭会使模块加载后零采样（admin Performance 页恒为空）。
+    /// 采集为内存环形缓冲（MaxHistorySize 上限），开销可忽略；
+    /// 如需关闭，配置 Performance:Enabled = false。
     /// </summary>
-    public bool Enabled { get; set; } = false;
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// 获取或设置 慢请求阈值（毫秒）

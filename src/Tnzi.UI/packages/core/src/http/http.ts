@@ -4,8 +4,29 @@
 
 import type { ApiResult, HttpMethod, RequestOptions, UploadOptions } from '../types/api';
 import { createFailedApiResult, createFailedApiResultFromError } from '../errors/api-error';
+import { TimeoutError } from '../errors/network-error';
 import { normalizeApiResult } from './response';
 import type { HttpResponseContext, HttpResponseMiddleware } from './middleware';
+
+/**
+ * Default request timeout in milliseconds.
+ * Applies to JSON API requests, uploads, and the token refresh call.
+ * `download()` is exempt (large files may take longer); SSE streaming
+ * (`streamChat`) does not go through HttpClient and is unaffected.
+ */
+export const DEFAULT_REQUEST_TIMEOUT = 30000;
+
+/**
+ * `ApiResult.errorCode` value set when a request fails because the
+ * client-side timeout elapsed (distinguishes timeouts from network errors
+ * and caller-initiated aborts).
+ */
+export const REQUEST_TIMEOUT_ERROR_CODE = 'REQUEST_TIMEOUT';
+
+/** Detect the DOM AbortError raised by fetch when its signal aborts. */
+function isDomAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
 
 /**
  * Retry configuration for failed requests
@@ -29,7 +50,12 @@ export interface HttpClientConfig {
   baseUrl: string;
   /** Default headers */
   defaultHeaders?: Record<string, string>;
-  /** Request timeout in milliseconds */
+  /**
+   * Request timeout in milliseconds (default: 30000). Set to 0 to disable.
+   * Applies to JSON API requests, uploads, and the token refresh call.
+   * `download()` is exempt unless an explicit per-request timeout is given;
+   * SSE streaming (`streamChat`) does not go through HttpClient.
+   */
   timeout?: number;
   /**
    * Token refresh function. When configured and a 401 response is received,
@@ -95,11 +121,13 @@ export class HttpClient {
 
   constructor(config: HttpClientConfig) {
     this.config = {
-      timeout: 30000,
       defaultHeaders: {
         'Content-Type': 'application/json',
       },
       ...config,
+      // Normalize after the spread so an explicitly-passed `timeout: undefined`
+      // cannot silently disable the default. Use `timeout: 0` to disable.
+      timeout: config.timeout ?? DEFAULT_REQUEST_TIMEOUT,
     };
   }
 
@@ -183,6 +211,7 @@ export class HttpClient {
       const xhr = new XMLHttpRequest();
 
       const fullUrl = this.buildUrl(url, options?.params);
+      const timeoutMs = options?.timeout ?? this.config.timeout ?? 0;
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && options?.onProgress) {
@@ -227,9 +256,11 @@ export class HttpClient {
       };
 
       xhr.ontimeout = () => {
-        resolve(createFailedApiResultFromError<T>(
-          new Error('Upload timeout'),
-        ));
+        resolve(createFailedApiResult<T>({
+          message: `Upload timed out after ${timeoutMs}ms`,
+          code: 408,
+          errorCode: REQUEST_TIMEOUT_ERROR_CODE,
+        }));
       };
 
       xhr.open('POST', fullUrl);
@@ -254,10 +285,8 @@ export class HttpClient {
         }
       }
 
-      if (options?.timeout) {
-        xhr.timeout = options.timeout;
-      } else if (this.config.timeout) {
-        xhr.timeout = this.config.timeout;
+      if (timeoutMs > 0) {
+        xhr.timeout = timeoutMs;
       }
 
       if (options?.withCredentials) {
@@ -270,8 +299,14 @@ export class HttpClient {
 
   /**
    * Download file. Returns ApiResult<Blob> for consistent error handling.
+   *
+   * Downloads are exempt from the default request timeout — large files can
+   * legitimately take longer than {@link DEFAULT_REQUEST_TIMEOUT}. An explicit
+   * per-request `timeout` is still honored when provided.
    */
   async download(url: string, options?: RequestOptions): Promise<ApiResult<Blob>> {
+    const timeoutMs = options?.timeout ?? 0;
+    const timeout = this.createTimeoutSignal(timeoutMs, options?.signal);
     try {
       const fullUrl = this.buildUrl(url, options?.params);
       const headers = this.buildHeaders(options?.headers);
@@ -279,7 +314,7 @@ export class HttpClient {
       const response = await fetch(fullUrl, {
         method: 'GET',
         headers,
-        signal: options?.signal,
+        signal: timeout.signal,
         credentials: options?.withCredentials ? 'include' : 'same-origin',
       });
 
@@ -298,7 +333,16 @@ export class HttpClient {
         data: blob,
       } as ApiResult<Blob>;
     } catch (error) {
+      if (timeout.timedOut() && isDomAbortError(error)) {
+        return createFailedApiResult<Blob>({
+          message: `${new TimeoutError(timeoutMs).message}: GET ${url}`,
+          code: 408,
+          errorCode: REQUEST_TIMEOUT_ERROR_CODE,
+        });
+      }
       return createFailedApiResultFromError<Blob>(error);
+    } finally {
+      timeout.dispose();
     }
   }
 
@@ -419,9 +463,12 @@ export class HttpClient {
     }
 
     try {
-      // Mutex: if a refresh is already in progress, wait for it
+      // Mutex: if a refresh is already in progress, wait for it.
+      // The refresh call is wrapped with a timeout so a refreshTokenFn that
+      // never settles cannot deadlock the mutex — without it, every queued
+      // request would await a forever-pending promise and freeze the app.
       if (!this._refreshPromise) {
-        this._refreshPromise = this.config.refreshTokenFn();
+        this._refreshPromise = this.withRefreshTimeout(this.config.refreshTokenFn());
       }
       const newToken = await this._refreshPromise;
       this.setAccessToken(newToken);
@@ -429,11 +476,41 @@ export class HttpClient {
       // Retry the original request once with new token
       return await this.executeWithRetry<T>(config, true);
     } catch {
+      // Refresh failed, threw, or timed out — waiters fall back to the
+      // original 401 result (executeWithRetry returns `lastResult` on null).
       this.notifyUnauthorized();
       return null;
     } finally {
+      // Reset the mutex so subsequent requests can attempt a fresh refresh.
       this._refreshPromise = null;
     }
+  }
+
+  /**
+   * Wrap the consumer-provided refresh promise with the client timeout so a
+   * `refreshTokenFn()` that never settles cannot permanently block the
+   * refresh mutex. Follows the instance `timeout` (0 disables, like requests).
+   */
+  private withRefreshTimeout(promise: Promise<string>): Promise<string> {
+    const timeoutMs = this.config.timeout ?? DEFAULT_REQUEST_TIMEOUT;
+    if (timeoutMs <= 0) {
+      return promise;
+    }
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
+      // Attach handlers to the original promise so a late settlement after
+      // the timeout neither leaks the timer nor raises an unhandled rejection.
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
   }
 
   /**
@@ -448,9 +525,15 @@ export class HttpClient {
   }
 
   /**
-   * Execute a single HTTP request (no retry logic)
+   * Execute a single HTTP request (no retry logic).
+   * Enforces the request timeout (per-request override > instance config >
+   * {@link DEFAULT_REQUEST_TIMEOUT}; 0 disables) so a hung connection always
+   * settles instead of leaving callers awaiting forever.
    */
   private async executeRequest<T>(config: RequestConfig): Promise<ApiResult<T>> {
+    const timeoutMs = config.timeout ?? this.config.timeout ?? DEFAULT_REQUEST_TIMEOUT;
+    const timeout = this.createTimeoutSignal(timeoutMs, config.signal);
+
     try {
       const fullUrl = this.buildUrl(config.url, config.params);
       const isFormData = config.body instanceof FormData;
@@ -462,19 +545,6 @@ export class HttpClient {
         delete (headers as Record<string, string>)['content-type'];
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), config.timeout ?? 30000);
-
-      // Combine abort signals if caller provided one
-      let signal: AbortSignal;
-      if (config.signal) {
-        signal = 'any' in AbortSignal
-          ? AbortSignal.any([controller.signal, config.signal])
-          : this.combineSignals(controller.signal, config.signal);
-      } else {
-        signal = controller.signal;
-      }
-
       const response = await fetch(fullUrl, {
         method: config.method,
         headers,
@@ -483,14 +553,19 @@ export class HttpClient {
           : config.body
             ? JSON.stringify(config.body)
             : undefined,
-        signal,
+        signal: timeout.signal,
         credentials: config.withCredentials ? 'include' : 'same-origin',
       });
 
       let data: ApiResult<T>;
       try {
         data = normalizeApiResult<T>(await response.json());
-      } catch {
+      } catch (parseError) {
+        // An abort during body read (timeout or caller cancellation) is not
+        // a JSON problem — rethrow and let the outer catch classify it.
+        if (isDomAbortError(parseError)) {
+          throw parseError;
+        }
         // Non-JSON response (e.g., 502/503 HTML pages)
         if (!response.ok) {
           data = createFailedApiResult<T>({
@@ -503,8 +578,6 @@ export class HttpClient {
             code: response.status,
           });
         }
-      } finally {
-        clearTimeout(timeoutId);
       }
 
       // Apply response interceptor
@@ -527,6 +600,18 @@ export class HttpClient {
 
       return data;
     } catch (error) {
+      // Classify client-side timeouts distinctly from network errors and
+      // caller-initiated aborts so consumers can react accordingly.
+      if (timeout.timedOut() && isDomAbortError(error)) {
+        const timeoutError = new TimeoutError(timeoutMs);
+        this.config.errorInterceptor?.(timeoutError);
+        return createFailedApiResult<T>({
+          message: `${timeoutError.message}: ${config.method} ${config.url}`,
+          code: 408,
+          errorCode: REQUEST_TIMEOUT_ERROR_CODE,
+        });
+      }
+
       // Apply error interceptor
       if (this.config.errorInterceptor) {
         this.config.errorInterceptor(error as Error);
@@ -534,7 +619,48 @@ export class HttpClient {
 
       // Return normalized failed result
       return createFailedApiResultFromError<T>(error);
+    } finally {
+      // Always clear the pending timer — previously it leaked whenever
+      // fetch itself rejected (network error / abort before response).
+      timeout.dispose();
     }
+  }
+
+  /**
+   * Create an abort signal that fires after `timeoutMs`, merged with an
+   * optional caller-provided signal. The returned `dispose()` must be called
+   * once the request settles to avoid timer leaks; `timedOut()` reports
+   * whether the abort was caused by the timeout (vs caller cancellation).
+   * A `timeoutMs` of 0 (or less) disables the timeout entirely and passes
+   * the caller signal through untouched.
+   */
+  private createTimeoutSignal(timeoutMs: number, userSignal?: AbortSignal): {
+    signal: AbortSignal | undefined;
+    timedOut: () => boolean;
+    dispose: () => void;
+  } {
+    if (timeoutMs <= 0) {
+      return { signal: userSignal, timedOut: () => false, dispose: () => {} };
+    }
+
+    const controller = new AbortController();
+    let fired = false;
+    const timer = setTimeout(() => {
+      fired = true;
+      controller.abort();
+    }, timeoutMs);
+
+    const signal = userSignal
+      ? 'any' in AbortSignal
+        ? AbortSignal.any([controller.signal, userSignal])
+        : this.combineSignals(controller.signal, userSignal)
+      : controller.signal;
+
+    return {
+      signal,
+      timedOut: () => fired,
+      dispose: () => clearTimeout(timer),
+    };
   }
 
   /**

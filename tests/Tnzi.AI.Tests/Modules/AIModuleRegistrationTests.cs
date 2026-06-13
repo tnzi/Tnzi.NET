@@ -420,8 +420,9 @@ public class AIModuleRegistrationTests
         services.AddOptions<PortAllocatorOptions>()
             .Bind(configuration.GetSection("AI:PortAllocator"));
 
-        var context = new ServiceConfigurationContext(services, configuration);
-        module.ConfigureServicesAsync(context).GetAwaiter().GetResult();
+        // AIModule registers the engine implementations in Configure and the NoOp fallbacks in
+        // PostConfigure. Bootstrap through the real phase semantics (Configure all → PostConfigure all).
+        TestHelpers.ConfigureModules(services, configuration, module);
     }
 
     #endregion

@@ -51,9 +51,9 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task BashAsync_NoEventBus_StillSucceeds()
     {
         // EventBus is optional — no observers, no problem.
-        var tools = new SandboxTools(_translator, NullLogger<SandboxTools>.Instance, eventBus: null);
+        var tools = CreateTools(eventBus: null);
 
-        var result = await tools.BashAsync(_sandbox, _threadId, "echo hello");
+        var result = await tools.BashAsync("echo hello");
 
         result.ShouldNotBeNull();
     }
@@ -62,9 +62,9 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task BashAsync_PublishesExecutedEvent_OnSuccess()
     {
         var bus = new CapturingEventBus();
-        var tools = new SandboxTools(_translator, NullLogger<SandboxTools>.Instance, eventBus: bus);
+        var tools = CreateTools(eventBus: bus);
 
-        await tools.BashAsync(_sandbox, _threadId, "echo audit-success");
+        await tools.BashAsync("echo audit-success");
 
         bus.Captured.Count.ShouldBe(1);
         var evt = bus.Captured[0].ShouldBeOfType<SandboxCommandExecutedEvent>();
@@ -80,9 +80,9 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task BashAsync_PublishesDeniedEvent_OnSubstringMatch()
     {
         var bus = new CapturingEventBus();
-        var tools = new SandboxTools(_translator, NullLogger<SandboxTools>.Instance, eventBus: bus);
+        var tools = CreateTools(eventBus: bus);
 
-        await tools.BashAsync(_sandbox, _threadId, "rm -rf /");
+        await tools.BashAsync("rm -rf /");
 
         var evt = bus.Captured.Single().ShouldBeOfType<SandboxCommandExecutedEvent>();
         evt.Denied.ShouldBeTrue();
@@ -95,10 +95,10 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task BashAsync_EventBusThrowing_DoesNotBreakAgent()
     {
         var bus = new ThrowingEventBus();
-        var tools = new SandboxTools(_translator, NullLogger<SandboxTools>.Instance, eventBus: bus);
+        var tools = CreateTools(eventBus: bus);
 
         // Must not throw — observability failures must not abort the agent's tool call.
-        var result = await tools.BashAsync(_sandbox, _threadId, "echo resilient");
+        var result = await tools.BashAsync("echo resilient");
 
         result.ShouldNotBeNull();
     }
@@ -183,6 +183,18 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     // ------------------------------------------------------------------ //
     // Helpers
     // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// 创建 SandboxTools 并在当前测试的异步流上发布沙箱环境
+    /// （模拟 SandboxMiddleware 的发布动作 — 必须在测试方法体内调用）。
+    /// </summary>
+    private SandboxTools CreateTools(IEventBus? eventBus)
+    {
+        var accessor = new AgentExecutionContextAccessor();
+        accessor.Properties[SandboxPropertyKeys.ToolEnvironment] =
+            new SandboxToolEnvironment(_sandbox, _threadId);
+        return new SandboxTools(_translator, NullLogger<SandboxTools>.Instance, accessor, eventBus: eventBus);
+    }
 
     private SandboxCommandExecutedEvent NewEvent(int exitCode, bool denied = false, string? denialReason = null) => new()
     {

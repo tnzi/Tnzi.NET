@@ -1,5 +1,6 @@
 global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
 global using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,7 @@ global using Tnzi.AI.Dtos;
 global using Tnzi.AI.Engine;
 global using Tnzi.AI.Entities;
 global using Tnzi.AI.Entities.Configs;
+global using Tnzi.AI.Mcp.Dtos;
 global using Tnzi.AI.Mcp.Server;
 global using Tnzi.AI.Mcp.Services.Interfaces;
 global using McpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;

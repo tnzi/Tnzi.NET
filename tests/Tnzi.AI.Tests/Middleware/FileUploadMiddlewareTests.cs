@@ -28,8 +28,7 @@ public class FileUploadMiddlewareTests : IDisposable
 
     private AiMiddlewareContext CreateContext(
         List<FileAttachment>? attachments = null,
-        bool setUploadsDir = true,
-        AgentExecutionMode executionMode = AgentExecutionMode.Single)
+        bool setUploadsDir = true)
     {
         var context = new AiMiddlewareContext
         {
@@ -39,9 +38,7 @@ public class FileUploadMiddlewareTests : IDisposable
                 Attachments = attachments,
                 ThreadId = Guid.NewGuid()
             },
-            Agent = executionMode == AgentExecutionMode.ExternalCli
-                ? AgentResolution.Success(agent: null!, provider: "test", model: "test", agentId: null, executionMode: AgentExecutionMode.ExternalCli)
-                : AgentResolution.Success(agent: null!, provider: "test", model: "test", agentId: null),
+            Agent = AgentResolution.Success(agent: null!, provider: "test", model: "test", agentId: null),
             Messages = [new ChatMessage(ChatRole.User, "Analyze this file")],
             ServiceProvider = new ServiceCollection().BuildServiceProvider()
         };
@@ -189,31 +186,6 @@ public class FileUploadMiddlewareTests : IDisposable
 
     #endregion
 
-    #region InvokeAsync — ShouldSkipMiddleware
-
-    [Fact]
-    public async Task InvokeAsync_ShouldSkipMiddleware_PassesThroughWithoutProcessing()
-    {
-        // Arrange
-        var middleware = CreateMiddleware();
-        CreateTempFile("readme.txt", "hello");
-
-        var context = CreateContext(
-            attachments: [new FileAttachment("readme.txt", 5, "text/plain")],
-            executionMode: AgentExecutionMode.ExternalCli);
-
-        AiMiddlewareDelegate next = (ctx, ct) => Task.FromResult(CreateSuccessResult());
-
-        // Act
-        var result = await middleware.InvokeAsync(context, next);
-
-        // Assert
-        result.Response.ShouldBe("ok");
-        context.Messages.Count.ShouldBe(1); // no injection
-    }
-
-    #endregion
-
     #region InvokeStreamingAsync
 
     [Fact]
@@ -243,32 +215,6 @@ public class FileUploadMiddlewareTests : IDisposable
         context.Messages.Count.ShouldBe(2);
         context.Messages[0].Role.ShouldBe(ChatRole.System);
         context.Messages[0].Text.ShouldContain("data.csv");
-    }
-
-    [Fact]
-    public async Task InvokeStreamingAsync_ShouldSkipMiddleware_PassesThrough()
-    {
-        // Arrange
-        var middleware = CreateMiddleware();
-        CreateTempFile("readme.txt", "hello");
-
-        var context = CreateContext(
-            attachments: [new FileAttachment("readme.txt", 5, "text/plain")],
-            executionMode: AgentExecutionMode.ExternalCli);
-
-        var expectedChunk = new AgentStreamChunk { Text = "streamed" };
-        AiStreamingMiddlewareDelegate next = (ctx, ct) => ToAsyncEnumerable(expectedChunk);
-
-        // Act
-        var chunks = new List<AgentStreamChunk>();
-        await foreach (var chunk in middleware.InvokeStreamingAsync(context, next))
-        {
-            chunks.Add(chunk);
-        }
-
-        // Assert
-        chunks.Count.ShouldBe(1);
-        context.Messages.Count.ShouldBe(1); // no injection
     }
 
     #endregion

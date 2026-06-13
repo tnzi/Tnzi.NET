@@ -13,15 +13,15 @@ namespace Tnzi.AI.Rag;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 依赖 AIModule，在其之后加载。AIModule 用 TryAddScoped 注册 NoOpTextSearchService，
-/// 本模块用 RemoveAll + AddScoped 替换为真实搜索实现。
+/// 依赖 AIModule，在其之后加载。AIModule 的 NoOpTextSearchService 回退注册在
+/// PostConfigure 阶段，本模块 Configure 期注册的真实搜索实现自动胜出。
 /// </para>
 /// </remarks>
 [DependsOn(typeof(AI.AIModule))]
 public class RagModule : TnziApplicationModule
 {
     /// <summary>
-    /// 在 AIModule(50)、AICoderModule(51) 之后加载
+    /// 在 AIModule(50) 之后加载
     /// </summary>
     public override int LoadOrder => 55;
 
@@ -57,11 +57,10 @@ public class RagModule : TnziApplicationModule
             case "PostgreSQL":
                 services.AddSingleton<IVectorStore, PgVectorStore>();
                 break;
-            default: // "Auto" — 覆盖 AIModule 的 NoOp 占位，但尊重用户预注册的自定义实现
-                // 不能用 TryAdd：AIModule 已用 TryAddScoped 注册了 NoOpVectorStore 占位，
-                // TryAdd 见到既有注册会直接跳过，导致 NoOp 一直生效、向量检索静默返空。
-                // 故检测最后一条 IVectorStore 注册：若为 NoOp 占位（INoOpService）或无注册则覆盖为
-                // PgVectorStore；若为用户预注册的真实实现则保留之。
+            default: // "Auto" — 注册默认实现，但尊重更早 Configure 的模块预注册的自定义实现
+                // AIModule 的 NoOpVectorStore 回退在 PostConfigure 阶段才 TryAdd（本模块 Configure 先于它），
+                // 此时通常无注册（existing == null）→ 注册 PgVectorStore；
+                // 若有更早模块预注册的真实实现则保留之（NoOp 检测为历史防御，保留无害）。
                 var existing = services.LastOrDefault(d => d.ServiceType == typeof(IVectorStore));
                 var existingIsNoOp = existing?.ImplementationType is { } implType
                     && typeof(INoOpService).IsAssignableFrom(implType);
@@ -134,9 +133,8 @@ public class RagModule : TnziApplicationModule
             services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();
         }
 
-        // 替换 NoOpTextSearchService 为向量/混合搜索实现
-        // RemoveAll 清除 AIModule 的 NoOp 回退，再注册真实实现（避免容器中残留无用注册）
-        services.RemoveAll<ITextSearchService>();
+        // 注册向量/混合搜索实现。AIModule 的 NoOpTextSearchService 回退在 PostConfigure 阶段才
+        // TryAdd（本模块 Configure 先于它），见已存在即跳过 → 真实实现胜出，无须 RemoveAll。
 
         var hybridEnabled = context.Configuration
             .GetSection("AI:Rag:HybridSearch")

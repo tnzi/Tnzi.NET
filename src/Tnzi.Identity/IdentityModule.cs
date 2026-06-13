@@ -42,6 +42,9 @@ public class IdentityModule : TnziApplicationModule
         // 自动配置 Identity（如果 DbContext 继承自 IdentityDbContext）
         AutoConfigureIdentity(context.Services, configuration);
 
+        // 注册配置中心定义提供者
+        context.Services.AddSingleton<ISettingDefinitionProvider, IdentitySettingDefinitionProvider>();
+
         // 注册核心服务（Token）
         context.Services.AddScoped<ITokenService, JwtTokenService>();
 

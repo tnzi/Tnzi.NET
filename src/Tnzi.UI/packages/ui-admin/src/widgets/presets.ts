@@ -105,7 +105,7 @@ export function defaultQuickActions(): QuickAction[] {
       key: 'settings',
       icon: 'mdi:cog-outline',
       label: 'admin.widgets.quickActions.settings',
-      to: '/admin/system/parameters',
+      to: '/admin/settings',
       tone: 'warning',
     },
   ]

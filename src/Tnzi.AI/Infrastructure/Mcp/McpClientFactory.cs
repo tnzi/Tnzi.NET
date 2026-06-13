@@ -6,6 +6,11 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// 支持连接健康检查与断线自动重连（指数退避，最多 3 次重试）。
 /// 实现 IAsyncDisposable，应用关闭时由 Host 调用以释放所有缓存的连接（Stdio 子进程、Http 连接等）。
 /// </summary>
+/// <remarks>
+/// 服务器配置来源由 <see cref="IMcpServerCatalog"/> 物化（部署配置 + DB 注册表合并），
+/// 本工厂只负责按给定 McpServerConfig 建连。信任边界：Stdio（本机子进程）配置只可能来自
+/// 部署配置（AI:Mcp options）— DB 注册表在 catalog/registry 两层均拒绝 stdio。
+/// </remarks>
 public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
 {
     // MCP 标准 Header 常量（与 McpServerSecurityMiddleware 共享语义）

@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Description>MCP Server hosting module for Tnzi.NET AI - exposes AI Agents as MCP tools via HTTP/SSE and stdio transports</Description>
+    <Description>MCP Server hosting module for Tnzi.NET AI - exposes AI Agents as MCP tools via HTTP/SSE transport</Description>
   </PropertyGroup>
 
   <ItemGroup>

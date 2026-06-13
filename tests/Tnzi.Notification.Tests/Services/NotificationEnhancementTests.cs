@@ -21,8 +21,8 @@ public class NotificationEnhancementTests
         _repositoryMock = new Mock<IRepository<Message, Guid>>();
         _unitOfWorkMock = new Mock<IUnitOfWork>();
 
-        var optionsMock = new Mock<IOptions<NotificationOptions>>();
-        optionsMock.Setup(x => x.Value).Returns(new NotificationOptions
+        var optionsMock = new Mock<IOptionsMonitor<NotificationOptions>>();
+        optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
             SmsMaxContentLength = 140,

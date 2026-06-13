@@ -14,13 +14,16 @@ public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
 {
     private readonly ILoginLogInternalService? _loginLogInternalService;
     private readonly ISessionService? _sessionService;
+    private readonly IUserAgentParserService? _userAgentParser;
 
     public UserLoggedInEventHandler(
         ILoginLogInternalService? loginLogInternalService = null,
-        ISessionService? sessionService = null)
+        ISessionService? sessionService = null,
+        IUserAgentParserService? userAgentParser = null)
     {
         _loginLogInternalService = loginLogInternalService;
         _sessionService = sessionService;
+        _userAgentParser = userAgentParser;
     }
 
     public async Task HandleAsync(UserLoggedInEvent @event, CancellationToken cancellationToken = default)
@@ -39,12 +42,12 @@ public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
                     null);
             }
 
-            // 处理会话创建
+            // 处理会话创建 — deviceInfo 从 UserAgent 解析（供会话统计 Top device 聚合）
             if (_sessionService != null)
             {
                 await _sessionService.CreateSessionAsync(
                     @event.UserId,
-                    null, // deviceInfo — 登录事件不携带设备信息
+                    BuildDeviceInfo(@event.UserAgent),
                     @event.IpAddress,
                     @event.UserAgent);
             }
@@ -54,6 +57,26 @@ public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
         {
             // 事件处理器错误不影响主业务流程，静默忽略（框架已有错误隔离，此处为双重保险）
         }
+    }
+
+    /// <summary>
+    /// 从 UserAgent 提取简短设备描述（如 "Chrome on Windows"），
+    /// 解析器缺失或 UA 不可识别时返回 null（统计端会忽略空值）。
+    /// </summary>
+    private string? BuildDeviceInfo(string? userAgent)
+    {
+        if (_userAgentParser == null || string.IsNullOrWhiteSpace(userAgent))
+        {
+            return null;
+        }
+
+        var info = _userAgentParser.Parse(userAgent);
+        if (!string.IsNullOrEmpty(info.Browser) && !string.IsNullOrEmpty(info.OperatingSystem))
+        {
+            return $"{info.Browser} on {info.OperatingSystem}";
+        }
+
+        return info.Browser ?? info.OperatingSystem ?? info.DeviceType;
     }
 }
 

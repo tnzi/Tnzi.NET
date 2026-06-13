@@ -240,15 +240,14 @@ public class AgentRuntimeResumeTests
 
         var resolver = new Mock<IAgentResolver>();
         resolver.Setup(x => x.ResolveAgentAsync(agentId, null, null, null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentResolution.SuccessWithoutExecutor("test", "gpt-5", null, null, AgentExecutionMode.ExternalCli));
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "test", "gpt-5", null));
 
         var sp = new ServiceCollection()
-            .AddSingleton<IExternalCliExecutor>(Mock.Of<IExternalCliExecutor>(x =>
-                x.ExecuteCliAsync(It.IsAny<AiMiddlewareContext>(), It.IsAny<CancellationToken>()) == Task.FromResult(new AgentRunResult
-                {
-                    Response = "resumed output",
-                    FinishReason = FinishReasons.Stop
-                })))
+            .AddSingleton<IAiMiddleware>(new StaticResultMiddleware(new AgentRunResult
+            {
+                Response = "resumed output",
+                FinishReason = FinishReasons.Stop
+            }))
             .BuildServiceProvider();
 
         var runtime = new AgentRuntime(
@@ -268,5 +267,28 @@ public class AgentRuntimeResumeTests
         result.RunId.ShouldBe(runId);
         result.Status.ShouldBe(AgentRunStatus.Completed);
         resolver.Verify(x => x.ResolveAgentAsync(agentId, null, null, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 短路中间件 — 直接返回固定结果，使测试无需真实执行策略/ChatClient。
+    /// </summary>
+    private sealed class StaticResultMiddleware : IAiMiddleware
+    {
+        private readonly AgentRunResult _result;
+
+        public StaticResultMiddleware(AgentRunResult result)
+        {
+            _result = result;
+        }
+
+        public int Order => 0;
+
+        public Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result);
+
+        public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield break;
+        }
     }
 }

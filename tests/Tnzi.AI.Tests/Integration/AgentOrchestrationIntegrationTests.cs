@@ -473,9 +473,9 @@ public class AgentOrchestrationIntegrationTests
                 var resolverMock = new Mock<IAgentResolver>();
                 resolverMock.Setup(r => r.ResolveAgentAsync(
                         It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                        It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+                        It.IsAny<List<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<List<string>?>()))
                     .ReturnsAsync((Guid? agentId, string? provider, string? model,
-                        List<string>? toolGroups, CancellationToken ct) =>
+                        List<string>? toolGroups, CancellationToken ct, List<string>? toolNames) =>
                     {
                         var client = MockProvider.CreateChatClient(
                             new ProviderOptions { Enabled = true }, model ?? "mock-model");

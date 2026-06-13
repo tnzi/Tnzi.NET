@@ -8,7 +8,7 @@ public class AuthServiceTests
     private readonly Mock<UserManager<User>> _userManagerMock;
     private readonly Mock<SignInManager<User>> _signInManagerMock;
     private readonly Mock<ITokenService> _tokenServiceMock;
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<IScopedContext> _scopedContextMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<ICaptchaService> _captchaServiceMock;
@@ -45,8 +45,8 @@ public class AuthServiceTests
             confirmation.Object);
 
         _tokenServiceMock = new Mock<ITokenService>();
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions());
+        _identityOptionsMock = new Mock<IOptionsMonitor<IdentityOptions>>();
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions());
         _scopedContextMock = new Mock<IScopedContext>();
         _scopedContextMock.Setup(x => x.ClientIpAddress).Returns("127.0.0.1");
         _scopedContextMock.Setup(x => x.UserAgent).Returns("Test Browser");
@@ -216,7 +216,7 @@ public class AuthServiceTests
         _userManagerMock.Setup(x => x.GetRolesAsync(user))
             .ReturnsAsync(new List<string> { "User" });
 
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 },
             SignIn = new TnziSignInOptions(),
@@ -282,7 +282,7 @@ public class AuthServiceTests
         _tokenServiceMock.Setup(x => x.GenerateToken(user, It.IsAny<IList<string>>()))
             .Returns("new_access_token");
 
-        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             Jwt = new JwtOptions { RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
         });

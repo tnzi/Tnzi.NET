@@ -3,7 +3,7 @@ using Tnzi.Exceptions;
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// RetryMiddleware 功能测试 — 重试逻辑、ExternalCli bypass、禁用行为
+/// RetryMiddleware 功能测试 — 重试逻辑、禁用行为
 /// </summary>
 public class RetryMiddlewareTests
 {
@@ -47,30 +47,6 @@ public class RetryMiddlewareTests
 
         callCount.ShouldBe(1);
         result.Response.ShouldBe("ok");
-    }
-
-    #endregion
-
-    #region ExternalCli bypass
-
-    [Fact]
-    public async Task InvokeAsync_ExternalCli_SkipsRetry()
-    {
-        var mw = CreateMiddleware();
-        var context = CreateExternalCliContext();
-
-        var callCount = 0;
-        await Should.ThrowAsync<HttpRequestException>(async () =>
-        {
-            await mw.InvokeAsync(context, (ctx, ct) =>
-            {
-                callCount++;
-                throw new HttpRequestException("test", null, System.Net.HttpStatusCode.InternalServerError);
-            });
-        });
-
-        // ExternalCli 不重试，所以只调用一次就抛异常
-        callCount.ShouldBe(1);
     }
 
     #endregion
@@ -191,44 +167,9 @@ public class RetryMiddlewareTests
         chunks.ShouldContain("hello");
     }
 
-    [Fact]
-    public async Task InvokeStreamingAsync_ExternalCli_PassesThrough()
-    {
-        var mw = CreateMiddleware();
-        var context = CreateExternalCliContext();
-
-        var chunks = new List<string>();
-        await foreach (var chunk in mw.InvokeStreamingAsync(context, (ctx, ct) => CreateTestStream("world")))
-        {
-            chunks.Add(chunk.Text ?? "");
-        }
-
-        chunks.ShouldContain("world");
-    }
-
     #endregion
 
     #region Helpers
-
-    private static AiMiddlewareContext CreateExternalCliContext()
-    {
-        return new AiMiddlewareContext
-        {
-            Request = new AgentRunRequest
-            {
-                UserMessage = "Hello",
-                ThreadId = Guid.NewGuid()
-            },
-            Agent = AgentResolution.Success(
-                agent: null!,
-                provider: "TestProvider",
-                model: "test-model",
-                agentId: null,
-                executionMode: AgentExecutionMode.ExternalCli),
-            ServiceProvider = new ServiceCollection().BuildServiceProvider(),
-            Messages = []
-        };
-    }
 
     private static RetryMiddleware CreateMiddleware(bool enabled = true)
     {

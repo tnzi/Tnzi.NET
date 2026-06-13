@@ -37,47 +37,39 @@
     </template>
 
     <div class="t-sec-page">
-      <div class="t-sec-page__kpis">
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.success')" :value="overview?.successfulLogins ?? 0">
-            <template #suffix>
-              <TSvgIcon icon="mdi:check-circle-outline" :size="14" color="var(--tnzi-success)" />
-            </template>
-          </NStatistic>
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.failures')" :value="overview?.failedLogins ?? 0">
-            <template #suffix>
-              <TSvgIcon icon="mdi:alert-circle-outline" :size="14" color="var(--tnzi-error)" />
-            </template>
-          </NStatistic>
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.failureRate')">
-            <template #default>
-              <span :style="{ color: failureColor }">{{ formatPercent(overview?.failureRate) }}</span>
-            </template>
-          </NStatistic>
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
-        </NCard>
-        <NCard size="small" :bordered="false">
-          <NStatistic :label="t('kpi.lockedOut')" :value="overview?.lockedOutUsers ?? 0">
-            <template #suffix>
-              <NTag v-if="(overview?.lockedOutUsers ?? 0) > 0" size="tiny" type="warning" :bordered="false">
-                {{ t('kpi.actionNeeded') }}
-              </NTag>
-            </template>
-          </NStatistic>
-        </NCard>
-      </div>
+      <TKpiRow class="t-sec-page__kpis" cols="1 s:2 m:4 l:7">
+        <TStatCard :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
+        <TStatCard
+          :label="t('kpi.success')"
+          :value="overview?.successfulLogins ?? 0"
+          icon="mdi:check-circle-outline"
+          tone="success"
+        />
+        <TStatCard
+          :label="t('kpi.failures')"
+          :value="overview?.failedLogins ?? 0"
+          icon="mdi:alert-circle-outline"
+          tone="error"
+        />
+        <TStatCard
+          :label="t('kpi.failureRate')"
+          :value="formatPercent(overview?.failureRate)"
+          :tone="failureTone"
+        />
+        <TStatCard :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
+        <TStatCard :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
+        <TStatCard
+          :label="t('kpi.lockedOut')"
+          :value="overview?.lockedOutUsers ?? 0"
+          :tone="(overview?.lockedOutUsers ?? 0) > 0 ? 'warning' : 'default'"
+        >
+          <template #extra>
+            <NTag v-if="(overview?.lockedOutUsers ?? 0) > 0" size="tiny" type="warning" :bordered="false">
+              {{ t('kpi.actionNeeded') }}
+            </NTag>
+          </template>
+        </TStatCard>
+      </TKpiRow>
 
       <NCard :title="t('sections.failureRate')" size="small" :bordered="false">
         <div class="t-sec-page__progress-wrap">
@@ -109,7 +101,7 @@
           :columns="failuresColumns"
           :data="failures"
           :loading="loading"
-          :pagination="{ pageSize: 15 }"
+          :pagination="failuresPagination"
           :flex-height="true"
           :bordered="false"
           size="small"
@@ -130,11 +122,12 @@ import {
   NProgress,
   NSelect,
   NSpace,
-  NStatistic,
   NTag,
   NTooltip,
 } from 'naive-ui'
-import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TStatCard from '../../components/data/TStatCard.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
@@ -174,11 +167,18 @@ const windowOptions = [
   { value: 168, label: t('window.7d') },
 ]
 
-const failureColor = computed(() => {
+// Client-side pagination with a "Total N" prefix so admins can see the full
+// failure-row count at a glance (mirrors TListShell's pager prefix).
+const failuresPagination: TResponsivePagination = {
+  pageSize: 15,
+  prefix: ({ itemCount }: { itemCount?: number }) => `${t('admin.crud.total')} ${itemCount ?? 0}`,
+}
+
+const failureTone = computed<'success' | 'warning' | 'error'>(() => {
   const rate = overview.value?.failureRate ?? 0
-  if (rate >= 50) return 'var(--tnzi-error)'
-  if (rate >= 20) return 'var(--tnzi-warning)'
-  return 'var(--tnzi-success)'
+  if (rate >= 50) return 'error'
+  if (rate >= 20) return 'warning'
+  return 'success'
 })
 const failureProgressStatus = computed<'success' | 'warning' | 'error'>(() => {
   const rate = overview.value?.failureRate ?? 0
@@ -355,16 +355,7 @@ onMounted(() => { void refresh() })
   gap: 12px;
 }
 .t-sec-page__kpis {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 12px;
   flex-shrink: 0;
-}
-@media (max-width: 1400px) {
-  .t-sec-page__kpis { grid-template-columns: repeat(4, 1fr); }
-}
-@media (max-width: 768px) {
-  .t-sec-page__kpis { grid-template-columns: repeat(2, 1fr); }
 }
 /* The failures table card claims the residual height; `t-table-card`
    (polish.css) makes its NDataTable flex-fill so the built-in pager pins to

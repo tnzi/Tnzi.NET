@@ -9,7 +9,7 @@ public class LoopDetectionMiddleware : IAiMiddleware
     private const string WarningMsg = "[LOOP DETECTED] You are repeating the same tool calls. Try a different approach or respond to the user directly.";
     private const string HardStopMsg = "[FORCED STOP] Repeated tool calls exceeded the limit. You must respond without using tools.";
 
-    private readonly IOptions<LoopDetectionOptions> _options;
+    private readonly IOptionsMonitor<LoopDetectionOptions> _options;
     private readonly ILogger<LoopDetectionMiddleware> _logger;
 
     // Per-thread tracking: threadKey → list of hashes (using LinkedList for LRU)
@@ -20,7 +20,7 @@ public class LoopDetectionMiddleware : IAiMiddleware
 
     public int Order => AiMiddlewareOrders.LoopDetection;
 
-    public LoopDetectionMiddleware(IOptions<LoopDetectionOptions> options, ILogger<LoopDetectionMiddleware> logger)
+    public LoopDetectionMiddleware(IOptionsMonitor<LoopDetectionOptions> options, ILogger<LoopDetectionMiddleware> logger)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
@@ -29,7 +29,7 @@ public class LoopDetectionMiddleware : IAiMiddleware
     public async Task<AgentRunResult> InvokeAsync(
         AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware || !_options.Value.Enabled)
+        if (!_options.CurrentValue.Enabled)
             return await next(context, cancellationToken);
 
         var result = await next(context, cancellationToken);
@@ -41,7 +41,7 @@ public class LoopDetectionMiddleware : IAiMiddleware
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware || !_options.Value.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;
@@ -61,7 +61,7 @@ public class LoopDetectionMiddleware : IAiMiddleware
 
         var hash = HashToolCalls(toolCalls);
         var threadKey = GetThreadKey(context);
-        var opts = _options.Value;
+        var opts = _options.CurrentValue;
 
         lock (_lock)
         {

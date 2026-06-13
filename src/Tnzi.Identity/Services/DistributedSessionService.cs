@@ -150,6 +150,54 @@ public class DistributedSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
+    public async Task<Result<IPagedList<UserSessionDto>>> GetSessionsAsync(SessionQueryDto query)
+    {
+        Check.NotNull(query);
+
+        // Redis 无法高效遍历全部会话 — 与 GetSessionStatisticsAsync 同理，
+        // 启用数据库审计日志时降级到数据库查询。
+        if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
+        {
+            var queryable = _repository.AsQueryable()
+                .WhereIf(us => us.UserId == query.UserId!.Value, query.UserId.HasValue)
+                .WhereIf(us => !us.IsRevoked, !query.IncludeRevoked)
+                .OrderByDescending(us => us.LastActivityTime)
+                .ThenByDescending(us => us.CreationTime);
+
+            var totalCount = await queryable.CountAsync();
+            var sessions = await queryable
+                .Skip((query.PageIndex - 1) * query.PageSize)
+                .Take(query.PageSize)
+                .ProjectTo<UserSession, UserSessionDto>()
+                .ToListAsync();
+
+            if (sessions.Count > 0)
+            {
+                var userIds = sessions.Select(s => s.UserId).Distinct().ToList();
+                var userRepository = ServiceProvider?.GetService<IRepository<User, Guid>>();
+                if (userRepository != null)
+                {
+                    var users = await userRepository
+                        .Where(u => userIds.Contains(u.Id))
+                        .Select(u => new { u.Id, u.UserName })
+                        .ToListAsync();
+                    var nameMap = users.ToDictionary(u => u.Id, u => u.UserName);
+                    foreach (var session in sessions)
+                    {
+                        session.UserName = nameMap.GetValueOrDefault(session.UserId);
+                    }
+                }
+            }
+
+            var paged = new PagedList<UserSessionDto>(sessions, query.PageIndex, query.PageSize, totalCount);
+            return Ok<IPagedList<UserSessionDto>>(paged);
+        }
+
+        LogWarning("Global session listing is not available in Redis mode without KeepDatabaseAuditLog enabled.");
+        return Ok<IPagedList<UserSessionDto>>(new PagedList<UserSessionDto>(new List<UserSessionDto>(), query.PageIndex, query.PageSize, 0));
+    }
+
+    /// <inheritdoc />
     public async Task<Result> RevokeSessionAsync(Guid sessionId)
     {
         var sessionData = await GetSessionAsync(sessionId);

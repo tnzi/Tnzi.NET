@@ -50,6 +50,37 @@ describe('audit-bridge', () => {
     expect(result.totalCount).toBe(2)
   })
 
+  it('operations.fetch forces isWriteOperation: true (change-type operations view)', async () => {
+    const auditApi = mockAuditApi()
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+    await bridge.operations.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
+    expect(auditApi.getList).toHaveBeenCalledWith(
+      expect.objectContaining({ isWriteOperation: true }),
+    )
+  })
+
+  it('operations.fetch isWriteOperation cannot be overridden by page filters', async () => {
+    const auditApi = mockAuditApi()
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+    await bridge.operations.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { isWriteOperation: false },
+    })
+    expect(auditApi.getList).toHaveBeenCalledWith(
+      expect.objectContaining({ isWriteOperation: true }),
+    )
+  })
+
+  it('logs.fetch does NOT set isWriteOperation (request-level full view)', async () => {
+    const auditApi = mockAuditApi()
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+    await bridge.logs.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
+    const params = (auditApi.getList.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect('isWriteOperation' in params).toBe(false)
+  })
+
   it('logs.create / logs.update / logs.delete are read-only stubs that reject', async () => {
     const bridge = createAuditBridge({ auditApi: mockAuditApi() as never })
     await expect(bridge.logs.create({})).rejects.toThrow()

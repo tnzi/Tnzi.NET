@@ -6,6 +6,7 @@
  */
 
 import type { HttpClient } from '../../http/http';
+import type { PagedList } from '../../types/pagination';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -25,15 +26,74 @@ export interface RagChatParams {
   topK?: number;
 }
 
+/** Document ingestion status. 0=Processing / 1=Completed / 2=Failed (mirrors backend DocumentStatus enum). */
+export type DocumentStatus = 0 | 1 | 2;
+
+/** A knowledge base (vector store + ingestion config). */
+export interface KnowledgeBaseDto {
+  id: string;
+  name: string;
+  description?: string | null;
+  embeddingProvider: string;
+  embeddingModel?: string | null;
+  chunkSize: number;
+  chunkOverlap: number;
+  documentCount: number;
+  chunkCount: number;
+  isEnabled: boolean;
+  creationTime: string;
+}
+
+/** A document inside a knowledge base. */
+export interface KnowledgeDocumentDto {
+  id: string;
+  knowledgeBaseId: string;
+  fileName: string;
+  contentType?: string | null;
+  fileSize: number;
+  chunkCount: number;
+  status: DocumentStatus;
+  errorMessage?: string | null;
+  contentHash?: string | null;
+  version: number;
+  creationTime: string;
+}
+
+/** Result of uploading a document (ingestion is async; poll status by docId). */
+export interface DocumentUploadResultDto {
+  documentId: string;
+  fileName: string;
+  status: DocumentStatus;
+  chunkCount: number;
+  errorMessage?: string | null;
+  /** True when the content hash matched an existing document (dedup hit). */
+  isDuplicate: boolean;
+}
+
+/** A single ranked search hit from a knowledge base. */
+export interface SearchResultDto {
+  content: string;
+  sourceName?: string | null;
+  knowledgeBaseName?: string | null;
+  /** Similarity score (0-1). */
+  score: number;
+  chunkIndex: number;
+  metadata?: string | null;
+}
+
 export interface KnowledgeBaseCreateParams {
   name: string;
   description?: string;
+  embeddingProvider?: string;
   embeddingModel?: string;
+  chunkSize?: number;
+  chunkOverlap?: number;
 }
 
 export interface KnowledgeBaseUpdateParams {
   name?: string;
   description?: string;
+  isEnabled?: boolean;
 }
 
 export interface SearchTestParams {
@@ -104,42 +164,46 @@ export function useAdminKnowledgeBaseApi(client: HttpClient) {
      * with `?page=…&pageSize=…` returns 405 Method Not Allowed.
      */
     getList: (params?: { pageIndex?: number; pageSize?: number; keyword?: string }) =>
-      client.post(`${base}/query`, params ?? {}),
+      client.post<PagedList<KnowledgeBaseDto>>(`${base}/query`, params ?? {}),
 
     /** Get knowledge base by ID */
     getById: (id: string) =>
-      client.get(`${base}/${id}`),
+      client.get<KnowledgeBaseDto>(`${base}/${id}`),
 
     /** Create a new knowledge base */
     create: (data: KnowledgeBaseCreateParams) =>
-      client.post(base, data),
+      client.post<KnowledgeBaseDto>(base, data),
 
     /** Update a knowledge base */
     update: (id: string, data: KnowledgeBaseUpdateParams) =>
-      client.put(`${base}/${id}`, data),
+      client.put<KnowledgeBaseDto>(`${base}/${id}`, data),
 
     /** Delete a knowledge base */
     delete: (id: string) =>
-      client.delete(`${base}/${id}`),
+      client.delete<void>(`${base}/${id}`),
 
     /** Upload a document to a knowledge base */
     uploadDocument: (kbId: string, file: File) =>
       // Backend route is POST {id}/upload (multipart, IFormFile). Use
       // client.upload (multipart/form-data via XHR) — NOT client.post, which
       // would JSON.stringify the FormData into "{}" and drop the file.
-      client.upload(`${base}/${kbId}/upload`, file),
+      client.upload<DocumentUploadResultDto>(`${base}/${kbId}/upload`, file),
 
     /** Get the paged document list for a knowledge base (POST {id}/documents/query) */
     getDocuments: (kbId: string, query?: DocumentQueryParams) =>
-      client.post(`${base}/${kbId}/documents/query`, query ?? {}),
+      client.post<PagedList<KnowledgeDocumentDto>>(`${base}/${kbId}/documents/query`, query ?? {}),
+
+    /** Poll a single document's ingestion status (GET {id}/documents/{docId}/status) */
+    getDocumentStatus: (kbId: string, docId: string) =>
+      client.get<KnowledgeDocumentDto>(`${base}/${kbId}/documents/${docId}/status`),
 
     /** Delete a document from a knowledge base */
     deleteDocument: (kbId: string, docId: string) =>
-      client.delete(`${base}/${kbId}/documents/${docId}`),
+      client.delete<void>(`${base}/${kbId}/documents/${docId}`),
 
     /** Search within a knowledge base (POST {id}/search) */
     searchTest: (kbId: string, data: SearchTestParams) =>
-      client.post(`${base}/${kbId}/search`, data),
+      client.post<SearchResultDto[]>(`${base}/${kbId}/search`, data),
 
     /** Trigger full re-vectorization of all chunks in a knowledge base (admin) */
     reindex: (kbId: string) =>

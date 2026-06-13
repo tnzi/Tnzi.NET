@@ -62,7 +62,7 @@ public interface IAuditOperationService
     /// </summary>
     /// <param name="days">保留天数</param>
     /// <returns>删除的记录数</returns>
-    Task<Result<int>> DeleteExpiredOperationsAsync(int days = 90);
+    Task<Result<int>> DeleteExpiredOperationsAsync(int? days = null);
 
     /// <summary>
     /// Export audit operations as CSV string

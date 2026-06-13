@@ -23,9 +23,6 @@ public interface IMcpServerHost
         IDictionary<string, JsonElement>? arguments,
         CancellationToken cancellationToken = default);
 
-    /// <summary>启动 MCP Server</summary>
-    Task StartAsync(CancellationToken cancellationToken = default);
-
     /// <summary>移除已暴露的 Agent</summary>
     bool RemoveAgent(Guid agentId) => false;
 

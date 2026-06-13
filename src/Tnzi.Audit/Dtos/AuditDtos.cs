@@ -43,6 +43,26 @@ public class AuditOperationQueryDto : PagedQueryDto
     /// </summary>
     [MaxLength(50)]
     public string? Ip { get; set; }
+
+    /// <summary>
+    /// 获取或设置 HTTP 方法精确过滤（可选，如 "GET" / "POST"，大小写不敏感）
+    /// </summary>
+    [MaxLength(10)]
+    public string? HttpMethod { get; set; }
+
+    /// <summary>
+    /// 获取或设置 是否仅返回变更类操作（可选）。
+    /// true = 仅写操作（POST/PUT/PATCH/DELETE，即"业务操作"视图）；
+    /// false = 仅读请求（GET/HEAD/OPTIONS 等非写方法）；
+    /// null = 全部请求（请求级审计日志视图）。
+    /// <para>
+    /// query-via-POST 惯例排除：框架的列表查询统一暴露为 <c>POST .../query</c>
+    /// 端点（如 <c>POST /admin/agents/query</c>），语义上是纯读 —
+    /// 请求路径以 "/query" 结尾（大小写不敏感）的 POST 记录被归入读请求
+    /// （IsWriteOperation=false 包含、=true 排除）。
+    /// </para>
+    /// </summary>
+    public bool? IsWriteOperation { get; set; }
 }
 
 /// <summary>

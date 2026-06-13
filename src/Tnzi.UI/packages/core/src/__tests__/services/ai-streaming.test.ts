@@ -444,6 +444,18 @@ describe('streamChat', () => {
     );
   });
 
+  it('should not inject any implicit timeout signal (streaming is exempt from HttpClient timeouts)', async () => {
+    // streamChat bypasses HttpClient entirely — a long-lived SSE stream must
+    // never be killed by the default request timeout. Lock in that the only
+    // signal fetch receives is the caller-provided one (here: none).
+    fetchSpy.mockResolvedValue(mockStreamResponse([sseDone()]));
+
+    await streamChat(defaultOptions());
+
+    const callArgs = fetchSpy.mock.calls[0]![1]!;
+    expect(callArgs.signal).toBeUndefined();
+  });
+
   // ----- Headers -----
 
   it('should merge custom headers with defaults', async () => {

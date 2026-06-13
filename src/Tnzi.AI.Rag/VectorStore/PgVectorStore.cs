@@ -18,6 +18,7 @@ public class PgVectorStore : IVectorStore
 {
     private readonly ILogger<PgVectorStore> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly bool _multiTenancyEnabled;
     private readonly string _connectionString;
     private readonly string _chunkTable;
     private readonly string _knowledgeBaseTable;
@@ -26,11 +27,13 @@ public class PgVectorStore : IVectorStore
         IConfiguration configuration,
         IOptions<AIRagOptions> options,
         ILogger<PgVectorStore> logger,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         Check.NotNull(configuration);
         _logger = Check.NotNull(logger);
         _serviceProvider = Check.NotNull(serviceProvider);
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _connectionString = RagConnectionStringResolver.Resolve(configuration, nameof(PgVectorStore));
 
         var prefix = Check.NotNull(options).Value.TableNamePrefix;
@@ -73,6 +76,12 @@ public class PgVectorStore : IVectorStore
     {
         Check.NotNull(queryVector);
 
+        // 多租户隔离：仅当存在非空租户上下文时追加 TenantId 谓词（单租户 / host 不追加，见 RagTenantSqlFilter）。
+        // fail-closed：MT 启用且无租户上下文（host 后台任务等）时禁止无 KB 范围的跨库搜索，
+        // 否则不追加谓词等于放行全部租户的数据。守卫先于连接打开，避免无效连接开销。
+        var tenantId = ResolveTenantId();
+        RagTenantSqlFilter.EnsureTenantScopeForSearchAll(_multiTenancyEnabled, tenantId, knowledgeBaseId.HasValue);
+
         var results = new List<VectorSearchResult>();
         var vectorString = FormatVector(queryVector);
 
@@ -100,8 +109,6 @@ public class PgVectorStore : IVectorStore
             ? " AND " + string.Join(" AND ", metadataConditions)
             : "";
 
-        // 多租户隔离：仅当存在非空租户上下文时追加 TenantId 谓词（单租户 / host 不追加，见 RagTenantSqlFilter）
-        var tenantId = ResolveTenantId();
         var sql = BuildSearchSql(_chunkTable, _knowledgeBaseTable, knowledgeBaseId.HasValue, extraWhere, tenantId);
 
         await using var cmd = new NpgsqlCommand(sql, connection);

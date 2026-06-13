@@ -49,7 +49,7 @@
             :columns="moduleColumns"
             :data="filteredModules"
             :loading="modulesLoading"
-            :pagination="{ pageSize: 20 }"
+            :pagination="modulesPagination"
             :bordered="false"
             size="small"
             :flex-height="true"
@@ -86,7 +86,7 @@
             :columns="controllerColumns"
             :data="filteredControllers"
             :loading="controllersLoading"
-            :pagination="{ pageSize: 25 }"
+            :pagination="controllersPagination"
             :bordered="false"
             size="small"
             :flex-height="true"
@@ -172,7 +172,7 @@
             :columns="exceptionColumns"
             :data="exceptions"
             :loading="exceptionsLoading"
-            :pagination="{ pageSize: 20 }"
+            :pagination="exceptionsPagination"
             :bordered="false"
             size="small"
             :flex-height="true"
@@ -185,7 +185,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
 import {
   NButton,
   NCard,
@@ -223,6 +223,23 @@ const t = (key: string, params?: Record<string, unknown>) =>
   interpolate(translatePageKey('system.diagnostics', key), params)
 
 const activeTab = ref<'modules' | 'controllers' | 'exceptions'>('modules')
+
+/**
+ * Client-side pagination config shared by the three tabs: a "Total N" prefix
+ * (mirrors TListShell's pager) + a page-size picker. `defaultPageSize` (not
+ * `pageSize`) keeps the size uncontrolled so the picker actually works.
+ */
+function makeClientPagination(defaultPageSize: number): TResponsivePagination {
+  return {
+    defaultPageSize,
+    showSizePicker: true,
+    pageSizes: [...new Set([10, defaultPageSize, 50, 100])].sort((a, b) => a - b),
+    prefix: ({ itemCount }: { itemCount?: number }) => `${t('admin.crud.total')} ${itemCount ?? 0}`,
+  }
+}
+const modulesPagination = makeClientPagination(20)
+const controllersPagination = makeClientPagination(25)
+const exceptionsPagination = makeClientPagination(20)
 
 // ─── Modules tab ───────────────────────────────────────────────────
 const modules = ref<ModuleDiagnosticsDto[]>([])

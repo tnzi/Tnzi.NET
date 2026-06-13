@@ -13,7 +13,7 @@ public class NotificationServiceTests
     private readonly Mock<ISmsSender> _smsSenderMock;
     private readonly Mock<IPushSender> _pushSenderMock;
     private readonly Mock<IUnitOfWork> _unitOfWorkMock;
-    private readonly Mock<IOptions<NotificationOptions>> _optionsMock;
+    private readonly Mock<IOptionsMonitor<NotificationOptions>> _optionsMock;
     private readonly Mock<INotificationQueueService> _queueServiceMock;
     private readonly NotificationService _service;
 
@@ -29,10 +29,10 @@ public class NotificationServiceTests
         _smsSenderMock = new Mock<ISmsSender>();
         _pushSenderMock = new Mock<IPushSender>();
         _unitOfWorkMock = new Mock<IUnitOfWork>();
-        _optionsMock = new Mock<IOptions<NotificationOptions>>();
+        _optionsMock = new Mock<IOptionsMonitor<NotificationOptions>>();
         _queueServiceMock = new Mock<INotificationQueueService>();
 
-        _optionsMock.Setup(x => x.Value).Returns(new NotificationOptions
+        _optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
             SmsMaxContentLength = 140,

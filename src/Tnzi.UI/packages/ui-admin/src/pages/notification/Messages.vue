@@ -14,7 +14,6 @@
     :all-columns="notificationMessageColumns"
     :title="title"
     :translate="t"
-    :show-create="false"
     :form-modal-width="760"
   >
     <template #batchActions="{ selectedIds }">
@@ -78,16 +77,12 @@ import type { NotificationInfo } from '@tnzi/core/services/notification'
 const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
 
-// Messages are read-only (immutable after sending) except delete
-const readOnlyFn = async (): Promise<never> => { throw new Error('Notification messages are immutable') }
-
 const crud = useCrudPage<NotificationInfo>({
   pageId: 'notification.messages',
   columns: notificationMessageColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.messages.fetch(query),
-  createData: readOnlyFn,
-  updateData: readOnlyFn,
+  // Messages are immutable after sending — no create/update; delete stays.
   deleteData: (ids) => bridge.messages.delete(ids.map(String)),
 })
 

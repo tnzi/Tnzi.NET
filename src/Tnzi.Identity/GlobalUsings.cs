@@ -76,5 +76,8 @@ global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
+global using Tnzi.Services;
+global using Tnzi.Identity.Settings;
+global using Tnzi.Settings;
 global using Tnzi.Security.Claims;
 global using Tnzi.Utilities;

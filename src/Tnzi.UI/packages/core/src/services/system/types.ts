@@ -450,6 +450,41 @@ export interface UpdateMaintenanceDto {
 }
 
 // ============================================
+// Settings Center Types
+// ============================================
+
+/** Mirror of Tnzi.System.Dtos.SettingsCenterFieldDto */
+export interface SettingsCenterFieldDto {
+  key: string;
+  label: string;
+  i18nKey?: string | null;
+  description?: string | null;
+  type: 'String' | 'Text' | 'Int' | 'Decimal' | 'Boolean' | 'Select' | 'Password';
+  isEncrypted: boolean;
+  isReadOnly: boolean;
+  isRequired: boolean;
+  min?: number | null;
+  max?: number | null;
+  options?: string[] | null;
+  value?: string | null;
+  defaultValue?: string | null;
+  isOverridden: boolean;
+  isSet: boolean;
+}
+
+/** Mirror of Tnzi.System.Dtos.SettingsCenterGroupDto */
+export interface SettingsCenterGroupDto {
+  key: string;
+  moduleName: string;
+  displayName: string;
+  i18nKey?: string | null;
+  description?: string | null;
+  icon?: string | null;
+  order: number;
+  fields: SettingsCenterFieldDto[];
+}
+
+// ============================================
 // Cache Management Types
 // ============================================
 

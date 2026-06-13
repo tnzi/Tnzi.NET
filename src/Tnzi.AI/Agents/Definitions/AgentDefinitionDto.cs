@@ -32,7 +32,7 @@ public class AgentDefinitionDto
     /// <summary>超时时间（秒）</summary>
     public int? TimeoutSeconds { get; set; }
 
-    /// <summary>执行模式（0=Single, 1=Handoff, 2=AgentAsTools, 3=Router, 4=ExternalCli）</summary>
+    /// <summary>执行模式（0=Single, 1=Handoff, 2=AgentAsTools, 3=Router）</summary>
     public int ExecutionMode { get; set; }
 
     /// <summary>额外配置（JSON 字符串）</summary>

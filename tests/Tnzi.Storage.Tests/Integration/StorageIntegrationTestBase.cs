@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Tnzi.EFCore;
 using Tnzi.Security.Claims;
 using Tnzi.Storage.Entities.Configs;
@@ -67,11 +68,13 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
 
     protected FileStorageService CreateStorageService()
     {
+        var optionsMonitor = new Mock<IOptionsMonitor<StorageOptions>>();
+        optionsMonitor.Setup(x => x.CurrentValue).Returns(StorageOptions);
         return new FileStorageService(
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
             Storage,
-            Microsoft.Extensions.Options.Options.Create(StorageOptions),
+            optionsMonitor.Object,
             ServiceProvider);
     }
 

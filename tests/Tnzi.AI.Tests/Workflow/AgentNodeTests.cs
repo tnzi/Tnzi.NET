@@ -37,7 +37,7 @@ public class AgentNodeTests
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(),
                 It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(executor);
 
@@ -101,10 +101,10 @@ public class AgentNodeTests
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(),
                 It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, Guid?, CancellationToken>(
-                (_, _, instructions, _, _, _, _, _, _, _, _) => capturedInstructions = instructions)
+            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, IEnumerable<string>?, Guid?, CancellationToken>(
+                (_, _, instructions, _, _, _, _, _, _, _, _, _) => capturedInstructions = instructions)
             .ReturnsAsync(executor);
 
         var chatResponse = new ChatResponse(new ChatMessage(ChatRole.Assistant, "response"));
@@ -151,10 +151,10 @@ public class AgentNodeTests
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(),
                 It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, Guid?, CancellationToken>(
-                (provider, model, _, _, _, _, _, _, _, _, _) =>
+            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, IEnumerable<string>?, Guid?, CancellationToken>(
+                (provider, model, _, _, _, _, _, _, _, _, _, _) =>
                 {
                     capturedProvider = provider;
                     capturedModel = model;

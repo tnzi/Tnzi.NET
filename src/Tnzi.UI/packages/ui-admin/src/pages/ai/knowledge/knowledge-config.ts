@@ -1,52 +1,70 @@
-import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 
 /**
- * Phase 5 Task 5.10 — Knowledge page config (sibling of Knowledge.vue).
+ * Knowledge page config (sibling of Knowledge.vue).
  *
- * Bridge contract: `bridge.knowledge` is typed as `Record<string, unknown>`
- * because the backend KnowledgeBase DTO is not exported from
- * @tnzi/core/services/ai (rag.ts only exposes `KnowledgeBaseCreateParams` /
- * `KnowledgeBaseUpdateParams` / `ReindexResultDto`). Columns/form fields
- * follow the create/update params shape — name + description + embeddingModel
- * — plus the audit fields the entity is known to carry. If a future task
- * exports a typed `KnowledgeBaseDto`, swap in the proper type here.
+ * Knowledge bases render as a `TCardPage` grid — the card + the document
+ * management drawer own all presentation, so there are no table columns, only
+ * the create/edit form schema + the keyword search field.
+ *
+ * KB shape derives from `@tnzi/core/services/ai` `KnowledgeBaseDto`:
+ *   { id, name, description, embeddingProvider, embeddingModel, chunkSize,
+ *     chunkOverlap, documentCount, chunkCount, isEnabled, creationTime }
+ *
+ * Two distinct write shapes (see core `rag.ts`):
+ *   - CREATE (`KnowledgeBaseCreateParams`): name + description +
+ *     embeddingProvider/embeddingModel + chunkSize/chunkOverlap. The chunking
+ *     config is immutable after creation (re-chunking needs a reindex), so it
+ *     only appears in the create form.
+ *   - UPDATE (`KnowledgeBaseUpdateParams`): only name / description / isEnabled
+ *     are mutable. The edit form therefore disables the embedding + chunk
+ *     fields and surfaces the enable toggle.
+ *
+ * The page passes the relevant schema depending on `mode` (create vs edit).
  */
-export const knowledgeColumns: ColumnDef[] = [
-  { key: 'name', title: 'columns.name' },
-  { key: 'description', title: 'columns.description' },
-  { key: 'embeddingModel', title: 'columns.embeddingModel' },
-  { key: 'chunkCount', title: 'columns.chunkCount', visible: false },
-  { key: 'documentCount', title: 'columns.documentCount', visible: false },
-  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
-]
 
-export const knowledgeFormSchema: FormSchemaItem[] = [
+/** Create form — full provisioning surface (KnowledgeBaseCreateParams). */
+export const knowledgeCreateFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
-  { key: 'embeddingModel', labelKey: 'form.embeddingModel', label: 'Embedding Model', type: 'text' },
+  {
+    key: 'embeddingProvider',
+    labelKey: 'form.embeddingProvider',
+    label: 'Embedding Provider',
+    type: 'text',
+    placeholder: 'e.g. openai',
+  },
+  {
+    key: 'embeddingModel',
+    labelKey: 'form.embeddingModel',
+    label: 'Embedding Model',
+    type: 'text',
+    placeholder: 'e.g. text-embedding-3-small',
+  },
+  {
+    key: 'chunkSize',
+    labelKey: 'form.chunkSize',
+    label: 'Chunk Size',
+    type: 'number',
+    placeholder: '1000',
+  },
+  {
+    key: 'chunkOverlap',
+    labelKey: 'form.chunkOverlap',
+    label: 'Chunk Overlap',
+    type: 'number',
+    placeholder: '200',
+  },
 ]
 
-/**
- * i18n keys (Task 5.16 will sweep into tnzi.admin.modules.ai.knowledge.*):
- *
- * Page meta:
- *   modules.ai.knowledge.pageTitle
- *   modules.ai.knowledge.reindex
- *   modules.ai.knowledge.reindexing
- *   modules.ai.knowledge.reindexSuccess
- *   modules.ai.knowledge.reindexError
- *
- * Columns:
- *   modules.ai.knowledge.columns.name
- *   modules.ai.knowledge.columns.description
- *   modules.ai.knowledge.columns.embeddingModel
- *   modules.ai.knowledge.columns.chunkCount
- *   modules.ai.knowledge.columns.documentCount
- *   modules.ai.knowledge.columns.lastModificationTime
- *
- * Form fields:
- *   modules.ai.knowledge.form.name
- *   modules.ai.knowledge.form.description
- *   modules.ai.knowledge.form.embeddingModel
- */
+/** Edit form — only the mutable subset (KnowledgeBaseUpdateParams). */
+export const knowledgeEditFormSchema: FormSchemaItem[] = [
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
+  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
+]
+
+/** Keyword search over the knowledge base name. */
+export const knowledgeSearchFields: FormSchemaItem[] = [
+  { key: 'keyword', labelKey: 'search.keyword', label: 'Keyword', type: 'text' },
+]

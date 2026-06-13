@@ -110,7 +110,7 @@ public class RouterExecutionStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
 
@@ -224,7 +224,7 @@ public class RouterExecutionStrategyTests
         agentFactory.Setup(x => x.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 "AgentB", It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(),
-                It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<int?>(), It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 targetBId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetBAgent);
 
@@ -232,7 +232,7 @@ public class RouterExecutionStrategyTests
         {
             AgentFactory = agentFactory.Object,
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
 
@@ -309,7 +309,7 @@ public class RouterExecutionStrategyTests
                 It.IsAny<double?>(),
                 It.IsAny<int?>(),
                 It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 targetAgentId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetAgent);
@@ -318,7 +318,7 @@ public class RouterExecutionStrategyTests
         {
             AgentFactory = agentFactory.Object,
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
     }
@@ -366,7 +366,7 @@ public class RouterExecutionStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = Mock.Of<IRepository<Agent, Guid>>(),
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
     }

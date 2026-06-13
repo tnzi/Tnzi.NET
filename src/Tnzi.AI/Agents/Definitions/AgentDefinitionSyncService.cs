@@ -46,6 +46,7 @@ public class AgentDefinitionSyncService : IHostedService
 
             await using var scope = _serviceProvider.CreateAsyncScope();
             var repository = scope.ServiceProvider.GetRequiredService<IRepository<Agent, Guid>>();
+            var grantService = scope.ServiceProvider.GetRequiredService<IAgentGrantService>();
 
             // 批量加载所有已有 Agent，避免循环内 N+1 查询
             var existingAgents = await repository.AsQueryable()
@@ -62,7 +63,7 @@ public class AgentDefinitionSyncService : IHostedService
 
                 try
                 {
-                    var result = await SyncDefinitionAsync(repository, definition, agentsByName, cancellationToken);
+                    var result = await SyncDefinitionAsync(repository, grantService, definition, agentsByName, cancellationToken);
                     if (result)
                         synced++;
                     else
@@ -86,7 +87,7 @@ public class AgentDefinitionSyncService : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private async Task<bool> SyncDefinitionAsync(IRepository<Agent, Guid> repository, AgentDefinitionDto definition, Dictionary<string, Agent> agentsByName, CancellationToken ct)
+    private async Task<bool> SyncDefinitionAsync(IRepository<Agent, Guid> repository, IAgentGrantService grantService, AgentDefinitionDto definition, Dictionary<string, Agent> agentsByName, CancellationToken ct)
     {
         var hash = definition.DefinitionHash;
 
@@ -111,7 +112,8 @@ public class AgentDefinitionSyncService : IHostedService
 
             // 更新已有 Agent
             ApplyDefinition(existing, definition, hash);
-            await repository.UpdateAsync(existing);
+            await repository.UpdateAsync(existing, ct);
+            await ReconcileGrantsAsync(grantService, existing.Id, definition, ct);
             _logger.LogDebug("Updated agent '{Name}' from YAML definition", definition.Name);
             return true;
         }
@@ -119,9 +121,23 @@ public class AgentDefinitionSyncService : IHostedService
         // 创建新 Agent
         var agent = new Agent { Source = AgentSources.Yaml };
         ApplyDefinition(agent, definition, hash);
-        await repository.InsertAsync(agent);
+        await repository.InsertAsync(agent, ct);
+        await ReconcileGrantsAsync(grantService, agent.Id, definition, ct);
         _logger.LogDebug("Created agent '{Name}' from YAML definition", definition.Name);
         return true;
+    }
+
+    /// <summary>
+    /// 把 YAML 定义里的资源（当前仅 ToolGroups，AgentDefinitionDto 不含 Skill/Knowledge）落实到
+    /// junction grant —— grant 是工具组的唯一权威来源（Agent 已无 ToolGroups 列）。
+    /// Reconciles the YAML definition's resources (only ToolGroups today — the YAML DTO carries no
+    /// Skill/Knowledge resources) into the junction grants, the sole source of truth.
+    /// </summary>
+    private static async Task ReconcileGrantsAsync(IAgentGrantService grantService, Guid agentId, AgentDefinitionDto definition, CancellationToken ct)
+    {
+        // reconcile 用空列表（非 null）表达"清空"，故这里把 null 折叠成空列表，
+        // 让 YAML 移除工具组时同步删除残留 grant。
+        await grantService.ReconcileToolGroupsAsync(agentId, definition.ToolGroups ?? new List<string>(), ct);
     }
 
     /// <summary>
@@ -134,7 +150,8 @@ public class AgentDefinitionSyncService : IHostedService
         agent.Instructions = definition.Instructions;
         agent.Provider = definition.Provider ?? string.Empty;
         agent.Model = definition.Model;
-        agent.ToolGroups = definition.ToolGroups is { Count: > 0 } ? definition.ToolGroups : null;
+        // ToolGroups are reconciled into the grant junction by ReconcileGrantsAsync — the entity no
+        // longer carries a ToolGroups column.
         agent.Temperature = definition.Temperature;
         agent.MaxTokens = definition.MaxTokens;
         agent.TimeoutSeconds = definition.TimeoutSeconds;

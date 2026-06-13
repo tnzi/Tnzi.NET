@@ -4,6 +4,13 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// MCP 客户端 OAuth 认证处理器 — 通过 client_credentials 流获取访问令牌，
 /// 支持令牌缓存、自动刷新和过期重新获取。
 /// </summary>
+/// <remarks>
+/// 这是 MCP 客户端侧唯一的 OAuth 路径：由 <see cref="McpClientFactory"/> 在建立连接时调用，
+/// 配置来源为 <c>McpServerConfig.OAuth</c>（<see cref="McpOAuthConfig"/>，AI:Mcp:Servers 部署配置）。
+/// 历史上并存的 IMcpOAuthTokenManager/McpClientOAuthOptions（AI:McpClient:OAuth 配置节）
+/// 从未被生产代码消费，已于 2026-06 删除。
+/// DB 注册表（McpServerRegistration）不支持动态 OAuth 流，仅支持静态 token（bearer/api-key）。
+/// </remarks>
 public class McpOAuthClientHandler
 {
     private const string HttpClientName = "Tnzi.AI.OAuth";

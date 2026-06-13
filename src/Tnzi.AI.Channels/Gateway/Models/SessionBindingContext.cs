@@ -22,4 +22,10 @@ public class SessionBindingContext
 
     /// <summary>显式指定的 Agent ID（优先级最高）</summary>
     public string? ExplicitAgentId { get; init; }
+
+    /// <summary>
+    /// Owning tenant resolved from channel config in multi-tenant deployments;
+    /// null = single-tenant / global default.
+    /// </summary>
+    public Guid? TenantId { get; init; }
 }

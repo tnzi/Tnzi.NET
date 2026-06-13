@@ -25,7 +25,7 @@ public class PaymentServiceTests
     private readonly Mock<IRepository<PaymentEntity, Guid>> _paymentRepositoryMock;
     private readonly Mock<IPaymentProviderFactory> _providerFactoryMock;
     private readonly Mock<IPaymentProvider> _providerMock;
-    private readonly Mock<IOptions<PaymentOptions>> _optionsMock;
+    private readonly Mock<IOptionsMonitor<PaymentOptions>> _optionsMock;
     private readonly PaymentService _service;
 
     public PaymentServiceTests()
@@ -38,9 +38,9 @@ public class PaymentServiceTests
         _paymentRepositoryMock = new Mock<IRepository<PaymentEntity, Guid>>();
         _providerFactoryMock = new Mock<IPaymentProviderFactory>();
         _providerMock = new Mock<IPaymentProvider>();
-        _optionsMock = new Mock<IOptions<PaymentOptions>>();
+        _optionsMock = new Mock<IOptionsMonitor<PaymentOptions>>();
 
-        _optionsMock.Setup(x => x.Value).Returns(new PaymentOptions
+        _optionsMock.Setup(x => x.CurrentValue).Returns(new PaymentOptions
         {
             DefaultCurrency = "USD",
             AutoCloseExpireMinutes = 30

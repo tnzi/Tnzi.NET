@@ -29,7 +29,6 @@ public class McpServerHostTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 ExposedAgentIds = [agentId]
             }),
             NullLogger<McpServerSecurityMiddleware>.Instance,
@@ -40,7 +39,6 @@ public class McpServerHostTests
             MsOptions.Create(new McpServerOptions
             {
                 Enabled = true,
-                Transport = "sse",
                 ExposedAgentIds = [agentId]
             }),
             NullLogger<McpServerHost>.Instance,
@@ -84,7 +82,6 @@ public class McpServerHostTests
         var options = MsOptions.Create(new McpServerOptions
         {
             Enabled = true,
-            Transport = "sse",
             ExposedAgentIds = [agentId],
             RequireAuthentication = false,
             RateLimitPerMinute = 0

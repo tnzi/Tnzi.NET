@@ -47,8 +47,8 @@ public class ContextInjection_PersonaTests
             }));
 
         var sp = BuildServiceProvider(personaService: personaService.Object);
-        var context = CreateContext(sp,
-            agentConfig: JsonSerializer.Serialize(new { personaId = personaId.ToString() }));
+        // Canonical path: persona resolves via the AgentResolution.PersonaId column.
+        var context = CreateContext(sp, personaId: personaId);
 
         var middleware = CreateMiddleware();
 
@@ -130,11 +130,10 @@ public class ContextInjection_PersonaTests
     [Fact]
     public async Task InvokeAsync_PersonaServiceNotRegistered_NoSoulBlock()
     {
-        // Arrange — personaId exists in config, but no IAgentPersonaService registered
+        // Arrange — personaId is set on the resolution, but no IAgentPersonaService registered
         var personaId = Guid.NewGuid();
         var sp = BuildServiceProvider(); // no personaService
-        var context = CreateContext(sp,
-            agentConfig: JsonSerializer.Serialize(new { personaId = personaId.ToString() }));
+        var context = CreateContext(sp, personaId: personaId);
 
         var middleware = CreateMiddleware();
 
@@ -213,8 +212,8 @@ public class ContextInjection_PersonaTests
     }
 
     /// <summary>
-    /// PersonaContent wins over both PersonaId and JSON personaId — inline content
-    /// is the most specific signal and must be honored even when DB metadata exists.
+    /// PersonaContent wins over PersonaId — inline content is the most specific
+    /// signal and must be honored even when a PersonaId column value also exists.
     /// </summary>
     [Fact]
     public async Task InvokeAsync_PersonaContentTakesPrecedenceOverPersonaId()
@@ -224,8 +223,7 @@ public class ContextInjection_PersonaTests
         var sp = BuildServiceProvider(personaService: personaService.Object);
         var context = CreateContext(sp,
             personaId: personaId,
-            personaContent: "INLINE_WINS",
-            agentConfig: JsonSerializer.Serialize(new { personaId = personaId.ToString() }));
+            personaContent: "INLINE_WINS");
 
         await CreateMiddleware().InvokeAsync(context, (ctx, ct) =>
             Task.FromResult(new AgentRunResult { Response = "ok" }), CancellationToken.None);

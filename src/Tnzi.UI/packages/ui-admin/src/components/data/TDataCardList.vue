@@ -8,8 +8,7 @@
     <!-- empty -->
     <div v-else-if="!hasItems" class="t-data-cards__empty">
       <slot name="empty">
-        <TSvgIcon icon="mdi:inbox-outline" :size="40" />
-        <span class="t-data-cards__empty-text">{{ emptyText }}</span>
+        <TEmpty :text="emptyText" />
       </slot>
     </div>
 
@@ -64,6 +63,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, isVNode, type PropType, type VNodeChild } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
+import TEmpty from './TEmpty.vue'
 
 /**
  * Column descriptor for the mobile card list. A subset of the table column
@@ -292,16 +292,11 @@ function onToggle(row: Record<string, unknown>): void {
   100% { background-position: -200% 0; }
 }
 
+/* Visuals live in TEmpty; this wrapper only centers custom #empty content. */
 .t-data-cards__empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 48px 0;
-  color: var(--tnzi-base-text-muted, #9ca3af);
-}
-.t-data-cards__empty-text {
-  font-size: 13px;
 }
 </style>

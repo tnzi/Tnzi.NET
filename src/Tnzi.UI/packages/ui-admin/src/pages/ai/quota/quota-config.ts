@@ -1,37 +1,105 @@
 import { h } from 'vue'
+import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+import { translatePageKey } from '../../_shared/translate'
+import type { UserQuotaDto } from '@tnzi/core/services/ai'
+
+// QuotaWarningLevel enum values (None=0 / Warning=1 / Critical=2). Inlined as
+// literals because pages/** may only `import type` from @tnzi/core/services/*
+// (the no-restricted-imports bridge guard), and the bridge does not re-export
+// this enum. Kept in sync with @tnzi/core/services/ai QuotaWarningLevel.
+const WARNING_LEVEL = { None: 0, Warning: 1, Critical: 2 } as const
 
 /**
- * Phase 5 Task 5.12 — Quotas page config.
+ * Quotas page config — budget cost dashboard + per-user quota CRUD.
  *
  * Shape derives from @tnzi/core/services/ai UserQuotaDto / SetQuotaDto /
- * UserQuotaQueryDto. Stage 1 backend prereq added the paged list endpoint
- * (POST /admin/quotas/query), which the bridge exposes as quota.fetch().
+ * UserQuotaQueryDto. The paged list is served by POST /admin/quotas/query and
+ * surfaced through the bridge as `quota.fetch()`. The budget dashboard above
+ * the table is fed by `quota.getBudgetSummary()` (GET /admin/quotas/budget/summary).
  *
- * Plan deviations vs the task sketch:
- *   - The plan listed a `warningLevel` slider 0-1; the real DTO splits it
- *     into `warningThreshold` and `criticalThreshold` (both number, both on
- *     SetQuotaDto). The displayed enum `warningLevel` (None/Warning/Critical)
- *     is computed server-side; we surface it as a read-only column.
- *   - There is NO `isEnabled` field on SetQuotaDto, so the form cannot toggle
- *     it. The DTO has `isEnabled` for display purposes only — kept as a
- *     column. The query filter still supports `isEnabled`.
- *   - Bridge `quota.delete` rejects (notImplemented) — a per-row delete is
- *     not exposed; batch delete in TCrudPage will surface the rejection if
- *     used. The page leaves it on by default since we have no `:hideDelete`
- *     prop, but documents the gap here.
+ * Notes:
+ *   - The DTO splits the warning slider into `warningThreshold` and
+ *     `criticalThreshold` (both 0-1 ratios on SetQuotaDto). The displayed
+ *     `warningLevel` enum (None/Warning/Critical) is computed server-side and
+ *     shown as a read-only colour-coded badge.
+ *   - SetQuotaDto has no `isEnabled` field, so the form cannot toggle it; it is
+ *     surfaced as a read-only column. The query filter still supports it.
+ *   - Bridge `quota.delete` rejects (notImplemented) — the page omits
+ *     `deleteData`, so the delete affordance is hidden automatically.
  */
+
+/** Render a 0-1 ratio as a percentage string (e.g. 0.05 → "5%"). */
+function formatPercent(ratio: unknown): string {
+  const n = typeof ratio === 'number' ? ratio : Number(ratio)
+  if (!Number.isFinite(n)) return '—'
+  return `${Math.round(n * 1000) / 10}%`
+}
+
+/** Render a token count compactly (e.g. 2000000 → "2,000,000"). */
+function formatTokens(value: unknown): string {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return '—'
+  return n.toLocaleString('en-US')
+}
+
+/**
+ * "No limit" sentinel guard. The backend models an unlimited quota as a huge
+ * long (≈ long.MaxValue / 2 ≈ 4.6e18); rendering that as a token count shows
+ * an astronomic number. Anything above 1e15 tokens is not a real limit.
+ */
+const UNLIMITED_THRESHOLD = 1e15
+
+/** Render a daily/monthly limit; the unlimited sentinel shows a label. */
+function formatLimit(value: unknown): string {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return '—'
+  if (n > UNLIMITED_THRESHOLD) return translatePageKey('ai.quota', 'unlimited')
+  return formatTokens(n)
+}
+
+/** Render a GUID truncated to its first 8 chars (full value in `title`). */
+function renderShortId(value: unknown) {
+  const full = typeof value === 'string' ? value : value == null ? '' : String(value)
+  if (!full) return '—'
+  const short = full.length > 8 ? `${full.slice(0, 8)}…` : full
+  return h('span', { title: full, class: 'font-mono' }, short)
+}
+
 export const quotaColumns: ColumnDef[] = [
-  { key: 'userId', title: 'columns.userId' },
-  { key: 'dailyTokenLimit', title: 'columns.dailyTokenLimit' },
-  { key: 'monthlyTokenLimit', title: 'columns.monthlyTokenLimit' },
-  { key: 'currentDailyUsage', title: 'columns.currentDailyUsage' },
-  { key: 'currentMonthlyUsage', title: 'columns.currentMonthlyUsage' },
-  { key: 'dailyUsagePercentage', title: 'columns.dailyUsagePercentage', visible: false },
-  { key: 'monthlyUsagePercentage', title: 'columns.monthlyUsagePercentage', visible: false },
-  { key: 'warningLevel', title: 'columns.warningLevel' },
+  { key: 'userId', title: 'columns.userId', primary: true, render: (row) => renderShortId(row.userId) },
+  { key: 'dailyTokenLimit', title: 'columns.dailyTokenLimit', render: (row) => formatLimit(row.dailyTokenLimit) },
+  { key: 'monthlyTokenLimit', title: 'columns.monthlyTokenLimit', render: (row) => formatLimit(row.monthlyTokenLimit) },
+  { key: 'currentDailyUsage', title: 'columns.currentDailyUsage', render: (row) => formatTokens(row.currentDailyUsage) },
+  { key: 'currentMonthlyUsage', title: 'columns.currentMonthlyUsage', render: (row) => formatTokens(row.currentMonthlyUsage) },
+  {
+    key: 'dailyUsagePercentage',
+    title: 'columns.dailyUsagePercentage',
+    render: (row) => formatPercent(row.dailyUsagePercentage),
+  },
+  {
+    key: 'monthlyUsagePercentage',
+    title: 'columns.monthlyUsagePercentage',
+    render: (row) => formatPercent(row.monthlyUsagePercentage),
+  },
+  {
+    key: 'warningLevel',
+    title: 'columns.warningLevel',
+    width: 130,
+    render: (row) =>
+      h(TStatusBadge, {
+        value: Number((row as unknown as UserQuotaDto).warningLevel ?? WARNING_LEVEL.None),
+        // The admin TStatusBadge wrapper resolves labelKeys with an EMPTY page
+        // namespace, so badge keys must be absolute (admin.modules.ai.quota.*).
+        mapping: {
+          [WARNING_LEVEL.None]: { type: 'success', labelKey: 'admin.modules.ai.quota.warningLevel.none' },
+          [WARNING_LEVEL.Warning]: { type: 'warning', labelKey: 'admin.modules.ai.quota.warningLevel.warning' },
+          [WARNING_LEVEL.Critical]: { type: 'error', labelKey: 'admin.modules.ai.quota.warningLevel.critical' },
+        },
+      }),
+  },
   {
     key: 'isEnabled',
     title: 'columns.isEnabled',
@@ -45,39 +113,38 @@ export const quotaColumns: ColumnDef[] = [
         },
       }),
   },
-  { key: 'lastModificationTime', title: 'columns.lastModificationTime' },
+  {
+    key: 'lastModificationTime',
+    title: 'columns.lastModificationTime',
+    render: (row) =>
+      formatDateTime(
+        (row as { lastModificationTime?: string | null }).lastModificationTime,
+        { fallback: '—' },
+      ),
+  },
 ]
 
 export const quotaFormSchema: FormSchemaItem[] = [
   { key: 'userId', labelKey: 'form.userId', label: 'User ID', type: 'text', required: true, placeholder: 'Target user UUID' },
   { key: 'dailyTokenLimit', labelKey: 'form.dailyTokenLimit', label: 'Daily Token Limit', type: 'number', min: 0, required: true },
   { key: 'monthlyTokenLimit', labelKey: 'form.monthlyTokenLimit', label: 'Monthly Token Limit', type: 'number', min: 0, required: true },
-  { key: 'warningThreshold', labelKey: 'form.warningThreshold', label: 'Warning Threshold (0-1)', type: 'number', min: 0, max: 1 },
-  { key: 'criticalThreshold', labelKey: 'form.criticalThreshold', label: 'Critical Threshold (0-1)', type: 'number', min: 0, max: 1 },
+  {
+    key: 'warningThreshold',
+    labelKey: 'form.warningThreshold',
+    label: 'Warning Threshold (0-1)',
+    type: 'number',
+    min: 0,
+    max: 1,
+    placeholderKey: 'form.thresholdHint',
+  },
+  {
+    key: 'criticalThreshold',
+    labelKey: 'form.criticalThreshold',
+    label: 'Critical Threshold (0-1)',
+    type: 'number',
+    min: 0,
+    max: 1,
+    placeholderKey: 'form.thresholdHint',
+  },
 ]
 
-/**
- * i18n keys (Task 5.16 will sweep into tnzi.admin.modules.ai.quota.*):
- *
- * Page meta:
- *   modules.ai.quota.pageTitle
- *
- * Columns:
- *   modules.ai.quota.columns.userId
- *   modules.ai.quota.columns.dailyTokenLimit
- *   modules.ai.quota.columns.monthlyTokenLimit
- *   modules.ai.quota.columns.currentDailyUsage
- *   modules.ai.quota.columns.currentMonthlyUsage
- *   modules.ai.quota.columns.dailyUsagePercentage
- *   modules.ai.quota.columns.monthlyUsagePercentage
- *   modules.ai.quota.columns.warningLevel
- *   modules.ai.quota.columns.isEnabled
- *   modules.ai.quota.columns.lastModificationTime
- *
- * Form fields:
- *   modules.ai.quota.form.userId
- *   modules.ai.quota.form.dailyTokenLimit
- *   modules.ai.quota.form.monthlyTokenLimit
- *   modules.ai.quota.form.warningThreshold
- *   modules.ai.quota.form.criticalThreshold
- */

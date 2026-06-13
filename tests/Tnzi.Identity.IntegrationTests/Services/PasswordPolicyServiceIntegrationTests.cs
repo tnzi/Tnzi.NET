@@ -14,7 +14,7 @@ public class PasswordPolicyServiceIntegrationTests : RelationalIdentityIntegrati
             CreateRepository<PasswordHistory>(),
             UserManager,
             ServiceProvider,
-            ServiceProvider.GetRequiredService<IOptions<IdentityOptions>>());
+            ServiceProvider.GetRequiredService<IOptionsMonitor<IdentityOptions>>());
     }
 
     [Fact]

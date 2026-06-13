@@ -48,7 +48,7 @@ export interface RequestOptions {
   params?: Record<string, unknown> | object;
   /** Optional request body (used by some DELETE endpoints) */
   body?: unknown;
-  /** Request timeout in milliseconds */
+  /** Request timeout in milliseconds (overrides the client config; 0 disables the timeout) */
   timeout?: number;
   /** Abort signal for cancellation */
   signal?: AbortSignal;

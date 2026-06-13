@@ -1,205 +1,824 @@
 <template>
   <!--
-    McpServers — Phase 5 Task 5.11. Entity-driven CRUD over EXTERNAL MCP
-    server registrations (AI_McpServerRegistration table). The page lets
-    admins register, edit, and test connections to MCP servers that Tnzi
-    connects to as a CLIENT.
+    McpServers — production-grade three-tab MCP control surface.
 
-    SEMANTIC NOTE — this page does NOT manage Tnzi's own self-hosted MCP
-    server (the one that exposes Tnzi's tools to external MCP clients). That
-    config lives in appsettings.json under McpServerOptions and is intentionally
-    not editable from the UI. The header callout reinforces this distinction
-    so admins don't conflate the two.
+      Tab 1 «External Servers» — entity-driven CRUD over AI_McpServerRegistration:
+        the external MCP servers Tnzi connects to as a CLIENT. A responsive card
+        grid (TCardPage) with per-card Test Connection, full create/edit modal
+        (authToken tri-state) + delete confirm.
 
-    Follows the Providers canonical pattern (Task 5.8) — same
-    test-connection inline panel, same tri-state token UX (blank = keep on
-    edit). Custom #header slot replaces the default title block to surface
-    the semantic callout next to the page title.
+      Tab 2 «This Server» — read-only status of Tnzi's OWN self-hosted MCP server
+        (Tnzi as the server, exposing its tools to external MCP clients). KPI strip
+        + descriptions, "Exposed Agents" management (expose/remove), and the
+        registered-tools list.
+
+      Tab 3 «Tool Analytics» — MCP tool-call telemetry: most-used ranking table;
+        clicking a row opens a drawer with per-tool stats (p95, error rate, unique
+        callers, first/last used) + recent error breakdown. A Cleanup popconfirm
+        prunes old usage records.
   -->
-  <TCrudPage
-    :state="crud"
-    :all-columns="mcpServerColumns"
-    :title="title"
-    :title-help="t('banner.body')"
-    :title-help-title="t('banner.title')"
+  <TContentPage
+    :title="t('title')"
+    icon="mdi:transit-connection-variant"
+    :help="t('banner')"
     :translate="t"
-    :form-modal-width="800"
-    :row-actions="rowActions"
+    scroll="fill"
   >
-    <template #form="{ formData, mode }">
-      <TFormSchemaRenderer
-        :schema="mcpServerFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
-        :translate="t"
-        :columns="2"
-      />
-      <p v-if="mode === 'edit'" class="mcp-servers__hint">
-        Leave <strong>Auth Token</strong> blank to keep the existing token. Enter
-        a new value to rotate it.
-      </p>
-      <div
-        v-if="mode === 'edit' && (formData as Record<string, unknown>)?.id"
-        class="mcp-servers__test"
-      >
-        <button
-          type="button"
-          class="mcp-servers__btn"
-          :disabled="testBusy"
-          @click="onTestConnection((formData as Record<string, unknown>).id as string)"
+    <!-- Keyword search lives in the single page-header bar (C2). It only
+         applies to the External Servers tab, so it hides on the others. -->
+    <template #actions>
+      <div v-if="activeTab === 'servers'" class="t-mcp__search">
+        <NInput
+          v-model:value="serverSearch"
+          size="small"
+          clearable
+          :placeholder="t('servers.searchPlaceholder')"
+          class="t-mcp__search-input"
+          @keydown.enter="onServerSearch"
+          @clear="onServerSearchClear"
         >
-          {{ testBusy ? 'Testing…' : 'Test Connection' }}
-        </button>
-        <span
-          v-if="testStatus"
-          class="mcp-servers__status"
-          :data-status="testStatus.kind"
-        >
-          {{ testStatus.message }}
-        </span>
+          <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
+        </NInput>
+        <NButton size="small" type="primary" @click="onServerSearch">
+          {{ t('admin.crud.search') }}
+        </NButton>
       </div>
     </template>
-  </TCrudPage>
+
+    <template #default>
+      <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
+        <!-- ─── Tab 1: External Servers ─────────────────────────────── -->
+        <NTabPane name="servers" :tab="t('tabs.servers')">
+          <div class="t-mcp__pane">
+            <!-- show-header=false suppresses the shell's own header bar:
+                 without it the shell falls back to the route meta title and
+                 renders a SECOND "MCP" bar. The page title + keyword search
+                 live on the outer TContentPage header instead. -->
+            <TCardPage
+              :state="serverCrud"
+              mode="page"
+              :cols="{ xs: 1, sm: 2, md: 3, lg: 3 }"
+              :form-modal-width="800"
+              :show-header="false"
+              :translate="t"
+            >
+              <template #card="{ item }">
+                <TEntityCard>
+                  <div class="flex items-center gap-8px mb-6px">
+                    <span class="t-mcp-server-card__icon">
+                      <TSvgIcon :icon="mcpTransportIcon(item.transport)" :size="18" />
+                    </span>
+                    <span class="t-mcp-server-card__name flex-1">{{ item.name }}</span>
+                    <NTag
+                      size="small"
+                      :type="item.isEnabled ? 'success' : 'warning'"
+                      :bordered="false"
+                    >
+                      {{ item.isEnabled ? t('status.enabled') : t('status.disabled') }}
+                    </NTag>
+                  </div>
+                  <div class="t-mcp-server-card__url font-mono">
+                    {{ item.serverUrl }}
+                  </div>
+                  <div class="t-mcp-server-card__meta">
+                    <span>{{ t('servers.transport') }}: {{ item.transport }}</span>
+                    <span>·</span>
+                    <span>{{ t('servers.priority') }}: {{ item.priority }}</span>
+                    <span v-if="item.hasAuthToken">·</span>
+                    <NTag v-if="item.hasAuthToken" size="tiny" :bordered="false" type="info">
+                      {{ t('servers.authed') }}
+                    </NTag>
+                  </div>
+                  <template #actions>
+                    <NTag
+                      v-if="testState[item.id]?.result"
+                      size="small"
+                      :bordered="false"
+                      class="mr-auto"
+                      :type="testState[item.id]?.result?.ok ? 'success' : 'error'"
+                    >
+                      {{ testState[item.id]?.result?.message }}
+                    </NTag>
+                    <NButton
+                      size="small"
+                      ghost
+                      :loading="testState[item.id]?.busy"
+                      @click="onTestConnection(item.id)"
+                    >
+                      <template #icon><TSvgIcon icon="mdi:connection" :size="14" /></template>
+                      {{ t('servers.test') }}
+                    </NButton>
+                    <NButton size="small" ghost @click="serverCrud.openEdit(item)">
+                      {{ t('actions.edit') }}
+                    </NButton>
+                    <NPopconfirm @positive-click="removeServer(item)">
+                      <template #trigger>
+                        <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
+                      </template>
+                      {{ t('servers.deleteConfirm') }}
+                    </NPopconfirm>
+                  </template>
+                </TEntityCard>
+              </template>
+
+              <template #form="{ formData, mode }">
+                <TFormSchemaRenderer
+                  :schema="mcpServerFormSchema"
+                  :model="(formData ?? {}) as Record<string, unknown>"
+                  :readonly="mode === 'view'"
+                  :translate="t"
+                  :columns="2"
+                />
+                <p v-if="mode === 'edit'" class="t-mcp__form-hint">
+                  {{ t('servers.tokenHint') }}
+                </p>
+              </template>
+            </TCardPage>
+          </div>
+        </NTabPane>
+
+        <!-- ─── Tab 2: This Server ──────────────────────────────────── -->
+        <NTabPane name="status" :tab="t('tabs.status')">
+          <div class="t-mcp__pane t-mcp__pane--scroll">
+            <NSpin :show="statusLoading">
+              <NAlert
+                v-if="status && !status.enabled"
+                :title="t('status.disabledTitle')"
+                type="warning"
+                :closable="false"
+                class="mb-12px"
+              >
+                {{ t('status.disabledBody') }}
+              </NAlert>
+
+              <div class="t-mcp__kpis">
+                <NCard size="small" :bordered="false">
+                  <NStatistic :label="t('status.state')">
+                    <template #default>
+                      <NTag :type="status?.enabled ? 'success' : 'default'" size="small" :bordered="false">
+                        {{ status?.enabled ? t('status.enabled') : t('status.disabled') }}
+                      </NTag>
+                    </template>
+                  </NStatistic>
+                </NCard>
+                <NCard size="small" :bordered="false">
+                  <NStatistic :label="t('status.totalTools')" :value="status?.totalToolCount ?? 0" />
+                </NCard>
+                <NCard size="small" :bordered="false">
+                  <NStatistic :label="t('status.customTools')" :value="status?.customToolCount ?? 0" />
+                </NCard>
+                <NCard size="small" :bordered="false">
+                  <NStatistic :label="t('status.exposedAgents')" :value="status?.exposedAgentCount ?? 0" />
+                </NCard>
+              </div>
+
+              <NCard size="small" :title="t('status.detailsTitle')" :bordered="false" class="mt-12px">
+                <NDescriptions :column="2" label-placement="left" size="small">
+                  <NDescriptionsItem :label="t('status.endpoint')">
+                    <code class="font-mono">{{ status?.endpoint || '—' }}</code>
+                  </NDescriptionsItem>
+                  <NDescriptionsItem :label="t('status.requireAuth')">
+                    <NTag size="tiny" :bordered="false" :type="status?.requireAuthentication ? 'success' : 'default'">
+                      {{ status?.requireAuthentication ? t('status.yes') : t('status.no') }}
+                    </NTag>
+                  </NDescriptionsItem>
+                  <NDescriptionsItem :label="t('status.rateLimitPerTenant')">
+                    <NTag size="tiny" :bordered="false" :type="status?.rateLimitPerTenant ? 'info' : 'default'">
+                      {{ status?.rateLimitPerTenant ? t('status.yes') : t('status.no') }}
+                    </NTag>
+                  </NDescriptionsItem>
+                  <NDescriptionsItem :label="t('status.rateLimitPerMinute')">
+                    {{ status?.rateLimitPerMinute ?? 0 }}
+                  </NDescriptionsItem>
+                </NDescriptions>
+              </NCard>
+
+              <!-- Exposed Agents management -->
+              <NCard size="small" :title="t('expose.title')" :bordered="false" class="mt-12px">
+                <template #header-extra>
+                  <div class="flex items-center gap-6px">
+                    <NSelect
+                      v-model:value="agentToExpose"
+                      size="small"
+                      class="w-220px"
+                      filterable
+                      clearable
+                      :placeholder="t('expose.selectPlaceholder')"
+                      :options="exposableAgentOptions"
+                      :loading="agentsLoading"
+                    />
+                    <NButton
+                      size="small"
+                      type="primary"
+                      :disabled="!agentToExpose"
+                      :loading="exposeBusy"
+                      @click="onExposeAgent"
+                    >
+                      <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
+                      {{ t('expose.add') }}
+                    </NButton>
+                  </div>
+                </template>
+                <div v-if="exposedAgents.length" class="flex flex-col gap-6px">
+                  <div
+                    v-for="row in exposedAgents"
+                    :key="row.agentId"
+                    class="t-mcp__exposed-row"
+                  >
+                    <span class="flex items-center gap-8px flex-1 min-w-0">
+                      <TSvgIcon icon="mdi:robot-outline" :size="16" />
+                      <span class="t-mcp__exposed-name">{{ row.name }}</span>
+                      <code class="font-mono t-mcp__exposed-id">{{ row.agentId }}</code>
+                    </span>
+                    <NPopconfirm @positive-click="onRemoveAgent(row.agentId)">
+                      <template #trigger>
+                        <NButton size="small" type="error" tertiary>
+                          <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
+                          {{ t('expose.remove') }}
+                        </NButton>
+                      </template>
+                      {{ t('expose.removeConfirm') }}
+                    </NPopconfirm>
+                  </div>
+                </div>
+                <div v-else class="t-mcp__empty">{{ t('expose.none') }}</div>
+              </NCard>
+
+              <!-- Registered tools -->
+              <NCard size="small" :title="t('tools.title')" :bordered="false" class="mt-12px">
+                <div v-if="tools.length" class="flex flex-col gap-4px">
+                  <div v-for="tool in tools" :key="tool.name" class="t-mcp__tool-row">
+                    <code class="font-mono t-mcp__tool-name">{{ tool.name }}</code>
+                    <span class="t-mcp__tool-desc">{{ tool.description || t('tools.noDescription') }}</span>
+                  </div>
+                </div>
+                <div v-else class="t-mcp__empty">{{ t('tools.none') }}</div>
+              </NCard>
+            </NSpin>
+          </div>
+        </NTabPane>
+
+        <!-- ─── Tab 3: Tool Analytics ───────────────────────────────── -->
+        <NTabPane name="analytics" :tab="t('tabs.analytics')">
+          <div class="t-mcp__pane">
+            <div class="t-mcp__analytics-bar">
+              <span class="t-mcp__analytics-hint">{{ t('analytics.hint') }}</span>
+              <NPopconfirm @positive-click="onCleanup">
+                <template #trigger>
+                  <NButton size="small" :loading="cleanupBusy">
+                    <template #icon><TSvgIcon icon="mdi:broom" :size="14" /></template>
+                    {{ t('analytics.cleanup') }}
+                  </NButton>
+                </template>
+                {{ t('analytics.cleanupConfirm', { days: retentionDays }) }}
+              </NPopconfirm>
+            </div>
+            <div class="t-table-tabs__pane">
+              <TResponsiveTable
+                :columns="analyticsColumns"
+                :data="popularTools"
+                :loading="analyticsLoading"
+                :pagination="{ pageSize: 20 }"
+                :bordered="false"
+                size="small"
+                :flex-height="true"
+                :row-props="analyticsRowProps"
+              />
+            </div>
+          </div>
+        </NTabPane>
+      </NTabs>
+
+      <!-- Per-tool analytics detail drawer -->
+      <NDrawer v-model:show="detailVisible" :width="560" placement="right">
+        <NDrawerContent v-if="detailTool" :title="detailTool" closable>
+          <NSpin :show="detailLoading">
+            <div v-if="toolStats" class="t-mcp__stats">
+              <NDescriptions :column="2" label-placement="top" size="small">
+                <NDescriptionsItem :label="t('analytics.totalCalls')">
+                  {{ toolStats.totalCalls }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="t('analytics.uniqueCallers')">
+                  {{ toolStats.uniqueCallers }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="t('analytics.avgDuration')">
+                  {{ Math.round(toolStats.avgDurationMs) }} ms
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="t('analytics.p95Duration')">
+                  {{ Math.round(toolStats.p95DurationMs) }} ms
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="t('analytics.errorRate')">
+                  <NTag size="tiny" :bordered="false" :type="toolStats.errorRate > 0 ? 'error' : 'success'">
+                    {{ formatPercent(toolStats.errorRate) }}
+                  </NTag>
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="t('analytics.firstUsed')">
+                  {{ toolStats.firstUsed ? formatDateTime(toolStats.firstUsed) : '—' }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="t('analytics.lastUsed')">
+                  {{ toolStats.lastUsed ? formatDateTime(toolStats.lastUsed) : '—' }}
+                </NDescriptionsItem>
+              </NDescriptions>
+            </div>
+
+            <div class="t-mcp__stats-section">
+              <h3>{{ t('analytics.errorsTitle') }}</h3>
+              <div v-if="toolErrors.length" class="flex flex-col gap-6px">
+                <div v-for="(err, idx) in toolErrors" :key="idx" class="t-mcp__error-row">
+                  <div class="flex items-center gap-8px">
+                    <NTag size="tiny" :bordered="false" type="error">{{ err.count }}×</NTag>
+                    <span class="t-mcp__error-time">{{ formatDateTime(err.lastOccurred) }}</span>
+                  </div>
+                  <code class="font-mono t-mcp__error-msg">{{ err.errorMessage }}</code>
+                </div>
+              </div>
+              <div v-else class="t-mcp__empty">{{ t('analytics.noErrors') }}</div>
+            </div>
+          </NSpin>
+        </NDrawerContent>
+      </NDrawer>
+    </template>
+  </TContentPage>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NDescriptions,
+  NDescriptionsItem,
+  NDrawer,
+  NDrawerContent,
+  NInput,
+  NPopconfirm,
+  NSelect,
+  NSpin,
+  NStatistic,
+  NTabPane,
+  NTabs,
+  NTag,
+} from 'naive-ui'
+import type { DataTableColumns } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
+import { formatDateTime } from '@tnzi/core'
+import TContentPage from '../../../components/layout/TContentPage.vue'
+import TCardPage from '../../../components/crud/TCardPage.vue'
+import TEntityCard from '../../../components/data/TEntityCard.vue'
+import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
+import TFormSchemaRenderer from '../../_shared/form-schema'
 import { useCrudPage } from '../../../headless/useCrudPage'
-import { editAction, deleteAction, type RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import TFormSchemaRenderer from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
-import { mcpServerColumns, mcpServerFormSchema } from './mcp-server-config'
+import {
+  mcpServerFormSchema,
+  mcpServerColumns,
+  mcpTransportIcon,
+  toCreateMcpServerDto,
+  toUpdateMcpServerDto,
+} from './mcp-server-config'
 import type {
   McpServerRegistrationDto,
-  CreateMcpServerRegistrationDto,
-  UpdateMcpServerRegistrationDto,
+  McpServerStatusDto,
+  McpToolInfoDto,
+  McpToolPopularityDto,
+  McpToolStatsDto,
+  McpToolErrorDto,
+  AgentDto,
 } from '@tnzi/core/services/ai'
 
-const title = 'pageTitle'
+/**
+ * Local mustache-style `{key}` interpolation — kept page-local per spec so we
+ * never assume an external `interpolate` export exists. Missing params resolve
+ * to '' rather than leaking the `{token}`.
+ */
+function interp(str: string, params?: Record<string, unknown>): string {
+  if (!params) return str
+  return str.replace(/\{(\w+)\}/g, (_, k: string) => {
+    const v = params[k]
+    return v == null ? '' : String(v)
+  })
+}
+
+const t = (key: string, params?: Record<string, unknown>) =>
+  interp(translatePageKey('ai.mcp', key), params)
 
 const bridge = createAiBridge({ client: useAdminClient() })
 
-/**
- * Form -> CreateMcpServerRegistrationDto adapter. Trims string fields and
- * normalizes blank-strings to null so backend validation handles the
- * required/optional distinction consistently.
- */
-function toCreateDto(form: Record<string, unknown>): CreateMcpServerRegistrationDto {
-  const authToken = String(form.authToken ?? '').trim()
-  return {
-    name: String(form.name ?? '').trim(),
-    serverUrl: String(form.serverUrl ?? '').trim(),
-    transport: String(form.transport ?? '').trim(),
-    command: (form.command as string | undefined)?.trim() || null,
-    arguments: (form.arguments as string | undefined) || null,
-    authType: (form.authType as string | undefined) || null,
-    authToken: authToken || null,
-    priority: (form.priority as number | undefined) ?? 0,
-    isEnabled: (form.isEnabled as boolean | undefined) ?? true,
-    description: (form.description as string | undefined) || null,
-    tags: (form.tags as string | undefined) || null,
-  }
-}
+const activeTab = ref<'servers' | 'status' | 'analytics'>('servers')
 
-/**
- * Form -> UpdateMcpServerRegistrationDto adapter. Tri-state authToken:
- * blank means "keep existing", so we omit the field entirely.
- */
-function toUpdateDto(form: Record<string, unknown>): UpdateMcpServerRegistrationDto {
-  const authTokenRaw = String(form.authToken ?? '')
-  const dto: UpdateMcpServerRegistrationDto = {
-    name: (form.name as string | undefined) ?? null,
-    serverUrl: (form.serverUrl as string | undefined) ?? null,
-    transport: (form.transport as string | undefined) ?? null,
-    command: (form.command as string | undefined) ?? null,
-    arguments: (form.arguments as string | undefined) ?? null,
-    authType: (form.authType as string | undefined) ?? null,
-    priority: (form.priority as number | undefined) ?? null,
-    isEnabled: (form.isEnabled as boolean | undefined) ?? null,
-    description: (form.description as string | undefined) ?? null,
-    tags: (form.tags as string | undefined) ?? null,
-  }
-  if (authTokenRaw.trim().length > 0) {
-    dto.authToken = authTokenRaw
-  }
-  return dto
-}
-
-const crud = useCrudPage<McpServerRegistrationDto>({
+// ─── Tab 1: External servers CRUD ──────────────────────────────────────
+const serverCrud = useCrudPage<McpServerRegistrationDto>({
   pageId: 'ai.mcp',
   columns: mcpServerColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.mcpServers.fetch(query),
-  createData: (data) => bridge.mcpServers.create(toCreateDto(data as Record<string, unknown>)),
+  createData: (data) => bridge.mcpServers.create(toCreateMcpServerDto(data as Record<string, unknown>)),
   updateData: (id, data) =>
-    bridge.mcpServers.update(String(id), toUpdateDto(data as Record<string, unknown>)),
+    bridge.mcpServers.update(String(id), toUpdateMcpServerDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.mcpServers.delete(ids.map(String)),
 })
+serverCrud.refresh().catch(() => undefined)
 
-const rowActions: RowAction<McpServerRegistrationDto>[] = [editAction(crud), deleteAction(crud)]
+// Header keyword search for the External Servers tab. The TCardPage header
+// bar is suppressed (single title bar on TContentPage), so the keyword search
+// is wired manually to the same crud state the shell would drive.
+const serverSearch = ref('')
+function onServerSearch(): void {
+  serverCrud.setSearch(serverSearch.value)
+  void serverCrud.refresh()
+}
+function onServerSearchClear(): void {
+  serverSearch.value = ''
+  serverCrud.setSearch('')
+  void serverCrud.refresh()
+}
 
+type TestEntry = { busy: boolean; result: { ok: boolean; message: string } | null }
+const testState = reactive<Record<string, TestEntry>>({})
 
-crud.refresh().catch(() => undefined)
-
-const testBusy = ref(false)
-const testStatus = ref<{ kind: 'success' | 'error'; message: string } | null>(null)
-
-async function onTestConnection(id: string) {
-  if (!id || testBusy.value) return
-  testBusy.value = true
-  testStatus.value = null
+async function onTestConnection(id: string): Promise<void> {
+  if (!id) return
+  const existing = testState[id]
+  if (existing?.busy) return
+  testState[id] = { busy: true, result: null }
   try {
     const result = await bridge.mcpServers.test(id)
-    if (result.ok) {
-      testStatus.value = {
-        kind: 'success',
-        message: `Connection OK (${result.latency}ms)`,
-      }
-    } else {
-      testStatus.value = {
-        kind: 'error',
-        message: result.error || 'Connection failed',
-      }
+    testState[id] = {
+      busy: false,
+      result: result.ok
+        ? { ok: true, message: t('servers.testOk', { ms: result.latency }) }
+        : { ok: false, message: result.error || t('servers.testFailed') },
     }
   } catch (err) {
-    testStatus.value = {
-      kind: 'error',
-      message: err instanceof Error ? err.message : 'Connection test failed',
+    testState[id] = {
+      busy: false,
+      result: { ok: false, message: err instanceof Error ? err.message : t('servers.testFailed') },
     }
-  } finally {
-    testBusy.value = false
   }
 }
 
-const t = (key: string) => translatePageKey('ai.mcp', key)
+async function removeServer(item: McpServerRegistrationDto): Promise<void> {
+  await serverCrud.handleDelete([item.id])
+}
 
-defineExpose({ onTestConnection, testBusy, testStatus, toCreateDto, toUpdateDto })
+// ─── Tab 2: This server status + exposed agents + tools ────────────────
+const statusLoading = ref(false)
+const status = ref<McpServerStatusDto | null>(null)
+const tools = ref<McpToolInfoDto[]>([])
+const exposedAgentIds = ref<string[]>([])
+const allAgents = ref<AgentDto[]>([])
+const agentsLoading = ref(false)
+const agentToExpose = ref<string | null>(null)
+const exposeBusy = ref(false)
+
+const agentNameById = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const a of allAgents.value) map[a.id] = a.name
+  return map
+})
+
+const exposedAgents = computed<Array<{ agentId: string; name: string }>>(() =>
+  exposedAgentIds.value.map((id) => ({ agentId: id, name: agentNameById.value[id] ?? id })),
+)
+
+const exposableAgentOptions = computed(() => {
+  const exposed = new Set(exposedAgentIds.value)
+  return allAgents.value
+    .filter((a) => !exposed.has(a.id))
+    .map((a) => ({ label: a.name, value: a.id }))
+})
+
+async function loadStatusTab(): Promise<void> {
+  statusLoading.value = true
+  agentsLoading.value = true
+  try {
+    const [st, tls, exposed, agentPage] = await Promise.all([
+      bridge.mcp.getStatus(),
+      bridge.mcp.getTools(),
+      bridge.mcp.getExposedAgents(),
+      bridge.agents.fetch({ pageIndex: 1, pageSize: 200, searchText: '', filters: {} }),
+    ])
+    status.value = st
+    tools.value = tls
+    exposedAgentIds.value = exposed
+    allAgents.value = agentPage.items
+  } catch {
+    status.value = null
+    tools.value = []
+    exposedAgentIds.value = []
+    allAgents.value = []
+  } finally {
+    statusLoading.value = false
+    agentsLoading.value = false
+  }
+}
+
+async function onExposeAgent(): Promise<void> {
+  if (!agentToExpose.value || exposeBusy.value) return
+  exposeBusy.value = true
+  try {
+    await bridge.mcp.exposeAgent(agentToExpose.value)
+    exposedAgentIds.value = await bridge.mcp.getExposedAgents()
+    agentToExpose.value = null
+  } catch {
+    /* bridge surfaces errors; keep UI responsive */
+  } finally {
+    exposeBusy.value = false
+  }
+}
+
+async function onRemoveAgent(agentId: string): Promise<void> {
+  try {
+    await bridge.mcp.removeAgent(agentId)
+    exposedAgentIds.value = await bridge.mcp.getExposedAgents()
+  } catch {
+    /* bridge surfaces errors */
+  }
+}
+
+// ─── Tab 3: Tool analytics ─────────────────────────────────────────────
+const analyticsLoading = ref(false)
+const popularTools = ref<McpToolPopularityDto[]>([])
+const retentionDays = 90
+const cleanupBusy = ref(false)
+
+function formatPercent(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`
+}
+
+const analyticsColumns: DataTableColumns<McpToolPopularityDto> = [
+  {
+    title: () => t('analytics.toolName'),
+    key: 'toolName',
+    render: (row) => h('code', { class: 'font-mono text-12px' }, row.toolName),
+  },
+  {
+    title: () => t('analytics.callCount'),
+    key: 'callCount',
+    width: 120,
+    align: 'right',
+    sorter: (a, b) => a.callCount - b.callCount,
+    defaultSortOrder: 'descend',
+  },
+  {
+    title: () => t('analytics.successRate'),
+    key: 'successRate',
+    width: 130,
+    align: 'right',
+    render: (row) =>
+      h(
+        NTag,
+        { size: 'tiny', bordered: false, type: row.successRate >= 0.99 ? 'success' : row.successRate >= 0.9 ? 'warning' : 'error' },
+        () => formatPercent(row.successRate),
+      ),
+  },
+  {
+    title: () => t('analytics.avgDuration'),
+    key: 'avgDurationMs',
+    width: 130,
+    align: 'right',
+    render: (row) => `${Math.round(row.avgDurationMs)} ms`,
+  },
+]
+
+function analyticsRowProps(row: McpToolPopularityDto) {
+  return {
+    class: 't-mcp__analytics-row',
+    onClick: () => void openToolDetail(row.toolName),
+  }
+}
+
+async function loadAnalyticsTab(): Promise<void> {
+  analyticsLoading.value = true
+  try {
+    popularTools.value = await bridge.mcpToolAnalytics.getMostUsedTools(20)
+  } catch {
+    popularTools.value = []
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
+async function onCleanup(): Promise<void> {
+  if (cleanupBusy.value) return
+  cleanupBusy.value = true
+  try {
+    await bridge.mcpToolAnalytics.cleanup(retentionDays)
+    await loadAnalyticsTab()
+  } catch {
+    /* bridge surfaces errors */
+  } finally {
+    cleanupBusy.value = false
+  }
+}
+
+// Per-tool detail drawer
+const detailVisible = ref(false)
+const detailTool = ref<string | null>(null)
+const detailLoading = ref(false)
+const toolStats = ref<McpToolStatsDto | null>(null)
+const toolErrors = ref<McpToolErrorDto[]>([])
+
+async function openToolDetail(toolName: string): Promise<void> {
+  detailTool.value = toolName
+  detailVisible.value = true
+  detailLoading.value = true
+  toolStats.value = null
+  toolErrors.value = []
+  try {
+    const [stats, errors] = await Promise.all([
+      bridge.mcpToolAnalytics.getToolStats(toolName),
+      bridge.mcpToolAnalytics.getToolErrors(toolName, 10),
+    ])
+    toolStats.value = stats
+    toolErrors.value = errors
+  } catch {
+    toolStats.value = null
+    toolErrors.value = []
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadStatusTab()
+  void loadAnalyticsTab()
+})
+
+defineExpose({
+  activeTab,
+  status,
+  tools,
+  exposedAgents,
+  popularTools,
+  toolStats,
+  onTestConnection,
+  onExposeAgent,
+  onRemoveAgent,
+  openToolDetail,
+  onCleanup,
+  loadStatusTab,
+  loadAnalyticsTab,
+})
 </script>
 
 <style scoped>
-.mcp-servers__hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.8rem;
-  color: var(--tnzi-base-text-muted, #888);
-}
-.mcp-servers__test {
+/* Page-header keyword search (External Servers tab only). */
+.t-mcp__search {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
+  gap: 8px;
 }
-.mcp-servers__btn {
-  padding: 0.4rem 0.9rem;
+.t-mcp__search-input {
+  width: 240px;
+  max-width: 100%;
+}
+@media (max-width: 640px) {
+  .t-mcp__search { flex-wrap: wrap; }
+  .t-mcp__search-input { width: 100%; }
+}
+.t-mcp__pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.t-mcp__pane--scroll {
+  overflow-y: auto;
+}
+.t-mcp__form-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-mcp__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .t-mcp__kpis { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .t-mcp__kpis { grid-template-columns: 1fr; }
+}
+.t-mcp__empty {
+  font-size: 13px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+/* External-server card */
+.t-mcp-server-card__icon {
+  display: inline-flex;
+  color: var(--tnzi-primary, #6d5ce7);
+}
+.t-mcp-server-card__name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--tnzi-base-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t-mcp-server-card__url {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t-mcp-server-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+/* Exposed agents */
+.t-mcp__exposed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--tnzi-bg-deep, #f6f8fa);
+}
+.t-mcp__exposed-name {
+  font-size: 13px;
+  color: var(--tnzi-base-text);
+  flex-shrink: 0;
+}
+.t-mcp__exposed-id {
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted, #aaa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Registered tools */
+.t-mcp__tool-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--tnzi-border, #eee);
+}
+.t-mcp__tool-name {
+  font-size: 12px;
+  color: var(--tnzi-primary, #6d5ce7);
+  flex-shrink: 0;
+  min-width: 160px;
+}
+.t-mcp__tool-desc {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+  line-height: 1.4;
+}
+/* Analytics tab */
+.t-mcp__analytics-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.t-mcp__analytics-hint {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-mcp__analytics-row {
   cursor: pointer;
 }
-.mcp-servers__btn:disabled {
-  cursor: wait;
-  opacity: 0.6;
+/* Tool detail drawer */
+.t-mcp__stats-section {
+  margin-top: 16px;
 }
-.mcp-servers__status[data-status='error'] {
+.t-mcp__stats-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+.t-mcp__error-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--tnzi-bg-deep, #f6f8fa);
+}
+.t-mcp__error-time {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-mcp__error-msg {
+  font-size: 11px;
   color: var(--tnzi-error, #d03050);
+  word-break: break-word;
 }
 </style>

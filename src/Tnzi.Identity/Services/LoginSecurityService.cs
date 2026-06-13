@@ -14,16 +14,19 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
 
     private readonly IRepository<LoginLog, Guid>? _loginLogRepository;
     private readonly UserManager<User>? _userManager;
-    private readonly AccountSecurityOptions _securityOptions;
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptionsMonitor;
+
+    private AccountSecurityOptions SecurityOptions =>
+        _identityOptionsMonitor?.CurrentValue.AccountSecurity ?? new AccountSecurityOptions();
 
     public LoginSecurityService(
         IServiceProvider serviceProvider,
-        IOptions<IdentityOptions>? identityOptions = null,
+        IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IRepository<LoginLog, Guid>? loginLogRepository = null,
         UserManager<User>? userManager = null)
         : base(serviceProvider)
     {
-        _securityOptions = identityOptions?.Value.AccountSecurity ?? new AccountSecurityOptions();
+        _identityOptionsMonitor = identityOptions;
         _loginLogRepository = loginLogRepository;
         _userManager = userManager;
     }
@@ -32,7 +35,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
     public async Task<AbnormalLoginResult> DetectAbnormalLoginAsync(Guid userId, string? ipAddress, string? userAgent)
     {
         // 如果未启用异常登录检测，直接返回正常
-        if (!_securityOptions.EnableAbnormalLoginDetection)
+        if (!SecurityOptions.EnableAbnormalLoginDetection)
         {
             return AbnormalLoginResult.Normal();
         }
@@ -71,7 +74,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
             {
                 result.IsAbnormal = true;
                 result.AbnormalTypes.Add(AbnormalLoginType.NewIpAddress);
-                result.RiskLevel = Math.Max(result.RiskLevel, _securityOptions.NewIpRiskLevel);
+                result.RiskLevel = Math.Max(result.RiskLevel, SecurityOptions.NewIpRiskLevel);
                 Logger.LogInformation("New IP address detected for user {UserId}: {IpAddress}", userId, ipAddress);
             }
         }
@@ -89,7 +92,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
             {
                 result.IsAbnormal = true;
                 result.AbnormalTypes.Add(AbnormalLoginType.NewDevice);
-                result.RiskLevel = Math.Max(result.RiskLevel, _securityOptions.NewDeviceRiskLevel);
+                result.RiskLevel = Math.Max(result.RiskLevel, SecurityOptions.NewDeviceRiskLevel);
                 Logger.LogInformation("New device detected for user {UserId}", userId);
             }
         }
@@ -104,7 +107,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
                 // 30分钟内从不同IP登录，可能是异常
                 result.IsAbnormal = true;
                 result.AbnormalTypes.Add(AbnormalLoginType.ImpossibleTravel);
-                result.RiskLevel = Math.Max(result.RiskLevel, _securityOptions.ImpossibleTravelRiskLevel);
+                result.RiskLevel = Math.Max(result.RiskLevel, SecurityOptions.ImpossibleTravelRiskLevel);
                 result.Details = $"Login from different IP within {timeSinceLastLogin.TotalMinutes:F0} minutes";
                 Logger.LogWarning("Impossible travel detected for user {UserId}: last login from {LastIp}, current from {CurrentIp}",
                     userId, lastLogin.IpAddress, ipAddress);
@@ -120,17 +123,17 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         {
             result.IsAbnormal = true;
             result.AbnormalTypes.Add(AbnormalLoginType.FrequentAttempts);
-            result.RiskLevel = Math.Max(result.RiskLevel, _securityOptions.FrequentAttemptsRiskLevel);
+            result.RiskLevel = Math.Max(result.RiskLevel, SecurityOptions.FrequentAttemptsRiskLevel);
             result.Details = $"{recentAttempts} login attempts in the last hour";
             Logger.LogWarning("Frequent login attempts detected for user {UserId}: {Count} attempts", userId, recentAttempts);
         }
 
         // 根据风险等级确定建议操作（使用配置的阈值）
-        if (result.RiskLevel >= _securityOptions.HighRiskThreshold)
+        if (result.RiskLevel >= SecurityOptions.HighRiskThreshold)
         {
             result.RecommendedAction = AbnormalLoginAction.RequireVerification;
         }
-        else if (result.RiskLevel >= _securityOptions.MediumRiskThreshold)
+        else if (result.RiskLevel >= SecurityOptions.MediumRiskThreshold)
         {
             result.RecommendedAction = AbnormalLoginAction.Notify;
         }

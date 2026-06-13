@@ -18,7 +18,6 @@ export enum AgentExecutionMode {
   Handoff = 1,
   AgentAsTools = 2,
   Router = 3,
-  ExternalCli = 4,
 }
 
 /** Agent run status */
@@ -87,6 +86,17 @@ export enum SkillScope {
   User = 2,
 }
 
+/**
+ * Shared-resource visibility scope (Provider / Persona).
+ * System rows are shared across tenants; Tenant rows are tenant-private.
+ * Mirrors the backend ResourceScope enum (serialized as numbers).
+ */
+export enum ResourceScope {
+  System = 0,
+  Tenant = 1,
+  User = 2,
+}
+
 /** Skill source */
 export enum SkillSource {
   FileSystem = 0,
@@ -130,6 +140,10 @@ export interface AgentDto {
   costTier: number;
   /** Persona FK — links the agent to an AgentPersona's soul / role template. */
   personaId?: string | null;
+  /** Assigned knowledge base IDs (RAG). Retrieval is scoped to these at runtime. */
+  knowledgeBaseIds?: string[] | null;
+  /** Assigned skill slugs. Only these skills are visible to the agent at runtime. */
+  skillSlugs?: string[] | null;
   creationTime: string;
   lastModificationTime?: string | null;
 }
@@ -139,7 +153,6 @@ export interface AgentExecutionConfigDto {
   handoff?: HandoffExecutionConfigDto | null;
   router?: RouterExecutionConfigDto | null;
   agentAsTools?: AgentAsToolsExecutionConfigDto | null;
-  externalCli?: ExternalCliExecutionConfigDto | null;
 }
 
 export interface HandoffExecutionConfigDto {
@@ -155,11 +168,6 @@ export interface RouterExecutionConfigDto {
 
 export interface AgentAsToolsExecutionConfigDto {
   agents: Record<string, string>;
-}
-
-export interface ExternalCliExecutionConfigDto {
-  provider: string;
-  workingDirectory?: string | null;
 }
 
 /** Create agent request */
@@ -183,6 +191,10 @@ export interface CreateAgentDto {
   costTier?: number;
   /** Persona FK (optional). */
   personaId?: string | null;
+  /** Assigned knowledge base IDs (RAG). */
+  knowledgeBaseIds?: string[] | null;
+  /** Assigned skill slugs. */
+  skillSlugs?: string[] | null;
 }
 
 /** Update agent request */
@@ -209,7 +221,50 @@ export interface UpdateAgentDto {
    * ("00000000-0000-0000-0000-000000000000") to unlink, omit to leave unchanged.
    */
   personaId?: string | null;
+  /** Assigned knowledge base IDs (RAG). Pass an empty array to clear all. */
+  knowledgeBaseIds?: string[] | null;
+  /** Assigned skill slugs. Pass an empty array to clear all. */
+  skillSlugs?: string[] | null;
   changeNote?: string | null;
+}
+
+/** Tool group catalog entry (assignable tool groups for an agent). */
+export interface ToolGroupDto {
+  name: string;
+  toolCount: number;
+  toolNames: string[];
+}
+
+/** Agent memory entry (admin-curated long-term memory). */
+export interface AgentMemoryDto {
+  id: string;
+  content: string;
+  category?: string | null;
+  importance: number;
+  source?: string | null;
+  accessCount: number;
+  lastAccessedTime?: string | null;
+  creationTime: string;
+}
+
+/** Agent memory list query. */
+export interface AgentMemoryListQueryDto extends PagedQueryDto {
+  category?: string | null;
+  keyword?: string | null;
+}
+
+/** Create agent memory request. */
+export interface CreateAgentMemoryDto {
+  content: string;
+  category?: string | null;
+  importance?: number;
+}
+
+/** Update agent memory request. */
+export interface UpdateAgentMemoryDto {
+  content?: string | null;
+  category?: string | null;
+  importance?: number | null;
 }
 
 /** Agent list query parameters */
@@ -296,6 +351,20 @@ export interface AgentHealthSummaryDto {
   unhealthyAgents: number;
   disabledAgents: number;
   unhealthyDetails: AgentValidationResultDto[];
+}
+
+/**
+ * Configure A/B test request.
+ * Backend stores this in `Agent.Configuration` JSON; routes a `trafficPercentB`
+ * slice of traffic to version B (experiment) vs version A (control).
+ */
+export interface ConfigureAbTestDto {
+  /** Version number for variant A (control group). */
+  versionA: number;
+  /** Version number for variant B (experiment group). */
+  versionB: number;
+  /** Traffic percentage routed to variant B (0-100). */
+  trafficPercentB: number;
 }
 
 // ============================================
@@ -435,6 +504,8 @@ export interface FileContentPartDto extends ContentPartDto {
 export interface AgentThreadDto {
   id: string;
   agentId?: string | null;
+  /** Resolved agent display name; null when the agent was deleted or the thread is agent-less. */
+  agentName?: string | null;
   title?: string | null;
   messageCount: number;
   lastActivityTime: string;
@@ -661,6 +732,31 @@ export interface UserQuotaQueryDto extends PagedQueryDto {
   isEnabled?: boolean | null;
 }
 
+/** Budget check status (USD cost budget). 0=WithinBudget / 1=WarningThreshold / 2=BudgetExceeded */
+export type BudgetStatus = 0 | 1 | 2;
+
+/** Per-agent USD spend breakdown inside a budget summary. */
+export interface AgentSpendDto {
+  agentId?: string | null;
+  agentName: string;
+  spendUsd: number;
+  /** Per-agent budget cap when `PerAgentBudgets` is configured. */
+  agentBudgetLimitUsd?: number | null;
+  requestCount: number;
+}
+
+/** USD cost budget summary for a tenant/time-range (advisory, UsageLog-aggregated). */
+export interface BudgetSummaryDto {
+  periodStart: string;
+  periodEnd: string;
+  currentSpendUsd: number;
+  budgetLimitUsd: number;
+  /** Usage ratio 0-1. */
+  usagePercentage: number;
+  status: BudgetStatus;
+  byAgent: AgentSpendDto[];
+}
+
 // ============================================
 // Usage Analytics Types
 // ============================================
@@ -817,6 +913,29 @@ export interface ProviderDefaultModelDto {
   defaultModel?: string | null;
 }
 
+/**
+ * Provider source — 'Database' (admin-entered entity, writable) or
+ * 'Configuration' (appsettings AI:Providers, read-only: update/delete/testConnection return 400).
+ */
+export type ProviderSource = 'Database' | 'Configuration';
+
+/** Provider dropdown option (enabled providers only) — for the Agent config Provider select. */
+export interface ProviderOptionDto {
+  id: string;
+  name: string;
+  providerType: string;
+  defaultModel?: string | null;
+  /** Source — 'Database' (entity) or 'Configuration' (appsettings AI:Providers). */
+  source: ProviderSource;
+}
+
+/** Provider model list — live from /v1/models when available, else a static fallback. */
+export interface ProviderModelsDto {
+  models: string[];
+  /** "live" = fetched from the provider's /v1/models; "fallback" = static curated list. */
+  source: string;
+}
+
 /** Provider entity DTO — never exposes plaintext or ciphertext API key */
 export interface ProviderDto {
   id: string;
@@ -828,7 +947,18 @@ export interface ProviderDto {
   isEnabled: boolean;
   description?: string | null;
   hasApiKey: boolean;
-  creationTime: string;
+  /** Visibility scope — System (shared across tenants) or Tenant (tenant-private). */
+  scope: ResourceScope;
+  /** Owning tenant — populated when scope=Tenant. */
+  tenantId?: string | null;
+  /**
+   * Source — 'Database' (entity, writable) or 'Configuration' (appsettings
+   * AI:Providers; synthetic stable id, pinned to the top of the list,
+   * update/delete/testConnection rejected with 400, listModels works).
+   */
+  source: ProviderSource;
+  /** Creation time — null for Configuration-sourced entries. */
+  creationTime: string | null;
   lastModificationTime?: string | null;
 }
 
@@ -851,6 +981,8 @@ export interface CreateProviderDto {
   priority?: number;
   isEnabled?: boolean;
   description?: string | null;
+  /** Optional explicit scope; when omitted the server infers (tenant context -> Tenant, else System). */
+  scope?: ResourceScope | null;
 }
 
 /** Provider update request — apiKey: null = keep, '' = clear, non-empty = rotate */
@@ -891,6 +1023,44 @@ export interface EvaluationRunDto {
 /** Evaluation run detail */
 export interface EvaluationRunDetailDto extends EvaluationRunDto {
   resultsJson: string;
+}
+
+/** A single point in an agent's evaluation score trend. */
+export interface EvaluationTrendPointDto {
+  runId: string;
+  /** ISO-8601 timestamp. */
+  date: string;
+  /** Average score (0-1). */
+  score: number;
+  /** Pass rate (0-1). */
+  passRate: number;
+}
+
+/** Evaluation score trend across an agent's recent runs. */
+export interface EvaluationTrendDto {
+  agentId: string;
+  points: EvaluationTrendPointDto[];
+}
+
+/** Aggregate evaluation stats for one agent version (used in A/B comparison). */
+export interface VersionStatsDto {
+  versionNumber: number;
+  runCount: number;
+  averageScore: number;
+  averagePassRate: number;
+  totalCases: number;
+  totalPassed: number;
+}
+
+/** Side-by-side comparison of two agent versions' evaluation stats. */
+export interface VersionComparisonDto {
+  agentId: string;
+  versionA: VersionStatsDto;
+  versionB: VersionStatsDto;
+  /** Score delta (B - A); positive means B scored higher. */
+  scoreDelta: number;
+  /** Winning version number (higher score), or null on a tie. */
+  winner?: number | null;
 }
 
 /** Evaluation run query */
@@ -1288,7 +1458,10 @@ export interface AgentPersonaDto {
   slug: string;
   content: string;
   description?: string | null;
-  isSystem: boolean;
+  /** Visibility scope — System (shared across tenants) or Tenant (tenant-private). */
+  scope: ResourceScope;
+  /** Owning tenant — populated when scope=Tenant. */
+  tenantId?: string | null;
   creationTime: string;
   lastModificationTime?: string | null;
 }
@@ -1299,7 +1472,8 @@ export interface CreateAgentPersonaDto {
   slug: string;
   content: string;
   description?: string | null;
-  isSystem?: boolean;
+  /** Optional explicit scope; when omitted the server infers (tenant context -> Tenant, else System). */
+  scope?: ResourceScope | null;
 }
 
 /** Update persona request */
@@ -1308,13 +1482,12 @@ export interface UpdateAgentPersonaDto {
   slug?: string | null;
   content?: string | null;
   description?: string | null;
-  isSystem?: boolean | null;
 }
 
 /** Persona query parameters */
 export interface AgentPersonaQueryDto extends PagedQueryDto {
   keyword?: string | null;
-  isSystem?: boolean | null;
+  scope?: ResourceScope | null;
 }
 
 // ============================================
@@ -1405,7 +1578,6 @@ export interface UpdateUserProfileDto {
 /** MCP server status */
 export interface McpServerStatusDto {
   enabled: boolean;
-  transport: string;
   endpoint: string;
   requireAuthentication: boolean;
   /** Whether rate-limit keys are partitioned per tenant (not execution isolation) */
@@ -1429,12 +1601,15 @@ export interface McpToolExposureOptionsDto {
   enableStreaming?: boolean;
 }
 
-// --- MCP Server Registration (Phase 5 backend prereq) ---------------------
+// --- MCP Server Registration ----------------------------------------------
 // Entity-driven catalogue of EXTERNAL MCP servers Tnzi can connect to as a
 // client. Distinct from McpServerStatusDto above (which describes Tnzi's own
 // MCP-server-hosting status). Auth tokens are encrypted server-side via
 // IDataProtectionProvider; DTOs only expose a `hasAuthToken` boolean — never
-// plaintext or ciphertext.
+// plaintext or ciphertext. Enabled registrations are materialized into the
+// MCP client runtime (merged with deployment-configured servers; same-name DB
+// entries win). Only HTTP-family transports are allowed (sse / streamable-http
+// / http) — stdio servers must be configured via deployment configuration.
 
 /** MCP server registration entity DTO (read shape, no credential exposure) */
 export interface McpServerRegistrationDto {
@@ -1442,8 +1617,6 @@ export interface McpServerRegistrationDto {
   name: string;
   serverUrl: string;
   transport: string;
-  command?: string | null;
-  arguments?: string | null;
   authType?: string | null;
   hasAuthToken: boolean;
   priority: number;
@@ -1465,9 +1638,8 @@ export interface McpServerRegistrationQueryDto extends PagedQueryDto {
 export interface CreateMcpServerRegistrationDto {
   name: string;
   serverUrl: string;
+  /** Transport mode — sse / streamable-http / http (stdio is rejected by the backend) */
   transport: string;
-  command?: string | null;
-  arguments?: string | null;
   /** Plaintext auth token — encrypted at rest by the backend */
   authToken?: string | null;
   authType?: string | null;
@@ -1485,9 +1657,8 @@ export interface CreateMcpServerRegistrationDto {
 export interface UpdateMcpServerRegistrationDto {
   name?: string | null;
   serverUrl?: string | null;
+  /** Transport mode — sse / streamable-http / http (stdio is rejected by the backend) */
   transport?: string | null;
-  command?: string | null;
-  arguments?: string | null;
   authToken?: string | null;
   authType?: string | null;
   priority?: number | null;

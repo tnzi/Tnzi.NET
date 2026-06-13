@@ -5,7 +5,7 @@
  */
 
 // HTTP Client
-export { HttpClient, createHttpClient } from './http';
+export { HttpClient, createHttpClient, DEFAULT_REQUEST_TIMEOUT, REQUEST_TIMEOUT_ERROR_CODE } from './http';
 export type { HttpClientConfig, RetryConfig } from './http';
 
 // Middleware helpers
@@ -38,3 +38,4 @@ export {
 } from './response';
 
 export { HttpError, isHttpError } from '../errors/api-error';
+export { TimeoutError, isTimeoutError } from '../errors/network-error';

@@ -20,15 +20,13 @@ public class PromptCachingMiddlewareTests
 
     private static AiMiddlewareContext CreateContext(
         string provider = AnthropicProvider,
-        AgentExecutionMode mode = AgentExecutionMode.Single,
         string? effectiveProvider = null,
         List<ChatMessage>? messages = null)
     {
         var resolution = new AgentResolution
         {
             Agent = null,
-            Provider = provider,
-            ExecutionMode = mode
+            Provider = provider
         };
         return new AiMiddlewareContext
         {
@@ -64,26 +62,6 @@ public class PromptCachingMiddlewareTests
     }
 
     #endregion
-
-    // -------------------------------------------------------------------------
-    // ExternalCli mode: skip
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public async Task InvokeAsync_ExternalCliMode_PassesThroughWithoutCaching()
-    {
-        var opts = CreateOptionsWithCaching(AnthropicProvider);
-        var middleware = CreateMiddleware(o => o.Providers[AnthropicProvider] = opts.Providers[AnthropicProvider]);
-
-        var systemMsg = new ChatMessage(ChatRole.System, "You are an assistant.");
-        var context = CreateContext(mode: AgentExecutionMode.ExternalCli, messages: [systemMsg]);
-
-        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
-
-        // In ExternalCli mode the system message should NOT have cache_control applied
-        systemMsg.AdditionalProperties.ShouldBeNull();
-        context.Properties.ContainsKey("PromptCachingEnabled").ShouldBeFalse();
-    }
 
     // -------------------------------------------------------------------------
     // No provider config: skip
@@ -274,27 +252,6 @@ public class PromptCachingMiddlewareTests
         context.Properties["PromptCachingEnabled"].ShouldBe(true);
         systemMsg.AdditionalProperties.ShouldNotBeNull();
         systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        chunks.Count.ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task InvokeStreamingAsync_ExternalCliMode_PassesThroughWithoutCaching()
-    {
-        var opts = CreateOptionsWithCaching(AnthropicProvider);
-        var middleware = CreateMiddleware(o => o.Providers[AnthropicProvider] = opts.Providers[AnthropicProvider]);
-
-        var systemMsg = new ChatMessage(ChatRole.System, "System prompt");
-        var context = CreateContext(mode: AgentExecutionMode.ExternalCli, messages: [systemMsg]);
-
-        var chunks = new List<AgentStreamChunk>();
-        await foreach (var chunk in middleware.InvokeStreamingAsync(context, (ctx, ct) => CreateChunkStream()))
-        {
-            chunks.Add(chunk);
-        }
-
-        // ExternalCli: cache_control should NOT be applied
-        systemMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
-        context.Properties.ContainsKey("PromptCachingEnabled").ShouldBeFalse();
         chunks.Count.ShouldBe(1);
     }
 

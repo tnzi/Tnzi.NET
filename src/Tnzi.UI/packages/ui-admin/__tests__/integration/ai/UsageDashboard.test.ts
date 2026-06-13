@@ -80,6 +80,91 @@ const byDayMock = vi.fn(async () => [
   },
 ])
 
+const costSummaryMock = vi.fn(async () => ({
+  totalCostUsd: 0.4567,
+  totalRequests: 89,
+  totalInputTokens: 5000,
+  totalOutputTokens: 7000,
+  averageCostPerRequest: 0.0051,
+  byProvider: [
+    { provider: 'openai', totalCostUsd: 0.4, totalRequests: 50, costPercentage: 87.6 },
+    { provider: 'anthropic', totalCostUsd: 0.0567, totalRequests: 39, costPercentage: 12.4 },
+  ],
+  byModel: [
+    {
+      provider: 'openai',
+      model: 'gpt-4o',
+      totalCostUsd: 0.4,
+      totalRequests: 50,
+      totalInputTokens: 3000,
+      totalOutputTokens: 4000,
+      costPercentage: 87.6,
+    },
+  ],
+}))
+
+const feedbackStatsMock = vi.fn(async () => [
+  {
+    agentId: 'a1',
+    agentName: 'Writer',
+    totalRated: 20,
+    positiveCount: 18,
+    negativeCount: 2,
+    positiveRate: 0.9,
+    tagDistribution: { helpful: 12, accurate: 6 },
+  },
+  {
+    agentId: 'a2',
+    agentName: 'Coder',
+    totalRated: 10,
+    positiveCount: 4,
+    negativeCount: 6,
+    positiveRate: 0.4,
+    tagDistribution: { slow: 5 },
+  },
+])
+
+const getLogsMock = vi.fn(async () => ({
+  items: [
+    {
+      id: 'log-1',
+      agentId: 'a1',
+      threadId: null,
+      provider: 'openai',
+      model: 'gpt-4o',
+      operationType: 'chat',
+      inputTokens: 100,
+      outputTokens: 200,
+      totalTokens: 300,
+      durationMs: 1200,
+      isSuccess: true,
+      errorMessage: null,
+      creationTime: '2026-04-13T10:00:00Z',
+      estimatedCostUsd: 0.012,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+    },
+  ],
+  totalCount: 1,
+  pageIndex: 1,
+  pageSize: 20,
+  totalPages: 1,
+  hasNextPage: false,
+  hasPreviousPage: false,
+}))
+
+const byProviderMock = vi.fn(async () => [
+  {
+    provider: 'openai',
+    totalRequests: 50,
+    totalInputTokens: 3000,
+    totalOutputTokens: 4000,
+    totalTokens: 7000,
+    averageDurationMs: 150,
+    totalEstimatedCostUsd: 0.4,
+  },
+])
+
 vi.mock('vue-router', () => ({
   useRoute: () => ({ meta: {}, query: {}, params: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -92,6 +177,10 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       byAgent: byAgentMock,
       byModel: byModelMock,
       byDay: byDayMock,
+      costSummary: costSummaryMock,
+      feedbackStats: feedbackStatsMock,
+      getLogs: getLogsMock,
+      byProvider: byProviderMock,
     },
   }),
 }))
@@ -123,6 +212,10 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     byAgentMock.mockClear()
     byModelMock.mockClear()
     byDayMock.mockClear()
+    costSummaryMock.mockClear()
+    feedbackStatsMock.mockClear()
+    getLogsMock.mockClear()
+    byProviderMock.mockClear()
     summaryMock.mockResolvedValue({
       totalTokens: 12345,
       totalCostUsd: 0.4567,
@@ -130,16 +223,20 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     })
   })
 
-  it('mounts, fans out 4 parallel bridge calls, renders stat cards', async () => {
+  it('mounts, fans out the parallel bridge calls, renders stat cards', async () => {
     const wrapper = mount(UsageDashboard)
     await flushPromises()
 
+    // Overview trio + the 3 new blocks (cost / feedback / logs) all fire once.
     expect(summaryMock).toHaveBeenCalledTimes(1)
     expect(byAgentMock).toHaveBeenCalledTimes(1)
     expect(byModelMock).toHaveBeenCalledTimes(1)
     expect(byDayMock).toHaveBeenCalledTimes(1)
+    expect(costSummaryMock).toHaveBeenCalledTimes(1)
+    expect(feedbackStatsMock).toHaveBeenCalledTimes(1)
+    expect(getLogsMock).toHaveBeenCalledTimes(1)
 
-    // All 4 calls receive the same default 7-day window filters.
+    // All summary-style calls receive the same default 7-day window filters.
     const q = summaryMock.mock.calls[0]?.[0] as { filters: { startTime: string; endTime: string } }
     expect(q.filters.startTime).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     expect(q.filters.endTime).toMatch(/^\d{4}-\d{2}-\d{2}T/)
@@ -160,7 +257,7 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     expect(wrapper.text()).toContain('2026-04-12')
   })
 
-  it('refresh button re-invokes all 4 bridge calls', async () => {
+  it('refresh button re-invokes all the dashboard bridge calls', async () => {
     const wrapper = mount(UsageDashboard)
     await flushPromises()
 
@@ -168,6 +265,9 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     byAgentMock.mockClear()
     byModelMock.mockClear()
     byDayMock.mockClear()
+    costSummaryMock.mockClear()
+    feedbackStatsMock.mockClear()
+    getLogsMock.mockClear()
 
     await wrapper.find('[data-test="refresh-btn"]').trigger('click')
     await flushPromises()
@@ -176,6 +276,51 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     expect(byAgentMock).toHaveBeenCalledTimes(1)
     expect(byModelMock).toHaveBeenCalledTimes(1)
     expect(byDayMock).toHaveBeenCalledTimes(1)
+    expect(costSummaryMock).toHaveBeenCalledTimes(1)
+    expect(feedbackStatsMock).toHaveBeenCalledTimes(1)
+    expect(getLogsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes cost / feedback / log data on the component instance', async () => {
+    const wrapper = mount(UsageDashboard)
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      cost: { totalCostUsd: number; byProvider: Array<{ provider: string }> }
+      feedback: Array<{ agentId: string; positiveRate: number }>
+      logs: Array<{ id: string }>
+      logTotal: number
+    }
+
+    // Cost summary loaded + providers sorted by spend (openai > anthropic).
+    expect(vm.cost.totalCostUsd).toBeCloseTo(0.4567)
+    expect(vm.cost.byProvider.map((p) => p.provider)).toEqual(['openai', 'anthropic'])
+
+    // Feedback sorted by totalRated desc (Writer 20 before Coder 10).
+    expect(vm.feedback.map((f) => f.agentId)).toEqual(['a1', 'a2'])
+
+    // Logs page loaded with its total count.
+    expect(vm.logs).toHaveLength(1)
+    expect(vm.logs[0]?.id).toBe('log-1')
+    expect(vm.logTotal).toBe(1)
+  })
+
+  it('renders the cost / feedback / logs tab content', async () => {
+    const wrapper = mount(UsageDashboard)
+    await flushPromises()
+
+    // NTabs renders every pane into the DOM (display toggle, not v-if), so the
+    // tab bodies are present without a click.
+    const text = wrapper.text()
+    // Cost tab — total + per-provider rows.
+    expect(wrapper.find('[data-test="cost-tab"]').exists()).toBe(true)
+    expect(text).toContain('anthropic')
+    // Feedback tab — agent feedback rows keyed by agent id.
+    expect(wrapper.find('[data-feedback-agent="a1"]').exists()).toBe(true)
+    expect(text).toContain('helpful')
+    // Logs tab — usage-log detail row.
+    expect(wrapper.find('[data-test="logs-tab"]').exists()).toBe(true)
+    expect(text).toContain('chat')
   })
 
   it('renders inline error banner for failed source while keeping successful cards', async () => {

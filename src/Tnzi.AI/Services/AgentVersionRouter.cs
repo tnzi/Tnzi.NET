@@ -84,9 +84,27 @@ public class AgentVersionRouter : IAgentVersionRouter
             Agent = routedAgent,
             IsAbTestRouted = true,
             SelectedVersion = selectedVersion,
-            SelectedVariant = selectedVariant
+            SelectedVariant = selectedVariant,
+            // The variant's resources must come from the SNAPSHOT, not the live junction — the
+            // resolver consumes this projection directly (resource columns were dropped from Agent,
+            // so they can't ride on routedAgent). Null snapshot lists map to empty to honor the
+            // projection's non-null contract (legacy/pre-grant snapshots → no resources, correct).
+            SnapshotGrants = BuildSnapshotGrants(snapshot)
         };
     }
+
+    /// <summary>
+    /// 把版本快照的资源列折叠成 <see cref="AgentGrantsProjection"/>（null 列 → 空列表）。
+    /// Projects a version snapshot's resource lists into an AgentGrantsProjection (null → empty list).
+    /// </summary>
+    private static AgentGrantsProjection BuildSnapshotGrants(AgentConfigSnapshot snapshot) =>
+        new()
+        {
+            ToolGroups = snapshot.ToolGroups ?? new List<string>(),
+            ToolNames = snapshot.ToolNames ?? new List<string>(),
+            SkillSlugs = snapshot.SkillSlugs ?? new List<string>(),
+            KnowledgeBaseIds = snapshot.KnowledgeBaseIds ?? new List<Guid>()
+        };
 
     /// <summary>
     /// 从 Agent.Configuration JSON 中提取 A/B 测试配置
@@ -175,7 +193,6 @@ public class AgentVersionRouter : IAgentVersionRouter
             Instructions = snapshot.Instructions,
             Provider = snapshot.Provider,
             Model = snapshot.Model,
-            ToolGroups = snapshot.ToolGroups?.ToList(),
             Temperature = snapshot.Temperature,
             MaxTokens = snapshot.MaxTokens,
             TimeoutSeconds = snapshot.TimeoutSeconds,

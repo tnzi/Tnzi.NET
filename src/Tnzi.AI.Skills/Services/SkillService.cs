@@ -400,18 +400,27 @@ public partial class SkillService : ApplicationService, ISkillService
 
     public async Task<Result<SkillUsageStatsDto>> GetUsageStatsAsync()
     {
-        var stats = await _repository.AsQueryable()
-            .GroupBy(_ => 1)
-            .Select(g => new SkillUsageStatsDto
-            {
-                TotalSkills = g.Count(),
-                EnabledSkills = g.Count(e => e.Enabled),
-                DisabledSkills = g.Count(e => !e.Enabled),
-                TenantScopeSkills = g.Count(e => e.Scope == SkillScope.Tenant),
-                UserScopeSkills = g.Count(e => e.Scope == SkillScope.User),
-                TotalActivations = g.Sum(e => e.ActivationCount)
-            })
-            .FirstOrDefaultAsync() ?? new SkillUsageStatsDto();
+        // Count over the same dual-source merged view the list endpoint exposes
+        // (DB rows + file-source skills via ISkillRegistry), so file-based skills
+        // (BuiltIn embedded resources + workspace SKILL.md + plugin/managed paths)
+        // are included. A DB-only count would report 0 on a fresh install even
+        // though the skill list shows the file-source skills.
+        var allSkills = await _registry.GetAvailableSkillsAsync();
+
+        // TotalActivations keeps its DB semantics: activation tracking
+        // (ActivationCount) only exists on AI_Skill rows.
+        var totalActivations = await _repository.AsQueryable()
+            .SumAsync(e => (long?)e.ActivationCount) ?? 0L;
+
+        var stats = new SkillUsageStatsDto
+        {
+            TotalSkills = allSkills.Count,
+            EnabledSkills = allSkills.Count(s => s.Enabled),
+            DisabledSkills = allSkills.Count(s => !s.Enabled),
+            TenantScopeSkills = allSkills.Count(s => s.Scope == SkillScope.Tenant),
+            UserScopeSkills = allSkills.Count(s => s.Scope == SkillScope.User),
+            TotalActivations = totalActivations
+        };
 
         return Ok(stats);
     }

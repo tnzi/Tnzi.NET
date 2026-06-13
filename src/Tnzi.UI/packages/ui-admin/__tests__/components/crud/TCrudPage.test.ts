@@ -257,4 +257,30 @@ describe('TCrudPage', () => {
     })
     expect(wrapper.find('.t-crud-page__create').exists()).toBe(false)
   })
+
+  it('forwards show-header=false to the shell (no white header card / page title)', () => {
+    const state = makeState()
+    const wrapper = mount(TCrudPage, {
+      props: {
+        state: state as any,
+        allColumns: state.columnSettings.visibleColumns.value,
+        title: 'Things',
+        showHeader: false,
+      },
+      global: { stubs },
+    })
+    expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(false)
+    expect(wrapper.find('.t-page-header__title').exists()).toBe(false)
+    // The list itself keeps rendering.
+    expect(wrapper.find('.n-data-table-stub').exists()).toBe(true)
+  })
+
+  it('renders the shell header card by default (showHeader defaults to true)', () => {
+    const state = makeState()
+    const wrapper = mount(TCrudPage, {
+      props: { state: state as any, allColumns: state.columnSettings.visibleColumns.value, title: 'Things' },
+      global: { stubs },
+    })
+    expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(true)
+  })
 })

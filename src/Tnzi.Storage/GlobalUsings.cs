@@ -1,3 +1,6 @@
+global using System.Globalization;
+global using Tnzi.Settings;
+global using Tnzi.Storage.Settings;
 global using Amazon;
 global using Amazon.S3;
 global using Amazon.S3.Model;

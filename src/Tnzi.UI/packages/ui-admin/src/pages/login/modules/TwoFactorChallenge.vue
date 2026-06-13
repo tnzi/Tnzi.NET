@@ -23,7 +23,7 @@ import { useLoginContext } from '../useLoginContext'
 
 defineOptions({ name: 'TwoFactorChallenge' })
 
-const { translate, toggleLoginModule, callbacks, pendingTwoFactor, helpers } = useLoginContext()
+const { translate, toggleLoginModule, callbacks, ui, pendingTwoFactor, helpers } = useLoginContext()
 const { formRef, validate } = useNaiveForm()
 const { label: resendLabel, isCounting, loading: resending, getCaptcha } = useCaptcha({ translate })
 
@@ -92,14 +92,14 @@ function handleCancel(): void {
 </script>
 
 <template>
-  <NForm ref="formRef" :model="model" :rules="rules" size="large" :show-label="false" @keyup.enter="handleSubmit">
+  <NForm ref="formRef" :model="model" :rules="rules" size="large" :show-label="ui.labeled" :show-require-mark="false" label-placement="top" @keyup.enter="handleSubmit">
     <p class="m-0 mb-12px text-14px text-muted">
       <template v-if="userLabel">
         {{ translate('admin.login.twoFactor.greeting', 'Hi') }}, <strong class="text-primary">{{ userLabel }}</strong>.
       </template>
       {{ translate('admin.login.twoFactor.prompt', 'Enter the code from your') }} {{ methodLabel }}.
     </p>
-    <NFormItem path="code">
+    <NFormItem path="code" :label="translate('admin.login.labels.code', 'Verification code')">
       <NInput
         v-model:value="model.code"
         :placeholder="translate('admin.login.twoFactor.codePlaceholder', 'Enter 6-digit code')"
@@ -108,13 +108,13 @@ function handleCancel(): void {
       />
     </NFormItem>
     <NSpace vertical :size="18" class="w-full">
-      <NButton type="primary" size="large" round block :loading="submitting" @click="handleSubmit">
+      <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
         {{ translate('admin.login.twoFactor.verify', 'Verify') }}
       </NButton>
       <NButton
         v-if="callbacks.resendTwoFactor"
         size="large"
-        round
+        :round="ui.pill"
         block
         :disabled="isCounting || resending"
         :loading="resending"
@@ -122,7 +122,7 @@ function handleCancel(): void {
       >
         {{ isCounting ? resendLabel : translate('admin.login.twoFactor.resend', 'Resend code') }}
       </NButton>
-      <NButton size="large" round block @click="handleCancel">
+      <NButton size="large" :round="ui.pill" block @click="handleCancel">
         {{ translate('admin.login.cancel', 'Cancel') }}
       </NButton>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>

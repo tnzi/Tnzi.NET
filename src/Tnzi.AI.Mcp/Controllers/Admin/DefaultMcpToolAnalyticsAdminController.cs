@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using Tnzi.AI.Mcp.Dtos;
-
 namespace Tnzi.AI.Mcp.Controllers.Admin;
 
 /// <summary>

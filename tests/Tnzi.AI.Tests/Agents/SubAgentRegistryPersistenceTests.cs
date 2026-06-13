@@ -22,8 +22,8 @@ public class SubAgentRegistryPersistenceTests
                 Id = Guid.NewGuid(),
                 Name = "code-reviewer",
                 Description = "Reviews code for quality",
-                ToolGroupsJson = """["code-analysis","file"]""",
-                ExcludedToolGroupsJson = null,
+                ToolGroups = ["code-analysis", "file"],
+                ExcludedToolGroups = null,
                 MaxTurns = 20,
                 Instructions = "Review code carefully.",
                 IsEnabled = true
@@ -63,12 +63,12 @@ public class SubAgentRegistryPersistenceTests
                 Id = Guid.NewGuid(),
                 Name = "bash",
                 Description = "Custom bash agent with extended tools",
-                ToolGroupsJson = """["sandbox","custom-tool"]""",
-                ExcludedToolGroupsJson = """[]""",
+                ToolGroups = ["sandbox", "custom-tool"],
+                ExcludedToolGroups = [],
                 MaxTurns = 10,
                 Instructions = "Custom bash instructions.",
-                DefaultApprovalMode = (int)ToolApprovalMode.AlwaysRequire,
-                CapabilityTagsJson = """["shell","custom"]""",
+                DefaultApprovalMode = ToolApprovalMode.AlwaysRequire,
+                CapabilityTags = ["shell", "custom"],
                 IsEnabled = true
             }
         };
@@ -127,7 +127,7 @@ public class SubAgentRegistryPersistenceTests
     }
 
     [Fact]
-    public async Task LoadFromStoreAsync_HandlesNullJsonFields()
+    public async Task LoadFromStoreAsync_HandlesNullListFields()
     {
         // Arrange
         var dbTypes = new List<SubAgentType>
@@ -137,9 +137,9 @@ public class SubAgentRegistryPersistenceTests
                 Id = Guid.NewGuid(),
                 Name = "minimal-type",
                 Description = "Minimal config",
-                ToolGroupsJson = null,
-                ExcludedToolGroupsJson = null,
-                CapabilityTagsJson = null,
+                ToolGroups = null,
+                ExcludedToolGroups = null,
+                CapabilityTags = null,
                 MaxTurns = 25,
                 IsEnabled = true
             }
@@ -150,7 +150,7 @@ public class SubAgentRegistryPersistenceTests
         // Act
         await _registry.LoadFromStoreAsync(_mockRepo.Object);
 
-        // Assert
+        // Assert — null 列表归一化为空列表
         var type = _registry.Get("minimal-type");
         type.ShouldNotBeNull();
         type.ToolGroups.Count.ShouldBe(0);
@@ -160,7 +160,7 @@ public class SubAgentRegistryPersistenceTests
     }
 
     [Fact]
-    public async Task LoadFromStoreAsync_HandlesEmptyJsonFields()
+    public async Task LoadFromStoreAsync_HandlesEmptyListFields()
     {
         // Arrange
         var dbTypes = new List<SubAgentType>
@@ -168,11 +168,11 @@ public class SubAgentRegistryPersistenceTests
             new()
             {
                 Id = Guid.NewGuid(),
-                Name = "empty-json-type",
-                Description = "Empty JSON arrays",
-                ToolGroupsJson = "",
-                ExcludedToolGroupsJson = "   ",
-                CapabilityTagsJson = "",
+                Name = "empty-list-type",
+                Description = "Empty lists",
+                ToolGroups = [],
+                ExcludedToolGroups = [],
+                CapabilityTags = [],
                 MaxTurns = 30,
                 IsEnabled = true
             }
@@ -184,43 +184,10 @@ public class SubAgentRegistryPersistenceTests
         await _registry.LoadFromStoreAsync(_mockRepo.Object);
 
         // Assert
-        var type = _registry.Get("empty-json-type");
+        var type = _registry.Get("empty-list-type");
         type.ShouldNotBeNull();
         type.ToolGroups.Count.ShouldBe(0);
         type.ExcludedToolGroups.Count.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task LoadFromStoreAsync_HandlesInvalidJsonFields()
-    {
-        // Arrange
-        var dbTypes = new List<SubAgentType>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "bad-json-type",
-                Description = "Invalid JSON",
-                ToolGroupsJson = "not-valid-json{",
-                ExcludedToolGroupsJson = "12345",
-                CapabilityTagsJson = "<xml>bad</xml>",
-                MaxTurns = 10,
-                IsEnabled = true
-            }
-        };
-
-        _mockRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(dbTypes.BuildMock());
-
-        // Act
-        await _registry.LoadFromStoreAsync(_mockRepo.Object);
-
-        // Assert — invalid JSON results in empty lists, not exceptions
-        var type = _registry.Get("bad-json-type");
-        type.ShouldNotBeNull();
-        type.ToolGroups.Count.ShouldBe(0);
-        type.ExcludedToolGroups.Count.ShouldBe(0);
-        type.CapabilityTags.ShouldNotBeNull();
-        type.CapabilityTags.Count.ShouldBe(0);
     }
 
     [Fact]
@@ -235,7 +202,7 @@ public class SubAgentRegistryPersistenceTests
                 Name = "approval-test",
                 Description = "Tests approval mode mapping",
                 MaxTurns = 10,
-                DefaultApprovalMode = (int)ToolApprovalMode.NeverRequire,
+                DefaultApprovalMode = ToolApprovalMode.NeverRequire,
                 IsEnabled = true
             }
         };

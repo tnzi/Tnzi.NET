@@ -9,16 +9,18 @@
   >
     <div class="t-page-header__bar">
       <div class="t-page-header__left">
+        <!-- Back lives OUTSIDE the title slot: a rich custom #title (avatar + name + tags)
+             must not swallow the back affordance the page asked for via `back`. -->
+        <button
+          v-if="showBack"
+          type="button"
+          class="t-page-header__back"
+          :aria-label="t('admin.common.back')"
+          @click="onBack"
+        >
+          <TSvgIcon icon="mdi:arrow-left" :size="18" />
+        </button>
         <slot name="title">
-          <button
-            v-if="showBack"
-            type="button"
-            class="t-page-header__back"
-            :aria-label="t('admin.common.back')"
-            @click="onBack"
-          >
-            <TSvgIcon icon="mdi:arrow-left" :size="18" />
-          </button>
           <TSvgIcon v-if="resolvedIcon" :icon="resolvedIcon" :size="20" class="t-page-header__icon" />
           <span class="t-page-header__title">{{ resolvedTitle }}</span>
           <NPopover v-if="resolvedHelp" trigger="hover" placement="bottom-start">

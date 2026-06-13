@@ -31,7 +31,4 @@ public class WorkflowNodeResult
     /// </summary>
     [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
     public WorkflowInterrupt? AwaitingInterrupt { get; init; }
-
-    /// <summary>动态生成的子步骤（可选，用于动态工作流）</summary>
-    public List<WorkflowStepDto>? DynamicSteps { get; init; }
 }

@@ -367,7 +367,7 @@ public class McpPromptProviderTests
 
     private McpPromptProvider CreateProvider()
     {
-        return new McpPromptProvider(_options.Object, _clientFactory.Object, _logger.Object);
+        return new McpPromptProvider(new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _logger.Object);
     }
 
     private static AIOptions CreateOptions(params McpServerConfig[] servers)

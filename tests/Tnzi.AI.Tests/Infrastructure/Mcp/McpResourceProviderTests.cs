@@ -323,7 +323,7 @@ public class McpResourceProviderTests
 
     private McpResourceProvider CreateProvider()
     {
-        return new McpResourceProvider(_options.Object, _clientFactory.Object, _logger.Object);
+        return new McpResourceProvider(new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _logger.Object);
     }
 
     private static AIOptions CreateOptions(params McpServerConfig[] servers)

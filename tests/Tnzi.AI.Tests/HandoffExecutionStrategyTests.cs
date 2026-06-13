@@ -195,7 +195,7 @@ public class HandoffExecutionStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = Mock.Of<IRepository<Agent, Guid>>(),
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>(),
             StartingAgentId = startingAgentId
         };
@@ -267,7 +267,7 @@ public class HandoffExecutionStrategyTests
                 It.IsAny<double?>(),
                 It.IsAny<int?>(),
                 It.IsAny<AgentExecutorOptions?>(),
-                It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 targetAgentId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(targetAgent);
@@ -276,7 +276,7 @@ public class HandoffExecutionStrategyTests
         {
             AgentFactory = agentFactory.Object,
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>(),
             StartingAgentId = startingAgentId
         };
@@ -355,7 +355,7 @@ public class HandoffExecutionStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
 
@@ -396,7 +396,7 @@ public class HandoffExecutionStrategyTests
         {
             AgentFactory = Mock.Of<IAgentFactory>(),
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>()
         };
         var messages = new List<ChatMessage> { new(ChatRole.User, "Hi") };
@@ -461,7 +461,7 @@ public class HandoffExecutionStrategyTests
         agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), "AgentB",
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 agentBId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => CreateHandoffAgent("AgentB", "AgentB")); // fresh instance each call
 
@@ -469,7 +469,7 @@ public class HandoffExecutionStrategyTests
         {
             AgentFactory = agentFactory.Object,
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>(),
             StartingAgentId = agentAId
         };
@@ -515,13 +515,13 @@ public class HandoffExecutionStrategyTests
         agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), "AgentB",
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 agentBId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(agentBHandsBackToA);
         agentFactory.Setup(f => f.CreateAgentAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), "AgentA",
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
-                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(),
                 agentAId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(agentAFinal);
 
@@ -529,7 +529,7 @@ public class HandoffExecutionStrategyTests
         {
             AgentFactory = agentFactory.Object,
             AgentRepository = repository.Object,
-            ServiceProvider = Mock.Of<IServiceProvider>(),
+            ServiceProvider = TestHelpers.ServiceProviderWithGrants(),
             Logger = Mock.Of<ILogger>(),
             StartingAgentId = agentAId
         };

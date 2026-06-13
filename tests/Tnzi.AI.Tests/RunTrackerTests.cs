@@ -15,8 +15,8 @@ public class RunTrackerTests
             ThreadId = threadId,
             UserMessage = new string('x', 600)
         };
-        var resolution = AgentResolution.SuccessWithoutExecutor(
-            "openai", "gpt-4o", agentId, null, AgentExecutionMode.Single);
+        var resolution = AgentResolution.Success(
+            Mock.Of<IAgentExecutor>(), "openai", "gpt-4o", agentId, null, AgentExecutionMode.Single);
 
         var run = await tracker.CreateRunAsync(request, resolution, CancellationToken.None);
 
@@ -35,7 +35,7 @@ public class RunTrackerTests
     {
         var (tracker, runStore, _, _, _) = Build();
         var request = new AgentRunRequest { UserMessage = "hi" };
-        var resolution = AgentResolution.SuccessWithoutExecutor("openai", "gpt-4o", Guid.NewGuid(), null, AgentExecutionMode.Single);
+        var resolution = AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-4o", Guid.NewGuid(), null, AgentExecutionMode.Single);
 
         await tracker.GetOrCreateRunAsync(request, resolution, CancellationToken.None);
 
@@ -57,7 +57,7 @@ public class RunTrackerTests
             ThreadId = Guid.NewGuid(),
             UserMessage = "resumed"
         };
-        var resolution = AgentResolution.SuccessWithoutExecutor("openai", "gpt-4o", request.AgentId!.Value, null, AgentExecutionMode.Handoff);
+        var resolution = AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-4o", request.AgentId!.Value, null, AgentExecutionMode.Handoff);
 
         var run = await tracker.GetOrCreateRunAsync(request, resolution, CancellationToken.None);
 
@@ -73,7 +73,7 @@ public class RunTrackerTests
         var (tracker, _, _, _, _) = Build(setupExistingRun: null, configureGetToReturnNull: true);
 
         var request = new AgentRunRequest { ExistingRunId = Guid.NewGuid() };
-        var resolution = AgentResolution.SuccessWithoutExecutor("openai", "gpt-4o", Guid.NewGuid(), null, AgentExecutionMode.Single);
+        var resolution = AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-4o", Guid.NewGuid(), null, AgentExecutionMode.Single);
 
         var ex = await Should.ThrowAsync<Tnzi.Exceptions.BusinessException>(
             () => tracker.GetOrCreateRunAsync(request, resolution, CancellationToken.None));

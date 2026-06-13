@@ -11,7 +11,8 @@ public class AgentValidationServiceTests
         Mock<IRepository<Agent, Guid>>? agentRepo = null,
         Mock<IChatClientFactory>? chatClientFactory = null,
         Mock<IToolRegistry>? toolRegistry = null,
-        ISkillRegistry? skillRegistry = null)
+        ISkillRegistry? skillRegistry = null,
+        IAgentGrantService? grantService = null)
     {
         agentRepo ??= new Mock<IRepository<Agent, Guid>>();
         chatClientFactory ??= new Mock<IChatClientFactory>();
@@ -28,8 +29,27 @@ public class AgentValidationServiceTests
             agentRepo.Object,
             chatClientFactory.Object,
             toolRegistry.Object,
+            grantService ?? EmptyGrantService(),
             services.BuildServiceProvider(),
             skillRegistry);
+    }
+
+    /// <summary>A grant service mock whose projection carries the given tool groups for any agent id.</summary>
+    private static IAgentGrantService GrantServiceWithToolGroups(params string[] toolGroups)
+    {
+        var mock = new Mock<IAgentGrantService>();
+        mock.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection { ToolGroups = toolGroups });
+        return mock.Object;
+    }
+
+    /// <summary>A grant service mock with no grants (empty projection).</summary>
+    private static IAgentGrantService EmptyGrantService()
+    {
+        var mock = new Mock<IAgentGrantService>();
+        mock.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection());
+        return mock.Object;
     }
 
     [Fact]
@@ -42,14 +62,15 @@ public class AgentValidationServiceTests
             Name = "Test Agent",
             Provider = "OpenAI",
             Model = "gpt-4",
-            ToolGroups = new List<string> { "web_search", "code_tools" },
             ExecutionMode = AgentExecutionMode.Single
         };
 
         var agentRepo = new Mock<IRepository<Agent, Guid>>();
         agentRepo.Setup(x => x.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync(agent);
 
-        var service = CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>());
+        // Tool groups are granted via the junction (no longer an entity column).
+        var service = CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>(),
+            grantService: GrantServiceWithToolGroups("web_search", "code_tools"));
         var result = await service.ValidateAsync(agentId);
 
         result.Succeeded.ShouldBeTrue();
@@ -96,14 +117,15 @@ public class AgentValidationServiceTests
             Name = "Test Agent",
             Provider = "OpenAI",
             Model = "gpt-4",
-            ToolGroups = new List<string> { "web_search", "nonexistent_tools" },
             ExecutionMode = AgentExecutionMode.Single
         };
 
         var agentRepo = new Mock<IRepository<Agent, Guid>>();
         agentRepo.Setup(x => x.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync(agent);
 
-        var service = CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>());
+        // One granted tool group is unregistered → tool-group check fails.
+        var service = CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>(),
+            grantService: GrantServiceWithToolGroups("web_search", "nonexistent_tools"));
         var result = await service.ValidateAsync(agentId);
 
         result.Succeeded.ShouldBeTrue();
@@ -164,13 +186,13 @@ public class AgentValidationServiceTests
             Id = agentId,
             Name = "Test Agent",
             Provider = "OpenAI",
-            ToolGroups = null,
             ExecutionMode = AgentExecutionMode.Single
         };
 
         var agentRepo = new Mock<IRepository<Agent, Guid>>();
         agentRepo.Setup(x => x.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync(agent);
 
+        // No tool-group grants → check passes.
         var service = CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>());
         var result = await service.ValidateAsync(agentId);
 
@@ -188,13 +210,13 @@ public class AgentValidationServiceTests
             Id = agentId,
             Name = "Test Agent",
             Provider = "OpenAI",
-            ToolGroups = null,
             ExecutionMode = AgentExecutionMode.Single
         };
 
         var agentRepo = new Mock<IRepository<Agent, Guid>>();
         agentRepo.Setup(x => x.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync(agent);
 
+        // No tool-group grants → check passes.
         var service = CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>());
         var result = await service.ValidateAsync(agentId);
 

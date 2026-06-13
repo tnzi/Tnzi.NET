@@ -60,13 +60,13 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
 
         entity.Name = input.Name;
         entity.Description = input.Description;
-        entity.ToolGroupsJson = input.ToolGroups?.ToJsonString();
-        entity.ExcludedToolGroupsJson = input.ExcludedToolGroups?.ToJsonString();
+        entity.ToolGroups = input.ToolGroups;
+        entity.ExcludedToolGroups = input.ExcludedToolGroups;
         entity.MaxTurns = input.MaxTurns;
         entity.Instructions = input.Instructions;
         entity.DefaultModel = input.DefaultModel;
-        entity.DefaultApprovalMode = input.DefaultApprovalMode.HasValue ? (int)input.DefaultApprovalMode.Value : null;
-        entity.CapabilityTagsJson = input.CapabilityTags?.ToJsonString();
+        entity.DefaultApprovalMode = input.DefaultApprovalMode;
+        entity.CapabilityTags = input.CapabilityTags;
         entity.IsEnabled = input.IsEnabled;
 
         await Repository.UpdateAsync(entity, ct);

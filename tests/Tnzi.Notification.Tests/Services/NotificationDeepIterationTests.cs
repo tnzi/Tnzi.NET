@@ -39,8 +39,8 @@ public class NotificationDeepIterationTests
         var emailSenderMock = new Mock<IEmailSender>();
         var smsSenderMock = new Mock<ISmsSender>();
         var pushSenderMock = new Mock<IPushSender>();
-        var optionsMock = new Mock<IOptions<NotificationOptions>>();
-        optionsMock.Setup(x => x.Value).Returns(new NotificationOptions
+        var optionsMock = new Mock<IOptionsMonitor<NotificationOptions>>();
+        optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
             SmsMaxContentLength = 140,

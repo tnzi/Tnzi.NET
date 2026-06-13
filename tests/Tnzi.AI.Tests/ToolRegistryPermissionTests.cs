@@ -78,6 +78,86 @@ public class ToolRegistryPermissionTests
     }
 
     [Fact]
+    public void GetToolsByNames_ReturnsOnlyNamedTools()
+    {
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+
+        registry.Register(new ToolDefinition
+        {
+            Name = "read_file",
+            GroupName = "fs",
+            ProviderType = typeof(BuiltInTextTools),
+            RequiredPermissions = []
+        });
+        registry.Register(new ToolDefinition
+        {
+            Name = "write_file",
+            GroupName = "fs",
+            ProviderType = typeof(BuiltInTextTools),
+            RequiredPermissions = []
+        });
+        registry.Register(new ToolDefinition
+        {
+            Name = "run_shell",
+            GroupName = "shell",
+            ProviderType = typeof(BuiltInTextTools),
+            RequiredPermissions = []
+        });
+
+        var result = registry.GetToolsByNames(["read_file", "run_shell"]);
+
+        result.Select(t => t.Name).OrderBy(x => x).ToArray()
+            .ShouldBe(["read_file", "run_shell"]);
+    }
+
+    [Fact]
+    public void GetToolsByNames_UnknownName_Skipped()
+    {
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+        registry.Register(new ToolDefinition
+        {
+            Name = "read_file",
+            GroupName = "fs",
+            ProviderType = typeof(BuiltInTextTools),
+            RequiredPermissions = []
+        });
+
+        var result = registry.GetToolsByNames(["read_file", "does_not_exist"]);
+
+        result.Select(t => t.Name).ShouldBe(["read_file"]);
+    }
+
+    [Fact]
+    public void GetToolsByNames_RespectsPermissions()
+    {
+        // A per-tool grant must still respect userPermissions — the grant is an allow-LIST
+        // of WHICH tools, but permissions gate access. A tool the user lacks permission for
+        // must NOT be returned even when explicitly named.
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+
+        registry.Register(new ToolDefinition
+        {
+            Name = "read_file",
+            GroupName = "fs",
+            ProviderType = typeof(BuiltInTextTools),
+            RequiredPermissions = []
+        });
+        registry.Register(new ToolDefinition
+        {
+            Name = "delete_file",
+            GroupName = "fs",
+            ProviderType = typeof(BuiltInTextTools),
+            RequiredPermissions = ["perm.delete"]
+        });
+
+        var result = registry.GetToolsByNames(
+            ["read_file", "delete_file"],
+            userPermissions: ["perm.read"]); // lacks perm.delete
+
+        result.Select(t => t.Name).ShouldBe(["read_file"]);
+    }
+
+    [Fact]
     public async Task ResolveAgentAsync_PassesGrantedPermissionsToAgentFactory()
     {
         var agentId = Guid.NewGuid();
@@ -95,10 +175,11 @@ public class ToolRegistryPermissionTests
                 It.IsAny<int?>(),
                 It.IsAny<AgentExecutorOptions?>(),
                 It.IsAny<IEnumerable<string>?>(),
+                It.IsAny<IEnumerable<string>?>(),
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, Guid?, CancellationToken>(
-                (_, _, _, _, _, _, _, _, userPermissions, resolvedAgentId, _) =>
+            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, IEnumerable<string>?, Guid?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, userPermissions, _, resolvedAgentId, _) =>
                 {
                     capturedPermissions = userPermissions?.OrderBy(x => x).ToArray() ?? [];
                     capturedAgentId = resolvedAgentId;
@@ -113,7 +194,6 @@ public class ToolRegistryPermissionTests
                 Name = "agent",
                 Provider = "OpenAI",
                 Model = "gpt-4o",
-                ToolGroups = new List<string> { "group-a" },
                 IsEnabled = true
             });
 
@@ -150,6 +230,11 @@ public class ToolRegistryPermissionTests
         versionRouter.Setup(r => r.RouteAsync(It.IsAny<Agent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Agent a, CancellationToken _) => AgentVersionRouteResult.Passthrough(a));
 
+        // Tool groups are owned by the grant junction (grants are the sole source of truth).
+        var grantService = new Mock<IAgentGrantService>();
+        grantService.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentGrantsProjection { ToolGroups = ["group-a"] });
+
         var resolver = new AgentResolver(
             agentFactory.Object,
             aiOptions,
@@ -157,6 +242,7 @@ public class ToolRegistryPermissionTests
             toolRegistry,
             new SimplePromptTemplateEngine(),
             versionRouter.Object,
+            grantService.Object,
             Mock.Of<ILogger<AgentResolver>>(),
             permissionChecker: permissionChecker.Object);
 

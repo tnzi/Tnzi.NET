@@ -1,46 +1,16 @@
 namespace Tnzi.AI;
 
 /// <summary>
-/// Startup validation and tool-registration helpers for <see cref="AIModule"/>.
-/// Extracted from AIModule.cs to reduce the main module file's surface area.
-/// All methods here are pure helpers invoked from <see cref="AIModule.OnApplicationInitializationAsync"/>.
+/// AIModule 的启动期校验与探测（partial）。
+/// 包含：可选子模块 NoOp 回退探测（信息级日志 + <c>ITextSearchService</c> 有条件硬错误）、
+/// 引擎运行时配置校验（Provider 必需性）、<c>[RequiresSkill]</c> 引用校验、框架程序集判定。
+/// 全部由 <see cref="AIModule.OnApplicationInitializationAsync"/> 调用。
 /// </summary>
 public partial class AIModule
 {
-    private static void ValidateRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
+    private static void ValidateNoOpFallbacks(IServiceProvider serviceProvider, ILogger logger)
     {
         var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
-        var hasEnabledProvider = options.Providers.Values.Any(p => p.Enabled);
-
-        if (options.History.Reduction.Mode == HistoryReductionMode.Summarize && !hasEnabledProvider)
-        {
-            throw new InvalidOperationException(
-                "AI:History:Reduction:Mode is set to Summarize, but no enabled AI provider is configured.");
-        }
-
-        if (options.Guardrails.Enabled && options.Guardrails.LlmJudge.Enabled && !hasEnabledProvider)
-        {
-            throw new InvalidOperationException(
-                "AI:Guardrails:LlmJudge is enabled, but no enabled AI provider is configured.");
-        }
-
-        if (options.ContextProviders.Enabled && options.ContextProviders.EntityMemory.Enabled && !hasEnabledProvider)
-        {
-            throw new InvalidOperationException(
-                "AI:ContextProviders:EntityMemory is enabled, but no enabled AI provider is configured for entity extraction.");
-        }
-
-        if (options.BuiltInTools.Enabled && options.BuiltInTools.EnableWebSearch)
-        {
-            // Resolve through a scope so a Scoped IWebSearchProvider registration is
-            // also detected (matches the ISkillRegistry probe pattern below).
-            using var scope = serviceProvider.CreateScope();
-            if (scope.ServiceProvider.GetService<IWebSearchProvider>() == null)
-            {
-                throw new InvalidOperationException(
-                    "AI:BuiltInTools:EnableWebSearch is enabled, but no IWebSearchProvider is registered.");
-            }
-        }
 
         if (options.ContextProviders.Enabled)
         {
@@ -68,7 +38,7 @@ public partial class AIModule
         }
 
         // 统一探测所有可选子模块的 NoOp 回退实现（仅信息级日志，不抛出）。
-        // 每项对应 AIModule.ConfigureServicesAsync 中的一个 TryAdd NoOp 注册；
+        // 每项对应 RegisterOptionalSubmoduleFallbacks 中的一个 TryAdd NoOp 注册；
         // 加载相应子模块后会被真实实现覆盖。新增 NoOp 回退时必须在此追加一行。
         // 注意：ITextSearchService 的 NoOp 回退是有条件的硬错误（见上方），不在此列。
         foreach (var (serviceType, message) in NoOpFallbackProbes)
@@ -80,7 +50,7 @@ public partial class AIModule
             }
         }
 
-        logger.LogDebug("AI runtime configuration validation passed.");
+        logger.LogDebug("AI NoOp fallback probing complete.");
     }
 
     /// <summary>
@@ -100,8 +70,6 @@ public partial class AIModule
             "IWorkflowExecutionQueryService is a no-op fallback; workflow run queries will be unavailable until Tnzi.AI.Workflow module is loaded."),
         (typeof(IWorkflowExecutionMailbox),
             "IWorkflowExecutionMailbox is a no-op fallback; workflow signal dispatch will be unavailable until Tnzi.AI.Workflow module is loaded."),
-        (typeof(IExternalCliExecutor),
-            "IExternalCliExecutor is a no-op fallback; ExternalCli agents will fail at runtime until Tnzi.AI.Cli module is loaded."),
         (typeof(IAgentStreamForwarder),
             "IAgentStreamForwarder is a no-op fallback; cross-process agent stream forwarding will be unavailable until a forwarder is registered."),
         (typeof(IVectorStore),
@@ -121,6 +89,47 @@ public partial class AIModule
         (typeof(ISkillRequirementsValidator),
             "ISkillRequirementsValidator is a no-op fallback; skill requirements validation will be unavailable until Tnzi.AI.Skills module is loaded."),
     ];
+
+    /// <summary>
+    /// 校验引擎运行时配置 — 当启用需要 LLM Provider 的功能时，必须存在已启用的 Provider。
+    /// </summary>
+    private static void ValidateProviderRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
+        var hasEnabledProvider = options.Providers.Values.Any(p => p.Enabled);
+
+        if (options.History.Reduction.Mode == HistoryReductionMode.Summarize && !hasEnabledProvider)
+        {
+            throw new InvalidOperationException(
+                "AI:History:Reduction:Mode is set to Summarize, but no enabled AI provider is configured.");
+        }
+
+        if (options.Guardrails.Enabled && options.Guardrails.LlmJudge.Enabled && !hasEnabledProvider)
+        {
+            throw new InvalidOperationException(
+                "AI:Guardrails:LlmJudge is enabled, but no enabled AI provider is configured.");
+        }
+
+        if (options.ContextProviders.Enabled && options.ContextProviders.EntityMemory.Enabled && !hasEnabledProvider)
+        {
+            throw new InvalidOperationException(
+                "AI:ContextProviders:EntityMemory is enabled, but no enabled AI provider is configured for entity extraction.");
+        }
+
+        if (options.BuiltInTools.Enabled && options.BuiltInTools.EnableWebSearch)
+        {
+            // Resolve through a scope so a Scoped IWebSearchProvider registration is
+            // also detected (matches the ISkillRegistry probe pattern).
+            using var scope = serviceProvider.CreateScope();
+            if (scope.ServiceProvider.GetService<IWebSearchProvider>() == null)
+            {
+                throw new InvalidOperationException(
+                    "AI:BuiltInTools:EnableWebSearch is enabled, but no IWebSearchProvider is registered.");
+            }
+        }
+
+        logger.LogDebug("AI engine runtime configuration validation passed.");
+    }
 
     /// <summary>
     /// 校验所有工具的 [RequiresSkill] 引用是否指向已注册的 Skill
@@ -152,32 +161,11 @@ public partial class AIModule
     }
 
     /// <summary>
-    /// 扫描程序集并注册工具到 ToolRegistry
-    /// </summary>
-    private static void RegisterTools(IToolRegistry registry, IToolScanner scanner, Assembly assembly, ILogger logger)
-    {
-        try
-        {
-            var tools = scanner.ScanAssembly(assembly);
-            foreach (var tool in tools)
-            {
-                registry.Register(tool);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "Failed to scan assembly '{AssemblyName}' for AI tools. Skipping this assembly.",
-                assembly.FullName);
-        }
-    }
-
-    /// <summary>
     /// 判断是否为框架核心程序集
     /// </summary>
     /// <remarks>
-    /// 所有 Tnzi.* 程序集（包括 Tnzi.AI.Coder）由各自模块负责工具注册。
-    /// AIModule 只扫描自身程序集和用户应用程序集。
+    /// 所有 Tnzi.* 程序集（包括各子模块）由各自模块负责工具注册。
+    /// 本模块只扫描自身程序集和用户应用程序集。
     /// </remarks>
     private static bool IsFrameworkCoreAssembly(Assembly a)
     {

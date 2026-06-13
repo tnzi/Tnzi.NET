@@ -352,18 +352,16 @@ public class MiddlewarePipelineIntegrationTests
     {
         protected override void ConfigureMiddlewares(IServiceCollection services)
         {
-            services.AddSingleton(MsOptions.Create(new LoopDetectionOptions
+            var opts = TestHelpers.CreateOptionsMonitor(new LoopDetectionOptions
             {
                 Enabled = true,
                 WarnThreshold = 2,
                 HardLimit = 4,
                 WindowSize = 10,
                 MaxTrackedThreads = 50
-            }));
-            services.AddSingleton<IAiMiddleware>(sp =>
-                new LoopDetectionMiddleware(
-                    sp.GetRequiredService<IOptions<LoopDetectionOptions>>(),
-                    NullLogger<LoopDetectionMiddleware>.Instance));
+            });
+            services.AddSingleton<IAiMiddleware>(_ =>
+                new LoopDetectionMiddleware(opts, NullLogger<LoopDetectionMiddleware>.Instance));
         }
 
         [Fact]
@@ -564,10 +562,9 @@ public class MiddlewarePipelineIntegrationTests
                     NullLogger<QuotaMiddleware>.Instance));
 
             // LoopDetection
-            services.AddSingleton(MsOptions.Create(new LoopDetectionOptions { Enabled = true }));
-            services.AddSingleton<IAiMiddleware>(sp =>
+            services.AddSingleton<IAiMiddleware>(_ =>
                 new LoopDetectionMiddleware(
-                    sp.GetRequiredService<IOptions<LoopDetectionOptions>>(),
+                    TestHelpers.CreateOptionsMonitor(new LoopDetectionOptions { Enabled = true }),
                     NullLogger<LoopDetectionMiddleware>.Instance));
         }
 

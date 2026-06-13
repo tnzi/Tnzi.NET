@@ -23,7 +23,7 @@ public class SubAgentLimitMiddleware : IAiMiddleware
     public async Task<AgentRunResult> InvokeAsync(
         AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware || !_options.Value.Enabled)
+        if (!_options.Value.Enabled)
             return await next(context, cancellationToken);
 
         TruncateTaskCalls(context);
@@ -34,7 +34,7 @@ public class SubAgentLimitMiddleware : IAiMiddleware
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (context.ShouldSkipMiddleware || !_options.Value.Enabled)
+        if (!_options.Value.Enabled)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;

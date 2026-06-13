@@ -293,14 +293,37 @@ public partial class WorkflowEngine
     }
 
     /// <summary>
-    /// 简单条件评估
+    /// 简单条件评估（fail-closed）：
+    /// 空/纯空白 = 无条件 → 执行；非空时仅白名单 "true"/"1"/"yes" 判真；
+    /// 含未解析模板占位符（{{...}}）或任意其他文本（如 LLM 自由输出）一律判假并告警。
     /// </summary>
-    private static bool EvaluateCondition(string condition)
+    private bool EvaluateCondition(string condition)
     {
+        // 无条件 = 执行（语义不变）
         if (string.IsNullOrWhiteSpace(condition)) return true;
-        var trimmed = condition.Trim().ToLowerInvariant();
-        return trimmed is not ("false" or "0" or "skip" or "no");
+
+        var trimmed = condition.Trim();
+
+        // 模板未解析（仍含 {{...}}）→ fail-closed 跳过节点
+        if (trimmed.Contains("{{", StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "Workflow step condition contains unresolved template placeholders; treating as false (fail-closed): {Condition}",
+                Truncate(trimmed, 200));
+            return false;
+        }
+
+        var normalized = trimmed.ToLowerInvariant();
+        if (normalized is "true" or "1" or "yes") return true;
+
+        _logger.LogWarning(
+            "Workflow step condition did not match the truthy whitelist (true/1/yes); treating as false (fail-closed): {Condition}",
+            Truncate(trimmed, 200));
+        return false;
     }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength] + "…";
 
     private static string? EvaluateOutputContains(ConditionalEdge edge, string output)
     {

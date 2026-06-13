@@ -23,10 +23,12 @@ public class AISkillsModule : TnziApplicationModule
         // optional injection) can resolve it. DatabaseSkillStore is scoped
         // and not suitable as a singleton default.
         services.AddSingleton<ISkillStore>(sp => sp.GetRequiredService<FileSystemSkillStore>());
-        services.TryAddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
-        services.TryAddSingleton<ISkillConstraintEnforcer, SkillConstraintEnforcer>();
-        services.TryAddSingleton<ISkillRequirementsValidator, SkillRequirementsValidator>();
-        services.TryAddScoped<ISkillSearchService, SkillSearchService>();
+        // AIModule 的 NoOp 回退在 PostConfigure 阶段才 TryAdd（见 AIModule.PostConfigureServicesAsync），
+        // 本模块 Configure 阶段的注册必然先于回退 → 真实实现永远胜出，无须 RemoveAll。
+        services.AddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
+        services.AddSingleton<ISkillConstraintEnforcer, SkillConstraintEnforcer>();
+        services.AddSingleton<ISkillRequirementsValidator, SkillRequirementsValidator>();
+        services.AddScoped<ISkillSearchService, SkillSearchService>();
         services.AddScoped<DatabaseSkillStore>();
         services.TryAddScoped<ISkillRegistry, SkillRegistry>();
         services.AddScoped<ISkillService, SkillService>();

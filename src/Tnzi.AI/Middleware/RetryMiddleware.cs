@@ -36,8 +36,6 @@ public class RetryMiddleware : IAiMiddleware
         if (!_options.Value.Retry.Enabled)
             return await next(context, cancellationToken);
 
-        if (context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
-            return await next(context, cancellationToken);
 
         var pipeline = IsBackgroundTask(context) ? _backgroundPipeline : _pipeline;
         return await pipeline.ExecuteAsync(async ct => await next(context, ct), cancellationToken);
@@ -45,7 +43,7 @@ public class RetryMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!_options.Value.Retry.Enabled || context.Agent.ExecutionMode == AgentExecutionMode.ExternalCli)
+        if (!_options.Value.Retry.Enabled)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;

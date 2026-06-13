@@ -16,6 +16,9 @@ public class MemoryEntryConfiguration : EntityTypeConfigurationBase<MemoryEntry,
         builder.Property(e => e.Content)
             .IsRequired();
 
+        builder.Property(e => e.ContentHash)
+            .HasMaxLength(64);
+
         builder.Property(e => e.Source)
             .HasMaxLength(100);
 
@@ -33,6 +36,24 @@ public class MemoryEntryConfiguration : EntityTypeConfigurationBase<MemoryEntry,
         if (multiTenancyEnabled)
         {
             builder.HasIndex(e => e.TenantId);
+        }
+
+        // 精确重复硬防线：同一 scope 下相同内容只允许一行。
+        // Scope 键已编码 user/agent/session 隔离维度（MemoryScope.ToScopeKey）；
+        // 多租户开启时把 TenantId 纳入索引列，避免跨租户的同 scope 同内容互相冲突。
+        // 过滤 ContentHash 非空（既有行无哈希、不参与约束）。
+        // 注意：MemoryEntry 非软删除实体（硬删语义），过滤器不得引用 IsDeleted（EntityPolicyTests B1）。
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => new { e.TenantId, e.Scope, e.ContentHash })
+                .IsUnique()
+                .HasFilter(IndexFilterFactory.GetColumnNotNull(nameof(MemoryEntry.ContentHash)));
+        }
+        else
+        {
+            builder.HasIndex(e => new { e.Scope, e.ContentHash })
+                .IsUnique()
+                .HasFilter(IndexFilterFactory.GetColumnNotNull(nameof(MemoryEntry.ContentHash)));
         }
 
         builder.HasIndex(e => e.Scope);

@@ -4,10 +4,12 @@
          Left: icon + title + ⓘ help. Right (#actions): the keyword search
          (small) + Advanced toggle. The advanced grid drops below the bar,
          still inside this white card. Consumers can replace the whole
-         header via the #header slot. -->
-    <slot v-if="$slots.header" name="header" />
+         header via the #header slot, or drop it entirely with
+         `:show-header="false"` (e.g. when the shell is embedded inside a
+         page that already owns the single title bar). -->
+    <slot v-if="props.showHeader && $slots.header" name="header" />
     <NCard
-      v-else
+      v-else-if="props.showHeader"
       :bordered="false"
       size="small"
       class="t-list-shell__header-card"
@@ -142,6 +144,13 @@
     >
       <slot name="search" />
     </NCard>
+
+    <!-- Optional KPI strip — sits between the white header card and the list
+         card (content-page standard: header → KPI row → list). Typically a
+         `TKpiRow` of `TStatCard`s. -->
+    <div v-if="$slots.kpis" class="t-list-shell__kpis">
+      <slot name="kpis" />
+    </div>
 
     <slot
       v-if="props.state.error.value"
@@ -289,6 +298,11 @@ export interface TListShellProps<T, TId extends string | number = string | numbe
   icon?: string
   /** `page` (default) flex-fills the page height; `container` is content-sized for embedding. */
   mode?: 'page' | 'container'
+  /** When false the whole white header card (TPageHeader + search) is not
+      rendered — for shells nested inside a page that already owns the single
+      title bar (otherwise TPageHeader falls back to the route meta title and
+      renders a duplicate bar). Default true. */
+  showHeader?: boolean
   showSearch?: boolean
   showDefaultSearch?: boolean
   searchFields?: FormSchemaItem[]
@@ -312,6 +326,7 @@ const props = withDefaults(defineProps<TListShellProps<T, TId>>(), {
   title: undefined,
   icon: undefined,
   mode: 'page',
+  showHeader: true,
   showSearch: true,
   showDefaultSearch: true,
   searchFields: undefined,
@@ -332,6 +347,7 @@ const props = withDefaults(defineProps<TListShellProps<T, TId>>(), {
 
 defineSlots<{
   header?: () => unknown
+  kpis?: () => unknown
   search?: () => unknown
   primary?: () => unknown
   toolbar?: () => unknown
@@ -541,6 +557,8 @@ const paginationConfig = computed(() => {
   flex-direction: column;
   overflow: hidden;
 }
+
+.t-list-shell__kpis { flex-shrink: 0; }
 
 .t-list-shell__error { flex-shrink: 0; }
 .t-list-shell__error-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

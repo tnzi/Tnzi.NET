@@ -29,6 +29,14 @@ public class AgentRunRequest
     /// <summary>附加工具组</summary>
     public List<string>? ToolGroups { get; init; }
 
+    /// <summary>
+    /// 附加的单个工具名称（per-request per-tool override，与 <see cref="ToolGroups"/> 对称叠加）。
+    /// 在工具组解析之外额外解析这些命名工具并按名称去重合并；权限仍然门控访问。
+    /// Per-request individual tool names — additive to <see cref="ToolGroups"/>, symmetric override.
+    /// Resolved in addition to group-expanded tools and unioned (deduped by name); permissions still gate access.
+    /// </summary>
+    public List<string>? ToolNames { get; init; }
+
     /// <summary>Workflow 定义 ID（若指定则走 Workflow 模式）</summary>
     public Guid? WorkflowId { get; init; }
 
@@ -56,7 +64,7 @@ public class AgentRunRequest
     /// <summary>文件附件列表（由 FileUploadMiddleware 处理）</summary>
     public List<FileAttachment>? Attachments { get; init; }
 
-    /// <summary>扩展元数据（ExternalCli 工作目录等）</summary>
+    /// <summary>扩展元数据</summary>
     public Dictionary<string, object>? Metadata { get; init; }
 
     /// <summary>是否启用计划模式（启用 Todo 追踪）</summary>

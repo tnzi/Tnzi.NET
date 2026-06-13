@@ -21,6 +21,7 @@ import type {
   AccessLogStatisticsDto,
   AccessLogTrendDto,
   TopEndpointDto,
+  SettingsCenterGroupDto,
 } from './types';
 import { type AccessLogTrendInterval, type TopEndpointSortBy } from './types';
 
@@ -122,6 +123,28 @@ export function useAdminSettingApi(client: HttpClient) {
     /** Get setting groups with counts */
     getGroups: () =>
       client.get<SettingGroupDto[]>(`${ADMIN_SETTING_BASE}/groups`),
+  };
+}
+
+const ADMIN_SETTINGS_CENTER_BASE = '/admin/settings-center';
+
+/**
+ * Admin Settings Center API — schema-driven module settings
+ * (definitions + per-group save/reset).
+ */
+export function useAdminSettingsCenterApi(client: HttpClient) {
+  return {
+    /** All definition groups with schema + effective values */
+    getDefinitions: () =>
+      client.get<SettingsCenterGroupDto[]>(`${ADMIN_SETTINGS_CENTER_BASE}/definitions`),
+
+    /** Save changed fields of one group (null value = remove override) */
+    saveGroup: (groupKey: string, changedValues: Record<string, string | null>) =>
+      client.put<SettingsCenterGroupDto>(`${ADMIN_SETTINGS_CENTER_BASE}/groups/${groupKey}`, changedValues),
+
+    /** Remove all overrides of one group (restore defaults) */
+    resetGroup: (groupKey: string) =>
+      client.delete<SettingsCenterGroupDto>(`${ADMIN_SETTINGS_CENTER_BASE}/groups/${groupKey}/overrides`),
   };
 }
 

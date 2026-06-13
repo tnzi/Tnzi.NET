@@ -402,7 +402,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { DataTableColumns } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -455,6 +455,50 @@ const t = makePageTranslator('account.userCenter')
 function logoutAndRedirect(): void {
   authStore.logout()
   void router.replace({ name: 'login' }).catch(() => undefined)
+}
+
+// ---- Guarded loading ------------------------------------------------------
+/**
+ * Every read-only load goes through this guard so a loading flag can NEVER
+ * be stranded (the "spinner keeps rotating forever" class of bug):
+ *
+ * - `try/finally` always releases the flag — even when `apply` throws on a
+ *   malformed/failed-envelope payload;
+ * - a generation token makes the **latest** call the sole owner of the flag
+ *   and the data, so concurrent invocations (mount + Refresh clicks) can
+ *   neither clear the spinner early nor overwrite fresh results with stale
+ *   late-resolving ones;
+ * - a timeout race ends the wait when the HTTP layer never settles (hung
+ *   connection / token-refresh deadlock — the request promise itself may
+ *   stay pending forever, which no try/finally can recover from), degrading
+ *   the infinite spinner into an error toast + a retryable Refresh button.
+ */
+const LOAD_TIMEOUT_MS = 15_000
+
+function createGuardedLoader<T>(options: {
+  flag: Ref<boolean>
+  fetch: () => Promise<T>
+  apply: (result: T) => void
+  onError: (e: unknown) => void
+}): () => Promise<void> {
+  let generation = 0
+  return async () => {
+    const token = ++generation
+    options.flag.value = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(t('loadTimeout'))), LOAD_TIMEOUT_MS)
+      })
+      const result = await Promise.race([options.fetch(), timeout])
+      if (token === generation) options.apply(result)
+    } catch (e) {
+      if (token === generation) options.onError(e)
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      if (token === generation) options.flag.value = false
+    }
+  }
 }
 
 // ---- Active section -------------------------------------------------------
@@ -517,21 +561,26 @@ function applyProfileToForm(p: UserDto): void {
   form.website = p.website ?? ''
 }
 
-async function loadProfile(): Promise<void> {
-  loadingProfile.value = true
-  try {
-    const p = await bridge.me.getProfile()
+const loadProfile = createGuardedLoader<UserDto>({
+  flag: loadingProfile,
+  fetch: () => bridge.me.getProfile(),
+  apply: (p) => {
+    // A failed backend envelope unwraps to `undefined` — surface it as a
+    // real error (caught by the guard) instead of a TypeError + half form.
+    if (!p) throw new Error(t('loadFailed'))
     profile.value = p
     applyProfileToForm(p)
     // detail load is optional — most installs use the basic profile, but we
     // try anyway so future fields (avatar metadata, etc.) are available.
-    try { detail.value = await bridge.me.getDetail() } catch { /* ignore */ }
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    loadingProfile.value = false
-  }
-}
+    // Fire-and-forget OUTSIDE the loadingProfile window so a slow or hung
+    // detail endpoint can never pin the profile spinner.
+    void bridge.me
+      .getDetail()
+      .then((d) => { detail.value = d })
+      .catch(() => undefined)
+  },
+  onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+})
 
 function resetProfileForm(): void {
   if (profile.value) applyProfileToForm(profile.value)
@@ -720,16 +769,12 @@ async function confirmChange(): Promise<void> {
 // ---- Sessions -------------------------------------------------------------
 const sessions = ref<UserSessionDto[]>([])
 const loadingSessions = ref(false)
-async function loadSessions(): Promise<void> {
-  loadingSessions.value = true
-  try {
-    sessions.value = await bridge.me.getSessions()
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    loadingSessions.value = false
-  }
-}
+const loadSessions = createGuardedLoader<UserSessionDto[]>({
+  flag: loadingSessions,
+  fetch: () => bridge.me.getSessions(),
+  apply: (rows) => { sessions.value = rows ?? [] },
+  onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+})
 async function revokeOne(row: UserSessionDto): Promise<void> {
   try {
     await bridge.me.revokeSession(row.id)
@@ -807,16 +852,12 @@ const sessionColumns = computed<DataTableColumns<UserSessionDto>>(() => [
 // ---- Login history --------------------------------------------------------
 const history = ref<LoginLogDto[]>([])
 const loadingHistory = ref(false)
-async function loadHistory(): Promise<void> {
-  loadingHistory.value = true
-  try {
-    history.value = await bridge.me.getLoginHistory()
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    loadingHistory.value = false
-  }
-}
+const loadHistory = createGuardedLoader<LoginLogDto[]>({
+  flag: loadingHistory,
+  fetch: () => bridge.me.getLoginHistory(),
+  apply: (rows) => { history.value = rows ?? [] },
+  onError: (e) => message.error(e instanceof Error ? e.message : String(e)),
+})
 
 const historyColumns = computed<DataTableColumns<LoginLogDto>>(() => [
   {
@@ -842,16 +883,14 @@ const historyColumns = computed<DataTableColumns<LoginLogDto>>(() => [
 // ---- Linked accounts ------------------------------------------------------
 const linked = ref<UserLoginDto[]>([])
 const loadingLinked = ref(false)
-async function loadLinked(): Promise<void> {
-  loadingLinked.value = true
-  try {
-    linked.value = await bridge.me.getLinkedAccounts()
-  } catch {
-    linked.value = []
-  } finally {
-    loadingLinked.value = false
-  }
-}
+const loadLinked = createGuardedLoader<UserLoginDto[]>({
+  flag: loadingLinked,
+  fetch: () => bridge.me.getLinkedAccounts(),
+  apply: (rows) => { linked.value = rows ?? [] },
+  // Linked accounts are optional (external providers may be disabled) —
+  // keep the original fail-silent behaviour, just with a guaranteed reset.
+  onError: () => { linked.value = [] },
+})
 async function unlink(provider: string): Promise<void> {
   try {
     await bridge.me.unlinkAccount(provider)
