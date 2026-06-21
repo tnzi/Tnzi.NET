@@ -13,8 +13,8 @@ export enum PaymentStatus {
   Closed = 4,
   Cancelled = 5,
   Expired = 6,
-  Refunding = 7,
-  Refunded = 8,
+  Refunded = 7,
+  PartialRefunded = 8,
 }
 
 /**
@@ -36,10 +36,10 @@ export function getPaymentStatusLabel(status: PaymentStatus): string {
       return 'Cancelled';
     case PaymentStatus.Expired:
       return 'Expired';
-    case PaymentStatus.Refunding:
-      return 'Refunding';
     case PaymentStatus.Refunded:
       return 'Refunded';
+    case PaymentStatus.PartialRefunded:
+      return 'Partial Refunded';
     default:
       return 'Unknown';
   }
@@ -196,6 +196,7 @@ export enum SubscriptionStatus {
   Paused = 4,
   Cancelled = 5,
   Expired = 6,
+  PastDue = 7,
 }
 
 /**
@@ -217,6 +218,8 @@ export function getSubscriptionStatusLabel(status: SubscriptionStatus): string {
       return 'Cancelled';
     case SubscriptionStatus.Expired:
       return 'Expired';
+    case SubscriptionStatus.PastDue:
+      return 'Past Due';
     default:
       return 'Unknown';
   }

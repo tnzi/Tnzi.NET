@@ -98,15 +98,17 @@ public class FileShareService : ApplicationService, IFileShareService
         return Ok(true);
     }
 
-    public async Task<Result> IncrementShareAccessCountAsync(string shareToken, CancellationToken cancellationToken = default)
+    public async Task<Result<bool>> IncrementShareAccessCountAsync(string shareToken, CancellationToken cancellationToken = default)
     {
-        var share = await _shareRepository.FindAsync((FileShare s) => s.ShareToken == shareToken, cancellationToken);
-        if (share == null)
-            return Fail("Share not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        // 原子 check-and-increment：单条 SQL 同时校验"启用 + 未超过 MaxAccessCount"并自增，
+        // WHERE 条件确保仅在仍有配额时才更新；受影响行数 > 0 表示成功占用一次配额。
+        var affectedRows = await _shareRepository.AsQueryable(withTracking: false)
+            .Where(s => s.ShareToken == shareToken
+                && s.IsEnabled
+                && (s.MaxAccessCount == null || s.AccessCount < s.MaxAccessCount))
+            .ExecuteUpdateAsync(set => set.SetProperty(x => x.AccessCount, x => x.AccessCount + 1), cancellationToken);
 
-        share.AccessCount++;
-        await _shareRepository.UpdateAsync(share, cancellationToken);
-        return Ok("Share access count incremented");
+        return Ok(affectedRows > 0);
     }
 
     public async Task<Result<IEnumerable<FileShareSummaryDto>>> GetSharesByFileAsync(Guid fileId, CancellationToken cancellationToken = default)

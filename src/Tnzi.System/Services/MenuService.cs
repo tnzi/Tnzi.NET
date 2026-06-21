@@ -52,6 +52,19 @@ public class MenuService : ApplicationService, IMenuService
     {
         Check.NotNull(input);
 
+        // MenuKey identifies the route a 'merge' override applies to — it must be
+        // unique or the override becomes non-deterministic. Case-insensitive to
+        // mirror the front-end matching.
+        if (!string.IsNullOrEmpty(input.MenuKey))
+        {
+            var key = input.MenuKey.ToLower();
+            var keyExists = await _menuRepository
+                .Where(m => m.MenuKey != null && m.MenuKey.ToLower() == key)
+                .AnyAsync();
+            if (keyExists)
+                return Fail<MenuDto>($"A menu with MenuKey '{input.MenuKey}' already exists", 409, ErrorCodes.RESOURCE_ALREADY_EXISTS);
+        }
+
         var entity = input.MapTo<Menu>();
         await _menuRepository.InsertAsync(entity);
 
@@ -68,6 +81,17 @@ public class MenuService : ApplicationService, IMenuService
         var entity = await _menuRepository.GetAsync(id);
         if (entity == null)
             return Fail<MenuDto>("Menu not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        // MenuKey must stay unique across other rows (case-insensitive).
+        if (!string.IsNullOrEmpty(input.MenuKey))
+        {
+            var key = input.MenuKey.ToLower();
+            var keyTaken = await _menuRepository
+                .Where(m => m.Id != id && m.MenuKey != null && m.MenuKey.ToLower() == key)
+                .AnyAsync();
+            if (keyTaken)
+                return Fail<MenuDto>($"A menu with MenuKey '{input.MenuKey}' already exists", 409, ErrorCodes.RESOURCE_ALREADY_EXISTS);
+        }
 
         input.MapTo(entity);
         await _menuRepository.UpdateAsync(entity);
@@ -155,6 +179,7 @@ public class MenuService : ApplicationService, IMenuService
             {
                 Id = m.Id,
                 ParentId = m.ParentId,
+                MenuKey = m.MenuKey,
                 Name = m.Name,
                 Icon = m.Icon,
                 Path = m.Path,
@@ -229,6 +254,49 @@ public class MenuService : ApplicationService, IMenuService
         LogInformation("Menu moved: {Name}, Id: {Id}, NewParentId: {NewParentId}", menu.Name, id, newParentId?.ToString() ?? "root");
         await InvalidateMenuCacheAsync();
         return Ok("Menu moved successfully");
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<MenuSeedResultDto>> SeedMenusAsync(IEnumerable<CreateMenuDto> menus)
+    {
+        Check.NotNull(menus);
+
+        var list = menus.ToList();
+        if (list.Count == 0)
+            return Ok(new MenuSeedResultDto());
+
+        // Existing MenuKeys are skipped so operator edits made in admin survive a
+        // re-seed (seed is additive, never overwrites a row that already exists).
+        // Pull all existing keys and compare case-insensitively in memory — the
+        // table is small and a DB `IN` would be collation-sensitive, letting a
+        // different-cased duplicate slip past.
+        var existingKeys = await _menuRepository
+            .Where(m => m.MenuKey != null)
+            .Select(m => m.MenuKey!)
+            .ToListAsync();
+        var seenKeys = new HashSet<string>(existingKeys, StringComparer.OrdinalIgnoreCase);
+
+        var toInsert = new List<Menu>();
+        var skipped = 0;
+        foreach (var dto in list)
+        {
+            // Skip rows whose MenuKey already exists in DB or repeats in this batch.
+            if (!string.IsNullOrEmpty(dto.MenuKey) && !seenKeys.Add(dto.MenuKey))
+            {
+                skipped++;
+                continue;
+            }
+            toInsert.Add(dto.MapTo<Menu>());
+        }
+
+        if (toInsert.Count > 0)
+        {
+            await _menuRepository.InsertManyAsync(toInsert);
+            await InvalidateMenuCacheAsync();
+        }
+
+        LogInformation("Menu seed: {Inserted} inserted, {Skipped} skipped", toInsert.Count, skipped);
+        return Ok(new MenuSeedResultDto { Inserted = toInsert.Count, Skipped = skipped });
     }
 
     #region 私有方法

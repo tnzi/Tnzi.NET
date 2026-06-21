@@ -66,28 +66,32 @@ public static class TnziDbContextHelper
             var processor = DbContextServiceResolver.GetFileReferenceProcessor(dbContext);
             if (processor != null)
             {
+                // 处理文件引用变更（建/删 FileReference + 增减 ReferenceCount）。
+                // 注意：此处刻意不吞异常——引用处理失败必须向上传播，使外层工作单元事务回滚主业务，
+                // 兑现「实体与文件引用要么全成功、要么全失败」的一致性承诺。
+                // （严格回滚依赖外层 UoW 事务；框架请求级默认启用事务。无外层事务的裸 SaveChanges
+                //  仅保证失败不被静默——异常会抛给调用方而非吞掉。）
+                await processor.ProcessChangesAsync(fileTracker.GetChanges(), cancellationToken);
+
+                // 显式保存 Repository 延迟添加的引用实体（与主保存处于同一物理事务时一并提交/回滚）。
+                // 使用 baseSaveAsync 避开递归审计逻辑。
+                if (dbContext.ChangeTracker.HasChanges())
+                {
+                    await baseSaveAsync(cancellationToken);
+                    logger?.LogDebug("[FileTracking] Saved pending file reference changes");
+                }
+
+                logger?.LogInformation("[FileTracking] Processed {Count} file reference changes", fileTracker.GetChanges().Count);
+
+                // 发布物理删除事件（事务成功后异步删除物理文件）。
+                // 物理删除失败不应回滚已提交的业务事务——僵尸文件由清理任务兜底，故此处保留容错。
                 try
                 {
-                    // 在主保存完成后处理文件引用
-                    await processor.ProcessChangesAsync(fileTracker.GetChanges(), cancellationToken);
-
-                    // 显式保存 Repository 延迟添加的实体
-                    // 使用 baseSaveAsync 避开递归审计逻辑
-                    if (dbContext.ChangeTracker.HasChanges())
-                    {
-                        await baseSaveAsync(cancellationToken);
-                        logger?.LogDebug("[FileTracking] Saved pending file reference changes");
-                    }
-
-                    logger?.LogInformation("[FileTracking] Processed {Count} file reference changes", fileTracker.GetChanges().Count);
-
-                    // 发布删除事件
                     await processor.PublishDeleteEventsAsync(fileTracker.GetChanges(), cancellationToken);
                 }
                 catch (Exception ex)
                 {
-                    // 文件引用处理失败不应影响主业务
-                    logger?.LogError(ex, "[FileTracking] Error processing file references");
+                    logger?.LogError(ex, "[FileTracking] Error publishing file delete events");
                 }
             }
             else

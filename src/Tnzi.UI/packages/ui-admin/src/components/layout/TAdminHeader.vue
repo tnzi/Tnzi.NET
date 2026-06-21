@@ -135,6 +135,9 @@
           <Icon icon="mdi:translate" width="20" height="20" />
         </button>
       </NDropdown>
+      <div v-if="$slots.chat" class="t-admin-header__chat">
+        <slot name="chat" />
+      </div>
       <div v-if="$slots.notification" class="t-admin-header__notification">
         <slot name="notification" />
       </div>
@@ -454,6 +457,7 @@ defineExpose({ setLocale })
   gap: 4px;
   flex-shrink: 0;
 }
+.t-admin-header__chat,
 .t-admin-header__notification,
 .t-admin-header__user {
   display: flex;

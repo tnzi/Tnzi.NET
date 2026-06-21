@@ -27,6 +27,8 @@ public class UserListItemDto
 /// </summary>
 public class UserDto : UserListItemDto
 {
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
     public string? Nickname { get; set; }
     public string? Avatar { get; set; }
     public Guid? AvatarId { get; set; }
@@ -68,7 +70,9 @@ public class UpdateUserDto
     public string? Email { get; set; }
     
     public string? PhoneNumber { get; set; }
-    
+
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
     public string? Nickname { get; set; }
     public string? AvatarUrl { get; set; }
     [FileField]

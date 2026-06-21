@@ -16,7 +16,6 @@ global using Tnzi.Audit.Dtos;
 global using Tnzi.Audit.Entities;
 global using Tnzi.Audit.Options;
 global using Tnzi.Audit.Services;
-global using Tnzi.Audit.Settings;
 global using Tnzi.Settings;
 global using Tnzi.Data;
 global using Tnzi.Domain.Repositories;

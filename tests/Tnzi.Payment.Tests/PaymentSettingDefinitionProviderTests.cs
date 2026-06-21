@@ -3,51 +3,47 @@ using Tnzi.Payment.Options;
 namespace Tnzi.Payment.Tests;
 
 /// <summary>
-/// PaymentSettingDefinitionProvider 结构测试 — 验证 provider 注册字段符合配置中心契约
+/// PaymentOptions 配置中心特性测试 — 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
 /// </summary>
 public class PaymentSettingDefinitionProviderTests
 {
-    private readonly PaymentSettingDefinitionProvider _provider = new();
+    private readonly SettingDefinitionGroup _group =
+        RuntimeSettingMetadataExtractor.Extract(typeof(PaymentOptions))!;
 
     [Fact]
-    public void GetGroups_ReturnsOneGroup()
+    public void Extract_ReturnsNonNull()
     {
-        var groups = _provider.GetGroups();
-        Assert.Single(groups);
+        Assert.NotNull(_group);
     }
 
     [Fact]
     public void Group_HasExpectedKey()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("payment-general", group.Key);
+        Assert.Equal("payment-general", _group.Key);
     }
 
     [Fact]
     public void Group_HasExpectedModuleName()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("Payment", group.ModuleName);
+        Assert.Equal("Payment", _group.ModuleName);
     }
 
     [Fact]
     public void Group_HasExpectedOrder()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(500, group.Order);
+        Assert.Equal(500, _group.Order);
     }
 
     [Fact]
     public void Group_HasFiveFields()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(5, group.Fields.Count);
+        Assert.Equal(5, _group.Fields.Count);
     }
 
     [Fact]
     public void Fields_HaveCorrectKeys()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var fields = _group.Fields;
         Assert.Contains(fields, f => f.Key == "Payment:DefaultCurrency");
         Assert.Contains(fields, f => f.Key == "Payment:DefaultNotifyUrl");
         Assert.Contains(fields, f => f.Key == "Payment:EnableRefundApproval");
@@ -58,7 +54,7 @@ public class PaymentSettingDefinitionProviderTests
     [Fact]
     public void Fields_HaveCorrectTypes()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var fields = _group.Fields;
         Assert.Equal(SettingFieldType.String, fields.First(f => f.Key == "Payment:DefaultCurrency").Type);
         Assert.Equal(SettingFieldType.String, fields.First(f => f.Key == "Payment:DefaultNotifyUrl").Type);
         Assert.Equal(SettingFieldType.Boolean, fields.First(f => f.Key == "Payment:EnableRefundApproval").Type);
@@ -69,7 +65,7 @@ public class PaymentSettingDefinitionProviderTests
     [Fact]
     public void DefaultValueAccessors_ReturnExpectedDefaults()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var fields = _group.Fields;
 
         var currency = fields.First(f => f.Key == "Payment:DefaultCurrency");
         Assert.NotNull(currency.DefaultValueAccessor);
@@ -77,7 +73,7 @@ public class PaymentSettingDefinitionProviderTests
 
         var approval = fields.First(f => f.Key == "Payment:EnableRefundApproval");
         Assert.NotNull(approval.DefaultValueAccessor);
-        Assert.Equal("true", approval.DefaultValueAccessor!());
+        Assert.Equal("True", approval.DefaultValueAccessor!());
 
         var threshold = fields.First(f => f.Key == "Payment:RefundApprovalThreshold");
         Assert.NotNull(threshold.DefaultValueAccessor);
@@ -91,7 +87,6 @@ public class PaymentSettingDefinitionProviderTests
     [Fact]
     public void Fields_HaveI18nKeys()
     {
-        var fields = _provider.GetGroups()[0].Fields;
-        Assert.All(fields, f => Assert.NotNull(f.I18nKey));
+        Assert.All(_group.Fields, f => Assert.NotNull(f.I18nKey));
     }
 }

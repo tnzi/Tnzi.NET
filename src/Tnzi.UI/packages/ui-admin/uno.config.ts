@@ -51,6 +51,18 @@ export default defineConfig({
 
   safelist: [],
 
+  // presetWind4 mis-compiles `font-[family-name:var(--tnzi-font-mono)]` into an
+  // invalid `font-family:family-name:var(...)` — it does NOT strip Tailwind's
+  // `family-name:` data-type hint — which corrupts the whole compiled
+  // dist/style.css under a strict postcss parser (consumer dev server
+  // white-screens on the very first transform). Pages use the plain `tnzi-mono`
+  // class instead; provide it as raw CSS here so the token semantics survive.
+  preflights: [
+    {
+      getCSS: () => '.tnzi-mono{font-family:var(--tnzi-font-mono)}',
+    },
+  ],
+
   content: {
     filesystem: ['./src/**/*.{vue,ts,tsx}'],
   },

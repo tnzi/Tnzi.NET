@@ -22,13 +22,8 @@ public class DefaultQuotaController : ApiControllerBase
     [HttpGet("me")]
     public virtual async Task<ApiResult<UserQuotaDto>> GetMyQuota(CancellationToken ct = default)
     {
-        var userId = GetRequiredCurrentUser().Id;
-        if (!userId.HasValue)
-        {
-            throw new BusinessException("Authentication required", "Unauthorized", 401);
-        }
-
-        var result = await QuotaService.GetQuotaAsync(userId.Value, ct);
+        var userId = AiControllerHelpers.RequireUserId(GetRequiredCurrentUser());
+        var result = await QuotaService.GetQuotaAsync(userId, ct);
         return result.ToApiResult();
     }
 }

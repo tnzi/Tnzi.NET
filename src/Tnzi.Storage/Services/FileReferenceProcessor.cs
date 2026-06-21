@@ -10,16 +10,19 @@ public class FileReferenceProcessor : IFileReferenceProcessor
     private readonly IRepository<FileRecord, Guid> _fileRepository;
     private readonly IEventBus? _eventBus;
     private readonly ILogger<FileReferenceProcessor> _logger;
+    private readonly StorageOptions _options;
 
     public FileReferenceProcessor(
         IRepository<FileReference, Guid> referenceRepository,
         IRepository<FileRecord, Guid> fileRepository,
         ILogger<FileReferenceProcessor> logger,
+        IOptions<StorageOptions> options,
         IEventBus? eventBus = null)
     {
         _referenceRepository = Check.NotNull(referenceRepository);
         _fileRepository = Check.NotNull(fileRepository);
         _logger = Check.NotNull(logger);
+        _options = Check.NotNull(options).Value;
         _eventBus = eventBus;
     }
 
@@ -28,6 +31,10 @@ public class FileReferenceProcessor : IFileReferenceProcessor
     /// </summary>
     public async Task ProcessChangesAsync(IReadOnlyList<FileReferenceChange> changes, CancellationToken cancellationToken = default)
     {
+        // 引用追踪开关：关闭时跳过自动 [FileField] 追踪与手动引用处理
+        if (!_options.EnableFileReference)
+            return;
+
         if (!changes.Any())
             return;
 
@@ -64,12 +71,7 @@ public class FileReferenceProcessor : IFileReferenceProcessor
                         IsTemporary = false
                     };
 
-                    _logger.LogInformation("Inserting FileReference: FileId={FileId}, EntityType={EntityType}, EntityId={EntityId}",
-                        change.FileId, change.EntityType, change.EntityId);
-
                     await _referenceRepository.InsertAsync(reference, cancellationToken);
-
-                    _logger.LogInformation("FileReference inserted with Id={Id}", reference.Id);
 
                     // 增加引用计数
                     var fileRecord = await _fileRepository.GetAsync(change.FileId, cancellationToken);
@@ -77,7 +79,7 @@ public class FileReferenceProcessor : IFileReferenceProcessor
                     {
                         fileRecord.ReferenceCount++;
                         await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
-                        _logger.LogInformation("FileRecord.ReferenceCount updated to {Count}", fileRecord.ReferenceCount);
+                        _logger.LogDebug("FileRecord.ReferenceCount updated to {Count}", fileRecord.ReferenceCount);
                     }
                     else
                     {

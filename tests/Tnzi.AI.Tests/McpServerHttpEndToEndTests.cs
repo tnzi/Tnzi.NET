@@ -73,12 +73,23 @@ public class McpServerHttpEndToEndTests
             tools.Select(x => x.Name).ShouldContain("echo");
 
             var tool = tools.Single(x => x.Name == "echo");
+
+            // Single-path coverage: a real HTTP tools/call dispatches through
+            // McpServerHost.CallToolAsync → InvokeCustomToolAsync (the one execution
+            // path with rate-limit/audit guards). BuildCustomTool's closure is only
+            // protocol metadata for tools/list and is never the runtime path here.
             var response = await InvokeToolTextAsync(tool, new Dictionary<string, object?>
             {
                 ["message"] = "hello"
             });
-
             response.ShouldBe("echo:hello");
+
+            // Re-invoke through the same guarded path with different input.
+            var second = await InvokeToolTextAsync(tool, new Dictionary<string, object?>
+            {
+                ["message"] = "world"
+            });
+            second.ShouldBe("echo:world");
         }
         finally
         {

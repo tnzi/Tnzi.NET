@@ -39,6 +39,19 @@ public partial class WorkflowEngine
         // 处理通用中断（CheckInterruptAsync 返回 AwaitingInterrupt）
         if (result.AwaitingInterrupt != null && !failed && !awaitingApproval)
         {
+            // Runtime backstop for interrupt/HITL nodes. The static HasHitlNode entry guard
+            // only catches declared approval nodes (RequiresApproval / nodeType=approval);
+            // a custom node can raise an interrupt via CheckInterruptAsync without those
+            // markers. Any interrupt needs a checkpoint store to persist resumable state —
+            // non-DAG modes have none, so setting an awaiting state here would break with no
+            // way to resume (silent hang). Fail fast instead.
+            if (checkpointStore == null)
+            {
+                throw new BusinessException(
+                    "Interrupt/HITL nodes require DAG execution mode",
+                    ErrorCodes.WorkflowExecutionInvalidState, 400);
+            }
+
             awaitingInterrupt = result.AwaitingInterrupt;
 
             // Approval 类型中断保持向后兼容
@@ -198,6 +211,14 @@ public partial class WorkflowEngine
                 selectedReachable.Add(selectedDownstream);
             }
 
+            // Nodes belonging to a currently-active loop must NOT be force-marked completed by
+            // branch pruning — loop iteration (HandleLoop) owns their completion lifecycle by
+            // removing them from `completed` to re-run. A loop is "active" when it contains the
+            // routing node (fromNodeId) or the selected target. Without this guard, an alternate
+            // branch node that happens to live inside the active loop would be wrongly skipped,
+            // breaking the loop's next iteration.
+            var activeLoopNodes = CollectActiveLoopNodeIds(graph, fromNodeId, targetNodeId, selectedReachable);
+
             var alternateRoots = edge.Routes.Values
                 .Append(edge.DefaultTarget)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -216,6 +237,13 @@ public partial class WorkflowEngine
                 {
                     if (selectedReachable.Contains(downstream) || completed.Contains(downstream))
                     {
+                        continue;
+                    }
+
+                    // Skip nodes inside an active loop — leave their state to HandleLoop.
+                    if (activeLoopNodes.Contains(downstream))
+                    {
+                        _logger.LogDebug("Conditional edge: not skipping '{Node}' (member of an active loop)", downstream);
                         continue;
                     }
 
@@ -244,6 +272,40 @@ public partial class WorkflowEngine
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 收集「当前激活循环」内的全部节点 ID，用于在条件边分支裁剪时显式排除它们。
+    /// 一个循环视为「激活」的判定：该循环包含路由节点（<paramref name="fromNodeId"/>）、
+    /// 或包含被选中的目标节点（<paramref name="targetNodeId"/>）、或其任一成员落在被选中路径
+    /// （<paramref name="selectedReachable"/>）内。激活循环内的节点完成态由 <see cref="HandleLoop"/>
+    /// 通过从 completed 集合移除来管理，故分支裁剪不得将其误标完成。
+    /// </summary>
+    private static HashSet<string> CollectActiveLoopNodeIds(
+        WorkflowGraph graph,
+        string fromNodeId,
+        string targetNodeId,
+        IReadOnlySet<string> selectedReachable)
+    {
+        var activeLoopNodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (graph.Loops.Count == 0) return activeLoopNodes;
+
+        foreach (var (_, loopDef) in graph.Loops)
+        {
+            var isActive = loopDef.NodeIds.Any(id =>
+                string.Equals(id, fromNodeId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(id, targetNodeId, StringComparison.OrdinalIgnoreCase)
+                || selectedReachable.Contains(id));
+
+            if (!isActive) continue;
+
+            foreach (var id in loopDef.NodeIds)
+            {
+                activeLoopNodes.Add(id);
+            }
+        }
+
+        return activeLoopNodes;
     }
 
     /// <summary>
@@ -293,9 +355,14 @@ public partial class WorkflowEngine
     }
 
     /// <summary>
-    /// 简单条件评估（fail-closed）：
+    /// 简单条件评估（fail-closed 真值门控）：
     /// 空/纯空白 = 无条件 → 执行；非空时仅白名单 "true"/"1"/"yes" 判真；
     /// 含未解析模板占位符（{{...}}）或任意其他文本（如 LLM 自由输出）一律判假并告警。
+    /// <para>
+    /// 注意：这与 <see cref="Nodes.ConditionalNode"/> 的 <c>ResolveRouteValue</c> 语义不同——
+    /// 本方法决定「节点是否执行」（布尔门控，fail-closed）；<c>ResolveRouteValue</c> 决定
+    /// 「条件边路由到哪个目标节点」（自由值路由键解析）。两者职责不可互换。
+    /// </para>
     /// </summary>
     private bool EvaluateCondition(string condition)
     {
@@ -402,31 +469,10 @@ public partial class WorkflowEngine
         return WorkflowNodeTypes.Agent;
     }
 
+    // Node input summary uses the shared WorkflowNodeHelper.BuildStepInput (single
+    // canonical implementation, also consumed by AgentNode) to avoid triplicated logic.
     private static string BuildNodeInputSummary(WorkflowStepDto step, WorkflowState state)
-    {
-        if (step.DependsOn == null || step.DependsOn.Count == 0)
-        {
-            return state.InitialInput;
-        }
-
-        if (step.DependsOn.Count == 1)
-        {
-            return state.GetOutput(step.DependsOn[0])?.Text ?? state.InitialInput;
-        }
-
-        var builder = new StringBuilder();
-        foreach (var depId in step.DependsOn)
-        {
-            var output = state.GetOutput(depId);
-            if (output == null || string.IsNullOrWhiteSpace(output.Text)) continue;
-
-            if (builder.Length > 0) builder.AppendLine();
-            builder.AppendLine($"[{depId}]");
-            builder.AppendLine(output.Text);
-        }
-
-        return builder.Length > 0 ? builder.ToString().TrimEnd() : state.InitialInput;
-    }
+        => WorkflowNodeHelper.BuildStepInput(step, state);
 
     private static async Task<AgentRun> GetOrCreateRunAsync(
         IRunStore runStore,

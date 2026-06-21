@@ -262,8 +262,6 @@ public sealed class ChannelManagerTenantFlowTests : IDisposable
         public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SendAsync(OutboundMessage message, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-            => Task.FromResult(false);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

@@ -23,9 +23,7 @@ public class SignalRModule : TnziFrameworkModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<SignalROptions>()
-            .Bind(context.Configuration.GetSection("SignalR"))
-            .ValidateWith<SignalROptions, SignalROptionsValidator>();
+        context.Services.AddTnziOptions<SignalROptions, SignalROptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

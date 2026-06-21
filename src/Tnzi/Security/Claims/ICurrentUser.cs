@@ -20,5 +20,17 @@ public interface ICurrentUser
     string? PhoneNumber => null;
 
     bool IsInRole(string roleName);
+
+    /// <summary>
+    /// 查找指定类型的首个 claim 值；不存在时返回 null。
+    /// 默认实现返回 null；承载 claim 的实现（如 HttpContextCurrentUser）覆盖此方法。
+    /// </summary>
+    string? FindClaim(string claimType) => null;
+
+    /// <summary>
+    /// 查找指定类型的全部 claim 值；不存在时返回空数组。
+    /// 用于读取应用自定义的多值 claim（如空格分隔角色、scope 等）。
+    /// </summary>
+    string[] FindClaims(string claimType) => Array.Empty<string>();
 }
 

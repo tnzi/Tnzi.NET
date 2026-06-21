@@ -259,7 +259,14 @@ public class McpServerSecurityMiddleware
         string? callerApiKeyId = null,
         CancellationToken ct = default)
     {
-        if (!_options.Value.EnableAuditLog)
+        var config = _options.Value;
+        var auditEnabled = config.EnableAuditLog;
+        var analyticsEnabled = config.EnableToolAnalytics;
+
+        // Audit log and operational analytics are gated INDEPENDENTLY: disabling the
+        // audit log (IUsageLogService) must NOT silently disable per-tool analytics
+        // (IMcpToolAnalyticsService) and vice versa. Skip the scope only when both are off.
+        if (!auditEnabled && !analyticsEnabled)
         {
             return;
         }
@@ -268,27 +275,33 @@ public class McpServerSecurityMiddleware
         {
             using var scope = _serviceProvider.CreateScope();
 
-            var usageLogService = scope.ServiceProvider.GetService<IUsageLogService>();
-            if (usageLogService != null)
+            if (auditEnabled)
             {
-                await usageLogService.LogUsageAsync(
-                    operationType: "McpToolCall",
-                    provider: "mcp-server",
-                    model: toolName,
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    durationMs: durationMs,
-                    isSuccess: isSuccess,
-                    errorMessage: errorMessage,
-                    agentId: agentId,
-                    ct: ct);
+                var usageLogService = scope.ServiceProvider.GetService<IUsageLogService>();
+                if (usageLogService != null)
+                {
+                    await usageLogService.LogUsageAsync(
+                        operationType: "McpToolCall",
+                        provider: "mcp-server",
+                        model: toolName,
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        durationMs: durationMs,
+                        isSuccess: isSuccess,
+                        errorMessage: errorMessage,
+                        agentId: agentId,
+                        ct: ct);
+                }
             }
 
-            // Also record to MCP-specific analytics for tool stats/popularity/errors
-            var analyticsService = scope.ServiceProvider.GetService<IMcpToolAnalyticsService>();
-            if (analyticsService != null)
+            // Per-tool operational analytics (stats/popularity/errors), independent of EnableAuditLog
+            if (analyticsEnabled)
             {
-                await analyticsService.RecordUsageAsync(toolName, durationMs, isSuccess, errorMessage, callerApiKeyId);
+                var analyticsService = scope.ServiceProvider.GetService<IMcpToolAnalyticsService>();
+                if (analyticsService != null)
+                {
+                    await analyticsService.RecordUsageAsync(toolName, durationMs, isSuccess, errorMessage, callerApiKeyId);
+                }
             }
         }
         catch (Exception ex)

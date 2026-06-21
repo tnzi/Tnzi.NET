@@ -28,7 +28,6 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public string Name => "discord";
     public bool SupportsStreaming => false;
-    public bool SupportsFileAttachment => true;
 
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
@@ -323,32 +322,6 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             ct);
     }
 
-    public async Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-    {
-        if (!System.IO.File.Exists(attachment.ActualPath))
-        {
-            _logger.LogWarning("Attachment file not found: {Path}", attachment.ActualPath);
-            return false;
-        }
-
-        if (attachment.Size > _options.MaxFileSize)
-        {
-            _logger.LogWarning("Attachment too large ({Size} bytes): {FileName}", attachment.Size, attachment.FileName);
-            return false;
-        }
-
-        try
-        {
-            await UploadFileAsync(message.ChatId, attachment, message.ThreadTs, ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to upload file to Discord: {FileName}", attachment.FileName);
-            return false;
-        }
-    }
-
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
@@ -359,7 +332,7 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     /// </summary>
     private async Task PostMessageAsync(string channelId, string content, string? threadTs, CancellationToken ct)
     {
-        var client = CreateAuthorizedClient();
+        var client = CreateClient();
 
         var payload = new Dictionary<string, object?>
         {
@@ -375,7 +348,15 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             };
         }
 
-        var response = await client.PostAsJsonAsync($"{BaseUrl}/channels/{channelId}/messages", payload, ct);
+        // Set Authorization per-request — the named HttpClient is pooled and its
+        // DefaultRequestHeaders must not be mutated across concurrent sends.
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/channels/{channelId}/messages")
+        {
+            Headers = { Authorization = new AuthenticationHeaderValue("Bot", _options.BotToken) },
+            Content = JsonContent.Create(payload)
+        };
+
+        var response = await client.SendAsync(request, ct);
         var responseBody = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
@@ -387,44 +368,8 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     }
 
     /// <summary>
-    /// 调用 Discord REST API 上传文件（multipart/form-data）
+    /// 获取命名 HttpClient（Authorization 头由每次请求单独设置，不触碰池化客户端的默认头）。
     /// </summary>
-    private async Task UploadFileAsync(string channelId, ResolvedAttachment attachment, string? threadTs, CancellationToken ct)
-    {
-        var client = CreateAuthorizedClient();
-
-        await using var stream = System.IO.File.OpenRead(attachment.ActualPath);
-        using var content = new MultipartFormDataContent();
-
-        content.Add(new StreamContent(stream), "files[0]", attachment.FileName);
-
-        // 可选的 JSON payload（用于 message_reference）
-        if (!string.IsNullOrWhiteSpace(threadTs))
-        {
-            var payloadJson = JsonSerializer.Serialize(new
-            {
-                message_reference = new { message_id = threadTs }
-            });
-            content.Add(new StringContent(payloadJson, System.Text.Encoding.UTF8, "application/json"), "payload_json");
-        }
-
-        var response = await client.PostAsync($"{BaseUrl}/channels/{channelId}/messages", content, ct);
-        var responseBody = await response.Content.ReadAsStringAsync(ct);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogWarning("Discord file upload HTTP error: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new HttpRequestException($"Discord file upload returned {response.StatusCode}");
-        }
-    }
-
-    /// <summary>
-    /// 创建带 Bot Token 授权头的 HttpClient
-    /// </summary>
-    private HttpClient CreateAuthorizedClient()
-    {
-        var client = _httpClientFactory.CreateClient("Tnzi.AI.Discord");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bot", _options.BotToken);
-        return client;
-    }
+    private HttpClient CreateClient()
+        => _httpClientFactory.CreateClient("Tnzi.AI.Discord");
 }

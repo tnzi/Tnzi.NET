@@ -36,9 +36,15 @@ public class SummarizationTrigger
 /// <summary>
 /// 上下文保留配置
 /// </summary>
+[ConfigSection("AI:Summarization:Keep")]
+[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "AI Summarization",
+    I18nKey = "admin.modules.system.settings.groups.aiSummarization", Icon = "mdi:text-short", Order = 140)]
 public class ContextRetention
 {
     /// <summary>保留最近 N 条完整消息（不参与摘要）</summary>
+    [RuntimeSetting(Label = "Keep Last Messages", I18n = "admin.modules.system.settings.fields.summarizationKeepLastMessages",
+        Type = SettingFieldType.Int, Min = 1, Max = 50,
+        Description = "Number of recent messages preserved verbatim (not included in summary)")]
     public int KeepLastMessages { get; set; } = 6;
 
     /// <summary>始终保留系统消息</summary>
@@ -48,9 +54,14 @@ public class ContextRetention
 /// <summary>
 /// 对话摘要配置选项
 /// </summary>
+[ConfigSection("AI:Summarization")]
+[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "AI Summarization",
+    I18nKey = "admin.modules.system.settings.groups.aiSummarization", Icon = "mdi:text-short", Order = 140)]
 public class SummarizationOptions
 {
     /// <summary>是否启用摘要（默认关闭）</summary>
+    [RuntimeSetting(Label = "Summarization Enabled", I18n = "admin.modules.system.settings.fields.summarizationEnabled",
+        Type = SettingFieldType.Boolean)]
     public bool Enabled { get; set; }
 
     /// <summary>触发条件</summary>
@@ -60,6 +71,9 @@ public class SummarizationOptions
     public ContextRetention Keep { get; set; } = new();
 
     /// <summary>参与摘要的最少 token 数（低于此值不触发摘要）</summary>
+    [RuntimeSetting(Label = "Min Tokens to Summarize", I18n = "admin.modules.system.settings.fields.summarizationTrimTokensToSummarize",
+        Type = SettingFieldType.Int, Min = 100, Max = 100_000,
+        Description = "Minimum token count before summarization is triggered")]
     public int TrimTokensToSummarize { get; set; } = 4000;
 
     /// <summary>摘要用的模型名称（null=使用当前 Agent 的模型）</summary>
@@ -69,11 +83,20 @@ public class SummarizationOptions
     public string? SummaryPrompt { get; set; }
 
     /// <summary>模型上下文窗口大小（token 数，用于 Fraction 触发计算）</summary>
+    [RuntimeSetting(Label = "Model Context Window", I18n = "admin.modules.system.settings.fields.summarizationModelContextWindow",
+        Type = SettingFieldType.Int, Min = 1_000, Max = 2_000_000,
+        Description = "Context window size in tokens used for fraction-based trigger calculation")]
     public int ModelContextWindow { get; set; } = 128_000;
 
     /// <summary>是否启用 MicroCompact（每次执行前清理过期工具结果）。默认 true。</summary>
+    [RuntimeSetting(Label = "Enable Micro-Compact", I18n = "admin.modules.system.settings.fields.summarizationEnableMicroCompact",
+        Type = SettingFieldType.Boolean,
+        Description = "Trim stale tool results before each execution to reduce context size")]
     public bool EnableMicroCompact { get; set; } = true;
 
     /// <summary>MicroCompact 保留最近的工具结果消息数。默认 5。</summary>
+    [RuntimeSetting(Label = "Keep Recent Tool Results", I18n = "admin.modules.system.settings.fields.summarizationKeepRecentToolResults",
+        Type = SettingFieldType.Int, Min = 1, Max = 50,
+        Description = "Number of recent tool result messages retained during micro-compact")]
     public int KeepRecentToolResults { get; set; } = 5;
 }

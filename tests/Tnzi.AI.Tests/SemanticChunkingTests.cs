@@ -162,6 +162,64 @@ public class SemanticChunkingStrategyTests
     }
 
     [Fact]
+    public async Task ChunkAsync_WithRagOptions_AlignsEmbeddingProviderAndModel()
+    {
+        // 提供 ragOptions 时，句子嵌入须按 RAG 默认 provider/model 对齐（向量空间一致性）
+        var text = "Cats are great pets. Python is a programming language.";
+
+        EmbeddingOptions? capturedOptions = null;
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback<List<string>, EmbeddingOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(Result<List<float[]>>.Success(new List<float[]>
+            {
+                MakeVector(1f, 0f, 0f),
+                MakeVector(0f, 1f, 0f)
+            }));
+
+        var ragOptions = Microsoft.Extensions.Options.Options.Create(new AIRagOptions
+        {
+            DefaultEmbeddingProvider = "rag-embed-provider",
+            DefaultEmbeddingModel = "rag-embed-model"
+        });
+
+        var strategy = new SemanticChunkingStrategy(
+            _embeddingServiceMock.Object, _loggerMock.Object,
+            similarityThreshold: 0.5, minChunkSize: 10, ragOptions: ragOptions);
+
+        await strategy.ChunkAsync(text, chunkSize: 30, chunkOverlap: 0);
+
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions!.Provider.ShouldBe("rag-embed-provider");
+        capturedOptions.Model.ShouldBe("rag-embed-model");
+    }
+
+    [Fact]
+    public async Task ChunkAsync_WithoutRagOptions_PassesNullEmbeddingOptions()
+    {
+        // 不提供 ragOptions 时回退到 null（AI 顶层默认 provider），保持向后兼容
+        var text = "Cats are great pets. Python is a programming language.";
+
+        EmbeddingOptions? capturedOptions = new EmbeddingOptions { Provider = "sentinel" };
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback<List<string>, EmbeddingOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(Result<List<float[]>>.Success(new List<float[]>
+            {
+                MakeVector(1f, 0f, 0f),
+                MakeVector(0f, 1f, 0f)
+            }));
+
+        var strategy = new SemanticChunkingStrategy(
+            _embeddingServiceMock.Object, _loggerMock.Object,
+            similarityThreshold: 0.5, minChunkSize: 10);
+
+        await strategy.ChunkAsync(text, chunkSize: 30, chunkOverlap: 0);
+
+        capturedOptions.ShouldBeNull();
+    }
+
+    [Fact]
     public void SplitIntoSentences_SplitsCorrectly()
     {
         var text = "Hello world. How are you? I'm fine! Great\nNew line here.";

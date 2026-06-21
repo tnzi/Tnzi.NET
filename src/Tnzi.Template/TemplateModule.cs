@@ -19,9 +19,7 @@ public class TemplateModule : TnziApplicationModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<TemplateOptions>()
-            .Bind(context.Configuration.GetSection("Template"))
-            .ValidateWith<TemplateOptions, TemplateOptionsValidator>();
+        context.Services.AddTnziOptions<TemplateOptions, TemplateOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

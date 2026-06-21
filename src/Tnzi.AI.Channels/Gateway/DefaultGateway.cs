@@ -67,9 +67,11 @@ public class DefaultGateway : IGateway
         }
         catch (Exception ex)
         {
+            // Do not echo internal exception details to the caller — log them server-side,
+            // return a generic error (parity with ProcessStreamingAsync).
             _logger.LogError(ex, "Gateway ProcessAsync failed for channel={Channel} chatId={ChatId}",
                 request.Channel, request.ChatId);
-            return new GatewayResponse { Success = false, Error = ex.Message };
+            return new GatewayResponse { Success = false, Error = "error" };
         }
     }
 

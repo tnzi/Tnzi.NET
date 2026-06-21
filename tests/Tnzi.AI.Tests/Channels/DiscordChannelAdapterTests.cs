@@ -454,50 +454,6 @@ public class DiscordChannelAdapterTests
     }
 
     [Fact]
-    public async Task SendFileAsync_FileNotFound_ReturnsFalse()
-    {
-        var adapter = CreateAdapter();
-        var attachment = new ResolvedAttachment(
-            VirtualPath: "/test.txt",
-            ActualPath: "/nonexistent/test.txt",
-            FileName: "test.txt",
-            ContentType: "text/plain",
-            Size: 100,
-            IsImage: false);
-
-        var message = new OutboundMessage(
-            ChannelName: "discord",
-            ChatId: "C001",
-            ThreadId: Guid.NewGuid(),
-            Text: "");
-
-        var result = await adapter.SendFileAsync(message, attachment);
-        result.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task SendFileAsync_TooLarge_ReturnsFalse()
-    {
-        var adapter = CreateAdapter();
-        var attachment = new ResolvedAttachment(
-            VirtualPath: "/large.bin",
-            ActualPath: "/nonexistent/large.bin",
-            FileName: "large.bin",
-            ContentType: "application/octet-stream",
-            Size: 50 * 1024 * 1024, // 50MB, exceeds default 25MB
-            IsImage: false);
-
-        var message = new OutboundMessage(
-            ChannelName: "discord",
-            ChatId: "C001",
-            ThreadId: Guid.NewGuid(),
-            Text: "");
-
-        var result = await adapter.SendFileAsync(message, attachment);
-        result.ShouldBeFalse();
-    }
-
-    [Fact]
     public void ChannelsModule_RegistersDiscord()
     {
         var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/ChannelsModule.cs");

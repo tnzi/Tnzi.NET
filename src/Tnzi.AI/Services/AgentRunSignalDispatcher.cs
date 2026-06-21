@@ -8,18 +8,24 @@ public class AgentRunSignalDispatcher : IAgentRunSignalDispatcher
 {
     private readonly IRunStore _runStore;
     private readonly IAgentRunService _agentRunService;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IWorkflowExecutionControlService? _workflowService;
+    private readonly IWorkflowExecutionQueryService? _workflowQueryService;
+    private readonly IWorkflowExecutionMailbox? _mailbox;
     private readonly ISubAgentRunCancellationRegistry? _cancellationRegistry;
 
     public AgentRunSignalDispatcher(
         IRunStore runStore,
         IAgentRunService agentRunService,
-        IServiceProvider serviceProvider,
+        IWorkflowExecutionControlService? workflowService = null,
+        IWorkflowExecutionQueryService? workflowQueryService = null,
+        IWorkflowExecutionMailbox? mailbox = null,
         ISubAgentRunCancellationRegistry? cancellationRegistry = null)
     {
         _runStore = Check.NotNull(runStore);
         _agentRunService = Check.NotNull(agentRunService);
-        _serviceProvider = Check.NotNull(serviceProvider);
+        _workflowService = workflowService;
+        _workflowQueryService = workflowQueryService;
+        _mailbox = mailbox;
         _cancellationRegistry = cancellationRegistry;
     }
 
@@ -45,11 +51,8 @@ public class AgentRunSignalDispatcher : IAgentRunSignalDispatcher
                 : Result.Failure(resumeResult.Message ?? "Failed to dispatch run input", resumeResult.Code ?? 500, resumeResult.ErrorCode);
         }
 
-        var workflowService = _serviceProvider.GetService<IWorkflowExecutionControlService>();
-        var mailbox = _serviceProvider.GetService<IWorkflowExecutionMailbox>();
-        if (workflowService == null)
-            return Result.Failure("Workflow control service is not available", 501, ErrorCodes.WorkflowFailed);
-
+        // Workflow 子接口由 DI 转发到 IWorkflowService（NoOpWorkflowService 在未加载 Workflow 模块时统一返回 501），
+        // 因此不再做 null→501 防御分支。
         if (run.Status == AgentRunStatus.RequiresClarification)
         {
             if (input.WorkflowInput == null || input.WorkflowInput.Count == 0)
@@ -58,27 +61,20 @@ public class AgentRunSignalDispatcher : IAgentRunSignalDispatcher
             var stepId = input.WorkflowStepId;
             if (string.IsNullOrWhiteSpace(stepId))
             {
-                var queryService = _serviceProvider.GetService<IWorkflowExecutionQueryService>();
-                if (queryService == null)
-                    return Result.Failure("Workflow query service is not available", 501, ErrorCodes.WorkflowFailed);
-
-                var interrupt = await queryService.GetPendingInterruptAsync(run.WorkflowExecutionId!, ct);
+                var interrupt = await _workflowQueryService!.GetPendingInterruptAsync(run.WorkflowExecutionId!, ct);
                 if (!interrupt.Succeeded || interrupt.Data == null || string.IsNullOrWhiteSpace(interrupt.Data.StepId))
                     return Result.Failure(interrupt.Message ?? "Failed to resolve workflow interrupt", interrupt.Code ?? 400, interrupt.ErrorCode);
 
                 stepId = interrupt.Data.StepId;
             }
 
-            var resume = await workflowService.ResumeWithInputAsync(run.WorkflowExecutionId!, stepId!, input.WorkflowInput, ct);
+            var resume = await _workflowService!.ResumeWithInputAsync(run.WorkflowExecutionId!, stepId!, input.WorkflowInput, ct);
             return resume.Succeeded
                 ? Result.Success()
                 : Result.Failure(resume.Message ?? "Failed to resume workflow execution", resume.Code ?? 500, resume.ErrorCode);
         }
 
-        if (mailbox == null)
-            return Result.Failure("Workflow mailbox is not available", 501, ErrorCodes.WorkflowFailed);
-
-        await mailbox.EnqueueSignalAsync(run.WorkflowExecutionId!, new WorkflowExecutionSignal
+        await _mailbox!.EnqueueSignalAsync(run.WorkflowExecutionId!, new WorkflowExecutionSignal
         {
             Type = WorkflowExecutionSignalTypes.ResumeInput,
             StepId = input.WorkflowStepId,
@@ -117,11 +113,8 @@ public class AgentRunSignalDispatcher : IAgentRunSignalDispatcher
             return Result.Success();
         }
 
-        var workflowService = _serviceProvider.GetService<IWorkflowExecutionControlService>();
-        if (workflowService == null)
-            return Result.Success();
-
-        var workflowResult = await workflowService.CancelAsync(run.WorkflowExecutionId!, $"Cancelled run {runId}", ct);
+        // 该 run 关联工作流执行：经 DI 转发的 IWorkflowExecutionControlService 取消（NoOp 在未加载 Workflow 模块时返回 501）。
+        var workflowResult = await _workflowService!.CancelAsync(run.WorkflowExecutionId!, $"Cancelled run {runId}", ct);
         return workflowResult.Succeeded
             ? Result.Success()
             : Result.Failure(workflowResult.Message ?? "Failed to cancel workflow execution", workflowResult.Code ?? 500, workflowResult.ErrorCode);

@@ -350,7 +350,7 @@ const inspectColumns = computed<DataTableColumns<EntityRoleDto>>(() => [
       row.filter
         ? h(
             'code',
-            { class: 'font-[family-name:var(--tnzi-font-mono)] text-11px' },
+            { class: 'tnzi-mono text-11px' },
             row.filter,
           )
         : '—',

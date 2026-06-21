@@ -300,13 +300,26 @@ public class AgentService : ApplicationService, IAgentService
 
     /// <summary>
     /// Set each DTO's resource lists from the authoritative grant projection.
-    /// NOTE (perf): one grant query per page item (N+1). Acceptable for the admin list page's
-    /// small page size; revisit with a batched multi-agent grant fetch if this becomes hot.
+    /// 批量获取本页全部 Agent 的授权（三表各一次 IN 查询），消除原先的逐条 N+1。
     /// </summary>
-    private async Task ApplyGrantsToPageAsync(IEnumerable<AgentDto> items)
+    private async Task ApplyGrantsToPageAsync(IList<AgentDto> items)
     {
+        if (items.Count == 0) return;
+
+        var grantsByAgent = await _grantService.GetGrantsAsync(items.Select(d => d.Id).ToList());
         foreach (var dto in items)
-            await OverrideDtoGrantsAsync(dto);
+        {
+            if (!grantsByAgent.TryGetValue(dto.Id, out var grants)) continue;
+            ApplyGrantsToDto(dto, grants);
+        }
+    }
+
+    /// <summary>把一份授权投影写入 DTO 的资源列表（空投影折叠为 null，保持 null-when-empty 语义）。</summary>
+    private static void ApplyGrantsToDto(AgentDto dto, AgentGrantsProjection grants)
+    {
+        dto.ToolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
+        dto.SkillSlugs = grants.SkillSlugs.Count > 0 ? grants.SkillSlugs.ToList() : null;
+        dto.KnowledgeBaseIds = grants.KnowledgeBaseIds.Count > 0 ? grants.KnowledgeBaseIds.ToList() : null;
     }
 
     public async Task<Result<AgentResponseDto>> RunAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default)
@@ -567,9 +580,7 @@ public class AgentService : ApplicationService, IAgentService
     private async Task OverrideDtoGrantsAsync(AgentDto dto)
     {
         var grants = await _grantService.GetGrantsAsync(dto.Id);
-        dto.ToolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
-        dto.SkillSlugs = grants.SkillSlugs.Count > 0 ? grants.SkillSlugs.ToList() : null;
-        dto.KnowledgeBaseIds = grants.KnowledgeBaseIds.Count > 0 ? grants.KnowledgeBaseIds.ToList() : null;
+        ApplyGrantsToDto(dto, grants);
     }
 }
 

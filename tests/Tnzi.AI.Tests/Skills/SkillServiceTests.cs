@@ -727,7 +727,7 @@ public class SkillServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_UserScope_DoesNotPersistTenantId()
+    public async Task CreateAsync_UserScope_PersistsCurrentTenantId()
     {
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
@@ -773,7 +773,10 @@ public class SkillServiceTests : IDisposable
 
         result.Succeeded.ShouldBeTrue();
         capturedEntity.ShouldNotBeNull();
-        capturedEntity!.TenantId.ShouldBeNull();
+        // User-scoped skills now persist the current tenant id (P1-6, 2026-06-20):
+        // required so admin tenant-isolation (ApplyTenantVisibility) and DatabaseSkillStore
+        // can scope User-scope rows to their owning tenant in multi-tenant deployments.
+        capturedEntity!.TenantId.ShouldBe(tenantId);
         capturedEntity.OwnerUserId.ShouldBe(userId);
     }
 

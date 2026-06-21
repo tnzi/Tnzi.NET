@@ -23,9 +23,7 @@ public class AIWorkflowModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<WorkflowWatchdogOptions>()
-            .Bind(context.Configuration.GetSection("AI:WorkflowWatchdog"))
-            .ValidateWith<WorkflowWatchdogOptions, WorkflowWatchdogOptionsValidator>();
+        context.Services.AddTnziOptions<WorkflowWatchdogOptions, WorkflowWatchdogOptionsValidator>(context.Configuration, "AI:WorkflowWatchdog");
 
         return Task.CompletedTask;
     }

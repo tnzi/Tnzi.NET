@@ -1,0 +1,24 @@
+namespace Tnzi.Chat.Entities;
+
+/// <summary>一条聊天消息（文本/图片/文件/系统）。软删支持撤回。</summary>
+public class ChatMessage : MultiTenantAuditedEntity<Guid>
+{
+    public Guid ConversationId { get; set; }
+
+    /// <summary>发送者；System 消息为 null。</summary>
+    public Guid? SenderId { get; set; }
+
+    public DateTime SentAt { get; set; }
+
+    public MessageContentType ContentType { get; set; } = MessageContentType.Text;
+
+    /// <summary>文本正文 / System 文本 / 图片文件可选图注。</summary>
+    public string Content { get; set; } = string.Empty;
+
+    [FileField]
+    public string? FileId { get; set; }
+    public string? FileName { get; set; }
+    public long? FileSize { get; set; }
+
+    public virtual Conversation? Conversation { get; set; }
+}

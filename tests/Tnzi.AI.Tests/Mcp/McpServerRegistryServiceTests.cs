@@ -14,6 +14,8 @@ public class McpServerRegistryServiceTests
     private readonly Mock<IMcpClientFactory> _clientFactory = new();
     private readonly Mock<IMcpServerCatalog> _catalog = new();
     private readonly Mock<IMcpToolProvider> _toolProvider = new();
+    private readonly IOptionsMonitor<AIOptions> _aiOptions =
+        Mock.Of<IOptionsMonitor<AIOptions>>(m => m.CurrentValue == new AIOptions { Mcp = { AllowPrivateEndpoints = true } });
     private readonly IServiceProvider _serviceProvider;
 
     public McpServerRegistryServiceTests()
@@ -36,6 +38,18 @@ public class McpServerRegistryServiceTests
         _clientFactory.Object,
         _catalog.Object,
         _toolProvider.Object,
+        _aiOptions,
+        _serviceProvider);
+
+    // Service with egress enforcement ON (AllowPrivateEndpoints=false) — used to assert
+    // the SSRF guard rejects private/internal ServerUrls before any DB write.
+    private McpServerRegistryService CreateServiceWithEgressEnforced() => new(
+        _repository.Object,
+        _dataProtection,
+        _clientFactory.Object,
+        _catalog.Object,
+        _toolProvider.Object,
+        Mock.Of<IOptionsMonitor<AIOptions>>(m => m.CurrentValue == new AIOptions { Mcp = { AllowPrivateEndpoints = false } }),
         _serviceProvider);
 
     private void SetupQueryable(List<McpServerRegistration> data)
@@ -188,6 +202,48 @@ public class McpServerRegistryServiceTests
         result.Code.ShouldBe(400);
         result.Message!.ShouldContain("stdio servers must be configured via deployment configuration (AI:Mcp options)");
         _repository.Verify(r => r.InsertAsync(It.IsAny<McpServerRegistration>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAsync_PrivateUrl_WithEgressEnforced_IsRejected()
+    {
+        // SSRF regression: with AllowPrivateEndpoints=false, a private/internal ServerUrl
+        // (literal RFC1918 IP — no DNS needed) must be rejected before any DB write.
+        SetupQueryable(new List<McpServerRegistration>());
+        var svc = CreateServiceWithEgressEnforced();
+
+        var result = await svc.CreateAsync(new CreateMcpServerRegistrationDto
+        {
+            Name = "internal-mcp",
+            ServerUrl = "http://10.0.0.1/sse",
+            Transport = "sse"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("rejected");
+        _repository.Verify(r => r.InsertAsync(It.IsAny<McpServerRegistration>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAsync_PrivateUrl_WithPrivateEndpointsAllowed_IsAccepted()
+    {
+        // Counterpart: AllowPrivateEndpoints=true (the trusted-internal opt-in) skips the
+        // egress check, so the same private URL is allowed through to insert.
+        SetupQueryable(new List<McpServerRegistration>());
+        _repository.Setup(r => r.InsertAsync(It.IsAny<McpServerRegistration>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var svc = CreateService(); // _aiOptions has AllowPrivateEndpoints = true
+
+        var result = await svc.CreateAsync(new CreateMcpServerRegistrationDto
+        {
+            Name = "internal-mcp",
+            ServerUrl = "http://10.0.0.1/sse",
+            Transport = "sse"
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        _repository.Verify(r => r.InsertAsync(It.IsAny<McpServerRegistration>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

@@ -50,7 +50,7 @@ public class ConditionalNode : IWorkflowNode
         var resolvedCondition = state.ResolveTemplate(condition);
 
         // 尝试从上游元数据中获取路由值
-        var routeValue = EvaluateCondition(resolvedCondition, context);
+        var routeValue = ResolveRouteValue(resolvedCondition, context);
 
         _logger.LogDebug("Conditional node '{StepId}' evaluated to route: {Route}", step.StepId, routeValue);
 
@@ -67,9 +67,16 @@ public class ConditionalNode : IWorkflowNode
     }
 
     /// <summary>
-    /// 评估条件，返回路由值
+    /// 解析条件表达式，返回 ConditionalNode 的**自由值路由键**（free-value routing）。
+    /// <para>
+    /// 注意：这与 <see cref="WorkflowEngine"/> 的 <c>EvaluateCondition</c> 语义不同——
+    /// 引擎层的 <c>EvaluateCondition</c> 是 <b>fail-closed 真值门控</b>（仅白名单
+    /// <c>true/1/yes</c> 判真，其余判假跳过节点）；本方法是 <b>路由值解析</b>，把
+    /// 上游 verdict/route 元数据或简单值原样作为下游条件边的路由键返回，无法识别时
+    /// 回退到 <c>"default"</c>。两者职责不可互换，故命名刻意区分。
+    /// </para>
     /// </summary>
-    private static string EvaluateCondition(string condition, WorkflowNodeContext context)
+    private static string ResolveRouteValue(string condition, WorkflowNodeContext context)
     {
         var trimmed = condition.Trim();
 

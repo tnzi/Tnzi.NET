@@ -27,7 +27,12 @@ import type { AdminMenuItem } from '../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { useAdminTabStore, type AdminTab } from '../stores/useAdminTabStore'
+import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useAdminLoginConfig } from '../plugin/loginConfig'
+import { useAdminChatConfig } from '../plugin/chatConfig'
+import { useAdminClient } from '../plugin/client'
+import { useStorageApi } from '@tnzi/core/services/storage'
+import { resolveAvatarUrl } from '../utils/resolveAvatarUrl'
 import { en } from '../locales/en'
 import { zhCn } from '../locales/zh-cn'
 
@@ -36,6 +41,18 @@ const route = useRoute()
 const appStore = useAdminAppStore()
 const themeStore = useAdminThemeStore()
 const tabStore = useAdminTabStore()
+const authStore = useAdminAuthStore()
+
+// Resolve the header avatar from the signed-in user (auth store). The store
+// only carries an external `avatar` link today, but routing it through
+// `resolveAvatarUrl` keeps the door open for an `avatarId`-backed picture
+// (storage preview URL) without changing this call site. `useAdminClient(false)`
+// → no throw when the shell renders before a client is provided.
+const storageClient = useAdminClient(false)
+const storageApi = storageClient ? useStorageApi(storageClient) : null
+const headerAvatarUrl = computed<string | null>(() =>
+  storageApi ? resolveAvatarUrl(authStore.userInfo, storageApi) : null,
+)
 
 /** NConfigProvider theme overrides — propagate `themeStore.themeRadius`
  *  into Naive UI's `common.borderRadius` / `borderRadiusSmall` tokens so
@@ -76,6 +93,7 @@ const naiveTheme = computed(() => (themeCtx?.isDark.value ? darkTheme : null))
 // header logo + title. Both surfaces want the same brand identity, and
 // consumers already configured this for the login page.
 const loginConfig = useAdminLoginConfig()
+const chatConfig = useAdminChatConfig()
 
 // Phase I.7.8: auto-push a tab into the tab store whenever the route
 // changes. Without this watcher the tab bar stays empty until the user
@@ -179,6 +197,7 @@ function defaultTranslate(key: string, fallback?: string): string {
       :title="loginConfig.brand ?? 'Tnzi Admin'"
       :sider="{ brand: loginConfig.brand, brandIcon: loginConfig.brandIcon }"
       :footer="{ copyright: footerCopyright, links: loginConfig.footer?.links }"
+      :builtin-chat="chatConfig?.enabled !== false"
       @menu-select="onMenuSelect"
       @open-theme-drawer="onOpenThemeDrawer"
       @locale-change="onLocaleChange"
@@ -196,7 +215,8 @@ function defaultTranslate(key: string, fallback?: string): string {
     <!-- Header user avatar (Phase I.7.7+) — wired from `useAdminLoginConfig().user`. -->
     <template #header-user>
       <TAdminUserAvatar
-        :user-name="loginConfig.user?.userName"
+        :user-name="authStore.userInfo?.displayName || authStore.userInfo?.username || loginConfig.user?.userName"
+        :avatar-url="headerAvatarUrl"
         :avatar-icon="loginConfig.user?.avatarIcon"
         :on-user-center="loginConfig.user?.onUserCenter ?? goUserCenter"
         :on-logout="loginConfig.user?.onLogout"

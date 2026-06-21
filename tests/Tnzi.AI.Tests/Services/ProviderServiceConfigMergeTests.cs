@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
 using System.Net.Http;
+using Tnzi.AI.Constants;
 
 namespace Tnzi.AI.Tests.Services;
 

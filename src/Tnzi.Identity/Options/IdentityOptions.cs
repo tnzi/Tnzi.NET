@@ -109,6 +109,14 @@ public class JwtOptions
 /// 登录配置选项
 /// 注意：使用 Tnzi 前缀避免与 Microsoft.AspNetCore.Identity.SignInOptions 冲突
 /// </summary>
+[ConfigSection("Identity:SignIn")]
+[RuntimeSettingGroup(
+    Key = "identity-registration",
+    Module = "Identity",
+    DisplayName = "Registration & Sign-in",
+    I18nKey = "admin.modules.system.settings.groups.identityRegistration",
+    Icon = "mdi:account-plus-outline",
+    Order = 210)]
 public class TnziSignInOptions
 {
     /// <summary>
@@ -119,16 +127,19 @@ public class TnziSignInOptions
     /// <summary>
     /// 是否允许用户名登录
     /// </summary>
+    [RuntimeSetting(Label = "Allow Username Login", I18n = "admin.modules.system.settings.fields.allowUserNameLogin", Type = SettingFieldType.Boolean)]
     public bool AllowUserNameLogin { get; set; } = true;
 
     /// <summary>
     /// 是否允许邮箱登录
     /// </summary>
+    [RuntimeSetting(Label = "Allow Email Login", I18n = "admin.modules.system.settings.fields.allowEmailLogin", Type = SettingFieldType.Boolean)]
     public bool AllowEmailLogin { get; set; } = true;
 
     /// <summary>
     /// 是否允许SMS登录
     /// </summary>
+    [RuntimeSetting(Label = "Allow SMS Login", I18n = "admin.modules.system.settings.fields.allowSmsLogin", Type = SettingFieldType.Boolean)]
     public bool AllowSmsLogin { get; set; } = false;
 
     /// <summary>
@@ -140,16 +151,26 @@ public class TnziSignInOptions
 /// <summary>
 /// 注册配置选项
 /// </summary>
+[ConfigSection("Identity:Registration")]
+[RuntimeSettingGroup(
+    Key = "identity-registration",
+    Module = "Identity",
+    DisplayName = "Registration & Sign-in",
+    I18nKey = "admin.modules.system.settings.groups.identityRegistration",
+    Icon = "mdi:account-plus-outline",
+    Order = 210)]
 public class RegistrationOptions
 {
     /// <summary>
     /// 是否启用邮箱快速注册
     /// </summary>
+    [RuntimeSetting(Label = "Enable Quick Register (Email)", I18n = "admin.modules.system.settings.fields.enableQuickRegisterEmail", Type = SettingFieldType.Boolean)]
     public bool EnableQuickRegisterEmail { get; set; } = false;
 
     /// <summary>
     /// 是否启用SMS快速注册
     /// </summary>
+    [RuntimeSetting(Label = "Enable Quick Register (SMS)", I18n = "admin.modules.system.settings.fields.enableQuickRegisterSms", Type = SettingFieldType.Boolean)]
     public bool EnableQuickRegisterSms { get; set; } = false;
 
     /// <summary>
@@ -160,11 +181,13 @@ public class RegistrationOptions
     /// <summary>
     /// 是否要求确认邮箱
     /// </summary>
+    [RuntimeSetting(Label = "Require Email Confirmation", I18n = "admin.modules.system.settings.fields.requireConfirmedEmail", Type = SettingFieldType.Boolean)]
     public bool RequireConfirmedEmail { get; set; } = false;
 
     /// <summary>
     /// 是否要求确认手机
     /// </summary>
+    [RuntimeSetting(Label = "Require Phone Confirmation", I18n = "admin.modules.system.settings.fields.requireConfirmedPhone", Type = SettingFieldType.Boolean)]
     public bool RequireConfirmedPhone { get; set; } = false;
 
     /// <summary>
@@ -355,6 +378,14 @@ public class PasswordPolicyOptions
 /// <summary>
 /// 账户安全配置选项
 /// </summary>
+[ConfigSection("Identity:AccountSecurity")]
+[RuntimeSettingGroup(
+    Key = "identity-security",
+    Module = "Identity",
+    DisplayName = "Account Security",
+    I18nKey = "admin.modules.system.settings.groups.identitySecurity",
+    Icon = "mdi:shield-account-outline",
+    Order = 200)]
 public class AccountSecurityOptions
 {
     /// <summary>
@@ -370,6 +401,7 @@ public class AccountSecurityOptions
     /// <summary>
     /// 是否启用账户锁定
     /// </summary>
+    [RuntimeSetting(Label = "Enable Account Lockout", I18n = "admin.modules.system.settings.fields.enableLockout", Type = SettingFieldType.Boolean)]
     public bool EnableLockout { get; set; } = true;
 
     /// <summary>

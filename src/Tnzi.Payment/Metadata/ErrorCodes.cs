@@ -48,6 +48,26 @@ public static class ErrorCodes
     /// </summary>
     public const string PaymentInvalidAmount = "PAYMENT_INVALID_AMOUNT";
 
+    /// <summary>
+    /// 渠道不支持 off-session 自动扣款
+    /// </summary>
+    public const string PaymentOffSessionNotSupported = "PAYMENT_OFFSESSION_NOT_SUPPORTED";
+
+    /// <summary>
+    /// off-session 自动扣款失败
+    /// </summary>
+    public const string PaymentOffSessionChargeFailed = "PAYMENT_OFFSESSION_CHARGE_FAILED";
+
+    /// <summary>
+    /// 测试渠道（Null）未启用（需开启 Payment:AllowTestProvider）
+    /// </summary>
+    public const string PaymentTestProviderDisabled = "PAYMENT_TEST_PROVIDER_DISABLED";
+
+    /// <summary>
+    /// 回调到账金额与订单应付金额不一致
+    /// </summary>
+    public const string PaymentAmountMismatch = "PAYMENT_AMOUNT_MISMATCH";
+
     #endregion
 
     #region Stripe Provider 错误码
@@ -203,6 +223,11 @@ public static class ErrorCodes
     /// 新旧计划币种不一致
     /// </summary>
     public const string SubscriptionCurrencyMismatch = "SUBSCRIPTION_CURRENCY_MISMATCH";
+
+    /// <summary>
+    /// 订阅缺少已保存的支付方式（无法 off-session 自动扣款）
+    /// </summary>
+    public const string SubscriptionPaymentMethodMissing = "SUBSCRIPTION_PAYMENT_METHOD_MISSING";
 
     #endregion
 

@@ -5,7 +5,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 
 /**
  * SubscriptionStatus enum: 0=Pending / 1=Trial / 2=Active /
- *   3=PendingRenewal / 4=Paused / 5=Cancelled / 6=Expired.
+ *   3=PendingRenewal / 4=Paused / 5=Cancelled / 6=Expired / 7=PastDue.
  * Backend serialises as int — the previous string-keyed map ('active' /
  * 'trialing' / 'pastDue' / 'ended') never matched any row, leaving the
  * badge with the raw number visible.
@@ -18,6 +18,7 @@ const SUBSCRIPTION_STATUS_MAP: Record<number, { type: 'info' | 'success' | 'warn
   4: { type: 'warning', label: 'Paused' },
   5: { type: 'default', labelKey: 'admin.shared.status.cancelled' },
   6: { type: 'default', label: 'Expired' },
+  7: { type: 'error',   label: 'Past Due' },
 }
 
 /**

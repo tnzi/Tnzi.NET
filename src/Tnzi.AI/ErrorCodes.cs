@@ -309,4 +309,9 @@ public static class ErrorCodes
     /// MCP server registration operation failed.
     /// </summary>
     public const string McpServerRegistrationOperationFailed = "AI_MCP_SERVER_REGISTRATION_OPERATION_FAILED";
+
+    /// <summary>
+    /// Agent memory entry not found.
+    /// </summary>
+    public const string MemoryNotFound = "AI_MEMORY_NOT_FOUND";
 }

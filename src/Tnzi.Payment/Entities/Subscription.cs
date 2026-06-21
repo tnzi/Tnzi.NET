@@ -101,6 +101,36 @@ public class Subscription : MultiTenantAuditedEntity<Guid>
     public string ChannelCode { get; set; } = string.Empty;
 
     /// <summary>
+    /// 渠道侧客户标识（用于 off-session 自动扣款，如 Stripe Customer ID）
+    /// </summary>
+    public string? ProviderCustomerId { get; set; }
+
+    /// <summary>
+    /// 渠道侧已保存的支付方式标识（用于 off-session 自动扣款，如 Stripe PaymentMethod ID）
+    /// </summary>
+    public string? PaymentMethodToken { get; set; }
+
+    /// <summary>
+    /// 续费/转正扣款连续失败次数（用于宽限期重试与降级 PastDue）
+    /// </summary>
+    public int RenewalRetryCount { get; set; }
+
+    /// <summary>
+    /// 进入逾期欠费（PastDue）的时间，用于宽限期到期判定
+    /// </summary>
+    public DateTime? PastDueSince { get; set; }
+
+    /// <summary>
+    /// 后台计费抢占锁到期时间（多实例下原子 claim，避免重复扣款）
+    /// </summary>
+    public DateTime? BillingLockedUntil { get; set; }
+
+    /// <summary>
+    /// 最近一次已应用到状态机的计费支付流水号（幂等：重复投递的同一支付不再重复推进周期）
+    /// </summary>
+    public string? LastBillingTradeNo { get; set; }
+
+    /// <summary>
     /// 取消原因
     /// </summary>
     public string? CancelReason { get; set; }

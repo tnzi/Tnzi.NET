@@ -20,9 +20,7 @@ public class KafkaEventBusModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<KafkaOptions>()
-            .Bind(context.Configuration.GetSection("Kafka"))
-            .ValidateWith<KafkaOptions, KafkaOptionsValidator>();
+        context.Services.AddTnziOptions<KafkaOptions, KafkaOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

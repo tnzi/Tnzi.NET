@@ -31,11 +31,66 @@ public class FileCleanupBackgroundService : BackgroundService
         _logger.LogInformation("File cleanup background task started, interval: {Interval} minutes",
             _options.Cleanup.IntervalMinutes);
 
-        // 启动后等待一段时间再执行首次清理（避免启动时资源竞争）
-        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+        // 解析 Cron 表达式（设置则优先于 IntervalMinutes）；非法表达式回退到固定间隔。
+        Cronos.CronExpression? cron = null;
+        var cronExpr = _options.Cleanup.CronExpression;
+        if (!string.IsNullOrWhiteSpace(cronExpr))
+        {
+            try
+            {
+                cron = Cronos.CronExpression.Parse(cronExpr);
+                _logger.LogInformation("File cleanup scheduled by cron expression: {Cron}", cronExpr);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Invalid Cleanup.CronExpression '{CronExpression}', falling back to IntervalMinutes ({Interval} min).",
+                    cronExpr, _options.Cleanup.IntervalMinutes);
+            }
+        }
+
+        // 间隔模式：启动后等待一段时间再首次执行（避免启动时资源竞争）。
+        // Cron 模式：直接进入循环，由 Cron 决定首次执行时间。
+        if (cron == null)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Cron 模式：等待到下一次计划执行时间
+            if (cron != null)
+            {
+                var next = cron.GetNextOccurrence(DateTime.UtcNow, TimeZoneInfo.Utc);
+                if (next == null)
+                {
+                    _logger.LogWarning(
+                        "Cron expression '{CronExpression}' has no further occurrences, stopping cleanup schedule",
+                        cronExpr);
+                    break;
+                }
+
+                var wait = next.Value - DateTime.UtcNow;
+                if (wait > TimeSpan.Zero)
+                {
+                    try
+                    {
+                        await Task.Delay(wait, stoppingToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+            }
+
             try
             {
                 await ExecuteCleanupAsync(stoppingToken);
@@ -50,15 +105,17 @@ public class FileCleanupBackgroundService : BackgroundService
                 _logger.LogError(ex, "File cleanup task encountered an exception");
             }
 
-            // 等待下一次执行
-            var interval = TimeSpan.FromMinutes(_options.Cleanup.IntervalMinutes);
-            try
+            // 间隔模式：等待固定间隔后再次执行（Cron 模式由循环顶部重新计算）
+            if (cron == null)
             {
-                await Task.Delay(interval, stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_options.Cleanup.IntervalMinutes), stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
 

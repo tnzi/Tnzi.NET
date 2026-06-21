@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import TAdminShell from '../../../src/components/layout/TAdminShell.vue'
 import TAdminSidebar from '../../../src/components/layout/TAdminSidebar.vue'
 import TAdminHeader from '../../../src/components/layout/TAdminHeader.vue'
+import TChatHost from '../../../src/components/chat/TChatHost.vue'
 import {
   useAdminRouteStore,
   type AdminRouteRecord,
@@ -208,5 +209,29 @@ describe('TAdminShell', () => {
     expect(app.siderCollapse).toBe(true)
     expect(wrapper.emitted('menuSelect')).toBeTruthy()
     wrapper.unmount()
+  })
+
+  it('passes TChatHost via the dedicated #chat slot on TAdminHeader (not via #user)', () => {
+    // Regression: previously TChatHost was placed inside the #user slot default,
+    // so consumers overriding #header-user (like AdminShellRoot) would hide it.
+    // Now it lives in TAdminHeader's #chat slot which AdminShellRoot never overrides.
+    forceMobile(false)
+    const wrapper = mountShell({ mode: 'vertical' })
+    const header = wrapper.findComponent(TAdminHeader)
+    // TChatHost self-gates when no admin client is provided (test environment)
+    // but the component node must still be rendered inside the header's chat region.
+    const chatHost = header.findComponent(TChatHost)
+    expect(chatHost.exists()).toBe(true)
+    // The chat region must be inside the header's right section, not the #user wrapper.
+    const chatContainer = header.find('.t-admin-header__chat')
+    expect(chatContainer.exists()).toBe(true)
+    expect(chatContainer.findComponent(TChatHost).exists()).toBe(true)
+  })
+
+  it('does not render TChatHost when builtinChat is false', () => {
+    forceMobile(false)
+    const wrapper = mountShell({ mode: 'vertical', builtinChat: false })
+    const header = wrapper.findComponent(TAdminHeader)
+    expect(header.findComponent(TChatHost).exists()).toBe(false)
   })
 })

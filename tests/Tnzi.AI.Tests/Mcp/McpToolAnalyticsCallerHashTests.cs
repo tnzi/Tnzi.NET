@@ -89,6 +89,122 @@ public class McpToolAnalyticsCallerHashTests
     }
 
     /// <summary>
+    /// P1 decoupling: per-tool analytics must keep recording even when the audit log
+    /// (IUsageLogService) is disabled — the two are gated independently.
+    /// </summary>
+    [Fact]
+    public async Task AuditLogAsync_AuditDisabledAnalyticsEnabled_StillRecordsAnalytics()
+    {
+        var analyticsService = new Mock<IMcpToolAnalyticsService>();
+        analyticsService
+            .Setup(x => x.RecordUsageAsync(
+                It.IsAny<string>(), It.IsAny<long>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<string?>()))
+            .Returns(Task.CompletedTask);
+
+        var usageLogService = new Mock<IUsageLogService>();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(analyticsService.Object);
+        services.AddSingleton(usageLogService.Object);
+        using var sp = services.BuildServiceProvider();
+
+        var security = BuildSecurity(sp, new McpServerOptions
+        {
+            Enabled = true,
+            RequireAuthentication = false,
+            EnableAuditLog = false,     // audit OFF
+            EnableToolAnalytics = true  // analytics ON
+        });
+
+        await security.AuditLogAsync("tool-a", agentId: null, 10, isSuccess: true, callerApiKeyId: "hash01");
+
+        // Analytics recorded, but audit log NOT written
+        analyticsService.Verify(
+            x => x.RecordUsageAsync("tool-a", 10, true, null, "hash01"),
+            Times.Once);
+        usageLogService.Verify(
+            x => x.LogUsageAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<long>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// P1 decoupling: disabling analytics while keeping audit on must skip analytics only.
+    /// </summary>
+    [Fact]
+    public async Task AuditLogAsync_AnalyticsDisabledAuditEnabled_SkipsAnalyticsOnly()
+    {
+        var analyticsService = new Mock<IMcpToolAnalyticsService>();
+        var usageLogService = new Mock<IUsageLogService>();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(analyticsService.Object);
+        services.AddSingleton(usageLogService.Object);
+        using var sp = services.BuildServiceProvider();
+
+        var security = BuildSecurity(sp, new McpServerOptions
+        {
+            Enabled = true,
+            RequireAuthentication = false,
+            EnableAuditLog = true,       // audit ON
+            EnableToolAnalytics = false  // analytics OFF
+        });
+
+        await security.AuditLogAsync("tool-a", agentId: null, 10, isSuccess: true, callerApiKeyId: "hash01");
+
+        analyticsService.Verify(
+            x => x.RecordUsageAsync(
+                It.IsAny<string>(), It.IsAny<long>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<string?>()),
+            Times.Never);
+        usageLogService.Verify(
+            x => x.LogUsageAsync(
+                "McpToolCall", "mcp-server", "tool-a",
+                0, 0, 10L, true, null, (Guid?)null, (Guid?)null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Both gates off: no scope work at all.
+    /// </summary>
+    [Fact]
+    public async Task AuditLogAsync_BothDisabled_RecordsNothing()
+    {
+        var analyticsService = new Mock<IMcpToolAnalyticsService>();
+        var usageLogService = new Mock<IUsageLogService>();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(analyticsService.Object);
+        services.AddSingleton(usageLogService.Object);
+        using var sp = services.BuildServiceProvider();
+
+        var security = BuildSecurity(sp, new McpServerOptions
+        {
+            Enabled = true,
+            RequireAuthentication = false,
+            EnableAuditLog = false,
+            EnableToolAnalytics = false
+        });
+
+        await security.AuditLogAsync("tool-a", agentId: null, 10, isSuccess: true);
+
+        analyticsService.Verify(
+            x => x.RecordUsageAsync(
+                It.IsAny<string>(), It.IsAny<long>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<string?>()),
+            Times.Never);
+        usageLogService.Verify(
+            x => x.LogUsageAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<long>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
     /// C4 end-to-end: McpServerHttpSecurityMiddleware stores the caller hash in context.Items
     /// so downstream code can retrieve it without touching the raw key.
     /// </summary>

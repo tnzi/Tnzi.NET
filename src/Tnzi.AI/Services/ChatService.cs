@@ -6,18 +6,15 @@ namespace Tnzi.AI.Services;
 public class ChatService : ApplicationService, IChatService
 {
     private readonly IAgentRuntime _runtime;
-    private readonly IAgentResolver _agentResolver;
     private readonly IOptions<AIOptions> _options;
 
     public ChatService(
         IAgentRuntime runtime,
-        IAgentResolver agentResolver,
         IOptions<AIOptions> options,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _runtime = Check.NotNull(runtime);
-        _agentResolver = Check.NotNull(agentResolver);
         _options = Check.NotNull(options);
     }
 

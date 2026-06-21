@@ -31,15 +31,6 @@ public class FeishuChannelAdapterTests
     }
 
     [Fact]
-    public void SupportsFileAttachment_ReturnsFalse()
-    {
-        // Feishu file upload not yet implemented — SupportsFileAttachment must
-        // advertise this so callers skip SendFileAsync rather than silently receiving false.
-        var adapter = CreateAdapter();
-        adapter.SupportsFileAttachment.ShouldBeFalse();
-    }
-
-    [Fact]
     public void Constructor_EmptyAppId_Throws()
     {
         var options = MsOptions.Create(new ChannelsModuleOptions

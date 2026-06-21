@@ -379,6 +379,56 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            path: 'shares',
+            name: 'storage.shares',
+            component: () => import('../pages/storage/Shares.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.storage.shares.title',
+              permission: 'storage.file.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'integrity',
+            name: 'storage.integrity',
+            component: () => import('../pages/storage/Integrity.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.storage.integrity.title',
+              permission: 'storage.file.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'user-usage',
+            name: 'storage.userUsage',
+            component: () => import('../pages/storage/UserUsage.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.storage.userUsage.title',
+              permission: 'storage.file.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'references',
+            name: 'storage.references',
+            component: () => import('../pages/storage/References.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.storage.references.title',
+              permission: 'storage.file.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'maintenance',
+            name: 'storage.maintenance',
+            component: () => import('../pages/storage/Maintenance.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.storage.maintenance.title',
+              permission: 'storage.file.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 
@@ -457,23 +507,12 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
         meta: { title: 'tnzi.admin.modules.chat.label', permission: 'chat.view', order: 140 },
         children: [
           {
-            path: 'sessions',
-            name: 'chat.sessions',
-            component: () => import('../pages/chat/Sessions.vue'),
+            path: 'broadcast',
+            name: 'chat.broadcast',
+            component: () => import('../pages/chat/Broadcast.vue'),
             meta: {
-              title: 'tnzi.admin.modules.chat.sessions.title',
-              permission: 'chat.session.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'messages',
-            name: 'chat.messages',
-            component: () => import('../pages/chat/Messages.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.chat.messages.title',
-              permission: 'chat.message.view',
-              keepAlive: true,
+              title: 'tnzi.admin.modules.chat.broadcast.title',
+              permission: 'chat.broadcast',
             },
           },
         ],

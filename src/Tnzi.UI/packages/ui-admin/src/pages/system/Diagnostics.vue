@@ -258,7 +258,7 @@ const moduleColumns: DataTableColumns<ModuleDiagnosticsDto> = [
           size: 14,
           color: row.isEnabled ? 'var(--tnzi-success)' : 'var(--tnzi-base-text-muted)',
         }),
-        h('span', { class: 'font-[family-name:var(--tnzi-font-mono)]' }, row.assembly),
+        h('span', { class: 'tnzi-mono' }, row.assembly),
       ]),
   },
   { title: () => t('cols.type'), key: 'type', width: 200, ellipsis: true },
@@ -349,7 +349,7 @@ const controllerColumns: DataTableColumns<ControllerInfoDto> = [
     key: 'route',
     width: 280,
     render: (row) =>
-      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.route || '—'),
+      h('code', { class: 'tnzi-mono text-12px' }, row.route || '—'),
   },
   { title: () => t('cols.type'), key: 'type', ellipsis: { tooltip: true } },
   { title: () => t('cols.module'), key: 'module', width: 180 },
@@ -442,7 +442,7 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
     key: 'exceptionType',
     width: 220,
     render: (row) =>
-      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.exceptionType),
+      h('code', { class: 'tnzi-mono text-12px' }, row.exceptionType),
   },
   {
     title: () => t('cols.statusCode'),
@@ -459,14 +459,14 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
     key: 'errorCode',
     width: 160,
     render: (row) =>
-      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.errorCode || '—'),
+      h('code', { class: 'tnzi-mono text-12px' }, row.errorCode || '—'),
   },
   {
     title: () => t('cols.requestId'),
     key: 'requestId',
     width: 200,
     render: (row) =>
-      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.requestId || '—'),
+      h('code', { class: 'tnzi-mono text-12px' }, row.requestId || '—'),
   },
   { title: () => t('cols.message'), key: 'message', ellipsis: { tooltip: true } },
 ]

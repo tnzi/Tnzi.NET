@@ -17,9 +17,7 @@ public class HangfireModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<HangfireOptions>()
-            .Bind(context.Configuration.GetSection("Hangfire"))
-            .ValidateWith<HangfireOptions, HangfireOptionsValidator>();
+        context.Services.AddTnziOptions<HangfireOptions, HangfireOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

@@ -367,7 +367,7 @@ const persistedColumns: DataTableColumns<PersistedPermissionRuleDto> = [
   {
     title: () => t('cols.toolPattern'),
     key: 'toolPattern',
-    render: (row) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.toolPattern ?? '*'),
+    render: (row) => h('code', { class: 'tnzi-mono text-12px' }, row.toolPattern ?? '*'),
   },
   { title: () => t('cols.toolGroup'), key: 'toolGroup', width: 120, render: (r) => r.toolGroup ?? '—' },
   { title: () => t('cols.serverName'), key: 'serverName', width: 120, render: (r) => r.serverName ?? '—' },
@@ -435,7 +435,7 @@ const sessionColumns: DataTableColumns<PermissionRuleItemDto> = [
   {
     title: () => t('cols.toolPattern'),
     key: 'toolPattern',
-    render: (row) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.toolPattern),
+    render: (row) => h('code', { class: 'tnzi-mono text-12px' }, row.toolPattern),
   },
   { title: () => t('cols.toolGroup'), key: 'toolGroup', width: 120, render: (r) => r.toolGroup ?? '—' },
   { title: () => t('cols.reason'), key: 'reason', ellipsis: { tooltip: true }, render: (r) => r.reason ?? '—' },

@@ -7,12 +7,17 @@ namespace Tnzi.AI.Options;
 /// 从 OpenAPI 3.x 规范自动生成 AITool，使 AI Agent 能够调用外部 REST API。
 /// 配置路径：AI:OpenApiTools
 /// </remarks>
+[ConfigSection("AI:OpenApiTools")]
+[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "AI Tools",
+    I18nKey = "admin.modules.system.settings.groups.aiTools", Icon = "mdi:tools", Order = 130)]
 [ExperimentalApi(Reason = "OpenAPI tool generation is evolving")]
 public class OpenApiToolsOptions
 {
     /// <summary>
     /// 是否启用 OpenAPI 工具生成（默认关闭）
     /// </summary>
+    [RuntimeSetting(Label = "OpenAPI Tools Enabled", I18n = "admin.modules.system.settings.fields.openApiToolsEnabled",
+        Type = SettingFieldType.Boolean)]
     public bool Enabled { get; set; }
 
     /// <summary>

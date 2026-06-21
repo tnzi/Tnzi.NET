@@ -15,9 +15,7 @@ public class CachingModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<CachingOptions>()
-            .Bind(context.Configuration.GetSection("Caching"))
-            .ValidateWith<CachingOptions, CachingOptionsValidator>();
+        context.Services.AddTnziOptions<CachingOptions, CachingOptionsValidator>(context.Configuration);
         return Task.CompletedTask;
     }
 

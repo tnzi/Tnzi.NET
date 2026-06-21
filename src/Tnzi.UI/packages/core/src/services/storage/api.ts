@@ -316,6 +316,16 @@ export function useAdminFileApi(client: HttpClient) {
     /** Get files by tag */
     getFilesByTag: (tag: string, pageIndex: number = 1, pageSize: number = 20) =>
       client.get<PagedList<FileRecordDto>>(`${ADMIN_BASE}/by-tag/${tag}`, { params: { pageIndex, pageSize } }),
+
+    // ---- Metadata ----
+
+    /** Get metadata (key/value map) for a file */
+    getMetadata: (id: string) =>
+      client.get<Record<string, string>>(`${ADMIN_BASE}/${id}/metadata`),
+
+    /** Set (replace) metadata for a file */
+    setMetadata: (id: string, metadata: Record<string, string>) =>
+      client.put<FileRecordDto>(`${ADMIN_BASE}/${id}/metadata`, { metadata }),
   };
 }
 

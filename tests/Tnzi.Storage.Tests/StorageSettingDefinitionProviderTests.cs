@@ -1,52 +1,48 @@
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
-/// StorageSettingDefinitionProvider 结构测试 — 验证 provider 注册字段符合配置中心契约
+/// StorageOptions 配置中心特性测试 — 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
 /// </summary>
 public class StorageSettingDefinitionProviderTests
 {
-    private readonly StorageSettingDefinitionProvider _provider = new();
+    private readonly SettingDefinitionGroup _group =
+        RuntimeSettingMetadataExtractor.Extract(typeof(StorageOptions))!;
 
     [Fact]
-    public void GetGroups_ReturnsOneGroup()
+    public void Extract_ReturnsNonNull()
     {
-        var groups = _provider.GetGroups();
-        Assert.Single(groups);
+        Assert.NotNull(_group);
     }
 
     [Fact]
     public void Group_HasExpectedKey()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("storage-upload", group.Key);
+        Assert.Equal("storage-upload", _group.Key);
     }
 
     [Fact]
     public void Group_HasExpectedModuleName()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("Storage", group.ModuleName);
+        Assert.Equal("Storage", _group.ModuleName);
     }
 
     [Fact]
     public void Group_HasExpectedOrder()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(300, group.Order);
+        Assert.Equal(300, _group.Order);
     }
 
     [Fact]
     public void Group_HasTwoFields()
     {
         // EnableMd5Validation（无消费者）与 UrlPrefix（单例 provider 构造期冻结）已移除
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(2, group.Fields.Count);
+        Assert.Equal(2, _group.Fields.Count);
     }
 
     [Fact]
     public void Fields_HaveCorrectKeys()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var fields = _group.Fields;
         Assert.Contains(fields, f => f.Key == "Storage:MaxFileSize");
         Assert.Contains(fields, f => f.Key == "Storage:ImageCompressionQuality");
     }
@@ -54,7 +50,7 @@ public class StorageSettingDefinitionProviderTests
     [Fact]
     public void Fields_HaveCorrectTypes()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var fields = _group.Fields;
         var maxFileSize = fields.First(f => f.Key == "Storage:MaxFileSize");
         var imageQuality = fields.First(f => f.Key == "Storage:ImageCompressionQuality");
 
@@ -65,7 +61,7 @@ public class StorageSettingDefinitionProviderTests
     [Fact]
     public void DefaultValueAccessors_ReturnExpectedDefaults()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var fields = _group.Fields;
 
         var maxFileSize = fields.First(f => f.Key == "Storage:MaxFileSize");
         var imageQuality = fields.First(f => f.Key == "Storage:ImageCompressionQuality");
@@ -80,7 +76,6 @@ public class StorageSettingDefinitionProviderTests
     [Fact]
     public void Fields_HaveI18nKeys()
     {
-        var fields = _provider.GetGroups()[0].Fields;
-        Assert.All(fields, f => Assert.NotNull(f.I18nKey));
+        Assert.All(_group.Fields, f => Assert.NotNull(f.I18nKey));
     }
 }

@@ -3,13 +3,18 @@ namespace Tnzi.Payment.Services;
 /// <summary>
 /// 订阅服务实现
 /// </summary>
-public class SubscriptionService : ApplicationService, ISubscriptionService
+public partial class SubscriptionService : ApplicationService, ISubscriptionService
 {
     private readonly IRepository<Subscription, Guid> _subscriptionRepository;
     private readonly IRepository<SubscriptionPlan, Guid> _planRepository;
     private readonly IRepository<SubscriptionChange, Guid> _changeRepository;
     private readonly IPaymentService _paymentService;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
+
+    private const int BillingScanPageSize = 200;
+
+    private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
     public SubscriptionService(
         IRepository<Subscription, Guid> subscriptionRepository,
@@ -17,6 +22,7 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         IRepository<SubscriptionChange, Guid> changeRepository,
         IPaymentService paymentService,
         IPaymentProviderFactory paymentProviderFactory,
+        IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -25,6 +31,7 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         _changeRepository = Check.NotNull(changeRepository);
         _paymentService = Check.NotNull(paymentService);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
+        _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
     }
 
     public async Task<Result<SubscriptionDto>> CreateSubscriptionAsync(CreateSubscriptionDto request, CancellationToken cancellationToken = default)
@@ -78,7 +85,7 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         }
         else
         {
-            // 创建首次支付
+            // 创建首次支付：订阅保持 Pending，待支付完成事件回流后才激活（见 ApplyPaymentCompletedAsync）
             var paymentResult = await _paymentService.CreatePaymentAsync(new CreatePaymentDto
             {
                 BusinessOrderNo = subscription.SubscriptionNo,
@@ -86,7 +93,8 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
                 Amount = plan.Price - subscription.DiscountAmount,
                 Currency = plan.Currency,
                 ChannelCode = request.ChannelCode,
-                Description = $"Subscription: {plan.PlanName}"
+                Description = $"Subscription: {plan.PlanName}",
+                ExtraData = new SubscriptionBillingMetadata { Purpose = SubscriptionBillingPurpose.Initial }.ToExtraData()
             }, cancellationToken);
 
             if (!paymentResult.Succeeded)
@@ -379,83 +387,6 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         return Ok();
     }
 
-    public async Task<Result<int>> RenewExpiredSubscriptionsAsync(CancellationToken cancellationToken = default)
-    {
-        var now = DateTime.UtcNow;
-
-        // 查找到期需要续费的订阅
-        var dueSubscriptions = await _subscriptionRepository
-            .Where(s => s.AutoRenew
-                && s.Status == SubscriptionStatus.Active
-                && s.NextBillingTime != null
-                && s.NextBillingTime <= now)
-            .Include(s => s.Plan)
-            .ToListAsync(cancellationToken);
-
-        if (dueSubscriptions.Count == 0)
-            return Ok(0);
-
-        var renewedCount = 0;
-
-        foreach (var subscription in dueSubscriptions)
-        {
-            try
-            {
-                if (subscription.Plan == null)
-                    continue;
-
-                // 创建续费支付
-                var paymentResult = await _paymentService.CreatePaymentAsync(new CreatePaymentDto
-                {
-                    BusinessOrderNo = subscription.SubscriptionNo,
-                    BusinessType = BusinessType.Subscription,
-                    Amount = subscription.Plan.Price,
-                    Currency = subscription.Currency,
-                    ChannelCode = subscription.ChannelCode,
-                    Description = $"Subscription renewal: {subscription.Plan.PlanName}"
-                }, cancellationToken);
-
-                if (!paymentResult.Succeeded)
-                {
-                    Logger.LogWarning("Subscription renewal payment failed. SubscriptionNo: {SubscriptionNo}",
-                        subscription.SubscriptionNo);
-                    continue;
-                }
-
-                // 更新下次计费时间
-                var nextBillingTime = CalculateNextBillingTime(now, subscription.CycleType, subscription.CycleValue);
-                subscription.NextBillingTime = nextBillingTime;
-                await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
-
-                if (EventBus != null)
-                {
-                    await EventBus.PublishAsync(new SubscriptionRenewedEvent
-                    {
-                        SubscriptionId = subscription.Id,
-                        SubscriptionNo = subscription.SubscriptionNo,
-                        UserId = subscription.UserId,
-                        PlanId = subscription.PlanId,
-                        NewEndTime = nextBillingTime,
-                        Amount = subscription.Plan.Price,
-                        Currency = subscription.Currency,
-                        PaymentTradeNo = paymentResult.Data?.TradeNo,
-                        AutoRenew = true
-                    });
-                }
-
-                renewedCount++;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Subscription renewal failed. SubscriptionNo: {SubscriptionNo}",
-                    subscription.SubscriptionNo);
-            }
-        }
-
-        Logger.LogInformation("Renewed {Count} subscriptions out of {Total} due", renewedCount, dueSubscriptions.Count);
-        return Ok(renewedCount);
-    }
-
     public async Task<Result<SubscriptionChangeDto>> ChangeSubscriptionPlanAsync(Guid subscriptionId, ChangeSubscriptionPlanDto input, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         Check.NotNull(input);
@@ -513,27 +444,24 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
             ChangeType = changeType,
             ProratedAmount = proratedAmount,
             EffectiveDate = effectiveDate,
-            Status = isImmediate ? SubscriptionChangeStatus.Applied : SubscriptionChangeStatus.Pending
+            Status = SubscriptionChangeStatus.Pending
         };
 
         await _changeRepository.InsertAsync(change, cancellationToken);
 
-        // 立即生效：更新订阅并创建补差支付
+        // 立即生效升级：需补差价时先收款，收款确认后再应用计划变更（见 ApplyProrationChangeAsync）；
+        // 无需补差则直接应用并标记已生效
         if (isImmediate)
         {
-            await ApplyPlanChangeAsync(subscription, newPlan, cancellationToken);
-
             if (proratedAmount > 0)
             {
-                await _paymentService.CreatePaymentAsync(new CreatePaymentDto
-                {
-                    BusinessOrderNo = subscription.SubscriptionNo,
-                    BusinessType = BusinessType.Subscription,
-                    Amount = proratedAmount,
-                    Currency = newPlan.Currency,
-                    ChannelCode = subscription.ChannelCode,
-                    Description = $"Plan change proration: {currentPlan.PlanName} -> {newPlan.PlanName}"
-                }, cancellationToken);
+                await ChargeOrCreateProrationPaymentAsync(subscription, currentPlan, newPlan, change.Id, proratedAmount, cancellationToken);
+            }
+            else
+            {
+                await ApplyPlanChangeAsync(subscription, newPlan, cancellationToken);
+                change.Status = SubscriptionChangeStatus.Applied;
+                await _changeRepository.UpdateAsync(change, cancellationToken);
             }
         }
 
@@ -670,24 +598,21 @@ public class SubscriptionService : ApplicationService, ISubscriptionService
         var now = DateTime.UtcNow;
         var periodEnd = subscription.NextBillingTime ?? now;
 
-        // 周期总天数
+        // 周期总时长（按 ticks 计算，全程 decimal，避免 double 中间值精度损失）
         var periodStart = CalculatePeriodStart(periodEnd, currentPlan.CycleType, currentPlan.CycleValue);
-        var totalDays = (periodEnd - periodStart).TotalDays;
-        if (totalDays <= 0) return newPlan.Price;
+        var totalTicks = (periodEnd - periodStart).Ticks;
+        if (totalTicks <= 0) return newPlan.Price;
 
-        // 剩余天数
-        var remainingDays = Math.Max(0, (periodEnd - now).TotalDays);
+        // 剩余时长占比
+        var remainingTicks = Math.Max(0L, (periodEnd - now).Ticks);
+        var remainingRatio = (decimal)remainingTicks / totalTicks;
 
-        // 当前计划按天费率 × 剩余天数 = 信用额度
-        var dailyRateCurrent = currentPlan.Price / (decimal)totalDays;
-        var credit = dailyRateCurrent * (decimal)remainingDays;
-
-        // 新计划按天费率 × 剩余天数 = 新费用
-        var dailyRateNew = newPlan.Price / (decimal)totalDays;
-        var charge = dailyRateNew * (decimal)remainingDays;
+        // 当前计划剩余信用额度 vs 新计划剩余费用
+        var credit = currentPlan.Price * remainingRatio;
+        var charge = newPlan.Price * remainingRatio;
 
         // 差额：正数=需要补差价，负数=返还信用
-        return Math.Round(charge - credit, 2);
+        return Math.Round(charge - credit, 2, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>

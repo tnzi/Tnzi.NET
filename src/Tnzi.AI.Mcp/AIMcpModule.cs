@@ -24,9 +24,7 @@ public class AIMcpModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<TnziMcpServerOptions>()
-            .Bind(context.Configuration.GetSection("AI:McpServer"))
-            .ValidateWith<TnziMcpServerOptions, McpServerOptionsValidator>();
+        context.Services.AddTnziOptions<TnziMcpServerOptions, McpServerOptionsValidator>(context.Configuration, "AI:McpServer");
 
         return Task.CompletedTask;
     }

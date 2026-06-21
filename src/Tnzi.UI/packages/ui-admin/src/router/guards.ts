@@ -40,9 +40,16 @@ export function createPermissionGuard(
   return (to, _from, next) => {
     const required = (to.meta?.permission ?? '') as string
     if (required) {
-      const { can } = usePermissionGuard()
-      if (!can(required)) {
-        return next(forbiddenPath)
+      // Fail-open while the permission list hasn't loaded yet (no user info):
+      // mirrors the menu layer and avoids bouncing a freshly-logged-in user to
+      // 403 before their permissions arrive (or in apps that never wire them).
+      // Real enforcement is the backend `[ApiAuthorize]`.
+      const auth = useAdminAuthStore()
+      if (auth.userInfo !== null) {
+        const { can } = usePermissionGuard()
+        if (!can(required)) {
+          return next(forbiddenPath)
+        }
       }
     }
     addTabFromRoute(to)

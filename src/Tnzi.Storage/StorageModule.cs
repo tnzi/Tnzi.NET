@@ -32,9 +32,6 @@ public class StorageModule : TnziApplicationModule
     {
         var services = context.Services;
 
-        // 注册配置中心分组定义
-        services.AddSingleton<ISettingDefinitionProvider, StorageSettingDefinitionProvider>();
-
         // 注册存储服务（默认使用 LocalStorage）
         // 用户可以通过配置选择不同的存储提供者（Local, S3, R2, Azure 等）
         // 自定义提供者: 在模块的 PreConfigureServicesAsync 中调用 StorageProviderFactory.Register()
@@ -45,8 +42,9 @@ public class StorageModule : TnziApplicationModule
             var configuration = provider.GetRequiredService<IConfiguration>();
             var environment = provider.GetService<IWebHostEnvironment>();
             var loggerFactory = provider.GetService<ILoggerFactory>();
+            var optionsMonitor = provider.GetService<IOptionsMonitor<StorageOptions>>();
 
-            var ctx = new StorageProviderContext(options, configuration, environment, loggerFactory);
+            var ctx = new StorageProviderContext(options, configuration, environment, loggerFactory, optionsMonitor);
             return StorageProviderFactory.Create(ctx);
         });
 
@@ -72,6 +70,10 @@ public class StorageModule : TnziApplicationModule
         // 注册文件引用处理器
         // 由 TnziDbContext.SaveChangesAsync() 调用，在事务中处理文件引用变更
         services.AddScoped<IFileReferenceProcessor, FileReferenceProcessor>();
+
+        // 注册默认孤立引用验证器（用 TryAdd 以便应用覆盖）
+        // 通过 IEntityManager 解析实体类型并按主键查询存在性，找不到/不确定时保守返回 true（绝不误删）
+        services.TryAddScoped<IOrphanReferenceValidator, EntityManagerOrphanReferenceValidator>();
 
         // 注册文件清理服务
         services.AddScoped<IFileCleanupService, FileCleanupService>();

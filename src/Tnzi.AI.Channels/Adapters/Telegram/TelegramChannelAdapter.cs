@@ -20,7 +20,6 @@ public class TelegramChannelAdapter : IChannelAdapter
 
     public string Name => "telegram";
     public bool SupportsStreaming => false;
-    public bool SupportsFileAttachment => true;
 
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
@@ -91,39 +90,6 @@ public class TelegramChannelAdapter : IChannelAdapter
             _logger,
             "Telegram",
             ct);
-    }
-
-    public async Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-    {
-        var chatId = long.Parse(message.ChatId);
-
-        if (!System.IO.File.Exists(attachment.ActualPath))
-        {
-            _logger.LogWarning("Attachment file not found: {Path}", attachment.ActualPath);
-            return false;
-        }
-
-        await using var stream = System.IO.File.OpenRead(attachment.ActualPath);
-
-        if (attachment.IsImage && attachment.Size <= _options.MaxPhotoSize)
-        {
-            await _botClient.SendPhoto(chatId,
-                InputFile.FromStream(stream, attachment.FileName),
-                cancellationToken: ct);
-        }
-        else if (attachment.Size <= _options.MaxDocumentSize)
-        {
-            await _botClient.SendDocument(chatId,
-                InputFile.FromStream(stream, attachment.FileName),
-                cancellationToken: ct);
-        }
-        else
-        {
-            _logger.LogWarning("Attachment too large ({Size} bytes): {FileName}", attachment.Size, attachment.FileName);
-            return false;
-        }
-
-        return true;
     }
 
     public ValueTask DisposeAsync()

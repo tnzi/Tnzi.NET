@@ -361,6 +361,34 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
     /// </summary>
     private async Task CreateReferenceAsync(Guid fileId, string entityType, Guid entityId, string fieldName, bool isTemporary, CancellationToken cancellationToken = default)
     {
+        // 去重：同一 (FileId, EntityType, EntityId, FieldName) 只应存在一条引用。
+        // 避免手动引用 API 与自动追踪(FileReferenceProcessor)双轨写入产生重复行 + ReferenceCount 虚高，
+        // 进而导致文件永远清不掉。与 FileReferenceProcessor 的去重语义保持一致。
+        var existing = await _referenceRepository.FindAsync(r =>
+            r.FileId == fileId &&
+            r.EntityType == entityType &&
+            r.EntityId == entityId &&
+            r.FieldName == fieldName, cancellationToken);
+
+        if (existing != null)
+        {
+            // 已存在引用：若现有为临时引用而本次需要正式引用，则转正并增加计数；
+            // 其余情况(已是正式引用，或本次也是临时引用)保持不变，避免重复计数。
+            if (!isTemporary && existing.IsTemporary)
+            {
+                existing.IsTemporary = false;
+                await _referenceRepository.UpdateAsync(existing, cancellationToken);
+
+                var fr = await _repository.GetAsync(fileId, cancellationToken);
+                if (fr != null)
+                {
+                    fr.ReferenceCount++;
+                    await _repository.UpdateAsync(fr, cancellationToken);
+                }
+            }
+            return;
+        }
+
         var reference = new FileReference
         {
             FileId = fileId,

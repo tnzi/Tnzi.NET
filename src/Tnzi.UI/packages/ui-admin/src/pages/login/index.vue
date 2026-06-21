@@ -112,6 +112,8 @@ const activeTranslate = computed(() => config.translate ?? defaultTranslate)
     :demo-accounts="config.demoAccounts ?? []"
     :third-party="config.thirdParty ?? []"
     :qr-component="config.qrComponent"
+    :show-lang-switch="config.showLangSwitch"
+    :show-theme-switch="config.showThemeSwitch"
     :on-toggle-module="toggleLoginModule"
   />
 </template>

@@ -60,6 +60,11 @@ public class GraphSearchService : IGraphSearchService
         try
         {
             // 1. 查询知识库内匹配节点（限制候选数量防止大图全加载）
+            //    注意：候选过滤谓词与 CalculateScore 打分谓词在语义上等价（同为大小写不敏感的
+            //    精确/部分/类型匹配），但写法不同是有意为之——此处在 SQL 中执行，须用 .ToLower()
+            //    才能翻译为数据库 LOWER()（query 已预先小写为 queryLower）；CalculateScore 在内存中
+            //    执行，改用 StringComparison.OrdinalIgnoreCase（框架编码规则 #16：EF LINQ 用 ToLower，
+            //    内存比较用 OrdinalIgnoreCase）。两者覆盖的命中集合一致。
             var candidateLimit = Math.Max(options.MaxResults * 10, 50);
             var candidateNodes = await _nodeRepository.AsQueryable()
                 .Where(n => n.KnowledgeBaseId == knowledgeBaseId

@@ -107,4 +107,19 @@ describe('TAdminHeader', () => {
     expect(wrapper.find('.user-slot').exists()).toBe(true)
     expect(wrapper.find('.notif-slot').exists()).toBe(true)
   })
+
+  it('renders chat slot inside t-admin-header__chat wrapper', () => {
+    const wrapper = mount(TAdminHeader, {
+      slots: {
+        chat: '<div class="chat-slot">C</div>',
+      },
+    })
+    expect(wrapper.find('.t-admin-header__chat').exists()).toBe(true)
+    expect(wrapper.find('.chat-slot').exists()).toBe(true)
+  })
+
+  it('does not render t-admin-header__chat when no chat slot supplied', () => {
+    const wrapper = mount(TAdminHeader)
+    expect(wrapper.find('.t-admin-header__chat').exists()).toBe(false)
+  })
 })

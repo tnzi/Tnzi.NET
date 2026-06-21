@@ -316,6 +316,61 @@ public class StripeProvider : IPaymentProvider
         }
     }
 
+    public bool SupportsOffSessionCharge => true;
+
+    public async Task<Result<PaymentProviderChargeResult>> ChargeOffSessionAsync(PaymentProviderChargeDto input)
+    {
+        if (string.IsNullOrWhiteSpace(input.PaymentMethodToken))
+            return Result.Failure<PaymentProviderChargeResult>(ErrorCodes.SubscriptionPaymentMethodMissing, 400);
+
+        try
+        {
+            var client = GetClient();
+            var service = new PaymentIntentService(client);
+
+            var options = new PaymentIntentCreateOptions
+            {
+                Amount = (long)(input.Amount * 100), // Stripe uses cents
+                Currency = input.Currency.ToLower(),
+                Customer = input.ProviderCustomerId,
+                PaymentMethod = input.PaymentMethodToken,
+                // 无人值守扣款：立即确认 + 标记为非交互场景，触发已保存卡的链下扣款
+                Confirm = true,
+                OffSession = true,
+                Description = input.Description,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "TradeNo", input.TradeNo },
+                    { "BusinessOrderNo", input.BusinessOrderNo }
+                }
+            };
+
+            var paymentIntent = await service.CreateAsync(options);
+
+            _logger.LogInformation("Stripe off-session charge created. TradeNo: {TradeNo}, IntentId: {IntentId}, Status: {Status}",
+                input.TradeNo, paymentIntent.Id, paymentIntent.Status);
+
+            return Result.Success(new PaymentProviderChargeResult
+            {
+                TradeNo = input.TradeNo,
+                ExternalTradeNo = paymentIntent.Id,
+                Status = MapStripeStatus(paymentIntent.Status),
+                PaidAmount = paymentIntent.AmountReceived > 0 ? paymentIntent.AmountReceived / 100m : input.Amount
+            });
+        }
+        catch (StripeException ex)
+        {
+            // 链下扣款被拒（如卡需要 3DS / 余额不足）属预期失败，记录原因供降级 PastDue
+            _logger.LogWarning(ex, "Stripe off-session charge failed. TradeNo: {TradeNo}", input.TradeNo);
+            return Result.Success(new PaymentProviderChargeResult
+            {
+                TradeNo = input.TradeNo,
+                Status = PaymentStatus.Failed,
+                FailReason = ex.StripeError?.Message ?? ex.Message
+            });
+        }
+    }
+
     /// <summary>
     /// 获取 Stripe 客户端（供模块内部使用）
     /// </summary>

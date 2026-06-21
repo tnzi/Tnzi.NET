@@ -27,7 +27,6 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public string Name => "slack";
     public bool SupportsStreaming => false;
-    public bool SupportsFileAttachment => true;
 
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
@@ -289,32 +288,6 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             ct);
     }
 
-    public async Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-    {
-        if (!System.IO.File.Exists(attachment.ActualPath))
-        {
-            _logger.LogWarning("Attachment file not found: {Path}", attachment.ActualPath);
-            return false;
-        }
-
-        if (attachment.Size > _options.MaxFileSize)
-        {
-            _logger.LogWarning("Attachment too large ({Size} bytes): {FileName}", attachment.Size, attachment.FileName);
-            return false;
-        }
-
-        try
-        {
-            await UploadFileAsync(message.ChatId, attachment, message.ThreadTs, ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to upload file to Slack: {FileName}", attachment.FileName);
-            return false;
-        }
-    }
-
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
@@ -325,7 +298,7 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     /// </summary>
     private async Task PostMessageAsync(string channel, string text, string? threadTs, CancellationToken ct)
     {
-        var client = CreateAuthorizedClient();
+        var client = CreateClient();
 
         var payload = new Dictionary<string, object?>
         {
@@ -336,7 +309,15 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         if (!string.IsNullOrWhiteSpace(threadTs))
             payload["thread_ts"] = threadTs;
 
-        var response = await client.PostAsJsonAsync($"{BaseUrl}/chat.postMessage", payload, ct);
+        // Set Authorization per-request — the named HttpClient is pooled and its
+        // DefaultRequestHeaders must not be mutated across concurrent sends.
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/chat.postMessage")
+        {
+            Headers = { Authorization = new AuthenticationHeaderValue("Bearer", _options.BotToken) },
+            Content = JsonContent.Create(payload)
+        };
+
+        var response = await client.SendAsync(request, ct);
         var responseBody = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
@@ -356,49 +337,8 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     }
 
     /// <summary>
-    /// 调用 Slack files.upload API
+    /// 获取命名 HttpClient（Authorization 头由每次请求单独设置，不触碰池化客户端的默认头）。
     /// </summary>
-    private async Task UploadFileAsync(string channel, ResolvedAttachment attachment, string? threadTs, CancellationToken ct)
-    {
-        var client = CreateAuthorizedClient();
-
-        await using var stream = System.IO.File.OpenRead(attachment.ActualPath);
-        using var content = new MultipartFormDataContent();
-
-        content.Add(new StringContent(channel), "channels");
-        content.Add(new StreamContent(stream), "file", attachment.FileName);
-
-        if (!string.IsNullOrWhiteSpace(attachment.FileName))
-            content.Add(new StringContent(attachment.FileName), "filename");
-
-        if (!string.IsNullOrWhiteSpace(threadTs))
-            content.Add(new StringContent(threadTs), "thread_ts");
-
-        var response = await client.PostAsync($"{BaseUrl}/files.upload", content, ct);
-        var responseBody = await response.Content.ReadAsStringAsync(ct);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogWarning("Slack files.upload HTTP error: {StatusCode} {Body}", response.StatusCode, responseBody);
-            throw new HttpRequestException($"Slack files.upload returned {response.StatusCode}");
-        }
-
-        using var doc = JsonDocument.Parse(responseBody);
-        if (!doc.RootElement.TryGetProperty("ok", out var okProp) || !okProp.GetBoolean())
-        {
-            var error = doc.RootElement.TryGetProperty("error", out var errProp) ? errProp.GetString() : "unknown";
-            _logger.LogWarning("Slack files.upload API error: {Error}", error);
-            throw new HttpRequestException($"Slack files.upload error: {error}");
-        }
-    }
-
-    /// <summary>
-    /// 创建带 Bearer Token 授权头的 HttpClient
-    /// </summary>
-    private HttpClient CreateAuthorizedClient()
-    {
-        var client = _httpClientFactory.CreateClient("Tnzi.AI.Slack");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.BotToken);
-        return client;
-    }
+    private HttpClient CreateClient()
+        => _httpClientFactory.CreateClient("Tnzi.AI.Slack");
 }

@@ -31,15 +31,6 @@ public class ChannelManagerHostedService : IHostedService
             if (adapterMap.TryGetValue(outbound.ChannelName, out var adapter))
             {
                 await adapter.SendAsync(outbound, CancellationToken.None);
-
-                // 发送附件（仅支持文件的适配器）
-                if (outbound.Attachments is { Count: > 0 } && adapter.SupportsFileAttachment)
-                {
-                    foreach (var attachment in outbound.Attachments)
-                    {
-                        await adapter.SendFileAsync(outbound, attachment, CancellationToken.None);
-                    }
-                }
             }
             else
             {
@@ -64,8 +55,9 @@ public class ChannelManagerHostedService : IHostedService
 
         foreach (var adapter in _adapters)
         {
+            // Adapters are DI singletons — the container owns disposal. Only stop listening
+            // here; calling DisposeAsync would double-dispose (StopAsync + container teardown).
             await adapter.StopAsync(ct);
-            await adapter.DisposeAsync();
         }
     }
 }

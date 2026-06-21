@@ -5,6 +5,8 @@ import { zhCn } from '../locales/zh-cn'
 import { DEFAULT_ROUTE_ICONS } from '../router/routeIcons'
 import { humanise } from '../pages/_shared/translate'
 import { useAdminAppStore } from './useAdminAppStore'
+import { useAdminAuthStore } from './useAdminAuthStore'
+import type { MenuTreeNode } from '@tnzi/core/services/system'
 
 /**
  * Resolve a dotted i18n key against the bundled admin locale pack.
@@ -66,6 +68,13 @@ export interface AdminRouteMeta {
   constant?: boolean
   keepAlive?: boolean
   hideInMenu?: boolean
+  /**
+   * Single permission code required to SEE this menu entry. Matches the real
+   * route table's `meta.permission` (71 occurrences) and the navigation guard.
+   * Prefer this over `permissions`.
+   */
+  permission?: string
+  /** Multiple permission codes (OR semantics). Back-compat / advanced use. */
   permissions?: string[]
   roles?: string[]
   activeMenu?: string
@@ -92,6 +101,56 @@ export interface AdminMenuItem {
 }
 
 /**
+ * Index a backend menu tree (`MenuTreeNode[]`) by `menuKey` so the 'merge' menu
+ * source can override the matching route-derived entry. Walks children too.
+ */
+function indexMenuOverrides(
+  nodes: MenuTreeNode[],
+  map: Map<string, MenuTreeNode> = new Map(),
+): Map<string, MenuTreeNode> {
+  for (const node of nodes) {
+    if (node.menuKey) map.set(node.menuKey, node)
+    if (node.children?.length) indexMenuOverrides(node.children, map)
+  }
+  return map
+}
+
+/**
+ * Apply backend overrides onto the route-derived menu tree, keyed by route name.
+ * The route table stays the source of truth for WHICH pages exist; a backend row
+ * keyed by a route's name can retitle / re-icon / reorder / hide it without a
+ * redeploy. Recurses into children; an override with `isHidden` drops the entry.
+ * No-op for entries without a matching backend row.
+ */
+function applyMenuOverrides(
+  items: AdminMenuItem[],
+  byKey: Map<string, MenuTreeNode>,
+): AdminMenuItem[] {
+  const result: AdminMenuItem[] = []
+  for (const item of items) {
+    const override = byKey.get(item.key)
+    if (override?.isHidden) continue
+    let next = item
+    if (override) {
+      next = {
+        ...item,
+        label: override.name?.trim() ? override.name : item.label,
+        icon: override.icon?.trim() ? override.icon : item.icon,
+        meta:
+          typeof override.sortOrder === 'number'
+            ? ({ ...item.meta, order: override.sortOrder } as AdminRouteMeta)
+            : item.meta,
+      }
+    }
+    if (next.children?.length) {
+      next = { ...next, children: applyMenuOverrides(next.children, byKey) }
+    }
+    result.push(next)
+  }
+  return result
+}
+
+/**
  * Admin route store — manages constant routes (always available), auth routes
  * (filtered by permissions), the derived menu tree, and the keepAlive cache list.
  */
@@ -99,6 +158,8 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   const constantRoutes = ref<AdminRouteRecord[]>([])
   const authRoutes = ref<AdminRouteRecord[]>([])
   const routesLoaded = ref(false)
+  /** Backend Sys_Menu tree for the 'merge' source (overrides by menuKey). Empty = 'route' source. */
+  const backendMenuNodes = ref<MenuTreeNode[]>([])
 
   const allRoutes = computed<AdminRouteRecord[]>(() => [
     ...constantRoutes.value,
@@ -111,7 +172,35 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   /** Derived menu tree from allRoutes, excluding hideInMenu entries, sorted by meta.order. */
   const menus = computed<AdminMenuItem[]>(() => {
     const appStore = useAdminAppStore()
+    const authStore = useAdminAuthStore()
     const locale = appStore.locale
+    // Permission-driven visibility. Reading these reactive auth fields HERE is
+    // what finally wires the sidebar to real permissions — `menus` recomputes
+    // the moment the user logs in / their permission list loads.
+    //  • super-user  → see everything (the backend also returns the full code
+    //    catalogue for super-admins, so this is belt-and-suspenders);
+    //  • no user yet → fail-OPEN (show all) so the sidebar is never blank before
+    //    the permission list is fetched, and apps that never wire permissions
+    //    keep the historical behaviour;
+    //  • otherwise   → keep entries whose singular `meta.permission` (the real
+    //    route-table field) — or any of plural `meta.permissions` (OR) — is
+    //    granted; entries with no requirement are public.
+    // Lowercased set → case-insensitive matching to mirror the backend
+    // (StringComparer.OrdinalIgnoreCase). Codes are all lowercase today, but
+    // pinning this prevents the silent-filter failure mode if casing drifts.
+    const grantedPermissions = new Set(
+      authStore.userPermissions.map((p) => p.toLowerCase()),
+    )
+    const permissionsLoaded = authStore.userInfo !== null
+    const bypassPermissionFilter = authStore.isSuperUser || !permissionsLoaded
+    function isVisible(route: AdminRouteRecord): boolean {
+      if (bypassPermissionFilter) return true
+      const single = route.meta?.permission
+      if (single) return grantedPermissions.has(single.toLowerCase())
+      const multi = route.meta?.permissions
+      if (multi && multi.length > 0) return multi.some((p) => grantedPermissions.has(p.toLowerCase()))
+      return true
+    }
     // Host-app messages registered via `extendLocaleMessages`. Passed
     // through to `resolveI18nKey` so consumer-owned route titles
     // (e.g. `tnzi.admin.modules.acme.blog.posts.title`) resolve in the
@@ -133,6 +222,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     }
     function toMenuItem(route: AdminRouteRecord, parentPath: string): AdminMenuItem | null {
       if (route.meta?.hideInMenu) return null
+      if (!isVisible(route)) return null
       const rawTitle = route.meta?.title ?? route.name
       const absolutePath = joinPath(parentPath, route.path)
       // Phase I.7.6: when `meta.icon` is missing, fall back to the curated
@@ -152,37 +242,29 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
         const children = route.children
           .map((c) => toMenuItem(c, absolutePath))
           .filter(Boolean) as AdminMenuItem[]
-        if (children.length > 0) item.children = children
+        if (children.length > 0) {
+          item.children = children
+        } else {
+          // A directory whose children were all filtered out (permission /
+          // hideInMenu) would render as an empty, unclickable parent — drop it.
+          return null
+        }
       }
       return item
     }
-    const items = allRoutes.value
+    let items = allRoutes.value
       .map((r) => toMenuItem(r, ''))
       .filter(Boolean) as AdminMenuItem[]
+    // 'merge' menu source: overlay backend Sys_Menu overrides (retitle / re-icon
+    // / reorder / hide) keyed by route name. Reading backendMenuNodes here keeps
+    // the menu reactive to it; empty (the default 'route' source) is a no-op.
+    const backendOverrides = backendMenuNodes.value
+    if (backendOverrides.length > 0) {
+      items = applyMenuOverrides(items, indexMenuOverrides(backendOverrides))
+    }
     items.sort((a, b) => (a.meta?.order ?? 999) - (b.meta?.order ?? 999))
     return items
   })
-
-  function filterRoutesByPermissions(
-    routes: AdminRouteRecord[],
-    userPermissions: string[],
-  ): AdminRouteRecord[] {
-    const result: AdminRouteRecord[] = []
-    for (const route of routes) {
-      const requiredPerms = route.meta?.permissions ?? []
-      const hasPerm =
-        requiredPerms.length === 0 || requiredPerms.some((p) => userPermissions.includes(p))
-      if (!hasPerm) continue
-
-      const filtered: AdminRouteRecord = { ...route }
-      if (route.children) {
-        filtered.children = filterRoutesByPermissions(route.children, userPermissions)
-        if (filtered.children.length === 0 && !route.component) continue
-      }
-      result.push(filtered)
-    }
-    return result
-  }
 
   function collectCacheRouteNames(routes: AdminRouteRecord[]): string[] {
     const names: string[] = []
@@ -200,8 +282,19 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     cacheRoutes.value = collectCacheRouteNames([...routes, ...authRoutes.value])
   }
 
-  function setAuthRoutes(routes: AdminRouteRecord[], userPermissions: string[]): void {
-    authRoutes.value = filterRoutesByPermissions(routes, userPermissions)
+  /**
+   * Register the application's auth routes. ALL routes are kept — vue-router and
+   * the navigation guards still need them resolvable. Menu *visibility* is now
+   * filtered reactively in the `menus` getter from the auth store, NOT here: the
+   * historical install-time `filterRoutesByPermissions(routes, [])` ran before
+   * login with an empty permission set, which (had the field names matched)
+   * would have permanently stripped every protected route.
+   *
+   * `_userPermissions` is accepted for backward compatibility but no longer used
+   * for physical filtering; pass it or omit it freely.
+   */
+  function setAuthRoutes(routes: AdminRouteRecord[], _userPermissions: string[] = []): void {
+    authRoutes.value = routes
     cacheRoutes.value = collectCacheRouteNames([...constantRoutes.value, ...authRoutes.value])
     routesLoaded.value = true
   }
@@ -210,9 +303,15 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     cacheRoutes.value = cacheRoutes.value.filter((n) => n !== routeName)
   }
 
+  /** Feed the backend Sys_Menu tree for the 'merge' source; [] reverts to 'route'. */
+  function setBackendMenus(nodes: MenuTreeNode[]): void {
+    backendMenuNodes.value = nodes
+  }
+
   function clearRoutes(): void {
     constantRoutes.value = []
     authRoutes.value = []
+    backendMenuNodes.value = []
     cacheRoutes.value = []
     routesLoaded.value = false
   }
@@ -222,10 +321,12 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     authRoutes,
     allRoutes,
     routesLoaded,
+    backendMenuNodes,
     menus,
     cacheRoutes,
     setConstantRoutes,
     setAuthRoutes,
+    setBackendMenus,
     resetRouteCache,
     clearRoutes,
   }

@@ -29,9 +29,19 @@ public class FileReferenceConfiguration : EntityTypeConfigurationBase<FileRefere
         builder.HasIndex(e => e.IsTemporary);
         builder.HasIndex(e => e.CreationTime);
 
-        // 唯一约束：同一个实体的同一个字段只能引用一个文件（非临时引用）
-        // 注意：临时引用可以有多个，但正式引用应该唯一
-        // 这里不设置唯一约束，因为允许临时引用存在多个
+        // 唯一约束：同一个 (FileId, EntityType, EntityId, FieldName) 只能有一条引用记录。
+        // 这是引用去重的数据库层兜底——配合 FileReferenceProcessor / FileReferenceService 的应用层查重，
+        // 防止双轨写入产生重复引用行与 ReferenceCount 虚高（导致文件永远清不掉）。
+        // 多文件字段(如 Attachments)同一字段引用多个文件时 FileId 不同，故不受影响。
+        // FileReference 为硬删除(无 ISoftDelete)，无需软删除过滤。
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => new { e.TenantId, e.FileId, e.EntityType, e.EntityId, e.FieldName }).IsUnique();
+        }
+        else
+        {
+            builder.HasIndex(e => new { e.FileId, e.EntityType, e.EntityId, e.FieldName }).IsUnique();
+        }
     }
 }
 

@@ -41,8 +41,14 @@ import type { App, Component } from 'vue'
 import type { Pinia } from 'pinia'
 import type { RouteRecordRaw, Router } from 'vue-router'
 import type { HttpClient } from '@tnzi/core/http'
+import { useAdminFunctionAuthorizationApi } from '@tnzi/core/services/authorization'
+import { useAdminMenuApi } from '@tnzi/core/services/system'
+import { createIdentityBridge } from '../services/bridges/identity-bridge'
+import type { MenuSeedResultDto } from '@tnzi/core/services/system'
+import { exportRouteMenuSeed } from '../headless/menuSeed'
 import { defaultAdminRoutes } from '../router/routes'
 import { createAuthGuard, createPermissionGuard } from '../router/guards'
+import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import {
   createTnziUiAdmin,
   type TnziUiAdminInstance,
@@ -60,6 +66,31 @@ import { useRouteProgress } from '../headless/useRouteProgress'
 export interface DefineAdminAppOptions {
   /** Backend HttpClient that admin bridges use to talk to the API. */
   client: HttpClient
+
+  /**
+   * Role names whose holders are treated as super-admins by `loadPermissions`:
+   * the shell sets `isSuperUser` (sidebar shows EVERYTHING, route guards bypass)
+   * when the signed-in user holds any of these roles (case-insensitive). Mirror
+   * the backend's `Authorization:SuperAdminRoles` here.
+   *
+   * Why it matters: a super-admin's backend permission list is only the codes
+   * that have actually been *defined* in the authorization system. Framework
+   * modules don't yet ship permission-code definitions, so without this bypass
+   * even a super-admin would see only the handful of codes an app defines.
+   * Listing the super-admin role(s) keeps the shell fully usable for admins
+   * regardless of permission-code coverage.
+   */
+  superAdminRoles?: string[]
+
+  /**
+   * Menu source — where the sidebar's structure comes from.
+   *  • `'route'` (default): purely derived from the front-end route table.
+   *  • `'merge'`: the route table stays the source of truth for WHICH pages
+   *    exist, but backend `Sys_Menu` rows (keyed by route name via `menuKey`)
+   *    override an entry's title / icon / order / visibility without a redeploy.
+   *    Call `loadMenus(userId)` after login to fetch them.
+   */
+  menu?: { source?: 'route' | 'merge' }
 
   /**
    * Root path the admin SPA is deployed under inside vue-router. Rewrites every
@@ -235,6 +266,17 @@ export interface DefineAdminAppOptions {
    */
   settings?: AdminSettingsConfig
 
+  /**
+   * Configuration for the built-in chat feature (TChatHost shell-level widget).
+   * When omitted the chat launcher is enabled by default.
+   */
+  chat?: {
+    /**
+     * When false, disables the chat launcher in the header. Default: true.
+     */
+    enabled?: boolean
+  }
+
   /** Replace the placeholder `/403` forbidden component. */
   forbiddenComponent?: Component
 
@@ -273,6 +315,42 @@ export interface DefineAdminAppOptions {
   }
 }
 
+/**
+ * The signed-in user passed to `loadPermissions`. Only `id` is required — it is
+ * used to fetch the permission code list from the backend. The rest populate the
+ * admin auth store's `userInfo` (drives the header avatar, breadcrumb, etc.).
+ */
+export interface AdminCurrentUser {
+  /** Backend user id — used to fetch `GET /admin/function-authorization/user/{id}/permissions`. */
+  id: string
+  username?: string
+  displayName?: string
+  email?: string
+  avatar?: string
+  /** Local-upload avatar file id (UserDetail.AvatarId). When omitted,
+   *  `loadPermissions` auto-fetches the current profile so the header avatar
+   *  reflects an uploaded picture, not just an external `avatar` link. */
+  avatarId?: string | null
+  roles?: string[]
+  tenantId?: string
+  /**
+   * Pre-fetched permission codes. When provided, `loadPermissions` SKIPS the
+   * backend round-trip — pass these when the caller already has them (e.g. the
+   * core `AuthStateManager` fetched them via its `permissionsFetchFn`). Omit to
+   * have `loadPermissions` fetch from `/admin/function-authorization/...`.
+   */
+  permissions?: string[]
+  /** Optional access token mirrored into the admin auth store (enables the built-in auth guard). */
+  token?: string
+  refreshToken?: string
+  /**
+   * Force super-user (sees every menu). Usually unnecessary — the backend
+   * already returns the full enabled-function catalogue for super-admins, so a
+   * super-admin naturally receives every code and sees every menu.
+   */
+  superUser?: boolean
+}
+
 export interface DefineAdminAppResult {
   /** Filtered + extended route table ready to feed `createRouter({ routes })`. */
   routes: RouteRecordRaw[]
@@ -288,6 +366,46 @@ export interface DefineAdminAppResult {
    * (`useRouteProgress(router)`).
    */
   install(app: App, pinia?: Pinia, router?: Router): TnziUiAdminInstance
+
+  /**
+   * Load the current user's permission codes and populate the admin auth store
+   * — call this right after a successful login (and on app boot when restoring a
+   * session). THIS is what wires permission-filtered menus + route guards to
+   * real data: until it runs, the sidebar fails OPEN (shows everything).
+   *
+   * Fetches `GET /admin/function-authorization/user/{id}/permissions`, then
+   * `setUserInfo({ …, permissions })`. A legitimate empty list (user has no
+   * grants) sets `userInfo` and the sidebar shows only public entries; a network
+   * failure THROWS without touching `userInfo`, so the menu stays fail-open and
+   * the caller can retry. Must run after `install()` (needs an active pinia).
+   *
+   * @returns the loaded permission codes.
+   *
+   * `user` is optional: when omitted (or `{ id: '' }`), the framework self-fetches
+   * the current profile (`GET /users/profile`) to resolve the id / display name /
+   * avatar — so a consumer can simply call `loadPermissions()` after login or
+   * session restore without threading the user through.
+   */
+  loadPermissions(user?: AdminCurrentUser): Promise<string[]>
+
+  /**
+   * Load backend `Sys_Menu` overrides for the 'merge' menu source and feed them
+   * to the route store (the sidebar then reflects operator retitle / reorder /
+   * hide without a redeploy). No-op unless `menu.source === 'merge'`. Call after
+   * `loadPermissions` (needs the user id + an active pinia). Safe to ignore the
+   * promise — failures leave the menu as the plain route-derived tree.
+   */
+  loadMenus(userId: string): Promise<void>
+
+  /**
+   * Mirror the front-end route-derived menu into editable `Sys_Menu` rows
+   * (`POST /admin/menus/seed`, upsert by menuKey — inserts missing keys, skips
+   * existing ones so operator edits survive). Gives operators an editable
+   * starting point when first enabling the `'merge'` source. Returns the
+   * insert/skip counts (null if nothing to seed or the request fails). Call
+   * after `install()` (needs an active pinia).
+   */
+  seedMenus(): Promise<MenuSeedResultDto | null>
 }
 
 function normalizeName(name: string): string {
@@ -530,6 +648,10 @@ function toAdminRouteRecords(
       constant: rawMeta?.constant as boolean | undefined,
       keepAlive: rawMeta?.keepAlive as boolean | undefined,
       hideInMenu: rawMeta?.hideInMenu as boolean | undefined,
+      // Carry BOTH the singular `permission` (what the real route table uses, 71×)
+      // and plural `permissions`. Dropping the singular one was the root of the
+      // silently-disabled menu permission filter.
+      permission: rawMeta?.permission as string | undefined,
       permissions: rawMeta?.permissions as string[] | undefined,
       roles: rawMeta?.roles as string[] | undefined,
       activeMenu: rawMeta?.activeMenu as string | undefined,
@@ -581,14 +703,48 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   routes = applyPlaceholders(routes, options.loginComponent, options.forbiddenComponent)
   routes = applyBasePath(routes, basePath)
 
+  /**
+   * Wrap the consumer's auth callbacks so the framework populates the admin auth
+   * store automatically after a successful login — the consumer no longer has to
+   * call `loadPermissions` itself. The consumer callback runs first (it sets the
+   * token on the HttpClient via its own auth manager); then we self-fetch the
+   * profile + permission codes so the header name/avatar and the chat window's
+   * own `myId` are correct the moment the user lands on the shell. This is what
+   * makes the login flow "框架自洽" — see `loadPermissions`.
+   */
+  function wrapLoginCallbacks(login?: AdminLoginConfig): AdminLoginConfig | undefined {
+    if (!login?.callbacks) return login
+    const cbs = login.callbacks
+    const after = async () => {
+      await loadPermissions().catch(() => undefined)
+    }
+    const callbacks: NonNullable<AdminLoginConfig['callbacks']> = {
+      ...cbs,
+      pwdLogin: cbs.pwdLogin
+        ? async (payload, helpers) => {
+            await cbs.pwdLogin!(payload, helpers)
+            await after()
+          }
+        : undefined,
+      codeLogin: cbs.codeLogin
+        ? async (payload, helpers) => {
+            await cbs.codeLogin!(payload, helpers)
+            await after()
+          }
+        : undefined,
+    }
+    return { ...login, callbacks }
+  }
+
   function install(app: App, pinia?: Pinia, router?: Router): TnziUiAdminInstance {
     const instance = createTnziUiAdmin(app, {
       ...(options.pluginOptions ?? {}),
       client: options.client,
       pinia,
-      login: options.login,
+      login: wrapLoginCallbacks(options.login),
       workbench: options.workbench,
       settings: options.settings,
+      chat: options.chat,
     })
 
     // Attach the soybean-style route progress bar if a router is provided.
@@ -638,5 +794,92 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     return instance
   }
 
-  return { routes, install }
+  async function loadPermissions(user: AdminCurrentUser = { id: '' }): Promise<string[]> {
+    const authStore = useAdminAuthStore()
+
+    // Framework self-wiring: fetch the signed-in user's profile so the admin
+    // store is populated (header name + avatar, and the chat window's own
+    // `myId`) even when the consumer's login flow doesn't thread the user
+    // through `loadPermissions`. `GET /users/profile` (UserDto) is the source of
+    // truth for id / display name / avatar — and `avatarId` only lives there
+    // (Identity UserDetail), never on the login/permission response. Best-effort:
+    // a failure falls back to whatever the caller supplied.
+    let profile: Awaited<ReturnType<ReturnType<typeof createIdentityBridge>['me']['getProfile']>> | null = null
+    try {
+      profile = await createIdentityBridge({ client: options.client }).me.getProfile()
+    } catch {
+      profile = null
+    }
+
+    const userId = user.id || profile?.id || ''
+    const username = user.username || profile?.userName || ''
+    const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim()
+    // Display-name precedence (mirrors backend ChatContactService.ResolveDisplayName):
+    // nickname → real name (FirstName/LastName) → username.
+    const displayName =
+      user.displayName || profile?.nickname || (fullName || undefined) || username || undefined
+    const avatarId: string | null = user.avatarId ?? profile?.avatarId ?? null
+    const avatar: string | undefined = user.avatar ?? profile?.avatar ?? undefined
+    const roles = user.roles ?? profile?.roles ?? []
+
+    if (user.token) authStore.setToken(user.token, user.refreshToken)
+
+    // Resolve permissions (BEST-EFFORT). The identity `setUserInfo` below MUST run
+    // even when this fails: a regular (non-admin) user gets 403 from the admin
+    // permission endpoint, yet still needs their name / avatar / id — the chat
+    // window's own `myId` and the header name both read `userInfo`. A failure just
+    // leaves the permission list empty (the sidebar then shows only public
+    // entries); it must NEVER throw and block the identity.
+    //
+    // (This was the "bob still shows Admin + no green bubbles" bug: bob's 403 on
+    //  /admin/function-authorization/user/{id}/permissions threw BEFORE setUserInfo
+    //  ran, so `userInfo` stayed null → header fell back to the static 'Admin' and
+    //  `myId` was undefined → own messages never matched as mine.)
+    let permissions = user.permissions ?? []
+    if (user.permissions === undefined && userId) {
+      try {
+        const api = useAdminFunctionAuthorizationApi(options.client)
+        const res = await api.getUserPermissionNames(userId)
+        if (res.success) permissions = res.data ?? []
+      } catch {
+        // best-effort — keep the identity, leave permissions empty
+      }
+    }
+
+    authStore.setUserInfo({
+      id: userId,
+      username,
+      displayName,
+      email: user.email ?? profile?.email ?? undefined,
+      avatar,
+      avatarId,
+      roles,
+      permissions,
+      tenantId: user.tenantId,
+    })
+    const superRoleSet = new Set((options.superAdminRoles ?? []).map((r) => r.toLowerCase()))
+    const isSuper =
+      user.superUser === true || roles.some((r) => superRoleSet.has(r.toLowerCase()))
+    if (isSuper) authStore.setSuperUser(true)
+    return permissions
+  }
+
+  async function loadMenus(userId: string): Promise<void> {
+    if (options.menu?.source !== 'merge') return
+    const routeStore = useAdminRouteStore()
+    const res = await useAdminMenuApi(options.client).getUserTree(userId)
+    if (res.success && Array.isArray(res.data)) {
+      routeStore.setBackendMenus(res.data)
+    }
+  }
+
+  async function seedMenus(): Promise<MenuSeedResultDto | null> {
+    const routeStore = useAdminRouteStore()
+    const seed = exportRouteMenuSeed(routeStore.menus)
+    if (seed.length === 0) return null
+    const res = await useAdminMenuApi(options.client).seed(seed)
+    return res.success ? (res.data ?? null) : null
+  }
+
+  return { routes, install, loadPermissions, loadMenus, seedMenus }
 }

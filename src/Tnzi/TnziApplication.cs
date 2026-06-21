@@ -178,6 +178,10 @@ public class TnziApplication : ITnziApplication
             {
                 var auditLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
                 ModuleDependencyAuditor.Audit(Modules, _moduleServiceMap, auditLogger);
+                RuntimeSettingConsumerAuditor.Audit(
+                    _moduleServiceMap.SelectMany(kv => kv.Value),
+                    _moduleServiceMap.Keys.Select(t => t.Assembly).Distinct(),
+                    auditLogger);
             }
 
             // Build module manifests before releasing the service map

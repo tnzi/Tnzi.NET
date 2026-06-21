@@ -110,6 +110,17 @@ export interface AdminLoginConfig {
     onSignIn?: () => void | Promise<void>
   }
   /**
+   * Whether to show the language switcher (`TLangSwitch`) in the login
+   * page toolbar. Defaults to **false** — many deployments are
+   * single-locale and the extra button adds visual noise.
+   */
+  showLangSwitch?: boolean
+  /**
+   * Whether to show the theme-schema switcher (`TThemeSchemaSwitch`) in
+   * the login page toolbar. Defaults to **true**.
+   */
+  showThemeSwitch?: boolean
+  /**
    * Footer configuration (Phase I.7.9+). When omitted the shell still
    * renders a default `Copyright © {year} {brand}` line so the admin
    * never ships with a bare grey strip.

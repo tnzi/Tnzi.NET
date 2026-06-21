@@ -85,6 +85,13 @@ public class FileQueryRequest : PagedQueryDto
     public string? Provider { get; set; }
 
     /// <summary>
+    /// MIME content type prefix filter (e.g. "image/" matches all images, "application/pdf" matches PDFs).
+    /// Matched via StartsWith so a trailing-slash prefix selects a whole category.
+    /// </summary>
+    [MaxLength(128)]
+    public string? ContentType { get; set; }
+
+    /// <summary>
     /// 文件夹 ID 过滤。传入 Guid.Empty 表示"根目录（未归档）"，
     /// 传入具体 ID 表示该文件夹直接子文件，不传则不按文件夹过滤。
     /// </summary>
@@ -129,6 +136,14 @@ public class FileQueryRequest : PagedQueryDto
     /// 是否降序，false 表示升序
     /// </summary>
     public bool Descending { get; set; } = false;
+
+    /// <summary>
+    /// Sort direction as a string ("asc"/"desc"). When set, takes precedence over
+    /// <see cref="Descending"/> so frontends sending a string direction work correctly.
+    /// Leave null to fall back to <see cref="Descending"/>.
+    /// </summary>
+    [MaxLength(8)]
+    public string? SortOrder { get; set; }
 }
 
 /// <summary>
@@ -589,6 +604,58 @@ public class FileShareSummaryDto
     /// Creator ID
     /// </summary>
     public Guid? CreatorId { get; set; }
+}
+
+/// <summary>
+/// Public-facing file share DTO (never exposes PasswordHash).
+/// 对外暴露的分享信息（绝不包含 PasswordHash），用于匿名可达的分享端点。
+/// </summary>
+public class FileSharePublicDto
+{
+    /// <summary>
+    /// Share ID
+    /// </summary>
+    public Guid Id { get; set; }
+
+    /// <summary>
+    /// File ID
+    /// </summary>
+    public Guid FileId { get; set; }
+
+    /// <summary>
+    /// Share token
+    /// </summary>
+    public string ShareToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Expiration time (null = never expires)
+    /// </summary>
+    public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// Max access count (null = unlimited)
+    /// </summary>
+    public int? MaxAccessCount { get; set; }
+
+    /// <summary>
+    /// Current access count
+    /// </summary>
+    public int AccessCount { get; set; }
+
+    /// <summary>
+    /// Whether a password is required to access this share
+    /// </summary>
+    public bool RequirePassword { get; set; }
+
+    /// <summary>
+    /// Whether the share is enabled
+    /// </summary>
+    public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// Creation time
+    /// </summary>
+    public DateTime CreationTime { get; set; }
 }
 
 /// <summary>

@@ -70,6 +70,78 @@ public class FileCleanupBackgroundServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WhenCronExpressionSet_SchedulesByCron()
+    {
+        // Arrange — Cron 已配置（有效）→ 应按 cron 调度并记录 info（含 "cron expression"）
+        var options = new StorageOptions
+        {
+            Cleanup = new CleanupOptions { Enabled = true, CronExpression = "0 3 * * *", IntervalMinutes = 60 }
+        };
+        var service = CreateService(options);
+        var cts = new CancellationTokenSource();
+
+        // Act
+        var task = service.StartAsync(cts.Token);
+        await Task.Delay(200);
+        cts.Cancel();
+
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            // 预期的取消异常
+        }
+
+        // Assert — 记录了 cron 调度 info（表明 CronExpression 真正生效，而非回退）
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("cron expression")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenInvalidCronExpression_LogsErrorAndFallsBack()
+    {
+        // Arrange — 非法 Cron → 应记录 error 并回退到 IntervalMinutes
+        var options = new StorageOptions
+        {
+            Cleanup = new CleanupOptions { Enabled = true, CronExpression = "not-a-valid-cron", IntervalMinutes = 60 }
+        };
+        var service = CreateService(options);
+        var cts = new CancellationTokenSource();
+
+        // Act
+        var task = service.StartAsync(cts.Token);
+        await Task.Delay(200);
+        cts.Cancel();
+
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            // 预期的取消异常
+        }
+
+        // Assert — 记录了非法 Cron 的 error
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Invalid Cleanup.CronExpression")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
     public void Constructor_ShouldNotThrow()
     {
         // Arrange

@@ -19,8 +19,6 @@ public class ChatClientFactory : IChatClientFactory
     private readonly Dictionary<string, IChatClientProvider> _providers;
     private ConcurrentDictionary<string, IChatClient> _chatClients = new();
     private ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>> _embeddingClients = new();
-    private ConcurrentDictionary<string, ChatClient> _openAIChatClients = new();
-    private ConcurrentDictionary<string, EmbeddingClient> _openAIEmbeddingClients = new();
 
     // DB-sourced provider cache. Lazy<T> wrapping ensures the DB query runs exactly
     // once per key per TTL window even under concurrent first-callers (stampede
@@ -49,8 +47,6 @@ public class ChatClientFactory : IChatClientFactory
         {
             var oldChatClients = Interlocked.Exchange(ref _chatClients, new ConcurrentDictionary<string, IChatClient>());
             var oldEmbeddingClients = Interlocked.Exchange(ref _embeddingClients, new ConcurrentDictionary<string, IEmbeddingGenerator<string, Embedding<float>>>());
-            Volatile.Write(ref _openAIChatClients, new ConcurrentDictionary<string, ChatClient>());
-            Volatile.Write(ref _openAIEmbeddingClients, new ConcurrentDictionary<string, EmbeddingClient>());
 
             // Also clear DB provider cache so next resolution re-reads the DB in case
             // the admin updated both config and DB rows in tandem.
@@ -116,54 +112,6 @@ public class ChatClientFactory : IChatClientFactory
             var generator = provider.CreateEmbeddingGenerator(providerOptions, model);
             return generator ?? throw new InvalidOperationException(
                 $"Provider '{name}' does not support embedding generation");
-        });
-    }
-
-    /// <summary>
-    /// 获取 OpenAI ChatClient（内部方法，通过 ChatClientFactoryExtensions 扩展方法访问）
-    /// </summary>
-    internal ChatClient GetOpenAIChatClientInternal(string? providerName = null, string? model = null)
-    {
-        var (name, providerOptions) = ResolveProvider(providerName);
-        model = ResolveModel(name, providerOptions, model);
-
-        var cacheKey = $"oai-chat:{name}:{providerOptions.BaseUrl ?? "default"}:{model}";
-
-        var openAIChatClients = Volatile.Read(ref _openAIChatClients);
-        return openAIChatClients.GetOrAdd(cacheKey, _ =>
-        {
-            var provider = ResolveProviderImpl(name);
-            var nativeClient = provider.CreateNativeClient(providerOptions);
-            if (nativeClient is OpenAIClient openAIClient)
-            {
-                return openAIClient.GetChatClient(model);
-            }
-            throw new InvalidOperationException(
-                $"Provider '{name}' does not support OpenAI SDK types. Use GetChatClient() for MEAI abstraction.");
-        });
-    }
-
-    /// <summary>
-    /// 获取 OpenAI EmbeddingClient（内部方法，通过 ChatClientFactoryExtensions 扩展方法访问）
-    /// </summary>
-    internal EmbeddingClient GetOpenAIEmbeddingClientInternal(string? providerName = null, string? model = null)
-    {
-        var (name, providerOptions) = ResolveProvider(providerName);
-        model = ResolveModel(name, providerOptions, model);
-
-        var cacheKey = $"oai-emb:{name}:{providerOptions.BaseUrl ?? "default"}:{model}";
-
-        var openAIEmbeddingClients = Volatile.Read(ref _openAIEmbeddingClients);
-        return openAIEmbeddingClients.GetOrAdd(cacheKey, _ =>
-        {
-            var provider = ResolveProviderImpl(name);
-            var nativeClient = provider.CreateNativeClient(providerOptions);
-            if (nativeClient is OpenAIClient openAIClient)
-            {
-                return openAIClient.GetEmbeddingClient(model);
-            }
-            throw new InvalidOperationException(
-                $"Provider '{name}' does not support OpenAI SDK types. Use GetEmbeddingGenerator() for MEAI abstraction.");
         });
     }
 

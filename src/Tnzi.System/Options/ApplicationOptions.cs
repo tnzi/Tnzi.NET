@@ -1,71 +1,44 @@
 namespace Tnzi.System.Options;
 
-/// <summary>
-/// 应用程序配置选项
-/// 从配置文件读取标准字段
-/// 配置路径：App
-/// </summary>
+/// <summary>应用程序配置选项。配置路径：System（经配置中心可热设置）。</summary>
+[ConfigSection("System")]
+[RuntimeSettingGroup(Key = "system-general", Module = "System", DisplayName = "General",
+    Icon = "mdi:web", Order = 0, I18nKey = "admin.modules.system.settings.groups.systemGeneral")]
 public class ApplicationOptions
 {
-    /// <summary>
-    /// 获取或设置 应用程序名称
-    /// </summary>
+    [RuntimeSetting(Label = "App Name", I18n = "admin.modules.system.settings.fields.appName")]
     public string AppName { get; set; } = "Tnzi.NET";
 
-    /// <summary>
-    /// 获取或设置 站点名称
-    /// </summary>
+    [RuntimeSetting(Label = "Site Name", I18n = "admin.modules.system.settings.fields.siteName")]
     public string SiteName { get; set; } = "Tnzi.NET";
 
-    /// <summary>
-    /// 获取或设置 前端URL
-    /// </summary>
+    [RuntimeSetting(Label = "Frontend URL", I18n = "admin.modules.system.settings.fields.frontendUrl")]
     public string? FrontendUrl { get; set; }
 
-    /// <summary>
-    /// 获取或设置 后端API基础URL（用于生成邮箱确认等回调链接）
-    /// 例如：https://api.example.com 或 https://example.com/api
-    /// </summary>
+    [RuntimeSetting(Label = "API Base URL", I18n = "admin.modules.system.settings.fields.apiBaseUrl")]
     public string? ApiBaseUrl { get; set; }
 
-    /// <summary>
-    /// 获取或设置 联系邮箱
-    /// </summary>
+    [RuntimeSetting(Label = "Email", I18n = "admin.modules.system.settings.fields.email")]
     public string? Email { get; set; }
 
-    /// <summary>
-    /// 获取或设置 联系电话
-    /// </summary>
+    [RuntimeSetting(Label = "Phone", I18n = "admin.modules.system.settings.fields.phone")]
     public string? Phone { get; set; }
 
-    /// <summary>
-    /// 获取或设置 公司/组织名称
-    /// </summary>
+    [RuntimeSetting(Label = "Company", I18n = "admin.modules.system.settings.fields.companyName")]
     public string? CompanyName { get; set; }
 
-    /// <summary>
-    /// 获取或设置 公司地址
-    /// </summary>
+    [RuntimeSetting(Label = "Address", I18n = "admin.modules.system.settings.fields.address")]
     public string? Address { get; set; }
 
-    /// <summary>
-    /// 获取或设置 网站URL
-    /// </summary>
+    [RuntimeSetting(Label = "Website URL", I18n = "admin.modules.system.settings.fields.websiteUrl")]
     public string? WebsiteUrl { get; set; }
 
-    /// <summary>
-    /// 获取或设置 Logo URL
-    /// </summary>
+    [RuntimeSetting(Label = "Logo URL", I18n = "admin.modules.system.settings.fields.logoUrl")]
     public string? LogoUrl { get; set; }
 
-    /// <summary>
-    /// 获取或设置 版权信息
-    /// </summary>
+    [RuntimeSetting(Label = "Copyright", I18n = "admin.modules.system.settings.fields.copyright")]
     public string? Copyright { get; set; }
 
-    /// <summary>
-    /// 获取或设置 ICP备案号
-    /// </summary>
+    [RuntimeSetting(Label = "ICP Number", I18n = "admin.modules.system.settings.fields.icpNumber")]
     public string? IcpNumber { get; set; }
 }
-

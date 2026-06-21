@@ -32,6 +32,13 @@ public interface IFileCleanupService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>清理的引用数量</returns>
     Task<int> CleanupOrphanReferencesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 清理过期的分片上传会话及其残留分片（含物理文件）
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>清理的会话数量</returns>
+    Task<int> CleanupExpiredUploadSessionsAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -55,6 +62,11 @@ public class CleanupResult
     public int OrphanReferencesDeleted { get; set; }
 
     /// <summary>
+    /// 清理的过期分片上传会话数量
+    /// </summary>
+    public int ExpiredSessionsDeleted { get; set; }
+
+    /// <summary>
     /// 清理是否成功
     /// </summary>
     public bool Success { get; set; } = true;
@@ -67,5 +79,5 @@ public class CleanupResult
     /// <summary>
     /// 清理总数
     /// </summary>
-    public int TotalDeleted => TemporaryFilesDeleted + OrphanFilesDeleted + OrphanReferencesDeleted;
+    public int TotalDeleted => TemporaryFilesDeleted + OrphanFilesDeleted + OrphanReferencesDeleted + ExpiredSessionsDeleted;
 }

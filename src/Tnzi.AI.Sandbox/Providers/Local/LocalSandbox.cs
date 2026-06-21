@@ -12,8 +12,10 @@ public class LocalSandbox : ISandbox
     private readonly string _normalizedWorkspacePath;
     private readonly TimeSpan _commandTimeout;
     private readonly long _maxOutputSize;
+    private readonly long _maxFileSize;
     private readonly IReadOnlyCollection<string> _deniedCommands;
     private readonly IReadOnlyCollection<string> _deniedCommandPrefixes;
+    private readonly IReadOnlyCollection<string> _deniedPatterns;
     private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private readonly List<string> _environmentBlacklist;
     private readonly IReadOnlyDictionary<string, string>? _environmentOverrides;
@@ -26,15 +28,20 @@ public class LocalSandbox : ISandbox
         IEnumerable<string>? environmentBlacklist = null,
         IReadOnlyDictionary<string, string>? environmentOverrides = null,
         IEnumerable<string>? deniedCommandPrefixes = null,
-        IShellCommandAnalyzer? commandAnalyzer = null)
+        IShellCommandAnalyzer? commandAnalyzer = null,
+        IEnumerable<string>? deniedPatterns = null,
+        long maxFileSize = 0)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _workspacePath = Check.NotNullOrWhiteSpace(workspacePath);
         _normalizedWorkspacePath = Path.GetFullPath(workspacePath);
         _commandTimeout = commandTimeout;
         _maxOutputSize = maxOutputSize;
+        // <= 0 disables the file-size precheck (used by unit tests that do not care).
+        _maxFileSize = maxFileSize;
         _deniedCommands = (deniedCommands ?? []).ToArray();
         _deniedCommandPrefixes = (deniedCommandPrefixes ?? []).ToArray();
+        _deniedPatterns = (deniedPatterns ?? []).ToArray();
         _commandAnalyzer = commandAnalyzer;
         _environmentBlacklist = (environmentBlacklist ?? []).ToList();
         _environmentOverrides = environmentOverrides;
@@ -119,12 +126,51 @@ public class LocalSandbox : ISandbox
         return new CommandResult(process.ExitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());
     }
 
-    public async Task<string> ReadFileAsync(string path, CancellationToken ct = default)
+    public async Task<string> ReadFileAsync(string path, int? offset = null, int? limit = null, CancellationToken ct = default)
     {
         ValidatePathWithinWorkspace(path);
+        if (SensitiveFileMatcher.IsDenied(path, _deniedPatterns, out var pattern))
+            throw new SecurityException($"Access denied: file matches sensitive pattern '{pattern}'");
         if (!File.Exists(path))
             throw new FileNotFoundException($"File not found: {path}");
-        return await File.ReadAllTextAsync(path, ct);
+
+        // Size precheck — reject before pulling a multi-GB file into memory.
+        if (_maxFileSize > 0)
+        {
+            var length = new FileInfo(path).Length;
+            if (length > _maxFileSize)
+                throw new SecurityException(
+                    $"File exceeds the maximum readable size ({length} > {_maxFileSize} bytes)");
+        }
+
+        // No slicing requested → return the whole file as-is.
+        if (offset is null && limit is null)
+            return await File.ReadAllTextAsync(path, ct);
+
+        // Stream line-by-line and skip/take the requested window instead of
+        // materialising the entire file just to slice it.
+        var start = Math.Max(0, (offset ?? 1) - 1);
+        var count = limit ?? int.MaxValue;
+        var builder = new StringBuilder();
+        var taken = 0;
+        var skipped = 0;
+
+        await foreach (var line in File.ReadLinesAsync(path, ct))
+        {
+            if (skipped < start)
+            {
+                skipped++;
+                continue;
+            }
+            if (taken >= count)
+                break;
+            if (taken > 0)
+                builder.Append('\n');
+            builder.Append(line);
+            taken++;
+        }
+
+        return builder.ToString();
     }
 
     public async Task WriteFileAsync(string path, string content, bool append = false, CancellationToken ct = default)
@@ -156,7 +202,7 @@ public class LocalSandbox : ISandbox
             throw new DirectoryNotFoundException($"Directory not found: {path}");
 
         var entries = new List<FileEntry>();
-        CollectEntries(path, entries, maxDepth, 0);
+        CollectEntries(path, entries, maxDepth, 0, _deniedPatterns);
         return Task.FromResult<IReadOnlyList<FileEntry>>(entries);
     }
 
@@ -174,7 +220,8 @@ public class LocalSandbox : ISandbox
         }
     }
 
-    private static void CollectEntries(string dir, List<FileEntry> entries, int maxDepth, int currentDepth)
+    private static void CollectEntries(string dir, List<FileEntry> entries, int maxDepth, int currentDepth,
+        IReadOnlyCollection<string> deniedPatterns)
     {
         if (currentDepth > maxDepth) return;
 
@@ -182,10 +229,15 @@ public class LocalSandbox : ISandbox
         {
             var info = new DirectoryInfo(d);
             entries.Add(new FileEntry(info.Name, d, 0, IsDirectory: true));
-            CollectEntries(d, entries, maxDepth, currentDepth + 1);
+            CollectEntries(d, entries, maxDepth, currentDepth + 1, deniedPatterns);
         }
         foreach (var f in Directory.GetFiles(dir))
         {
+            // Hide sensitive files from listings so the agent cannot discover
+            // their existence, mirroring the read-time denial.
+            if (SensitiveFileMatcher.IsDenied(f, deniedPatterns, out _))
+                continue;
+
             var info = new FileInfo(f);
             entries.Add(new FileEntry(info.Name, f, info.Length, IsDirectory: false));
         }

@@ -1,6 +1,5 @@
 global using System.Globalization;
 global using Tnzi.Settings;
-global using Tnzi.Notification.Settings;
 global using Microsoft.AspNetCore.Http;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;

@@ -1,5 +1,5 @@
-using Tnzi.Identity.Settings;
 using Tnzi.Settings;
+using Tnzi.Identity.Options;
 
 namespace Tnzi.Identity.Tests.Settings;
 
@@ -9,7 +9,34 @@ public class IdentitySettingDefinitionProviderTests
 
     public IdentitySettingDefinitionProviderTests()
     {
-        _groups = new IdentitySettingDefinitionProvider().GetGroups();
+        // Extract per-class and merge groups sharing the same Key (mirrors AttributeSettingDefinitionProvider.MergeByGroupKey).
+        var raw = new List<SettingDefinitionGroup>();
+        foreach (var type in new[] { typeof(AccountSecurityOptions), typeof(RegistrationOptions), typeof(TnziSignInOptions) })
+        {
+            var g = RuntimeSettingMetadataExtractor.Extract(type);
+            if (g != null) raw.Add(g);
+        }
+
+        var merged = raw
+            .GroupBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(cluster =>
+            {
+                var first = cluster.First();
+                if (cluster.Count() == 1) return first;
+                return new SettingDefinitionGroup
+                {
+                    Key = first.Key,
+                    ModuleName = first.ModuleName,
+                    DisplayName = first.DisplayName,
+                    I18nKey = first.I18nKey,
+                    Icon = first.Icon,
+                    Order = cluster.Min(c => c.Order),
+                    Fields = cluster.SelectMany(c => c.Fields).ToList(),
+                };
+            })
+            .ToList();
+
+        _groups = merged;
     }
 
     [Fact]
@@ -69,7 +96,7 @@ public class IdentitySettingDefinitionProviderTests
         var field = security.Fields.Single(f => f.Key == "Identity:AccountSecurity:EnableLockout");
 
         field.Type.ShouldBe(SettingFieldType.Boolean);
-        field.DefaultValueAccessor!().ShouldBe("true");
+        field.DefaultValueAccessor!().ShouldBe("True");
     }
 
     [Fact]
@@ -79,7 +106,7 @@ public class IdentitySettingDefinitionProviderTests
         var field = registration.Fields.Single(f => f.Key == "Identity:Registration:EnableQuickRegisterEmail");
 
         field.Type.ShouldBe(SettingFieldType.Boolean);
-        field.DefaultValueAccessor!().ShouldBe("false");
+        field.DefaultValueAccessor!().ShouldBe("False");
     }
 
     [Fact]
@@ -89,7 +116,7 @@ public class IdentitySettingDefinitionProviderTests
         var field = registration.Fields.Single(f => f.Key == "Identity:SignIn:AllowEmailLogin");
 
         field.Type.ShouldBe(SettingFieldType.Boolean);
-        field.DefaultValueAccessor!().ShouldBe("true");
+        field.DefaultValueAccessor!().ShouldBe("True");
     }
 
     [Fact]

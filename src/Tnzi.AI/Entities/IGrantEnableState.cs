@@ -10,4 +10,7 @@ public interface IGrantEnableState
 {
     /// <summary>是否启用本条授权。Whether this grant is enabled.</summary>
     bool IsEnabled { get; set; }
+
+    /// <summary>授权优先级（越大越优先），用于投影排序与冲突决胜。Grant priority (higher wins), used for projection ordering.</summary>
+    int Priority { get; set; }
 }

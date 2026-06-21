@@ -100,7 +100,7 @@ public class AgentMemoryService : ApplicationService, IAgentMemoryService
         Check.NotNull(dto);
         var entry = await _repository.AsQueryable(withTracking: true).FirstOrDefaultAsync(e => e.Id == memoryId, ct);
         if (entry == null || entry.AgentId != agentId)
-            return Fail<AgentMemoryDto>("Memory entry not found", 404, "AI_MEMORY_NOT_FOUND");
+            return Fail<AgentMemoryDto>("Memory entry not found", 404, ErrorCodes.MemoryNotFound);
 
         if (dto.Content != null)
         {
@@ -128,7 +128,7 @@ public class AgentMemoryService : ApplicationService, IAgentMemoryService
     {
         var entry = await _repository.AsQueryable(withTracking: true).FirstOrDefaultAsync(e => e.Id == memoryId, ct);
         if (entry == null || entry.AgentId != agentId)
-            return Fail("Memory entry not found", 404, "AI_MEMORY_NOT_FOUND");
+            return Fail("Memory entry not found", 404, ErrorCodes.MemoryNotFound);
 
         await _repository.DeleteAsync(entry);
         return Ok();

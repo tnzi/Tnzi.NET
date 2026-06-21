@@ -254,6 +254,10 @@ function buildSnapshot(): AdminThemeSnapshot {
       autoSelectFirstMenu: themeStore.autoSelectFirstMenu,
       themeRadius: themeStore.themeRadius,
       footerHeight: themeStore.footerHeight,
+      siderBg: themeStore.siderBg,
+      headerBg: themeStore.headerBg,
+      contentBg: themeStore.contentBg,
+      containerBg: themeStore.containerBg,
     },
     ui: {
       mode: ctx.settings.value.mode,
@@ -390,6 +394,20 @@ function applySnapshot(snapshot: AdminThemeSnapshot): void {
   if (typeof snapshot.admin.footerHeight === 'number') {
     themeStore.setFooterHeight(snapshot.admin.footerHeight)
   }
+  // Background color overrides — `undefined` means the field was absent in an
+  // older snapshot (skip to preserve current value); `null` clears the override.
+  if ('siderBg' in snapshot.admin) {
+    themeStore.setSiderBg(snapshot.admin.siderBg ?? null)
+  }
+  if ('headerBg' in snapshot.admin) {
+    themeStore.setHeaderBg(snapshot.admin.headerBg ?? null)
+  }
+  if ('contentBg' in snapshot.admin) {
+    themeStore.setContentBg(snapshot.admin.contentBg ?? null)
+  }
+  if ('containerBg' in snapshot.admin) {
+    themeStore.setContainerBg(snapshot.admin.containerBg ?? null)
+  }
   // Apply ui state
   ctx.setMode(snapshot.ui.mode)
   for (const [role, color] of Object.entries(snapshot.ui.colors)) {
@@ -519,6 +537,121 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               @update:value="(v: number | null) => v != null && themeStore.setThemeRadius(v)"
             />
           </section>
+
+          <!-- Group 4: Background colors — 4 NColorPicker rows with per-row
+               reset button. Null value = default token fallback (picker shows
+               transparent / empty). -->
+          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.backgrounds') }}</NDivider>
+          <div class="t-theme-drawer__color-grid">
+            <label class="t-theme-drawer__color-row">
+              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.siderBg') }}</span>
+              <div class="t-theme-drawer__bg-control">
+                <NColorPicker
+                  :value="themeStore.siderBg ?? undefined"
+                  :modes="['hex']"
+                  :show-alpha="false"
+                  size="small"
+                  class="t-theme-drawer__color-picker"
+                  @update:value="(v: string | null) => themeStore.setSiderBg(v)"
+                />
+                <NTooltip>
+                  <template #trigger>
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      class="t-theme-drawer__bg-reset"
+                      :disabled="themeStore.siderBg === null"
+                      @click="themeStore.resetSiderBg()"
+                    >
+                      <Icon icon="mdi:restore" width="14" height="14" />
+                    </NButton>
+                  </template>
+                  {{ translate('admin.theme.appearance.resetBg') }}
+                </NTooltip>
+              </div>
+            </label>
+            <label class="t-theme-drawer__color-row">
+              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.headerBg') }}</span>
+              <div class="t-theme-drawer__bg-control">
+                <NColorPicker
+                  :value="themeStore.headerBg ?? undefined"
+                  :modes="['hex']"
+                  :show-alpha="false"
+                  size="small"
+                  class="t-theme-drawer__color-picker"
+                  @update:value="(v: string | null) => themeStore.setHeaderBg(v)"
+                />
+                <NTooltip>
+                  <template #trigger>
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      class="t-theme-drawer__bg-reset"
+                      :disabled="themeStore.headerBg === null"
+                      @click="themeStore.resetHeaderBg()"
+                    >
+                      <Icon icon="mdi:restore" width="14" height="14" />
+                    </NButton>
+                  </template>
+                  {{ translate('admin.theme.appearance.resetBg') }}
+                </NTooltip>
+              </div>
+            </label>
+            <label class="t-theme-drawer__color-row">
+              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.contentBg') }}</span>
+              <div class="t-theme-drawer__bg-control">
+                <NColorPicker
+                  :value="themeStore.contentBg ?? undefined"
+                  :modes="['hex']"
+                  :show-alpha="false"
+                  size="small"
+                  class="t-theme-drawer__color-picker"
+                  @update:value="(v: string | null) => themeStore.setContentBg(v)"
+                />
+                <NTooltip>
+                  <template #trigger>
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      class="t-theme-drawer__bg-reset"
+                      :disabled="themeStore.contentBg === null"
+                      @click="themeStore.resetContentBg()"
+                    >
+                      <Icon icon="mdi:restore" width="14" height="14" />
+                    </NButton>
+                  </template>
+                  {{ translate('admin.theme.appearance.resetBg') }}
+                </NTooltip>
+              </div>
+            </label>
+            <label class="t-theme-drawer__color-row">
+              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.containerBg') }}</span>
+              <div class="t-theme-drawer__bg-control">
+                <NColorPicker
+                  :value="themeStore.containerBg ?? undefined"
+                  :modes="['hex']"
+                  :show-alpha="false"
+                  size="small"
+                  class="t-theme-drawer__color-picker"
+                  @update:value="(v: string | null) => themeStore.setContainerBg(v)"
+                />
+                <NTooltip>
+                  <template #trigger>
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      class="t-theme-drawer__bg-reset"
+                      :disabled="themeStore.containerBg === null"
+                      @click="themeStore.resetContainerBg()"
+                    >
+                      <Icon icon="mdi:restore" width="14" height="14" />
+                    </NButton>
+                  </template>
+                  {{ translate('admin.theme.appearance.resetBg') }}
+                </NTooltip>
+              </div>
+            </label>
+          </div>
         </NTabPane>
 
         <!-- ── Tab 2: Layout — soybean parity (Mode/Sider/Header/Tab/Footer/Content) ── -->
@@ -1050,6 +1183,25 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 }
 .t-theme-drawer__color-picker {
   width: 140px;
+}
+/* Background color row — picker + reset icon button side by side */
+.t-theme-drawer__bg-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.t-theme-drawer__bg-control .t-theme-drawer__color-picker {
+  width: 120px;
+}
+.t-theme-drawer__bg-reset {
+  padding: 0 2px;
+  height: 22px;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 .t-theme-drawer__row-actions {
   display: flex;

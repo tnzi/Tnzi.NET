@@ -108,4 +108,15 @@ public class DefaultMenuAdminController : ApiAdminControllerBase
         var result = await MenuService.MoveMenuAsync(id, newParentId);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 批量 seed 菜单（按 MenuKey upsert，已存在跳过以保护运营修改）。用于首次启用
+    /// 'merge' 菜单源时把前端路由派生菜单镜像成一组可编辑的 Sys_Menu 行。
+    /// </summary>
+    [HttpPost("seed")]
+    public virtual async Task<ApiResult<MenuSeedResultDto>> Seed([FromBody] IEnumerable<CreateMenuDto> menus)
+    {
+        var result = await MenuService.SeedMenusAsync(menus);
+        return result.ToApiResult();
+    }
 }

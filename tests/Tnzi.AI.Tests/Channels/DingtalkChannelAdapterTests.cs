@@ -371,37 +371,6 @@ public class DingtalkChannelAdapterTests
     }
 
     [Fact]
-    public void SupportsFileAttachment_ReturnsFalse()
-    {
-        // DingTalk robot API does not support file uploads — SupportsFileAttachment must
-        // advertise this so callers skip SendFileAsync rather than silently receiving false.
-        var adapter = CreateAdapter();
-        adapter.SupportsFileAttachment.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task SendFileAsync_ReturnsFalse()
-    {
-        var adapter = CreateAdapter();
-        var attachment = new ResolvedAttachment(
-            VirtualPath: "/test.txt",
-            ActualPath: "/nonexistent/test.txt",
-            FileName: "test.txt",
-            ContentType: "text/plain",
-            Size: 100,
-            IsImage: false);
-
-        var message = new OutboundMessage(
-            ChannelName: "dingtalk",
-            ChatId: "conv001",
-            ThreadId: Guid.NewGuid(),
-            Text: "");
-
-        var result = await adapter.SendFileAsync(message, attachment);
-        result.ShouldBeFalse();
-    }
-
-    [Fact]
     public void ChannelsModule_RegistersDingtalk()
     {
         var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/ChannelsModule.cs");

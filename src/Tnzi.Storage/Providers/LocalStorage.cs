@@ -8,6 +8,20 @@ public class LocalStorage : IFileStorage
     private readonly string _basePath;
     private readonly string? _baseUrl;
     private readonly ILogger<LocalStorage>? _logger;
+    private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
+
+    /// <summary>
+    /// 运行时有效的 URL 前缀：优先取 IOptionsMonitor 的当前值（支持配置热更新），
+    /// 为空时回退到构造期冻结的 _baseUrl（保持既有行为）。
+    /// </summary>
+    private string? EffectiveBaseUrl
+    {
+        get
+        {
+            var hot = _optionsMonitor?.CurrentValue.UrlPrefix;
+            return !string.IsNullOrEmpty(hot) ? hot : _baseUrl;
+        }
+    }
 
     /// <summary>
     /// 初始化 <see cref="LocalStorage"/> 类型的新实例
@@ -15,9 +29,11 @@ public class LocalStorage : IFileStorage
     /// <param name="configuration">配置</param>
     /// <param name="environment">Web宿主环境</param>
     /// <param name="logger">日志记录器</param>
-    public LocalStorage(IConfiguration configuration, IWebHostEnvironment? environment = null, ILogger<LocalStorage>? logger = null)
+    /// <param name="optionsMonitor">选项监视器（可选），用于运行时热读取 UrlPrefix</param>
+    public LocalStorage(IConfiguration configuration, IWebHostEnvironment? environment = null, ILogger<LocalStorage>? logger = null, IOptionsMonitor<StorageOptions>? optionsMonitor = null)
     {
         _logger = logger;
+        _optionsMonitor = optionsMonitor;
         // 与模块配置节一致：Storage（参见 StorageModule.GetSection("Storage")）
         var storagePath = configuration["Storage:StoragePath"]
                        ?? configuration["Storage:LocalPath"]
@@ -168,9 +184,10 @@ public class LocalStorage : IFileStorage
 
         // 返回文件路径作为标识，实际访问 URL 应在 FileStorageService 中基于文件 ID 生成
         // 这里保留原逻辑以兼容其他可能的使用场景
-        if (!string.IsNullOrEmpty(_baseUrl))
+        var baseUrl = EffectiveBaseUrl;
+        if (!string.IsNullOrEmpty(baseUrl))
         {
-            var url = _baseUrl.TrimEnd('/') + "/" + filePath.TrimStart('/');
+            var url = baseUrl.TrimEnd('/') + "/" + filePath.TrimStart('/');
             return Task.FromResult(url);
         }
 

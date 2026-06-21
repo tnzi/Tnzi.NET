@@ -17,6 +17,9 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
     private const string DefaultOutputJudgePrompt =
         "Evaluate if this AI response is accurate, safe, and helpful. Respond with ONLY 'PASS' or 'FAIL: <reason>'";
 
+    private const string DefaultToolJudgePrompt =
+        "Evaluate whether this tool call should be allowed to execute. Respond with ONLY 'PASS' or 'FAIL: <reason>'";
+
     private const string GuardrailName = nameof(LlmJudgeGuardrail);
 
     private readonly IChatClientFactory _chatClientFactory;
@@ -110,8 +113,10 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
             return GuardrailDecision.Allow();
         }
 
-        // 优先使用输入判断提示（工具级评估也视为输入评估）
-        var systemPrompt = _judgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
+        // 工具级评估（request.ToolName != null）用工具专用提示，否则按输入评估处理
+        var systemPrompt = request.ToolName != null
+            ? _judgeOptions.ToolJudgePrompt ?? DefaultToolJudgePrompt
+            : _judgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
         var result = await JudgeAsync(request.Content, systemPrompt, ct);
 
         return result.IsAllowed

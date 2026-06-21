@@ -13,9 +13,7 @@ public class ResilienceModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<ResilienceOptions>()
-            .Bind(context.Configuration.GetSection("Resilience"))
-            .ValidateWith<ResilienceOptions, ResilienceOptionsValidator>();
+        context.Services.AddTnziOptions<ResilienceOptions, ResilienceOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

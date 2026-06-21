@@ -37,9 +37,7 @@ public class HealthChecksModule : TnziFrameworkModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<HealthChecksOptions>()
-            .Bind(context.Configuration.GetSection("HealthChecks"))
-            .ValidateWith<HealthChecksOptions, HealthChecksOptionsValidator>();
+        context.Services.AddTnziOptions<HealthChecksOptions, HealthChecksOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

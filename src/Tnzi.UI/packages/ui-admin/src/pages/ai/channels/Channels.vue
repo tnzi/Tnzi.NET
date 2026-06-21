@@ -238,7 +238,7 @@ const connectionColumns: DataTableColumns<GatewayConnectionInfo> = [
     key: 'connectionId',
     width: 220,
     render: (row) =>
-      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-11px' }, row.connectionId),
+      h('code', { class: 'tnzi-mono text-11px' }, row.connectionId),
   },
   { title: () => t('cols.clientType'), key: 'clientType', width: 120 },
   { title: () => t('cols.user'), key: 'userId', width: 220, render: (r) => r.userId ?? '—' },
@@ -282,7 +282,7 @@ const bindingColumns: DataTableColumns<SessionBindingRuleDto> = [
     title: () => t('cols.agentId'),
     key: 'agentId',
     ellipsis: { tooltip: true },
-    render: (r) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-11px' }, r.agentId),
+    render: (r) => h('code', { class: 'tnzi-mono text-11px' }, r.agentId),
   },
 ]
 

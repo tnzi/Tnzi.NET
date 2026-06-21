@@ -46,9 +46,23 @@ public class McpServerOptions
     public bool RateLimitPerTenant { get; set; } = true;
 
     /// <summary>
-    /// 是否启用审计日志（默认开启）
+    /// 是否启用审计日志（默认开启）。
+    /// <para>
+    /// 仅控制经 <c>IUsageLogService</c>（operation type <c>McpToolCall</c>）写入的审计日志，
+    /// <b>不影响</b>工具运营统计（见 <see cref="EnableToolAnalytics"/>）。
+    /// </para>
     /// </summary>
     public bool EnableAuditLog { get; set; } = true;
+
+    /// <summary>
+    /// 是否启用工具运营统计（默认开启）。
+    /// <para>
+    /// 控制经 <c>IMcpToolAnalyticsService.RecordUsageAsync</c> 写入的 per-tool 统计
+    /// （调用量/P95 延迟/错误率/唯一调用方）。此开关独立于 <see cref="EnableAuditLog"/>：
+    /// 关闭审计日志不会同时关闭运营统计，反之亦然。
+    /// </para>
+    /// </summary>
+    public bool EnableToolAnalytics { get; set; } = true;
 
     /// <summary>
     /// 每分钟速率限制（每客户端，默认 600）

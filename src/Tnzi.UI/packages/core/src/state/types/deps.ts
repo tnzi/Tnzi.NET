@@ -26,4 +26,10 @@ export interface StateDeps {
   permissionsFetchFn?: () => Promise<string[]>;
   /** Callback invoked after logout completes (e.g., to clear UserStateManager) */
   onLogout?: () => void | Promise<void>;
+  /**
+   * Prefix for persisted auth storage keys (token/refresh/expiry).
+   * Defaults to `'tnzi:auth'` → `tnzi:auth:token` etc. Set a distinct value
+   * to isolate multiple apps that share the same storage origin.
+   */
+  storagePrefix?: string;
 }

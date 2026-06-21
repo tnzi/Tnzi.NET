@@ -10,6 +10,7 @@ import type {
   CreateMenuDto,
   UpdateMenuDto,
   MenuOrderDto,
+  MenuSeedResultDto,
   MenuQueryDto,
   SettingDto,
   CreateSettingDto,
@@ -71,6 +72,14 @@ export function useAdminMenuApi(client: HttpClient) {
       client.put<void>(`${ADMIN_MENU_BASE}/${id}/move`, undefined, {
         params: { newParentId },
       }),
+
+    /**
+     * Seed menus by menuKey (upsert: insert missing, skip existing). Used to
+     * mirror the front-end route-derived menu into editable Sys_Menu rows when
+     * first enabling the 'merge' menu source.
+     */
+    seed: (menus: CreateMenuDto[]) =>
+      client.post<MenuSeedResultDto>(`${ADMIN_MENU_BASE}/seed`, menus),
   };
 }
 

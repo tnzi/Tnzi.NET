@@ -5,8 +5,8 @@ namespace Tnzi.AI.Services.Interfaces;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 内置两种实现：DatabaseConversationStore（桥接 AgentThread 实体，默认）
-/// 和 FileConversationStore（文件系统存储，适用于 CLI 场景无需数据库）。
+/// 内置实现：DatabaseConversationStore（桥接 AgentThread 实体，默认）。
+/// 应用可注册自定义 IConversationStore 替换默认实现。
 /// </para>
 /// <para>
 /// conversationId 是不透明字符串标识符，调用方不应假设其格式。

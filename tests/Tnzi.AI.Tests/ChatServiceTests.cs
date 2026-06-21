@@ -214,7 +214,6 @@ public class ChatServiceTests
     {
         return new ChatService(
             runtime,
-            Mock.Of<IAgentResolver>(),
             Microsoft.Extensions.Options.Options.Create(new AIOptions { DefaultProvider = "test" }),
             new ServiceCollection()
                 .AddLogging()

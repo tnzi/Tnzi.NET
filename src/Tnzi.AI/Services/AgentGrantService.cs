@@ -78,6 +78,53 @@ public class AgentGrantService : ApplicationService, IAgentGrantService
         };
     }
 
+    public async Task<IReadOnlyDictionary<Guid, AgentGrantsProjection>> GetGrantsAsync(
+        IReadOnlyList<Guid> agentIds, CancellationToken ct = default)
+    {
+        Check.NotNull(agentIds);
+
+        var result = new Dictionary<Guid, AgentGrantsProjection>();
+        if (agentIds.Count == 0) return result;
+
+        var ids = agentIds.Distinct().ToList();
+
+        // 三类 grant 表各一次 WHERE AgentId IN (...) 查询，避免按页逐 Agent 的 N+1。
+        var toolGrants = await _toolGrants
+            .ToListAsync(g => ids.Contains(g.AgentId) && g.IsEnabled, ct);
+        var skillGrants = await _skillGrants
+            .ToListAsync(g => ids.Contains(g.AgentId) && g.IsEnabled, ct);
+        var knowledgeGrants = await _knowledgeGrants
+            .ToListAsync(g => ids.Contains(g.AgentId) && g.IsEnabled, ct);
+
+        // 内存按 AgentId 分组。
+        var toolsByAgent = toolGrants.ToLookup(g => g.AgentId);
+        var skillsByAgent = skillGrants.ToLookup(g => g.AgentId);
+        var knowledgeByAgent = knowledgeGrants.ToLookup(g => g.AgentId);
+
+        foreach (var id in ids)
+        {
+            var agentTools = toolsByAgent[id];
+            result[id] = new AgentGrantsProjection
+            {
+                ToolGroups = OrderedKeys(agentTools.Where(g => g.GrantType == GrantType.Group), g => g.ToolKey),
+                ToolNames = OrderedKeys(agentTools.Where(g => g.GrantType == GrantType.Tool), g => g.ToolKey),
+                SkillSlugs = OrderedKeys(skillsByAgent[id], g => g.SkillSlug),
+                KnowledgeBaseIds = OrderedKeys(knowledgeByAgent[id], g => g.KnowledgeBaseId)
+            };
+        }
+
+        return result;
+    }
+
+    /// <summary>按 Priority 降序、再按创建时间升序投影出键列表（与 <see cref="GetGrantsAsync(Guid, CancellationToken)"/> 排序一致）。</summary>
+    private static List<TKey> OrderedKeys<TGrant, TKey>(IEnumerable<TGrant> grants, Func<TGrant, TKey> keySelector)
+        where TGrant : MultiTenantAuditedEntity<Guid>, IGrantEnableState
+        => grants
+            .OrderByDescending(g => g.Priority)
+            .ThenBy(g => g.CreationTime)
+            .Select(keySelector)
+            .ToList();
+
     // =====================================================================
     // Reconcile (write) — tri-state PATCH semantics
     // =====================================================================

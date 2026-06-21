@@ -37,6 +37,14 @@ public interface IAgentGrantService
     /// </summary>
     Task<AgentGrantsProjection> GetGrantsAsync(Guid agentId, CancellationToken ct = default);
 
+    /// <summary>
+    /// 批量读取多个 Agent 的<b>已启用</b>授权（三类 grant 表各一次 <c>WHERE AgentId IN (...)</c> 查询 + 内存分组），
+    /// 消除按页逐 Agent 查询的 N+1。返回字典按 agentId 索引；未授权任何资源的 Agent 返回空投影。
+    /// Batched read of enabled grants for multiple Agents (one IN-query per grant table + in-memory grouping),
+    /// eliminating per-item N+1. Result is keyed by agentId; agents with no grants get an empty projection.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, AgentGrantsProjection>> GetGrantsAsync(IReadOnlyList<Guid> agentIds, CancellationToken ct = default);
+
     // ---------------------------------------------------------------------
     // Reconcile (write) — tri-state PATCH semantics
     // ---------------------------------------------------------------------

@@ -1,65 +1,61 @@
 namespace Tnzi.Audit.Tests;
 
 /// <summary>
-/// AuditSettingDefinitionProvider 结构测试 — 验证 provider 注册字段符合配置中心契约
+/// AuditOptions 配置中心特性测试 — 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
 /// </summary>
 public class AuditSettingDefinitionProviderTests
 {
-    private readonly AuditSettingDefinitionProvider _provider = new();
+    private readonly SettingDefinitionGroup _group =
+        RuntimeSettingMetadataExtractor.Extract(typeof(AuditOptions))!;
 
     [Fact]
-    public void GetGroups_ReturnsOneGroup()
+    public void Extract_ReturnsNonNull()
     {
-        var groups = _provider.GetGroups();
-        Assert.Single(groups);
+        Assert.NotNull(_group);
     }
 
     [Fact]
     public void Group_HasExpectedKey()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("audit-retention", group.Key);
+        Assert.Equal("audit-retention", _group.Key);
     }
 
     [Fact]
     public void Group_HasExpectedModuleName()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("Audit", group.ModuleName);
+        Assert.Equal("Audit", _group.ModuleName);
     }
 
     [Fact]
     public void Group_HasExpectedOrder()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(600, group.Order);
+        Assert.Equal(600, _group.Order);
     }
 
     [Fact]
     public void Group_HasOneField()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Single(group.Fields);
+        Assert.Single(_group.Fields);
     }
 
     [Fact]
     public void Field_HasCorrectKey()
     {
-        var field = _provider.GetGroups()[0].Fields[0];
+        var field = _group.Fields[0];
         Assert.Equal("Audit:RetentionDays", field.Key);
     }
 
     [Fact]
     public void Field_HasCorrectType()
     {
-        var field = _provider.GetGroups()[0].Fields[0];
+        var field = _group.Fields[0];
         Assert.Equal(SettingFieldType.Int, field.Type);
     }
 
     [Fact]
     public void DefaultValueAccessor_ReturnsExpectedDefault()
     {
-        var field = _provider.GetGroups()[0].Fields[0];
+        var field = _group.Fields[0];
         Assert.NotNull(field.DefaultValueAccessor);
         Assert.Equal("90", field.DefaultValueAccessor!());
     }
@@ -67,7 +63,7 @@ public class AuditSettingDefinitionProviderTests
     [Fact]
     public void Field_HasI18nKey()
     {
-        var field = _provider.GetGroups()[0].Fields[0];
+        var field = _group.Fields[0];
         Assert.NotNull(field.I18nKey);
     }
 }

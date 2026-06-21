@@ -5,6 +5,7 @@ namespace Tnzi.EFCore.Outbox;
 /// Outbox 模式配置选项
 /// 配置路径：EFCore:Outbox
 /// </summary>
+[ConfigSection("EFCore:Outbox")]
 public class OutboxOptions
 {
     /// <summary>

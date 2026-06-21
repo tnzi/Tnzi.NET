@@ -22,6 +22,9 @@ public class FileChannelThreadStore : IChannelThreadStore
 
     public async Task<Guid?> GetThreadIdAsync(string channelName, string chatId, string? topicId = null)
     {
+        // Intentional lock-free read fast path: writes (Set/Remove) swap in a brand-new immutable
+        // dictionary under _lock, so a concurrent read either sees the old or the new snapshot
+        // atomically — never a half-mutated map. No lock acquisition is needed on the hot read path.
         var mappings = await LoadAsync();
         var key = BuildKey(channelName, chatId, topicId);
         return mappings.TryGetValue(key, out var threadId) ? threadId : null;

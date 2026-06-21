@@ -5,7 +5,14 @@ namespace Tnzi.AI.Infrastructure.Streaming;
 /// </summary>
 public static class StreamingResponseWriter
 {
-    private static readonly JsonSerializerOptions _jsonOptions = new()
+    /// <summary>
+    /// 默认 JSON 序列化选项（camelCase + 忽略 null）。
+    /// ⚠️ 共享只读实例 —— 首次序列化后会被 .NET 冻结，<b>不要直接修改它的属性</b>
+    /// （会抛 <see cref="InvalidOperationException"/>）。需要定制时请复制后再传入
+    /// <see cref="WriteEventAsync{T}"/> 的 jsonOptions 参数：
+    /// <c>new JsonSerializerOptions(StreamingResponseWriter.DefaultJsonOptions) { ... }</c>。
+    /// </summary>
+    public static readonly JsonSerializerOptions DefaultJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -63,9 +70,9 @@ public static class StreamingResponseWriter
     /// <summary>
     /// 写入一个任意类型的流式事件到 HttpResponse
     /// </summary>
-    public static async Task WriteEventAsync<T>(HttpResponse response, T evt, StreamingFormat format, CancellationToken ct = default)
+    public static async Task WriteEventAsync<T>(HttpResponse response, T evt, StreamingFormat format, CancellationToken ct = default, JsonSerializerOptions? jsonOptions = null)
     {
-        var json = JsonSerializer.Serialize(evt, _jsonOptions);
+        var json = JsonSerializer.Serialize(evt, jsonOptions ?? DefaultJsonOptions);
 
         switch (format)
         {

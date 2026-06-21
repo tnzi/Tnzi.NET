@@ -109,3 +109,18 @@
   .n-form-item-label {
   padding: 0 12px 0 0;
 }
+
+/* Fallback rendering for an unknown field type (not a builtin + no matching
+   `fieldRenderers` entry) — TSchemaForm renders the raw value in this span
+   rather than nothing. Styled as a visible diagnostic so a schema `type` typo
+   or a missing custom renderer is obvious in the UI instead of silently
+   degrading to plain unstyled text. */
+.t-form-schema__unknown {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 13px;
+  color: var(--tnzi-warning, #f0a020);
+  border: 1px dashed var(--tnzi-warning, #f0a020);
+  border-radius: 4px;
+  word-break: break-word;
+}

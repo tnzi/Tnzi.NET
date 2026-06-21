@@ -23,6 +23,7 @@ public class HybridSearchService : ApplicationService, ITextSearchService
     private readonly IEmbeddingService _embeddingService;
     private readonly IReranker _reranker;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
+    private readonly AIRagOptions _ragOptions;
     private readonly HybridSearchOptions _hybridOptions;
 
     public HybridSearchService(
@@ -39,7 +40,8 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         _embeddingService = Check.NotNull(embeddingService);
         _reranker = Check.NotNull(reranker);
         _docRepository = Check.NotNull(docRepository);
-        _hybridOptions = Check.NotNull(ragOptions).Value.HybridSearch;
+        _ragOptions = Check.NotNull(ragOptions).Value;
+        _hybridOptions = _ragOptions.HybridSearch;
     }
 
     /// <inheritdoc />
@@ -56,8 +58,10 @@ public class HybridSearchService : ApplicationService, ITextSearchService
             using var activity = RagActivitySource.StartSearchActivity(maxResults);
             var sw = Stopwatch.StartNew();
 
-            // 1. 生成查询向量
-            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, ct: ct);
+            // 1. 生成查询向量 — 使用 RAG 默认嵌入配置（provider/model 须与摄取对齐，
+            //    与 VectorTextSearchService.SearchCoreAsync 同范式；否则向量空间不一致）。
+            var defaultOptions = RagEmbeddingOptionsResolver.ResolveDefault(_ragOptions);
+            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, defaultOptions, ct);
             if (!embeddingResult.Succeeded)
             {
                 Logger.LogWarning("Embedding generation failed for hybrid search: {Message}", embeddingResult.Message);

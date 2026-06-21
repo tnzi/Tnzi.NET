@@ -23,9 +23,7 @@ public class SandboxModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<SandboxModuleOptions>()
-            .Bind(context.Configuration.GetSection("AI:Sandbox"))
-            .ValidateWith<SandboxModuleOptions, SandboxModuleOptionsValidator>();
+        context.Services.AddTnziOptions<SandboxModuleOptions, SandboxModuleOptionsValidator>(context.Configuration, "AI:Sandbox");
         return Task.CompletedTask;
     }
 
@@ -59,6 +57,10 @@ public class SandboxModule : TnziApplicationModule
 
         // Tools
         context.Services.AddScoped<SandboxTools>();
+        // Explicit accessor for the active sandbox (F8) — lets consumers inject
+        // ISandboxAccessor instead of reaching into the AsyncLocal channel.
+        // Stateless (reads the singleton AsyncLocal accessor live) → Singleton.
+        context.Services.AddSingleton<ISandboxAccessor, SandboxAccessor>();
 
         // Middlewares
         context.Services.AddScoped<IAiMiddleware, ThreadDataMiddleware>();

@@ -23,11 +23,19 @@ import {
   useAdminFileApi,
   useAdminFileFolderApi,
   useStorageApi,
+  useStoragePreviewApi,
   type FileRecordDto,
   type FileQueryDto,
   type FileFolderDto,
   type CreateFileFolderDto,
   type UpdateFileFolderDto,
+  type FileStorageStatisticsDto,
+  type FileShareSummaryDto,
+  type ActiveSharesQueryDto,
+  type FileIntegrityResultDto,
+  type BatchIntegrityResultDto,
+  type FileReferenceDto,
+  type UserStorageUsageDto,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
@@ -94,6 +102,60 @@ export interface StorageBridge {
      */
     restore(fileId: string, version: number): Promise<void>
   }
+  /** Aggregate storage statistics — GET /admin/files/statistics. */
+  statistics: {
+    get(): Promise<FileStorageStatisticsDto>
+  }
+  /**
+   * Share-link management — paged active-share listing + revocation.
+   * Wired to /admin/files/shares/* and /admin/files/{id}/shares.
+   */
+  shares: StorageSharesContract
+  /** File-integrity verification — single + batch. */
+  integrity: {
+    verifyOne(fileId: string): Promise<FileIntegrityResultDto>
+    batchVerify(maxFiles?: number): Promise<BatchIntegrityResultDto>
+  }
+  /** File tags — set per file + query files by a single tag. */
+  tags: {
+    set(fileId: string, tags: string[]): Promise<FileRecordDto>
+    byTag(tag: string, query: CrudPageQuery): Promise<CrudPageResult<FileRecordDto>>
+  }
+  /** File metadata (key/value map). */
+  metadata: {
+    get(fileId: string): Promise<Record<string, string>>
+    set(fileId: string, metadata: Record<string, string>): Promise<FileRecordDto>
+  }
+  /** File-reference queries — by file or by owning entity. */
+  references: {
+    byFile(fileId: string): Promise<FileReferenceDto[]>
+    byEntity(entityType: string, entityId: string): Promise<FileReferenceDto[]>
+  }
+  /** Per-user storage usage — single user + top-N leaderboard. */
+  userUsage: {
+    forUser(userId: string): Promise<UserStorageUsageDto>
+    topUsers(topN?: number): Promise<UserStorageUsageDto[]>
+  }
+  /** Temporary-file maintenance — list + cleanup trigger. */
+  cleanup: {
+    temporaryFiles(olderThanHours?: number): Promise<FileRecordDto[]>
+    trigger(olderThanHours?: number): Promise<number>
+  }
+  /** File preview — capability check + URL resolution (user-facing controller). */
+  preview: {
+    canPreview(fileId: string): Promise<boolean>
+    url(fileId: string): Promise<string>
+  }
+}
+
+/**
+ * Active-share listing + revocation surface. Read + revoke only — shares are
+ * created from the file detail / user-facing API, never via this admin list.
+ */
+export interface StorageSharesContract {
+  fetch(query: CrudPageQuery): Promise<CrudPageResult<FileShareSummaryDto>>
+  byFile(fileId: string): Promise<FileShareSummaryDto[]>
+  batchRevoke(shareIds: string[]): Promise<number>
 }
 
 /**
@@ -133,6 +195,7 @@ export interface StorageBridgeDeps {
   fileApi?: ReturnType<typeof useAdminFileApi>
   storageApi?: ReturnType<typeof useStorageApi>
   folderApi?: ReturnType<typeof useAdminFileFolderApi>
+  previewApi?: ReturnType<typeof useStoragePreviewApi>
 }
 
 export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge {
@@ -144,6 +207,8 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
   // green while still providing real implementations in production.
   const folderApi =
     deps.folderApi ?? (deps.client ? useAdminFileFolderApi(deps.client) : null)
+  const previewApi =
+    deps.previewApi ?? (deps.client ? useStoragePreviewApi(deps.client) : null)
 
   if (!fileApi || !storageApi) {
     const noOp = () => Promise.reject(new Error('createStorageBridge: no deps provided'))
@@ -170,6 +235,15 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       },
       chunks: { fetch: stub as never, delete: noOp as never },
       versions: { fetch: stub as never, restore: stub as never },
+      statistics: { get: noOp as never },
+      shares: { fetch: stub as never, byFile: noOp as never, batchRevoke: noOp as never },
+      integrity: { verifyOne: noOp as never, batchVerify: noOp as never },
+      tags: { set: noOp as never, byTag: stub as never },
+      metadata: { get: noOp as never, set: noOp as never },
+      references: { byFile: noOp as never, byEntity: noOp as never },
+      userUsage: { forUser: noOp as never, topUsers: noOp as never },
+      cleanup: { temporaryFiles: noOp as never, trigger: noOp as never },
+      preview: { canPreview: noOp as never, url: noOp as never },
     }
   }
 
@@ -354,5 +428,149 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         move: () => missing('folders.move'),
       }
 
-  return { files, folders, chunks, versions }
+  // ---- statistics ----
+  const statistics: StorageBridge['statistics'] = {
+    get: async (): Promise<FileStorageStatisticsDto> =>
+      unwrap<FileStorageStatisticsDto>(await fileApi.getStatistics()),
+  }
+
+  // ---- shares ----
+  const shares: StorageSharesContract = {
+    fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FileShareSummaryDto>> => {
+      const f = query.filters
+      const request: ActiveSharesQueryDto = {
+        pageIndex: query.pageIndex,
+        pageSize: query.pageSize,
+        skip: (query.pageIndex - 1) * query.pageSize,
+        take: query.pageSize,
+        fileId: typeof f.fileId === 'string' && f.fileId ? f.fileId : undefined,
+        creatorId: typeof f.creatorId === 'string' && f.creatorId ? f.creatorId : undefined,
+        includeExpired: typeof f.includeExpired === 'boolean' ? f.includeExpired : undefined,
+        includeDisabled: typeof f.includeDisabled === 'boolean' ? f.includeDisabled : undefined,
+      }
+      const result = unwrap<{
+        items: FileShareSummaryDto[]
+        totalCount: number
+        pageIndex: number
+        pageSize: number
+      }>(await fileApi.queryActiveShares(request))
+      return pagedResult({
+        items: result.items ?? [],
+        totalCount: result.totalCount ?? 0,
+        pageIndex: result.pageIndex ?? query.pageIndex,
+        pageSize: result.pageSize ?? query.pageSize,
+      })
+    },
+    byFile: async (fileId: string): Promise<FileShareSummaryDto[]> => {
+      const items = unwrap<FileShareSummaryDto[]>(await fileApi.getSharesByFile(fileId))
+      return Array.isArray(items) ? items : []
+    },
+    batchRevoke: async (shareIds: string[]): Promise<number> => {
+      if (!shareIds.length) return 0
+      return unwrap<number>(await fileApi.batchRevokeShares(shareIds))
+    },
+  }
+
+  // ---- integrity ----
+  const integrity: StorageBridge['integrity'] = {
+    verifyOne: async (fileId: string): Promise<FileIntegrityResultDto> =>
+      unwrap<FileIntegrityResultDto>(await fileApi.verifyFileIntegrity(fileId)),
+    batchVerify: async (maxFiles = 100): Promise<BatchIntegrityResultDto> =>
+      unwrap<BatchIntegrityResultDto>(await fileApi.batchVerifyIntegrity(maxFiles)),
+  }
+
+  // ---- tags ----
+  const tags: StorageBridge['tags'] = {
+    set: async (fileId: string, tagList: string[]): Promise<FileRecordDto> =>
+      unwrap<FileRecordDto>(await fileApi.setFileTags(fileId, { tags: tagList })),
+    byTag: async (tag: string, query: CrudPageQuery): Promise<CrudPageResult<FileRecordDto>> => {
+      const result = unwrap<{
+        items: FileRecordDto[]
+        totalCount: number
+        pageIndex: number
+        pageSize: number
+      }>(await fileApi.getFilesByTag(tag, query.pageIndex, query.pageSize))
+      return pagedResult({
+        items: result.items ?? [],
+        totalCount: result.totalCount ?? 0,
+        pageIndex: result.pageIndex ?? query.pageIndex,
+        pageSize: result.pageSize ?? query.pageSize,
+      })
+    },
+  }
+
+  // ---- metadata ----
+  const metadata: StorageBridge['metadata'] = {
+    get: async (fileId: string): Promise<Record<string, string>> => {
+      const map = unwrap<Record<string, string>>(await fileApi.getMetadata(fileId))
+      return map ?? {}
+    },
+    set: async (fileId: string, meta: Record<string, string>): Promise<FileRecordDto> =>
+      unwrap<FileRecordDto>(await fileApi.setMetadata(fileId, meta)),
+  }
+
+  // ---- references ----
+  const references: StorageBridge['references'] = {
+    byFile: async (fileId: string): Promise<FileReferenceDto[]> => {
+      const items = unwrap<FileReferenceDto[]>(await fileApi.getReferences(fileId))
+      return Array.isArray(items) ? items : []
+    },
+    byEntity: async (entityType: string, entityId: string): Promise<FileReferenceDto[]> => {
+      const items = unwrap<FileReferenceDto[]>(
+        await fileApi.getReferencesByEntity(entityType, entityId),
+      )
+      return Array.isArray(items) ? items : []
+    },
+  }
+
+  // ---- userUsage ----
+  const userUsage: StorageBridge['userUsage'] = {
+    forUser: async (userId: string): Promise<UserStorageUsageDto> =>
+      unwrap<UserStorageUsageDto>(await fileApi.getUserStorageUsage(userId)),
+    topUsers: async (topN = 20): Promise<UserStorageUsageDto[]> => {
+      const items = unwrap<UserStorageUsageDto[]>(await fileApi.getTopUsersByStorage(topN))
+      return Array.isArray(items) ? items : []
+    },
+  }
+
+  // ---- cleanup (temporary files) ----
+  const cleanup: StorageBridge['cleanup'] = {
+    temporaryFiles: async (olderThanHours?: number): Promise<FileRecordDto[]> => {
+      const items = unwrap<FileRecordDto[]>(await fileApi.getTemporaryFiles(olderThanHours))
+      return Array.isArray(items) ? items : []
+    },
+    trigger: async (olderThanHours?: number): Promise<number> =>
+      unwrap<number>(await fileApi.cleanupTemporary(olderThanHours)),
+  }
+
+  // ---- preview (user-facing controller) ----
+  const preview: StorageBridge['preview'] = previewApi
+    ? {
+        canPreview: async (fileId: string): Promise<boolean> => {
+          const can = unwrap<boolean>(await previewApi.canPreview(fileId))
+          return can === true
+        },
+        url: async (fileId: string): Promise<string> =>
+          unwrap<string>(await previewApi.getPreviewUrl(fileId)),
+      }
+    : {
+        canPreview: () => missing('preview.canPreview'),
+        url: () => missing('preview.url'),
+      }
+
+  return {
+    files,
+    folders,
+    chunks,
+    versions,
+    statistics,
+    shares,
+    integrity,
+    tags,
+    metadata,
+    references,
+    userUsage,
+    cleanup,
+    preview,
+  }
 }

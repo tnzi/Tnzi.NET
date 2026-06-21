@@ -44,6 +44,16 @@ public class PaymentCompletedEvent : EventBase
     /// 外部交易流水号
     /// </summary>
     public string? ExternalTradeNo { get; set; }
+
+    /// <summary>
+    /// 业务类型（用于将事件路由到对应业务状态机，如订阅）
+    /// </summary>
+    public BusinessType BusinessType { get; set; }
+
+    /// <summary>
+    /// 扩展数据（JSON，承载业务用途，如订阅计费 purpose）
+    /// </summary>
+    public string? ExtraData { get; set; }
 }
 
 /// <summary>
@@ -75,6 +85,16 @@ public class PaymentFailedEvent : EventBase
     /// 错误代码
     /// </summary>
     public string? ErrorCode { get; set; }
+
+    /// <summary>
+    /// 业务类型（用于将事件路由到对应业务状态机，如订阅）
+    /// </summary>
+    public BusinessType BusinessType { get; set; }
+
+    /// <summary>
+    /// 扩展数据（JSON，承载业务用途，如订阅计费 purpose）
+    /// </summary>
+    public string? ExtraData { get; set; }
 }
 
 /// <summary>
@@ -101,6 +121,16 @@ public class PaymentExpiredEvent : EventBase
     /// 过期时间
     /// </summary>
     public DateTime ExpiredTime { get; set; }
+
+    /// <summary>
+    /// 业务类型（用于将事件路由到对应业务状态机，如订阅）
+    /// </summary>
+    public BusinessType BusinessType { get; set; }
+
+    /// <summary>
+    /// 扩展数据（JSON，承载业务用途，如订阅计费 purpose）
+    /// </summary>
+    public string? ExtraData { get; set; }
 }
 
 /// <summary>

@@ -33,9 +33,7 @@ public class RagModule : TnziApplicationModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 绑定 AI:Rag 配置节
-        context.Services.AddOptions<AIRagOptions>()
-            .Bind(context.Configuration.GetSection("AI:Rag"))
-            .ValidateWith<AIRagOptions, AIRagOptionsValidator>();
+        context.Services.AddTnziOptions<AIRagOptions, AIRagOptionsValidator>(context.Configuration, "AI:Rag");
 
         return Task.CompletedTask;
     }

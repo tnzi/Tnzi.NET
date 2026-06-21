@@ -204,17 +204,22 @@ public class RetryMiddleware : IAiMiddleware
         if (ex is TaskCanceledException tce && tce.InnerException is TimeoutException)
             return true;
 
-        // HTTP 异常：429 和 5xx 重试，其他 4xx 不重试
+        // HTTP 异常：429 和 5xx 重试；无状态码（连接层瞬时失败，如 DNS/连接重置）重试；其他 4xx 不重试
         if (ex is HttpRequestException httpEx)
         {
             var statusCode = (int?)httpEx.StatusCode;
+            if (statusCode is null) return true; // 网络层失败，无 HTTP 响应
             if (statusCode == 429) return true;
             if (statusCode >= 500) return true;
             return false;
         }
 
-        // 未知异常默认重试（网络中断等）
-        return true;
+        // 明确的网络层瞬时异常重试（连接重置、套接字错误等）
+        if (ex is System.IO.IOException || ex is System.Net.Sockets.SocketException)
+            return true;
+
+        // 其他未知异常 fail-fast，避免对非幂等工具调用重复执行产生副作用
+        return false;
     }
 
     /// <summary>

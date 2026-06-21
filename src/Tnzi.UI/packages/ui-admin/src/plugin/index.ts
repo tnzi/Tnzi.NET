@@ -23,6 +23,10 @@ import {
   provideAdminSettingsConfig,
   type AdminSettingsConfig,
 } from './settingsConfig'
+import {
+  provideAdminChatConfig,
+  type AdminChatConfig,
+} from './chatConfig'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -83,6 +87,11 @@ export interface TnziUiAdminOptions {
    * built-in schema groups. When omitted the page renders framework groups only.
    */
   settings?: AdminSettingsConfig
+  /**
+   * Configuration for the built-in chat feature (TChatHost shell-level widget).
+   * When omitted the chat launcher is enabled by default.
+   */
+  chat?: AdminChatConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -118,6 +127,11 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   if (options.settings) {
     provideAdminSettingsConfig(app, options.settings)
   }
+
+  // Chat config — provide so AdminShellRoot can read enabled/disabled state.
+  // Always provide (even when undefined) with a stable empty object so
+  // useAdminChatConfig() returns a consistent value.
+  provideAdminChatConfig(app, options.chat ?? {})
 
   // Install global directives (v-permission, etc).
   installDirectives(app)
@@ -190,6 +204,12 @@ export {
   type AdminSettingsConfig,
   type AdminSettingsSection,
 } from './settingsConfig'
+export {
+  ADMIN_CHAT_CONFIG_KEY,
+  provideAdminChatConfig,
+  useAdminChatConfig,
+  type AdminChatConfig,
+} from './chatConfig'
 export {
   fetchAdminManifest,
   type AdminManifest,

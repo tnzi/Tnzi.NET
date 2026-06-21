@@ -26,9 +26,13 @@ public interface IFileShareService
     Task<Result<bool>> ValidateShareAccessAsync(string shareToken, string? password = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 增加分享访问计数
+    /// 原子占用一次访问配额：在单条 SQL 中检查"启用 + 未超过 MaxAccessCount"并自增 AccessCount，
+    /// 消除"读取计数判超限 → 再自增"两步之间的竞态。
+    /// Atomically consumes one access slot: a single SQL statement checks "enabled + below MaxAccessCount"
+    /// and increments AccessCount, eliminating the TOCTOU race between read-check and increment.
     /// </summary>
-    Task<Result> IncrementShareAccessCountAsync(string shareToken, CancellationToken cancellationToken = default);
+    /// <returns>true = 成功占用一次配额；false = 已超限 / 已禁用 / 不存在。</returns>
+    Task<Result<bool>> IncrementShareAccessCountAsync(string shareToken, CancellationToken cancellationToken = default);
 
     // Admin management methods
     /// <summary>

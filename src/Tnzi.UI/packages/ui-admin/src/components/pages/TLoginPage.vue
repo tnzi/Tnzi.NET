@@ -90,6 +90,16 @@ interface Props {
   onToggleModule?: (name: LoginModule) => void
   /** CSS transition `name` for the `<Transition>` wrapper. Default `'fade-slide'`. */
   transitionName?: string
+  /**
+   * Show the language switcher (`TLangSwitch`) in the toolbar.
+   * Defaults to **false** — many deployments are single-locale.
+   */
+  showLangSwitch?: boolean
+  /**
+   * Show the theme-schema switcher (`TThemeSchemaSwitch`) in the toolbar.
+   * Defaults to **true**.
+   */
+  showThemeSwitch?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -109,6 +119,8 @@ const props = withDefaults(defineProps<Props>(), {
   moduleLabels: () => ({}),
   onToggleModule: undefined,
   transitionName: 'fade-slide',
+  showLangSwitch: false,
+  showThemeSwitch: true,
 })
 
 const theme = useTheme()
@@ -294,8 +306,8 @@ provideLoginContext(loginContext)
           </h3>
           <div data-test="t-login-page-toolbar" class="i-flex-col items-end gap-1">
             <slot name="toolbar">
-              <TThemeSchemaSwitch :translate="t" class="text-20px lt-sm:text-18px" />
-              <TLangSwitch :translate="t" class="text-20px lt-sm:text-18px" />
+              <TThemeSchemaSwitch v-if="showThemeSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
+              <TLangSwitch v-if="showLangSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
             </slot>
           </div>
         </header>
@@ -341,8 +353,8 @@ provideLoginContext(loginContext)
       :class="{ 't-login__pane-toolbar--offset': qrCornerVisible }"
     >
       <slot name="toolbar">
-        <TThemeSchemaSwitch :translate="t" class="text-20px lt-sm:text-18px" />
-        <TLangSwitch :translate="t" class="text-20px lt-sm:text-18px" />
+        <TThemeSchemaSwitch v-if="showThemeSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
+        <TLangSwitch v-if="showLangSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
       </slot>
     </div>
     <div class="t-login__pane">

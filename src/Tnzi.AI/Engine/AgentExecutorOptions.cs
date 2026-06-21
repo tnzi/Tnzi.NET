@@ -77,6 +77,16 @@ public class AgentExecutorOptions
     /// 浅拷贝克隆 — 基于 <see cref="object.MemberwiseClone"/>，自动复制全部成员；
     /// 新增选项属性无需手动同步到克隆逻辑（曾因手抄字段清单漏掉
     /// <see cref="Logger"/> 与 <see cref="StripTextFromToolCallMessages"/>）。
+    /// <para>
+    /// <see cref="Tools"/> 做防御性复制（克隆后增删工具不影响原对象）；
+    /// <see cref="Middlewares"/> 与 <see cref="ToolDefinitions"/> 按引用共享
+    /// （只读集合，克隆体之间共享同一实例，符合预期）。
+    /// </para>
     /// </summary>
-    public AgentExecutorOptions Clone() => (AgentExecutorOptions)MemberwiseClone();
+    public AgentExecutorOptions Clone()
+    {
+        var clone = (AgentExecutorOptions)MemberwiseClone();
+        clone.Tools = Tools is null ? null : new List<AITool>(Tools);
+        return clone;
+    }
 }

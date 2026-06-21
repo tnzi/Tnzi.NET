@@ -19,9 +19,7 @@ public class LoggingModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<LoggingOptions>()
-            .Bind(context.Configuration.GetSection("Logging"))
-            .ValidateWith<LoggingOptions, LoggingOptionsValidator>();
+        context.Services.AddTnziOptions<LoggingOptions, LoggingOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

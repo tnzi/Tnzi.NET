@@ -444,9 +444,7 @@ public partial class AIModule
         services.AddSingleton<IReadabilityExtractor, SmartReaderExtractor>();
 
         // Phase 6: 端口分配器（线程安全，socket 绑定验证）
-        services.AddOptions<PortAllocatorOptions>()
-            .Bind(context.Configuration.GetSection("AI:PortAllocator"))
-            .ValidateWith<PortAllocatorOptions, PortAllocatorOptionsValidator>();
+        services.AddTnziOptions<PortAllocatorOptions, PortAllocatorOptionsValidator>(context.Configuration, "AI:PortAllocator");
         services.AddSingleton<IPortAllocator, PortAllocator>();
     }
 

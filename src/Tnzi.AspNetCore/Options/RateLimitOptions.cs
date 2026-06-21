@@ -3,21 +3,31 @@ namespace Tnzi.AspNetCore.Options;
 /// <summary>
 /// 限流配置选项
 /// </summary>
+[ConfigSection("AspNetCore:RateLimit")]
+[RuntimeSettingGroup(Key = "web-ratelimit", Module = "Web", DisplayName = "Rate Limiting",
+    I18nKey = "admin.modules.system.settings.groups.webRatelimit",
+    Icon = "mdi:speedometer", Order = 720)]
 public class RateLimitOptions
 {
     /// <summary>
     /// 获取或设置 是否启用限流
     /// </summary>
+    [RuntimeSetting(Label = "Enable Rate Limiting", I18n = "admin.modules.system.settings.fields.rateLimitEnabled",
+        Type = SettingFieldType.Boolean)]
     public bool Enabled { get; set; } = false;
 
     /// <summary>
     /// 获取或设置 默认限流数量
     /// </summary>
+    [RuntimeSetting(Label = "Default Limit (requests)", I18n = "admin.modules.system.settings.fields.rateLimitDefaultLimit",
+        Type = SettingFieldType.Int, Min = 1)]
     public int DefaultLimit { get; set; } = 100;
 
     /// <summary>
     /// 获取或设置 默认时间窗口（秒）
     /// </summary>
+    [RuntimeSetting(Label = "Default Window (seconds)", I18n = "admin.modules.system.settings.fields.rateLimitDefaultWindowSeconds",
+        Type = SettingFieldType.Int, Min = 1)]
     public int DefaultWindowSeconds { get; set; } = 60;
 
     /// <summary>
@@ -45,6 +55,8 @@ public class RateLimitOptions
     /// true: 允许所有请求通过（fail-open）
     /// false: 拒绝所有请求（fail-safe，默认）
     /// </summary>
+    [RuntimeSetting(Label = "Allow On Failure (fail-open)", I18n = "admin.modules.system.settings.fields.rateLimitAllowOnFailure",
+        Type = SettingFieldType.Boolean)]
     public bool AllowOnFailure { get; set; } = false;
 }
 

@@ -1,3 +1,5 @@
+using Tnzi.Security.Claims;
+
 namespace Tnzi.Hangfire;
 
 /// <summary>
@@ -32,6 +34,6 @@ internal class DashboardRoleAuthorizationFilter : IDashboardAuthorizationFilter
 
         // 检查用户是否具有允许的角色
         // 构造函数已通过 Check.NotNullOrEmpty 保证 _allowedRoles 非空
-        return _allowedRoles.Any(role => httpContext.User.IsInRole(role));
+        return _allowedRoles.Any(role => httpContext.User.IsInRoleIgnoreCase(role));
     }
 }

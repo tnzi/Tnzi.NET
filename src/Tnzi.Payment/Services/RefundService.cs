@@ -34,7 +34,8 @@ public class RefundService : ApplicationService, IRefundService
         if (payment == null)
             return Fail<RefundDto>(ErrorCodes.PaymentNotFound, 404);
 
-        if (payment.Status != PaymentStatus.Succeeded)
+        // 已成功或部分退款的支付均可继续退款（剩余可退额由下方累计校验把关）；已全额退款则不可再退
+        if (payment.Status != PaymentStatus.Succeeded && payment.Status != PaymentStatus.PartialRefunded)
             return Fail<RefundDto>(ErrorCodes.PaymentCannotRefund, 400);
 
         var options = PaymentOptions;
@@ -142,12 +143,17 @@ public class RefundService : ApplicationService, IRefundService
         if (provider == null)
             return Fail(ErrorCodes.PaymentChannelNotSupported, 400);
 
-        // 标记为退款中
-        if (refund.Status != RefundStatus.Refunding)
-        {
-            refund.Status = RefundStatus.Refunding;
-            await _refundRepository.UpdateAsync(refund, cancellationToken);
-        }
+        // 原子抢占（CAS）：仅当退款仍为 Approved/Processing 时置为 Refunding，
+        // 防止并发/重试重复调用渠道退款接口造成多次退款
+        var claimed = await _refundRepository.AsQueryable()
+            .Where(r => r.Id == refund.Id
+                && (r.Status == RefundStatus.Approved || r.Status == RefundStatus.Processing))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, RefundStatus.Refunding), cancellationToken);
+
+        if (claimed == 0)
+            return Fail(ErrorCodes.RefundCannotProcess, 409);
+
+        refund.Status = RefundStatus.Refunding;
 
         var result = await provider.RefundAsync(new PaymentProviderRefundDto
         {
@@ -170,6 +176,9 @@ public class RefundService : ApplicationService, IRefundService
         refund.CompletedTime = DateTime.UtcNow;
         await _refundRepository.UpdateAsync(refund, cancellationToken);
 
+        // 回写支付状态：累计成功退款额达到已付额 → Refunded，否则 PartialRefunded
+        await SyncPaymentRefundStatusAsync(payment, cancellationToken);
+
         // 发布退款完成事件
         if (EventBus != null)
         {
@@ -190,6 +199,26 @@ public class RefundService : ApplicationService, IRefundService
             refund.RefundNo, refund.RefundAmount);
 
         return Ok();
+    }
+
+    /// <summary>
+    /// 回写支付的退款状态：累计成功退款额 >= 已付额 → Refunded，否则 PartialRefunded
+    /// </summary>
+    private async Task SyncPaymentRefundStatusAsync(PaymentEntity payment, CancellationToken cancellationToken)
+    {
+        var totalRefunded = await _refundRepository.AsQueryable()
+            .Where(r => r.PaymentId == payment.Id && r.Status == RefundStatus.Succeeded)
+            .SumAsync(r => r.RefundAmount, cancellationToken);
+
+        var newStatus = totalRefunded >= payment.PaidAmount
+            ? PaymentStatus.Refunded
+            : PaymentStatus.PartialRefunded;
+
+        if (payment.Status != newStatus)
+        {
+            payment.Status = newStatus;
+            await _paymentRepository.UpdateAsync(payment, cancellationToken);
+        }
     }
 
     public async Task<Result> CancelRefundAsync(Guid refundId, string? reason, Guid? ownerUserId = null, CancellationToken cancellationToken = default)

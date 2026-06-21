@@ -159,6 +159,15 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // (sm/md/lg derived by scale in setThemeRadius). 0-16px range.
   const themeRadius = ref(4)
 
+  // Background color overrides — `null` = fall back to default token value.
+  // When non-null the value is written to the corresponding CSS custom
+  // property on `document.documentElement` so it overrides the token binding
+  // from variables.css without touching any other property.
+  const siderBg = ref<string | null>(null)
+  const headerBg = ref<string | null>(null)
+  const contentBg = ref<string | null>(null)
+  const containerBg = ref<string | null>(null)
+
   // Inverted color scheme for sider (orthogonal to global dark mode).
   // Note: soybean only inverts the sider — the header always follows the
   // global dark/light mode. We removed `invertHeader` because our previous
@@ -300,6 +309,73 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     // CSS variables are written by the `watch(themeRadius, ...)` block
     // further down — single source of truth so persisted-state hydration
     // and user setter calls take the same path.
+  }
+
+  function applySiderBg(v: string | null): void {
+    if (typeof document === 'undefined') return
+    if (v) {
+      document.documentElement.style.setProperty('--tnzi-admin-sider-bg', v)
+    } else {
+      document.documentElement.style.removeProperty('--tnzi-admin-sider-bg')
+    }
+  }
+  function setSiderBg(v: string | null): void {
+    siderBg.value = v
+    applySiderBg(v)
+  }
+  function resetSiderBg(): void {
+    siderBg.value = null
+    applySiderBg(null)
+  }
+  function applyHeaderBg(v: string | null): void {
+    if (typeof document === 'undefined') return
+    if (v) {
+      document.documentElement.style.setProperty('--tnzi-admin-header-bg', v)
+    } else {
+      document.documentElement.style.removeProperty('--tnzi-admin-header-bg')
+    }
+  }
+  function setHeaderBg(v: string | null): void {
+    headerBg.value = v
+    applyHeaderBg(v)
+  }
+  function resetHeaderBg(): void {
+    headerBg.value = null
+    applyHeaderBg(null)
+  }
+  function applyContentBg(v: string | null): void {
+    if (typeof document === 'undefined') return
+    if (v) {
+      document.documentElement.style.setProperty('--tnzi-admin-content-bg', v)
+      document.documentElement.style.setProperty('--tnzi-layout-bg', v)
+    } else {
+      document.documentElement.style.removeProperty('--tnzi-admin-content-bg')
+      document.documentElement.style.removeProperty('--tnzi-layout-bg')
+    }
+  }
+  function setContentBg(v: string | null): void {
+    contentBg.value = v
+    applyContentBg(v)
+  }
+  function resetContentBg(): void {
+    contentBg.value = null
+    applyContentBg(null)
+  }
+  function applyContainerBg(v: string | null): void {
+    if (typeof document === 'undefined') return
+    if (v) {
+      document.documentElement.style.setProperty('--tnzi-container-bg', v)
+    } else {
+      document.documentElement.style.removeProperty('--tnzi-container-bg')
+    }
+  }
+  function setContainerBg(v: string | null): void {
+    containerBg.value = v
+    applyContainerBg(v)
+  }
+  function resetContainerBg(): void {
+    containerBg.value = null
+    applyContainerBg(null)
   }
 
   function toggleInvertSider(): void {
@@ -459,6 +535,14 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     closeTabByMiddleClick.value = false
     tabScrollAnimation.value = false
     scrollMode.value = 'content'
+    applySiderBg(null)
+    siderBg.value = null
+    applyHeaderBg(null)
+    headerBg.value = null
+    applyContentBg(null)
+    contentBg.value = null
+    applyContainerBg(null)
+    containerBg.value = null
     if (typeof document !== 'undefined') {
       document.documentElement.style.filter = ''
     }
@@ -493,6 +577,15 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       },
       { immediate: true },
     )
+    // Background color overrides — `immediate: true` covers persisted-state
+    // hydration (pinia-plugin-persistedstate bypasses setters, so the CSS var
+    // would otherwise not be written after a page reload). Normal user
+    // interactions go through the setter functions which call the apply*
+    // helpers directly and are therefore synchronous.
+    watch(siderBg, applySiderBg, { immediate: true })
+    watch(headerBg, applyHeaderBg, { immediate: true })
+    watch(contentBg, applyContentBg, { immediate: true })
+    watch(containerBg, applyContainerBg, { immediate: true })
   }
 
   // ── Theme-schema ⇄ @tnzi/ui context sync ──
@@ -564,6 +657,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     closeTabByMiddleClick,
     tabScrollAnimation,
     scrollMode,
+    siderBg,
+    headerBg,
+    contentBg,
+    containerBg,
     // setters
     setLayoutMode,
     setThemeSchema,
@@ -605,6 +702,14 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setCloseTabByMiddleClick,
     setTabScrollAnimation,
     setScrollMode,
+    setSiderBg,
+    resetSiderBg,
+    setHeaderBg,
+    resetHeaderBg,
+    setContentBg,
+    resetContentBg,
+    setContainerBg,
+    resetContainerBg,
     reset,
   }
 }, {
@@ -649,6 +754,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'closeTabByMiddleClick',
       'tabScrollAnimation',
       'scrollMode',
+      'siderBg',
+      'headerBg',
+      'contentBg',
+      'containerBg',
     ],
   },
 })

@@ -13,9 +13,7 @@ public class EventBusModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 配置EventBusOptions并启用启动时验证
-        context.Services.AddOptions<EventBusOptions>()
-            .Bind(context.Configuration.GetSection("EventBus"))
-            .ValidateWith<EventBusOptions, EventBusOptionsValidator>();
+        context.Services.AddTnziOptions<EventBusOptions, EventBusOptionsValidator>(context.Configuration);
         return Task.CompletedTask;
     }
 

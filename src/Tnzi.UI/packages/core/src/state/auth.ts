@@ -48,14 +48,6 @@ export function createInitialAuthState(): AuthState {
 }
 
 // ============================================
-// Storage key constants
-// ============================================
-
-const STORAGE_KEY_TOKEN = 'tnzi:auth:token';
-const STORAGE_KEY_REFRESH = 'tnzi:auth:refresh';
-const STORAGE_KEY_EXPIRY = 'tnzi:auth:expiry';
-
-// ============================================
 // AuthStateManager
 // ============================================
 
@@ -92,7 +84,16 @@ export class AuthStateManager {
   /** Mutex: pending login promise for deduplication */
   private _loginPromise: Promise<LoginResultDto> | null = null;
 
+  /** Persisted-storage keys derived from the configurable storage prefix. */
+  private readonly _keys: { token: string; refresh: string; expiry: string };
+
   constructor(private readonly deps: StateDeps) {
+    const prefix = deps.storagePrefix ?? 'tnzi:auth';
+    this._keys = {
+      token: `${prefix}:token`,
+      refresh: `${prefix}:refresh`,
+      expiry: `${prefix}:expiry`,
+    };
     return reactive(this) as this;
   }
 
@@ -383,9 +384,9 @@ export class AuthStateManager {
   // ============================================
 
   async restoreAuth(): Promise<void> {
-    const token = this.deps.storage.get<string>(STORAGE_KEY_TOKEN);
-    const refresh = this.deps.storage.get<string>(STORAGE_KEY_REFRESH);
-    const expiry = this.deps.storage.get<string>(STORAGE_KEY_EXPIRY);
+    const token = this.deps.storage.get<string>(this._keys.token);
+    const refresh = this.deps.storage.get<string>(this._keys.refresh);
+    const expiry = this.deps.storage.get<string>(this._keys.expiry);
 
     if (!token || !refresh) return;
 
@@ -444,19 +445,19 @@ export class AuthStateManager {
 
   private persistTokens(): void {
     if (this.accessToken) {
-      this.deps.storage.set(STORAGE_KEY_TOKEN, this.accessToken);
+      this.deps.storage.set(this._keys.token, this.accessToken);
     }
     if (this.refreshToken) {
-      this.deps.storage.set(STORAGE_KEY_REFRESH, this.refreshToken);
+      this.deps.storage.set(this._keys.refresh, this.refreshToken);
     }
     if (this.tokenExpiry) {
-      this.deps.storage.set(STORAGE_KEY_EXPIRY, this.tokenExpiry.toISOString());
+      this.deps.storage.set(this._keys.expiry, this.tokenExpiry.toISOString());
     }
   }
 
   private clearPersistedTokens(): void {
-    this.deps.storage.remove(STORAGE_KEY_TOKEN);
-    this.deps.storage.remove(STORAGE_KEY_REFRESH);
-    this.deps.storage.remove(STORAGE_KEY_EXPIRY);
+    this.deps.storage.remove(this._keys.token);
+    this.deps.storage.remove(this._keys.refresh);
+    this.deps.storage.remove(this._keys.expiry);
   }
 }

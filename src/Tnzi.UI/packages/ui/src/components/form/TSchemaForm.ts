@@ -13,11 +13,17 @@
  * `./form-schema.css` and must be imported by the application shell
  * (typically through the package's `style.css` aggregate).
  */
-import { defineComponent, h, type PropType } from 'vue'
+import { defineComponent, h, type PropType, type VNodeChild } from 'vue'
 import { NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NDatePicker } from 'naive-ui'
 import './form-schema.css'
 
-export type FormSchemaFieldType = 'text' | 'textarea' | 'number' | 'switch' | 'select' | 'date'
+export type FormSchemaBuiltinFieldType = 'text' | 'textarea' | 'number' | 'switch' | 'select' | 'date'
+/**
+ * Builtin field types render to naive-ui controls. Any other string is a
+ * custom field type rendered through the `fieldRenderers` prop — this keeps
+ * autocomplete for the builtins while allowing extension without forking.
+ */
+export type FormSchemaFieldType = FormSchemaBuiltinFieldType | (string & {})
 
 export interface FormSchemaItem {
   key: string
@@ -59,12 +65,37 @@ export interface FormSchemaItem {
   span?: number
 }
 
+/**
+ * Context handed to a custom field renderer registered via `fieldRenderers`.
+ */
+export interface FieldRenderContext {
+  item: FormSchemaItem
+  value: unknown
+  readonly: boolean
+  onUpdate: (v: unknown) => void
+  /** Resolve an i18n key to text, with a fallback for raw strings. */
+  translate: (key: string | undefined, fallback: string) => string
+}
+
+/**
+ * Renders a single field for a given (possibly custom) field `type`.
+ * Register under the `fieldRenderers` prop to extend TSchemaForm with custom
+ * editors (e.g. markdown / color) without forking the component.
+ */
+export type FieldRenderer = (ctx: FieldRenderContext) => VNodeChild
+
 interface Props {
   schema: FormSchemaItem[]
   model: Record<string, unknown>
   readonly: boolean
   translate?: (key: string) => string
   columns?: number
+  /**
+   * Custom field renderers keyed by field `type`. A field whose `type`
+   * matches a key here is rendered by that function instead of a builtin
+   * control — the extension point for markdown/color/etc. without forking.
+   */
+  fieldRenderers?: Record<string, FieldRenderer>
 }
 
 const TSchemaForm = defineComponent({
@@ -82,6 +113,7 @@ const TSchemaForm = defineComponent({
      * so the columns don't crush each other.
      */
     columns: { type: Number, default: 1 },
+    fieldRenderers: { type: Object as PropType<Record<string, FieldRenderer>>, default: undefined },
   },
   setup(props: Props) {
     function tr(key: string | undefined, fallback: string): string {
@@ -107,6 +139,11 @@ const TSchemaForm = defineComponent({
       const value = props.model[item.key]
       const onUpdate = (v: unknown) => { props.model[item.key] = v }
       const effectiveType = item.typeFn ? item.typeFn(props.model) : item.type
+      // A custom renderer registered for this (possibly non-builtin) type wins.
+      const custom = props.fieldRenderers?.[effectiveType]
+      if (custom) {
+        return custom({ item, value, readonly: viewMode, onUpdate, translate: tr })
+      }
       const placeholder = tr(item.placeholderKey, item.placeholder ?? '')
       switch (effectiveType) {
         case 'text':
@@ -149,6 +186,11 @@ const TSchemaForm = defineComponent({
         }
         case 'date':
           return h(NDatePicker, { value: value as number | null, disabled: viewMode, type: 'date', 'onUpdate:value': onUpdate })
+        default:
+          // Unknown field type without a registered renderer: degrade to a
+          // visible read-only text rendering rather than silently rendering
+          // nothing — the surfaced value signals the missing editor to the dev.
+          return h('span', { class: 't-form-schema__unknown' }, String(value ?? ''))
       }
     }
 

@@ -53,6 +53,7 @@
     <Project Path="src/Tnzi.AI.Sandbox/Tnzi.AI.Sandbox.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Tnzi.AI.Rag.Tests/Tnzi.AI.Rag.Tests.csproj" />
     <Project Path="tests/Tnzi.AI.Tests/Tnzi.AI.Tests.csproj" />
     <Project Path="tests/Tnzi.AspNetCore.Tests/Tnzi.AspNetCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Audit.Tests/Tnzi.Audit.Tests.csproj" />

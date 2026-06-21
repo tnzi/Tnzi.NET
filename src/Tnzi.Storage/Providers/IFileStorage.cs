@@ -78,4 +78,16 @@ public interface IFileStorage
     /// <returns>Presigned URL, or null if not supported by the provider</returns>
     Task<string?> GetPresignedUrlAsync(string filePath, int expiresInSeconds = 3600, string httpMethod = "GET")
         => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Server-side copy an existing object to a new key within the same storage backend.
+    /// Default implementation returns null (not supported) so callers fall back to download+upload.
+    /// Cloud providers (S3, R2, Azure) should override to use native server-side copy, avoiding
+    /// the bandwidth/memory cost of streaming large files through the application.
+    /// </summary>
+    /// <param name="sourcePath">Source object key/path</param>
+    /// <param name="destFileName">Destination object key/path</param>
+    /// <returns>The destination path on success, or null if the provider does not support server-side copy</returns>
+    Task<string?> CopyAsync(string sourcePath, string destFileName)
+        => Task.FromResult<string?>(null);
 }

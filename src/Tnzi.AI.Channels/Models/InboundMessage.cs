@@ -11,5 +11,4 @@ public record InboundMessage(
     InboundMessageType Type = InboundMessageType.Chat,
     string? ThreadTs = null,
     string? TopicId = null,
-    List<FileAttachmentInfo>? Files = null,
     Dictionary<string, object>? Metadata = null);

@@ -18,9 +18,7 @@ public class LocalizationModule : TnziFrameworkModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用验证
-        context.Services.AddOptions<LocalizationOptions>()
-            .Bind(context.Configuration.GetSection("Localization"))
-            .ValidateWith<LocalizationOptions, LocalizationOptionsValidator>();
+        context.Services.AddTnziOptions<LocalizationOptions, LocalizationOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

@@ -191,6 +191,47 @@ public class ChannelsModuleOptionsValidatorTests
         result.Succeeded.ShouldBeTrue();
     }
 
+    // ─── ThreadStore tenant isolation ───────────────────────────────────────
+
+    [Fact]
+    public void Validate_FileThreadStore_MultiTenancyEnabled_Fails()
+    {
+        // FileChannelThreadStore has no TenantId in its key — reject under multi-tenancy.
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            ThreadStore = "File"
+        }, multiTenancyEnabled: true);
+
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains("ThreadStore=File is not tenant-isolated",
+            StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_FileThreadStore_SingleTenant_Passes()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            ThreadStore = "File"
+        }, multiTenancyEnabled: false);
+
+        result.Failed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Validate_DatabaseThreadStore_MultiTenancyEnabled_Passes()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            ThreadStore = "Database"
+        }, multiTenancyEnabled: true);
+
+        result.Failed.ShouldBeFalse();
+    }
+
     // ─── FIX 2: Feishu challenge JSON escaping ───────────────────────────────
 
     [Fact]
@@ -229,9 +270,10 @@ public class ChannelsModuleOptionsValidatorTests
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private static ValidateOptionsResult Validate(ChannelsModuleOptions options)
+    private static ValidateOptionsResult Validate(ChannelsModuleOptions options, bool multiTenancyEnabled = false)
     {
-        var validator = new ChannelsModuleOptionsValidator();
+        var validator = new ChannelsModuleOptionsValidator(
+            MsOptions.Create(new MultiTenancyOptions { Enabled = multiTenancyEnabled }));
         return validator.Validate(null, options);
     }
 

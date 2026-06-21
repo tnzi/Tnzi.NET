@@ -1,19 +1,76 @@
+using Mapster;
+using MapsterMapper;
+using Microsoft.Extensions.Options;
+using Moq;
+using Tnzi.Chat.Mappings;
+using Tnzi.Chat.Services;
+using Tnzi.Chat.Services.Interfaces;
+using Tnzi.Data;
+using Tnzi.Domain.Repositories;
+using Tnzi.EFCore;
+using Tnzi.Identity.Entities;
+using Tnzi.Mapster;
+using Tnzi.MultiTenancy;
 
 namespace Tnzi.Chat.Tests.Integration;
 
-/// <summary>
-/// Chat 模块集成测试基类
-/// </summary>
 public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDisposable
 {
-    protected IntegrationTestBase()
+    protected static Guid CurrentUserId => TestHelper.DefaultTestUserId;
+
+    public IntegrationTestBase()
     {
+        var config = new TypeAdapterConfig();
+        new ChatMappingConfig().Configure(config);
+        MapperExtensions.SetMapper(new Mapper(config));
+    }
+
+    protected override void ConfigureServices(IServiceCollection services)
+    {
+        services.AddScoped<IRepository<Conversation, Guid>>(sp =>
+            new EFCoreRepository<ChatTestDbContext, Conversation, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
+        services.AddScoped<IRepository<ConversationMember, Guid>>(sp =>
+            new EFCoreRepository<ChatTestDbContext, ConversationMember, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
+        services.AddScoped<IRepository<ChatMessage, Guid>>(sp =>
+            new EFCoreRepository<ChatTestDbContext, ChatMessage, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
+
+        var userRepo = new Mock<IRepository<User, Guid>>();
+        userRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<User>());
+        services.AddScoped(_ => userRepo.Object);
+
+        // ChatContactService now joins UserDetail for display name + avatar — register
+        // an empty mock so DI resolves (names fall back to UserName, avatar null).
+        var userDetailRepo = new Mock<IRepository<UserDetail, Guid>>();
+        userDetailRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<UserDetail, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserDetail>());
+        services.AddScoped(_ => userDetailRepo.Object);
+
+        // Multi-tenancy OFF by default (BroadcastService guards the All path on this).
+        services.AddSingleton<IOptions<MultiTenancyOptions>>(Microsoft.Extensions.Options.Options.Create(new MultiTenancyOptions()));
+
+        // Register real UnitOfWorkManager so ExecuteInUnitOfWorkAsync exercises the deferred-save path.
+        // IEntityManager mock tells UnitOfWorkManager which DbContext types to discover.
+        var entityManagerMock = new Mock<IEntityManager>();
+        entityManagerMock.Setup(m => m.GetAllDbContextTypes()).Returns(new[] { typeof(ChatTestDbContext) });
+        entityManagerMock.Setup(m => m.Initialize());
+        services.AddSingleton(_ => entityManagerMock.Object);
+        services.AddScoped<IUnitOfWorkManager, UnitOfWorkManager>();
+
+        services.AddScoped<IGroupService, GroupService>();
+        services.AddScoped<IBroadcastService, BroadcastService>();
+
+        // IPresenceService — mock returning empty list (presence enrichment not under test in integration suite)
+        var presenceMock = new Mock<IPresenceService>();
+        presenceMock.Setup(p => p.ResolveEffectiveAsync(It.IsAny<IReadOnlyCollection<Guid>>()))
+            .ReturnsAsync(Array.Empty<UserPresenceDto>());
+        services.AddScoped(_ => presenceMock.Object);
+
+        services.AddScoped<IChatContactService, ChatContactService>();
+        services.AddScoped<IConversationService, ConversationService>();
     }
 }
 
-/// <summary>
-/// Chat 测试用 DbContext
-/// </summary>
 public class ChatTestDbContext : TnziDbContext<ChatTestDbContext>
 {
     public ChatTestDbContext(
@@ -23,22 +80,14 @@ public class ChatTestDbContext : TnziDbContext<ChatTestDbContext>
     {
     }
 
-    public DbSet<Message> Messages => Set<Message>();
-    public DbSet<MessageReceive> MessageReceives => Set<MessageReceive>();
-    public DbSet<MessageReply> MessageReplies => Set<MessageReply>();
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // 应用 Chat 实体配置
-        modelBuilder.ApplyConfiguration(new Entities.Configs.MessageConfiguration());
-        modelBuilder.ApplyConfiguration(new Entities.Configs.MessageReceiveConfiguration());
-        modelBuilder.ApplyConfiguration(new Entities.Configs.MessageReplyConfiguration());
-        modelBuilder.ApplyConfiguration(new Entities.Configs.MessageRecipientConfiguration());
-        modelBuilder.ApplyConfiguration(new Entities.Configs.MessageRoleConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ConversationConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ConversationMemberConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ChatMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.UserPresenceConfiguration());
 
         base.OnModelCreating(modelBuilder);
-
-        // 应用 SQLite UTC DateTime 转换器
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
     }
 }

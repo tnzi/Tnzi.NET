@@ -213,3 +213,126 @@ describe('TListShell', () => {
     ;(globalThis as any).__bpNarrow = false
   })
 })
+
+// ── Toolbar: icon-only buttons + fixed-trailing order ─────────────────────
+// Enhanced stubs that expose aria-label and both default + icon named slots,
+// so we can assert "no text content" and "has aria-label".
+const trailingStubs = {
+  ...stubs,
+  // Override Button stub to:
+  //   • carry aria-label on the root <button>
+  //   • render both #icon slot AND #default slot
+  //   • suppress NTooltip wrapper (we test for it separately)
+  Button: {
+    name: 'Button',
+    props: ['ariaLabel'],
+    inheritAttrs: false,
+    template: `<button
+      class="n-button"
+      v-bind="$attrs"
+      :aria-label="ariaLabel"
+      @click="$emit('click')"
+    ><slot name="icon" /><slot /></button>`,
+  },
+  // NTooltip: render its #trigger slot so descendants are visible;
+  // wrap in a sentinel class so we can assert it's present.
+  Tooltip: {
+    name: 'Tooltip',
+    template: '<span class="n-tooltip-stub"><slot name="trigger" /></span>',
+  },
+}
+
+describe('TListShell toolbar — icon-only buttons + trailing order', () => {
+  afterEach(() => { delete (globalThis as Record<string, unknown>).__bpNarrow })
+
+  // (a) Refresh renders as icon-only: no text node in its default slot,
+  //     aria-label is set, button is wrapped inside NTooltip.
+  it('renders Refresh as icon-only button with aria-label and no text', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, showRefresh: true },
+      slots: { renderer: '<div/>' },
+      global: { stubs: trailingStubs },
+    })
+    const refreshBtn = wrapper.find('.t-list-shell__refresh')
+    expect(refreshBtn.exists()).toBe(true)
+    // aria-label must be set (non-empty)
+    expect(refreshBtn.attributes('aria-label')).toBeTruthy()
+    // The default slot of the Refresh button must be empty (icon-only)
+    // We detect text by checking that there are no text nodes directly in the
+    // button's rendered output — only the icon slot element.
+    const directText = refreshBtn.text().trim()
+    expect(directText).toBe('')
+    // The Refresh button must be inside an NTooltip wrapper
+    expect(wrapper.find('.n-tooltip-stub').exists()).toBe(true)
+  })
+
+  // (b) Columns (injected via #toolbar slot from TCrudPage) must render
+  //     as icon-only: no text, aria-label set. We simulate what TCrudPage injects.
+  it('renders Columns (#toolbar slot) as icon-only button with aria-label', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any },
+      slots: {
+        renderer: '<div/>',
+        // Simulate what TCrudPage injects: icon-only button with aria-label
+        toolbar: '<button class="t-crud-toolbar__columns columns-btn" aria-label="Columns"><span class="icon-stub" /></button>',
+      },
+      global: { stubs: trailingStubs },
+    })
+    const colBtn = wrapper.find('.columns-btn')
+    expect(colBtn.exists()).toBe(true)
+    expect(colBtn.attributes('aria-label')).toBe('Columns')
+    // Text content should be empty (no label text)
+    expect(colBtn.text().trim()).toBe('')
+  })
+
+  // (c) DOM order: #toolbarRight content must appear BEFORE Refresh and Columns
+  it('places Refresh and Columns (#toolbar) after #toolbarRight in the DOM', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, showRefresh: true },
+      slots: {
+        renderer: '<div/>',
+        toolbarRight: '<button class="custom-right-btn">Custom</button>',
+        toolbar: '<button class="columns-btn" aria-label="Columns"><span /></button>',
+      },
+      global: { stubs: trailingStubs },
+    })
+    const actionsEl = wrapper.find('.t-list-shell__actions')
+    expect(actionsEl.exists()).toBe(true)
+    const html = actionsEl.html()
+
+    const customIdx = html.indexOf('custom-right-btn')
+    const refreshIdx = html.indexOf('t-list-shell__refresh')
+    const columnsIdx = html.indexOf('columns-btn')
+
+    expect(customIdx).toBeGreaterThanOrEqual(0)
+    expect(refreshIdx).toBeGreaterThanOrEqual(0)
+    expect(columnsIdx).toBeGreaterThanOrEqual(0)
+    // Custom (#toolbarRight) before Refresh
+    expect(customIdx).toBeLessThan(refreshIdx)
+    // Custom (#toolbarRight) before Columns
+    expect(customIdx).toBeLessThan(columnsIdx)
+    // Refresh before Columns (Columns is rightmost)
+    expect(refreshIdx).toBeLessThan(columnsIdx)
+  })
+
+  // (d) showRefresh=false → Refresh button absent
+  it('omits the Refresh button when showRefresh=false', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, showRefresh: false },
+      slots: { renderer: '<div/>' },
+      global: { stubs: trailingStubs },
+    })
+    expect(wrapper.find('.t-list-shell__refresh').exists()).toBe(false)
+  })
+
+  // (e) No #toolbar slot → no Columns button rendered (the shell itself never
+  //     renders a Columns button — that is TCrudPage's responsibility via the slot)
+  it('does not render a Columns button when no #toolbar slot is provided', () => {
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, showRefresh: true },
+      slots: { renderer: '<div/>' },
+      global: { stubs: trailingStubs },
+    })
+    expect(wrapper.find('.t-crud-toolbar__columns').exists()).toBe(false)
+  })
+})

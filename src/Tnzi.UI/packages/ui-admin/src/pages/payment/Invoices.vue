@@ -160,7 +160,7 @@ const tableColumns: ColumnDef[] = [
     width: 180,
     render: (row) => {
       const r = row as unknown as InvoiceDto
-      return h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, r.invoiceNo)
+      return h('code', { class: 'tnzi-mono text-12px' }, r.invoiceNo)
     },
   },
   { key: 'customerName', title: t('cols.customer'), ellipsis: { tooltip: true } },

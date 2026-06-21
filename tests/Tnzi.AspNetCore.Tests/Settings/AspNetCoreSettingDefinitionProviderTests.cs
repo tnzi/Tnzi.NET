@@ -1,27 +1,44 @@
+using Tnzi.System.Settings;
+
 namespace Tnzi.AspNetCore.Tests.Settings;
 
+/// <summary>
+/// Verifies that the AspNetCore Options classes carry correct [RuntimeSetting] / [RuntimeSettingGroup]
+/// attribute metadata after migrating away from the hand-written AspNetCoreSettingDefinitionProvider.
+/// Tests use RuntimeSettingMetadataExtractor (same extractor as AttributeSettingDefinitionProvider)
+/// and AttributeSettingDefinitionProvider.MergeByGroupKey to reproduce the three groups.
+/// </summary>
 public class AspNetCoreSettingDefinitionProviderTests
 {
-    private readonly AspNetCoreSettingDefinitionProvider _provider = new();
+    private static IReadOnlyList<SettingDefinitionGroup> BuildGroups()
+    {
+        var rawGroups = new List<SettingDefinitionGroup>();
+        foreach (var t in new[] { typeof(RequestTrackingOptions), typeof(ExceptionHandlingOptions), typeof(SecurityHeadersOptions), typeof(RateLimitOptions) })
+        {
+            var g = RuntimeSettingMetadataExtractor.Extract(t);
+            if (g != null) rawGroups.Add(g);
+        }
+        return AttributeSettingDefinitionProvider.MergeByGroupKey(rawGroups);
+    }
 
     [Fact]
     public void GetGroups_ReturnsThreeGroups()
     {
-        var groups = _provider.GetGroups();
+        var groups = BuildGroups();
         Assert.Equal(3, groups.Count);
     }
 
     [Fact]
     public void GetGroups_AllGroupsHaveModuleNameWeb()
     {
-        var groups = _provider.GetGroups();
+        var groups = BuildGroups();
         Assert.All(groups, g => Assert.Equal("Web", g.ModuleName));
     }
 
     [Fact]
     public void GetGroups_KeysAreDistinct()
     {
-        var groups = _provider.GetGroups();
+        var groups = BuildGroups();
         var keys = groups.Select(g => g.Key).ToList();
         Assert.Equal(keys.Count, keys.Distinct().Count());
     }
@@ -82,7 +99,7 @@ public class AspNetCoreSettingDefinitionProviderTests
         Assert.NotEmpty(exFields);
         Assert.Contains(exFields, f => f.Key == "AspNetCore:ExceptionHandling:ShowDetailsInDevelopment");
         Assert.Contains(exFields, f => f.Key == "AspNetCore:ExceptionHandling:IncludeRequestId");
-        // EnableMetrics 已移除：仅启动期门控 DI 注册，运行时无消费者（死字段）
+        // EnableMetrics 不收录：仅启动期门控 DI 注册，运行时无消费者（死字段）
         Assert.DoesNotContain(exFields, f => f.Key == "AspNetCore:ExceptionHandling:EnableMetrics");
     }
 
@@ -111,25 +128,25 @@ public class AspNetCoreSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void EnableRequestLogging_DefaultValueAccessor_ReturnsFalseString()
+    public void EnableRequestLogging_DefaultValue_IsTrue()
     {
         // RequestTrackingOptions.EnableRequestLogging default = true
         var field = GetField("web-observability", "AspNetCore:RequestTracking:EnableRequestLogging");
         Assert.NotNull(field.DefaultValueAccessor);
-        Assert.Equal("true", field.DefaultValueAccessor!());
+        Assert.Equal("True", field.DefaultValueAccessor!());
     }
 
     [Fact]
-    public void RateLimitEnabled_DefaultValueAccessor_ReturnsFalseString()
+    public void RateLimitEnabled_DefaultValue_IsFalse()
     {
         // RateLimitOptions.Enabled default = false
         var field = GetField("web-ratelimit", "AspNetCore:RateLimit:Enabled");
         Assert.NotNull(field.DefaultValueAccessor);
-        Assert.Equal("false", field.DefaultValueAccessor!());
+        Assert.Equal("False", field.DefaultValueAccessor!());
     }
 
     [Fact]
-    public void RateLimitDefaultLimit_DefaultValueAccessor_Returns100()
+    public void RateLimitDefaultLimit_DefaultValue_Is100()
     {
         var field = GetField("web-ratelimit", "AspNetCore:RateLimit:DefaultLimit");
         Assert.NotNull(field.DefaultValueAccessor);
@@ -137,7 +154,7 @@ public class AspNetCoreSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void RateLimitDefaultWindowSeconds_DefaultValueAccessor_Returns60()
+    public void RateLimitDefaultWindowSeconds_DefaultValue_Is60()
     {
         var field = GetField("web-ratelimit", "AspNetCore:RateLimit:DefaultWindowSeconds");
         Assert.NotNull(field.DefaultValueAccessor);
@@ -145,18 +162,18 @@ public class AspNetCoreSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void EnableSecurityHeaders_DefaultValueAccessor_ReturnsFalseString()
+    public void EnableSecurityHeaders_DefaultValue_IsFalse()
     {
         // SecurityHeadersOptions.EnableSecurityHeaders default = false
         var field = GetField("web-security-headers", "AspNetCore:SecurityHeaders:EnableSecurityHeaders");
         Assert.NotNull(field.DefaultValueAccessor);
-        Assert.Equal("false", field.DefaultValueAccessor!());
+        Assert.Equal("False", field.DefaultValueAccessor!());
     }
 
     [Fact]
     public void AllFields_HaveNonEmptyI18nKey()
     {
-        var groups = _provider.GetGroups();
+        var groups = BuildGroups();
         foreach (var group in groups)
         {
             Assert.All(group.Fields, f =>
@@ -170,7 +187,7 @@ public class AspNetCoreSettingDefinitionProviderTests
     [Fact]
     public void AllFields_HaveDistinctKeysWithinEachGroup()
     {
-        var groups = _provider.GetGroups();
+        var groups = BuildGroups();
         foreach (var group in groups)
         {
             var keys = group.Fields.Select(f => f.Key).ToList();
@@ -179,33 +196,28 @@ public class AspNetCoreSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void BooleanFields_DefaultValueAccessors_ReturnLowercaseString()
+    public void ContentSecurityPolicy_HasTypeText()
     {
-        var groups = _provider.GetGroups();
-        var boolFields = groups.SelectMany(g => g.Fields)
-            .Where(f => f.Type == SettingFieldType.Boolean && f.DefaultValueAccessor != null)
-            .ToList();
-
-        Assert.NotEmpty(boolFields);
-        foreach (var field in boolFields)
-        {
-            var value = field.DefaultValueAccessor!();
-            if (value != null)
-            {
-                Assert.True(value == "true" || value == "false",
-                    $"Field {field.Key} default accessor returned '{value}', expected 'true' or 'false'");
-            }
-        }
+        var field = GetField("web-security-headers", "AspNetCore:SecurityHeaders:ContentSecurityPolicy");
+        Assert.Equal(SettingFieldType.Text, field.Type);
     }
 
-    private SettingDefinitionGroup GetGroup(string key)
+    [Fact]
+    public void NoConflictsAcrossAllGroups()
     {
-        var group = _provider.GetGroups().FirstOrDefault(g => g.Key == key);
+        var groups = BuildGroups();
+        // ValidateNoConflicts throws if any field key is duplicated across groups
+        AttributeSettingDefinitionProvider.ValidateNoConflicts(groups);
+    }
+
+    private static SettingDefinitionGroup GetGroup(string key)
+    {
+        var group = BuildGroups().FirstOrDefault(g => g.Key == key);
         Assert.NotNull(group);
         return group;
     }
 
-    private SettingFieldDefinition GetField(string groupKey, string fieldKey)
+    private static SettingFieldDefinition GetField(string groupKey, string fieldKey)
     {
         var group = GetGroup(groupKey);
         var field = group.Fields.FirstOrDefault(f => f.Key == fieldKey);

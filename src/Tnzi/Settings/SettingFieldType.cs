@@ -17,5 +17,8 @@ public enum SettingFieldType
     Decimal = 3,
     Boolean = 4,
     Select = 5,
-    Password = 6
+    Password = 6,
+
+    /// <summary>仅用于 [RuntimeSetting]：由属性 CLR 类型推断实际类型，不作为最终 SettingFieldDefinition.Type。</summary>
+    Auto = 7
 }

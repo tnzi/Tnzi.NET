@@ -127,6 +127,27 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                     ? QuotaWarningLevel.Warning
                     : QuotaWarningLevel.None;
 
+            // 命中预警/严重阈值时发布事件（静默失败，不影响配额检查主流程）
+            if (warningLevel != QuotaWarningLevel.None)
+            {
+                try
+                {
+                    await (EventBus?.PublishAsync(new QuotaThresholdReachedEvent
+                    {
+                        UserId = userId,
+                        Level = warningLevel.ToString(),
+                        DailyUsagePercentage = dailyPct,
+                        MonthlyUsagePercentage = monthlyPct,
+                        RemainingDailyQuota = remainingDaily,
+                        RemainingMonthlyQuota = remainingMonthly
+                    }) ?? Task.CompletedTask);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to publish QuotaThresholdReachedEvent for user {UserId}", userId);
+                }
+            }
+
             return Ok(QuotaCheckResult.Allow(remainingDaily, remainingMonthly, dailyPct, monthlyPct, warningLevel));
         }
         catch (Exception ex)

@@ -8,6 +8,10 @@ export interface AdminUserInfo {
   displayName?: string
   email?: string
   avatar?: string
+  /** Local-upload avatar file id (Identity UserDetail.AvatarId). Drives the
+   *  header status-bar avatar through `resolveAvatarUrl` when there is no
+   *  external `avatar` link. */
+  avatarId?: string | null
   roles: string[]
   permissions: string[]
   tenantId?: string
@@ -55,7 +59,11 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
   }
 
   function hasPermission(permission: string): boolean {
-    return userPermissions.value.includes(permission)
+    // Case-insensitive to mirror the backend (StringComparer.OrdinalIgnoreCase).
+    // Route + FrameworkPermissions codes are all lowercase today, but pinning
+    // this prevents the silent-filter failure mode if casing ever drifts.
+    const target = permission.toLowerCase()
+    return userPermissions.value.some((p) => p.toLowerCase() === target)
   }
 
   function hasAnyPermission(permissions: string[]): boolean {

@@ -3,11 +3,24 @@ namespace Tnzi.AspNetCore.Options;
 /// <summary>
 /// 安全头部选项
 /// </summary>
+[ConfigSection("AspNetCore:SecurityHeaders")]
+[RuntimeSettingGroup(Key = "web-security-headers", Module = "Web", DisplayName = "Security Headers",
+    I18nKey = "admin.modules.system.settings.groups.webSecurityHeaders",
+    Icon = "mdi:shield-lock-outline", Order = 710)]
 public class SecurityHeadersOptions
 {
     /// <summary>
+    /// 是否启用安全头部
+    /// </summary>
+    [RuntimeSetting(Label = "Enable Security Headers", I18n = "admin.modules.system.settings.fields.enableSecurityHeaders",
+        Type = SettingFieldType.Boolean)]
+    public bool EnableSecurityHeaders { get; set; } = false;
+
+    /// <summary>
     /// Content Security Policy
     /// </summary>
+    [RuntimeSetting(Label = "Content-Security-Policy", I18n = "admin.modules.system.settings.fields.contentSecurityPolicy",
+        Type = SettingFieldType.Text)]
     public string ContentSecurityPolicy { get; set; } =
         "default-src 'self'; " +
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
@@ -18,27 +31,41 @@ public class SecurityHeadersOptions
     /// X-Frame-Options
     /// DENY, SAMEORIGIN, ALLOW-FROM
     /// </summary>
+    [RuntimeSetting(Label = "X-Frame-Options", I18n = "admin.modules.system.settings.fields.xFrameOptions")]
     public string XFrameOptions { get; set; } = "DENY";
 
     /// <summary>
     /// X-Content-Type-Options
     /// </summary>
+    [RuntimeSetting(Label = "X-Content-Type-Options", I18n = "admin.modules.system.settings.fields.xContentTypeOptions")]
     public string? XContentTypeOptions { get; set; } = "nosniff";
 
     /// <summary>
     /// X-XSS-Protection
     /// 0: Disabled, 1: Enabled with block mode
     /// </summary>
+    [RuntimeSetting(Label = "X-XSS-Protection", I18n = "admin.modules.system.settings.fields.xXssProtection")]
     public string? XXssProtection { get; set; } = "1; mode=block";
+
+    /// <summary>
+    /// Referrer-Policy
+    /// no-referrer, no-referrer-when-downgrade, same-origin, strict-origin, strict-origin-when-cross-origin, origin-when-cross-origin, unsafe-url
+    /// </summary>
+    [RuntimeSetting(Label = "Referrer-Policy", I18n = "admin.modules.system.settings.fields.referrerPolicy")]
+    public string ReferrerPolicy { get; set; } = "strict-origin-when-cross-origin";
 
     /// <summary>
     /// Strict-Transport-Security
     /// </summary>
+    [RuntimeSetting(Label = "Enable HSTS", I18n = "admin.modules.system.settings.fields.hstsEnabled",
+        Type = SettingFieldType.Boolean)]
     public bool HstsEnabled { get; set; } = false;
 
     /// <summary>
     /// HSTS Max-Age (秒）
     /// </summary>
+    [RuntimeSetting(Label = "HSTS Max-Age (seconds)", I18n = "admin.modules.system.settings.fields.hstsMaxAge",
+        Type = SettingFieldType.Int, Min = 0)]
     public int HstsMaxAge { get; set; } = 31536000; // 365 days
 
     /// <summary>
@@ -52,18 +79,7 @@ public class SecurityHeadersOptions
     public bool HstsPreload { get; set; } = false;
 
     /// <summary>
-    /// Referrer-Policy
-    /// no-referrer, no-referrer-when-downgrade, same-origin, strict-origin, strict-origin-when-cross-origin, origin-when-cross-origin, unsafe-url
-    /// </summary>
-    public string ReferrerPolicy { get; set; } = "strict-origin-when-cross-origin";
-
-    /// <summary>
     /// Permissions-Policy
     /// </summary>
     public string? PermissionsPolicy { get; set; }
-
-    /// <summary>
-    /// 是否启用安全头部
-    /// </summary>
-    public bool EnableSecurityHeaders { get; set; } = false;
 }

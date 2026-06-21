@@ -70,6 +70,8 @@ export enum TopEndpointSortBy {
  */
 export interface MenuInfoDto extends OrderedEntity<string> {
   parentId?: string | null;
+  /** Route name this row overrides (e.g. "identity.users"); null = custom node. */
+  menuKey?: string | null;
   name: string;
   displayName: string;
   icon?: string | null;
@@ -111,6 +113,8 @@ export interface MenuMetaDto {
 export interface MenuTreeNode {
   id: string;
   parentId?: string | null;
+  /** Route name this row overrides (e.g. "identity.users"); null = custom node. */
+  menuKey?: string | null;
   name: string;
   icon?: string | null;
   path?: string | null;
@@ -127,6 +131,7 @@ export interface MenuTreeNode {
  */
 export interface CreateMenuDto {
   parentId?: string;
+  menuKey?: string;
   name: string;
   displayName?: string;
   icon?: string;
@@ -149,6 +154,7 @@ export interface CreateMenuDto {
  */
 export interface UpdateMenuDto {
   parentId?: string;
+  menuKey?: string;
   name?: string;
   displayName?: string;
   icon?: string;
@@ -172,6 +178,15 @@ export interface UpdateMenuDto {
 export interface MenuOrderDto {
   id: string;
   sortOrder: number;
+}
+
+/**
+ * Menu seed result (backend MenuSeedResultDto). Seed upserts by menuKey:
+ * inserts missing rows, skips existing ones (protects operator overrides).
+ */
+export interface MenuSeedResultDto {
+  inserted: number;
+  skipped: number;
 }
 
 /**

@@ -35,21 +35,16 @@ public class AspNetCoreModule : TnziFrameworkModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<AspNetCoreOptions>()
-            .Bind(context.Configuration.GetSection("AspNetCore"))
-            .ValidateWith<AspNetCoreOptions, AspNetCoreOptionsValidator>();
+        context.Services.AddTnziOptions<AspNetCoreOptions, AspNetCoreOptionsValidator>(context.Configuration);
 
-        // 注册租户解析器配置选项
-        context.Services.AddOptions<TenantResolverOptions>()
-            .Bind(context.Configuration.GetSection("AspNetCore:TenantResolver"));
+        // 注册租户解析器配置选项（section 路径由 [ConfigSection] 派生）
+        context.Services.AddTnziOptions<TenantResolverOptions>(context.Configuration);
 
-        // 注册异常处理选项（中间件通过 IOptionsMonitor<ExceptionHandlingOptions> 独立注入）
-        context.Services.AddOptions<ExceptionHandlingOptions>()
-            .Bind(context.Configuration.GetSection("AspNetCore:ExceptionHandling"));
+        // 注册异常处理选项（section 路径由 [ConfigSection] 派生；中间件通过 IOptionsMonitor<ExceptionHandlingOptions> 独立注入）
+        context.Services.AddTnziOptions<ExceptionHandlingOptions>(context.Configuration);
 
-        // 注册请求追踪选项（中间件通过 IOptionsMonitor<RequestTrackingOptions> 独立注入）
-        context.Services.AddOptions<RequestTrackingOptions>()
-            .Bind(context.Configuration.GetSection("AspNetCore:RequestTracking"));
+        // 注册请求追踪选项（section 路径由 [ConfigSection] 派生；中间件通过 IOptionsMonitor<RequestTrackingOptions> 独立注入）
+        context.Services.AddTnziOptions<RequestTrackingOptions>(context.Configuration);
 
         return Task.CompletedTask;
     }
@@ -198,9 +193,6 @@ public class AspNetCoreModule : TnziFrameworkModule
 
         // 注册 AjaxOnlyFilter（供 [ServiceFilter(typeof(AjaxOnlyFilter))] 使用）
         context.Services.AddScoped<AjaxOnlyFilter>();
-
-        // 注册配置中心定义提供者
-        context.Services.AddSingleton<ISettingDefinitionProvider, Settings.AspNetCoreSettingDefinitionProvider>();
 
         // 注册请求验证服务（如果启用）
         if (aspNetCoreOptions.RequestValidation?.Enabled == true)

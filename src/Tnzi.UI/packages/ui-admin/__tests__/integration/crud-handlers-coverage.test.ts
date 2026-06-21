@@ -76,7 +76,7 @@ vi.mock('../../src/services/bridges/payment-bridge', () => ({
   createPaymentBridge: () => ({ orders: mkCrud(), refunds: mkCrud(), subscriptions: mkCrud(), invoices: mkCrud() }),
 }))
 vi.mock('../../src/services/bridges/chat-bridge', () => ({
-  createChatBridge: () => ({ sessions: mkCrud(), messages: mkCrud() }),
+  createChatBridge: () => ({ broadcast: vi.fn(async () => 1) }),
 }))
 vi.mock('../../src/services/bridges/notification-bridge', () => ({
   createNotificationBridge: () => ({ messages: mkCrud(), templates: mkCrud(), subscriptions: mkCrud() }),
@@ -101,7 +101,10 @@ vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   }),
 }))
 vi.mock('../../src/services/bridges/storage-bridge', () => ({
-  createStorageBridge: () => ({ records: mkCrud(), chunks: mkCrud(), versions: mkCrud(), files: mkCrud() }),
+  createStorageBridge: () => ({
+    records: mkCrud(), chunks: mkCrud(), versions: mkCrud(), files: mkCrud(),
+    shares: { ...mkCrud(), byFile: vi.fn(async () => []), batchRevoke: vi.fn(async () => 1) },
+  }),
 }))
 vi.mock('../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
@@ -129,8 +132,6 @@ import Quotas from '../../src/pages/ai/quota/Quotas.vue'
 import Orders from '../../src/pages/payment/Orders.vue'
 import Refunds from '../../src/pages/payment/Refunds.vue'
 import PaymentSubscriptions from '../../src/pages/payment/Subscriptions.vue'
-import ChatSessions from '../../src/pages/chat/Sessions.vue'
-import ChatMessages from '../../src/pages/chat/Messages.vue'
 import NotificationTemplates from '../../src/pages/notification/Templates.vue'
 import NotificationMessages from '../../src/pages/notification/Messages.vue'
 import NotificationSubscriptions from '../../src/pages/notification/Subscriptions.vue'
@@ -155,6 +156,7 @@ import Permissions from '../../src/pages/authorization/Permissions.vue'
 import Files from '../../src/pages/storage/Files.vue'
 import Chunks from '../../src/pages/storage/Chunks.vue'
 import Versions from '../../src/pages/storage/Versions.vue'
+import Shares from '../../src/pages/storage/Shares.vue'
 
 const stubs = {
   DataTable: { props: ['data', 'rowKey'], template: '<div class="dt" />' },
@@ -255,7 +257,6 @@ const PAGES: Array<[string, any]> = [
   ['Providers', Providers], ['Quotas', Quotas],
   // Payment / Chat / Notification / Template
   ['Orders', Orders], ['Refunds', Refunds], ['PaymentSubscriptions', PaymentSubscriptions],
-  ['ChatSessions', ChatSessions], ['ChatMessages', ChatMessages],
   ['NotificationTemplates', NotificationTemplates], ['NotificationMessages', NotificationMessages],
   ['NotificationSubscriptions', NotificationSubscriptions],
   ['Layouts', Layouts], ['Templates', Templates],

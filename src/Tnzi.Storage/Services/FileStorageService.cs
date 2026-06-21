@@ -40,15 +40,19 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (fileValidation != null)
             return fileValidation;
 
-        // 计算MD5
-        var md5Hash = await Md5Helper.CalculateAsync(stream);
-        stream.Position = 0;
-
-        // 检查是否已存在相同MD5的文件
-        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream);
-        if (existingResult != null)
+        // 计算 MD5 + 按 MD5 去重（受 EnableMd5Validation 控制；关闭时跳过两者，每次都产生独立记录）
+        string? md5Hash = null;
+        if (Options.EnableMd5Validation)
         {
-            return existingResult;
+            md5Hash = await Md5Helper.CalculateAsync(stream);
+            stream.Position = 0;
+
+            // 检查是否已存在相同MD5的文件
+            var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream);
+            if (existingResult != null)
+            {
+                return existingResult;
+            }
         }
 
         var extension = Path.GetExtension(originalFileName);
@@ -189,8 +193,15 @@ public class FileStorageService : ApplicationService, IFileStorageService
         // 1. 批量删除所有引用记录
         await _referenceRepository.DeleteAsync(r => r.FileId == id);
 
-        // 2. 删除物理文件和数据库记录
-        await DeleteFileAsync(record!);
+        // 2. 删除物理文件，仅当物理删除成功（或文件已不存在）才删数据库记录
+        var dbDeleted = await DeleteFileAsync(record!);
+        if (!dbDeleted)
+        {
+            // 物理删除失败，DB 记录保留（ReferenceCount 已为 0），交后台清理任务重试
+            LogInformation("File reference count zeroed but physical delete failed, deferred to background cleanup: {FileName}", record!.FileName);
+            return Ok("File reference count zeroed; physical file deletion deferred to background cleanup");
+        }
+
         LogInformation("File deleted: {FileName}, OriginalName: {OriginalName}", record!.FileName, record!.OriginalName);
         return Ok("File deleted successfully");
     }
@@ -298,8 +309,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
                 // 引用归零，批量删除引用记录和物理文件
                 await _referenceRepository.DeleteAsync(r => r.FileId == record.Id, cancellationToken);
 
-                await DeleteFileAsync(record);
-                deletedCount++;
+                // 仅当物理删除成功（或文件已不存在）才计为已删除；失败则 DB 记录保留交后台清理
+                if (await DeleteFileAsync(record))
+                {
+                    deletedCount++;
+                }
             }
 
             LogInformation("Batch delete: {Deleted} deleted, {Decremented} reference count decreased", deletedCount, decrementedCount);
@@ -330,12 +344,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (string.IsNullOrEmpty(sourceFile.Path))
             return Fail<FileRecord>("Source file path is empty", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
-        using var sourceStream = await _storage.DownloadAsync(GetSafePath(sourceFile.Path));
-
         var extension = sourceFile.Extension;
         var copyFileName = $"{SequentialGuid.NewGuid()}{extension}";
 
-        var newFilePath = await _storage.UploadAsync(copyFileName, sourceStream, sourceFile.ContentType);
+        // Prefer provider-native server-side copy (S3/R2/Azure) to avoid streaming large files
+        // through the application; fall back to download + upload when unsupported (Local/InMemory).
+        var newFilePath = await _storage.CopyAsync(GetSafePath(sourceFile.Path), copyFileName);
+        if (string.IsNullOrEmpty(newFilePath))
+        {
+            using var sourceStream = await _storage.DownloadAsync(GetSafePath(sourceFile.Path));
+            newFilePath = await _storage.UploadAsync(copyFileName, sourceStream, sourceFile.ContentType);
+        }
 
         string? thumbnailPath = null;
         if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
@@ -468,6 +487,13 @@ public class FileStorageService : ApplicationService, IFileStorageService
             query = query.Where(f => f.Provider != null && f.Provider.ToLower() == provider);
         }
 
+        if (!string.IsNullOrEmpty(request.ContentType))
+        {
+            // Prefix match so "image/" selects all images, "application/pdf" selects PDFs, etc.
+            var contentType = request.ContentType;
+            query = query.Where(f => f.ContentType != null && f.ContentType.StartsWith(contentType));
+        }
+
         if (!string.IsNullOrEmpty(request.OriginalName))
         {
             var keyword = request.OriginalName.ToLower();
@@ -515,17 +541,23 @@ public class FileStorageService : ApplicationService, IFileStorageService
             }
         }
 
+        // Resolve sort direction: SortOrder string ("asc"/"desc") takes precedence over the
+        // legacy bool Descending; when SortOrder is unset, fall back to Descending.
+        var descending = !string.IsNullOrEmpty(request.SortOrder)
+            ? request.SortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase)
+            : request.Descending;
+
         if (!string.IsNullOrEmpty(request.SortBy))
         {
             query = request.SortBy.ToLowerInvariant() switch
             {
-                "creationtime" => request.Descending
+                "creationtime" => descending
                     ? query.OrderByDescending(f => f.CreationTime)
                     : query.OrderBy(f => f.CreationTime),
-                "size" => request.Descending
+                "size" => descending
                     ? query.OrderByDescending(f => f.Size)
                     : query.OrderBy(f => f.Size),
-                "originalname" => request.Descending
+                "originalname" => descending
                     ? query.OrderByDescending(f => f.OriginalName)
                     : query.OrderBy(f => f.OriginalName),
                 _ => query.OrderByDescending(f => f.CreationTime)
@@ -1113,19 +1145,41 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return result;
     }
 
-    private async Task DeleteFileAsync(FileRecord record)
+    /// <summary>
+    /// Physically delete a file (and its thumbnail), then delete the DB record only when the
+    /// primary physical file is confirmed gone. If the physical delete fails while the file still
+    /// exists on storage, the DB record is intentionally KEPT (ReferenceCount is already 0) so the
+    /// background cleanup task (CleanupOrphanFilesAsync) can retry — this avoids leaving an
+    /// orphaned physical file with no DB record. Returns true if the DB record was deleted.
+    /// </summary>
+    private async Task<bool> DeleteFileAsync(FileRecord record)
     {
-        if (!string.IsNullOrEmpty(record.Path))
-        {
-            await _storage.DeleteAsync(record.Path);
-        }
-
+        // Thumbnail is best-effort: failing to delete it must not block the main record cleanup.
         if (!string.IsNullOrEmpty(record.ThumbnailPath))
         {
             await _storage.DeleteAsync(record.ThumbnailPath);
         }
 
+        if (!string.IsNullOrEmpty(record.Path))
+        {
+            var deleted = await _storage.DeleteAsync(record.Path);
+            if (!deleted)
+            {
+                // DeleteAsync returns false both on real failure and when the file is already gone.
+                // Only keep the DB record when the physical file genuinely still exists.
+                var stillExists = await _storage.ExistsAsync(record.Path);
+                if (stillExists)
+                {
+                    LogWarning(
+                        "Physical file deletion failed, keeping DB record for background cleanup retry: {FileName}, Path: {Path}",
+                        record.FileName, record.Path);
+                    return false;
+                }
+            }
+        }
+
         await _repository.DeleteAsync(record);
+        return true;
     }
 
     #endregion

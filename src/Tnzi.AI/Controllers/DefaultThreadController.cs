@@ -12,11 +12,16 @@ public class DefaultThreadController : ApiControllerBase
 {
     protected readonly IAgentThreadService ThreadService;
     protected readonly IMessageFeedbackService FeedbackService;
+    protected readonly ISuggestionService? SuggestionService;
 
-    public DefaultThreadController(IAgentThreadService threadService, IMessageFeedbackService feedbackService)
+    public DefaultThreadController(
+        IAgentThreadService threadService,
+        IMessageFeedbackService feedbackService,
+        ISuggestionService? suggestionService = null)
     {
         ThreadService = Check.NotNull(threadService);
         FeedbackService = Check.NotNull(feedbackService);
+        SuggestionService = suggestionService;
     }
 
     /// <summary>
@@ -100,11 +105,10 @@ public class DefaultThreadController : ApiControllerBase
     {
         await EnsureOwnershipAsync(threadId);
 
-        var suggestionService = HttpContext.RequestServices.GetService<ISuggestionService>();
-        if (suggestionService == null)
+        if (SuggestionService == null)
             return ApiResult<List<string>>.Error("Suggestion service not available.", 503);
 
-        var suggestions = await suggestionService.GenerateAsync(threadId, count, ct);
+        var suggestions = await SuggestionService.GenerateAsync(threadId, count, ct);
         return ApiResult<List<string>>.Ok(suggestions);
     }
 
@@ -133,15 +137,7 @@ public class DefaultThreadController : ApiControllerBase
     /// <summary>
     /// 获取当前用户 ID，未认证时抛出异常
     /// </summary>
-    private Guid GetCurrentUserId()
-    {
-        var userId = GetRequiredCurrentUser().Id;
-        if (!userId.HasValue)
-        {
-            throw new BusinessException("Authentication required", "Unauthorized", 401);
-        }
-        return userId.Value;
-    }
+    private Guid GetCurrentUserId() => AiControllerHelpers.RequireUserId(GetRequiredCurrentUser());
 
     /// <summary>
     /// 验证当前用户是否为线程所有者（单次查询）

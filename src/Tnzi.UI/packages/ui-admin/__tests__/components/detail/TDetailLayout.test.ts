@@ -65,4 +65,16 @@ describe('TDetailLayout', () => {
     expect(w.find('.t-page-header').exists()).toBe(false)
     expect(w.find('.body').exists()).toBe(true)
   })
+
+  it('exposes scrollToSection that activates the target section', async () => {
+    const w = mount(TDetailLayout, {
+      props: { layout: 'side', title: 'X', sections, activeSection: 'basic' },
+      slots: { default: '<div class="body" />' },
+      global: { stubs },
+    })
+    const vm = w.vm as unknown as { scrollToSection?: (k: string) => Promise<void> }
+    expect(typeof vm.scrollToSection).toBe('function')
+    await vm.scrollToSection?.('perms')
+    expect(w.emitted('update:activeSection')?.[0]).toEqual(['perms'])
+  })
 })

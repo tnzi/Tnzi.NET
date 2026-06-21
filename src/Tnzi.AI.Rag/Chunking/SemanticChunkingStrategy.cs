@@ -21,6 +21,7 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
     private readonly ILogger<SemanticChunkingStrategy> _logger;
     private readonly double _similarityThreshold;
     private readonly int _minChunkSize;
+    private readonly EmbeddingOptions? _embeddingOptions;
 
     private static readonly char[] SentenceDelimiters = ['.', '!', '?', '\n'];
 
@@ -31,16 +32,25 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
     /// <param name="logger">日志记录器</param>
     /// <param name="similarityThreshold">相似度阈值，低于此值的位置将作为分块边界（默认 0.5）</param>
     /// <param name="minChunkSize">最小块大小（字符数），小于此值的块将与相邻块合并（默认 100）</param>
+    /// <param name="ragOptions">
+    /// RAG 配置（可选）。提供时句子嵌入按 <see cref="RagEmbeddingOptionsResolver.ResolveDefault"/>
+    /// 对齐 RAG 默认 provider/model——使句子向量与摄取/检索向量空间一致（与
+    /// <see cref="Services.VectorTextSearchService"/> 同范式）；为 null 时回退到 AI 顶层默认 provider。
+    /// </param>
     public SemanticChunkingStrategy(
         IEmbeddingService embeddingService,
         ILogger<SemanticChunkingStrategy> logger,
         double similarityThreshold = 0.5,
-        int minChunkSize = 100)
+        int minChunkSize = 100,
+        IOptions<AIRagOptions>? ragOptions = null)
     {
         _embeddingService = Check.NotNull(embeddingService);
         _logger = Check.NotNull(logger);
         _similarityThreshold = similarityThreshold;
         _minChunkSize = minChunkSize;
+        _embeddingOptions = ragOptions is not null
+            ? RagEmbeddingOptionsResolver.ResolveDefault(ragOptions.Value)
+            : null;
     }
 
     /// <inheritdoc />
@@ -65,8 +75,8 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
 
         _logger.LogDebug("Split text into {SentenceCount} sentences for semantic chunking", sentences.Count);
 
-        // 2. 批量生成嵌入
-        var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(sentences, ct: ct);
+        // 2. 批量生成嵌入（按 RAG 默认嵌入配置对齐 provider/model，与摄取/检索向量空间一致）
+        var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(sentences, _embeddingOptions, ct);
         if (!embeddingResult.Succeeded || embeddingResult.Data == null || embeddingResult.Data.Count != sentences.Count)
         {
             // 嵌入生成失败，回退到固定大小分块

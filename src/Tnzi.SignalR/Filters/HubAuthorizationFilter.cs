@@ -1,4 +1,6 @@
 
+using Tnzi.Security.Claims;
+
 namespace Tnzi.SignalR.Filters;
 
 /// <summary>
@@ -53,7 +55,7 @@ public class HubAuthorizationFilter : IHubFilter
         if (!string.IsNullOrEmpty(hubAuth.Roles))
         {
             var roles = hubAuth.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            var hasRole = roles.Any(r => user.IsInRole(r.Trim()));
+            var hasRole = roles.Any(r => user.IsInRoleIgnoreCase(r.Trim()));
             if (!hasRole)
             {
                 var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.Identity?.Name;

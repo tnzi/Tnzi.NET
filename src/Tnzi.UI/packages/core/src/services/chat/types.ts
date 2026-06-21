@@ -229,3 +229,53 @@ export interface ChatSessionQueryDto extends SortedPagedQueryDto {
   keyword?: string;
   participantId?: string;
 }
+
+// ============================================
+// IM (Instant Messaging) Types
+// ============================================
+
+export enum ConversationType { Direct = 1, Group = 2, System = 3 }
+export enum MemberRole { Owner = 1, Member = 2 }
+export enum MessageContentType { Text = 1, Image = 2, File = 3, System = 4 }
+
+export interface ConversationListItemDto {
+  id: string; type: ConversationType; title: string; avatarFileId?: string | null;
+  lastMessagePreview?: string | null; lastMessageAt?: string | null;
+  unreadCount: number; isMuted: boolean; memberCount: number;
+  peerUserId?: string | null; peerStatus?: UserPresenceStatus | null;
+  isSticky: boolean; remark?: string | null;
+}
+export interface ConversationMemberDto {
+  userId: string; name: string; avatarFileId?: string | null; role: MemberRole;
+  status?: UserPresenceStatus | null; lastSeenAt?: string | null; alias?: string | null;
+}
+export interface ConversationDto {
+  id: string; type: ConversationType; title: string; avatarFileId?: string | null;
+  ownerId?: string | null; memberCount: number; lastMessageAt?: string | null;
+  notice?: string | null; isSticky: boolean; isMuted: boolean;
+  myRemark?: string | null; myAlias?: string | null;
+  members: ConversationMemberDto[];
+}
+export interface ChatMessageDto {
+  id: string; conversationId: string; senderId?: string | null; senderName?: string | null;
+  senderAvatarFileId?: string | null;
+  contentType: MessageContentType; content: string;
+  fileId?: string | null; fileName?: string | null; fileSize?: number | null; sentAt: string;
+}
+export interface MessageThreadDto { messages: ChatMessageDto[]; hasMore: boolean; }
+export interface SendMessageDto { contentType: MessageContentType; content?: string; fileId?: string; fileName?: string; fileSize?: number; }
+export interface StartDirectDto { userId: string; }
+export interface CreateGroupDto { title: string; memberIds: string[]; }
+export interface AddMembersDto { userIds: string[]; }
+export interface MuteRequestDto { muted: boolean; }
+export interface RenameGroupDto { title: string; }
+export interface BroadcastDto { content: string; roleIds?: string[]; userIds?: string[]; all?: boolean; }
+export interface ChatContactDto { userId: string; name: string; avatarFileId?: string | null; }
+
+export enum UserPresenceStatus { Online = 1, Away = 2, Busy = 3, Invisible = 4, Offline = 5 }
+export interface UserPresenceDto { userId: string; status: UserPresenceStatus; lastSeenAt?: string | null }
+export interface SetPresenceDto { status: UserPresenceStatus }
+export interface ChatContactProfileDto { userId: string; name: string; avatarFileId?: string | null; status: UserPresenceStatus; lastSeenAt?: string | null }
+export interface ConversationMemberSettingsDto { isMuted?: boolean; isSticky?: boolean; remark?: string | null; alias?: string | null }
+export interface UpdateNoticeDto { notice?: string | null }
+export interface SearchMessagesParams { keyword: string; before?: string; limit?: number }

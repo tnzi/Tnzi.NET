@@ -170,6 +170,20 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                     if (string.IsNullOrEmpty(chunk.ChunkPath))
                         throw new StorageException($"Chunk {chunk.ChunkIndex} path is empty.", null, ErrorCodes.FILE_OPERATION_ERROR);
 
+                    // 回读分片并校验其完整性（受 EnableMd5Validation 控制）。
+                    // 损坏的分片在合并时会被检测出来，避免静默合出坏文件。
+                    if (_options.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash))
+                    {
+                        using var verifyStream = await _storage.DownloadAsync(chunk.ChunkPath);
+                        var actualChunkMd5 = await Md5Helper.CalculateAsync(verifyStream);
+                        if (!string.Equals(actualChunkMd5, chunk.Md5Hash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            LogWarning("Chunk MD5 mismatch during merge: SessionId={SessionId}, ChunkIndex={ChunkIndex}, Expected={Expected}, Actual={Actual}",
+                                uploadSessionId, chunk.ChunkIndex, chunk.Md5Hash, actualChunkMd5);
+                            return Fail<FileRecord>($"Chunk {chunk.ChunkIndex} integrity check failed (MD5 mismatch)", 400, ErrorCodes.VALIDATION_ERROR);
+                        }
+                    }
+
                     using var chunkStream = await _storage.DownloadAsync(chunk.ChunkPath);
                     await chunkStream.CopyToAsync(mergedStream, cancellationToken);
                 }
@@ -180,12 +194,16 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                 if (mergedSize != session.TotalSize)
                     return Fail<FileRecord>($"File size mismatch. Expected {session.TotalSize}, got {mergedSize}", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
-                // 计算合并后的 MD5
-                mergedStream.Position = 0;
-                var md5Hash = await Md5Helper.CalculateAsync(mergedStream);
+                // 计算合并后的 MD5（受 EnableMd5Validation 控制；关闭时跳过整文件校验）
+                string? md5Hash = null;
+                if (_options.EnableMd5Validation)
+                {
+                    mergedStream.Position = 0;
+                    md5Hash = await Md5Helper.CalculateAsync(mergedStream);
 
-                if (!string.IsNullOrEmpty(session.Md5Hash) && md5Hash != session.Md5Hash)
-                    return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.FILE_OPERATION_ERROR);
+                    if (!string.IsNullOrEmpty(session.Md5Hash) && md5Hash != session.Md5Hash)
+                        return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.FILE_OPERATION_ERROR);
+                }
 
                 // 保存合并后的文件
                 mergedStream.Position = 0;

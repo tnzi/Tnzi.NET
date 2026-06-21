@@ -4,8 +4,7 @@ namespace Tnzi.AI.Infrastructure.Providers;
 /// ChatClient 工厂接口 — 返回 MEAI 抽象类型
 /// </summary>
 /// <remarks>
-/// 接口只暴露 MEAI 抽象方法。需要 OpenAI SDK 类型时，
-/// 使用 <see cref="ChatClientFactoryExtensions"/> 中的扩展方法。
+/// 接口只暴露 MEAI 抽象方法（IChatClient / IEmbeddingGenerator）。
 /// </remarks>
 public interface IChatClientFactory
 {

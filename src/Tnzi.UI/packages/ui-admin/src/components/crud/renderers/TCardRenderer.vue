@@ -144,7 +144,11 @@ function toggle(row: T): void {
   min-height: 0;
   overflow-y: auto;
 }
-.t-card-renderer__grid { display: grid; }
+/* padding-top gives the first row's cards headroom for the card hover
+   `translateY(-1px)` lift. The page-mode renderer is an `overflow-y:auto`
+   scroll container whose padding-box top edge is the clip boundary; without
+   this headroom the top row's cards get their top edge clipped on hover. */
+.t-card-renderer__grid { display: grid; padding-top: 4px; }
 .t-card-renderer__cell { position: relative; }
 .t-card-renderer__cell--selected { outline: 2px solid var(--tnzi-primary, #646cff); outline-offset: 2px; border-radius: var(--tnzi-admin-radius-md, 8px); }
 .t-card-renderer__select {

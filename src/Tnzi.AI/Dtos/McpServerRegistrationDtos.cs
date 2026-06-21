@@ -65,17 +65,17 @@ public class CreateMcpServerRegistrationDto
     /// <summary>Display name</summary>
     [Required]
     [StringLength(100)]
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; set; } = null!;
 
     /// <summary>MCP server endpoint URL</summary>
     [Required]
     [StringLength(500)]
-    public string ServerUrl { get; set; } = string.Empty;
+    public string ServerUrl { get; set; } = null!;
 
     /// <summary>Transport mode — sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
     [Required]
     [StringLength(50)]
-    public string Transport { get; set; } = string.Empty;
+    public string Transport { get; set; } = null!;
 
     /// <summary>Auth token (plaintext) — encrypted at rest</summary>
     public string? AuthToken { get; set; }

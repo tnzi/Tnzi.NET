@@ -292,18 +292,55 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
+    /// 只读下载指定历史版本（不改变当前版本指针）
+    /// </summary>
+    [HttpGet("{id:guid}/versions/{version}/download")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public virtual async Task<IActionResult> DownloadVersion(Guid id, int version)
+    {
+        var recordResult = await FileStorageService.GetRecordAsync(id);
+        if (!recordResult.Succeeded)
+        {
+            return new NotFoundResult();
+        }
+        var record = recordResult.Data!;
+
+        var contentResult = await FileVersionService.GetVersionContentAsync(id, version);
+        if (!contentResult.Succeeded)
+        {
+            return new NotFoundResult();
+        }
+
+        var contentType = record.ContentType ?? "application/octet-stream";
+        var fileName = $"{record.OriginalName ?? record.FileName}.v{version}";
+        return File(contentResult.Data!, contentType, fileName);
+    }
+
+    /// <summary>
+    /// 删除指定历史版本（禁止删除当前版本）
+    /// </summary>
+    [HttpDelete("{id:guid}/versions/{version}")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public virtual async Task<ApiResult> DeleteVersion(Guid id, int version)
+    {
+        var result = await FileVersionService.DeleteVersionAsync(id, version);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 创建分享链接
     /// </summary>
     [HttpPost("{id:guid}/share")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<Tnzi.Storage.Entities.FileShare>> CreateShare(Guid id, [FromBody] CreateShareRequest request)
+    public virtual async Task<ApiResult<FileSharePublicDto>> CreateShare(Guid id, [FromBody] CreateShareRequest request)
     {
         var result = await FileShareService.CreateShareAsync(
             id,
             request.ExpiresAt,
             request.MaxAccessCount,
             request.Password);
-        return result.ToApiResult();
+        // 投影到公开 DTO，绝不向外暴露 PasswordHash
+        return result.Map(MapToPublicDto).ToApiResult();
     }
 
     /// <summary>
@@ -311,10 +348,11 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpGet("share/{token}")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<Tnzi.Storage.Entities.FileShare>> GetShare(string token)
+    public virtual async Task<ApiResult<FileSharePublicDto>> GetShare(string token)
     {
         var result = await FileShareService.GetShareAsync(token);
-        return result.ToApiResult();
+        // 投影到公开 DTO，绝不向外暴露 PasswordHash
+        return result.Map(MapToPublicDto).ToApiResult();
     }
 
     /// <summary>
@@ -335,6 +373,7 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<IActionResult> DownloadByShareToken(string token, [FromQuery] string? password = null)
     {
+        // 1) 校验密码/过期/启用（密码校验仍需在此进行）
         var isValidResult = await FileShareService.ValidateShareAccessAsync(token, password);
         if (!isValidResult.Succeeded || !isValidResult.Data)
         {
@@ -348,7 +387,13 @@ public class DefaultStorageController : ApiControllerBase
         }
         var share = shareResult.Data!;
 
-        await FileShareService.IncrementShareAccessCountAsync(token);
+        // 2) 原子占用一次配额：把"判超限 + 占额"合并为单次原子 DB 操作，消除竞态。
+        //    返回 false 表示已超限/已禁用 → 拒绝下载（410 Gone）。
+        var consumeResult = await FileShareService.IncrementShareAccessCountAsync(token);
+        if (!consumeResult.Succeeded || !consumeResult.Data)
+        {
+            return new StatusCodeResult(StatusCodes.Status410Gone);
+        }
 
         var fileRecordResult = await FileStorageService.GetRecordAsync(share.FileId);
         if (!fileRecordResult.Succeeded)
@@ -507,5 +552,24 @@ public class DefaultStorageController : ApiControllerBase
         }
 
         return (start, end);
+    }
+
+    /// <summary>
+    /// 把 FileShare 实体投影为对外公开 DTO（绝不包含 PasswordHash）
+    /// </summary>
+    private static FileSharePublicDto MapToPublicDto(Tnzi.Storage.Entities.FileShare share)
+    {
+        return new FileSharePublicDto
+        {
+            Id = share.Id,
+            FileId = share.FileId,
+            ShareToken = share.ShareToken,
+            ExpiresAt = share.ExpiresAt,
+            MaxAccessCount = share.MaxAccessCount,
+            AccessCount = share.AccessCount,
+            RequirePassword = share.RequirePassword,
+            IsEnabled = share.IsEnabled,
+            CreationTime = share.CreationTime
+        };
     }
 }

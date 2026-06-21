@@ -114,4 +114,20 @@ public class NullProvider : IPaymentProvider
     {
         return Task.FromResult(Result.Success());
     }
+
+    public bool SupportsOffSessionCharge => true;
+
+    public Task<Result<PaymentProviderChargeResult>> ChargeOffSessionAsync(PaymentProviderChargeDto input)
+    {
+        _logger.LogInformation("Null off-session charge (test mode). TradeNo: {TradeNo}, Amount: {Amount}",
+            input.TradeNo, input.Amount);
+
+        return Task.FromResult(Result.Success(new PaymentProviderChargeResult
+        {
+            TradeNo = input.TradeNo,
+            ExternalTradeNo = $"null_charge_{input.TradeNo}",
+            Status = PaymentStatus.Succeeded,
+            PaidAmount = input.Amount
+        }));
+    }
 }

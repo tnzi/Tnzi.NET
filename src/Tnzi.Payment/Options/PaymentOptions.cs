@@ -4,11 +4,17 @@ namespace Tnzi.Payment.Options;
 /// 支付模块配置选项
 /// 配置路径：Payment
 /// </summary>
+[ConfigSection("Payment")]
+[RuntimeSettingGroup(Key = "payment-general", Module = "Payment", DisplayName = "Payment",
+    I18nKey = "admin.modules.system.settings.groups.paymentGeneral",
+    Icon = "mdi:credit-card-settings-outline", Order = 500)]
 public class PaymentOptions
 {
     /// <summary>
     /// 默认币种
     /// </summary>
+    [RuntimeSetting(Label = "Default Currency", I18n = "admin.modules.system.settings.fields.defaultCurrency",
+        Type = SettingFieldType.String)]
     public string DefaultCurrency { get; set; } = "USD";
 
     /// <summary>
@@ -19,21 +25,29 @@ public class PaymentOptions
     /// <summary>
     /// 默认回调URL
     /// </summary>
+    [RuntimeSetting(Label = "Default Notify URL", I18n = "admin.modules.system.settings.fields.defaultNotifyUrl",
+        Type = SettingFieldType.String)]
     public string? DefaultNotifyUrl { get; set; }
 
     /// <summary>
     /// 每日最大退款金额
     /// </summary>
+    [RuntimeSetting(Label = "Max Refund Amount Per Day", I18n = "admin.modules.system.settings.fields.maxRefundAmountPerDay",
+        Type = SettingFieldType.Decimal, Min = 0)]
     public decimal MaxRefundAmountPerDay { get; set; } = 10000m;
 
     /// <summary>
     /// 退款审批阈值
     /// </summary>
+    [RuntimeSetting(Label = "Refund Approval Threshold", I18n = "admin.modules.system.settings.fields.refundApprovalThreshold",
+        Type = SettingFieldType.Decimal, Min = 0)]
     public decimal RefundApprovalThreshold { get; set; } = 1000m;
 
     /// <summary>
     /// 是否启用退款审批
     /// </summary>
+    [RuntimeSetting(Label = "Enable Refund Approval", I18n = "admin.modules.system.settings.fields.enableRefundApproval",
+        Type = SettingFieldType.Boolean)]
     public bool EnableRefundApproval { get; set; } = true;
 
     /// <summary>
@@ -65,6 +79,17 @@ public class PaymentOptions
     /// 后台任务执行间隔（分钟），默认 5 分钟
     /// </summary>
     public int BackgroundTaskIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// 是否允许使用测试渠道（NullProvider）。默认 false，生产环境务必保持关闭，
+    /// 否则调用方可选 "Null" 渠道在不实际收款的情况下让支付/退款"成功"。
+    /// </summary>
+    public bool AllowTestProvider { get; set; }
+
+    /// <summary>
+    /// 后台计费抢占锁时长（分钟），多实例下避免重复扣款，默认 10 分钟
+    /// </summary>
+    public int BillingLockMinutes { get; set; } = 10;
 }
 
 /// <summary>

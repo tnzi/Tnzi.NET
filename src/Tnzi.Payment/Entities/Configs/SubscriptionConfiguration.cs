@@ -10,6 +10,9 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         builder.Property(s => s.CancelReason).HasMaxLength(500);
         builder.Property(s => s.ChannelCode).HasMaxLength(32).IsRequired();
         builder.Property(s => s.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
+        builder.Property(s => s.ProviderCustomerId).HasMaxLength(128);
+        builder.Property(s => s.PaymentMethodToken).HasMaxLength(128);
+        builder.Property(s => s.LastBillingTradeNo).HasMaxLength(64);
 
         if (multiTenancyEnabled)
         {
@@ -27,5 +30,9 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         builder.HasIndex(s => s.PlanId);
         builder.HasIndex(s => s.Status);
         builder.HasIndex(s => s.EndTime);
+        // 后台续费/过期扫描：按状态 + 下次计费时间过滤
+        builder.HasIndex(s => new { s.Status, s.NextBillingTime });
+        // 后台试用转正扫描：按状态 + 试用结束时间过滤
+        builder.HasIndex(s => new { s.Status, s.TrialEndTime });
     }
 }

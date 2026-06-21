@@ -64,6 +64,13 @@ export interface AdminThemeSnapshotV1 {
     /** Theme Drawer additions — radius slider + footer height knob. */
     themeRadius?: number
     footerHeight?: number
+    /** Background color overrides — `null` clears the override (falls back
+        to the default token). `undefined` means the field was missing from
+        an older snapshot and should be skipped (leave current value). */
+    siderBg?: string | null
+    headerBg?: string | null
+    contentBg?: string | null
+    containerBg?: string | null
   }
   ui: {
     mode: 'light' | 'dark' | 'auto'

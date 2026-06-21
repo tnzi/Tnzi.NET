@@ -11,6 +11,7 @@
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
   </ItemGroup>
 
   <ItemGroup>

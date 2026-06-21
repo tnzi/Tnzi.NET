@@ -37,9 +37,6 @@ public class SlackAdapterOptions
     /// <summary>Retry attempts.</summary>
     public int MaxRetries { get; set; } = 3;
 
-    /// <summary>Maximum file upload size in bytes.</summary>
-    public long MaxFileSize { get; set; } = 50 * 1024 * 1024;
-
     public override string ToString() =>
         $"SlackAdapterOptions {{ Enabled = {Enabled}, " +
         $"BotToken = {SecretMask.Mask(BotToken)}, " +
@@ -48,5 +45,5 @@ public class SlackAdapterOptions
         $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedChannels.Count = {AllowedChannels.Count}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +
-        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries}, MaxFileSize = {MaxFileSize} }}";
+        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries} }}";
 }

@@ -3,11 +3,15 @@ namespace Tnzi.AI.Options;
 /// <summary>
 /// AI 模块配置选项
 /// </summary>
+[ConfigSection("AI")]
+[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "AI General",
+    I18nKey = "admin.modules.system.settings.groups.aiGeneral", Icon = "mdi:robot-outline", Order = 100)]
 public class AIOptions
 {
     /// <summary>
     /// 默认提供商名称
     /// </summary>
+    [RuntimeSetting(Label = "Default Provider", I18n = "admin.modules.system.settings.fields.defaultProvider")]
     public string DefaultProvider { get; set; } = "OpenAI";
 
     /// <summary>

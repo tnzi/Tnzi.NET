@@ -32,7 +32,6 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public string Name => "feishu";
     public bool SupportsStreaming => true;
-    public bool SupportsFileAttachment => false;
 
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
@@ -281,7 +280,7 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     public async Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {
         var token = await _tokenRefresher.GetTokenAsync(ct);
-        var client = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
+        var client = _httpClientFactory.CreateClient(ResilientHttpClientNames.Fallback);
 
         var payload = JsonSerializer.Serialize(new
         {
@@ -303,14 +302,6 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         }
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// Feishu file sending is not yet implemented. Check <see cref="SupportsFileAttachment"/>
-    /// before calling this method; it will always return false for this adapter.
-    /// </remarks>
-    public Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-        => Task.FromResult(false);
-
     public ValueTask DisposeAsync()
         => _tokenRefresher.DisposeAsync();
 
@@ -319,7 +310,7 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     /// </summary>
     private async Task<(string Token, int ExpiresInSeconds)> RefreshTenantAccessTokenAsync(CancellationToken ct)
     {
-        var client = _httpClientFactory.CreateClient("Tnzi.AI.Resilient");
+        var client = _httpClientFactory.CreateClient(ResilientHttpClientNames.Fallback);
         var response = await client.PostAsJsonAsync(
             $"{BaseUrl}/auth/v3/tenant_access_token/internal",
             new { app_id = _options.AppId, app_secret = _options.AppSecret }, ct);

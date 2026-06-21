@@ -22,21 +22,32 @@ namespace Tnzi.AI.Sandbox.Quota;
 public interface IThreadResourceQuota
 {
     /// <summary>
-    /// Reads the current accumulated usage and reports whether the next
-    /// command would be admitted.
+    /// Admission decision for the next sandbox command.
     /// </summary>
+    /// <remarks>
+    /// The command-count dimension is a <b>hard cap</b>: this method atomically
+    /// reserves one command slot (single increment) and uses the post-increment
+    /// value as the decision point, rolling the reservation back on denial. This
+    /// makes the count cap race-free even when two commands probe concurrently.
+    /// The duration and output-byte dimensions are <b>soft (approximate) caps</b>
+    /// evaluated against previously-recorded usage, which may briefly lag an
+    /// in-flight command — they are charged after the fact via
+    /// <see cref="RecordExecutionAsync"/>.
+    /// </remarks>
     /// <param name="threadId">Thread the next sandbox command will run under.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<ThreadQuotaCheckResult> CheckAsync(Guid threadId, CancellationToken ct = default);
 
     /// <summary>
-    /// Records the cost of a completed sandbox command. The window TTL is
-    /// extended on every record call so an active thread keeps its counters
-    /// alive while consuming.
+    /// Records the soft-cap cost (duration + output bytes) of a completed sandbox
+    /// command. The window TTL is extended so an active thread keeps its counters
+    /// alive while consuming. Note: the command-count counter is reserved in
+    /// <see cref="CheckAsync"/> and is intentionally <b>not</b> touched here to
+    /// avoid double-counting.
     /// </summary>
     /// <param name="threadId">Thread the command ran under.</param>
-    /// <param name="durationMs">Wall-clock duration of the command.</param>
-    /// <param name="outputBytes">Combined stdout + stderr byte count.</param>
+    /// <param name="durationMs">Wall-clock duration of the command (soft cap).</param>
+    /// <param name="outputBytes">Combined stdout + stderr byte count (soft cap).</param>
     /// <param name="ct">Cancellation token.</param>
     Task RecordExecutionAsync(Guid threadId, long durationMs, long outputBytes, CancellationToken ct = default);
 

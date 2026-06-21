@@ -30,13 +30,9 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
         if (!quota.Enabled)
             return ThreadQuotaCheckResult.Allow(long.MaxValue, long.MaxValue, long.MaxValue);
 
+        // Duration / output are soft (approximate) caps — enforced from the
+        // previously-recorded usage, which can momentarily lag a parallel command.
         var usage = await GetUsageAsync(threadId, ct);
-
-        if (quota.MaxCommandCount > 0 && usage.CommandCount >= quota.MaxCommandCount)
-        {
-            return ThreadQuotaCheckResult.Deny(
-                $"Thread command count limit reached ({usage.CommandCount}/{quota.MaxCommandCount})");
-        }
 
         if (quota.MaxTotalDurationMs > 0 && usage.TotalDurationMs >= quota.MaxTotalDurationMs)
         {
@@ -50,8 +46,46 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
                 $"Thread cumulative output limit reached ({usage.TotalOutputBytes}/{quota.MaxTotalOutputBytes} bytes)");
         }
 
+        // Command count is a HARD cap: reserve a slot with a single atomic
+        // increment so two parallel CheckAsync calls cannot both pass at the
+        // boundary (closes the previous Check→Record TOCTOU window). The
+        // post-increment value IS the decision point; if it exceeds the cap we
+        // roll the reservation back and deny.
+        if (quota.MaxCommandCount > 0)
+        {
+            long reserved;
+            try
+            {
+                reserved = await _cache.IncrementAsync(KeyCommandCount(threadId), 1, quota.WindowDuration, ct);
+            }
+            catch (Exception ex)
+            {
+                // Cache failure must never block the agent — fall through to allow.
+                _logger.LogWarning(ex, "Failed to reserve thread command quota for thread {ThreadId}", threadId);
+                return ThreadQuotaCheckResult.Allow(long.MaxValue,
+                    remainingDurationMs: quota.MaxTotalDurationMs > 0 ? quota.MaxTotalDurationMs - usage.TotalDurationMs : long.MaxValue,
+                    remainingOutputBytes: quota.MaxTotalOutputBytes > 0 ? quota.MaxTotalOutputBytes - usage.TotalOutputBytes : long.MaxValue);
+            }
+
+            if (reserved > quota.MaxCommandCount)
+            {
+                // Over the cap — give the reserved slot back so a later window
+                // reset / different thread is not penalised, then deny.
+                try { await _cache.IncrementAsync(KeyCommandCount(threadId), -1, quota.WindowDuration, ct); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to roll back thread command quota for thread {ThreadId}", threadId); }
+
+                return ThreadQuotaCheckResult.Deny(
+                    $"Thread command count limit reached ({quota.MaxCommandCount}/{quota.MaxCommandCount})");
+            }
+
+            return ThreadQuotaCheckResult.Allow(
+                remainingCommands: quota.MaxCommandCount - reserved,
+                remainingDurationMs: quota.MaxTotalDurationMs > 0 ? quota.MaxTotalDurationMs - usage.TotalDurationMs : long.MaxValue,
+                remainingOutputBytes: quota.MaxTotalOutputBytes > 0 ? quota.MaxTotalOutputBytes - usage.TotalOutputBytes : long.MaxValue);
+        }
+
         return ThreadQuotaCheckResult.Allow(
-            remainingCommands: quota.MaxCommandCount > 0 ? quota.MaxCommandCount - usage.CommandCount : long.MaxValue,
+            remainingCommands: long.MaxValue,
             remainingDurationMs: quota.MaxTotalDurationMs > 0 ? quota.MaxTotalDurationMs - usage.TotalDurationMs : long.MaxValue,
             remainingOutputBytes: quota.MaxTotalOutputBytes > 0 ? quota.MaxTotalOutputBytes - usage.TotalOutputBytes : long.MaxValue);
     }
@@ -65,10 +99,10 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
 
         try
         {
-            // Three independent atomic counters; TTL is refreshed on every increment so
-            // an actively-used thread keeps its counters alive through the window.
-            await _cache.IncrementAsync(KeyCommandCount(threadId), 1, ttl, ct);
-
+            // Command count is already reserved up-front in CheckAsync (hard cap),
+            // so it is intentionally NOT incremented here — doing so would
+            // double-count. Duration and output bytes are soft caps recorded
+            // after the fact.
             if (durationMs > 0)
                 await _cache.IncrementAsync(KeyDurationMs(threadId), durationMs, ttl, ct);
 

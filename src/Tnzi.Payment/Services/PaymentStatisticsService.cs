@@ -187,13 +187,15 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             ? Math.Round((decimal)cancelledThisMonth / lastMonthActive * 100, 2)
             : 0;
 
-        // MRR：活跃订阅的计划价格折算为月度等值金额
-        var mrrData = await _subscriptionRepository.AsNoTracking()
+        // MRR：活跃订阅的计划价格折算为月度等值金额。
+        // 数据库级 GroupBy 按 (价格,周期类型,周期值) 归并，避免把每条活跃订阅都加载到内存（行数收敛到不同计划配置数）
+        var mrrGroups = await _subscriptionRepository.AsNoTracking()
             .Where(s => s.Status == SubscriptionStatus.Active && s.Plan != null)
-            .Select(s => new { s.Plan!.Price, s.Plan.CycleType, s.Plan.CycleValue })
+            .GroupBy(s => new { s.Plan!.Price, s.Plan.CycleType, s.Plan.CycleValue })
+            .Select(g => new { g.Key.Price, g.Key.CycleType, g.Key.CycleValue, Count = g.Count() })
             .ToListAsync(cancellationToken);
 
-        var mrr = mrrData.Sum(s => CalculateMonthlyEquivalent(s.Price, s.CycleType, s.CycleValue));
+        var mrr = mrrGroups.Sum(g => CalculateMonthlyEquivalent(g.Price, g.CycleType, g.CycleValue) * g.Count);
 
         // ARPU
         var arpu = activeCount > 0 ? Math.Round(mrr / activeCount, 2) : 0;

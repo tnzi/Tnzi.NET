@@ -40,7 +40,17 @@ public enum PaymentStatus
     /// <summary>
     /// 已过期
     /// </summary>
-    Expired = 6
+    Expired = 6,
+
+    /// <summary>
+    /// 已全额退款
+    /// </summary>
+    Refunded = 7,
+
+    /// <summary>
+    /// 已部分退款
+    /// </summary>
+    PartialRefunded = 8
 }
 
 /// <summary>
@@ -152,7 +162,38 @@ public enum SubscriptionStatus
     /// <summary>
     /// 已过期
     /// </summary>
-    Expired = 6
+    Expired = 6,
+
+    /// <summary>
+    /// 逾期欠费（续费/试用转正扣款失败，宽限期内等待重试，超期则过期）
+    /// </summary>
+    PastDue = 7
+}
+
+/// <summary>
+/// 订阅计费支付用途（用于将支付完成事件路由回订阅状态机）
+/// </summary>
+public enum SubscriptionBillingPurpose
+{
+    /// <summary>
+    /// 首次开通付款
+    /// </summary>
+    Initial = 0,
+
+    /// <summary>
+    /// 周期续费
+    /// </summary>
+    Renewal = 1,
+
+    /// <summary>
+    /// 试用转正付款
+    /// </summary>
+    TrialConversion = 2,
+
+    /// <summary>
+    /// 升级补差价
+    /// </summary>
+    Proration = 3
 }
 
 /// <summary>

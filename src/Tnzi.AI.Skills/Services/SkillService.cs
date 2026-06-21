@@ -33,6 +33,31 @@ public partial class SkillService : ApplicationService, ISkillService
         _currentTenant = currentTenant;
     }
 
+    /// <summary>
+    /// Applies tenant visibility filtering to a SkillEntity query.
+    /// <para>
+    /// SkillEntity is an <see cref="IScopedResource"/> with no global multi-tenant
+    /// query filter (so System rows stay visible to every tenant), so service-layer
+    /// admin paths MUST enforce visibility explicitly. Mirrors
+    /// <c>AgentPersonaService.ApplyVisibility</c>:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>Single-tenant mode (<c>_currentTenant?.Id == null</c>): no filter — all rows visible.</item>
+    ///   <item>Multi-tenant mode: keep System rows + Tenant/User rows owned by the current tenant.</item>
+    /// </list>
+    /// </summary>
+    private IQueryable<SkillEntity> ApplyTenantVisibility(IQueryable<SkillEntity> query)
+    {
+        var tenantId = _currentTenant?.Id;
+        if (tenantId == null)
+            return query; // single-tenant: no additional filter
+
+        return query.Where(e =>
+            e.Scope == SkillScope.System ||
+            (e.Scope == SkillScope.Tenant && e.TenantId == tenantId) ||
+            (e.Scope == SkillScope.User && e.TenantId == tenantId));
+    }
+
     public async Task<Result<List<SkillSummaryDto>>> GetAvailableAsync()
     {
         var skills = await _registry.GetAvailableSkillsAsync();
@@ -86,7 +111,9 @@ public partial class SkillService : ApplicationService, ISkillService
             return Fail<SkillActivationResult>($"Skill activation failed: {errorMsg}", 400, ErrorCodes.SkillActivationFailed);
         }
 
-        var warnings = new List<string>(renderResult.Errors);
+        // Success path: renderResult.Errors is always empty here (the !Success branch
+        // returned above), so start warnings empty rather than copying an empty list.
+        var warnings = new List<string>();
         if (renderResult.UnusedParameters.Count > 0)
             warnings.Add($"Unused parameters: {string.Join(", ", renderResult.UnusedParameters)}");
 
@@ -140,8 +167,11 @@ public partial class SkillService : ApplicationService, ISkillService
             ownerUserId = userId.Value;
         }
 
-        // Resolve TenantId: tenant-scoped skills store the current tenant; others stay null
-        Guid? tenantId = input.Scope == SkillScope.Tenant ? _currentTenant?.Id : null;
+        // Resolve TenantId: Tenant- AND User-scoped skills both record the current
+        // tenant so admin visibility filtering can isolate User rows per tenant.
+        // System skills stay tenant-agnostic (null). User-scope ownership is still
+        // pinned by OwnerUserId; TenantId adds the tenant dimension for isolation.
+        Guid? tenantId = input.Scope == SkillScope.System ? null : _currentTenant?.Id;
 
         // Check for duplicate slug in same scope/tenant/user
         var duplicate = await _repository.AnyAsync(e =>
@@ -170,6 +200,7 @@ public partial class SkillService : ApplicationService, ISkillService
             Priority = input.Priority,
             Version = input.Version,
             Author = input.Author,
+            CategoryId = input.CategoryId,
             Enabled = input.Enabled
         };
 
@@ -187,6 +218,19 @@ public partial class SkillService : ApplicationService, ISkillService
         var entity = await _repository.GetAsync(id);
         if (entity == null)
             return Fail<SkillDetailDto>("Skill not found.", 404, ErrorCodes.SkillNotFound);
+
+        var tenantId = _currentTenant?.Id;
+
+        // Tenant isolation: a tenant user must never see/modify another tenant's rows.
+        // System rows are administrator-managed and off-limits to tenant users.
+        if (tenantId != null)
+        {
+            if (entity.Scope == SkillScope.System)
+                return Fail<SkillDetailDto>("Access denied: system skills are managed by administrators.", 403, ErrorCodes.SkillUnauthorized);
+            // Tenant/User rows owned by a different tenant are invisible to this tenant → 404
+            if (entity.TenantId != tenantId)
+                return Fail<SkillDetailDto>("Skill not found.", 404, ErrorCodes.SkillNotFound);
+        }
 
         // Ownership check for user-scoped skills
         if (entity.Scope == SkillScope.User)
@@ -209,6 +253,7 @@ public partial class SkillService : ApplicationService, ISkillService
         if (input.Priority.HasValue) entity.Priority = input.Priority.Value;
         if (input.Version != null) entity.Version = input.Version;
         if (input.Author != null) entity.Author = input.Author;
+        if (input.CategoryId.HasValue) entity.CategoryId = input.CategoryId.Value;
         if (input.Enabled.HasValue) entity.Enabled = input.Enabled.Value;
 
         await _repository.UpdateAsync(entity);
@@ -223,6 +268,17 @@ public partial class SkillService : ApplicationService, ISkillService
         var entity = await _repository.GetAsync(id);
         if (entity == null)
             return Fail("Skill not found.", 404, ErrorCodes.SkillNotFound);
+
+        var tenantId = _currentTenant?.Id;
+
+        // Tenant isolation: same guards as UpdateAsync.
+        if (tenantId != null)
+        {
+            if (entity.Scope == SkillScope.System)
+                return Fail("Access denied: system skills are managed by administrators.", 403, ErrorCodes.SkillUnauthorized);
+            if (entity.TenantId != tenantId)
+                return Fail("Skill not found.", 404, ErrorCodes.SkillNotFound);
+        }
 
         // Ownership check for user-scoped skills
         if (entity.Scope == SkillScope.User)
@@ -243,8 +299,11 @@ public partial class SkillService : ApplicationService, ISkillService
     {
         Check.NotNullOrEmpty(ids);
 
-        var deleted = await _repository
-            .Where(e => ids.Contains(e.Id))
+        // Tenant isolation: ApplyTenantVisibility ensures a tenant user can only
+        // delete rows it is allowed to see (System rows are excluded by the filter
+        // in multi-tenant mode → never deletable here; admin-only via single-tenant host).
+        var deleted = await ApplyTenantVisibility(_repository.AsQueryable())
+            .Where(e => ids.Contains(e.Id) && e.Scope != SkillScope.System)
             .ExecuteDeleteAsync();
 
         if (deleted > 0)
@@ -257,8 +316,10 @@ public partial class SkillService : ApplicationService, ISkillService
     {
         Check.NotNullOrEmpty(ids);
 
-        var updated = await _repository
-            .Where(e => ids.Contains(e.Id))
+        // Tenant isolation: only the current tenant's visible rows may be toggled
+        // (System rows excluded so tenant users cannot enable/disable shared skills).
+        var updated = await ApplyTenantVisibility(_repository.AsQueryable())
+            .Where(e => ids.Contains(e.Id) && e.Scope != SkillScope.System)
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.Enabled, enabled));
 
         if (updated > 0)
@@ -272,13 +333,16 @@ public partial class SkillService : ApplicationService, ISkillService
         Check.NotNull(query);
 
         // ── DB branch ─────────────────────────────────────────────────────
-        var queryable = _repository.AsQueryable()
+        // Tenant isolation: enforce visibility before any caller-supplied filter
+        // so a tenant admin can never page over another tenant's rows.
+        var queryable = ApplyTenantVisibility(_repository.AsQueryable())
             .WhereIf(e => e.Name.ToLower().Contains(query.Keyword!.ToLower())
                 || (e.Description != null && e.Description.ToLower().Contains(query.Keyword!.ToLower()))
                 || e.Slug.ToLower().Contains(query.Keyword!.ToLower()),
                 !string.IsNullOrWhiteSpace(query.Keyword))
             .WhereIf(e => e.Scope == query.Scope!.Value, query.Scope.HasValue)
-            .WhereIf(e => e.Enabled == query.Enabled!.Value, query.Enabled.HasValue);
+            .WhereIf(e => e.Enabled == query.Enabled!.Value, query.Enabled.HasValue)
+            .WhereIf(e => e.CategoryId == query.CategoryId!.Value, query.CategoryId.HasValue);
 
         // Tag filter (JSON contains)
         if (!string.IsNullOrWhiteSpace(query.Tag))
@@ -320,6 +384,7 @@ public partial class SkillService : ApplicationService, ISkillService
                     Enabled = e.Enabled,
                     Source = SkillSource.Database,
                     IsReadOnly = false,
+                    CategoryId = e.CategoryId,
                     CreationTime = e.CreationTime,
                     LastModificationTime = e.LastModificationTime
                 })
@@ -338,7 +403,7 @@ public partial class SkillService : ApplicationService, ISkillService
         // no Guid id). To keep the DTO contract `Id: Guid`, we look up the
         // DB row by slug when available and use its Id; otherwise we deterministically
         // derive an empty Guid so the front-end can fall back to Slug-keyed rendering.
-        var dbIdBySlug = await _repository.AsQueryable()
+        var dbIdBySlug = await ApplyTenantVisibility(_repository.AsQueryable())
             .Select(e => new { e.Id, e.Slug })
             .ToListAsync();
         var dbIdMap = dbIdBySlug
@@ -408,8 +473,9 @@ public partial class SkillService : ApplicationService, ISkillService
         var allSkills = await _registry.GetAvailableSkillsAsync();
 
         // TotalActivations keeps its DB semantics: activation tracking
-        // (ActivationCount) only exists on AI_Skill rows.
-        var totalActivations = await _repository.AsQueryable()
+        // (ActivationCount) only exists on AI_Skill rows. Tenant-scoped so the
+        // sum never leaks another tenant's usage.
+        var totalActivations = await ApplyTenantVisibility(_repository.AsQueryable())
             .SumAsync(e => (long?)e.ActivationCount) ?? 0L;
 
         var stats = new SkillUsageStatsDto
@@ -427,7 +493,7 @@ public partial class SkillService : ApplicationService, ISkillService
 
     public async Task<Result<List<PopularSkillDto>>> GetPopularSkillsAsync(int topN = 10)
     {
-        var popular = await _repository.AsQueryable()
+        var popular = await ApplyTenantVisibility(_repository.AsQueryable())
             .Where(e => e.ActivationCount > 0)
             .OrderByDescending(e => e.ActivationCount)
             .Take(topN)
@@ -447,7 +513,7 @@ public partial class SkillService : ApplicationService, ISkillService
 
     public async Task<Result<List<SkillExportDto>>> ExportSkillsAsync(SkillScope? scope = null)
     {
-        var entities = await _repository.AsQueryable()
+        var entities = await ApplyTenantVisibility(_repository.AsQueryable())
             .WhereIf(e => e.Scope == scope!.Value, scope.HasValue)
             .OrderBy(e => e.Slug)
             .ToListAsync();
@@ -484,8 +550,9 @@ public partial class SkillService : ApplicationService, ISkillService
         var toInsert = new List<SkillEntity>();
         var toUpdate = new List<SkillEntity>();
 
-        // Resolve TenantId for the import batch (same rule as CreateAsync)
-        Guid? importTenantId = targetScope == SkillScope.Tenant ? _currentTenant?.Id : null;
+        // Resolve TenantId for the import batch (same rule as CreateAsync):
+        // Tenant- and User-scoped rows both record the current tenant; System stays null.
+        Guid? importTenantId = targetScope == SkillScope.System ? null : _currentTenant?.Id;
 
         // Pre-load existing slugs in target scope+tenant for conflict detection
         var existingSlugs = await _repository.AsQueryable()

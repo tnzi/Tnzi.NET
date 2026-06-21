@@ -91,6 +91,36 @@ internal static class WorkflowNodeHelper
     }
 
     /// <summary>
+    /// 按步骤的 <see cref="WorkflowStepDto.DependsOn"/> 从工作流状态收集输入文本：
+    /// 无依赖返回初始输入；单依赖返回该依赖输出（缺失时回退初始输入）；
+    /// 多依赖以 <c>[depId]</c> 分段拼接（跳过空输出，全空时回退初始输入）。
+    /// <para>
+    /// 引擎层（node input summary）与 AgentNode 共用此唯一实现，避免三处重复。
+    /// </para>
+    /// </summary>
+    internal static string BuildStepInput(WorkflowStepDto step, WorkflowState state)
+    {
+        if (step.DependsOn == null || step.DependsOn.Count == 0)
+            return state.InitialInput;
+
+        if (step.DependsOn.Count == 1)
+            return state.GetOutput(step.DependsOn[0])?.Text ?? state.InitialInput;
+
+        var sb = new StringBuilder();
+        foreach (var depId in step.DependsOn)
+        {
+            var output = state.GetOutput(depId);
+            if (output == null || string.IsNullOrWhiteSpace(output.Text)) continue;
+
+            if (sb.Length > 0) sb.AppendLine();
+            sb.AppendLine($"[{depId}]");
+            sb.AppendLine(output.Text);
+        }
+
+        return sb.Length > 0 ? sb.ToString().TrimEnd() : state.InitialInput;
+    }
+
+    /// <summary>
     /// 收集所有上游输出 — 无依赖返回初始输入，有依赖时始终以 [depId] 分段拼接（不做单依赖短路）
     /// </summary>
     internal static string CollectAllUpstreamOutputs(WorkflowNodeContext context)

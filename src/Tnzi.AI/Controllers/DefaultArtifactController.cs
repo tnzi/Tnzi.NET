@@ -59,13 +59,7 @@ public class DefaultArtifactController : ApiControllerBase
     /// <summary>
     /// 获取当前用户 ID，未认证时抛出异常
     /// </summary>
-    private Guid GetCurrentUserId()
-    {
-        var userId = GetRequiredCurrentUser().Id;
-        if (!userId.HasValue)
-            throw new BusinessException("Authentication required", Tnzi.Exceptions.ErrorCodes.UNAUTHORIZED, 401);
-        return userId.Value;
-    }
+    private Guid GetCurrentUserId() => AiControllerHelpers.RequireUserId(GetRequiredCurrentUser());
 
     /// <summary>
     /// 验证当前用户是否为线程所有者，不是则抛出 404（不暴露存在性）

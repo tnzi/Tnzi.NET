@@ -150,8 +150,20 @@ public class WorkflowNodeExecutor
                     stepId, attempt + 1, maxAttempts);
             }
 
+            // 每次 attempt 失败写一条轻量 Trace（含 attempt 序号），让重试中间态可观测，
+            // 而不是被吞进 LogWarning。最终全部耗尽后另写 NodeError（见下方）。
+            var willRetry = attempt < maxAttempts - 1;
+            await RecordTraceAsync(run, stepId, AgentTraceEventTypes.NodeRetryRequested, new
+            {
+                nodeType = node.NodeType,
+                attempt = attempt + 1,
+                maxAttempts,
+                willRetry,
+                error = lastException?.Message
+            }, sw.ElapsedMilliseconds, cancellationToken);
+
             // 指数退避重试
-            if (attempt < maxAttempts - 1)
+            if (willRetry)
             {
                 var delay = step.RetryDelaySeconds * Math.Pow(2, Math.Min(attempt, 20));
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(delay, 300)), cancellationToken);

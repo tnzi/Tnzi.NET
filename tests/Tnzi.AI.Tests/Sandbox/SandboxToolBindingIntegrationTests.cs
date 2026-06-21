@@ -224,7 +224,7 @@ file sealed class RecordingSandbox : ISandbox
         return Task.FromResult(new CommandResult(0, "sandbox-exec-ok", string.Empty));
     }
 
-    public Task<string> ReadFileAsync(string path, CancellationToken ct = default)
+    public Task<string> ReadFileAsync(string path, int? offset = null, int? limit = null, CancellationToken ct = default)
         => Task.FromResult(string.Empty);
 
     public Task WriteFileAsync(string path, string content, bool append = false, CancellationToken ct = default)

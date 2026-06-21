@@ -237,7 +237,7 @@ const tableColumns: ColumnDef[] = [
     width: 180,
     render: (row) => {
       const r = row as unknown as PromotionDto
-      return h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px font-600' }, r.promotionCode)
+      return h('code', { class: 'tnzi-mono text-12px font-600' }, r.promotionCode)
     },
   },
   {

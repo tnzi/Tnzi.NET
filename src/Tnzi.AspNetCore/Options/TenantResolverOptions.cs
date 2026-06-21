@@ -19,6 +19,7 @@ public enum TenantResolutionSource
 /// 租户解析中间件配置选项
 /// 配置路径：AspNetCore:TenantResolver
 /// </summary>
+[ConfigSection("AspNetCore:TenantResolver")]
 public class TenantResolverOptions
 {
     /// <summary>

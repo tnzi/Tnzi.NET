@@ -20,6 +20,9 @@ public class LlmJudgeOptions
     /// <summary>输出评估系统提示词</summary>
     public string? OutputJudgePrompt { get; set; }
 
+    /// <summary>工具调用评估系统提示词（工具级 IGuardrailProvider 评估时使用）</summary>
+    public string? ToolJudgePrompt { get; set; }
+
     /// <summary>超时秒数</summary>
     public int TimeoutSeconds { get; set; } = 30;
 }

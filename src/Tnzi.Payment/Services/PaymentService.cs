@@ -201,79 +201,123 @@ public class PaymentService : ApplicationService, IPaymentService
         if (payment == null)
             return Fail(ErrorCodes.PaymentNotFound, 404);
 
-        // 幂等性：已完成的支付不再处理
-        if (payment.Status == PaymentStatus.Succeeded || payment.Status == PaymentStatus.Failed)
+        // 幂等性 + 防回退：任何终态支付都不再被回调改写
+        if (IsTerminalStatus(payment.Status))
             return Ok();
 
-        // 事务保护：状态更新原子操作，防止并发回调重复处理
-        await ExecuteInUnitOfWorkAsync(async ct =>
-        {
-            if (result.Data?.Status == PaymentStatus.Succeeded)
-            {
-                payment.Status = PaymentStatus.Succeeded;
-                payment.PaidTime = DateTime.UtcNow;
-                payment.PaidAmount = result.Data.PaidAmount;
-                payment.ExternalTradeNo = result.Data.ExternalTradeNo;
-                payment.ChannelResponse = JsonSerializer.Serialize(result.Data);
+        var newStatus = result.Data?.Status;
 
-                await _paymentRepository.UpdateAsync(payment, ct);
-            }
-            else if (result.Data?.Status == PaymentStatus.Failed)
+        if (newStatus == PaymentStatus.Succeeded)
+        {
+            // 金额一致性校验：到账金额需覆盖订单应付金额（防止少付/篡改）
+            var expectedAmount = payment.OriginalAmount - payment.DiscountAmount;
+            if (result.Data!.PaidAmount + 0.01m < expectedAmount)
             {
-                payment.Status = PaymentStatus.Failed;
-                payment.ChannelResponse = JsonSerializer.Serialize(result.Data);
-                await _paymentRepository.UpdateAsync(payment, ct);
+                Logger.LogWarning("Payment callback amount mismatch. TradeNo: {TradeNo}, Expected: {Expected}, Paid: {Paid}",
+                    payment.TradeNo, expectedAmount, result.Data.PaidAmount);
+                return Fail(ErrorCodes.PaymentAmountMismatch, 400);
             }
 
-            return Ok<object?>(null);
-        }, cancellationToken);
+            var paidTime = DateTime.UtcNow;
+            var channelResponse = JsonSerializer.Serialize(result.Data);
 
-        // 事件发布在事务外，避免事务回滚后事件已发出
-        if (result.Data?.Status == PaymentStatus.Succeeded)
-        {
+            // 原子状态条件更新（CAS）：仅当仍为 Pending/Processing 才置成功，收敛并发回调
+            var affected = await _paymentRepository.AsQueryable()
+                .Where(p => p.Id == payment.Id
+                    && (p.Status == PaymentStatus.Pending || p.Status == PaymentStatus.Processing))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.Status, PaymentStatus.Succeeded)
+                    .SetProperty(p => p.PaidTime, paidTime)
+                    .SetProperty(p => p.PaidAmount, result.Data.PaidAmount)
+                    .SetProperty(p => p.ExternalTradeNo, result.Data.ExternalTradeNo)
+                    .SetProperty(p => p.ChannelResponse, channelResponse), cancellationToken);
+
+            if (affected == 0)
+            {
+                // 并发回调已抢先处理，直接幂等返回
+                await MarkCallbackProcessedAsync(eventId, cancellationToken);
+                return Ok();
+            }
+
+            // 同步内存值供事件使用
+            payment.Status = PaymentStatus.Succeeded;
+            payment.PaidTime = paidTime;
+            payment.PaidAmount = result.Data.PaidAmount;
+            payment.ExternalTradeNo = result.Data.ExternalTradeNo;
+
             if (EventBus != null)
-            {
-                await EventBus.PublishAsync(new PaymentCompletedEvent
-                {
-                    PaymentId = payment.Id,
-                    TradeNo = payment.TradeNo,
-                    BusinessOrderNo = payment.BusinessOrderNo,
-                    Amount = payment.PaidAmount,
-                    Currency = payment.Currency,
-                    ChannelCode = payment.ChannelCode,
-                    PaidTime = payment.PaidTime!.Value,
-                    ExternalTradeNo = payment.ExternalTradeNo
-                });
-            }
+                await EventBus.PublishAsync(BuildCompletedEvent(payment));
 
             Logger.LogInformation("Payment completed. TradeNo: {TradeNo}, Amount: {Amount}",
                 payment.TradeNo, payment.PaidAmount);
         }
-        else if (result.Data?.Status == PaymentStatus.Failed)
+        else if (newStatus == PaymentStatus.Failed)
         {
-            if (EventBus != null)
+            var channelResponse = JsonSerializer.Serialize(result.Data);
+
+            var affected = await _paymentRepository.AsQueryable()
+                .Where(p => p.Id == payment.Id
+                    && (p.Status == PaymentStatus.Pending || p.Status == PaymentStatus.Processing))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.Status, PaymentStatus.Failed)
+                    .SetProperty(p => p.ChannelResponse, channelResponse), cancellationToken);
+
+            if (affected == 0)
             {
-                await EventBus.PublishAsync(new PaymentFailedEvent
-                {
-                    PaymentId = payment.Id,
-                    TradeNo = payment.TradeNo,
-                    BusinessOrderNo = payment.BusinessOrderNo,
-                    FailReason = result.Data?.FailReason ?? "Unknown"
-                });
+                await MarkCallbackProcessedAsync(eventId, cancellationToken);
+                return Ok();
             }
+
+            payment.Status = PaymentStatus.Failed;
+
+            if (EventBus != null)
+                await EventBus.PublishAsync(BuildFailedEvent(payment, result.Data?.FailReason ?? "Unknown"));
 
             Logger.LogWarning("Payment failed. TradeNo: {TradeNo}, Reason: {Reason}",
                 payment.TradeNo, result.Data?.FailReason);
         }
 
-        // 标记回调已处理，24小时内不再重复处理
-        if (_cache != null && !string.IsNullOrEmpty(eventId))
-        {
-            await _cache.SetAsync($"payment:callback:{eventId}", true, TimeSpan.FromHours(24), cancellationToken);
-        }
-
+        await MarkCallbackProcessedAsync(eventId, cancellationToken);
         return Ok();
     }
+
+    /// <summary>
+    /// 终态判定：处于这些状态的支付不应再被回调/同步改写，防止状态回退
+    /// </summary>
+    private static bool IsTerminalStatus(PaymentStatus status)
+        => status is PaymentStatus.Succeeded or PaymentStatus.Failed or PaymentStatus.Closed
+            or PaymentStatus.Cancelled or PaymentStatus.Expired
+            or PaymentStatus.Refunded or PaymentStatus.PartialRefunded;
+
+    private async Task MarkCallbackProcessedAsync(string? eventId, CancellationToken cancellationToken)
+    {
+        if (_cache != null && !string.IsNullOrEmpty(eventId))
+            await _cache.SetAsync($"payment:callback:{eventId}", true, TimeSpan.FromHours(24), cancellationToken);
+    }
+
+    private static PaymentCompletedEvent BuildCompletedEvent(PaymentEntity payment) => new()
+    {
+        PaymentId = payment.Id,
+        TradeNo = payment.TradeNo,
+        BusinessOrderNo = payment.BusinessOrderNo,
+        BusinessType = payment.BusinessType,
+        Amount = payment.PaidAmount,
+        Currency = payment.Currency,
+        ChannelCode = payment.ChannelCode,
+        PaidTime = payment.PaidTime ?? DateTime.UtcNow,
+        ExternalTradeNo = payment.ExternalTradeNo,
+        ExtraData = payment.ExtraData
+    };
+
+    private static PaymentFailedEvent BuildFailedEvent(PaymentEntity payment, string failReason) => new()
+    {
+        PaymentId = payment.Id,
+        TradeNo = payment.TradeNo,
+        BusinessOrderNo = payment.BusinessOrderNo,
+        BusinessType = payment.BusinessType,
+        FailReason = failReason,
+        ExtraData = payment.ExtraData
+    };
 
     public async Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
@@ -320,6 +364,98 @@ public class PaymentService : ApplicationService, IPaymentService
         return Ok();
     }
 
+    public async Task<Result<PaymentDto>> ChargeOffSessionAsync(OffSessionChargeDto request, CancellationToken cancellationToken = default)
+    {
+        if (request.Amount <= 0)
+            return Fail<PaymentDto>(ErrorCodes.PaymentInvalidAmount, 400);
+
+        if (string.IsNullOrWhiteSpace(request.PaymentMethodToken))
+            return Fail<PaymentDto>(ErrorCodes.SubscriptionPaymentMethodMissing, 400);
+
+        var channelCode = request.ChannelCode ?? PaymentConstants.DefaultPaymentChannel;
+        var provider = _paymentProviderFactory.GetProvider(channelCode);
+        if (provider == null)
+            return Fail<PaymentDto>(ErrorCodes.PaymentChannelNotSupported, 400);
+
+        if (!provider.SupportsOffSessionCharge)
+            return Fail<PaymentDto>(ErrorCodes.PaymentOffSessionNotSupported, 400);
+
+        var tradeNo = GenerateTradeNo();
+        var currency = request.Currency ?? PaymentOptions.DefaultCurrency;
+
+        var payment = new PaymentEntity
+        {
+            TradeNo = tradeNo,
+            BusinessOrderNo = request.BusinessOrderNo,
+            BusinessType = request.BusinessType,
+            OriginalAmount = request.Amount,
+            PaidAmount = 0,
+            DiscountAmount = 0,
+            Currency = currency,
+            Status = PaymentStatus.Processing,
+            ChannelCode = channelCode,
+            PaymentMethod = PaymentMethod.CreditCard,
+            Description = request.Description,
+            ExtraData = request.ExtraData
+        };
+
+        await _paymentRepository.InsertAsync(payment, cancellationToken);
+
+        var chargeResult = await provider.ChargeOffSessionAsync(new PaymentProviderChargeDto
+        {
+            TradeNo = tradeNo,
+            BusinessOrderNo = request.BusinessOrderNo,
+            Amount = request.Amount,
+            Currency = currency,
+            Description = request.Description,
+            ProviderCustomerId = request.ProviderCustomerId,
+            PaymentMethodToken = request.PaymentMethodToken
+        });
+
+        // 金额一致性校验：渠道回报的实际扣款额需覆盖请求额（防止短款捕获被记为全额成功）
+        if (chargeResult.Succeeded
+            && chargeResult.Data?.Status == PaymentStatus.Succeeded
+            && chargeResult.Data.PaidAmount > 0
+            && chargeResult.Data.PaidAmount + 0.01m < request.Amount)
+        {
+            Logger.LogWarning("Off-session charge captured less than requested. TradeNo: {TradeNo}, Requested: {Requested}, Captured: {Captured}",
+                tradeNo, request.Amount, chargeResult.Data.PaidAmount);
+            payment.Status = PaymentStatus.Failed;
+            payment.ChannelResponse = ErrorCodes.PaymentAmountMismatch;
+            await _paymentRepository.UpdateAsync(payment, cancellationToken);
+            if (EventBus != null)
+                await EventBus.PublishAsync(BuildFailedEvent(payment, ErrorCodes.PaymentAmountMismatch));
+            return Fail<PaymentDto>(ErrorCodes.PaymentAmountMismatch, 400);
+        }
+
+        if (chargeResult.Succeeded && chargeResult.Data?.Status == PaymentStatus.Succeeded)
+        {
+            payment.Status = PaymentStatus.Succeeded;
+            payment.PaidTime = DateTime.UtcNow;
+            payment.PaidAmount = chargeResult.Data.PaidAmount > 0 ? chargeResult.Data.PaidAmount : request.Amount;
+            payment.ExternalTradeNo = chargeResult.Data.ExternalTradeNo;
+            await _paymentRepository.UpdateAsync(payment, cancellationToken);
+
+            if (EventBus != null)
+                await EventBus.PublishAsync(BuildCompletedEvent(payment));
+
+            Logger.LogInformation("Off-session charge succeeded. TradeNo: {TradeNo}, Amount: {Amount}", tradeNo, payment.PaidAmount);
+            return Ok(payment.MapTo<PaymentDto>());
+        }
+
+        // 失败（含渠道拒付 / requires_action 无法无人值守完成）
+        var failReason = chargeResult.Data?.FailReason ?? chargeResult.Message ?? ErrorCodes.PaymentOffSessionChargeFailed;
+        payment.Status = PaymentStatus.Failed;
+        payment.ChannelResponse = failReason;
+        await _paymentRepository.UpdateAsync(payment, cancellationToken);
+
+        if (EventBus != null)
+            await EventBus.PublishAsync(BuildFailedEvent(payment, failReason));
+
+        Logger.LogWarning("Off-session charge failed. TradeNo: {TradeNo}, Reason: {Reason}", tradeNo, failReason);
+        return Fail<PaymentDto>(failReason);
+    }
+
     public async Task<Result<int>> CloseExpiredPaymentsAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
@@ -351,7 +487,9 @@ public class PaymentService : ApplicationService, IPaymentService
                     PaymentId = payment.Id,
                     TradeNo = payment.TradeNo,
                     BusinessOrderNo = payment.BusinessOrderNo,
-                    ExpiredTime = DateTime.UtcNow
+                    BusinessType = payment.BusinessType,
+                    ExpiredTime = DateTime.UtcNow,
+                    ExtraData = payment.ExtraData
                 });
             }
         }

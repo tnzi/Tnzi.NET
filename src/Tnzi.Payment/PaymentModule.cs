@@ -10,6 +10,7 @@ namespace Tnzi.Payment;
 [DependsOn(typeof(CachingModule))]
 [OptionalDependsOn(typeof(TemplateModule))]
 [OptionalDependsOn(typeof(NotificationModule))]
+[OptionalDependsOn(typeof(StorageModule))]
 public class PaymentModule : TnziApplicationModule
 {
     /// <summary>
@@ -46,9 +47,6 @@ public class PaymentModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 注册配置中心
-        context.Services.AddSingleton<ISettingDefinitionProvider, PaymentSettingDefinitionProvider>();
-
         // 注册服务
         context.Services.AddScoped<IPaymentService, PaymentService>();
         context.Services.AddScoped<IRefundService, RefundService>();
@@ -78,6 +76,11 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddEventHandler<SubscriptionRenewedEvent, SubscriptionRenewedEventHandler>();
         context.Services.AddEventHandler<SubscriptionPlanChangedEvent, SubscriptionPlanChangedEventHandler>();
         context.Services.AddEventHandler<SubscriptionTrialConvertedEvent, SubscriptionTrialConvertedEventHandler>();
+
+        // 订阅计费状态机回流处理器（将支付完成/失败/过期路由回订阅状态机）
+        context.Services.AddEventHandler<PaymentCompletedEvent, SubscriptionPaymentCompletedHandler>();
+        context.Services.AddEventHandler<PaymentFailedEvent, SubscriptionPaymentFailedHandler>();
+        context.Services.AddEventHandler<PaymentExpiredEvent, SubscriptionPaymentExpiredHandler>();
 
         return Task.CompletedTask;
     }

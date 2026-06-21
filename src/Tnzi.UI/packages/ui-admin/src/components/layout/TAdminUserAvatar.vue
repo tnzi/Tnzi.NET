@@ -12,7 +12,7 @@
  * `useAdminLoginConfig().userMenu` so the common case (Acme et al.)
  * is one-config-line away.
  */
-import { computed, h } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { NDropdown, NButton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -21,6 +21,13 @@ import { translatePageKey } from '../../pages/_shared/translate'
 interface Props {
   /** Display name shown next to the avatar. */
   userName?: string
+  /**
+   * Resolved avatar image URL. When present (and it loads) the header shows
+   * the real picture; on a load error — or when absent — it falls back to the
+   * name initial, then to `avatarIcon`. Resolve via `resolveAvatarUrl()` in
+   * the container so this component stays stateless about storage/DTO shapes.
+   */
+  avatarUrl?: string | null
   /** Iconify icon for the avatar. Default `mdi:account-circle-outline`. */
   avatarIcon?: string
   /** Called when the user picks "User Center" from the dropdown. */
@@ -37,6 +44,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   userName: 'User',
+  avatarUrl: null,
   avatarIcon: 'mdi:account-circle-outline',
   onUserCenter: undefined,
   onLogout: undefined,
@@ -46,6 +54,22 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const dialog = useDialog()
+
+// Track image load failures so a broken/expired avatar URL degrades to the
+// name initial instead of a broken-image glyph. Reset whenever the URL
+// changes (a fresh upload should get a fresh chance to load).
+const imgFailed = ref(false)
+watch(
+  () => props.avatarUrl,
+  () => { imgFailed.value = false },
+)
+const showAvatarImage = computed(() => !!props.avatarUrl && !imgFailed.value)
+
+/** First letter of the display name, used as the image fallback. */
+const initial = computed(() => {
+  const name = (props.userName ?? '').trim()
+  return name ? name.slice(0, 1).toUpperCase() : ''
+})
 
 function t(key: string, fallback: string): string {
   if (props.translate) return props.translate(key, fallback)
@@ -106,7 +130,15 @@ function confirmLogout(): void {
     @select="handleSelect"
   >
     <button class="t-admin-user-avatar" type="button" :title="userName">
-      <TSvgIcon :icon="avatarIcon" :size="22" class="t-admin-user-avatar__icon" />
+      <img
+        v-if="showAvatarImage"
+        :src="avatarUrl ?? ''"
+        :alt="userName"
+        class="t-admin-user-avatar__img"
+        @error="imgFailed = true"
+      />
+      <span v-else-if="initial" class="t-admin-user-avatar__initial" aria-hidden="true">{{ initial }}</span>
+      <TSvgIcon v-else :icon="avatarIcon" :size="22" class="t-admin-user-avatar__icon" />
       <span class="t-admin-user-avatar__name">{{ userName }}</span>
     </button>
   </NDropdown>
@@ -133,6 +165,29 @@ function confirmLogout(): void {
 }
 .t-admin-user-avatar__icon {
   color: var(--tnzi-primary);
+}
+/* Real avatar picture — circular, cover-cropped, sized to match the icon. */
+.t-admin-user-avatar__img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+/* Name-initial fallback when there's no picture (or it failed to load). */
+.t-admin-user-avatar__initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.12);
+  color: var(--tnzi-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
 }
 .t-admin-user-avatar__name {
   max-width: 160px;

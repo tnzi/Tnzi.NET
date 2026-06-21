@@ -908,6 +908,8 @@ public class UserService : ApplicationService, IUserService
             if (detailResult.Succeeded && detailResult.Data != null)
             {
                 var detail = detailResult.Data;
+                userDto.FirstName = detail.FirstName;
+                userDto.LastName = detail.LastName;
                 userDto.Nickname = detail.Nickname;
                 userDto.AvatarId = detail.AvatarId;
                 userDto.Avatar = detail.AvatarUrl;  // 外部头像 URL 作为备用

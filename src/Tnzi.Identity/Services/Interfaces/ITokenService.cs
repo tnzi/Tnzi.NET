@@ -10,7 +10,8 @@ public interface ITokenService
     /// <summary>
     /// 生成JWT令牌
     /// </summary>
-    string GenerateToken(User user, IList<string> roles);
+    /// <param name="extraClaims">可选的自定义 claim（如桥接登录的 ai_roles/user_type 等）；与框架保留类型（subject/name/jti/role/tenant_id）冲突的项会被忽略</param>
+    string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null);
 
     /// <summary>
     /// 生成刷新令牌
@@ -25,7 +26,8 @@ public interface ITokenService
     /// <summary>
     /// 生成令牌结果
     /// </summary>
-    TokenResult GenerateTokenResult(User user, IList<string> roles);
+    /// <param name="extraClaims">可选的自定义 claim；与框架保留类型冲突的项会被忽略</param>
+    TokenResult GenerateTokenResult(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null);
 }
 
 /// <summary>

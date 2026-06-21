@@ -65,17 +65,42 @@ public class PaymentBackgroundService : BackgroundService
             _logger.LogError(ex, "Failed to close expired payments");
         }
 
-        // 续费到期订阅
+        var subscriptionService = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+
+        // 续费到期订阅（off-session 扣款）
         try
         {
-            var subscriptionService = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
             var renewedResult = await subscriptionService.RenewExpiredSubscriptionsAsync(cancellationToken);
             if (renewedResult.Succeeded && renewedResult.Data > 0)
-                _logger.LogInformation("Renewed {Count} expired subscriptions", renewedResult.Data);
+                _logger.LogInformation("Processed renewal for {Count} due subscriptions", renewedResult.Data);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to renew expired subscriptions");
+        }
+
+        // 试用到期转正/过期
+        try
+        {
+            var trialResult = await subscriptionService.ConvertDueTrialsAsync(cancellationToken);
+            if (trialResult.Succeeded && trialResult.Data > 0)
+                _logger.LogInformation("Processed trial conversion for {Count} subscriptions", trialResult.Data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process due trials");
+        }
+
+        // 到期未续费 / 逾期超宽限期 → 过期
+        try
+        {
+            var expiredResult = await subscriptionService.ExpireOverdueSubscriptionsAsync(cancellationToken);
+            if (expiredResult.Succeeded && expiredResult.Data > 0)
+                _logger.LogInformation("Expired {Count} overdue subscriptions", expiredResult.Data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to expire overdue subscriptions");
         }
     }
 }

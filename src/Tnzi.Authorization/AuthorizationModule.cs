@@ -1,5 +1,3 @@
-using Tnzi.Options;
-
 namespace Tnzi.Authorization;
 
 /// <summary>
@@ -35,10 +33,8 @@ public class AuthorizationModule : TnziApplicationModule
         // duplicate role names. The semantic check "does this role exist
         // in Identity?" runs later in OnApplicationInitializationAsync,
         // since that requires Identity's DbContext to be ready.
-        services.AddOptions<Tnzi.Authorization.Options.AuthorizationOptions>()
-            .Bind(context.Configuration.GetSection("Authorization"))
-            .ValidateWith<Tnzi.Authorization.Options.AuthorizationOptions,
-                Tnzi.Authorization.Options.AuthorizationOptionsValidator>();
+        services.AddTnziOptions<Tnzi.Authorization.Options.AuthorizationOptions,
+            Tnzi.Authorization.Options.AuthorizationOptionsValidator>(context.Configuration);
 
         // 注册授权服务（单一实现，多接口注册）
         services.AddScoped<FunctionAuthorizationService>();
@@ -61,11 +57,20 @@ public class AuthorizationModule : TnziApplicationModule
         // only and can't FK to RoleFunction.
         services.AddScoped<PermissionDbSeeder>();
 
+        // Framework built-in permission catalogue: declares the ~68 codes the
+        // admin shell's routes reference (identity.*, system.*, ai.*, …) so a
+        // super-admin's GetUserPermissionNamesAsync returns them and admins can
+        // assign them to roles. Centralised here because framework modules don't
+        // depend on Authorization — see FrameworkPermissions for the rationale.
+        services.AddTransient<IPermissionDefinitionProvider, FrameworkPermissions>();
+
         // IUserRoleService 由 Identity 模块注册
         // 通过 [DependsOn] 确保 Identity 模块先加载
 
         // 注册授权处理器
         services.AddScoped<IAuthorizationHandler, FunctionAuthorizationHandler>();
+        // 让 [Authorize(Roles=...)] 与框架其余角色判断一样大小写不敏感（补充 handler，只放宽不收紧）。
+        services.AddSingleton<IAuthorizationHandler, CaseInsensitiveRolesAuthorizationHandler>();
 
         // Event handlers — cross-module signal: when Identity flips a user's
         // role membership, we drop that user's cached permission set so the

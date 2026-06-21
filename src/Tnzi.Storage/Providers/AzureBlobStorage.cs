@@ -11,6 +11,20 @@ public class AzureBlobStorage : IFileStorage
     private readonly BlobServiceClient _blobServiceClient;
     private readonly BlobContainerClient _containerClient;
     private readonly string _baseUrl;
+    private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
+
+    /// <summary>
+    /// 运行时有效的 URL 前缀：优先取 IOptionsMonitor 的当前值（支持配置热更新），
+    /// 为空时回退到构造期冻结的 _baseUrl（保持既有行为）。
+    /// </summary>
+    private string EffectiveBaseUrl
+    {
+        get
+        {
+            var hot = _optionsMonitor?.CurrentValue.UrlPrefix;
+            return !string.IsNullOrEmpty(hot) ? hot : _baseUrl;
+        }
+    }
 
     /// <summary>
     /// 初始化 <see cref="AzureBlobStorage"/> 类型的新实例
@@ -18,13 +32,16 @@ public class AzureBlobStorage : IFileStorage
     /// <param name="options">Azure Blob 存储配置选项</param>
     /// <param name="configuration">配置</param>
     /// <param name="logger">日志记录器</param>
+    /// <param name="optionsMonitor">选项监视器（可选），用于运行时热读取 UrlPrefix</param>
     public AzureBlobStorage(
         AzureBlobStorageOptions options,
         IConfiguration? configuration = null,
-        ILogger<AzureBlobStorage>? logger = null)
+        ILogger<AzureBlobStorage>? logger = null,
+        IOptionsMonitor<StorageOptions>? optionsMonitor = null)
     {
         _options = Check.NotNull(options);
         _logger = logger;
+        _optionsMonitor = optionsMonitor;
 
         Check.NotNullOrEmpty(_options.ConnectionString);
         Check.NotNullOrEmpty(_options.ContainerName);
@@ -195,27 +212,90 @@ public class AzureBlobStorage : IFileStorage
         if (string.IsNullOrEmpty(filePath))
             return Task.FromResult(string.Empty);
 
-        var blobClient = _containerClient.GetBlobClient(filePath);
-
-        if (expiresIn.HasValue && blobClient.CanGenerateSasUri)
+        if (expiresIn.HasValue)
         {
-            // 生成SAS URL
-            var sasBuilder = new BlobSasBuilder
-            {
-                BlobContainerName = _options.ContainerName,
-                BlobName = filePath,
-                Resource = "b", // b = blob
-                ExpiresOn = DateTimeOffset.UtcNow.AddSeconds(expiresIn.Value)
-            };
-            sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-            var sasUri = blobClient.GenerateSasUri(sasBuilder);
-            return Task.FromResult(sasUri.ToString());
+            var sasUrl = GenerateSasUrl(filePath, expiresIn.Value, BlobSasPermissions.Read);
+            if (sasUrl != null)
+                return Task.FromResult(sasUrl);
         }
 
         // 返回基本URL（适用于公开容器或无需SAS的场景）
-        var url = _baseUrl.TrimEnd('/') + "/" + filePath.TrimStart('/');
+        var url = EffectiveBaseUrl.TrimEnd('/') + "/" + filePath.TrimStart('/');
         return Task.FromResult(url);
+    }
+
+    /// <summary>
+    /// Generate a presigned (SAS) URL for direct upload or temporary public download access.
+    /// </summary>
+    /// <param name="filePath">Blob name</param>
+    /// <param name="expiresInSeconds">URL expiration in seconds</param>
+    /// <param name="httpMethod">HTTP method: GET for download, PUT for upload</param>
+    /// <returns>SAS URL, or null if the path is empty or SAS cannot be generated</returns>
+    public Task<string?> GetPresignedUrlAsync(string filePath, int expiresInSeconds = 3600, string httpMethod = "GET")
+    {
+        if (string.IsNullOrEmpty(filePath))
+            return Task.FromResult<string?>(null);
+
+        var permissions = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase)
+            ? BlobSasPermissions.Write | BlobSasPermissions.Create
+            : BlobSasPermissions.Read;
+
+        return Task.FromResult(GenerateSasUrl(filePath, expiresInSeconds, permissions));
+    }
+
+    /// <summary>
+    /// Server-side copy a blob to a new name within the same container using Azure's async copy,
+    /// waiting for completion. Avoids streaming the blob content through the application.
+    /// </summary>
+    /// <param name="sourcePath">Source blob name</param>
+    /// <param name="destFileName">Destination blob name</param>
+    /// <returns>The destination blob name on success, or null if the path is empty or the copy fails</returns>
+    public async Task<string?> CopyAsync(string sourcePath, string destFileName)
+    {
+        if (string.IsNullOrEmpty(sourcePath) || string.IsNullOrEmpty(destFileName))
+            return null;
+
+        try
+        {
+            await EnsureContainerExistsAsync();
+
+            var sourceBlob = _containerClient.GetBlobClient(sourcePath);
+            var destBlob = _containerClient.GetBlobClient(destFileName);
+
+            var copyOperation = await destBlob.StartCopyFromUriAsync(sourceBlob.Uri);
+            await copyOperation.WaitForCompletionAsync();
+
+            _logger?.LogInformation("Blob '{SourcePath}' server-side copied to '{DestFileName}'", sourcePath, destFileName);
+            return destFileName;
+        }
+        catch (RequestFailedException ex)
+        {
+            _logger?.LogWarning(ex, "Failed to server-side copy Azure blob: {SourcePath} -> {DestFileName}", sourcePath, destFileName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 为指定 Blob 生成带权限与过期时间的 SAS URL。
+    /// 当账户无法本地签名（如使用托管身份连接）时返回 null。
+    /// </summary>
+    private string? GenerateSasUrl(string filePath, int expiresInSeconds, BlobSasPermissions permissions)
+    {
+        var blobClient = _containerClient.GetBlobClient(filePath);
+
+        if (!blobClient.CanGenerateSasUri)
+            return null;
+
+        var sasBuilder = new BlobSasBuilder
+        {
+            BlobContainerName = _options.ContainerName,
+            BlobName = filePath,
+            Resource = "b", // b = blob
+            ExpiresOn = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds)
+        };
+        sasBuilder.SetPermissions(permissions);
+
+        return blobClient.GenerateSasUri(sasBuilder).ToString();
     }
 
     /// <summary>

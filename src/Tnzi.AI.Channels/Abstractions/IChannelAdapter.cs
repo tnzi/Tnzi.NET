@@ -12,13 +12,6 @@ public interface IChannelAdapter : IAsyncDisposable
     bool SupportsStreaming { get; }
 
     /// <summary>
-    /// 是否支持文件附件发送。
-    /// 返回 false 的适配器不应被调用 <see cref="SendFileAsync"/>。
-    /// 默认实现返回 false，有能力的平台（Telegram、Slack、Discord）覆盖为 true。
-    /// </summary>
-    bool SupportsFileAttachment => false;
-
-    /// <summary>
     /// 此渠道 Bot 实例归属的租户 ID（来自渠道 adapter options）。
     /// 多租户部署下用于将入站消息打上租户上下文（会话绑定规则分区、线程映射审计填充）。
     /// 默认 null = 单租户部署 / 渠道不归属任何租户（行为与既往完全一致）。
@@ -33,10 +26,4 @@ public interface IChannelAdapter : IAsyncDisposable
 
     /// <summary>发送文本消息</summary>
     Task SendAsync(OutboundMessage message, CancellationToken ct = default);
-
-    /// <summary>
-    /// 发送文件附件。调用前应先检查 <see cref="SupportsFileAttachment"/>。
-    /// 不支持文件的适配器应返回 false 而非抛出异常。
-    /// </summary>
-    Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default);
 }

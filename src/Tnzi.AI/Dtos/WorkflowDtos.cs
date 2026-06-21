@@ -12,7 +12,7 @@ public class WorkflowDefinitionDto
     /// <summary>Workflow description</summary>
     public string? Description { get; set; }
     /// <summary>Workflow steps</summary>
-    public List<WorkflowStepDto> Steps { get; set; } = new();
+    public List<WorkflowStepDto> Steps { get; set; } = [];
     /// <summary>Execution mode</summary>
     public WorkflowExecutionMode ExecutionMode { get; set; } = WorkflowExecutionMode.Sequential;
     /// <summary>Whether enabled</summary>
@@ -305,7 +305,7 @@ public class WorkflowExecutionDetailDto : WorkflowExecutionSummaryDto
     public List<string> StepsAwaitingApproval { get; set; } = [];
 
     /// <summary>Step outputs (stepId → output text)</summary>
-    public Dictionary<string, string> StepOutputs { get; set; } = new();
+    public Dictionary<string, string> StepOutputs { get; set; } = [];
 
     /// <summary>待处理执行信号</summary>
     [ExperimentalApi(Reason = "Workflow mailbox and signals are in preview")]
@@ -327,7 +327,7 @@ public class WorkflowStatsDto
     public int DisabledWorkflows { get; set; }
 
     /// <summary>Count by execution mode</summary>
-    public Dictionary<string, int> ByExecutionMode { get; set; } = new();
+    public Dictionary<string, int> ByExecutionMode { get; set; } = [];
 
     /// <summary>Total executions</summary>
     public int TotalExecutions { get; set; }

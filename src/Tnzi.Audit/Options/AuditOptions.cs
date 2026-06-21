@@ -3,6 +3,10 @@ namespace Tnzi.Audit.Options;
 /// <summary>
 /// 审计模块配置选项
 /// </summary>
+[ConfigSection("Audit")]
+[RuntimeSettingGroup(Key = "audit-retention", Module = "Audit", DisplayName = "Audit Retention",
+    I18nKey = "admin.modules.system.settings.groups.auditRetention",
+    Icon = "mdi:archive-clock-outline", Order = 600)]
 public class AuditOptions
 {
     /// <summary>是否启用操作审计</summary>
@@ -12,6 +16,8 @@ public class AuditOptions
     public bool EnableEntityAudit { get; set; } = true;
 
     /// <summary>审计数据保留天数</summary>
+    [RuntimeSetting(Label = "Retention Days", I18n = "admin.modules.system.settings.fields.retentionDays",
+        Type = SettingFieldType.Int, Min = 1)]
     public int RetentionDays { get; set; } = 90;
 
     /// <summary>批量处理大小</summary>

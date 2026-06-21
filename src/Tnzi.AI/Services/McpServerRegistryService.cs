@@ -34,6 +34,7 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
     private readonly IMcpClientFactory _clientFactory;
     private readonly IMcpServerCatalog _serverCatalog;
     private readonly IMcpToolProvider _toolProvider;
+    private readonly IOptionsMonitor<AIOptions> _aiOptions;
 
     public McpServerRegistryService(
         IRepository<McpServerRegistration, Guid> repository,
@@ -41,6 +42,7 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
         IMcpClientFactory clientFactory,
         IMcpServerCatalog serverCatalog,
         IMcpToolProvider toolProvider,
+        IOptionsMonitor<AIOptions> aiOptions,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -49,6 +51,18 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
         _clientFactory = Check.NotNull(clientFactory);
         _serverCatalog = Check.NotNull(serverCatalog);
         _toolProvider = Check.NotNull(toolProvider);
+        _aiOptions = Check.NotNull(aiOptions);
+    }
+
+    /// <summary>
+    /// SSRF egress 校验：除非 <c>AI:Mcp:AllowPrivateEndpoints</c> 开启，否则拒绝指向私有/内网的 ServerUrl。
+    /// 返回 null 表示通过，否则返回英文阻止原因。
+    /// </summary>
+    private async Task<string?> CheckEgressAsync(string serverUrl, CancellationToken ct)
+    {
+        if (_aiOptions.CurrentValue.Mcp.AllowPrivateEndpoints)
+            return null;
+        return await EgressGuard.CheckAsync(serverUrl, ct);
     }
 
     private IDataProtector GetProtector() =>
@@ -194,10 +208,17 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
                 return Fail<McpServerRegistrationDto>("Transport is required", 400, ErrorCodes.McpServerRegistrationOperationFailed);
             }
 
-            var validationError = ValidateTransportAndUrl(dto.Transport, dto.ServerUrl.Trim());
+            var serverUrl = dto.ServerUrl.Trim();
+            var validationError = ValidateTransportAndUrl(dto.Transport, serverUrl);
             if (validationError != null)
             {
                 return Fail<McpServerRegistrationDto>(validationError, 400, ErrorCodes.McpServerRegistrationOperationFailed);
+            }
+
+            var egressError = await CheckEgressAsync(serverUrl, ct);
+            if (egressError != null)
+            {
+                return Fail<McpServerRegistrationDto>($"Server URL rejected: {egressError}", 400, ErrorCodes.McpServerRegistrationOperationFailed);
             }
 
             var exists = await _repository.AsQueryable().AnyAsync(p => p.Name == name, ct);
@@ -251,6 +272,12 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
             if (validationError != null)
             {
                 return Fail<McpServerRegistrationDto>(validationError, 400, ErrorCodes.McpServerRegistrationOperationFailed);
+            }
+
+            var egressError = await CheckEgressAsync(effectiveUrl, ct);
+            if (egressError != null)
+            {
+                return Fail<McpServerRegistrationDto>($"Server URL rejected: {egressError}", 400, ErrorCodes.McpServerRegistrationOperationFailed);
             }
 
             var previousName = entity.Name;
@@ -341,6 +368,12 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
             if (validationError != null)
             {
                 return TestFailure(sw, validationError);
+            }
+
+            var egressError = await CheckEgressAsync(entity.ServerUrl, ct);
+            if (egressError != null)
+            {
+                return TestFailure(sw, $"Server URL rejected: {egressError}");
             }
 
             if (string.IsNullOrEmpty(entity.AuthTokenEncrypted) &&

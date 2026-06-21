@@ -62,7 +62,11 @@ public class SandboxTools : IAIToolProvider
         _quota = quota;
     }
 
-    [AIFunction("bash", "Execute a bash command in the sandbox environment",
+    [AIFunction("bash",
+        "Execute a bash command in the sandbox environment. Under the Local provider " +
+        "the shell is NOT filesystem-jailed: it is protected only by the command blacklist " +
+        "and a best-effort path check on translated /mnt paths. Use the Docker provider for " +
+        "strong isolation.",
         SearchHint = "shell command execute terminal run script")]
     public async Task<object> BashAsync(
         [Description("The shell command to execute")] string command,
@@ -89,9 +93,31 @@ public class SandboxTools : IAIToolProvider
 
     private async Task<object> ExecuteBashCoreAsync(ISandbox sandbox, Guid threadId, string command, CancellationToken ct)
     {
+        var translatedCommand = TranslatePathsInCommand(command, threadId);
+
+        // Best-effort jail check for the Local provider: the translated command is
+        // handed verbatim to a host shell, so if a translated /mnt path resolves
+        // outside the thread directory (via `..` segments embedded in the virtual
+        // path) refuse the command rather than let it escape. This is NOT a true
+        // jail — it cannot reason about shell-constructed paths — but it closes the
+        // obvious `/mnt/workspace/../../../etc/passwd` style bypass. Runs before the
+        // quota reservation so an escaping command does not consume a quota slot.
+        if (!IsTranslatedCommandWithinThreadDir(translatedCommand, threadId))
+        {
+            const string escapeReason = "Command references a path outside the sandbox thread directory";
+            _logger.LogWarning(
+                "Sandbox bash blocked by path-escape guard for thread {ThreadId}", threadId);
+
+            var escapeResult = new CommandResult(-1, string.Empty, $"Command denied: {escapeReason}");
+            await PublishExecutionEventAsync(sandbox, threadId, command, escapeResult, DateTime.UtcNow, 0);
+
+            return new { stdout = string.Empty, stderr = escapeResult.Error, exit_code = -1, note = (string?)null };
+        }
+
         // Thread-level resource quota check — pre-flight before reaching the shell.
-        // Quota denials are reported back through the same event/audit pipeline as
-        // command-blacklist denials so dashboards see a unified "denied" stream.
+        // CheckAsync atomically reserves a command slot (hard cap); quota denials are
+        // reported back through the same event/audit pipeline as command-blacklist
+        // denials so dashboards see a unified "denied" stream.
         if (_quota is not null)
         {
             var quotaCheck = await _quota.CheckAsync(threadId);
@@ -109,16 +135,16 @@ public class SandboxTools : IAIToolProvider
             }
         }
 
-        var translatedCommand = TranslatePathsInCommand(command, threadId);
-
         var startedAt = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         var result = await sandbox.ExecuteCommandAsync(translatedCommand, ct);
         stopwatch.Stop();
 
-        // Accumulate usage even on non-zero exits so a busy-looping agent cannot
-        // dodge the cap by failing fast. Denials (handled above) skip this path
-        // because their cost is intentionally not charged against the cap.
+        // Record the soft-cap cost (duration + output bytes) even on non-zero exits
+        // so a busy-looping agent cannot dodge the caps by failing fast. The command
+        // count is already reserved by CheckAsync above (hard cap); RecordExecutionAsync
+        // deliberately does not touch it. Denials (handled above) return early and
+        // therefore never reach this accounting.
         if (_quota is not null)
         {
             var outputBytes = (result.Output?.Length ?? 0) + (result.Error?.Length ?? 0);
@@ -182,16 +208,9 @@ public class SandboxTools : IAIToolProvider
         try
         {
             var physicalPath = _translator.ToPhysical(path, env.ThreadId);
-            var content = await env.Sandbox.ReadFileAsync(physicalPath, ct);
-
-            if (offset.HasValue || limit.HasValue)
-            {
-                var lines = content.Split('\n');
-                var start = Math.Max(0, (offset ?? 1) - 1);
-                var count = limit ?? lines.Length;
-                content = string.Join('\n', lines.Skip(start).Take(count));
-            }
-
+            // Slicing is pushed down into the sandbox so large files are streamed
+            // line-by-line rather than read fully into memory just to be sliced.
+            var content = await env.Sandbox.ReadFileAsync(physicalPath, offset, limit, ct);
             return new { path, content };
         }
         catch (OperationCanceledException)
@@ -245,7 +264,7 @@ public class SandboxTools : IAIToolProvider
         try
         {
             var physicalPath = _translator.ToPhysical(path, env.ThreadId);
-            var content = await env.Sandbox.ReadFileAsync(physicalPath, ct);
+            var content = await env.Sandbox.ReadFileAsync(physicalPath, ct: ct);
 
             if (!content.Contains(oldString))
                 return new { success = false, error = $"String '{oldString}' not found in file" };
@@ -343,4 +362,64 @@ public class SandboxTools : IAIToolProvider
             .Replace("/mnt/outputs", Path.Combine(threadDir, "outputs"))
             .Replace("/mnt/skills", Path.Combine(threadDir, "skills"));
     }
+
+    /// <summary>
+    /// Best-effort guard: after naive /mnt → physical translation, scan the command
+    /// for path tokens rooted at the thread directory and confirm each still
+    /// resolves inside that directory once <c>..</c> segments collapse. Returns
+    /// <c>true</c> when no escaping token is found. This is intentionally
+    /// conservative (it inspects literal tokens only and cannot follow shell
+    /// constructs) — under the Local provider it is a hardening layer, not a jail.
+    /// </summary>
+    private bool IsTranslatedCommandWithinThreadDir(string translatedCommand, Guid threadId)
+    {
+        // Search for the thread dir exactly as TranslatePathsInCommand emitted it
+        // (it does NOT call GetFullPath, so the substring may be relative); resolve
+        // both sides through GetFullPath only for the containment comparison.
+        var rawThreadDir = _translator.GetThreadDirectory(threadId);
+        var normalizedThreadDir = Path.GetFullPath(rawThreadDir);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        var searchStart = 0;
+        while (true)
+        {
+            var idx = translatedCommand.IndexOf(rawThreadDir, searchStart, comparison);
+            if (idx < 0)
+                break;
+
+            // Slice from this occurrence to the next shell-token boundary so a
+            // `..` escape embedded in the path participates in normalization.
+            var end = idx;
+            while (end < translatedCommand.Length && !IsShellTokenBoundary(translatedCommand[end]))
+                end++;
+
+            var token = translatedCommand[idx..end];
+            string resolved;
+            try
+            {
+                resolved = Path.GetFullPath(token);
+            }
+            catch
+            {
+                // An unparseable token is suspicious — fail closed.
+                return false;
+            }
+
+            if (!resolved.Equals(normalizedThreadDir, comparison)
+                && !resolved.StartsWith(normalizedThreadDir + Path.DirectorySeparatorChar, comparison)
+                && !resolved.StartsWith(normalizedThreadDir + Path.AltDirectorySeparatorChar, comparison))
+            {
+                return false;
+            }
+
+            searchStart = end;
+        }
+
+        return true;
+    }
+
+    private static bool IsShellTokenBoundary(char c)
+        => c is ' ' or '\t' or '\n' or '\r' or '"' or '\'' or '|' or '&' or ';' or '<' or '>' or '`';
 }

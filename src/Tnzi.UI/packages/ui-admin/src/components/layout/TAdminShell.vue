@@ -14,6 +14,7 @@ import TAdminFooter from './TAdminFooter.vue'
 import TAdminWatermark from './TAdminWatermark.vue'
 import TGlobalSearch from './TGlobalSearch.vue'
 import TAdminUserAvatar from './TAdminUserAvatar.vue'
+import TChatHost from '../chat/TChatHost.vue'
 import TBackTop from '../utility/TBackTop.vue'
 import { TPinToggler } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -106,6 +107,12 @@ interface Props {
    * to `false` if your content layout already provides one.
    */
   builtinBackTop?: boolean
+  /**
+   * When true (default), TAdminShell renders TChatHost in the header's
+   * user slot before TAdminUserAvatar, providing a persistent chat launcher
+   * and notification badge. Set to `false` to handle chat yourself.
+   */
+  builtinChat?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -119,6 +126,7 @@ const props = withDefaults(defineProps<Props>(), {
   builtinSearch: true,
   builtinUserAvatar: true,
   builtinBackTop: true,
+  builtinChat: true,
 })
 
 const emit = defineEmits<{
@@ -632,6 +640,13 @@ function onMixMouseleave(): void {
         </template>
         <template v-if="$slots['header-notification']" #notification>
           <slot name="header-notification" />
+        </template>
+        <!-- TChatHost lives in a dedicated #chat slot so it renders even
+             when the consumer overrides #header-user (e.g. AdminShellRoot
+             passes its own TAdminUserAvatar via #header-user, which would
+             otherwise replace the #user default and hide TChatHost). -->
+        <template #chat>
+          <TChatHost v-if="builtinChat !== false" />
         </template>
         <template #user>
           <!-- Phase H2 B4: default to a built-in TAdminUserAvatar so

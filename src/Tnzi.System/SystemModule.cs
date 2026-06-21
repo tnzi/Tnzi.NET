@@ -18,15 +18,11 @@ public class SystemModule : TnziApplicationModule
     {
         var configuration = context.Configuration;
 
-        // 注册应用程序配置选项并启用启动时验证
-        context.Services.AddOptions<ApplicationOptions>()
-            .Bind(configuration.GetSection("System"))
-            .ValidateWith<ApplicationOptions, ApplicationOptionsValidator>();
+        // 注册应用程序配置选项并启用启动时验证（section 路径由 [ConfigSection] 派生）
+        context.Services.AddTnziOptions<ApplicationOptions, ApplicationOptionsValidator>(configuration);
 
-        // 注册配置加密选项
-        context.Services.AddOptions<SettingEncryptionOptions>()
-            .Bind(configuration.GetSection("System:Encryption"))
-            .ValidateWith<SettingEncryptionOptions, SettingEncryptionOptionsValidator>();
+        // 注册配置加密选项（显式嵌套 section）
+        context.Services.AddTnziOptions<SettingEncryptionOptions, SettingEncryptionOptionsValidator>(configuration, "System:Encryption");
 
         return Task.CompletedTask;
     }
@@ -41,7 +37,7 @@ public class SystemModule : TnziApplicationModule
         // 注册配置服务
         services.AddScoped<ISettingService, SettingService>();
         services.AddScoped<ISettingsCenterService, SettingsCenterService>();
-        services.AddSingleton<ISettingDefinitionProvider, SystemSettingDefinitionProvider>();
+        services.AddSingleton<ISettingDefinitionProvider, AttributeSettingDefinitionProvider>();
 
         // 注册配置加密器（仅在启用加密时注册）
         var encryptionOptions = context.Configuration

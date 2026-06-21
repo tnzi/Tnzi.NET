@@ -62,10 +62,23 @@ public class SkillConstraintMiddleware : IAiMiddleware
             CurrentProvider = context.EffectiveProvider ?? context.Request.Provider
         };
 
-        // Accumulate individual tool allow/deny across all active skills
-        var accumulatedAllowedTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Accumulate individual tool allow/deny across all active skills.
+        //
+        // AllowedTools semantics = INTERSECTION (most-restrictive-wins), matching the
+        // tool-group filtering done by SkillConstraintEnforcer.Apply and the documented
+        // "strictest wins" contract. Rationale: a per-skill AllowedTools whitelist means
+        // "while this skill is active, only these tools are permitted"; with multiple
+        // active skills the agent must satisfy every whitelist, so only tools that ALL
+        // whitelisting skills permit survive.
+        //
+        // A skill with NO AllowedTools imposes no individual-tool restriction and must
+        // NOT collapse the intersection to empty — so only skills that actually declare
+        // a non-empty AllowedTools participate in the intersection (`accumulatedAllowedTools`
+        // stays null until the first whitelisting skill is seen).
+        //
+        // DeniedTools remains a UNION (any skill's deny blocks the tool) — deny always wins.
+        HashSet<string>? accumulatedAllowedTools = null;
         var accumulatedDeniedTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var hasAllowedTools = false;
 
         foreach (var skill in activeSkills.OrderByDescending(s => s.Priority))
         {
@@ -76,9 +89,11 @@ public class SkillConstraintMiddleware : IAiMiddleware
 
             if (result.EffectiveTools is { Count: > 0 })
             {
-                hasAllowedTools = true;
-                foreach (var tool in result.EffectiveTools)
-                    accumulatedAllowedTools.Add(tool);
+                var skillTools = new HashSet<string>(result.EffectiveTools, StringComparer.OrdinalIgnoreCase);
+                if (accumulatedAllowedTools == null)
+                    accumulatedAllowedTools = skillTools; // first whitelisting skill seeds the set
+                else
+                    accumulatedAllowedTools.IntersectWith(skillTools); // narrow to common tools
             }
 
             if (result.DeniedTools is { Count: > 0 })
@@ -88,6 +103,11 @@ public class SkillConstraintMiddleware : IAiMiddleware
             }
         }
 
+        // A non-null set means at least one active skill declared an AllowedTools whitelist.
+        // An empty (but non-null) set means multiple skills declared *disjoint* whitelists,
+        // so no grouped tool satisfies every whitelist → all grouped tools must be removed.
+        var hasAllowedToolsWhitelist = accumulatedAllowedTools != null;
+
         // Filter AdditionalTools: remove tools whose group is not in effective groups
         if (constraintCtx.AvailableToolGroups.Count < availableGroups.Count)
         {
@@ -96,18 +116,20 @@ public class SkillConstraintMiddleware : IAiMiddleware
                 t.Name != null
                 && toolGroupMap.TryGetValue(t.Name, out var group)
                 && !allowed.Contains(group)
-                && !accumulatedAllowedTools.Contains(t.Name)); // individual whitelist overrides group removal
+                && accumulatedAllowedTools?.Contains(t.Name) != true); // individual whitelist overrides group removal
 
             if (removed > 0)
                 _logger.LogInformation("Skill constraints filtered {Count} tools by group", removed);
         }
 
-        // Apply individual tool allow list (keep only allowed + ungrouped tools)
-        if (hasAllowedTools)
+        // Apply individual tool allow list (keep only allowed + ungrouped tools).
+        // Runs whenever a whitelist exists (even if empty → removes every grouped tool).
+        if (hasAllowedToolsWhitelist)
         {
+            var whitelist = accumulatedAllowedTools!;
             var allowedCount = context.AdditionalTools.RemoveAll(t =>
                 t.Name != null
-                && !accumulatedAllowedTools.Contains(t.Name)
+                && !whitelist.Contains(t.Name)
                 && toolGroupMap.ContainsKey(t.Name)); // only filter grouped tools, keep ungrouped (MCP/dynamic)
 
             if (allowedCount > 0)
@@ -126,7 +148,7 @@ public class SkillConstraintMiddleware : IAiMiddleware
 
         // Inject per-skill AllowedTools: ensure individually whitelisted tools are present in AdditionalTools.
         // Deny wins: skip tools that are in the deny set even if they were also allowed by another skill.
-        if (accumulatedAllowedTools.Count > 0)
+        if (accumulatedAllowedTools is { Count: > 0 })
         {
             var existingToolNames = new HashSet<string>(
                 context.AdditionalTools.Where(t => t.Name != null).Select(t => t.Name!),

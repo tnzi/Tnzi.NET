@@ -17,9 +17,7 @@ public class OpenTelemetryModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<OpenTelemetryOptions>()
-            .Bind(context.Configuration.GetSection("OpenTelemetry"))
-            .ValidateWith<OpenTelemetryOptions, OpenTelemetryOptionsValidator>();
+        context.Services.AddTnziOptions<OpenTelemetryOptions, OpenTelemetryOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

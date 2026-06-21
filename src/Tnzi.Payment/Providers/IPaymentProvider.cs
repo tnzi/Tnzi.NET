@@ -64,6 +64,18 @@ public interface IPaymentProvider
     /// 更新支付方式
     /// </summary>
     Task<Result> UpdatePaymentMethodAsync(string subscriptionNo, string paymentMethodId);
+
+    /// <summary>
+    /// off-session 自动扣款（后台续费/试用转正用，使用渠道侧已保存的支付方式无人值守扣款）。
+    /// 默认实现返回"不支持"，渠道按需覆写（Stripe 支持；PayPal 暂不支持）。
+    /// </summary>
+    Task<Result<PaymentProviderChargeResult>> ChargeOffSessionAsync(PaymentProviderChargeDto input)
+        => Task.FromResult(Result.Failure<PaymentProviderChargeResult>(ErrorCodes.PaymentOffSessionNotSupported, 400));
+
+    /// <summary>
+    /// 是否支持 off-session 自动扣款
+    /// </summary>
+    bool SupportsOffSessionCharge => false;
 }
 
 /// <summary>

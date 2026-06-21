@@ -35,8 +35,8 @@ public class AgentNode : IWorkflowNode
             name: step.StepId ?? "agent-node",
             cancellationToken: cancellationToken);
 
-        // 构建输入
-        var stepInput = BuildStepInput(step, state);
+        // 构建输入（与引擎 node input summary 共用 WorkflowNodeHelper.BuildStepInput）
+        var stepInput = WorkflowNodeHelper.BuildStepInput(step, state);
         stepInput = state.ResolveTemplate(stepInput);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, stepInput) };
@@ -48,34 +48,5 @@ public class AgentNode : IWorkflowNode
             Usage = response.Usage,
             IsSuccess = true
         };
-    }
-
-    /// <summary>
-    /// 构建步骤输入：优先使用依赖步骤输出，否则使用初始输入
-    /// </summary>
-    private static string BuildStepInput(WorkflowStepDto step, WorkflowState state)
-    {
-        if (step.DependsOn == null || step.DependsOn.Count == 0)
-            return state.InitialInput;
-
-        if (step.DependsOn.Count == 1)
-        {
-            var output = state.GetOutput(step.DependsOn[0]);
-            return output?.Text ?? state.InitialInput;
-        }
-
-        var sb = new StringBuilder();
-        foreach (var depId in step.DependsOn)
-        {
-            var output = state.GetOutput(depId);
-            if (output != null && !string.IsNullOrEmpty(output.Text))
-            {
-                if (sb.Length > 0) sb.AppendLine();
-                sb.AppendLine($"[{depId}]");
-                sb.AppendLine(output.Text);
-            }
-        }
-
-        return sb.Length > 0 ? sb.ToString().TrimEnd() : state.InitialInput;
     }
 }

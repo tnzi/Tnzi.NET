@@ -10,9 +10,7 @@ public class ImagingModule : TnziInfrastructureModule
 {
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<ImagingOptions>()
-            .Bind(context.Configuration.GetSection("Imaging"))
-            .ValidateWith<ImagingOptions, ImagingOptionsValidator>();
+        context.Services.AddTnziOptions<ImagingOptions, ImagingOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

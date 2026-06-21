@@ -34,13 +34,12 @@ public class AgentRunSignalDispatcherTests
                 Output = "done"
             }));
 
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(workflowControl.Object);
         var dispatcher = new AgentRunSignalDispatcher(
             runStore.Object,
             Mock.Of<IAgentRunService>(),
-            services.BuildServiceProvider());
+            workflowControl.Object,
+            Mock.Of<IWorkflowExecutionQueryService>(),
+            Mock.Of<IWorkflowExecutionMailbox>());
 
         var result = await dispatcher.DispatchInputAsync(runId, new SendAgentRunInput
         {
@@ -83,13 +82,12 @@ public class AgentRunSignalDispatcherTests
         workflowControl.Setup(x => x.CancelAsync(executionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success());
 
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(workflowControl.Object);
         var dispatcher = new AgentRunSignalDispatcher(
             runStore.Object,
             runService.Object,
-            services.BuildServiceProvider());
+            workflowControl.Object,
+            Mock.Of<IWorkflowExecutionQueryService>(),
+            Mock.Of<IWorkflowExecutionMailbox>());
 
         var result = await dispatcher.CancelAsync(runId);
 

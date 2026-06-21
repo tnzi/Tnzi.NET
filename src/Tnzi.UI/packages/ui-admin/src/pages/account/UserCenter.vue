@@ -20,10 +20,11 @@
         <div class="t-user-center__head">
           <div class="t-user-center__avatar t-user-center__avatar--sm">
             <img
-              v-if="profile?.avatar"
-              :src="profile.avatar"
-              :alt="profile.userName"
+              v-if="avatarUrl"
+              :src="avatarUrl"
+              :alt="profile?.userName ?? t('title')"
               class="t-user-center__avatar-img"
+              @error="onHeaderAvatarError"
             />
             <span v-else class="t-user-center__avatar-initials">{{ avatarInitials }}</span>
           </div>
@@ -53,6 +54,20 @@
               </header>
               <div class="t-user-center__section-body">
                 <div class="t-detail-content">
+                <div class="t-user-center__avatar-field">
+                  <TImageUpload
+                    shape="circle"
+                    :cropper="true"
+                    :model-value="avatarUrl"
+                    :disabled="savingAvatar"
+                    :upload="handleAvatarUpload"
+                    @error="(msg: string) => message.error(msg)"
+                  />
+                  <div class="t-user-center__avatar-field-text">
+                    <div class="t-user-center__avatar-field-label">{{ t('profile.avatar') }}</div>
+                    <div class="t-user-center__hint">{{ t('profile.avatarHint') }}</div>
+                  </div>
+                </div>
                 <NForm label-placement="top" size="small" :show-feedback="false">
                   <div class="t-user-center__form-grid">
                     <NFormItem :label="t('profile.userName')">
@@ -60,6 +75,12 @@
                     </NFormItem>
                     <NFormItem :label="t('profile.nickname')">
                       <NInput v-model:value="form.nickname" :placeholder="t('profile.nicknamePlaceholder')" />
+                    </NFormItem>
+                    <NFormItem :label="t('profile.firstName')">
+                      <NInput v-model:value="form.firstName" :placeholder="t('profile.firstNamePlaceholder')" />
+                    </NFormItem>
+                    <NFormItem :label="t('profile.lastName')">
+                      <NInput v-model:value="form.lastName" :placeholder="t('profile.lastNamePlaceholder')" />
                     </NFormItem>
                     <NFormItem :label="t('profile.email')">
                       <NInput
@@ -402,7 +423,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, type Ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { DataTableColumns } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -421,14 +442,17 @@ import {
   NSpin,
   NTag,
 } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, TImageUpload } from '@tnzi/ui'
+import { useStorageApi } from '@tnzi/core/services/storage'
 import TDetailLayout from '../../components/detail/TDetailLayout.vue'
 import type { DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { deviceIconColor, parseDeviceInfo } from '../_shared/device-info'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
+import { unwrapResult } from '../../services/_mappers'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
+import { resolveAvatarUrl } from '../../utils/resolveAvatarUrl'
 import { makePageTranslator } from '../_shared/translate'
 import type {
   UserDto,
@@ -440,7 +464,9 @@ import type {
   UpdateUserDto,
 } from '@tnzi/core/services/identity'
 
-const bridge = createIdentityBridge({ client: useAdminClient() })
+const client = useAdminClient()
+const bridge = createIdentityBridge({ client })
+const storageApi = useStorageApi(client)
 const message = useSafeMessage()
 const router = useRouter()
 const authStore = useAdminAuthStore()
@@ -524,6 +550,8 @@ const loadingProfile = ref(false)
 const savingProfile = ref(false)
 
 interface ProfileForm {
+  firstName: string
+  lastName: string
   nickname: string
   email: string
   phoneNumber: string
@@ -534,6 +562,8 @@ interface ProfileForm {
   website: string
 }
 const form = reactive<ProfileForm>({
+  firstName: '',
+  lastName: '',
   nickname: '',
   email: '',
   phoneNumber: '',
@@ -551,6 +581,8 @@ const genderOptions = computed(() => [
 ])
 
 function applyProfileToForm(p: UserDto): void {
+  form.firstName = p.firstName ?? ''
+  form.lastName = p.lastName ?? ''
   form.nickname = p.nickname ?? ''
   form.email = p.email ?? ''
   form.phoneNumber = p.phoneNumber ?? ''
@@ -591,23 +623,118 @@ const avatarInitials = computed(() => {
   return name.slice(0, 1).toUpperCase()
 })
 
-async function saveProfile(): Promise<void> {
-  savingProfile.value = true
+// Resolved avatar URL for the header + the upload widget's preview. Reads the
+// (possibly newer) `detail` first since the detail endpoint owns `avatarUrl`,
+// then falls back to the basic `profile` (`avatar`/`avatarId`). A broken image
+// drops back to the name initial; the broken flag resets whenever the resolved
+// URL changes (a fresh upload should get a fresh chance to load).
+const resolvedAvatarUrl = computed<string | null>(
+  () => resolveAvatarUrl(detail.value, storageApi) ?? resolveAvatarUrl(profile.value, storageApi),
+)
+const headerAvatarBroken = ref(false)
+watch(resolvedAvatarUrl, () => { headerAvatarBroken.value = false })
+const avatarUrl = computed<string | null>(() =>
+  headerAvatarBroken.value ? null : resolvedAvatarUrl.value,
+)
+function onHeaderAvatarError(): void {
+  headerAvatarBroken.value = true
+}
+
+const savingAvatar = ref(false)
+
+/**
+ * `TImageUpload`'s `upload` handler: push the cropped blob to the storage
+ * module, then hand back the file id + an anonymous preview URL so the widget
+ * can render it immediately. The id is persisted to the user's profile via the
+ * `avatarId` field of `PUT /users/profile/detail`.
+ */
+async function handleAvatarUpload(file: File | Blob): Promise<{ id?: string; url: string }> {
+  savingAvatar.value = true
   try {
-    // Email / phone deliberately omitted — they require the verify-code
-    // round-trip and are mutated through `openChangeEmail/openChangePhone`
-    // modals, NOT this PUT.
-    const payload: UpdateUserDto = {
+    // `TImageUpload` may emit a cropped Blob; the storage API takes a File, so
+    // wrap it with a sensible filename when needed.
+    const toUpload =
+      file instanceof File ? file : new File([file], 'avatar.png', { type: file.type || 'image/png' })
+    // `storageApi.upload` resolves to the raw `ApiResult<FileUploadResultDto>`
+    // envelope (unlike bridge methods, which pre-unwrap) — peel it here.
+    const uploaded = unwrapResult(await storageApi.upload(toUpload))
+    const id = uploaded?.id
+    if (!id) throw new Error(t('profile.avatarUploadFailed'))
+    const url = storageApi.getPreviewUrl(id)
+
+    // Persist the new avatar id. CRITICAL: the backend detail update is
+    // REPLACE-semantics (Mapster maps every field, nulls included), so a
+    // partial `{ avatarId }` would wipe nickname/gender/bio. Send the full
+    // current form payload alongside the new avatar id.
+    const updated = await bridge.me.updateProfile({
+      firstName: form.firstName || null,
+      lastName: form.lastName || null,
       nickname: form.nickname || null,
       gender: form.gender,
       birthday: form.birthday || null,
       bio: form.bio || null,
       address: form.address || null,
       website: form.website || null,
+      avatarId: id,
+      avatarUrl: null,
+    } as UpdateUserDto)
+    if (updated) {
+      profile.value = updated
+      applyProfileToForm(updated)
+    } else if (profile.value) {
+      profile.value = { ...profile.value, avatarId: id, avatar: null }
+    }
+    // Reflect the new id on `detail` too (it drives `avatarUrl`'s first branch).
+    detail.value = detail.value
+      ? { ...detail.value, avatarId: id, avatarUrl: null }
+      : detail.value
+    // Mirror onto the auth store so the header-bar avatar (outside this page)
+    // refreshes without a reload.
+    if (authStore.userInfo) {
+      authStore.setUserInfo({ ...authStore.userInfo, avatar: url })
+    }
+    message.success(t('profile.avatarUpdated'))
+    return { id, url }
+  } finally {
+    savingAvatar.value = false
+  }
+}
+
+async function saveProfile(): Promise<void> {
+  savingProfile.value = true
+  try {
+    // Email / phone deliberately omitted — they require the verify-code
+    // round-trip and are mutated through `openChangeEmail/openChangePhone`
+    // modals, NOT this PUT.
+    // avatarId/avatarUrl MUST be carried through: the backend detail update is
+    // REPLACE-semantics, so omitting them would wipe a previously-uploaded
+    // avatar the moment the user saves any other profile field (this was the
+    // "avatar disappears after refresh" bug — a Save silently nulled avatarId).
+    const payload: UpdateUserDto = {
+      firstName: form.firstName || null,
+      lastName: form.lastName || null,
+      nickname: form.nickname || null,
+      gender: form.gender,
+      birthday: form.birthday || null,
+      bio: form.bio || null,
+      address: form.address || null,
+      website: form.website || null,
+      avatarId: detail.value?.avatarId ?? profile.value?.avatarId ?? null,
+      avatarUrl: detail.value?.avatarUrl ?? null,
     }
     const updated = await bridge.me.updateProfile(payload)
     profile.value = updated
     applyProfileToForm(updated)
+    // Mirror the new display name onto the auth store so the header bar (outside
+    // this page) updates live — same precedence as the backend: nickname → real
+    // name → username.
+    if (authStore.userInfo && updated) {
+      const fullName = [updated.firstName, updated.lastName].filter(Boolean).join(' ').trim()
+      authStore.setUserInfo({
+        ...authStore.userInfo,
+        displayName: updated.nickname || (fullName || undefined) || authStore.userInfo.username,
+      })
+    }
     message.success(t('profile.saved'))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -1101,6 +1228,25 @@ onMounted(() => {
 }
 .t-user-center__avatar--sm .t-user-center__avatar-initials {
   font-size: 16px;
+}
+
+/* Profile-section avatar uploader: the circular picker + a label/hint column. */
+.t-user-center__avatar-field {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.t-user-center__avatar-field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.t-user-center__avatar-field-label {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--tnzi-base-text);
 }
 
 .t-user-center__section-title {

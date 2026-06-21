@@ -7,7 +7,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
  * Orders page config — aligned with PaymentDto (2026-04-14 Plan C unstub).
  *
  * `status` is the PaymentStatus enum (0=Pending / 1=Processing / 2=Succeeded /
- *  3=Failed / 4=Closed / 5=Cancelled / 6=Expired / 7=Refunding / 8=Refunded).
+ *  3=Failed / 4=Closed / 5=Cancelled / 6=Expired / 7=Refunded / 8=PartialRefunded).
  * Backend serialises it as an int — the previous string-keyed map never
  * matched any row, so the badge silently fell through to the raw number.
  *
@@ -21,8 +21,8 @@ const ORDER_STATUS_MAP: Record<number, { type: 'info' | 'success' | 'warning' | 
   4: { type: 'default', label: 'Closed' },
   5: { type: 'default', labelKey: 'admin.shared.status.cancelled' },
   6: { type: 'default', label: 'Expired' },
-  7: { type: 'info',    label: 'Refunding' },
-  8: { type: 'default', label: 'Refunded' },
+  7: { type: 'info',    label: 'Refunded' },
+  8: { type: 'warning', label: 'Partial Refunded' },
 }
 
 export const orderColumns: ColumnDef[] = [

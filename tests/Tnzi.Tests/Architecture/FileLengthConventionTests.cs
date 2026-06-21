@@ -24,8 +24,6 @@ public class FileLengthConventionTests
         "src/Tnzi.Redis/RedisCacheService.cs",
         "src/Tnzi.Identity/Services/IdentityPageService.cs",
         "src/Tnzi.EFCore/EfCoreRepository.cs",
-        "src/Tnzi.AI/Infrastructure/Mcp/McpClientAdapter.cs",
-        "src/Tnzi.AI.Workflow/Services/WorkflowService.Execution.cs",
         "src/Tnzi.Authorization/Services/DataAuthService.cs",
     };
 

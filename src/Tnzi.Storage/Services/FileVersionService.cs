@@ -144,4 +144,53 @@ public class FileVersionService : ApplicationService, IFileVersionService
         LogInformation("File version restored: FileId: {FileId}, Version: {Version}", fileId, version);
         return Ok(fileRecord, $"File restored to version {version}");
     }
+
+    public async Task<Result<Stream>> GetVersionContentAsync(Guid fileId, int version, CancellationToken cancellationToken = default)
+    {
+        var targetVersion = await _versionRepository.AsQueryable()
+            .Where(v => v.FileId == fileId && v.Version == version)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (targetVersion == null)
+            return Fail<Stream>($"Version {version} not found for file {fileId}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        if (string.IsNullOrEmpty(targetVersion.Path))
+            return Fail<Stream>($"Version {version} has no stored content for file {fileId}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var stream = await _storage.DownloadAsync(targetVersion.Path);
+        return Ok(stream);
+    }
+
+    public async Task<Result> DeleteVersionAsync(Guid fileId, int version, CancellationToken cancellationToken = default)
+    {
+        // 用 tracking 查询，确保 DeleteAsync 操作的是已被上下文跟踪的实例，避免身份映射冲突
+        var targetVersion = await _versionRepository.AsQueryable(withTracking: true)
+            .Where(v => v.FileId == fileId && v.Version == version)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (targetVersion == null)
+            return Fail($"Version {version} not found for file {fileId}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        if (targetVersion.IsCurrent)
+            return Fail("Cannot delete the current version", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+        // 先删数据库记录，再删物理文件（物理删除失败仅告警，不阻断）
+        await _versionRepository.DeleteAsync(targetVersion, cancellationToken);
+
+        if (!string.IsNullOrEmpty(targetVersion.Path))
+        {
+            try
+            {
+                await _storage.DeleteAsync(targetVersion.Path);
+            }
+            catch (Exception ex)
+            {
+                LogWarning("Failed to delete physical file for version. FileId: {FileId}, Version: {Version}, Path: {Path}, Error: {Error}",
+                    fileId, version, targetVersion.Path, ex.Message);
+            }
+        }
+
+        LogInformation("File version deleted: FileId: {FileId}, Version: {Version}", fileId, version);
+        return Ok($"File version {version} deleted successfully");
+    }
 }

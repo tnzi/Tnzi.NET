@@ -11,13 +11,8 @@ public class ChannelsModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<ChannelsModuleOptions>()
-            .Bind(context.Configuration.GetSection("AI:Channels"))
-            .ValidateWith<ChannelsModuleOptions, ChannelsModuleOptionsValidator>();
-
-        context.Services.AddOptions<GatewayOptions>()
-            .Bind(context.Configuration.GetSection("AI:Channels:Gateway"))
-            .ValidateWith<GatewayOptions, GatewayOptionsValidator>();
+        context.Services.AddTnziOptions<ChannelsModuleOptions, ChannelsModuleOptionsValidator>(context.Configuration, "AI:Channels");
+        context.Services.AddTnziOptions<GatewayOptions, GatewayOptionsValidator>(context.Configuration, "AI:Channels:Gateway");
 
         return Task.CompletedTask;
     }

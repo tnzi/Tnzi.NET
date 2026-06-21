@@ -105,7 +105,12 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
                     Math.Min(i + batchSize, chunks.Count), chunks.Count);
             }
 
-            // 5. 构建 DocumentChunk 实体并批量插入（ID 由框架自动生成）
+            // 5. 幂等性：清理本文档已存在的旧块再插入。
+            // 后台摄取任务可能被 Hangfire 重试（chunk 在状态回写之前就已提交），
+            // 若不先删除，重试会重复插入整套块。先按 DocumentId 删除已有块，使重试"替换"而非"叠加"。
+            await _chunkRepository.DeleteAsync(c => c.DocumentId == documentId, ct);
+
+            // 6. 构建 DocumentChunk 实体并批量插入（ID 由框架自动生成）
             var chunkEntities = new List<DocumentChunk>();
 
             for (var i = 0; i < chunks.Count; i++)
@@ -123,7 +128,7 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
 
             await _chunkRepository.InsertManyAsync(chunkEntities);
 
-            // 6. GraphRAG 实体/关系抽取（默认关闭，opt-in via AI:Rag:GraphRag:Enabled）
+            // 7. GraphRAG 实体/关系抽取（默认关闭，opt-in via AI:Rag:GraphRag:Enabled）
             // 抽取失败不能影响文档摄取主流程：捕获并记录后继续。
             if (_options.GraphRag.Enabled)
             {

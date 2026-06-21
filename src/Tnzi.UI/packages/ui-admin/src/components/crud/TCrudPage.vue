@@ -70,10 +70,19 @@
           @update:show="(v: boolean) => (showColumnSetting = v)"
         >
           <template #trigger>
-            <NButton tertiary size="small" class="t-list-shell__action t-crud-toolbar__columns">
-              <template #icon><TSvgIcon icon="mdi:cog-outline" :size="16" /></template>
+            <NTooltip placement="top" :delay="600">
+              <template #trigger>
+                <NButton
+                  tertiary
+                  size="small"
+                  class="t-list-shell__action t-crud-toolbar__columns t-list-shell__trailing-icon"
+                  :aria-label="t('admin.crud.columns')"
+                >
+                  <template #icon><TSvgIcon icon="mdi:cog-outline" :size="16" /></template>
+                </NButton>
+              </template>
               {{ t('admin.crud.columns') }}
-            </NButton>
+            </NTooltip>
           </template>
         </TCrudColumnSetting>
       </template>
@@ -95,7 +104,7 @@
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { ref } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NTooltip } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TListShell from './TListShell.vue'
 import TTableRenderer from './renderers/TTableRenderer.vue'

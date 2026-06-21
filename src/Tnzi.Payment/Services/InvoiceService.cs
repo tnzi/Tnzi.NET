@@ -13,6 +13,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
     private readonly IHtmlToPdfConverter? _pdfConverter;
     private readonly ITemplateRenderService? _templateRenderService;
     private readonly INotificationService? _notificationService;
+    private readonly IFileStorageService? _fileStorage;
     private readonly IOptions<InvoiceOptions> _invoiceOptions;
 
     public InvoiceService(
@@ -23,7 +24,8 @@ public class InvoiceService : ApplicationService, IInvoiceService
         IServiceProvider serviceProvider,
         IHtmlToPdfConverter? pdfConverter = null,
         ITemplateRenderService? templateRenderService = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IFileStorageService? fileStorage = null)
         : base(serviceProvider)
     {
         _invoiceRepository = Check.NotNull(invoiceRepository);
@@ -33,6 +35,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         _pdfConverter = pdfConverter;
         _templateRenderService = templateRenderService;
         _notificationService = notificationService;
+        _fileStorage = fileStorage;
     }
 
     public async Task<Result<InvoiceDto>> CreateFromPaymentAsync(Guid paymentId, CreateInvoiceDto? request, CancellationToken cancellationToken = default)
@@ -262,22 +265,52 @@ public class InvoiceService : ApplicationService, IInvoiceService
             outputBytes = Encoding.UTF8.GetBytes(htmlContent);
         }
 
-        // 持久化生成的文件
+        // 持久化生成的文件：优先走框架 Storage 模块（多实例/容器部署安全），否则回退本地文件系统
         var fileName = $"{invoice.InvoiceNo}{fileExtension}";
-        var invoiceDir = Path.Combine(AppContext.BaseDirectory, "invoices");
-        Directory.CreateDirectory(invoiceDir);
-        var localFilePath = Path.Combine(invoiceDir, fileName);
-        await File.WriteAllBytesAsync(localFilePath, outputBytes, cancellationToken);
 
-        invoice.PdfFilePath = localFilePath;
+        if (_fileStorage != null)
+        {
+            using var stream = new MemoryStream(outputBytes);
+            var saveResult = await _fileStorage.SaveWithReferenceAsync(
+                fileName, stream, nameof(Invoice), invoice.Id, nameof(Invoice.PdfFileId));
+
+            if (saveResult.Succeeded && saveResult.Data != null)
+            {
+                invoice.PdfFileId = saveResult.Data.Id;
+                invoice.PdfFilePath = saveResult.Data.Path;
+            }
+            else
+            {
+                Logger.LogWarning("Invoice PDF storage save failed, falling back to local file. InvoiceNo: {InvoiceNo}, Error: {Error}",
+                    invoice.InvoiceNo, saveResult.Message);
+                invoice.PdfFilePath = await WriteLocalFallbackAsync(fileName, outputBytes, cancellationToken);
+            }
+        }
+        else
+        {
+            invoice.PdfFilePath = await WriteLocalFallbackAsync(fileName, outputBytes, cancellationToken);
+        }
+
         invoice.PdfFileUrl = $"/api/invoices/{invoice.Id}/pdf";
 
         await _invoiceRepository.UpdateAsync(invoice, cancellationToken);
 
-        Logger.LogInformation("Invoice generated. InvoiceNo: {InvoiceNo}, Format: {Format}",
-            invoice.InvoiceNo, contentType);
+        Logger.LogInformation("Invoice generated. InvoiceNo: {InvoiceNo}, Format: {Format}, StorageBacked: {StorageBacked}",
+            invoice.InvoiceNo, contentType, invoice.PdfFileId != null);
 
         return Ok<string>(invoice.PdfFileUrl ?? string.Empty);
+    }
+
+    /// <summary>
+    /// 本地文件系统回退（仅在未加载 Storage 模块时使用）
+    /// </summary>
+    private static async Task<string> WriteLocalFallbackAsync(string fileName, byte[] content, CancellationToken cancellationToken)
+    {
+        var invoiceDir = Path.Combine(AppContext.BaseDirectory, "invoices");
+        Directory.CreateDirectory(invoiceDir);
+        var localFilePath = Path.Combine(invoiceDir, fileName);
+        await File.WriteAllBytesAsync(localFilePath, content, cancellationToken);
+        return localFilePath;
     }
 
     /// <summary>

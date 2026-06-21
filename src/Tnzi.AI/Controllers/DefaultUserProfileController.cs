@@ -41,13 +41,5 @@ public class DefaultUserProfileController : ApiControllerBase
     /// <summary>
     /// 获取当前用户 ID，未认证时抛出异常
     /// </summary>
-    private Guid GetCurrentUserId()
-    {
-        var userId = GetRequiredCurrentUser().Id;
-        if (!userId.HasValue)
-        {
-            throw new BusinessException("Authentication required", "Unauthorized", 401);
-        }
-        return userId.Value;
-    }
+    private Guid GetCurrentUserId() => AiControllerHelpers.RequireUserId(GetRequiredCurrentUser());
 }

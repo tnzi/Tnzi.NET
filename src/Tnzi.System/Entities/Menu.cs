@@ -28,6 +28,23 @@ public enum MenuType
 public class Menu : MultiTenantAuditedEntity<Guid>
 {
     public Guid? ParentId { get; set; }
+
+    /// <summary>
+    /// Associates this row with a front-end route by its name (e.g. "identity.users").
+    /// <para>
+    /// When set, the row <b>overrides</b> that route's derived menu entry
+    /// (title / icon / order / visibility) under the front-end <c>'merge'</c> menu
+    /// source — the route table stays the source of truth for which pages exist,
+    /// this table just lets operators retitle / reorder / hide / re-icon them
+    /// without a redeploy.
+    /// </para>
+    /// <para>
+    /// When null, the row is a stand-alone <b>custom</b> navigation node (e.g. an
+    /// external link via <see cref="Path"/>) the route table doesn't know about.
+    /// </para>
+    /// </summary>
+    public string? MenuKey { get; set; }
+
     public string Name { get; set; } = string.Empty;
     public string? Icon { get; set; }
     public string? Path { get; set; }

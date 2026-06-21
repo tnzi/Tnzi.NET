@@ -10,6 +10,20 @@ public class S3Storage : IFileStorage, IDisposable
     private readonly string? _baseUrl;
     private readonly IAmazonS3 _s3Client;
     private readonly ILogger<S3Storage>? _logger;
+    private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
+
+    /// <summary>
+    /// 运行时有效的 URL 前缀：优先取 IOptionsMonitor 的当前值（支持配置热更新），
+    /// 为空时回退到构造期冻结的 _baseUrl（保持既有行为）。
+    /// </summary>
+    private string? EffectiveBaseUrl
+    {
+        get
+        {
+            var hot = _optionsMonitor?.CurrentValue.UrlPrefix;
+            return !string.IsNullOrEmpty(hot) ? hot : _baseUrl;
+        }
+    }
 
     /// <summary>
     /// 初始化 <see cref="S3Storage"/> 类型的新实例
@@ -17,10 +31,12 @@ public class S3Storage : IFileStorage, IDisposable
     /// <param name="options">S3存储配置选项</param>
     /// <param name="configuration">配置</param>
     /// <param name="logger">日志记录器</param>
-    public S3Storage(S3StorageOptions options, IConfiguration? configuration = null, ILogger<S3Storage>? logger = null)
+    /// <param name="optionsMonitor">选项监视器（可选），用于运行时热读取 UrlPrefix</param>
+    public S3Storage(S3StorageOptions options, IConfiguration? configuration = null, ILogger<S3Storage>? logger = null, IOptionsMonitor<StorageOptions>? optionsMonitor = null)
     {
         _options = Check.NotNull(options);
         _logger = logger;
+        _optionsMonitor = optionsMonitor;
 
         Check.NotNullOrEmpty(_options.AccessKeyId);
         Check.NotNullOrEmpty(_options.SecretAccessKey);
@@ -29,18 +45,25 @@ public class S3Storage : IFileStorage, IDisposable
         _baseUrl = configuration?["Storage:UrlPrefix"] ?? $"https://{_options.BucketName}.s3.{_options.Region}.amazonaws.com";
 
         // 创建 S3 客户端
-        var region = string.IsNullOrEmpty(_options.Region)
-            ? RegionEndpoint.USEast1
-            : RegionEndpoint.GetBySystemName(_options.Region);
+        // 注意：AWS SDK 中 RegionEndpoint 与 ServiceURL 互斥，设置自定义端点时不能再设 RegionEndpoint。
+        var config = new AmazonS3Config();
 
-        var config = new AmazonS3Config
-        {
-            RegionEndpoint = region
-        };
+        // UseHttp 控制 SDK（含预签名 URL 签名器）生成的 scheme。
+        config.UseHttp = !_options.UseHttps;
 
         if (!string.IsNullOrEmpty(_options.ServiceUrl))
         {
-            config.ServiceURL = _options.ServiceUrl;
+            // 自定义端点（如 MinIO / 自托管 S3 兼容服务）：
+            // 依据 UseHttps 规整其 scheme，并使用路径样式以避免把桶名提升为子域名。
+            config.ServiceURL = NormalizeServiceUrlScheme(_options.ServiceUrl, _options.UseHttps);
+            config.ForcePathStyle = true;
+        }
+        else
+        {
+            // 默认 AWS 端点：由 RegionEndpoint 决定。
+            config.RegionEndpoint = string.IsNullOrEmpty(_options.Region)
+                ? RegionEndpoint.USEast1
+                : RegionEndpoint.GetBySystemName(_options.Region);
         }
 
         _s3Client = new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, config);
@@ -177,7 +200,7 @@ public class S3Storage : IFileStorage, IDisposable
         }
 
         // 如果没有过期时间，返回基本URL
-        var url = _baseUrl?.TrimEnd('/') + "/" + filePath.TrimStart('/');
+        var url = EffectiveBaseUrl?.TrimEnd('/') + "/" + filePath.TrimStart('/');
         return Task.FromResult(url);
     }
 
@@ -280,11 +303,65 @@ public class S3Storage : IFileStorage, IDisposable
             BucketName = _options.BucketName,
             Key = filePath,
             Verb = verb,
-            Expires = DateTime.UtcNow.AddSeconds(expiresInSeconds)
+            Expires = DateTime.UtcNow.AddSeconds(expiresInSeconds),
+            // 预签名 URL 的 scheme 由请求的 Protocol 决定（默认 HTTPS），与 UseHttps 对齐。
+            Protocol = _options.UseHttps ? Protocol.HTTPS : Protocol.HTTP
         };
 
         var url = _s3Client.GetPreSignedURL(request);
         return Task.FromResult<string?>(url);
+    }
+
+    /// <summary>
+    /// Server-side copy an S3 object to a new key within the same bucket (no download/upload round-trip).
+    /// </summary>
+    /// <param name="sourcePath">Source object key</param>
+    /// <param name="destFileName">Destination object key</param>
+    /// <returns>The destination key on success, or null if the path is empty or the copy fails</returns>
+    public async Task<string?> CopyAsync(string sourcePath, string destFileName)
+    {
+        if (string.IsNullOrEmpty(sourcePath) || string.IsNullOrEmpty(destFileName))
+            return null;
+
+        try
+        {
+            var request = new CopyObjectRequest
+            {
+                SourceBucket = _options.BucketName,
+                SourceKey = sourcePath,
+                DestinationBucket = _options.BucketName,
+                DestinationKey = destFileName
+            };
+            await _s3Client.CopyObjectAsync(request);
+            return destFileName;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to server-side copy S3 object: {SourcePath} -> {DestFileName}", sourcePath, destFileName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 依据 UseHttps 规整自定义服务端点的 scheme。
+    /// 若端点已含 scheme 则替换为期望的 http/https；若无 scheme 则补全。
+    /// </summary>
+    private static string NormalizeServiceUrlScheme(string serviceUrl, bool useHttps)
+    {
+        var desiredScheme = useHttps ? "https" : "http";
+
+        if (serviceUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return useHttps ? serviceUrl : $"http://{serviceUrl["https://".Length..]}";
+        }
+
+        if (serviceUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return useHttps ? $"https://{serviceUrl["http://".Length..]}" : serviceUrl;
+        }
+
+        // 无 scheme：按期望补全
+        return $"{desiredScheme}://{serviceUrl}";
     }
 
     public void Dispose()

@@ -301,52 +301,66 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
             throw new InvalidOperationException($"MCP server '{config.Name}': Http requires a valid HTTP(S) Endpoint.");
         }
         var options = new HttpClientTransportOptions { Endpoint = uri };
-        if (config.Headers is { Count: > 0 })
+
+        // 始终为 HTTP transport 配置禁止自动重定向的 HttpClient（防御 SSRF 重定向绕过），
+        // 与 A2A 客户端基线一致。SDK 不支持注入 HttpClient 时降级到不带 handler 的默认行为。
+        var configuredHttpClient = TryApplyHttpClientWithHeaders(options, config.Headers);
+
+        if (!configuredHttpClient && config.Headers is { Count: > 0 })
         {
-            if (!TryApplyHttpHeaders(options, config.Headers))
+            // 无法注入 HttpClient（即无法应用自定义头/重定向策略）— 尝试 query 降级传递鉴权信息。
+            if (TryApplyHttpQueryFallback(options, config.Headers))
             {
-                if (TryApplyHttpQueryFallback(options, config.Headers))
-                {
-                    _logger.LogWarning(
-                        "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support custom headers in this SDK version. Falling back to query-based auth/tenant propagation.",
-                        config.Name);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support custom headers in this SDK version.",
-                        config.Name);
-                }
+                _logger.LogWarning(
+                    "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support injecting an HttpClient in this SDK version. Falling back to query-based auth/tenant propagation (redirect protection unavailable).",
+                    config.Name);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support injecting an HttpClient in this SDK version.",
+                    config.Name);
             }
         }
 
         return new HttpClientTransport(options, loggerFactory: _loggerFactory);
     }
 
-    private static bool TryApplyHttpHeaders(HttpClientTransportOptions options, Dictionary<string, string> headers)
+    /// <summary>
+    /// 尝试为 HTTP transport 注入一个禁止自动重定向（AllowAutoRedirect=false）的 HttpClient，
+    /// 并附加自定义头（若有）。注入成功返回 true（重定向保护生效）。
+    /// SDK 不支持 HttpClient 属性时返回 false，由调用方决定 query 降级。
+    /// </summary>
+    private static bool TryApplyHttpClientWithHeaders(HttpClientTransportOptions options, Dictionary<string, string>? headers)
     {
         var optionsType = options.GetType();
         var httpClientProp = optionsType.GetProperty("HttpClient", BindingFlags.Instance | BindingFlags.Public);
         if (httpClientProp != null && httpClientProp.PropertyType == typeof(HttpClient) && httpClientProp.CanWrite)
         {
-            var client = new HttpClient();
-            foreach (var (key, value) in headers)
+            var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
+            if (headers is { Count: > 0 })
             {
-                if (!string.IsNullOrWhiteSpace(key))
+                foreach (var (key, value) in headers)
                 {
-                    client.DefaultRequestHeaders.TryAddWithoutValidation(key, value);
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        client.DefaultRequestHeaders.TryAddWithoutValidation(key, value);
+                    }
                 }
             }
             httpClientProp.SetValue(options, client);
             return true;
         }
 
-        var headersProp = optionsType.GetProperty("DefaultHeaders", BindingFlags.Instance | BindingFlags.Public)
-                         ?? optionsType.GetProperty("Headers", BindingFlags.Instance | BindingFlags.Public);
-        if (headersProp != null && headersProp.CanWrite)
+        // SDK 无 HttpClient 注入点：仅当有头时退而求其次写入 Headers/DefaultHeaders（无法控制重定向）。
+        if (headers is { Count: > 0 })
         {
-            headersProp.SetValue(options, headers);
-            return true;
+            var headersProp = optionsType.GetProperty("DefaultHeaders", BindingFlags.Instance | BindingFlags.Public)
+                             ?? optionsType.GetProperty("Headers", BindingFlags.Instance | BindingFlags.Public);
+            if (headersProp != null && headersProp.CanWrite)
+            {
+                headersProp.SetValue(options, headers);
+            }
         }
 
         return false;

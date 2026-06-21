@@ -18,18 +18,13 @@ public class AuditModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<AuditOptions>()
-            .Bind(context.Configuration.GetSection("Audit"))
-            .ValidateWith<AuditOptions, AuditOptionsValidator>();
+        context.Services.AddTnziOptions<AuditOptions, AuditOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 注册配置中心
-        context.Services.AddSingleton<ISettingDefinitionProvider, AuditSettingDefinitionProvider>();
-
         // 注册请求体脱敏工具（无状态，可单例）
         context.Services.AddSingleton<RequestBodyRedactor>();
 

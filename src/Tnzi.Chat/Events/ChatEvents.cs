@@ -1,84 +1,42 @@
 namespace Tnzi.Chat.Events;
 
-/// <summary>
-/// 消息发送事件
-/// </summary>
-public class MessageSentEvent : EventBase
+public enum ConversationChangeType
 {
-    /// <summary>
-    /// 消息ID
-    /// </summary>
+    Created = 1,
+    MemberAdded = 2,
+    MemberRemoved = 3,
+    Left = 4,
+    Renamed = 5,
+    Dissolved = 6
+}
+
+/// <summary>新消息发出（推给除发送者外所有在群成员）。</summary>
+public class ConversationMessageSentEvent : EventBase
+{
+    public Guid ConversationId { get; set; }
     public Guid MessageId { get; set; }
-
-    /// <summary>
-    /// 发送人ID
-    /// </summary>
-    public Guid SenderId { get; set; }
-
-    /// <summary>
-    /// 消息类型
-    /// </summary>
-    public MessageType MessageType { get; set; }
-
-    /// <summary>
-    /// 收件人ID列表
-    /// </summary>
+    public Guid? SenderId { get; set; }
+    public MessageContentType ContentType { get; set; }
+    public string Preview { get; set; } = string.Empty;
     public List<Guid> RecipientUserIds { get; set; } = new();
 
-    /// <summary>
-    /// 消息标题
-    /// </summary>
-    public string Title { get; set; } = string.Empty;
+    /// <summary>完整消息体，供实时推送给接收方直接增量追加（无需回拉）。</summary>
+    public ChatMessageDto? Message { get; set; }
 }
 
-/// <summary>
-/// 消息已读事件
-/// </summary>
-public class MessageReadEvent : EventBase
+/// <summary>某成员标记会话已读（推给其他成员做已读回执）。</summary>
+public class ConversationReadEvent : EventBase
 {
-    /// <summary>
-    /// 消息ID
-    /// </summary>
-    public Guid MessageId { get; set; }
-
-    /// <summary>
-    /// 阅读人ID
-    /// </summary>
+    public Guid ConversationId { get; set; }
     public Guid UserId { get; set; }
-
-    /// <summary>
-    /// 消息发送人ID（用于推送已读回执）
-    /// </summary>
-    public Guid SenderId { get; set; }
+    public DateTime ReadAt { get; set; }
+    public List<Guid> OtherMemberIds { get; set; } = new();
 }
 
-/// <summary>
-/// 消息回复事件
-/// </summary>
-public class MessageRepliedEvent : EventBase
+/// <summary>会话成员/属性变化（建群/加退人/改名/解散）。</summary>
+public class ConversationChangedEvent : EventBase
 {
-    /// <summary>
-    /// 回复ID
-    /// </summary>
-    public Guid ReplyId { get; set; }
-
-    /// <summary>
-    /// 所属消息ID
-    /// </summary>
-    public Guid MessageId { get; set; }
-
-    /// <summary>
-    /// 回复人ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
-    /// <summary>
-    /// 需要通知的用户ID列表
-    /// </summary>
-    public List<Guid> NotifyUserIds { get; set; } = new();
-
-    /// <summary>
-    /// 回复内容
-    /// </summary>
-    public string Content { get; set; } = string.Empty;
+    public Guid ConversationId { get; set; }
+    public ConversationChangeType ChangeType { get; set; }
+    public List<Guid> AffectedUserIds { get; set; } = new();
 }

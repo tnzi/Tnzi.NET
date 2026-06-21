@@ -152,7 +152,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
                 key: 'connectionId',
                 width: 220,
                 render: (c) =>
-                  h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-11px' }, c.connectionId),
+                  h('code', { class: 'tnzi-mono text-11px' }, c.connectionId),
               },
               { title: () => t('cols.hub'), key: 'hubName', width: 140 },
               {
@@ -186,7 +186,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
     key: 'userId',
     ellipsis: { tooltip: true },
     render: (row) =>
-      h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.userId),
+      h('code', { class: 'tnzi-mono text-12px' }, row.userId),
   },
   {
     title: () => t('cols.userName'),

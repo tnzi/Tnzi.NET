@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Tnzi.AI.Tools.Sql;
 
 /// <summary>
@@ -5,14 +7,33 @@ namespace Tnzi.AI.Tools.Sql;
 /// Identifier quoting (and any future dialect-specific escape rules) live here
 /// so all four built-in providers stay consistent.
 /// </summary>
-internal static class SqlSchemaProviderHelpers
+internal static partial class SqlSchemaProviderHelpers
 {
+    // 与 SchemaInspector.SafeIdentifierRegex 同款白名单，provider 内做深度防御，不依赖调用方校验。
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.None, matchTimeoutMilliseconds: 100)]
+    private static partial Regex SafeIdentifierRegex();
+
     /// <summary>
     /// Escapes a single quote for inclusion in a SQL string literal. Callers MUST also
     /// have validated the input through an identifier-safe regex first; this is the
     /// secondary belt-and-suspenders layer.
     /// </summary>
     public static string EscapeLiteral(string s) => s.Replace("'", "''");
+
+    /// <summary>
+    /// Validates that <paramref name="identifier"/> contains only safe identifier characters
+    /// (letters, digits, underscore; not starting with a digit). Identifiers are interpolated
+    /// directly into quoted SQL, so this is an in-provider defense-in-depth check independent
+    /// of any caller-side validation. Throws <see cref="ArgumentException"/> when unsafe.
+    /// </summary>
+    public static string EnsureSafeIdentifier(string identifier)
+    {
+        if (string.IsNullOrEmpty(identifier) || !SafeIdentifierRegex().IsMatch(identifier))
+            throw new ArgumentException(
+                $"Invalid SQL identifier '{identifier}'. Only letters, digits, and underscores allowed.",
+                nameof(identifier));
+        return identifier;
+    }
 }
 
 /// <summary>
@@ -34,14 +55,14 @@ public sealed class TSqlSchemaProvider : ISqlSchemaProvider
     public string ListColumnsQuery(string tableName) => $"""
         SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, NULL AS comment
         FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = '{SqlSchemaProviderHelpers.EscapeLiteral(tableName)}'
+        WHERE TABLE_NAME = '{SqlSchemaProviderHelpers.EscapeLiteral(SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName))}'
           AND TABLE_SCHEMA = SCHEMA_NAME()
         ORDER BY ORDINAL_POSITION
         """;
 
     public string ListDistinctValuesQuery(string tableName, string columnName, int limit) => $"""
-        SELECT DISTINCT TOP {limit} [{columnName}]
-        FROM [{tableName}]
+        SELECT DISTINCT TOP {limit} [{SqlSchemaProviderHelpers.EnsureSafeIdentifier(columnName)}]
+        FROM [{SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName)}]
         """;
 }
 
@@ -63,14 +84,14 @@ public sealed class PostgreSqlSchemaProvider : ISqlSchemaProvider
     public string ListColumnsQuery(string tableName) => $"""
         SELECT column_name, data_type, is_nullable, NULL AS comment
         FROM information_schema.columns
-        WHERE table_name = '{SqlSchemaProviderHelpers.EscapeLiteral(tableName)}'
+        WHERE table_name = '{SqlSchemaProviderHelpers.EscapeLiteral(SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName))}'
           AND table_schema = current_schema()
         ORDER BY ordinal_position
         """;
 
     public string ListDistinctValuesQuery(string tableName, string columnName, int limit) => $"""
-        SELECT DISTINCT "{columnName}"
-        FROM "{tableName}"
+        SELECT DISTINCT "{SqlSchemaProviderHelpers.EnsureSafeIdentifier(columnName)}"
+        FROM "{SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName)}"
         LIMIT {limit}
         """;
 }
@@ -93,14 +114,14 @@ public sealed class MySqlSchemaProvider : ISqlSchemaProvider
     public string ListColumnsQuery(string tableName) => $"""
         SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_COMMENT AS comment
         FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = '{SqlSchemaProviderHelpers.EscapeLiteral(tableName)}'
+        WHERE TABLE_NAME = '{SqlSchemaProviderHelpers.EscapeLiteral(SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName))}'
           AND TABLE_SCHEMA = DATABASE()
         ORDER BY ORDINAL_POSITION
         """;
 
     public string ListDistinctValuesQuery(string tableName, string columnName, int limit) => $"""
-        SELECT DISTINCT `{columnName}`
-        FROM `{tableName}`
+        SELECT DISTINCT `{SqlSchemaProviderHelpers.EnsureSafeIdentifier(columnName)}`
+        FROM `{SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName)}`
         LIMIT {limit}
         """;
 }
@@ -125,13 +146,13 @@ public sealed class SqliteSchemaProvider : ISqlSchemaProvider
         SELECT name AS column_name, type AS data_type,
                CASE "notnull" WHEN 0 THEN 'YES' ELSE 'NO' END AS is_nullable,
                NULL AS comment
-        FROM pragma_table_info('{SqlSchemaProviderHelpers.EscapeLiteral(tableName)}')
+        FROM pragma_table_info('{SqlSchemaProviderHelpers.EscapeLiteral(SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName))}')
         ORDER BY cid
         """;
 
     public string ListDistinctValuesQuery(string tableName, string columnName, int limit) => $"""
-        SELECT DISTINCT "{columnName}"
-        FROM "{tableName}"
+        SELECT DISTINCT "{SqlSchemaProviderHelpers.EnsureSafeIdentifier(columnName)}"
+        FROM "{SqlSchemaProviderHelpers.EnsureSafeIdentifier(tableName)}"
         LIMIT {limit}
         """;
 }

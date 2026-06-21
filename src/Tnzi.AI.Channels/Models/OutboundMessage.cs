@@ -9,7 +9,6 @@ public record OutboundMessage(
     Guid ThreadId,
     string Text,
     List<string>? ArtifactPaths = null,
-    List<ResolvedAttachment>? Attachments = null,
     bool IsFinal = true,
     string? ThreadTs = null,
     Dictionary<string, object>? Metadata = null);

@@ -51,7 +51,7 @@
     <NAlert v-if="unavailable" :title="t('unavailable.title')" type="warning" :closable="false">
       <div>{{ t('unavailable.body') }}</div>
       <div class="mt-8px">
-        <code class="font-[family-name:var(--tnzi-font-mono)] text-12px">
+        <code class="tnzi-mono text-12px">
           [DependsOn(typeof(HealthChecksModule))]
         </code>
       </div>

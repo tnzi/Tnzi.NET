@@ -112,11 +112,18 @@ public class FileFolderService : ApplicationService, IFileFolderService
                 return Fail<FileFolderDto>("A folder with the same name already exists at this location", 409);
             }
 
-            // Update descendant paths
-            await UpdateDescendantPathsAsync(oldPath, folder.Path);
+            // Atomically update descendant paths together with the folder itself so a partial
+            // failure cannot leave the tree inconsistent.
+            await ExecuteInUnitOfWorkAsync(async ct =>
+            {
+                await UpdateDescendantPathsAsync(oldPath, folder.Path);
+                await _folderRepository.UpdateAsync(folder, ct);
+            });
         }
-
-        await _folderRepository.UpdateAsync(folder);
+        else
+        {
+            await _folderRepository.UpdateAsync(folder);
+        }
 
         return Ok(await MapToDto(folder));
     }
@@ -230,10 +237,13 @@ public class FileFolderService : ApplicationService, IFileFolderService
             return Fail("A folder with the same name already exists at the target location", 409);
         }
 
-        // Update descendant paths
-        await UpdateDescendantPathsAsync(oldPath, folder.Path);
-
-        await _folderRepository.UpdateAsync(folder);
+        // Atomically update the folder itself and all descendant paths so a mid-way failure
+        // cannot leave the folder tree in an inconsistent state.
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            await UpdateDescendantPathsAsync(oldPath, folder.Path);
+            await _folderRepository.UpdateAsync(folder, ct);
+        });
 
         await EventBus?.PublishAsync(new FileFolderMovedEvent
         {

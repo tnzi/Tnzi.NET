@@ -37,6 +37,8 @@ export interface UserListItemDto {
  * User DTO - full user information (includes UserDetail fields)
  */
 export interface UserDto extends UserListItemDto {
+  firstName?: string | null;
+  lastName?: string | null;
   nickname?: string | null;
   avatar?: string | null;
   avatarId?: string | null;
@@ -80,6 +82,8 @@ export interface CreateUserDto {
 export interface UpdateUserDto {
   email?: string | null;
   phoneNumber?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
   nickname?: string | null;
   avatarUrl?: string | null;
   avatarId?: string | null;

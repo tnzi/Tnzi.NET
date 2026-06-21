@@ -20,9 +20,7 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<RabbitMQOptions>()
-            .Bind(context.Configuration.GetSection("RabbitMQ"))
-            .ValidateWith<RabbitMQOptions, RabbitMQOptionsValidator>();
+        context.Services.AddTnziOptions<RabbitMQOptions, RabbitMQOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

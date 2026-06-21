@@ -4,6 +4,10 @@ namespace Tnzi.Storage.Options;
 /// 存储模块配置选项
 /// 配置路径：Storage
 /// </summary>
+[ConfigSection("Storage")]
+[RuntimeSettingGroup(Key = "storage-upload", Module = "Storage", DisplayName = "Upload Limits",
+    I18nKey = "admin.modules.system.settings.groups.storageUpload",
+    Icon = "mdi:cloud-upload-outline", Order = 300)]
 public class StorageOptions
 {
     /// <summary>
@@ -29,6 +33,8 @@ public class StorageOptions
     /// <summary>
     /// 获取或设置 最大文件大小（字节）
     /// </summary>
+    [RuntimeSetting(Label = "Max File Size (bytes)", I18n = "admin.modules.system.settings.fields.maxFileSize",
+        Type = SettingFieldType.Int, Min = 1)]
     public long MaxFileSize { get; set; } = 100 * 1024 * 1024; // 100MB
 
     /// <summary>
@@ -49,6 +55,8 @@ public class StorageOptions
     /// <summary>
     /// 获取或设置 图片压缩质量（1-100）
     /// </summary>
+    [RuntimeSetting(Label = "Image Compression Quality", I18n = "admin.modules.system.settings.fields.imageCompressionQuality",
+        Type = SettingFieldType.Int, Min = 1, Max = 100)]
     public int ImageCompressionQuality { get; set; } = 85;
 
     /// <summary>

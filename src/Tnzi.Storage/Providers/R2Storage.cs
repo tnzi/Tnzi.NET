@@ -11,6 +11,20 @@ public class R2Storage : IFileStorage, IDisposable
     private readonly string? _baseUrl;
     private readonly IAmazonS3 _s3Client;
     private readonly ILogger<R2Storage>? _logger;
+    private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
+
+    /// <summary>
+    /// 运行时有效的 URL 前缀：优先取 IOptionsMonitor 的当前值（支持配置热更新），
+    /// 为空时回退到构造期冻结的 _baseUrl（保持既有行为）。
+    /// </summary>
+    private string? EffectiveBaseUrl
+    {
+        get
+        {
+            var hot = _optionsMonitor?.CurrentValue.UrlPrefix;
+            return !string.IsNullOrEmpty(hot) ? hot : _baseUrl;
+        }
+    }
 
     /// <summary>
     /// 初始化 <see cref="R2Storage"/> 类型的新实例
@@ -18,10 +32,12 @@ public class R2Storage : IFileStorage, IDisposable
     /// <param name="options">R2存储配置选项</param>
     /// <param name="configuration">配置</param>
     /// <param name="logger">日志记录器</param>
-    public R2Storage(R2StorageOptions options, IConfiguration? configuration = null, ILogger<R2Storage>? logger = null)
+    /// <param name="optionsMonitor">选项监视器（可选），用于运行时热读取 UrlPrefix</param>
+    public R2Storage(R2StorageOptions options, IConfiguration? configuration = null, ILogger<R2Storage>? logger = null, IOptionsMonitor<StorageOptions>? optionsMonitor = null)
     {
         _options = Check.NotNull(options);
         _logger = logger;
+        _optionsMonitor = optionsMonitor;
 
         Check.NotNullOrEmpty(_options.AccessKeyId);
         Check.NotNullOrEmpty(_options.SecretAccessKey);
@@ -184,9 +200,10 @@ public class R2Storage : IFileStorage, IDisposable
         }
 
         // 如果没有过期时间，返回基本URL
-        if (!string.IsNullOrEmpty(_baseUrl))
+        var baseUrl = EffectiveBaseUrl;
+        if (!string.IsNullOrEmpty(baseUrl))
         {
-            var url = _baseUrl.TrimEnd('/') + "/" + filePath.TrimStart('/');
+            var url = baseUrl.TrimEnd('/') + "/" + filePath.TrimStart('/');
             return Task.FromResult(url);
         }
 
@@ -269,6 +286,65 @@ public class R2Storage : IFileStorage, IDisposable
         var actualEnd = rangeEnd.HasValue ? rangeEnd.Value : totalLength - 1;
 
         return (response.ResponseStream, start, actualEnd, totalLength);
+    }
+
+    /// <summary>
+    /// Generate a presigned URL for direct upload or temporary public download access.
+    /// R2 is S3-compatible, so this uses the AWS SDK presigned URL generation.
+    /// </summary>
+    /// <param name="filePath">R2 object key</param>
+    /// <param name="expiresInSeconds">URL expiration in seconds</param>
+    /// <param name="httpMethod">HTTP method: GET for download, PUT for upload</param>
+    /// <returns>Presigned URL, or null if the path is empty</returns>
+    public Task<string?> GetPresignedUrlAsync(string filePath, int expiresInSeconds = 3600, string httpMethod = "GET")
+    {
+        if (string.IsNullOrEmpty(filePath))
+            return Task.FromResult<string?>(null);
+
+        var verb = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase)
+            ? HttpVerb.PUT
+            : HttpVerb.GET;
+
+        var request = new GetPreSignedUrlRequest
+        {
+            BucketName = _options.BucketName,
+            Key = filePath,
+            Verb = verb,
+            Expires = DateTime.UtcNow.AddSeconds(expiresInSeconds)
+        };
+
+        var url = _s3Client.GetPreSignedURL(request);
+        return Task.FromResult<string?>(url);
+    }
+
+    /// <summary>
+    /// Server-side copy an R2 (S3-compatible) object to a new key within the same bucket.
+    /// </summary>
+    /// <param name="sourcePath">Source object key</param>
+    /// <param name="destFileName">Destination object key</param>
+    /// <returns>The destination key on success, or null if the path is empty or the copy fails</returns>
+    public async Task<string?> CopyAsync(string sourcePath, string destFileName)
+    {
+        if (string.IsNullOrEmpty(sourcePath) || string.IsNullOrEmpty(destFileName))
+            return null;
+
+        try
+        {
+            var request = new CopyObjectRequest
+            {
+                SourceBucket = _options.BucketName,
+                SourceKey = sourcePath,
+                DestinationBucket = _options.BucketName,
+                DestinationKey = destFileName
+            };
+            await _s3Client.CopyObjectAsync(request);
+            return destFileName;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to server-side copy R2 object: {SourcePath} -> {DestFileName}", sourcePath, destFileName);
+            return null;
+        }
     }
 
     public void Dispose()

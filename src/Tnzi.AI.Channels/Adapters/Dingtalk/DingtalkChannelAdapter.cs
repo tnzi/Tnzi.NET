@@ -28,7 +28,6 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public string Name => "dingtalk";
     public bool SupportsStreaming => false;
-    public bool SupportsFileAttachment => false;
 
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
@@ -87,13 +86,20 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     /// <param name="ct">取消令牌</param>
     public Task HandleEventAsync(string eventJson, IDictionary<string, string>? headers, CancellationToken ct = default)
     {
-        if (headers != null)
+        if (_options.VerifyWebhookSignature && headers != null)
         {
             if (!ValidateDingtalkSignature(headers))
             {
                 _logger.LogWarning("DingTalk webhook signature validation failed, rejecting event");
                 return Task.CompletedTask;
             }
+        }
+        else if (_options.VerifyWebhookSignature && headers == null)
+        {
+            // Fail closed: signature verification is required but no headers were supplied,
+            // so the request cannot be authenticated (parity with Slack/Discord/Feishu).
+            _logger.LogWarning("DingTalk VerifyWebhookSignature is enabled but no headers provided for verification, rejecting event");
+            return Task.CompletedTask;
         }
 
         return HandleEventCoreAsync(eventJson, ct);
@@ -290,14 +296,6 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             ct);
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// DingTalk robot API does not support file uploads. Check <see cref="SupportsFileAttachment"/>
-    /// before calling this method; it will always return false for this adapter.
-    /// </remarks>
-    public Task<bool> SendFileAsync(OutboundMessage message, ResolvedAttachment attachment, CancellationToken ct = default)
-        => Task.FromResult(false);
-
     public ValueTask DisposeAsync()
         => _tokenRefresher.DisposeAsync();
 
@@ -308,7 +306,6 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     {
         var token = await _tokenRefresher.GetTokenAsync(ct);
         var client = _httpClientFactory.CreateClient("Tnzi.AI.Dingtalk");
-        client.DefaultRequestHeaders.Add("x-acs-dingtalk-access-token", token);
 
         var payload = new
         {
@@ -322,8 +319,16 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             })
         };
 
-        var response = await client.PostAsJsonAsync(
-            $"{NewApiBaseUrl}/v1.0/robot/oToMessages/batchSend", payload, ct);
+        // Set the access-token header per-request — the named HttpClient is pooled and its
+        // DefaultRequestHeaders must not be mutated across concurrent sends (.Add throws on a
+        // duplicate header name and the token changes on refresh).
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{NewApiBaseUrl}/v1.0/robot/oToMessages/batchSend")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Add("x-acs-dingtalk-access-token", token);
+
+        var response = await client.SendAsync(request, ct);
         var responseBody = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)

@@ -16,10 +16,6 @@ public class SettingService : ApplicationService, ISettingService
     private readonly ITnziApplication? _tnziApplication;
     private readonly IHostEnvironment? _hostEnvironment;
 
-    // 标准配置键常量
-    private const string KeyAppName = "App.AppName";
-    private const string KeySiteName = "App.SiteName";
-
     /// <summary>
     /// 缓存条目，用于区分"不存在"和"值为null"
     /// </summary>
@@ -54,20 +50,12 @@ public class SettingService : ApplicationService, ISettingService
     }
 
     /// <inheritdoc />
-    public async Task<Result<string>> GetAppNameAsync()
-    {
-        var result = await GetSettingAsync(KeyAppName);
-        var value = result.Data ?? _applicationOptions.CurrentValue.AppName;
-        return Ok<string>(value);
-    }
+    public Task<Result<string>> GetAppNameAsync()
+        => Task.FromResult(Ok<string>(_applicationOptions.CurrentValue.AppName));
 
     /// <inheritdoc />
-    public async Task<Result<string>> GetSiteNameAsync()
-    {
-        var result = await GetSettingAsync(KeySiteName);
-        var value = result.Data ?? _applicationOptions.CurrentValue.SiteName;
-        return Ok<string>(value);
-    }
+    public Task<Result<string>> GetSiteNameAsync()
+        => Task.FromResult(Ok<string>(_applicationOptions.CurrentValue.SiteName));
 
     /// <inheritdoc />
     public async Task<Result<string?>> GetSettingAsync(string key, string? defaultValue = null)

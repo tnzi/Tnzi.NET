@@ -10,12 +10,18 @@ public class StorageProviderContext
     public IWebHostEnvironment? Environment { get; }
     public ILoggerFactory? LoggerFactory { get; }
 
-    public StorageProviderContext(StorageOptions options, IConfiguration configuration, IWebHostEnvironment? environment = null, ILoggerFactory? loggerFactory = null)
+    /// <summary>
+    /// 选项监视器，使单例 provider 能在运行时热读取 UrlPrefix（可选）
+    /// </summary>
+    public IOptionsMonitor<StorageOptions>? OptionsMonitor { get; }
+
+    public StorageProviderContext(StorageOptions options, IConfiguration configuration, IWebHostEnvironment? environment = null, ILoggerFactory? loggerFactory = null, IOptionsMonitor<StorageOptions>? optionsMonitor = null)
     {
         Options = Check.NotNull(options);
         Configuration = Check.NotNull(configuration);
         Environment = environment;
         LoggerFactory = loggerFactory;
+        OptionsMonitor = optionsMonitor;
     }
 }
 
@@ -33,18 +39,20 @@ public static class StorageProviderFactory
     static StorageProviderFactory()
     {
         // 注册内置提供者
-        Register("local", ctx => new LocalStorage(ctx.Configuration, ctx.Environment));
+        Register("local", ctx => new LocalStorage(ctx.Configuration, ctx.Environment, optionsMonitor: ctx.OptionsMonitor));
         Register("s3", ctx =>
         {
             if (ctx.Options.S3 == null)
                 throw new InvalidOperationException("S3 options are required when Provider is S3.");
-            return new S3Storage(ctx.Options.S3, ctx.Configuration);
+            ILogger<S3Storage>? logger = ctx.LoggerFactory?.CreateLogger<S3Storage>();
+            return new S3Storage(ctx.Options.S3, ctx.Configuration, logger, ctx.OptionsMonitor);
         });
         Register("r2", ctx =>
         {
             if (ctx.Options.R2 == null)
                 throw new InvalidOperationException("R2 options are required when Provider is R2.");
-            return new R2Storage(ctx.Options.R2, ctx.Configuration);
+            ILogger<R2Storage>? logger = ctx.LoggerFactory?.CreateLogger<R2Storage>();
+            return new R2Storage(ctx.Options.R2, ctx.Configuration, logger, ctx.OptionsMonitor);
         });
         Register("inmemory", _ => new InMemoryFileStorage());
         Register("azure", ctx =>
@@ -52,7 +60,7 @@ public static class StorageProviderFactory
             if (ctx.Options.Azure == null)
                 throw new InvalidOperationException("Azure options are required when Provider is Azure.");
             ILogger<AzureBlobStorage>? logger = ctx.LoggerFactory?.CreateLogger<AzureBlobStorage>();
-            return new AzureBlobStorage(ctx.Options.Azure, ctx.Configuration, logger);
+            return new AzureBlobStorage(ctx.Options.Azure, ctx.Configuration, logger, ctx.OptionsMonitor);
         });
     }
 

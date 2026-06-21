@@ -61,6 +61,8 @@ public class LoopDetectionMiddleware : IAiMiddleware
 
         var hash = HashToolCalls(toolCalls);
         var threadKey = GetThreadKey(context);
+        // 无任何会话/运行/用户标识时跳过循环检测，避免跨用户共享 "default" 桶导致状态串扰
+        if (threadKey is null) return;
         var opts = _options.CurrentValue;
 
         lock (_lock)
@@ -141,11 +143,30 @@ public class LoopDetectionMiddleware : IAiMiddleware
         return json.ToMd5()[..12];
     }
 
-    private static string GetThreadKey(AiMiddlewareContext context)
+    /// <summary>
+    /// Resolves a per-conversation isolation key for loop tracking.
+    /// Falls back ThreadId → UserId → null; returns null when the request carries no
+    /// stable identity so <see cref="CheckAndApply"/> skips detection rather than letting
+    /// unrelated anonymous requests share a single bucket (cross-user state bleed).
+    /// </summary>
+    private static string? GetThreadKey(AiMiddlewareContext context)
     {
         if (context.Request.Metadata?.TryGetValue("ThreadId", out var tid) == true)
-            return tid.ToString() ?? "default";
-        return context.Request.ThreadId?.ToString() ?? "default";
+        {
+            var metaThreadId = tid?.ToString();
+            if (!string.IsNullOrEmpty(metaThreadId))
+                return metaThreadId;
+        }
+
+        if (context.Request.ThreadId is { } threadId)
+            return threadId.ToString();
+
+        // No conversation thread (ad-hoc run): isolate per user so two users never share a
+        // bucket. Truly anonymous requests (no thread, no user) return null → detection skipped.
+        if (context.Request.UserId is { } userId)
+            return "user:" + userId;
+
+        return null;
     }
 
     public void Reset(string? threadKey = null)

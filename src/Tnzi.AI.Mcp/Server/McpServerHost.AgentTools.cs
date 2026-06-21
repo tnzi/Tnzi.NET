@@ -9,6 +9,7 @@ public partial class McpServerHost
     public void ExposeAgent(Guid agentId, McpToolExposureOptions? options = null)
     {
         _agentTools[agentId] = new AgentToolRegistration(agentId, options);
+        InvalidateToolCache();
         _logger.LogInformation("Registered Agent '{AgentId}' for MCP exposure", agentId);
     }
 
@@ -23,6 +24,7 @@ public partial class McpServerHost
             foreach (var key in keysToRemove)
                 _agentToolNameMap.TryRemove(key, out _);
 
+            InvalidateToolCache();
             _logger.LogInformation("Removed Agent '{AgentId}' from MCP exposure", agentId);
         }
         return removed;
@@ -60,9 +62,12 @@ public partial class McpServerHost
         var capturedAgentId = agentId;
         var capturedToolName = toolName;
 
-        // 使用 McpServerTool.Create(Delegate) 创建工具
-        Func<string, CancellationToken, Task<string>> handler = (message, cancellation) =>
-            InvokeAgentAsync(capturedAgentId, capturedToolName, message, cancellation);
+        // 使用 McpServerTool.Create(Delegate) 创建工具（仅 tools/list 元数据，详见 McpServerHost.BuildCustomTool）
+        Func<string, CancellationToken, Task<string>> handler = async (message, cancellation) =>
+        {
+            var (text, _) = await InvokeAgentAsync(capturedAgentId, capturedToolName, message, cancellation);
+            return text;
+        };
 
         return McpServerTool.Create(handler, new McpServerToolCreateOptions
         {
@@ -72,26 +77,15 @@ public partial class McpServerHost
     }
 
     /// <summary>
-    /// 调用 Agent（通过 IAgentRuntime），包含安全检查
+    /// 调用 Agent（通过 IAgentRuntime），经统一守卫处理限流/审计/异常映射。
     /// </summary>
-    private async Task<string> InvokeAgentAsync(
+    private Task<(string Text, bool IsError)> InvokeAgentAsync(
         Guid agentId,
         string toolName,
         string message,
-        CancellationToken ct)
-    {
-        var sw = Stopwatch.StartNew();
-        string? errorMessage = null;
-        var isSuccess = false;
-
-        try
+        CancellationToken ct) =>
+        ExecuteWithGuardsAsync(toolName, agentId, async () =>
         {
-            // 速率限制检查
-            if (!_security.CheckRateLimit($"agent:{agentId}"))
-            {
-                throw new RateLimitException("Rate limit exceeded");
-            }
-
             // 通过 scoped IAgentRuntime 执行
             using var scope = _serviceProvider.CreateScope();
             var runtime = scope.ServiceProvider.GetRequiredService<IAgentRuntime>();
@@ -103,24 +97,6 @@ public partial class McpServerHost
             };
 
             var result = await runtime.RunAsync(request, ct);
-            isSuccess = true;
             return result.Response;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.Message;
-            _logger.LogError(ex, "MCP tool call failed for Agent '{AgentId}'", agentId);
-            // 仅暴露业务异常消息，内部错误使用通用提示
-            return ex is BusinessException
-                ? $"Error: {ex.Message}"
-                : "Error: An internal error occurred while processing the request.";
-        }
-        finally
-        {
-            sw.Stop();
-            await _security.AuditLogAsync(
-                toolName, agentId, sw.ElapsedMilliseconds, isSuccess, errorMessage,
-                callerApiKeyId: GetCallerHash(), ct: CancellationToken.None);
-        }
-    }
+        }, ct);
 }

@@ -23,9 +23,7 @@ public class FeatureModule : TnziApplicationModule
     /// </summary>
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<FeatureOptions>()
-            .Bind(context.Configuration.GetSection("Feature"))
-            .ValidateWith<FeatureOptions, FeatureOptionsValidator>();
+        context.Services.AddTnziOptions<FeatureOptions, FeatureOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

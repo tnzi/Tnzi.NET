@@ -20,9 +20,11 @@ public sealed class DockerSandbox : ISandbox
     private readonly string _workspacePath;
     private readonly TimeSpan _commandTimeout;
     private readonly long _maxOutputSize;
+    private readonly long _maxFileSize;
     private readonly ILogger _logger;
     private readonly IReadOnlyCollection<string> _deniedCommands;
     private readonly IReadOnlyCollection<string> _deniedCommandPrefixes;
+    private readonly IReadOnlyCollection<string> _deniedPatterns;
     private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private readonly Action? _onDisposed;
     private bool _disposed;
@@ -34,7 +36,9 @@ public sealed class DockerSandbox : ISandbox
         IEnumerable<string>? deniedCommands = null,
         Action? onDisposed = null,
         IEnumerable<string>? deniedCommandPrefixes = null,
-        IShellCommandAnalyzer? commandAnalyzer = null)
+        IShellCommandAnalyzer? commandAnalyzer = null,
+        IEnumerable<string>? deniedPatterns = null,
+        long maxFileSize = 0)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _httpClient = Check.NotNull(httpClient);
@@ -42,9 +46,12 @@ public sealed class DockerSandbox : ISandbox
         _workspacePath = Check.NotNullOrWhiteSpace(workspacePath);
         _commandTimeout = commandTimeout;
         _maxOutputSize = maxOutputSize;
+        // <= 0 disables the file-size precheck.
+        _maxFileSize = maxFileSize;
         _logger = Check.NotNull(logger);
         _deniedCommands = (deniedCommands ?? DefaultDeniedCommands).ToArray();
         _deniedCommandPrefixes = (deniedCommandPrefixes ?? []).ToArray();
+        _deniedPatterns = (deniedPatterns ?? []).ToArray();
         _commandAnalyzer = commandAnalyzer;
         _onDisposed = onDisposed;
     }
@@ -117,13 +124,58 @@ public sealed class DockerSandbox : ISandbox
         }
     }
 
-    public async Task<string> ReadFileAsync(string path, CancellationToken ct = default)
+    public async Task<string> ReadFileAsync(string path, int? offset = null, int? limit = null, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(path);
         ThrowIfDisposed();
 
-        // 使用 exec cat 读取文件内容
-        var result = await ExecuteCommandAsync($"cat '{EscapePath(path)}'", ct);
+        if (SensitiveFileMatcher.IsDenied(path, _deniedPatterns, out var pattern))
+            throw new SecurityException($"Access denied: file matches sensitive pattern '{pattern}'");
+
+        var escaped = EscapePath(path);
+
+        // Size precheck — reject before streaming a multi-GB file out of the
+        // container. `wc -c` is portable across GNU coreutils and busybox.
+        if (_maxFileSize > 0)
+        {
+            var sizeResult = await ExecuteCommandAsync($"wc -c < '{escaped}'", ct);
+            if (sizeResult.ExitCode == 0)
+            {
+                // wc ran: a non-numeric result means we genuinely cannot determine the
+                // size of an accessible file → fail closed rather than stream it unbounded.
+                if (!long.TryParse(sizeResult.Output.Trim(), out var size))
+                    throw new SecurityException("Unable to determine file size for sandbox limit enforcement.");
+                if (size > _maxFileSize)
+                    throw new SecurityException(
+                        $"File exceeds the maximum readable size ({size} > {_maxFileSize} bytes)");
+            }
+            else
+            {
+                // wc failed — most often a missing/inaccessible file, which the read below
+                // surfaces as FileNotFound. Log so an unverified size read isn't fully silent.
+                _logger.LogWarning(
+                    "Sandbox size precheck (wc -c) failed for {Path} (exit {ExitCode}); size limit not enforced for this read.",
+                    path, sizeResult.ExitCode);
+            }
+        }
+
+        // When a line window is requested, slice inside the container with
+        // sed so only the requested lines cross the exec stream.
+        string readCommand;
+        if (offset is not null || limit is not null)
+        {
+            var start = Math.Max(1, offset ?? 1);
+            var end = limit is not null ? (long)start + limit.Value - 1 : (long?)null;
+            readCommand = end is not null
+                ? $"sed -n '{start},{end}p' '{escaped}'"
+                : $"sed -n '{start},$p' '{escaped}'";
+        }
+        else
+        {
+            readCommand = $"cat '{escaped}'";
+        }
+
+        var result = await ExecuteCommandAsync(readCommand, ct);
         if (result.ExitCode != 0)
             throw new FileNotFoundException($"File not found or not readable: {path}. Error: {result.Error}");
 
@@ -193,7 +245,13 @@ public sealed class DockerSandbox : ISandbox
             // 跳过根目录本身
             if (fullPath == path) continue;
 
-            entries.Add(new FileEntry(name, fullPath, size, IsDirectory: type == "d"));
+            var isDirectory = type == "d";
+            // Hide sensitive files from listings (mirrors read-time denial). Only
+            // files are filtered — directory names are not matched as patterns.
+            if (!isDirectory && SensitiveFileMatcher.IsDenied(fullPath, _deniedPatterns, out _))
+                continue;
+
+            entries.Add(new FileEntry(name, fullPath, size, IsDirectory: isDirectory));
         }
 
         return entries;

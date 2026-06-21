@@ -231,7 +231,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         var configuration = step.Configuration != null
             ? new Dictionary<string, string>(step.Configuration, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        configuration["__originalIndex"] = originalIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        configuration["__originalIndex"] = originalIndex.ToString(CultureInfo.InvariantCulture);
 
         return new WorkflowStepDto
         {

@@ -38,10 +38,14 @@ public class DatabaseSkillStore : ISkillStore
             var tenantId = _currentTenant?.Id;
             var userId = _currentUser?.Id;
 
+            // User-scope rows are now tenant-stamped (TenantId == current tenant);
+            // older rows persisted before the fix carry null TenantId, so accept both
+            // null and the current tenant for backward compatibility.
             var entities = await _repository
                 .Where(e => e.Enabled &&
                     ((e.Scope == SkillScope.Tenant && e.TenantId == tenantId) ||
-                     (e.Scope == SkillScope.User && e.OwnerUserId == userId)))
+                     (e.Scope == SkillScope.User && e.OwnerUserId == userId
+                        && (e.TenantId == null || e.TenantId == tenantId))))
                 .ToListAsync(ct);
 
             _cachedResults = entities.Select(MapToDefinition).ToList();
@@ -72,7 +76,8 @@ public class DatabaseSkillStore : ISkillStore
             var entity = await _repository
                 .Where(e => e.Enabled && e.Slug.ToLower() == slug.ToLower() &&
                     ((e.Scope == SkillScope.Tenant && e.TenantId == tenantId) ||
-                     (e.Scope == SkillScope.User && e.OwnerUserId == userId)))
+                     (e.Scope == SkillScope.User && e.OwnerUserId == userId
+                        && (e.TenantId == null || e.TenantId == tenantId))))
                 .FirstOrDefaultAsync(ct);
 
             return entity == null ? null : MapToDefinition(entity);

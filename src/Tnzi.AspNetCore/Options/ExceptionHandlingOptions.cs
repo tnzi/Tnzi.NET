@@ -4,11 +4,17 @@ namespace Tnzi.AspNetCore.Options;
 /// <summary>
 /// 异常处理选项
 /// </summary>
+[ConfigSection("AspNetCore:ExceptionHandling")]
+[RuntimeSettingGroup(Key = "web-observability", Module = "Web", DisplayName = "Request Observability",
+    I18nKey = "admin.modules.system.settings.groups.webObservability",
+    Icon = "mdi:chart-timeline-variant", Order = 700)]
 public class ExceptionHandlingOptions
 {
     /// <summary>
     /// 是否在开发环境暴露详细错误
     /// </summary>
+    [RuntimeSetting(Label = "Show Details In Development", I18n = "admin.modules.system.settings.fields.showDetailsInDevelopment",
+        Type = SettingFieldType.Boolean)]
     public bool ShowDetailsInDevelopment { get; set; } = true;
 
     /// <summary>
@@ -29,6 +35,8 @@ public class ExceptionHandlingOptions
     /// <summary>
     /// 是否包含请求 ID 在错误响应中
     /// </summary>
+    [RuntimeSetting(Label = "Include Request ID In Response", I18n = "admin.modules.system.settings.fields.includeRequestId",
+        Type = SettingFieldType.Boolean)]
     public bool IncludeRequestId { get; set; } = true;
 
     /// <summary>

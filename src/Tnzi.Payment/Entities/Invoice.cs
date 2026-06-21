@@ -111,7 +111,7 @@ public class Invoice : MultiTenantAuditedEntity<Guid>
     public string? TemplateName { get; set; }
 
     /// <summary>
-    /// PDF文件路径
+    /// PDF文件路径（Storage 模块加载时为存储后端相对路径/URL；否则为本地回退路径）
     /// </summary>
     [FileField]
     public string? PdfFilePath { get; set; }
@@ -121,6 +121,11 @@ public class Invoice : MultiTenantAuditedEntity<Guid>
     /// </summary>
     [FileField]
     public string? PdfFileUrl { get; set; }
+
+    /// <summary>
+    /// Storage 模块中的 PDF 文件记录ID（多实例/容器部署下持久化引用；引用追踪由 Storage 模块负责）
+    /// </summary>
+    public Guid? PdfFileId { get; set; }
 
     /// <summary>
     /// 备注

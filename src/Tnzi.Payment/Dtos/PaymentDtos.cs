@@ -64,6 +64,58 @@ public class CreatePaymentDto
 }
 
 /// <summary>
+/// off-session 自动扣款请求 DTO（后台续费/试用转正使用，使用渠道侧已保存的支付方式无人值守扣款）
+/// </summary>
+public class OffSessionChargeDto
+{
+    /// <summary>
+    /// 业务订单号
+    /// </summary>
+    [Required]
+    public string BusinessOrderNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 业务类型
+    /// </summary>
+    public BusinessType BusinessType { get; set; }
+
+    /// <summary>
+    /// 金额
+    /// </summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// 币种
+    /// </summary>
+    public string? Currency { get; set; }
+
+    /// <summary>
+    /// 支付渠道代码
+    /// </summary>
+    public string? ChannelCode { get; set; }
+
+    /// <summary>
+    /// 描述
+    /// </summary>
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// 渠道侧客户标识（如 Stripe Customer ID）
+    /// </summary>
+    public string? ProviderCustomerId { get; set; }
+
+    /// <summary>
+    /// 渠道侧已保存的支付方式标识（如 Stripe PaymentMethod ID）
+    /// </summary>
+    public string PaymentMethodToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 扩展数据（JSON，承载业务用途，如订阅计费 purpose）
+    /// </summary>
+    public string? ExtraData { get; set; }
+}
+
+/// <summary>
 /// 关闭支付 DTO
 /// </summary>
 public class ClosePaymentDto
@@ -310,6 +362,45 @@ public class PaymentProviderRefundDto
     public string RefundNo { get; set; } = string.Empty;
     public decimal RefundAmount { get; set; }
     public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 支付提供商 off-session 自动扣款 DTO (Internal Use)
+/// 使用渠道侧已保存的客户/支付方式发起后台无人值守扣款
+/// </summary>
+public class PaymentProviderChargeDto
+{
+    public string TradeNo { get; set; } = string.Empty;
+    public string BusinessOrderNo { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "USD";
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// 渠道侧客户标识（如 Stripe Customer ID）
+    /// </summary>
+    public string? ProviderCustomerId { get; set; }
+
+    /// <summary>
+    /// 渠道侧已保存的支付方式标识（如 Stripe PaymentMethod ID）
+    /// </summary>
+    public string PaymentMethodToken { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 支付提供商 off-session 扣款结果
+/// </summary>
+public class PaymentProviderChargeResult
+{
+    public string TradeNo { get; set; } = string.Empty;
+    public string? ExternalTradeNo { get; set; }
+
+    /// <summary>
+    /// 扣款后的支付状态（Succeeded=已收款；Processing=需进一步动作/异步确认；Failed=失败）
+    /// </summary>
+    public PaymentStatus Status { get; set; }
+    public decimal PaidAmount { get; set; }
+    public string? FailReason { get; set; }
 }
 
 /// <summary>

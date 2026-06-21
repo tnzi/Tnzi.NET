@@ -1,6 +1,5 @@
 global using System.Globalization;
 global using Tnzi.Settings;
-global using Tnzi.Storage.Settings;
 global using Amazon;
 global using Amazon.S3;
 global using Amazon.S3.Model;
@@ -21,6 +20,7 @@ global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.DependencyInjection.Extensions;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;

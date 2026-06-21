@@ -78,7 +78,6 @@ global using Tnzi.AI.Options;
 global using Tnzi.AI.Prompt;
 global using ReasoningEffort = Tnzi.AI.Options.ReasoningEffort;
 global using Tnzi.AI.Security;
-global using Tnzi.AI.Settings;
 global using Tnzi.AI.Services;
 global using Tnzi.AI.Services.Interfaces;
 global using Tnzi.AI.Skills;

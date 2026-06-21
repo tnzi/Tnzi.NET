@@ -146,4 +146,35 @@ public class SandboxToolsTests : IAsyncLifetime
 
         Assert.Contains("read_file failed", result.ToString()!);
     }
+
+    [Fact]
+    public async Task Bash_PathEscapeViaMntPath_IsDenied()
+    {
+        SeedEnvironment();
+
+        // The naive /mnt translation turns this into {threadDir}/workspace/../../../etc/passwd,
+        // which resolves OUTSIDE the thread directory. The best-effort jail guard
+        // must deny it rather than hand it to the host shell verbatim.
+        var result = await _tools.BashAsync("cat /mnt/workspace/../../../etc/passwd");
+        var json = System.Text.Json.JsonSerializer.Serialize(result);
+
+        Assert.Contains("Command denied", json);
+        Assert.Contains("outside the sandbox thread directory", json);
+    }
+
+    [Fact]
+    public async Task Bash_NormalMntPath_IsAllowed()
+    {
+        SeedEnvironment();
+
+        // A well-formed /mnt path stays inside the thread directory — must NOT trip
+        // the escape guard. We assert it is NOT denied (the shell `cat`/`type` may
+        // differ per OS, so we check the guard let it through rather than output).
+        await _tools.WriteFileAsync("/mnt/workspace/ok.txt", "content-here");
+        var result = await _tools.BashAsync("echo /mnt/workspace/ok.txt");
+        var json = System.Text.Json.JsonSerializer.Serialize(result);
+
+        Assert.DoesNotContain("Command denied", json);
+        Assert.DoesNotContain("outside the sandbox thread directory", json);
+    }
 }

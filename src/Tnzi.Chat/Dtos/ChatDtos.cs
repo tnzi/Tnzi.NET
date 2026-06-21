@@ -1,195 +1,163 @@
 namespace Tnzi.Chat.Dtos;
 
-/// <summary>
-/// 消息详情 DTO
-/// </summary>
-public class MessageDto
+/// <summary>会话列表项（左栏）。</summary>
+public class ConversationListItemDto
 {
     public Guid Id { get; set; }
+    public ConversationType Type { get; set; }
     public string Title { get; set; } = string.Empty;
-    public string Content { get; set; } = string.Empty;
-    public MessageType MessageType { get; set; }
-    public Guid SenderId { get; set; }
-    public string? SenderName { get; set; }
-    public bool IsSent { get; set; }
-    public bool IsDraft { get; set; }
-    public bool CanReply { get; set; }
-    public DateTime? BeginDate { get; set; }
-    public DateTime? EndDate { get; set; }
-    public DateTime CreationTime { get; set; }
-    public bool IsRead { get; set; }
-    public DateTime? ReadTime { get; set; }
-    public int ReplyCount { get; set; }
-    public bool IsImportant { get; set; }
-    public List<MessageReplyDto> Replies { get; set; } = new();
+    public string? AvatarFileId { get; set; }
+    public string? LastMessagePreview { get; set; }
+    public DateTime? LastMessageAt { get; set; }
+    public int UnreadCount { get; set; }
+    public bool IsMuted { get; set; }
+    public int MemberCount { get; set; }
+    public Guid? PeerUserId { get; set; }
+    public UserPresenceStatus? PeerStatus { get; set; }
+    public bool IsSticky { get; set; }
+    public string? Remark { get; set; }
 }
 
-/// <summary>
-/// 消息列表项 DTO（不含回复详情和完整内容）
-/// </summary>
-public class MessageListItemDto
+public class ConversationMemberDto
 {
-    public Guid Id { get; set; }
-    public string Title { get; set; } = string.Empty;
-    public MessageType MessageType { get; set; }
-    public Guid SenderId { get; set; }
-    public string? SenderName { get; set; }
-    public bool CanReply { get; set; }
-    public DateTime CreationTime { get; set; }
-    public bool IsRead { get; set; }
-    public int ReplyCount { get; set; }
-    public bool IsImportant { get; set; }
-}
-
-/// <summary>
-/// 创建消息 DTO
-/// </summary>
-public class CreateMessageDto
-{
-    [Required]
-    [MaxLength(200)]
-    public string Title { get; set; } = null!;
-
-    [Required]
-    [MaxLength(4000)]
-    public string Content { get; set; } = null!;
-
-    public MessageType MessageType { get; set; }
-
-    /// <summary>
-    /// 接收角色ID列表（公共消息使用）
-    /// </summary>
-    public List<Guid>? RoleIds { get; set; }
-
-    /// <summary>
-    /// 接收用户ID列表（私人消息使用）
-    /// </summary>
-    public List<Guid>? RecipientIds { get; set; }
-
-    public bool CanReply { get; set; } = true;
-    public bool IsImportant { get; set; }
-    public DateTime? BeginDate { get; set; }
-    public DateTime? EndDate { get; set; }
-}
-
-/// <summary>
-/// 更新消息 DTO
-/// </summary>
-public class UpdateMessageDto
-{
-    [MaxLength(200)]
-    public string? Title { get; set; }
-
-    [MaxLength(4000)]
-    public string? Content { get; set; }
-
-    public bool? CanReply { get; set; }
-    public bool? IsImportant { get; set; }
-    public DateTime? BeginDate { get; set; }
-    public DateTime? EndDate { get; set; }
-}
-
-/// <summary>
-/// 消息回复 DTO
-/// </summary>
-public class MessageReplyDto
-{
-    public Guid Id { get; set; }
-    public string Content { get; set; } = string.Empty;
     public Guid UserId { get; set; }
-    public string? UserName { get; set; }
-    public Guid BelongMessageId { get; set; }
-    public Guid? ParentReplyId { get; set; }
-    public DateTime CreationTime { get; set; }
-    public List<MessageReplyDto> Replies { get; set; } = new();
+    public string Name { get; set; } = string.Empty;
+    public string? AvatarFileId { get; set; }
+    public MemberRole Role { get; set; }
+    public UserPresenceStatus? Status { get; set; }
+    public DateTime? LastSeenAt { get; set; }
+    public string? Alias { get; set; }
 }
 
-/// <summary>
-/// 创建消息回复 DTO
-/// </summary>
-public class CreateMessageReplyDto
+public class ConversationDto
 {
-    public Guid MessageId { get; set; }
-
-    [Required]
-    [MaxLength(4000)]
-    public string Content { get; set; } = null!;
-
-    /// <summary>
-    /// 父回复ID（回复某个回复时指定）
-    /// </summary>
-    public Guid? ParentReplyId { get; set; }
+    public Guid Id { get; set; }
+    public ConversationType Type { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? AvatarFileId { get; set; }
+    public Guid? OwnerId { get; set; }
+    public int MemberCount { get; set; }
+    public DateTime? LastMessageAt { get; set; }
+    public List<ConversationMemberDto> Members { get; set; } = new();
+    public string? Notice { get; set; }
+    public bool IsSticky { get; set; }
+    public bool IsMuted { get; set; }
+    public string? MyRemark { get; set; }
+    public string? MyAlias { get; set; }
 }
 
-/// <summary>
-/// 消息查询 DTO
-/// </summary>
-public class MessageQueryDto : PagedQueryDto
+public class ChatMessageDto
 {
-    public MessageType? MessageType { get; set; }
-    public bool? IsRead { get; set; }
-    public bool? IsImportant { get; set; }
-    public string? Keyword { get; set; }
-    public DateTime? StartDate { get; set; }
-    public DateTime? EndDate { get; set; }
-}
-
-/// <summary>
-/// 消息统计 DTO
-/// </summary>
-public class ChatStatisticsDto
-{
-    /// <summary>
-    /// 总消息数
-    /// </summary>
-    public int TotalMessages { get; set; }
-
-    /// <summary>
-    /// 已发送消息数
-    /// </summary>
-    public int SentMessages { get; set; }
-
-    /// <summary>
-    /// 草稿消息数
-    /// </summary>
-    public int DraftMessages { get; set; }
-
-    /// <summary>
-    /// 公共消息数
-    /// </summary>
-    public int PublicMessages { get; set; }
-
-    /// <summary>
-    /// 私人消息数
-    /// </summary>
-    public int PrivateMessages { get; set; }
-
-    /// <summary>
-    /// 总回复数
-    /// </summary>
-    public int TotalReplies { get; set; }
-
-    /// <summary>
-    /// 活跃发送者数量（去重）
-    /// </summary>
-    public int ActiveSenders { get; set; }
-
-    /// <summary>
-    /// 重要消息数
-    /// </summary>
-    public int ImportantMessages { get; set; }
-}
-
-/// <summary>
-/// 管理端消息查询 DTO
-/// </summary>
-public class AdminMessageQueryDto : PagedQueryDto
-{
-    public MessageType? MessageType { get; set; }
-    public bool? IsSent { get; set; }
-    public bool? IsDraft { get; set; }
+    public Guid Id { get; set; }
+    public Guid ConversationId { get; set; }
     public Guid? SenderId { get; set; }
-    public string? Keyword { get; set; }
-    public DateTime? StartDate { get; set; }
-    public DateTime? EndDate { get; set; }
+    public string? SenderName { get; set; }
+    public string? SenderAvatarFileId { get; set; }
+    public MessageContentType ContentType { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public string? FileId { get; set; }
+    public string? FileName { get; set; }
+    public long? FileSize { get; set; }
+    public DateTime SentAt { get; set; }
+}
+
+/// <summary>会话消息流（游标分页，向上翻历史）。</summary>
+public class MessageThreadDto
+{
+    public List<ChatMessageDto> Messages { get; set; } = new();
+    public bool HasMore { get; set; }
+}
+
+public class MessageThreadQueryDto
+{
+    /// <summary>取此消息 id 之前的更早消息（向上翻历史）；null=取最新一页。</summary>
+    public Guid? Before { get; set; }
+    public int Limit { get; set; } = 30;
+}
+
+public class SendMessageDto
+{
+    public MessageContentType ContentType { get; set; } = MessageContentType.Text;
+    public string? Content { get; set; }
+    public string? FileId { get; set; }
+    public string? FileName { get; set; }
+    public long? FileSize { get; set; }
+}
+
+public class StartDirectDto
+{
+    // Guid is a value type; = null! does not compile — drop the initializer
+    public Guid UserId { get; set; }
+}
+
+public class CreateGroupDto
+{
+    public string Title { get; set; } = null!;
+    public List<Guid> MemberIds { get; set; } = null!;
+}
+
+public class RenameGroupDto
+{
+    public string Title { get; set; } = null!;
+}
+
+public class AddMembersDto
+{
+    public List<Guid> UserIds { get; set; } = null!;
+}
+
+public class MuteRequestDto
+{
+    public bool Muted { get; set; }
+}
+
+public class BroadcastDto
+{
+    public string Content { get; set; } = null!;
+    public List<Guid>? RoleIds { get; set; }
+    public List<Guid>? UserIds { get; set; }
+
+    /// <summary>When true, deliver to every user (system-wide notification); RoleIds/UserIds are ignored.</summary>
+    public bool All { get; set; }
+}
+
+public class ChatContactDto
+{
+    public Guid UserId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? AvatarFileId { get; set; }
+}
+
+public class UserPresenceDto
+{
+    public Guid UserId { get; set; }
+    public UserPresenceStatus Status { get; set; }
+    public DateTime? LastSeenAt { get; set; }
+}
+
+public class SetPresenceDto
+{
+    public UserPresenceStatus Status { get; set; }
+}
+
+public class ChatContactProfileDto
+{
+    public Guid UserId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? AvatarFileId { get; set; }
+    public UserPresenceStatus Status { get; set; }
+    public DateTime? LastSeenAt { get; set; }
+}
+
+public class ConversationMemberSettingsDto
+{
+    public bool? IsMuted { get; set; }
+    public bool? IsSticky { get; set; }
+    public string? Remark { get; set; }
+    public string? Alias { get; set; }
+}
+
+public class UpdateNoticeDto
+{
+    public string? Notice { get; set; }
 }

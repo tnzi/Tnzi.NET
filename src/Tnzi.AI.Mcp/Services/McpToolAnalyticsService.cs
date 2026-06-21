@@ -113,6 +113,13 @@ public class McpToolAnalyticsService : ApplicationService, IMcpToolAnalyticsServ
 
     public async Task<Result<int>> CleanupOldRecordsAsync(int retentionDays = 90)
     {
+        // Guard against deleting the entire table: a retention window below one day
+        // (0 or negative) would set the cutoff to now/future and purge every record.
+        if (retentionDays < 1)
+        {
+            return Fail<int>("retentionDays must be at least 1 day.", 400);
+        }
+
         var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
         var deleted = await _repository.AsQueryable()
             .Where(r => r.CreationTime < cutoff)

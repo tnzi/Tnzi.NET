@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\Tnzi.Mapster\Tnzi.Mapster.csproj" />
     <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" />
   </ItemGroup>
 

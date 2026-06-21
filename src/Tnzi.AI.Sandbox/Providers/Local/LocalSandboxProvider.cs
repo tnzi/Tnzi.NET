@@ -59,7 +59,9 @@ public class LocalSandboxProvider : ISandboxProvider
             environmentBlacklist: options.EnvironmentBlacklist ?? localOpts.EnvironmentBlacklist,
             environmentOverrides: options.EnvironmentOverrides,
             deniedCommandPrefixes: localOpts.DeniedCommandPrefixes,
-            commandAnalyzer: _commandAnalyzer);
+            commandAnalyzer: _commandAnalyzer,
+            deniedPatterns: localOpts.DeniedPatterns,
+            maxFileSize: options.MaxFileSizeBytes);
 
         return Task.FromResult(sandbox);
     }

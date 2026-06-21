@@ -62,6 +62,16 @@ public class CouponService : ApplicationService, ICouponService
                     return Fail<CouponUsageDto>(ErrorCodes.CouponAlreadyUsedByUser, 400);
             }
 
+            // per-user 使用次数上限校验（事务内，缩小并发超限窗口）
+            if (promotion.PerUserUsageLimit.HasValue)
+            {
+                var userUsageCount = await _couponUsageRepository.CountAsync(
+                    c => c.CouponId == promotion.Id && c.UserId == userId, ct);
+
+                if (userUsageCount >= promotion.PerUserUsageLimit.Value)
+                    return Fail<CouponUsageDto>(ErrorCodes.CouponUsageLimitReached, 400);
+            }
+
             // 记录使用
             var couponUsage = new CouponUsage
             {
@@ -74,13 +84,14 @@ public class CouponService : ApplicationService, ICouponService
 
             await _couponUsageRepository.InsertAsync(couponUsage, ct);
 
-            // 更新使用次数（事务内原子操作，防止并发超发）
-            var promotionEntity = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == promotion.Id, ct);
-            if (promotionEntity != null)
-            {
-                promotionEntity.UsedCount++;
-                await _promotionRepository.UpdateAsync(promotionEntity, ct);
-            }
+            // 原子递增总使用次数（带总量上限 CAS，防止并发超发）
+            var incremented = await _promotionRepository.AsQueryable()
+                .Where(p => p.Id == promotion.Id
+                    && (!p.TotalUsageLimit.HasValue || p.UsedCount < p.TotalUsageLimit.Value))
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.UsedCount, x => x.UsedCount + 1), ct);
+
+            if (incremented == 0)
+                return Fail<CouponUsageDto>(ErrorCodes.CouponUsageLimitReached, 400);
 
             Logger.LogInformation("Coupon applied. UserId: {UserId}, Coupon: {Code}, OrderId: {OrderId}, Amount: {Amount}",
                 userId, couponCode, orderId, discountAmount);

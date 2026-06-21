@@ -28,9 +28,15 @@ public class PaymentProviderFactory : IPaymentProviderFactory
         if (!_providers.TryGetValue(channelCode, out var provider))
             return null;
 
-        // NullProvider 始终可用（测试用途）
+        // 测试渠道（NullProvider）仅在显式开启时可用，防止生产环境无实际收款即"支付成功"
         if (string.Equals(provider.ChannelCode, "Null", StringComparison.OrdinalIgnoreCase))
-            return provider;
+        {
+            if (_paymentOptions.Value.AllowTestProvider)
+                return provider;
+
+            _logger.LogWarning("Test payment channel 'Null' is disabled. Set Payment:AllowTestProvider=true to enable (non-production only).");
+            return null;
+        }
 
         var channelOptions = _paymentOptions.Value.Channels
             .FirstOrDefault(x => string.Equals(x.Key, provider.ChannelCode, StringComparison.OrdinalIgnoreCase))

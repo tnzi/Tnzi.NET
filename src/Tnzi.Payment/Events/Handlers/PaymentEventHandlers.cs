@@ -305,6 +305,138 @@ public class SubscriptionPlanChangedEventHandler : IEventHandler<SubscriptionPla
 }
 
 /// <summary>
+/// 订阅支付完成处理器：将订阅相关支付的完成回流到订阅状态机（激活/续费/试用转正/升级补差生效）
+/// </summary>
+public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentCompletedEvent>
+{
+    private readonly ILogger<SubscriptionPaymentCompletedHandler> _logger;
+    private readonly ISubscriptionService? _subscriptionService;
+
+    public SubscriptionPaymentCompletedHandler(
+        ILogger<SubscriptionPaymentCompletedHandler> logger,
+        ISubscriptionService? subscriptionService = null)
+    {
+        _logger = Check.NotNull(logger);
+        _subscriptionService = subscriptionService;
+    }
+
+    public async Task HandleAsync(PaymentCompletedEvent eventData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
+                return;
+
+            var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
+            if (meta == null)
+                return;
+
+            await _subscriptionService.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+            {
+                Purpose = meta.Purpose,
+                SubscriptionId = meta.SubscriptionId,
+                SubscriptionNo = eventData.BusinessOrderNo,
+                ChangeId = meta.ChangeId,
+                PaymentTradeNo = eventData.TradeNo,
+                Amount = eventData.Amount,
+                Currency = eventData.Currency
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply subscription payment-completed. TradeNo: {TradeNo}", eventData.TradeNo);
+        }
+    }
+}
+
+/// <summary>
+/// 订阅支付失败处理器：续费/转正失败降级 PastDue，升级补差失败取消变更
+/// </summary>
+public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent>
+{
+    private readonly ILogger<SubscriptionPaymentFailedHandler> _logger;
+    private readonly ISubscriptionService? _subscriptionService;
+
+    public SubscriptionPaymentFailedHandler(
+        ILogger<SubscriptionPaymentFailedHandler> logger,
+        ISubscriptionService? subscriptionService = null)
+    {
+        _logger = Check.NotNull(logger);
+        _subscriptionService = subscriptionService;
+    }
+
+    public async Task HandleAsync(PaymentFailedEvent eventData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
+                return;
+
+            var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
+            if (meta == null)
+                return;
+
+            await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+            {
+                Purpose = meta.Purpose,
+                SubscriptionId = meta.SubscriptionId,
+                SubscriptionNo = eventData.BusinessOrderNo,
+                ChangeId = meta.ChangeId,
+                PaymentTradeNo = eventData.TradeNo,
+                FailReason = eventData.FailReason
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply subscription payment-failed. TradeNo: {TradeNo}", eventData.TradeNo);
+        }
+    }
+}
+
+/// <summary>
+/// 订阅支付过期处理器：未支付的订阅待支付订单过期视同失败（如升级补差待支付单过期则取消变更）
+/// </summary>
+public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEvent>
+{
+    private readonly ILogger<SubscriptionPaymentExpiredHandler> _logger;
+    private readonly ISubscriptionService? _subscriptionService;
+
+    public SubscriptionPaymentExpiredHandler(
+        ILogger<SubscriptionPaymentExpiredHandler> logger,
+        ISubscriptionService? subscriptionService = null)
+    {
+        _logger = Check.NotNull(logger);
+        _subscriptionService = subscriptionService;
+    }
+
+    public async Task HandleAsync(PaymentExpiredEvent eventData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
+                return;
+
+            var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
+            if (meta == null)
+                return;
+
+            await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+            {
+                Purpose = meta.Purpose,
+                SubscriptionId = meta.SubscriptionId,
+                SubscriptionNo = eventData.BusinessOrderNo,
+                ChangeId = meta.ChangeId,
+                FailReason = "Payment order expired"
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply subscription payment-expired. TradeNo: {TradeNo}", eventData.TradeNo);
+        }
+    }
+}
+
+/// <summary>
 /// 试用转正事件处理器
 /// 记录试用转正日志
 /// </summary>

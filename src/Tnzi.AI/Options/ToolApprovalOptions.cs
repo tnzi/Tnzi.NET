@@ -3,11 +3,16 @@ namespace Tnzi.AI.Options;
 /// <summary>
 /// 工具审批配置选项
 /// </summary>
+[ConfigSection("AI:ToolApproval")]
+[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "AI Tools",
+    I18nKey = "admin.modules.system.settings.groups.aiTools", Icon = "mdi:tools", Order = 130)]
 public class ToolApprovalOptions
 {
     /// <summary>
     /// 是否启用审批机制
     /// </summary>
+    [RuntimeSetting(Label = "Tool Approval Enabled", I18n = "admin.modules.system.settings.fields.toolApprovalEnabled",
+        Type = SettingFieldType.Boolean)]
     public bool Enabled { get; set; } = false;
 
     /// <summary>

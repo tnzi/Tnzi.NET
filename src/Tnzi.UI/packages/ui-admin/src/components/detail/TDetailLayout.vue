@@ -19,6 +19,7 @@
     <!-- side: left vertical menu | right panel -->
     <div v-if="layout === 'side'" class="t-detail-layout__split">
       <NMenu
+        ref="navRef"
         :value="activeSection ?? undefined"
         :options="menuOptions"
         mode="vertical"
@@ -26,13 +27,13 @@
         class="t-detail-layout__nav"
         @update:value="onSection"
       />
-      <div class="t-detail-layout__panel">
+      <div ref="panelRef" class="t-detail-layout__panel">
         <slot :section="activeSection" />
       </div>
     </div>
 
     <!-- plain + tabs share the single body region -->
-    <div v-else class="t-detail-layout__body">
+    <div v-else ref="bodyRef" class="t-detail-layout__body">
       <slot :section="activeSection" />
     </div>
 
@@ -43,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, type CSSProperties } from 'vue'
+import { computed, h, nextTick, ref, type CSSProperties, type ComponentPublicInstance } from 'vue'
 import { NTabs, NTabPane, NMenu } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TPageHeader from '../layout/TPageHeader.vue'
@@ -107,8 +108,29 @@ function label(s: DetailSection): string {
 function onSection(key: string): void {
   emit('update:activeSection', key)
 }
+
+// Template refs backing the scrollToSection public API.
+const navRef = ref<ComponentPublicInstance | null>(null)
+const bodyRef = ref<HTMLElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+
+/**
+ * Activate a section and scroll it into view — the public replacement for
+ * consumers reaching into the layout's private DOM (e.g. `.t-detail-layout__nav`).
+ * For `side` layout it brings the selected nav item into view; for every layout
+ * it returns the content region to the top so the section starts at the top.
+ */
+async function scrollToSection(key: string): Promise<void> {
+  emit('update:activeSection', key)
+  await nextTick()
+  const navEl = navRef.value?.$el as HTMLElement | undefined
+  navEl?.querySelector?.('.n-menu-item-content--selected')?.scrollIntoView?.({ block: 'nearest' })
+  bodyRef.value?.scrollTo?.({ top: 0 })
+  panelRef.value?.scrollTo?.({ top: 0 })
+}
+
 // exposed for unit testing the section handler without simulating naive events
-defineExpose({ onSection })
+defineExpose({ onSection, scrollToSection })
 
 /** Group sections into NMenu option groups when any section declares a `group`. */
 const menuOptions = computed(() => {

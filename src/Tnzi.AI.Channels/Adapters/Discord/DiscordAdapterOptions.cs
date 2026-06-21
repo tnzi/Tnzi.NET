@@ -40,9 +40,6 @@ public class DiscordAdapterOptions
     /// <summary>Retry attempts.</summary>
     public int MaxRetries { get; set; } = 3;
 
-    /// <summary>Maximum file upload size in bytes (Discord free tier is 25MB).</summary>
-    public long MaxFileSize { get; set; } = 25 * 1024 * 1024;
-
     public override string ToString() =>
         $"DiscordAdapterOptions {{ Enabled = {Enabled}, " +
         $"BotToken = {SecretMask.Mask(BotToken)}, " +
@@ -52,5 +49,5 @@ public class DiscordAdapterOptions
         $"AllowedGuilds.Count = {AllowedGuilds.Count}, " +
         $"AllowedChannels.Count = {AllowedChannels.Count}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +
-        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries}, MaxFileSize = {MaxFileSize} }}";
+        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries} }}";
 }

@@ -208,16 +208,6 @@
               {{ t('admin.crud.create') }}
             </NButton>
           </slot>
-          <NButton
-            v-if="showRefresh"
-            tertiary
-            size="small"
-            class="t-list-shell__action t-list-shell__refresh t-crud-toolbar__refresh"
-            @click="onRefresh"
-          >
-            <template #icon><TSvgIcon icon="mdi:refresh" :size="16" /></template>
-            {{ t('admin.crud.refresh') }}
-          </NButton>
           <NButton v-if="showExport" tertiary size="small" class="t-list-shell__action" @click="onExport">
             <template #icon><TSvgIcon icon="mdi:download-outline" :size="16" /></template>
             {{ t('admin.crud.export') }}
@@ -226,8 +216,22 @@
             <template #icon><TSvgIcon icon="mdi:upload-outline" :size="16" /></template>
             {{ t('admin.crud.import') }}
           </NButton>
-          <slot name="toolbar" />
           <slot name="toolbarRight" />
+          <NTooltip v-if="showRefresh" placement="top" :delay="600">
+            <template #trigger>
+              <NButton
+                tertiary
+                size="small"
+                class="t-list-shell__action t-list-shell__refresh t-crud-toolbar__refresh t-list-shell__trailing-icon"
+                :aria-label="t('admin.crud.refresh')"
+                @click="onRefresh"
+              >
+                <template #icon><TSvgIcon icon="mdi:refresh" :size="16" /></template>
+              </NButton>
+            </template>
+            {{ t('admin.crud.refresh') }}
+          </NTooltip>
+          <slot name="toolbar" />
         </div>
       </div>
 
@@ -281,7 +285,7 @@
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed, ref, useSlots, watch } from 'vue'
-import { NAlert, NButton, NCard, NInput, NPagination, NPopconfirm } from 'naive-ui'
+import { NAlert, NButton, NCard, NInput, NPagination, NPopconfirm, NTooltip } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TFormModal from './TFormModal.vue'
 import TCrudSearchDrawer from './TCrudSearchDrawer.vue'
@@ -584,6 +588,11 @@ const paginationConfig = computed(() => {
 .t-list-shell__footer-left { display: flex; align-items: center; gap: 8px; min-height: 28px; min-width: 0; }
 .t-list-shell__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .t-list-shell__action { font-weight: 400; }
+/* Trailing icon-only buttons (Refresh / Columns) keep the same `tertiary`
+   background as the adjacent text buttons (Export / Import) — they are NOT
+   bare icons. A slightly tighter horizontal padding makes them read as
+   compact square buttons while still carrying the button surface. */
+.t-list-shell__trailing-icon { padding-inline: 8px; }
 
 /* Header-card search cluster (right of the page header bar). */
 .t-list-shell__search { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }

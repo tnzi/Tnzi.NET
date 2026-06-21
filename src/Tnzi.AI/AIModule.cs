@@ -64,9 +64,7 @@ public partial class AIModule : TnziApplicationModule
         where TOptions : class
         where TValidator : class, IValidateOptions<TOptions>
     {
-        context.Services.AddOptions<TOptions>()
-            .Bind(context.Configuration.GetSection(section))
-            .ValidateWith<TOptions, TValidator>();
+        context.Services.AddTnziOptions<TOptions, TValidator>(context.Configuration, section);
     }
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
@@ -88,9 +86,6 @@ public partial class AIModule : TnziApplicationModule
 
         // 核心工具：Shell 命令分析器 — 纯字符串解析工具，被 Sandbox 子模块消费
         services.TryAddSingleton<IShellCommandAnalyzer, ShellCommandAnalyzer>();
-
-        // 配置中心：声明 AI 模块可热更新的配置组（System 模块未加载时惰性无害）
-        services.AddSingleton<ISettingDefinitionProvider, AISettingDefinitionProvider>();
 
         return Task.CompletedTask;
     }

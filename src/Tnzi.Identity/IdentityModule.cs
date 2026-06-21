@@ -42,9 +42,6 @@ public class IdentityModule : TnziApplicationModule
         // 自动配置 Identity（如果 DbContext 继承自 IdentityDbContext）
         AutoConfigureIdentity(context.Services, configuration);
 
-        // 注册配置中心定义提供者
-        context.Services.AddSingleton<ISettingDefinitionProvider, IdentitySettingDefinitionProvider>();
-
         // 注册核心服务（Token）
         context.Services.AddScoped<ITokenService, JwtTokenService>();
 
@@ -136,6 +133,11 @@ public class IdentityModule : TnziApplicationModule
                 }
                 var key = Encoding.UTF8.GetBytes(jwtSecret);
 
+                // 显式声明读写两端依赖的 claim 映射契约 —— 不依赖 MapInboundClaims 的隐式默认。
+                // 写端（JwtTokenService）用 ClaimTypes.* 建 claim；入站经 MapInboundClaims 把 JWT
+                // 短名映射回长 URI，读端（HttpContextCurrentUser / IsInRole）按长 URI 读 → 三方对齐。
+                // 钉死可防迁移到 JsonWebTokenHandler（默认不映射）或他处改配置时静默打破对齐。
+                jwtBearerOptions.MapInboundClaims = true;
                 jwtBearerOptions.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
@@ -144,7 +146,12 @@ public class IdentityModule : TnziApplicationModule
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtConfig.Issuer,
                     ValidAudience = jwtConfig.Audience,
-                    IssuerSigningKey = new SymmetricSecurityKey(key)
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    NameClaimType = ClaimTypes.Name,
+                    RoleClaimType = ClaimTypes.Role,
+                    // 写端固定 HS256（对称密钥）；锁死算法消除算法混淆面，与
+                    // JwtTokenService.GetPrincipalFromExpiredToken 的手动 alg 校验一致。
+                    ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 }
                 };
             });
 

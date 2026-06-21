@@ -9,7 +9,12 @@ public class ThreadQuotaUsage
     /// <summary>Owning thread.</summary>
     public Guid ThreadId { get; init; }
 
-    /// <summary>Total successful <c>bash</c> invocations recorded in the current window.</summary>
+    /// <summary>
+    /// Total non-rejected <c>bash</c> invocations admitted in the current window.
+    /// Counts every command that passed the quota pre-flight (reserved a slot),
+    /// including ones that later exit non-zero — only quota/blacklist-denied
+    /// commands are excluded.
+    /// </summary>
     public long CommandCount { get; init; }
 
     /// <summary>Sum of <see cref="System.Diagnostics.Stopwatch.ElapsedMilliseconds"/> across all <c>bash</c> calls.</summary>

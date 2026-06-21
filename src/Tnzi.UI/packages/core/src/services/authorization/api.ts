@@ -1,9 +1,10 @@
 /**
  * Authorization Module API
  * Aligned with Tnzi.NET backend Authorization module controllers:
- *   - /admin/modules         (DefaultModuleAdminController)
- *   - /admin/role-functions  (DefaultRoleFunctionAdminController)
- *   - /admin/data-auth       (DefaultDataAuthAdminController)
+ *   - /admin/modules                 (DefaultModuleAdminController)
+ *   - /admin/role-functions          (DefaultRoleFunctionAdminController)
+ *   - /admin/data-auth               (DefaultDataAuthAdminController)
+ *   - /admin/function-authorization  (DefaultFunctionAuthorizationAdminController)
  */
 
 import type { HttpClient } from '../../http/http'
@@ -28,6 +29,7 @@ import type {
 const MODULES_BASE = '/admin/modules'
 const ROLE_FUNCTIONS_BASE = '/admin/role-functions'
 const DATA_AUTH_BASE = '/admin/data-auth'
+const FUNCTION_AUTH_BASE = '/admin/function-authorization'
 
 // ─── Module Function (permission) API ────────────────────────────────────────
 
@@ -185,5 +187,30 @@ export function useAdminEntityRoleApi(client: HttpClient) {
 
     /** Delete entity role */
     delete: (id: string) => client.delete<void>(`${DATA_AUTH_BASE}/entity-roles/${id}`),
+  }
+}
+
+// ─── Function Authorization API (current-user permissions, checks) ────────────
+
+/**
+ * Function authorization API — maps to `DefaultFunctionAuthorizationAdminController`
+ * (`/admin/function-authorization`).
+ *
+ * `getUserPermissionNames` is the source the admin shell feeds into its auth
+ * store to drive permission-filtered menus and route guards. The backend
+ * returns the FULL enabled-function catalogue for super-admins, so the client
+ * never needs a super-user special case — a super-admin simply receives every
+ * code and therefore sees every menu.
+ */
+export function useAdminFunctionAuthorizationApi(client: HttpClient) {
+  return {
+    /** Get the flat list of permission codes granted to a user. */
+    getUserPermissionNames: (userId: string) =>
+      client.get<string[]>(`${FUNCTION_AUTH_BASE}/user/${userId}/permissions`),
+    /** Check whether a user holds a specific permission code. */
+    checkPermission: (userId: string, permissionName: string) =>
+      client.get<boolean>(`${FUNCTION_AUTH_BASE}/check`, {
+        params: { userId, permissionName },
+      }),
   }
 }

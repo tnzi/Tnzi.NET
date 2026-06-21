@@ -8,7 +8,10 @@ public class FileCleanupServiceTests
 {
     private readonly Mock<IRepository<FileRecord, Guid>> _mockFileRepository;
     private readonly Mock<IRepository<FileReference, Guid>> _mockReferenceRepository;
+    private readonly Mock<IRepository<FileUploadSession, Guid>> _mockSessionRepository;
+    private readonly Mock<IRepository<FileChunk, Guid>> _mockChunkRepository;
     private readonly Mock<IFileStorage> _mockStorage;
+    private readonly Mock<Tnzi.MultiTenancy.ICurrentTenant> _mockCurrentTenant;
     private readonly Mock<ILogger<FileCleanupService>> _mockLogger;
     private readonly Mock<IServiceProvider> _mockServiceProvider;
     private readonly StorageOptions _options;
@@ -17,7 +20,12 @@ public class FileCleanupServiceTests
     {
         _mockFileRepository = new Mock<IRepository<FileRecord, Guid>>();
         _mockReferenceRepository = new Mock<IRepository<FileReference, Guid>>();
+        _mockSessionRepository = new Mock<IRepository<FileUploadSession, Guid>>();
+        _mockChunkRepository = new Mock<IRepository<FileChunk, Guid>>();
         _mockStorage = new Mock<IFileStorage>();
+        _mockCurrentTenant = new Mock<Tnzi.MultiTenancy.ICurrentTenant>();
+        _mockCurrentTenant.Setup(t => t.Change(It.IsAny<Guid?>(), It.IsAny<string?>()))
+            .Returns(Mock.Of<IDisposable>());
         _mockLogger = new Mock<ILogger<FileCleanupService>>();
         _mockServiceProvider = new Mock<IServiceProvider>();
         _options = new StorageOptions();
@@ -33,9 +41,13 @@ public class FileCleanupServiceTests
         return new FileCleanupService(
             _mockFileRepository.Object,
             _mockReferenceRepository.Object,
+            _mockSessionRepository.Object,
+            _mockChunkRepository.Object,
             _mockStorage.Object,
+            _mockCurrentTenant.Object,
             optionsWrapper,
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            multiTenancyOptions: null);
     }
 
     [Fact]
@@ -46,11 +58,12 @@ public class FileCleanupServiceTests
         {
             TemporaryFilesDeleted = 5,
             OrphanFilesDeleted = 3,
-            OrphanReferencesDeleted = 2
+            OrphanReferencesDeleted = 2,
+            ExpiredSessionsDeleted = 4
         };
 
         // Act & Assert
-        Assert.Equal(10, result.TotalDeleted);
+        Assert.Equal(14, result.TotalDeleted);
     }
 
     [Fact]
@@ -65,6 +78,7 @@ public class FileCleanupServiceTests
         Assert.Equal(0, result.TemporaryFilesDeleted);
         Assert.Equal(0, result.OrphanFilesDeleted);
         Assert.Equal(0, result.OrphanReferencesDeleted);
+        Assert.Equal(0, result.ExpiredSessionsDeleted);
     }
 
     [Fact]

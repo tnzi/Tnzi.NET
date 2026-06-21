@@ -48,6 +48,7 @@ global using Tnzi.Identity.Services;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;
 global using Tnzi.MultiTenancy;
+global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Security.Claims;

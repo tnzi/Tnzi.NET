@@ -190,9 +190,11 @@ public class PerSkillAllowedToolsTests
     }
 
     [Fact]
-    public async Task InvokeAsync_MultipleSkillsWithAllowedTools_AccumulatesInjection()
+    public async Task InvokeAsync_MultipleSkillsWithDisjointAllowedTools_IntersectionIsEmpty_InjectsNothing()
     {
-        // Arrange: two skills, each with different AllowedTools
+        // Arrange: two skills with DISJOINT whitelists. AllowedTools semantics are
+        // INTERSECTION (most-restrictive-wins): the agent must satisfy every active
+        // skill's whitelist, so two disjoint whitelists permit no common tool.
         var skill1 = new SkillDefinition
         {
             Slug = "skill-1",
@@ -226,7 +228,87 @@ public class PerSkillAllowedToolsTests
         await middleware.InvokeAsync(context, (ctx, ct) =>
             Task.FromResult(new AgentRunResult { Response = "done" }));
 
-        // Assert: both tools should be injected
-        context.AdditionalTools.Count.ShouldBe(2);
+        // Assert: intersection of {tool-a} ∩ {tool-b} = ∅ → nothing injected.
+        context.AdditionalTools.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_MultipleSkillsWithOverlappingAllowedTools_InjectsCommonTool()
+    {
+        // Arrange: two skills whose whitelists overlap on "tool-a". The intersection
+        // keeps only the common tool.
+        var skill1 = new SkillDefinition
+        {
+            Slug = "skill-1",
+            Name = "Skill 1",
+            Priority = 2,
+            AllowedTools = ["tool-a", "tool-b"]
+        };
+        var skill2 = new SkillDefinition
+        {
+            Slug = "skill-2",
+            Name = "Skill 2",
+            Priority = 1,
+            AllowedTools = ["tool-a"]
+        };
+
+        var toolA = MakeToolDef("tool-a", "group1");
+        var toolB = new ToolDefinition
+        {
+            Name = "tool-b",
+            GroupName = "group2",
+            ProviderType = typeof(DummyToolProvider),
+            MethodInfo = typeof(DummyToolProvider).GetMethod(nameof(DummyToolProvider.AnotherTool))!
+        };
+
+        var registry = CreateToolRegistry(toolA, toolB);
+        var middleware = CreateMiddleware(registry);
+
+        var context = CreateContext([skill1, skill2]);
+
+        // Act
+        await middleware.InvokeAsync(context, (ctx, ct) =>
+            Task.FromResult(new AgentRunResult { Response = "done" }));
+
+        // Assert: {tool-a, tool-b} ∩ {tool-a} = {tool-a} → only the common tool injected.
+        context.AdditionalTools.Count.ShouldBe(1);
+        context.AdditionalTools.ShouldContain(t =>
+            string.Equals(t.Name, "tool-a", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t.Name, "TestTool", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_OneSkillWhitelistsOneSkillDoesNot_DoesNotCollapseIntersection()
+    {
+        // Arrange: skill1 declares a whitelist, skill2 declares none. A skill with no
+        // AllowedTools imposes NO individual-tool restriction and must NOT collapse the
+        // intersection — so skill1's whitelist still applies in full.
+        var skill1 = new SkillDefinition
+        {
+            Slug = "skill-1",
+            Name = "Skill 1",
+            Priority = 2,
+            AllowedTools = ["tool-a"]
+        };
+        var skill2 = new SkillDefinition
+        {
+            Slug = "skill-2",
+            Name = "Skill 2",
+            Priority = 1,
+            AllowedTools = null // no individual-tool restriction
+        };
+
+        var toolA = MakeToolDef("tool-a", "group1");
+        var registry = CreateToolRegistry(toolA);
+        var middleware = CreateMiddleware(registry);
+
+        var context = CreateContext([skill1, skill2]);
+
+        // Act
+        await middleware.InvokeAsync(context, (ctx, ct) =>
+            Task.FromResult(new AgentRunResult { Response = "done" }));
+
+        // Assert: skill1's {tool-a} survives (skill2 contributes no restriction).
+        context.AdditionalTools.Count.ShouldBe(1);
     }
 }

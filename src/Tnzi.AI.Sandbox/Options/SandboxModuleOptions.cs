@@ -68,6 +68,13 @@ public class LocalSandboxOptions
     public List<string> DeniedCommandPrefixes { get; set; } =
         ["mkfs", "shutdown", "reboot", "halt", "poweroff", "init", "fdisk", "dd"];
 
+    /// <summary>
+    /// Wildcard patterns matched (case-insensitive) against the leaf file name in
+    /// <c>read_file</c> / <c>ls</c>. A match is hidden from listings and refused on
+    /// read so the agent cannot exfiltrate secrets via the file tools. Note this
+    /// guards the file tools only — a raw <c>bash cat</c> is governed by the command
+    /// blacklist, not this list.
+    /// </summary>
     public List<string> DeniedPatterns { get; set; } = [".env", "*.key", "*.pem", "credentials*"];
     public List<string> EnvironmentBlacklist { get; set; } =
         ["API_KEY", "SECRET_KEY", "ACCESS_TOKEN", "PRIVATE_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"];
@@ -136,6 +143,15 @@ public class DockerSandboxOptions
     /// </summary>
     public List<string> DeniedCommandPrefixes { get; set; } =
         ["mkfs", "shutdown", "reboot", "halt", "poweroff", "init", "fdisk", "dd"];
+
+    /// <summary>
+    /// Wildcard patterns matched (case-insensitive) against the leaf file name in
+    /// <c>read_file</c> / <c>ls</c>. A match is hidden from listings and refused on
+    /// read so the agent cannot exfiltrate secrets via the file tools. Note this
+    /// guards the file tools only — a raw <c>bash cat</c> is governed by the command
+    /// blacklist, not this list.
+    /// </summary>
+    public List<string> DeniedPatterns { get; set; } = [".env", "*.key", "*.pem", "credentials*"];
 
     /// <summary>
     /// Drop all Linux capabilities inside the container. Defaults to <c>true</c>

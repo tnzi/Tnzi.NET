@@ -56,9 +56,11 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
             return await _storage.GetUrlAsync(fileRecord.Path);
         }
 
-        // 对于其他类型，返回预览API URL
+        // 对于其他类型，返回预览 API URL。
+        // 路由对应 DefaultStoragePreviewController：[Route("files/preview")] + [HttpGet("{id:guid}/preview")]，
+        // 框架自动加 "api/" 前缀，故完整路径为 /api/files/preview/{id}/preview。
         var previewType = GetPreviewType(fileRecord);
-        return $"/api/file/preview/{fileRecord.Id}?type={previewType}";
+        return $"/api/files/preview/{fileRecord.Id}/preview?type={previewType}";
     }
 
     /// <summary>

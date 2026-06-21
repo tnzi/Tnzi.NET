@@ -238,6 +238,73 @@
         </div>
       </template>
     </NModal>
+
+    <!-- Tags modal -->
+    <NModal
+      v-model:show="tagsModal.show"
+      :title="t('tags.title')"
+      preset="card"
+      :style="folderModalStyle"
+    >
+      <p class="text-13px text-muted mb-8px">{{ tagsModal.fileName }}</p>
+      <NDynamicTags v-model:value="tagsModal.tags" />
+      <template #footer>
+        <div class="flex justify-end gap-8px">
+          <NButton @click="tagsModal.show = false">{{ t('cancel') }}</NButton>
+          <NButton type="primary" :loading="tagsModal.saving" @click="saveTags">
+            {{ t('save') }}
+          </NButton>
+        </div>
+      </template>
+    </NModal>
+
+    <!-- Metadata modal -->
+    <NModal
+      v-model:show="metadataModal.show"
+      :title="t('metadata.title')"
+      preset="card"
+      :style="folderModalStyle"
+    >
+      <p class="text-13px text-muted mb-8px">{{ metadataModal.fileName }}</p>
+      <NSpin :show="metadataModal.loading">
+        <NEmpty v-if="!metadataModal.rows.length" :description="t('metadata.empty')" class="my-12px" />
+        <NSpace v-else vertical size="small">
+          <div
+            v-for="(row, i) in metadataModal.rows"
+            :key="i"
+            class="flex items-center gap-8px"
+          >
+            <NInput
+              v-model:value="row.key"
+              :placeholder="t('metadata.key')"
+              size="small"
+              class="flex-1"
+            />
+            <NInput
+              v-model:value="row.value"
+              :placeholder="t('metadata.value')"
+              size="small"
+              class="flex-1"
+            />
+            <NButton size="small" quaternary @click="removeMetadataRow(i)">
+              <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
+            </NButton>
+          </div>
+        </NSpace>
+        <NButton size="small" dashed class="mt-8px" @click="addMetadataRow">
+          <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
+          {{ t('metadata.add') }}
+        </NButton>
+      </NSpin>
+      <template #footer>
+        <div class="flex justify-end gap-8px">
+          <NButton @click="metadataModal.show = false">{{ t('cancel') }}</NButton>
+          <NButton type="primary" :loading="metadataModal.saving" @click="saveMetadata">
+            {{ t('save') }}
+          </NButton>
+        </div>
+      </template>
+    </NModal>
   </TContentPage>
 </template>
 
@@ -247,6 +314,7 @@ import type { TreeOption, DataTableColumns } from 'naive-ui'
 import {
   NButton, NTree, NInput, NSelect, NSpin, NPagination,
   NModal, NForm, NFormItem, NInputNumber, NPopconfirm, NTag,
+  NDropdown, NDynamicTags, NEmpty, NSpace,
 } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { useBreakpoint } from '../../headless/useBreakpoint'
@@ -309,6 +377,25 @@ const folderModal = reactive({
   mode: 'create' as 'create' | 'rename',
   parentId: null as string | null,
   form: { name: '', description: '' as string | undefined, sortOrder: 0 },
+})
+
+// Tags modal — edits FileRecord.Tags via PUT /admin/files/{id}/tags.
+const tagsModal = reactive({
+  show: false,
+  fileId: '' as string,
+  fileName: '' as string,
+  tags: [] as string[],
+  saving: false,
+})
+
+// Metadata modal — key/value rows persisted via PUT /admin/files/{id}/metadata.
+const metadataModal = reactive({
+  show: false,
+  fileId: '' as string,
+  fileName: '' as string,
+  rows: [] as Array<{ key: string; value: string }>,
+  loading: false,
+  saving: false,
 })
 
 // ---- Derived --------------------------------------------------------------
@@ -424,19 +511,48 @@ const columns = computed<DataTableColumns<FileRecordDto>>(() => [
   {
     key: 'actions',
     title: t('columns.actions'),
-    width: 100,
+    width: 180,
     render: (row) =>
-      h(
-        NButton,
-        {
-          size: 'small',
-          ghost: true,
-          onClick: () => downloadFile(row),
-        },
-        { default: () => t('actions.download') },
-      ),
+      h('div', { class: 'flex items-center gap-4px' }, [
+        h(
+          NButton,
+          { size: 'small', ghost: true, onClick: () => downloadFile(row) },
+          { default: () => t('actions.download') },
+        ),
+        h(
+          NDropdown,
+          {
+            trigger: 'click',
+            options: rowMenuOptions,
+            onSelect: (key: string) => onRowMenuSelect(key, row),
+          },
+          {
+            default: () =>
+              h(
+                NButton,
+                { size: 'small', tertiary: true },
+                {
+                  icon: () => h(TSvgIcon, { icon: 'mdi:dots-horizontal', size: 16 }),
+                },
+              ),
+          },
+        ),
+      ]),
   },
 ])
+
+// Per-row More menu: preview / set tags / view+edit metadata.
+const rowMenuOptions = [
+  { key: 'preview', label: t('actions.preview') },
+  { key: 'tags', label: t('actions.tags') },
+  { key: 'metadata', label: t('actions.metadata') },
+]
+
+function onRowMenuSelect(key: string, row: FileRecordDto): void {
+  if (key === 'preview') void previewFile(row)
+  else if (key === 'tags') openTagsModal(row)
+  else if (key === 'metadata') void openMetadataModal(row)
+}
 
 // ---- Actions --------------------------------------------------------------
 
@@ -521,6 +637,91 @@ function onPageSizeChange(next: number): void {
 function downloadFile(row: FileRecordDto): void {
   const url = bridge.files.downloadUrl(row.id)
   window.open(url, '_blank')
+}
+
+// ---- Preview / tags / metadata --------------------------------------------
+
+async function previewFile(row: FileRecordDto): Promise<void> {
+  try {
+    const can = await bridge.preview.canPreview(row.id)
+    if (!can) {
+      message.warning(t('preview.unsupported'))
+      return
+    }
+    const url = await bridge.preview.url(row.id)
+    if (url) {
+      window.open(url, '_blank')
+    } else {
+      message.warning(t('preview.unsupported'))
+    }
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+function openTagsModal(row: FileRecordDto): void {
+  tagsModal.fileId = row.id
+  tagsModal.fileName = row.originalName
+  // FileRecordDto has no typed `tags` field; read it defensively when present.
+  const existing = (row as { tags?: string[] }).tags
+  tagsModal.tags = Array.isArray(existing) ? [...existing] : []
+  tagsModal.show = true
+}
+
+async function saveTags(): Promise<void> {
+  tagsModal.saving = true
+  try {
+    await bridge.tags.set(tagsModal.fileId, tagsModal.tags)
+    message.success(t('tags.saveSuccess'))
+    tagsModal.show = false
+    await loadFiles()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    tagsModal.saving = false
+  }
+}
+
+async function openMetadataModal(row: FileRecordDto): Promise<void> {
+  metadataModal.fileId = row.id
+  metadataModal.fileName = row.originalName
+  metadataModal.rows = []
+  metadataModal.show = true
+  metadataModal.loading = true
+  try {
+    const map = await bridge.metadata.get(row.id)
+    metadataModal.rows = Object.entries(map).map(([key, value]) => ({ key, value }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    metadataModal.loading = false
+  }
+}
+
+function addMetadataRow(): void {
+  metadataModal.rows = [...metadataModal.rows, { key: '', value: '' }]
+}
+
+function removeMetadataRow(index: number): void {
+  metadataModal.rows = metadataModal.rows.filter((_, i) => i !== index)
+}
+
+async function saveMetadata(): Promise<void> {
+  metadataModal.saving = true
+  try {
+    const map: Record<string, string> = {}
+    for (const r of metadataModal.rows) {
+      const key = r.key.trim()
+      if (key) map[key] = r.value
+    }
+    await bridge.metadata.set(metadataModal.fileId, map)
+    message.success(t('metadata.saveSuccess'))
+    metadataModal.show = false
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    metadataModal.saving = false
+  }
 }
 
 async function batchMoveFiles(): Promise<void> {

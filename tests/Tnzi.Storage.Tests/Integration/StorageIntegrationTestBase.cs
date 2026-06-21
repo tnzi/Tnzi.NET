@@ -26,6 +26,7 @@ public class StorageTestDbContext : TnziDbContext<StorageTestDbContext>
     public DbSet<Tnzi.Storage.Entities.FileShare> FileShares => Set<Tnzi.Storage.Entities.FileShare>();
     public DbSet<FileUploadSession> FileUploadSessions => Set<FileUploadSession>();
     public DbSet<FileChunk> FileChunks => Set<FileChunk>();
+    public DbSet<FileFolder> FileFolders => Set<FileFolder>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +36,7 @@ public class StorageTestDbContext : TnziDbContext<StorageTestDbContext>
         modelBuilder.ApplyConfiguration(new FileShareConfiguration());
         modelBuilder.ApplyConfiguration(new FileUploadSessionConfiguration());
         modelBuilder.ApplyConfiguration(new FileChunkConfiguration());
+        modelBuilder.ApplyConfiguration(new FileFolderConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
@@ -64,18 +66,43 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         Storage = new LocalStorage(configuration, logger: NullLogger<LocalStorage>.Instance);
 
         services.AddSingleton<IFileStorage>(Storage);
+
+        // No-op event bus so services that publish lifecycle events (e.g. FileFolderService)
+        // do not NRE when no real EventBus module is loaded in the test host.
+        // DefaultValue.Empty makes the generic PublishAsync<TEvent> return a completed Task
+        // (not null) without per-generic-arg setup.
+        var eventBus = new Mock<Tnzi.EventBus.IEventBus> { DefaultValue = DefaultValue.Empty };
+        services.AddSingleton(eventBus.Object);
     }
 
-    protected FileStorageService CreateStorageService()
+    protected FileStorageService CreateStorageService(StorageOptions? options = null)
     {
+        return CreateStorageService(Storage, options);
+    }
+
+    /// <summary>
+    /// Build a FileStorageService backed by a caller-supplied IFileStorage (e.g. a fake that
+    /// simulates physical-delete failure) so storage-level edge cases can be exercised.
+    /// </summary>
+    protected FileStorageService CreateStorageService(IFileStorage storage, StorageOptions? options = null)
+    {
+        var effective = options ?? StorageOptions;
         var optionsMonitor = new Mock<IOptionsMonitor<StorageOptions>>();
-        optionsMonitor.Setup(x => x.CurrentValue).Returns(StorageOptions);
+        optionsMonitor.Setup(x => x.CurrentValue).Returns(effective);
         return new FileStorageService(
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
-            Storage,
+            storage,
             optionsMonitor.Object,
             ServiceProvider);
+    }
+
+    protected FileFolderService CreateFolderService()
+    {
+        return new FileFolderService(
+            ServiceProvider,
+            new EFCoreRepository<StorageTestDbContext, FileFolder, Guid>(DbContext, serviceProvider: ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider));
     }
 
     protected FileVersionService CreateVersionService()
@@ -87,15 +114,24 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             ServiceProvider);
     }
 
-    protected FileChunkUploadService CreateChunkUploadService()
+    protected FileChunkUploadService CreateChunkUploadService(StorageOptions? options = null)
     {
         return new FileChunkUploadService(
             new EFCoreRepository<StorageTestDbContext, FileUploadSession, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileChunk, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             Storage,
-            Microsoft.Extensions.Options.Options.Create(StorageOptions),
+            Microsoft.Extensions.Options.Options.Create(options ?? StorageOptions),
             ServiceProvider);
+    }
+
+    protected FileReferenceProcessor CreateReferenceProcessor(StorageOptions? options = null)
+    {
+        return new FileReferenceProcessor(
+            new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
+            NullLogger<FileReferenceProcessor>.Instance,
+            Microsoft.Extensions.Options.Options.Create(options ?? StorageOptions));
     }
 
     protected FileShareService CreateShareService()
@@ -104,6 +140,24 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, Tnzi.Storage.Entities.FileShare, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             ServiceProvider);
+    }
+
+    protected FileCleanupService CreateCleanupService(
+        Tnzi.MultiTenancy.ICurrentTenant? currentTenant = null,
+        IOrphanReferenceValidator? orphanReferenceValidator = null,
+        bool multiTenancyEnabled = false)
+    {
+        return new FileCleanupService(
+            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileUploadSession, Guid>(DbContext, serviceProvider: ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileChunk, Guid>(DbContext, serviceProvider: ServiceProvider),
+            Storage,
+            currentTenant ?? new Tnzi.MultiTenancy.CurrentTenant(),
+            Microsoft.Extensions.Options.Options.Create(StorageOptions),
+            ServiceProvider,
+            Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = multiTenancyEnabled }),
+            orphanReferenceValidator);
     }
 
     protected async Task<FileRecord> CreateStoredFileAsync(string originalName, byte[] content, string? tags = null)

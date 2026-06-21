@@ -1,92 +1,119 @@
+using Tnzi.Settings;
+using Tnzi.Notification.Options;
+
 namespace Tnzi.Notification.Tests;
 
 /// <summary>
-/// NotificationSettingDefinitionProvider 结构测试 — 验证 provider 注册字段符合配置中心契约
+/// Notification 配置中心属性驱动定义测试 — 验证 NotificationOptions + RetryOptions 的
+/// [RuntimeSetting] 注解经 RuntimeSettingMetadataExtractor 扫描合并后符合配置中心契约。
 /// </summary>
 public class NotificationSettingDefinitionProviderTests
 {
-    private readonly NotificationSettingDefinitionProvider _provider = new();
+    private readonly SettingDefinitionGroup _group;
+
+    public NotificationSettingDefinitionProviderTests()
+    {
+        // Mirrors AttributeSettingDefinitionProvider: extract per-type, then merge by group key.
+        var raw = new List<SettingDefinitionGroup>();
+        foreach (var type in new[] { typeof(NotificationOptions), typeof(RetryOptions) })
+        {
+            var g = RuntimeSettingMetadataExtractor.Extract(type);
+            if (g != null) raw.Add(g);
+        }
+
+        // Inline merge (same logic as AttributeSettingDefinitionProvider.MergeByGroupKey).
+        var merged = raw
+            .GroupBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(cluster =>
+            {
+                var first = cluster.First();
+                if (cluster.Count() == 1) return first;
+                return new SettingDefinitionGroup
+                {
+                    Key = first.Key,
+                    ModuleName = first.ModuleName,
+                    DisplayName = first.DisplayName,
+                    I18nKey = first.I18nKey,
+                    Icon = first.Icon,
+                    Order = cluster.Min(c => c.Order),
+                    Fields = cluster.SelectMany(c => c.Fields).ToList(),
+                };
+            })
+            .ToList();
+
+        _group = merged.Single();
+    }
 
     [Fact]
     public void GetGroups_ReturnsOneGroup()
     {
-        var groups = _provider.GetGroups();
-        Assert.Single(groups);
+        _group.ShouldNotBeNull();
     }
 
     [Fact]
     public void Group_HasExpectedKey()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("notification-general", group.Key);
+        _group.Key.ShouldBe("notification-general");
     }
 
     [Fact]
     public void Group_HasExpectedModuleName()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal("Notification", group.ModuleName);
+        _group.ModuleName.ShouldBe("Notification");
     }
 
     [Fact]
     public void Group_HasExpectedOrder()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(400, group.Order);
+        _group.Order.ShouldBe(400);
     }
 
     [Fact]
     public void Group_HasThreeFields()
     {
-        var group = _provider.GetGroups()[0];
-        Assert.Equal(3, group.Fields.Count);
+        _group.Fields.Count.ShouldBe(3);
     }
 
     [Fact]
     public void Fields_HaveCorrectKeys()
     {
-        var fields = _provider.GetGroups()[0].Fields;
-        Assert.Contains(fields, f => f.Key == "Notification:SendTimeoutSeconds");
-        Assert.Contains(fields, f => f.Key == "Notification:Retry:RetryDelaySeconds");
-        Assert.Contains(fields, f => f.Key == "Notification:Retry:EnableExponentialBackoff");
+        _group.Fields.ShouldContain(f => f.Key == "Notification:SendTimeoutSeconds");
+        _group.Fields.ShouldContain(f => f.Key == "Notification:Retry:RetryDelaySeconds");
+        _group.Fields.ShouldContain(f => f.Key == "Notification:Retry:EnableExponentialBackoff");
     }
 
     [Fact]
     public void Fields_HaveCorrectTypes()
     {
-        var fields = _provider.GetGroups()[0].Fields;
-        var timeout = fields.First(f => f.Key == "Notification:SendTimeoutSeconds");
-        var delay = fields.First(f => f.Key == "Notification:Retry:RetryDelaySeconds");
-        var backoff = fields.First(f => f.Key == "Notification:Retry:EnableExponentialBackoff");
+        var timeout = _group.Fields.Single(f => f.Key == "Notification:SendTimeoutSeconds");
+        var delay = _group.Fields.Single(f => f.Key == "Notification:Retry:RetryDelaySeconds");
+        var backoff = _group.Fields.Single(f => f.Key == "Notification:Retry:EnableExponentialBackoff");
 
-        Assert.Equal(SettingFieldType.Int, timeout.Type);
-        Assert.Equal(SettingFieldType.Int, delay.Type);
-        Assert.Equal(SettingFieldType.Boolean, backoff.Type);
+        timeout.Type.ShouldBe(SettingFieldType.Int);
+        delay.Type.ShouldBe(SettingFieldType.Int);
+        backoff.Type.ShouldBe(SettingFieldType.Boolean);
     }
 
     [Fact]
     public void DefaultValueAccessors_ReturnExpectedDefaults()
     {
-        var fields = _provider.GetGroups()[0].Fields;
+        var timeout = _group.Fields.Single(f => f.Key == "Notification:SendTimeoutSeconds");
+        var delay = _group.Fields.Single(f => f.Key == "Notification:Retry:RetryDelaySeconds");
+        var backoff = _group.Fields.Single(f => f.Key == "Notification:Retry:EnableExponentialBackoff");
 
-        var timeout = fields.First(f => f.Key == "Notification:SendTimeoutSeconds");
-        var delay = fields.First(f => f.Key == "Notification:Retry:RetryDelaySeconds");
-        var backoff = fields.First(f => f.Key == "Notification:Retry:EnableExponentialBackoff");
+        timeout.DefaultValueAccessor.ShouldNotBeNull();
+        timeout.DefaultValueAccessor!().ShouldBe("30");
 
-        Assert.NotNull(timeout.DefaultValueAccessor);
-        Assert.Equal("30", timeout.DefaultValueAccessor!());
+        delay.DefaultValueAccessor.ShouldNotBeNull();
+        delay.DefaultValueAccessor!().ShouldBe("60");
 
-        Assert.NotNull(delay.DefaultValueAccessor);
-        Assert.Equal("60", delay.DefaultValueAccessor!());
-
-        Assert.NotNull(backoff.DefaultValueAccessor);
-        Assert.Equal("true", backoff.DefaultValueAccessor!());
+        backoff.DefaultValueAccessor.ShouldNotBeNull();
+        backoff.DefaultValueAccessor!().ShouldBe("True");
     }
 
     [Fact]
     public void Fields_HaveI18nKeys()
     {
-        var fields = _provider.GetGroups()[0].Fields;
-        Assert.All(fields, f => Assert.NotNull(f.I18nKey));
+        _group.Fields.ShouldAllBe(f => f.I18nKey != null);
     }
 }

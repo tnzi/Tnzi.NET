@@ -78,7 +78,9 @@ public class DockerSandboxProvider : ISandboxProvider
                     _containerSemaphore.Release();
                 },
                 deniedCommandPrefixes: dockerOpts.DeniedCommandPrefixes,
-                commandAnalyzer: _commandAnalyzer);
+                commandAnalyzer: _commandAnalyzer,
+                deniedPatterns: dockerOpts.DeniedPatterns,
+                maxFileSize: options.MaxFileSizeBytes);
         }
         catch
         {

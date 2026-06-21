@@ -3,11 +3,17 @@ namespace Tnzi.AI.Options;
 /// <summary>
 /// 成本追踪配置选项
 /// </summary>
+[ConfigSection("AI:CostTracking")]
+[RuntimeSettingGroup(Key = "ai-budget", Module = "AI", DisplayName = "AI Budget",
+    I18nKey = "admin.modules.system.settings.groups.aiBudget", Icon = "mdi:cash-multiple", Order = 110)]
 public class CostTrackingOptions
 {
     /// <summary>
     /// 是否启用成本追踪（默认关闭）
     /// </summary>
+    [RuntimeSetting(Label = "Cost Tracking Enabled", I18n = "admin.modules.system.settings.fields.costTrackingEnabled",
+        Type = SettingFieldType.Boolean,
+        Description = "Enable per-request token cost calculation (requires model cost rates configured)")]
     public bool Enabled { get; set; }
 
     /// <summary>

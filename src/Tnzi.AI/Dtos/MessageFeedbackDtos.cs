@@ -61,5 +61,5 @@ public class AgentFeedbackStatsDto
     public double PositiveRate { get; set; }
 
     /// <summary>Negative tag distribution (tag → count)</summary>
-    public Dictionary<string, int> TagDistribution { get; set; } = new();
+    public Dictionary<string, int> TagDistribution { get; set; } = [];
 }

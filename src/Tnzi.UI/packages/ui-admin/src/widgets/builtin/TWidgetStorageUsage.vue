@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
- * `TWidgetStorageUsage` — total file count + aggregate size (best-effort).
+ * `TWidgetStorageUsage` — total file count + aggregate size.
  *
- * Backend gap: `storage-bridge` doesn't expose a `/admin/storage/stats`
- * endpoint yet, so we cheat — `files.fetch({ pageSize: 1 })` returns
- * `totalCount` for free. Aggregate size pulls the first page and sums
- * the visible rows, then projects a rough estimate; this is acknowledged
- * to be approximate (and labeled "≈" in the UI).
+ * Wired to `storage-bridge.statistics.get()` (GET /admin/files/statistics →
+ * FileStorageStatistics) which returns the exact `totalFiles` / `totalSize`
+ * aggregates. This replaces the previous best-effort sampling estimate
+ * (`files.fetch({ pageSize: 50 })` → average × count), so the size is no
+ * longer approximate and the "≈" hint is gone.
  */
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
@@ -16,32 +16,16 @@ import { useWidgetData } from '../shell/useWidgetData'
 import { translatePageKey } from '../../pages/_shared/translate'
 
 const totalFiles = ref<number>(0)
-const sampleSizeBytes = ref<number>(0)
-const sampleCount = ref<number>(0)
+const totalSizeBytes = ref<number>(0)
 const loaded = ref(false)
 const bridge = createStorageBridge({ client: useAdminClient() })
 
 useWidgetData(async () => {
-  const result = await bridge.files.fetch({ pageIndex: 1, pageSize: 50, searchText: '', filters: {} })
-  totalFiles.value = result.totalCount ?? 0
-  const items = result.items ?? []
-  sampleCount.value = items.length
-  sampleSizeBytes.value = items.reduce<number>((sum, item) => {
-    const size = (item as { size?: number; fileSize?: number }).size
-      ?? (item as { fileSize?: number }).fileSize
-      ?? 0
-    return sum + (typeof size === 'number' ? size : 0)
-  }, 0)
+  const stats = await bridge.statistics.get()
+  totalFiles.value = stats.totalFiles ?? 0
+  totalSizeBytes.value = stats.totalSize ?? 0
   loaded.value = true
 })
-
-const projectedSize = computed<number>(() => {
-  if (sampleCount.value === 0 || totalFiles.value === 0) return 0
-  const avg = sampleSizeBytes.value / sampleCount.value
-  return Math.round(avg * totalFiles.value)
-})
-
-const isProjected = computed(() => totalFiles.value > sampleCount.value)
 
 function t(key: string, fallback: string): string {
   return translatePageKey('', key) || fallback
@@ -75,11 +59,10 @@ function fmtBytes(bytes: number): string {
       </span>
       <div class="t-widget-storage__text">
         <span class="t-widget-storage__label">
-          {{ t('admin.widgets.storage.totalSize', 'Estimated size') }}
-          <span v-if="isProjected" class="t-widget-storage__hint">≈</span>
+          {{ t('admin.widgets.storage.totalSize', 'Total size') }}
         </span>
         <span class="t-widget-storage__value">
-          {{ loaded ? fmtBytes(projectedSize) : '—' }}
+          {{ loaded ? fmtBytes(totalSizeBytes) : '—' }}
         </span>
       </div>
     </div>
@@ -120,10 +103,6 @@ function fmtBytes(bytes: number): string {
 .t-widget-storage__label {
   font-size: 12px;
   color: var(--tnzi-base-text-muted, #888);
-}
-.t-widget-storage__hint {
-  margin-left: 4px;
-  color: var(--tnzi-warning);
 }
 .t-widget-storage__value {
   font-size: 20px;

@@ -17,9 +17,7 @@ public class PerformanceModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
-        context.Services.AddOptions<PerformanceOptions>()
-            .Bind(context.Configuration.GetSection("Performance"))
-            .ValidateWith<PerformanceOptions, PerformanceOptionsValidator>();
+        context.Services.AddTnziOptions<PerformanceOptions, PerformanceOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

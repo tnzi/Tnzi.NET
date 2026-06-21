@@ -4,6 +4,9 @@ namespace Tnzi.Notification.Options;
 /// 通知模块配置选项
 /// 配置路径：Notification
 /// </summary>
+[ConfigSection("Notification")]
+[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "Notification",
+    Icon = "mdi:bell-cog-outline", Order = 400, I18nKey = "admin.modules.system.settings.groups.notificationGeneral")]
 public class NotificationOptions
 {
     /// <summary>
@@ -34,6 +37,8 @@ public class NotificationOptions
     /// <summary>
     /// 获取或设置 发送超时（秒）
     /// </summary>
+    [RuntimeSetting(Label = "Send Timeout (s)", I18n = "admin.modules.system.settings.fields.sendTimeoutSeconds",
+        Type = SettingFieldType.Int, Min = 1)]
     public int SendTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
@@ -67,16 +72,23 @@ public class QueueOptions
 /// <summary>
 /// 重试配置选项
 /// </summary>
+[ConfigSection("Notification:Retry")]
+[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "Notification",
+    Icon = "mdi:bell-cog-outline", Order = 400, I18nKey = "admin.modules.system.settings.groups.notificationGeneral")]
 public class RetryOptions
 {
     /// <summary>
     /// 获取或设置 重试延迟（秒）
     /// </summary>
+    [RuntimeSetting(Label = "Retry Delay (s)", I18n = "admin.modules.system.settings.fields.retryDelaySeconds",
+        Type = SettingFieldType.Int, Min = 0)]
     public int RetryDelaySeconds { get; set; } = 60;
 
     /// <summary>
     /// 获取或设置 是否启用指数退避
     /// </summary>
+    [RuntimeSetting(Label = "Exponential Backoff", I18n = "admin.modules.system.settings.fields.enableExponentialBackoff",
+        Type = SettingFieldType.Boolean)]
     public bool EnableExponentialBackoff { get; set; } = true;
 }
 

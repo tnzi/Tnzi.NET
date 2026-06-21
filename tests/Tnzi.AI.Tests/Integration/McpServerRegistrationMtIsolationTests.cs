@@ -151,8 +151,9 @@ public class McpServerRegistrationMtIsolationTests : IDisposable
         var clientFactory = new Mock<Tnzi.AI.Infrastructure.Mcp.IMcpClientFactory>();
         var catalog = new Mock<Tnzi.AI.Infrastructure.Mcp.IMcpServerCatalog>();
         var toolProvider = new Mock<IMcpToolProvider>();
+        var aiOptions = Mock.Of<IOptionsMonitor<AIOptions>>(m => m.CurrentValue == new AIOptions { Mcp = { AllowPrivateEndpoints = true } });
         return new McpServerRegistryService(
-            repo, new StubDataProtectionProvider(), clientFactory.Object, catalog.Object, toolProvider.Object, sp);
+            repo, new StubDataProtectionProvider(), clientFactory.Object, catalog.Object, toolProvider.Object, aiOptions, sp);
     }
 
     private sealed class StubCurrentTenant : ICurrentTenant

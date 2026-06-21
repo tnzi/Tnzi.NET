@@ -59,5 +59,6 @@ global using Tnzi.Modules;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Security.Claims;
+global using Tnzi.Settings;
 global using Tnzi.Services;
 global using Tnzi.Utilities;

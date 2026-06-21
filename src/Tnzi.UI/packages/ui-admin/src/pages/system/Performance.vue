@@ -156,7 +156,7 @@ const endpointColumns: DataTableColumns<EndpointStatsDto> = [
     title: () => t('cols.path'),
     key: 'path',
     ellipsis: { tooltip: true },
-    render: (row) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.path),
+    render: (row) => h('code', { class: 'tnzi-mono text-12px' }, row.path),
   },
   {
     title: () => t('cols.count'),
@@ -223,7 +223,7 @@ const slowColumns: DataTableColumns<SlowRequestRecordDto> = [
     title: () => t('cols.path'),
     key: 'path',
     ellipsis: { tooltip: true },
-    render: (row) => h('code', { class: 'font-[family-name:var(--tnzi-font-mono)] text-12px' }, row.path),
+    render: (row) => h('code', { class: 'tnzi-mono text-12px' }, row.path),
   },
   {
     title: () => t('cols.status'),

@@ -20,9 +20,7 @@ public class SwaggerModule : TnziFrameworkModule
     /// </summary>
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.AddOptions<SwaggerOptions>()
-            .Bind(context.Configuration.GetSection("Swagger"))
-            .ValidateWith<SwaggerOptions, SwaggerOptionsValidator>();
+        context.Services.AddTnziOptions<SwaggerOptions, SwaggerOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

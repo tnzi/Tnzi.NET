@@ -67,7 +67,7 @@ public class ThreadResourceQuotaTests : IDisposable
     }
 
     [Fact]
-    public async Task FreshThread_AllowsWithFullRemaining()
+    public async Task FreshThread_AllowsAndReservesOneCommandSlot()
     {
         var quota = CreateQuota(new ThreadQuotaOptions
         {
@@ -79,17 +79,23 @@ public class ThreadResourceQuotaTests : IDisposable
         var check = await quota.CheckAsync(_threadId);
 
         check.IsAllowed.ShouldBeTrue();
-        check.RemainingCommands.ShouldBe(100);
+        // CheckAsync reserves one command slot up-front (hard cap), so 99 remain.
+        check.RemainingCommands.ShouldBe(99);
+        // Soft caps are evaluated against recorded usage (still zero) — full budget.
         check.RemainingDurationMs.ShouldBe(5_000);
         check.RemainingOutputBytes.ShouldBe(10_240);
     }
 
     [Fact]
-    public async Task RecordExecution_AccumulatesAllThreeCounters()
+    public async Task CheckAsync_ReservesCommandSlot_AndRecordAccumulatesSoftCaps()
     {
+        // Command count is reserved on CheckAsync (hard cap); duration / bytes are
+        // recorded after the fact (soft caps).
         var quota = CreateQuota();
 
+        await quota.CheckAsync(_threadId);
         await quota.RecordExecutionAsync(_threadId, durationMs: 120, outputBytes: 512);
+        await quota.CheckAsync(_threadId);
         await quota.RecordExecutionAsync(_threadId, durationMs: 80, outputBytes: 1024);
 
         var usage = await quota.GetUsageAsync(_threadId);
@@ -99,16 +105,49 @@ public class ThreadResourceQuotaTests : IDisposable
     }
 
     [Fact]
-    public async Task ExceedingCommandCount_Denies()
+    public async Task RecordExecution_DoesNotIncrementCommandCount()
+    {
+        // Record only charges the soft caps — the command counter is reserved
+        // exclusively by CheckAsync, so Record must not double-count it.
+        var quota = CreateQuota();
+
+        await quota.RecordExecutionAsync(_threadId, durationMs: 50, outputBytes: 64);
+
+        var usage = await quota.GetUsageAsync(_threadId);
+        usage.CommandCount.ShouldBe(0);
+        usage.TotalDurationMs.ShouldBe(50);
+        usage.TotalOutputBytes.ShouldBe(64);
+    }
+
+    [Fact]
+    public async Task ExceedingCommandCount_Denies_AndDoesNotOverCount()
     {
         var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 2 });
 
-        await quota.RecordExecutionAsync(_threadId, 1, 1);
-        await quota.RecordExecutionAsync(_threadId, 1, 1);
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeTrue();  // reserves 1
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeTrue();  // reserves 2
 
-        var check = await quota.CheckAsync(_threadId);
+        var check = await quota.CheckAsync(_threadId);                 // reserves 3 → rolled back
         check.IsAllowed.ShouldBeFalse();
         check.Reason!.ShouldContain("command count");
+
+        // The denied probe must have rolled its reservation back to the cap value.
+        (await quota.GetUsageAsync(_threadId)).CommandCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ConcurrentChecks_NeverAdmitMoreThanCommandCap()
+    {
+        // TOCTOU regression guard: 50 parallel CheckAsync probes against a cap of
+        // 10 must admit exactly 10 — the atomic reserve-then-rollback prevents two
+        // probes from both passing at the boundary.
+        var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 10 });
+
+        var results = await Task.WhenAll(
+            Enumerable.Range(0, 50).Select(_ => quota.CheckAsync(_threadId)));
+
+        results.Count(r => r.IsAllowed).ShouldBe(10);
+        (await quota.GetUsageAsync(_threadId)).CommandCount.ShouldBe(10);
     }
 
     [Fact]
@@ -162,9 +201,9 @@ public class ThreadResourceQuotaTests : IDisposable
     {
         var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 2 });
 
-        await quota.RecordExecutionAsync(_threadId, 1, 1);
-        await quota.RecordExecutionAsync(_threadId, 1, 1);
-        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeFalse();
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeTrue();  // reserves 1
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeTrue();  // reserves 2
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeFalse(); // over cap
 
         await quota.ResetAsync(_threadId);
 
@@ -179,10 +218,10 @@ public class ThreadResourceQuotaTests : IDisposable
         var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 1 });
         var otherThread = Guid.NewGuid();
 
-        await quota.RecordExecutionAsync(_threadId, 1, 1);
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeTrue();  // reserves the single slot
 
-        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeFalse();
-        (await quota.CheckAsync(otherThread)).IsAllowed.ShouldBeTrue();
+        (await quota.CheckAsync(_threadId)).IsAllowed.ShouldBeFalse(); // own thread exhausted
+        (await quota.CheckAsync(otherThread)).IsAllowed.ShouldBeTrue();// other thread fresh
     }
 
     // ------------------------------------------------------------------ //

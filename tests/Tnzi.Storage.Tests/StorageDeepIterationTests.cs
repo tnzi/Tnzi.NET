@@ -399,51 +399,9 @@ public class StorageDeepIterationTests
         Assert.False(result.Data);
     }
 
-    [Fact]
-    public async Task IncrementShareAccessCountAsync_IncrementsCount()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "test-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            AccessCount = 5
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(
-                It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-        _mockShareRepository.Setup(r => r.UpdateAsync(share, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.IncrementShareAccessCountAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.Equal(6, share.AccessCount);
-        _mockShareRepository.Verify(r => r.UpdateAsync(share, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task IncrementShareAccessCountAsync_ReturnsFail_WhenShareNotFound()
-    {
-        // Arrange
-        var service = CreateShareService();
-
-        _mockShareRepository.Setup(r => r.FindAsync(
-                It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Entities.FileShare?)null);
-
-        // Act
-        var result = await service.IncrementShareAccessCountAsync("nonexistent-token");
-
-        // Assert
-        Assert.False(result.Succeeded);
-    }
+    // IncrementShareAccessCountAsync is now an atomic DB-side ExecuteUpdateAsync operation that
+    // cannot be exercised with a mocked IRepository. Its behavior is covered by integration tests
+    // against a real SQLite database in StorageRelationalServiceTests.
 
     #endregion
 

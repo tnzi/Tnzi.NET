@@ -17,11 +17,15 @@ public class MenuConfiguration : EntityTypeConfigurationBase<Menu, Guid>
 
         builder.HasIndex(m => m.ParentId);
         builder.HasIndex(m => m.Path);
+        // MenuKey is looked up by the front-end 'merge' source to override the
+        // matching route's menu entry — index it for that lookup.
+        builder.HasIndex(m => m.MenuKey);
         builder.HasOne<Menu>()
             .WithMany()
             .HasForeignKey(m => m.ParentId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.Property(m => m.MenuKey).HasMaxLength(100);
         builder.Property(m => m.Name).HasMaxLength(50);
         builder.Property(m => m.Icon).HasMaxLength(100);
         builder.Property(m => m.Path).HasMaxLength(200);

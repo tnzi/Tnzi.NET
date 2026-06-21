@@ -28,17 +28,10 @@ public class TelegramAdapterOptions
     /// <summary>Retry attempts.</summary>
     public int MaxRetries { get; set; } = 3;
 
-    /// <summary>Maximum photo size in bytes.</summary>
-    public long MaxPhotoSize { get; set; } = 10 * 1024 * 1024;
-
-    /// <summary>Maximum document size in bytes.</summary>
-    public long MaxDocumentSize { get; set; } = 50 * 1024 * 1024;
-
     public override string ToString() =>
         $"TelegramAdapterOptions {{ Enabled = {Enabled}, " +
         $"BotToken = {SecretMask.Mask(BotToken)}, " +
         $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
         $"AllowedUsers.Count = {AllowedUsers.Count}, " +
-        $"PollingTimeoutSeconds = {PollingTimeoutSeconds}, MaxRetries = {MaxRetries}, " +
-        $"MaxPhotoSize = {MaxPhotoSize}, MaxDocumentSize = {MaxDocumentSize} }}";
+        $"PollingTimeoutSeconds = {PollingTimeoutSeconds}, MaxRetries = {MaxRetries} }}";
 }

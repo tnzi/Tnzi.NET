@@ -280,4 +280,56 @@ public class SettingServiceTests
         result.AppName.ShouldBe("TestApp");
         result.SiteName.ShouldBe("TestSite");
     }
+
+    [Fact]
+    public async Task GetAppNameAsync_Should_Return_Value_From_IOptionsMonitor_Without_Setting_Row()
+    {
+        // Arrange: IOptionsMonitor returns "MyApp"; no App.AppName row in Setting table
+        _applicationOptionsMock.SetupGet(x => x.CurrentValue).Returns(new ApplicationOptions { AppName = "MyApp", SiteName = "MySite" });
+
+        // No cache hit
+        _cacheMock.Setup(c => c.GetAsync<object>(It.IsAny<string>())).ReturnsAsync((object?)null);
+
+        // Act
+        var result = await _service.GetAppNameAsync();
+
+        // Assert: value comes directly from IOptionsMonitor, not the Setting table
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe("MyApp");
+
+        // The repository must NOT be queried — the legacy App.AppName table read path is gone
+        _settingRepositoryMock.Verify(r => r.AsQueryable(It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetSiteNameAsync_Should_Return_Value_From_IOptionsMonitor_Without_Setting_Row()
+    {
+        // Arrange: IOptionsMonitor returns "MySite"; no App.SiteName row in Setting table
+        _applicationOptionsMock.SetupGet(x => x.CurrentValue).Returns(new ApplicationOptions { AppName = "MyApp", SiteName = "MySite" });
+
+        // No cache hit
+        _cacheMock.Setup(c => c.GetAsync<object>(It.IsAny<string>())).ReturnsAsync((object?)null);
+
+        // Act
+        var result = await _service.GetSiteNameAsync();
+
+        // Assert: value comes directly from IOptionsMonitor, not the Setting table
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe("MySite");
+
+        // The repository must NOT be queried — the legacy App.SiteName table read path is gone
+        _settingRepositoryMock.Verify(r => r.AsQueryable(It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetAppNameAsync_Should_Reflect_IOptionsMonitor_Changes()
+    {
+        // Simulate hot-reload: CurrentValue changes between calls
+        _applicationOptionsMock.SetupGet(x => x.CurrentValue).Returns(new ApplicationOptions { AppName = "UpdatedApp", SiteName = "UpdatedSite" });
+
+        var result = await _service.GetAppNameAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe("UpdatedApp");
+    }
 }

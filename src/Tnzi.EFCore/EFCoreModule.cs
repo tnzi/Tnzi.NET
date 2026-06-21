@@ -20,18 +20,13 @@ public class EFCoreModule : TnziInfrastructureModule
         context.Services.Configure<DatabaseOptions>(configuration.GetSection("Database"));
 
         // 注册 EFCore 配置选项并启用启动时验证
-        context.Services.AddOptions<Options.EFCoreOptions>()
-            .Bind(configuration.GetSection("EFCore"))
-            .ValidateWith<Options.EFCoreOptions, Options.EFCoreOptionsValidator>();
+        context.Services.AddTnziOptions<Options.EFCoreOptions, Options.EFCoreOptionsValidator>(configuration);
 
-        // 注册 Outbox 配置选项并启用启动时验证
-        context.Services.AddOptions<OutboxOptions>()
-            .Bind(configuration.GetSection("EFCore:Outbox"))
-            .ValidateWith<OutboxOptions, OutboxOptionsValidator>();
+        // 注册 Outbox 配置选项并启用启动时验证（section 路径由 [ConfigSection] 派生）
+        context.Services.AddTnziOptions<OutboxOptions, OutboxOptionsValidator>(configuration);
 
         // 注册多租户开关
-        context.Services.AddOptions<MultiTenancyOptions>()
-            .Bind(configuration.GetSection("MultiTenancy"));
+        context.Services.AddTnziOptions<MultiTenancyOptions>(configuration);
 
         return Task.CompletedTask;
     }
