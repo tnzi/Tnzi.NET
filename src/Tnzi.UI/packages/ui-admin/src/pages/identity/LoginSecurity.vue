@@ -38,27 +38,27 @@
 
     <div class="t-sec-page">
       <TKpiRow class="t-sec-page__kpis" cols="1 s:2 m:4 l:7">
-        <TStatCard :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
-        <TStatCard
+        <TKpiCard :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
+        <TKpiCard
           :label="t('kpi.success')"
           :value="overview?.successfulLogins ?? 0"
           icon="mdi:check-circle-outline"
           tone="success"
         />
-        <TStatCard
+        <TKpiCard
           :label="t('kpi.failures')"
           :value="overview?.failedLogins ?? 0"
           icon="mdi:alert-circle-outline"
           tone="error"
         />
-        <TStatCard
+        <TKpiCard
           :label="t('kpi.failureRate')"
           :value="formatPercent(overview?.failureRate)"
           :tone="failureTone"
         />
-        <TStatCard :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
-        <TStatCard :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
-        <TStatCard
+        <TKpiCard :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
+        <TKpiCard :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
+        <TKpiCard
           :label="t('kpi.lockedOut')"
           :value="overview?.lockedOutUsers ?? 0"
           :tone="(overview?.lockedOutUsers ?? 0) > 0 ? 'warning' : 'default'"
@@ -68,7 +68,7 @@
               {{ t('kpi.actionNeeded') }}
             </NTag>
           </template>
-        </TStatCard>
+        </TKpiCard>
       </TKpiRow>
 
       <NCard :title="t('sections.failureRate')" size="small" :bordered="false">
@@ -127,7 +127,7 @@ import {
 } from 'naive-ui'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
-import TStatCard from '../../components/data/TStatCard.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
@@ -233,13 +233,13 @@ const failuresColumns = computed<DataTableColumns<UserFailedLoginSummaryDto>>(()
   {
     title: () => t('cols.userName'),
     key: 'userName',
-    width: 180,
+    minWidth: 130,
     render: (row) => row.userName ?? '—',
   },
   {
     title: () => t('cols.email'),
     key: 'email',
-    width: 240,
+    minWidth: 180,
     render: (row) => row.email ?? '—',
   },
   {

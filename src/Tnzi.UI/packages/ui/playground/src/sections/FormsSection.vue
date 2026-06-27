@@ -35,6 +35,30 @@
     </div>
 
     <div class="demo-block">
+      <h2 class="demo-label">Image Upload (cropperjs v2)</h2>
+      <PreviewBox :full-width="true">
+        <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;">
+          <TImageUpload
+            :model-value="avatarUrl"
+            shape="circle"
+            :upload="mockUpload"
+            @update:model-value="(u: string) => (avatarUrl = u)"
+            @error="(m: string) => message.error(m)"
+          />
+          <TImageUpload
+            :model-value="squareUrl"
+            shape="square"
+            :aspect-ratio="16 / 9"
+            :upload="mockUpload"
+            @update:model-value="(u: string) => (squareUrl = u)"
+            @error="(m: string) => message.error(m)"
+          />
+          <span style="color: var(--tnzi-base-text-muted);">Click a box, pick an image, crop, then Confirm.</span>
+        </div>
+      </PreviewBox>
+    </div>
+
+    <div class="demo-block">
       <h2 class="demo-label">Dynamic Form</h2>
       <PreviewBox :full-width="true">
         <div style="width: 100%; max-width: 560px; margin: 0 auto;">
@@ -74,11 +98,18 @@ import {
   demoBasicFormRules,
   demoDynamicFormFields,
 } from '../data/index';
-import { TForm, TDynamicForm, TSearchForm, createMessageAdapter } from '@tnzi/ui';
+import { TForm, TDynamicForm, TSearchForm, TImageUpload, createMessageAdapter } from '@tnzi/ui';
 import PreviewBox from '../components/PreviewBox.vue';
 
 const message = useMessage();
 const msgAdapter = createMessageAdapter(message);
+
+// Image upload demo (cropperjs v2) — no backend; the cropped blob becomes an object URL.
+const avatarUrl = ref('');
+const squareUrl = ref('');
+async function mockUpload(file: File | Blob): Promise<{ id?: string; url: string }> {
+  return { id: 'demo', url: URL.createObjectURL(file) };
+}
 
 // Basic form
 const basicForm = reactive({ ...demoBasicForm });

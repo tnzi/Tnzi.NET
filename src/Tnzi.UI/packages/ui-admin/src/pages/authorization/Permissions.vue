@@ -5,9 +5,8 @@
     </template>
 
     <NCard :bordered="false" class="t-permission-page__card">
-      <div class="t-permission-page__layout">
-        <!-- Left: function-module tree -->
-        <aside class="t-permission-page__tree">
+      <TMasterDetailLayout :master-width="320">
+        <template #master>
           <NInput
             v-model:value="treeFilter"
             :placeholder="t('searchModule')"
@@ -30,10 +29,9 @@
               @update:selected-keys="onSelectModule"
             />
           </NSpin>
-        </aside>
-
-        <!-- Right: permissions for the selected module -->
-        <section class="t-permission-page__detail">
+        </template>
+        <template #detail>
+          <section class="t-permission-page__detail">
           <div v-if="!selectedModule" class="t-permission-page__placeholder">
             {{ t('selectPrompt') }}
           </div>
@@ -64,8 +62,9 @@
               />
             </NSpin>
           </div>
-        </section>
-      </div>
+          </section>
+        </template>
+      </TMasterDetailLayout>
     </NCard>
   </TContentPage>
 </template>
@@ -83,6 +82,7 @@ import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
 import TContentPage from '../../components/layout/TContentPage.vue'
+import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 
 type PermissionRow = ModuleFunctionDto
 
@@ -247,22 +247,8 @@ onMounted(() => {
   flex: 1 1 auto;
   min-height: 0;
 }
-.t-permission-page__layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  /* Single explicit row capped to the container so the panes (grid items)
-     get a definite height and their own overflow-y can engage. */
-  grid-template-rows: minmax(0, 1fr);
-  gap: 16px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.t-permission-page__tree {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 16px;
-  min-height: 0;
-  overflow-y: auto;
-}
+/* Master/detail grid, responsive stacking and pane scroll come from
+   <TMasterDetailLayout>. Only page-specific content styling stays here. */
 .t-permission-page__naive-tree {
   margin-top: 8px;
   max-height: 64vh;
@@ -270,33 +256,6 @@ onMounted(() => {
 }
 .t-permission-page__detail {
   padding: 0 4px;
-  min-height: 0;
-  overflow-y: auto;
-}
-/* Phone: stack the module tree above the permission list. The layout itself
-   becomes the single scroller (rows go back to natural auto height), so the
-   panes drop their own scrollbars. Declared after the base rules so the
-   equal-specificity overrides win. */
-@media (max-width: 767px) {
-  .t-permission-page__layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-    overflow-y: auto;
-  }
-  .t-permission-page__tree {
-    border-right: none;
-    padding-right: 0;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-bottom: 12px;
-    overflow: visible;
-  }
-  .t-permission-page__naive-tree {
-    max-height: 36vh;
-  }
-  .t-permission-page__detail {
-    padding: 0;
-    overflow: visible;
-  }
 }
 .t-permission-page__placeholder {
   color: var(--tnzi-base-text-muted);

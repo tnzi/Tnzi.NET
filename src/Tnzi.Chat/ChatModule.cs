@@ -15,6 +15,7 @@ public class ChatModule : TnziApplicationModule
         services.AddScoped<IConversationService, ConversationService>();
         services.AddScoped<IGroupService, GroupService>();
         services.AddScoped<IBroadcastService, BroadcastService>();
+        services.AddScoped<IChatAdminService, ChatAdminService>();
 
         services.AddEventHandler<ConversationMessageSentEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationReadEvent, ChatSignalREventHandler>();

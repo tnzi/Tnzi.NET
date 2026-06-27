@@ -8,86 +8,31 @@
     :row-actions="rowActions"
   >
     <template #form="{ formData, mode }">
-      <NForm :disabled="mode === 'view'" label-placement="left" label-width="140px">
-        <NFormItem :label="t('form.name')" required>
-          <NInput
-            :value="(formData as MenuRow)?.name ?? ''"
-            @update:value="(v: string) => set('name', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.type')" required>
-          <NSelect
-            :value="(formData as MenuRow)?.type ?? 1"
-            :options="typeOptions"
-            @update:value="(v: number) => set('type', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.parentId')">
-          <NSelect
-            :value="(formData as MenuRow)?.parentId ?? null"
-            :options="parentOptions"
-            :placeholder="t('form.parentIdPlaceholder')"
-            clearable
-            filterable
-            @update:value="(v: string | null) => set('parentId', v ?? undefined)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.path')">
-          <NInput
-            :value="(formData as MenuRow)?.path ?? ''"
-            @update:value="(v: string) => set('path', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.component')">
-          <NInput
-            :value="(formData as MenuRow)?.component ?? ''"
-            @update:value="(v: string) => set('component', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.icon')">
-          <NInput
-            :value="(formData as MenuRow)?.icon ?? ''"
-            placeholder="mdi:home-outline"
-            @update:value="(v: string) => set('icon', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.permission')">
-          <NInput
-            :value="(formData as MenuRow)?.permission ?? ''"
-            @update:value="(v: string) => set('permission', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.sortOrder')">
-          <NInputNumber
-            :value="(formData as MenuRow)?.sortOrder ?? 0"
-            :min="0"
-            @update:value="(v: number | null) => set('sortOrder', v ?? 0)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.isHidden')">
-          <NSwitch
-            :value="(formData as MenuRow)?.isHidden ?? false"
-            @update:value="(v: boolean) => set('isHidden', v)"
-          />
-        </NFormItem>
-      </NForm>
+      <TFormSchemaRenderer
+        :schema="menuFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+        :translate="t"
+        :field-renderers="fieldRenderers"
+      />
     </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, ref, onMounted } from 'vue'
-import { NForm, NFormItem, NInput, NInputNumber, NSelect, NSwitch } from 'naive-ui'
+import { NSelect } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { translatePageKey } from '../_shared/translate'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { MenuRow } from './menu-config'
+import { menuFormSchema, type MenuRow } from './menu-config'
 
 const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
@@ -155,7 +100,7 @@ function typeLabel(v?: number): string {
 }
 
 const columns: ColumnDef<MenuRow>[] = [
-  { key: 'name', title: 'columns.name', width: 220, fixed: 'left' },
+  { key: 'name', title: 'columns.name', minWidth: 150 },
   {
     key: 'icon',
     title: 'columns.icon',
@@ -170,15 +115,15 @@ const columns: ColumnDef<MenuRow>[] = [
   {
     key: 'parentName',
     title: 'columns.parentName',
-    width: 180,
+    minWidth: 140,
     render: (row) => {
       if (!row.parentId) return h('span', { class: 'text-muted' }, '—')
       const p = menuById.value.get(row.parentId)
       return p?.name ?? row.parentId
     },
   },
-  { key: 'path', title: 'columns.path', width: 220 },
-  { key: 'permission', title: 'columns.permission', width: 180 },
+  { key: 'path', title: 'columns.path', minWidth: 160 },
+  { key: 'permission', title: 'columns.permission', minWidth: 150 },
   {
     key: 'type',
     title: 'columns.type',
@@ -195,7 +140,6 @@ const columns: ColumnDef<MenuRow>[] = [
     key: 'isHidden',
     title: 'columns.isHidden',
     width: 110,
-    fixed: 'right',
     render: (row) =>
       h(TStatusBadge, {
         value: row.isHidden ?? false,
@@ -232,11 +176,20 @@ const rowActions: RowAction<MenuRow>[] = [editAction(crud), deleteAction(crud)]
 
 crud.refresh().catch(() => undefined)
 
-function set(key: keyof MenuRow, value: unknown): void {
-  if (!crud.formModal.formData.value) {
-    crud.formModal.formData.value = {} as MenuRow
-  }
-  ;(crud.formModal.formData.value as unknown as Record<string, unknown>)[key as string] = value
+// Custom field renderer for the schema's `menu-parent` field: a filterable +
+// clearable parent picker built from the runtime menu tree (the static schema
+// `select` can't carry the dynamic, indented parent options).
+const fieldRenderers = {
+  'menu-parent': (ctx: FieldRenderContext) =>
+    h(NSelect, {
+      value: (ctx.value as string | null) ?? null,
+      options: parentOptions.value,
+      placeholder: t('form.parentIdPlaceholder'),
+      clearable: true,
+      filterable: true,
+      disabled: ctx.readonly,
+      'onUpdate:value': (v: string | null) => ctx.onUpdate(v ?? undefined),
+    }),
 }
 
 onMounted(() => {

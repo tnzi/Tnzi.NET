@@ -10,41 +10,13 @@
     :show-export="true"
     :show-import="true"
   >
-    <template #form="{ mode }">
-      <NForm :disabled="mode === 'view'">
-        <NFormItem v-if="mode === 'create'" :label="t('form.userName')" path="userName" required>
-          <NInput
-            :value="userNameValue"
-            @update:value="(v: string) => setField('userName', v)"
-          />
-        </NFormItem>
-        <NFormItem v-if="mode === 'create'" :label="t('form.password')" path="password" required>
-          <NInput
-            type="password"
-            show-password-on="click"
-            :value="passwordValue"
-            @update:value="(v: string) => setField('password', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.email')" path="email">
-          <NInput
-            :value="emailValue"
-            @update:value="(v: string) => setField('email', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.phoneNumber')" path="phoneNumber">
-          <NInput
-            :value="phoneNumberValue"
-            @update:value="(v: string) => setField('phoneNumber', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.nickname')" path="nickname">
-          <NInput
-            :value="nicknameValue"
-            @update:value="(v: string) => setField('nickname', v)"
-          />
-        </NFormItem>
-      </NForm>
+    <template #form="{ formData, mode }">
+      <TFormSchemaRenderer
+        :schema="userFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+        :translate="t"
+      />
     </template>
   </TCrudPage>
 
@@ -119,7 +91,8 @@ import { editAction, deleteAction, type RowAction } from '../../headless/rowActi
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { interpolate, translatePageKey } from '../_shared/translate'
-import { userColumns, userSearchFields } from './user-config'
+import TFormSchemaRenderer from '../_shared/form-schema'
+import { userColumns, userSearchFields, userFormSchema } from './user-config'
 import { computed, reactive, ref, shallowRef } from 'vue'
 import {
   NForm,
@@ -167,20 +140,8 @@ const crud = useCrudPage<UserListItem>({
 })
 
 const rowKey = (row: unknown) => (row as UserListItem).id
-const userNameValue = computed(() => crud.formModal.formData.value?.userName ?? '')
-const passwordValue = computed(() => crud.formModal.formData.value?.password ?? '')
-const emailValue = computed(() => crud.formModal.formData.value?.email ?? '')
-const phoneNumberValue = computed(() => crud.formModal.formData.value?.phoneNumber ?? '')
-const nicknameValue = computed(() => crud.formModal.formData.value?.nickname ?? '')
 
 crud.refresh().catch(() => undefined)
-
-function setField(key: keyof UserListItem, value: unknown) {
-  if (!crud.formModal.formData.value) {
-    crud.formModal.formData.value = {} as UserListItem
-  }
-  ;(crud.formModal.formData.value as unknown as Record<string, unknown>)[key as string] = value
-}
 
 const t = (key: string, params?: Record<string, unknown>) =>
   interpolate(translatePageKey('identity.users', key), params)

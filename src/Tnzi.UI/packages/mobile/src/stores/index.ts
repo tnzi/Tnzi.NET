@@ -52,4 +52,4 @@ export type {
   OnlineStatus,
 } from '@tnzi/core/state';
 
-export type { ThemeMode } from '@tnzi/core/types/theme';
+export type { ThemeMode } from '@tnzi/core/types';

@@ -51,6 +51,14 @@ describe('useChatStore', () => {
     expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(3)
     expect(store.conversations.find(c => c.id === 'c1')!.lastMessagePreview).toBe('ping')
   })
+
+  it('applyIncomingMessage treats system/broadcast (senderId=null) as from-other → bumps unread', async () => {
+    // Broadcast/system messages carry senderId=null; they must still raise the badge.
+    const store = useChatStore(); store.init(mockBridge() as never)
+    await store.fetchConversations() // c1 unread=2, none active
+    store.applyIncomingMessage({ conversationId: 'c1', messageId: 'mB', senderId: null, contentType: 4, preview: '[System] notice' }, 'me')
+    expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(3)
+  })
 })
 
 describe('useChatStore — new actions (U6)', () => {

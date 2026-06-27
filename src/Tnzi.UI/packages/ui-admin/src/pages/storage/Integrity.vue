@@ -23,10 +23,10 @@
     </template>
 
     <TKpiRow cols="1 s:2 m:4">
-      <TStatCard :label="t('kpi.totalChecked')" :value="result ? result.totalChecked : null" icon="mdi:file-search-outline" />
-      <TStatCard :label="t('kpi.healthy')" :value="result ? result.healthy : null" tone="success" icon="mdi:check-circle-outline" />
-      <TStatCard :label="t('kpi.problems')" :value="result ? problemCount : null" tone="error" icon="mdi:alert-circle-outline" />
-      <TStatCard :label="t('kpi.errors')" :value="result ? result.errors : null" tone="warning" icon="mdi:help-circle-outline" />
+      <TKpiCard :label="t('kpi.totalChecked')" :value="result ? result.totalChecked : null" icon="mdi:file-search-outline" />
+      <TKpiCard :label="t('kpi.healthy')" :value="result ? result.healthy : null" tone="success" icon="mdi:check-circle-outline" />
+      <TKpiCard :label="t('kpi.problems')" :value="result ? problemCount : null" tone="error" icon="mdi:alert-circle-outline" />
+      <TKpiCard :label="t('kpi.errors')" :value="result ? result.errors : null" tone="warning" icon="mdi:help-circle-outline" />
     </TKpiRow>
 
     <NCard size="small" :bordered="false" class="t-table-card" :title="t('problems.title')">
@@ -51,7 +51,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
-import TStatCard from '../../components/data/TStatCard.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { translatePageKey } from '../_shared/translate'

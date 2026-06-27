@@ -14,7 +14,8 @@
         :name="item.title"
         :file-id="item.avatarFileId"
         :seed="item.id"
-        :size="42"
+        :size="38"
+        :system="item.type === ConversationType.System"
         :status="item.type === ConversationType.Direct ? item.peerStatus : null"
       />
     </NBadge>
@@ -58,8 +59,8 @@ const timeLabel = computed(() => formatChatTime(props.item.lastMessageAt, transl
 .t-conv-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 14px;
+  gap: 10px;
+  padding: 9px 14px;
   cursor: pointer;
   user-select: none;
   transition: background 0.12s ease;
@@ -78,12 +79,14 @@ const timeLabel = computed(() => formatChatTime(props.item.lastMessageAt, transl
   flex-shrink: 0;
 }
 
+/* Tight two-line block: title + preview ≈ the avatar's height so the row reads
+   compact and the text aligns to the avatar instead of sprawling. */
 .t-conv-item__body {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .t-conv-item__line {

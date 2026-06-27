@@ -25,6 +25,7 @@ import {
   useStorageApi,
   useStoragePreviewApi,
   type FileRecordDto,
+  type FileUploadResultDto,
   type FileQueryDto,
   type FileFolderDto,
   type CreateFileFolderDto,
@@ -52,6 +53,10 @@ export interface ChunkUploader {
 export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> {
   /** Returns a direct download URL for a file. Works offline (no async needed). */
   downloadUrl(id: string): string
+  /** Synchronously build the inline (anonymous) preview URL for a stored file id. */
+  previewUrl(id: string): string
+  /** Single-shot upload for small files (e.g. avatars); pre-unwraps the envelope. */
+  upload(file: File): Promise<FileUploadResultDto>
   /** Move a batch of files to a target folder (null = root / unfiled). */
   moveTo(fileIds: string[], folderId: string | null): Promise<void>
   /** ChunkUploader methods for TChunkFileUpload */
@@ -220,6 +225,8 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         update: noOp as never,
         delete: noOp as never,
         downloadUrl: () => '',
+        previewUrl: () => '',
+        upload: noOp as never,
         moveTo: noOp as never,
         initUpload: noOp as never,
         uploadChunk: noOp as never,
@@ -286,6 +293,14 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       // Use a relative path that matches the backend route /api/files/{id}/download
       return `/api/files/${id}/download`
     },
+
+    // Synchronous anonymous preview URL (no request) — used for avatar rendering.
+    previewUrl: (id: string): string => storageApi.getPreviewUrl(id),
+
+    // Single-shot upload (avatars etc.); pre-unwraps the ApiResult envelope so
+    // callers get the FileUploadResultDto directly (consistent with bridge style).
+    upload: async (file: File): Promise<FileUploadResultDto> =>
+      unwrap<FileUploadResultDto>(await storageApi.upload(file)),
 
     moveTo: async (fileIds: string[], folderId: string | null): Promise<void> => {
       if (!folderApi) {

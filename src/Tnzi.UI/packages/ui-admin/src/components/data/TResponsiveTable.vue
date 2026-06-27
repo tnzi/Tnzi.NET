@@ -199,11 +199,19 @@ const paginationConfig = computed<TResponsivePagination | null>(() => {
   return p
 })
 
-/** Horizontal-scroll min-width for the desktop / scroll-mobile table. */
+/**
+ * Horizontal-scroll min-width for the desktop / scroll-mobile table. Naive
+ * applies it as the inner table's `min-width` (table stays `width: 100%`), so
+ * columns stretch to fill when the container is wide enough and the table only
+ * scrolls horizontally once the columns' minimum widths genuinely overflow.
+ * Summing `minWidth` (elastic floor) before `width` lets minWidth-based
+ * columns fill instead of forcing an early scrollbar; the 120px fallback
+ * covers columns that declare neither.
+ */
 const scrollX = computed<number | undefined>(() => {
   let total = 0
-  for (const c of looseColumns.value) total += c.width ?? c.minWidth ?? 140
-  return total > 720 ? total : undefined
+  for (const c of looseColumns.value) total += c.width ?? c.minWidth ?? 120
+  return total > 0 ? total : undefined
 })
 </script>
 

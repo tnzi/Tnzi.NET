@@ -6,6 +6,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
     private readonly IRepository<ConversationMember, Guid> _memberRepository;
     private readonly IRepository<ChatMessage, Guid> _messageRepository;
     private readonly IRepository<User, Guid> _userRepository;
+    private readonly IRepository<BroadcastLog, Guid> _broadcastLogRepository;
     private readonly IOptions<MultiTenancyOptions> _multiTenancyOptions;
     private readonly IUserRoleService? _userRoleService;
 
@@ -15,6 +16,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<ChatMessage, Guid> messageRepository,
         IRepository<User, Guid> userRepository,
+        IRepository<BroadcastLog, Guid> broadcastLogRepository,
         IOptions<MultiTenancyOptions> multiTenancyOptions,
         IUserRoleService? userRoleService = null) : base(serviceProvider)
     {
@@ -22,6 +24,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
         _memberRepository = Check.NotNull(memberRepository);
         _messageRepository = Check.NotNull(messageRepository);
         _userRepository = Check.NotNull(userRepository);
+        _broadcastLogRepository = Check.NotNull(broadcastLogRepository);
         _multiTenancyOptions = Check.NotNull(multiTenancyOptions);
         _userRoleService = userRoleService;
     }
@@ -150,6 +153,10 @@ public class BroadcastService : ApplicationService, IBroadcastService
         // global query filter excludes soft-deleted users. This loads user rows to project
         // their ids — acceptable for an admin broadcast (the per-user fan-out below is the
         // dominant cost); very large deployments would override with a queued mechanism.
+        BroadcastTargetType targetType;
+        string summary;
+        List<Guid> targetIds;
+
         if (input.All)
         {
             // Multi-tenant guard: User is NOT IMultiTenant (no TenantId), so the global query
@@ -160,21 +167,66 @@ public class BroadcastService : ApplicationService, IBroadcastService
                 return Fail<int>("System-wide broadcast is not supported in multi-tenant mode; target by role or user instead.", 400);
 
             var allUsers = await _userRepository.ToListAsync(u => true);
-            var allIds = allUsers.Select(u => u.Id).ToList();
-            return await BroadcastToUsersAsync(allIds, input.Content);
+            targetIds = allUsers.Select(u => u.Id).ToList();
+            targetType = BroadcastTargetType.All;
+            summary = "All users";
         }
-
-        var targets = new HashSet<Guid>();
-        if (input.UserIds != null) foreach (var u in input.UserIds) targets.Add(u);
-        if (input.RoleIds != null && _userRoleService != null)
+        else
         {
-            foreach (var roleId in input.RoleIds)
+            var targets = new HashSet<Guid>();
+            if (input.UserIds != null) foreach (var u in input.UserIds) targets.Add(u);
+            if (input.RoleIds != null && _userRoleService != null)
             {
-                var users = await _userRoleService.GetRoleUserIdsAsync(roleId);
-                foreach (var u in users) targets.Add(u);
+                foreach (var roleId in input.RoleIds)
+                {
+                    var users = await _userRoleService.GetRoleUserIdsAsync(roleId);
+                    foreach (var u in users) targets.Add(u);
+                }
+            }
+            if (targets.Count == 0) return Fail<int>("No broadcast targets resolved.", 400);
+            targetIds = targets.ToList();
+
+            var roleCount = input.RoleIds?.Count ?? 0;
+            var userCount = input.UserIds?.Count ?? 0;
+            if (roleCount > 0)
+            {
+                targetType = BroadcastTargetType.Roles;
+                summary = userCount > 0 ? $"{roleCount} role(s) + {userCount} user(s)" : $"{roleCount} role(s)";
+            }
+            else
+            {
+                targetType = BroadcastTargetType.Users;
+                summary = $"{userCount} user(s)";
             }
         }
-        if (targets.Count == 0) return Fail<int>("No broadcast targets resolved.", 400);
-        return await BroadcastToUsersAsync(targets, input.Content);
+
+        var result = await BroadcastToUsersAsync(targetIds, input.Content);
+        if (!result.Succeeded) return result;
+
+        await RecordBroadcastAsync(input.Content, targetType, summary, result.Data);
+        return result;
+    }
+
+    /// <summary>记录一次广播（辅助操作，失败静默——不影响广播主流程）。</summary>
+    private async Task RecordBroadcastAsync(string content, BroadcastTargetType targetType, string summary, int recipientCount)
+    {
+        try
+        {
+            await ExecuteInUnitOfWorkAsync(async ct =>
+            {
+                await _broadcastLogRepository.InsertAsync(new BroadcastLog
+                {
+                    SenderId = CurrentUser?.Id,
+                    Content = content,
+                    TargetType = targetType,
+                    TargetSummary = summary,
+                    RecipientCount = recipientCount
+                }, ct);
+            });
+        }
+        catch
+        {
+            // Logging the broadcast is auxiliary; never fail the broadcast over it.
+        }
     }
 }

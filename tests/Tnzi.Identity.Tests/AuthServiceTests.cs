@@ -89,6 +89,73 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public void GetAuthConfig_MapsOptionsToDto_AndFiltersEnabledOAuthProviders()
+    {
+        // Arrange — specific switches + two OAuth providers with full creds, one empty.
+        var options = new IdentityOptions
+        {
+            SignIn = { AllowUserNameLogin = true, AllowEmailLogin = true, AllowSmsLogin = false, UseEmailAsUserName = true },
+            Otp = { EnableSms = false, EnableEmail = true },
+            Registration = { EnableQuickRegisterEmail = true, EnableQuickRegisterSms = false },
+            Recovery = { EnablePasswordResetByEmail = true, EnablePasswordResetBySms = false },
+            Captcha = { EnableCaptchaOnLogin = true, EnableCaptchaOnRegister = false },
+            OAuth =
+            {
+                GitHub = { ClientId = "gh-id", ClientSecret = "gh-secret" },
+                Google = { ClientId = "g-id", ClientSecret = "g-secret" },
+                // Microsoft/Facebook/Twitter left empty → must be excluded.
+            },
+        };
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(options);
+
+        // Act
+        var result = _authService.GetAuthConfig();
+
+        // Assert — each flag maps from the right option.
+        Assert.True(result.Succeeded);
+        var dto = result.Data!;
+        Assert.True(dto.AllowUserNameLogin);
+        Assert.True(dto.AllowEmailLogin);
+        Assert.False(dto.AllowSmsLogin);
+        Assert.True(dto.UseEmailAsUserName);
+        Assert.True(dto.EnableCodeLogin);            // email OR sms
+        Assert.True(dto.CodeLoginViaEmail);
+        Assert.False(dto.CodeLoginViaSms);
+        Assert.True(dto.EnableRegistration);         // quick email OR sms
+        Assert.True(dto.RegisterViaEmail);
+        Assert.False(dto.RegisterViaSms);
+        Assert.True(dto.EnablePasswordRecovery);
+        Assert.True(dto.RecoveryViaEmail);
+        Assert.False(dto.RecoveryViaSms);
+        Assert.True(dto.EnableCaptchaOnLogin);
+        Assert.False(dto.EnableCaptchaOnRegister);
+
+        // Only providers with BOTH ClientId + ClientSecret are listed — no secrets leak.
+        Assert.Equal(2, dto.OAuthProviders.Count);
+        Assert.Contains(dto.OAuthProviders, p => p.Provider == "github" && p.DisplayName == "GitHub");
+        Assert.Contains(dto.OAuthProviders, p => p.Provider == "google" && p.DisplayName == "Google");
+        Assert.DoesNotContain(dto.OAuthProviders, p => p.Provider == "microsoft");
+    }
+
+    [Fact]
+    public void GetAuthConfig_AllChannelsOff_DisablesCodeLoginRecoveryAndProviders()
+    {
+        var options = new IdentityOptions
+        {
+            Otp = { EnableSms = false, EnableEmail = false },
+            Registration = { EnableQuickRegisterEmail = false, EnableQuickRegisterSms = false },
+            Recovery = { EnablePasswordResetByEmail = false, EnablePasswordResetBySms = false },
+        };
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(options);
+
+        var dto = _authService.GetAuthConfig().Data!;
+        Assert.False(dto.EnableCodeLogin);
+        Assert.False(dto.EnableRegistration);
+        Assert.False(dto.EnablePasswordRecovery);
+        Assert.Empty(dto.OAuthProviders);
+    }
+
+    [Fact]
     public async Task LoginAsync_WithValidCredentials_ReturnsSuccess()
     {
         // Arrange

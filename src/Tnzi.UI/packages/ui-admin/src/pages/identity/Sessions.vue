@@ -13,9 +13,9 @@
     <div class="t-session-page">
     <!-- KPI cards -->
     <TKpiRow class="t-session-page__stats" cols="1 s:2 m:3" :gap="16">
-      <TStatCard :label="t('stats.activeSessions')" :value="stats?.activeSessionCount ?? 0" />
-      <TStatCard :label="t('stats.onlineUsers')" :value="stats?.onlineUserCount ?? 0" />
-      <TStatCard
+      <TKpiCard :label="t('stats.activeSessions')" :value="stats?.activeSessionCount ?? 0" />
+      <TKpiCard :label="t('stats.onlineUsers')" :value="stats?.onlineUserCount ?? 0" />
+      <TKpiCard
         :label="t('stats.topDevice')"
         :value="stats?.topDevices?.[0]?.deviceInfo ?? null"
         :suffix="stats?.topDevices?.[0]?.count ? `× ${stats.topDevices[0].count}` : undefined"
@@ -38,14 +38,15 @@
           :loading="loadingActiveUsers"
           :filterable="true"
           :tag="true"
+          size="small"
           clearable
           class="w-360px max-w-full"
           @update:value="onFilterChanged"
         />
-        <NCheckbox v-model:checked="includeRevoked" @update:checked="onFilterChanged">
+        <NCheckbox v-model:checked="includeRevoked" size="small" @update:checked="onFilterChanged">
           {{ t('toolbar.includeRevoked') }}
         </NCheckbox>
-        <NButton type="primary" :loading="loading" @click="onFilterChanged">
+        <NButton type="primary" size="small" :loading="loading" @click="onFilterChanged">
           {{ t('toolbar.fetch') }}
         </NButton>
       </NSpace>
@@ -103,7 +104,7 @@ import {
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
-import TStatCard from '../../components/data/TStatCard.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -257,11 +258,11 @@ function formatTime(v: string | Date | null | undefined): string {
 }
 
 const columns = computed<DataTableColumns<UserSessionRow>>(() => [
-  { key: 'id', title: t('columns.sessionId'), width: 180, ellipsis: { tooltip: true } },
+  { key: 'id', title: t('columns.sessionId'), minWidth: 150, ellipsis: { tooltip: true } },
   {
     key: 'userName',
     title: t('columns.user'),
-    width: 140,
+    minWidth: 120,
     ellipsis: { tooltip: true },
     // userName is populated by the global list endpoint; fall back to the
     // raw userId so per-user rows (or older payloads) still identify the owner.
@@ -270,7 +271,7 @@ const columns = computed<DataTableColumns<UserSessionRow>>(() => [
   {
     key: 'deviceInfo',
     title: t('columns.device'),
-    width: 220,
+    minWidth: 160,
     render: (row) => {
       // Parse deviceInfo once per row; the helper handles null/empty
       // values gracefully so we can render unconditionally. Icon is

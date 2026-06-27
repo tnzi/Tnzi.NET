@@ -13,9 +13,8 @@
     </template>
 
     <template #default>
-      <div class="t-wf-run-page__layout">
-        <!-- Left: runs list -->
-        <aside class="t-wf-run-page__list">
+      <TMasterDetailLayout :master-width="320">
+        <template #master>
           <NSpace vertical size="small">
             <NSelect
               v-model:value="filters.status"
@@ -71,10 +70,8 @@
           <div v-if="hasMore" class="t-wf-run-page__more">
             <NButton size="tiny" @click="loadMore">{{ t('loadMore') }}</NButton>
           </div>
-        </aside>
-
-        <!-- Right: selected run detail / step timeline -->
-        <section class="t-wf-run-page__detail">
+        </template>
+        <template #detail>
           <div v-if="!selectedRunId" class="t-wf-run-page__placeholder">
             {{ t('selectPrompt') }}
           </div>
@@ -181,8 +178,8 @@
               </div>
             </div>
           </NSpin>
-        </section>
-      </div>
+        </template>
+      </TMasterDetailLayout>
     </template>
   </TContentPage>
 </template>
@@ -195,6 +192,7 @@ import {
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../../components/layout/TContentPage.vue'
+import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
 import { useSafeMessage } from '../../_shared/safeMessage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -489,32 +487,8 @@ onMounted(() => {
   font-weight: 600;
   color: var(--tnzi-base-text);
 }
-.t-wf-run-page__layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
-  height: 100%;
-}
-/* Phone: stack the run list above the run detail. */
-@media (max-width: 767px) {
-  .t-wf-run-page__layout {
-    grid-template-columns: 1fr;
-    height: auto;
-  }
-  .t-wf-run-page__list {
-    max-height: 36vh;
-  }
-}
-.t-wf-run-page__list {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 16px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
+/* Master/detail grid, responsive stacking and pane scroll come from
+   <TMasterDetailLayout>. Only page-specific content styling stays here. */
 .t-wf-run-page__run-list {
   list-style: none;
   padding: 0;
@@ -563,10 +537,6 @@ onMounted(() => {
   color: var(--tnzi-base-text);
   font-weight: 500;
   font-size: 12.5px;
-}
-.t-wf-run-page__detail {
-  min-height: 0;
-  overflow: auto;
 }
 .t-wf-run-page__empty,
 .t-wf-run-page__placeholder {

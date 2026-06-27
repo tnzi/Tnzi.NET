@@ -116,7 +116,7 @@ import Skills from '../../../src/pages/ai/skills/Skills.vue'
 
 const stubs = {
   DataTable: { name: 'DataTable', props: ['data'], template: '<div class="n-data-table-stub" />' },
-  // TStatCard animates numbers via NNumberAnimation (tween from 0 over ~2s);
+  // TKpiCard animates numbers via NNumberAnimation (tween from 0 over ~2s);
   // stub it to render the target value synchronously so text assertions hold.
   NumberAnimation: { name: 'NumberAnimation', props: ['from', 'to', 'precision'], template: '<span>{{ to }}</span>' },
   Pagination: { name: 'Pagination', template: '<div class="n-pagination-stub" />' },

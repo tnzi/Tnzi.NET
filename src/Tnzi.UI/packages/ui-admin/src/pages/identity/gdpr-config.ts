@@ -15,7 +15,7 @@ export interface GdprRow {
 }
 
 export const gdprColumns: ColumnDef<GdprRow>[] = [
-  { key: 'username', title: 'columns.username', width: 180, fixed: 'left' },
+  { key: 'username', title: 'columns.username', minWidth: 140 },
   {
     key: 'requestType',
     title: 'columns.requestType',
@@ -43,13 +43,12 @@ export const gdprColumns: ColumnDef<GdprRow>[] = [
         },
       }),
   },
-  { key: 'userId', title: 'columns.userId', width: 240 },
-  { key: 'notes', title: 'columns.notes' },
+  { key: 'userId', title: 'columns.userId', minWidth: 180 },
+  { key: 'notes', title: 'columns.notes', minWidth: 160 },
   {
     key: 'requestedAt',
     title: 'columns.requestedAt',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.requestedAt }),
   },
 ]

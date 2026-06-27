@@ -17,10 +17,10 @@
   >
     <template #kpis>
       <TKpiRow class="orders-page__stats">
-        <TStatCard :label="t('kpi.totalRevenue')" :value="totalRevenueDisplay" />
-        <TStatCard :label="t('kpi.orderCount')" :value="stats.totalTransactions" />
-        <TStatCard :label="t('kpi.averageAmount')" :value="averageAmountDisplay" />
-        <TStatCard :label="t('kpi.paidRate')" :value="paidRateDisplay" suffix="%" />
+        <TKpiCard :label="t('kpi.totalRevenue')" :value="totalRevenueDisplay" />
+        <TKpiCard :label="t('kpi.orderCount')" :value="stats.totalTransactions" />
+        <TKpiCard :label="t('kpi.averageAmount')" :value="averageAmountDisplay" />
+        <TKpiCard :label="t('kpi.paidRate')" :value="paidRateDisplay" suffix="%" />
       </TKpiRow>
     </template>
 
@@ -40,7 +40,7 @@
 import { computed, ref, watchEffect, onMounted } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
-import TStatCard from '../../components/data/TStatCard.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { type RowAction } from '../../headless/rowActions'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
@@ -77,7 +77,7 @@ const averageAmount = computed(() =>
     : 0,
 )
 // KPI display values — money formats through @tnzi/core's formatCurrency
-// ("$1,234.56"); the paid rate keeps one decimal place. TStatCard renders
+// ("$1,234.56"); the paid rate keeps one decimal place. TKpiCard renders
 // string values verbatim (no number animation), which is intended here.
 const totalRevenueDisplay = computed(() => formatCurrency(stats.value.totalRevenue))
 const averageAmountDisplay = computed(() => formatCurrency(averageAmount.value))

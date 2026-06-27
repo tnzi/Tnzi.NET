@@ -18,9 +18,9 @@ interface Props {
   mode?: 'full' | 'first-level'
   /**
    * Phase E: override the menu items rendered. Defaults to
-   * `routeStore.menus` (full tree). Hybrid layouts can pass a slice
-   * (e.g. `top-hybrid-sidebar-first` passes the *children* of the
-   * currently-active 1st level item so the top hosts the 2nd level).
+   * `routeStore.menus` (full tree). Layout modes can pass a slice; when
+   * left undefined the `mode` prop (`full` / `first-level`) decides how
+   * many levels of the default tree render.
    */
   items?: AdminMenuItem[]
   /** Optional active key override (otherwise uses tabStore.activeTabId). */

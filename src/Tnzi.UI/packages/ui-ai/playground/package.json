@@ -9,13 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fontsource/libre-baskerville": "^5.1.0",
+    "@fontsource/libre-baskerville": "^5.2.10",
     "@tnzi/ui-ai": "workspace:*",
-    "vue": "^3.5.0"
+    "vue": "catalog:"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
-    "typescript": "^5.9.3",
-    "vite": "^5.4.0"
+    "@vitejs/plugin-vue": "^6.0.7",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.5"
   }
 }

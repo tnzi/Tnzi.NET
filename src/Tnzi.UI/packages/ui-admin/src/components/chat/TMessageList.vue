@@ -13,6 +13,7 @@
             :message="row.msg"
             :mine="isMine(row.msg)"
             :show-sender="isGroup"
+            :is-system="isSystem"
             :my-name="myName"
             :my-avatar-file-id="myAvatarFileId"
           />
@@ -37,6 +38,8 @@ const props = defineProps<{
   myName?: string
   myAvatarFileId?: string | null
   isGroup: boolean
+  /** Rendered inside a System (notifications) conversation. */
+  isSystem?: boolean
 }>()
 
 const scrollbarRef = ref<InstanceType<typeof NScrollbar> | null>(null)
@@ -130,7 +133,7 @@ watch(
   display: flex;
   flex-direction: column;
   padding: 14px 0 16px;
-  gap: 3px;
+  gap: 7px;
 }
 
 .t-msg-list__sep {

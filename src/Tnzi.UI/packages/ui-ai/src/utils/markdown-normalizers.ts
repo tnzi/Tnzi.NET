@@ -85,6 +85,9 @@ export function normalizeCjkSpacing(text: string): string {
  * LTR/RTL marks, and various format effect characters.
  */
 const INVISIBLE_FORMAT_CHAR =
+  // This class deliberately enumerates invisible / combining format code points
+  // (incl. the combining grapheme joiner) so they can be stripped individually.
+  // eslint-disable-next-line no-misleading-character-class
   /[\u00AD\u034F\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF\uFFF9-\uFFFB]/g;
 
 /**

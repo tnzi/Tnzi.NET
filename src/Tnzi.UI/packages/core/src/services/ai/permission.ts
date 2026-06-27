@@ -154,6 +154,10 @@ export function usePermissionAdminApi(client: HttpClient) {
     createPersistedRule: (data: CreatePersistedPermissionRuleDto) =>
       client.post<PersistedPermissionRuleDto>(`${base}/persisted-rules`, data),
 
+    /** Update a persisted permission rule */
+    updatePersistedRule: (id: string, data: CreatePersistedPermissionRuleDto) =>
+      client.put<PersistedPermissionRuleDto>(`${base}/persisted-rules/${id}`, data),
+
     /** Delete a persisted permission rule */
     deletePersistedRule: (id: string) =>
       client.delete<void>(`${base}/persisted-rules/${id}`),

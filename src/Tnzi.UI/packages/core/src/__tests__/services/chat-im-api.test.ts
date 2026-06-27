@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { useChatImApi, useChatBroadcastApi, usePresenceApi } from '../../services/chat/api'
+import { useChatImApi, useChatBroadcastApi, usePresenceApi, useChatAdminApi } from '../../services/chat/api'
 import { UserPresenceStatus } from '../../services/chat/types'
 
 function mockClient() {
@@ -87,5 +87,43 @@ describe('useChatBroadcastApi', () => {
     const c = mockClient(); const api = useChatBroadcastApi(c as never)
     await api.broadcast({ content: 'hello' })
     expect(c.post).toHaveBeenCalledWith('/admin/chat/broadcast', { content: 'hello' })
+  })
+})
+
+describe('useChatAdminApi', () => {
+  it('getStatistics hits GET /admin/chat/statistics', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.getStatistics()
+    expect(c.get).toHaveBeenCalledWith('/admin/chat/statistics')
+  })
+  it('queryConversations posts to /admin/chat/conversations/query', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.queryConversations({ pageIndex: 1, pageSize: 10, type: 2 } as never)
+    expect(c.post).toHaveBeenCalledWith('/admin/chat/conversations/query', { pageIndex: 1, pageSize: 10, type: 2 })
+  })
+  it('getConversation hits GET /admin/chat/conversations/{id}', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.getConversation('cid')
+    expect(c.get).toHaveBeenCalledWith('/admin/chat/conversations/cid')
+  })
+  it('getConversationMessages passes before+limit params', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.getConversationMessages('cid', { before: 'm1', limit: 30 })
+    expect(c.get).toHaveBeenCalledWith('/admin/chat/conversations/cid/messages', { params: { before: 'm1', limit: 30 } })
+  })
+  it('deleteConversation hits DELETE /admin/chat/conversations/{id}', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.deleteConversation('cid')
+    expect(c.delete).toHaveBeenCalledWith('/admin/chat/conversations/cid')
+  })
+  it('deleteMessage hits DELETE /admin/chat/messages/{messageId}', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.deleteMessage('mid')
+    expect(c.delete).toHaveBeenCalledWith('/admin/chat/messages/mid')
+  })
+  it('getPresenceOverview hits GET /admin/chat/presence with params', async () => {
+    const c = mockClient(); const api = useChatAdminApi(c as never)
+    await api.getPresenceOverview({ onlineOnly: true })
+    expect(c.get).toHaveBeenCalledWith('/admin/chat/presence', { params: { onlineOnly: true } })
   })
 })

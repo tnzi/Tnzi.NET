@@ -28,6 +28,8 @@ import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { useAdminTabStore, type AdminTab } from '../stores/useAdminTabStore'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
+import { useChatStore } from '../stores/useChatStore'
+import type { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { useAdminLoginConfig } from '../plugin/loginConfig'
 import { useAdminChatConfig } from '../plugin/chatConfig'
 import { useAdminClient } from '../plugin/client'
@@ -94,6 +96,14 @@ const naiveTheme = computed(() => (themeCtx?.isDark.value ? darkTheme : null))
 // consumers already configured this for the login page.
 const loginConfig = useAdminLoginConfig()
 const chatConfig = useAdminChatConfig()
+
+// Presence in the header avatar — only when the built-in chat is enabled AND a
+// client is present (TChatHost then inits the chat bridge + loads my status).
+const chatStore = useChatStore()
+const presenceEnabled = computed(() => chatConfig?.enabled !== false && !!storageClient)
+function onSetPresence(status: UserPresenceStatus): void {
+  void chatStore.setMyStatus(status).catch(() => undefined)
+}
 
 // Phase I.7.8: auto-push a tab into the tab store whenever the route
 // changes. Without this watcher the tab bar stays empty until the user
@@ -195,7 +205,7 @@ function defaultTranslate(key: string, fallback?: string): string {
   <NConfigProvider :theme="naiveTheme" :theme-overrides="naiveOverrides" inline-theme-disabled>
     <TAdminShell
       :title="loginConfig.brand ?? 'Tnzi Admin'"
-      :sider="{ brand: loginConfig.brand, brandIcon: loginConfig.brandIcon }"
+      :sider="{ brand: loginConfig.brand, brandSubtitle: loginConfig.brandSubtitle, brandIcon: loginConfig.brandIcon }"
       :footer="{ copyright: footerCopyright, links: loginConfig.footer?.links }"
       :builtin-chat="chatConfig?.enabled !== false"
       @menu-select="onMenuSelect"
@@ -222,6 +232,8 @@ function defaultTranslate(key: string, fallback?: string): string {
         :on-logout="loginConfig.user?.onLogout"
         :signed-in="loginConfig.user?.signedIn ?? true"
         :on-sign-in="loginConfig.user?.onSignIn"
+        :presence="presenceEnabled ? chatStore.myStatus : null"
+        :on-set-presence="onSetPresence"
         :translate="loginConfig.translate ?? defaultTranslate"
       />
     </template>

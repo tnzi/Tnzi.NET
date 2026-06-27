@@ -33,4 +33,15 @@ describe('useChatRealtime', () => {
     expect(store.conversations[0].unreadCount).toBe(1)
     expect(onNew).toHaveBeenCalled()
   })
+
+  it('system/broadcast Chat.NewMessage (senderId=null) bumps unread + fires onNewMessage', async () => {
+    const store = useChatStore()
+    store.conversations = [{ id: 'sys', type: 3, title: 'System', unreadCount: 0, isMuted: false, memberCount: 1 } as never]
+    const onNew = vi.fn()
+    const rt = useChatRealtime({ client: {} as never, store, hubUrl: '/hubs/chat', getToken: () => 't', getUserId: () => 'me', onNewMessage: onNew })
+    await rt.start()
+    handlers['Chat.NewMessage']({ conversationId: 'sys', messageId: 'mB', senderId: null, contentType: 4, preview: '[System] broadcast' })
+    expect(store.conversations[0].unreadCount).toBe(1)
+    expect(onNew).toHaveBeenCalled()
+  })
 })

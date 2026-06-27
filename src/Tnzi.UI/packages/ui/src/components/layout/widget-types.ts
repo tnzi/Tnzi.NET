@@ -135,8 +135,12 @@ export interface WidgetDef {
  * dashboard inline at app boot.
  */
 export interface WorkbenchConfig {
-  /** Widget descriptors rendered in order. */
-  widgets: WidgetDef[]
+  /**
+   * Widget descriptors rendered in order. Optional — when omitted the admin
+   * Workbench page falls back to `defaultWorkbenchWidgets()`, so a consumer can
+   * opt into the bundled deck with just `{ layout: 'draggable' }`.
+   */
+  widgets?: WidgetDef[]
   /**
    * Layout mode. `'fixed'` renders the widgets in the supplied order;
    * `'draggable'` overlays VueDraggable so the user can re-order and

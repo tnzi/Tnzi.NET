@@ -131,6 +131,44 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 更新持久化权限规则
+    /// </summary>
+    [HttpPut("persisted-rules/{id}")]
+    public virtual async Task<ApiResult<PersistedPermissionRuleDto>> UpdatePersistedRule(
+        Guid id,
+        [FromBody] CreatePersistedPermissionRuleDto input)
+    {
+        Check.NotNull(input);
+
+        var entity = await PermissionRuleRepository.GetAsync(id);
+        if (entity == null)
+        {
+            return ApiResult<PersistedPermissionRuleDto>.Error("Permission rule not found.", 404);
+        }
+
+        // In-place field assignment — never re-create the entity (would drop the
+        // Id / audit fields / TenantId). Behavior & Scope are persisted as int.
+        entity.ToolPattern = input.ToolPattern;
+        entity.ToolGroup = input.ToolGroup;
+        entity.CommandPrefix = input.CommandPrefix;
+        entity.ServerName = input.ServerName;
+        entity.PathPrefix = input.PathPrefix;
+        entity.Behavior = (int)input.Behavior;
+        entity.Scope = (int)input.Scope;
+        entity.Priority = input.Priority;
+        entity.IsDestructiveOnly = input.IsDestructiveOnly;
+        entity.IsSubAgentOnly = input.IsSubAgentOnly;
+        entity.Reason = input.Reason;
+        entity.UserId = input.UserId;
+        entity.IsEnabled = input.IsEnabled;
+
+        await PermissionRuleRepository.UpdateAsync(entity);
+        await PermissionEvaluator.RefreshRulesAsync();
+
+        return ApiResult<PersistedPermissionRuleDto>.Ok(entity.MapTo<PersistedPermissionRuleDto>());
+    }
+
+    /// <summary>
     /// 删除持久化权限规则
     /// </summary>
     [HttpDelete("persisted-rules/{id}")]

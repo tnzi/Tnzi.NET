@@ -46,11 +46,27 @@ export interface UserRow {
   creationTime?: string
 }
 
+/**
+ * Create/edit form schema. `userName` + `password` are create-only — the
+ * `visible: (m) => !m.id` predicate hides them once the record has an id
+ * (edit/view), mirroring the previous `v-if="mode === 'create'"`. `password`
+ * uses the admin form-schema's built-in masked `password` field renderer.
+ * Role assignment is NOT here — it has its own diff-aware "Manage Roles" modal
+ * (name→id resolution + assign/remove), which the main form can't express.
+ */
+export const userFormSchema: FormSchemaItem[] = [
+  { key: 'userName', labelKey: 'form.userName', label: 'User Name', type: 'text', required: true, visible: (m) => !m.id },
+  { key: 'password', labelKey: 'form.password', label: 'Password', type: 'password', required: true, visible: (m) => !m.id },
+  { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text' },
+  { key: 'phoneNumber', labelKey: 'form.phoneNumber', label: 'Phone Number', type: 'text' },
+  { key: 'nickname', labelKey: 'form.nickname', label: 'Nickname', type: 'text' },
+]
+
 export const userColumns: ColumnDef<UserRow>[] = [
-  { key: 'userName', title: 'columns.userName', width: 160, fixed: 'left' },
-  { key: 'email', title: 'columns.email', width: 220 },
-  { key: 'phoneNumber', title: 'columns.phoneNumber', width: 140 },
-  { key: 'organizationName', title: 'columns.organizationName', width: 160 },
+  { key: 'userName', title: 'columns.userName', minWidth: 130 },
+  { key: 'email', title: 'columns.email', minWidth: 180 },
+  { key: 'phoneNumber', title: 'columns.phoneNumber', minWidth: 130 },
+  { key: 'organizationName', title: 'columns.organizationName', minWidth: 140 },
   {
     key: 'isLockedOut',
     title: 'columns.isLockedOut',
@@ -89,8 +105,7 @@ export const userColumns: ColumnDef<UserRow>[] = [
   {
     key: 'creationTime',
     title: 'columns.creationTime',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },
 ]

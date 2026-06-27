@@ -7,9 +7,8 @@
       </NButton>
     </template>
 
-    <div class="t-org-page__layout">
-        <!-- Left: tree -->
-        <div class="t-org-page__tree">
+    <TMasterDetailLayout :master-width="320">
+      <template #master>
           <NInput
             v-model:value="filter"
             :placeholder="t('searchPlaceholder')"
@@ -36,9 +35,8 @@
               {{ t('emptyTip') }}
             </div>
           </NSpin>
-        </div>
-
-        <!-- Right: detail / edit form -->
+      </template>
+      <template #detail>
         <div class="t-org-page__detail">
           <div v-if="!selectedNode" class="t-org-page__placeholder">
             {{ t('selectPrompt') }}
@@ -132,7 +130,8 @@
             </div>
           </div>
         </div>
-    </div>
+      </template>
+    </TMasterDetailLayout>
 
     <!-- Create modal — works for both root and child create -->
     <NModal
@@ -186,6 +185,7 @@ import { createIdentityBridge, type OrganizationTreeNodeDto, type OrganizationDt
 import { useAdminClient } from '../../plugin/client'
 import { interpolate, translatePageKey } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
+import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 import type { UserListItemDto } from '@tnzi/core/services/identity'
 
 const bridge = createIdentityBridge({ client: useAdminClient() })
@@ -452,49 +452,19 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.t-org-page__layout {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 16px;
-  min-height: 0;
-  height: 100%;
-}
-.t-org-page__tree {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 16px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-/* Phone: stack the tree above the detail; the tree gets a capped height and
-   a bottom divider instead of the right border. */
-@media (max-width: 767px) {
-  .t-org-page__layout {
-    grid-template-columns: 1fr;
-    height: auto;
-  }
-  .t-org-page__tree {
-    border-right: none;
-    padding-right: 0;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-bottom: 12px;
-    max-height: 40vh;
-  }
-  .t-org-page__detail {
-    padding: 0;
-  }
-}
+/* Master/detail grid, responsive stacking and pane scroll come from
+   <TMasterDetailLayout>. Only page-specific content styling stays here. */
+/* The tree (not the whole master pane) owns the scroll so the search input
+   above it stays pinned while a long org tree scrolls. The master pane is a
+   flex column from TMasterDetailLayout, so flex:1 + overflow engages here. */
 .t-org-page__naive-tree {
   flex: 1;
-  margin-top: 8px;
   min-height: 0;
+  margin-top: 8px;
   overflow: auto;
 }
 .t-org-page__detail {
   padding: 0 8px;
-  overflow: auto;
-  min-height: 0;
 }
 .t-org-page__placeholder {
   color: var(--tnzi-base-text-muted);

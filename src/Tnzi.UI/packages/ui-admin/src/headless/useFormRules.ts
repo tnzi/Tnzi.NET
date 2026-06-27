@@ -34,8 +34,26 @@ export interface FormRules {
   email: FormItemRule[]
   /** International phone number — digits + optional `+` and dashes. */
   phone: FormItemRule[]
-  /** Strong password — 8-32 chars, at least one letter + one digit. */
-  password(opts?: { min?: number; max?: number }): FormItemRule[]
+  /**
+   * Strong password — length range + (by default) at least one letter and one
+   * digit. Pass `complexity: false` for LOGIN forms where the password must
+   * only be non-empty (composition rules belong to register/reset, and the
+   * backend enforces its own policy — the login form must not reject a valid
+   * existing password client-side).
+   */
+  password(opts?: { min?: number; max?: number; complexity?: boolean }): FormItemRule[]
+  /**
+   * Account identifier — username, email, OR phone. Length-only (no strict
+   * format) so a login form accepts whatever the backend allows. Used by the
+   * password-login account field.
+   */
+  account(opts?: { min?: number; max?: number; message?: string }): FormItemRule[]
+  /**
+   * Email or phone — accepts either format in a single field (the consumer
+   * auto-detects which `type` to send). Used by code-login / register /
+   * password-recovery.
+   */
+  emailOrPhone(message?: string): FormItemRule[]
   /** Match another field value (e.g. confirm-password). */
   matches(other: () => string, message?: string): FormItemRule
   /** Valid URL (http/https only). */
@@ -155,6 +173,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
     password(opts = {}) {
       const min = opts.min ?? 8
       const max = opts.max ?? 32
+      const complexity = opts.complexity ?? true
       return [
         {
           required: true,
@@ -172,12 +191,58 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
                   .replace('{max}', String(max)),
               )
             }
-            if (!/[A-Za-z]/.test(v) || !/\d/.test(v)) {
+            if (complexity && (!/[A-Za-z]/.test(v) || !/\d/.test(v))) {
               return new Error(
                 fb(t, 'admin.rules.passwordMix', 'Password must contain letters and digits'),
               )
             }
             return true
+          },
+        },
+      ]
+    },
+
+    account(opts = {}) {
+      const min = opts.min ?? 1
+      const max = opts.max ?? 256
+      return [
+        {
+          required: true,
+          trigger: ['blur', 'input'],
+          message: opts.message ?? fb(t, 'admin.rules.required', 'Account is required'),
+        },
+        {
+          trigger: ['blur', 'input'],
+          validator(_rule: unknown, value: string) {
+            const len = (value ?? '').trim().length
+            if (len < min || len > max) {
+              return new Error(
+                fb(t, 'admin.rules.lengthRange', `Length must be ${min}-${max}`)
+                  .replace('{min}', String(min))
+                  .replace('{max}', String(max)),
+              )
+            }
+            return true
+          },
+        },
+      ]
+    },
+
+    emailOrPhone(message) {
+      return [
+        {
+          required: true,
+          trigger: ['blur', 'input'],
+          message: fb(t, 'admin.rules.required', 'This field is required'),
+        },
+        {
+          trigger: ['blur', 'input'],
+          validator(_rule: unknown, value: string) {
+            const v = (value ?? '').trim()
+            if (emailRegex().test(v) || phoneRegex().test(v)) return true
+            return new Error(
+              message ?? fb(t, 'admin.rules.emailOrPhone', 'Enter a valid email or phone number'),
+            )
           },
         },
       ]

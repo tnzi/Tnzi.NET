@@ -219,7 +219,11 @@ const dataTableColumns = computed(() => {
     base.push({
       key: c.key,
       title: maybeTranslate(c.title, c.title),
-      width: c.width,
+      // `width` → fixed size; `minWidth` (no width) → elastic, fills the
+      // container down to the floor. Forward only what's set so a minWidth-
+      // only column stays elastic instead of being pinned by `width: undefined`.
+      ...(c.width !== undefined ? { width: c.width } : {}),
+      ...(c.minWidth !== undefined ? { minWidth: c.minWidth } : {}),
       fixed: c.fixed,
       ...(c.align ? { align: c.align } : {}),
       ...(c.ellipsis !== undefined ? { ellipsis: c.ellipsis } : {}),
@@ -242,20 +246,29 @@ const dataTableColumns = computed(() => {
   return base as never[]
 })
 
+/** Assumed minimum width (px) for a column that declares neither `width`
+ *  nor `minWidth` — used only to estimate {@link scrollX}. */
+const DEFAULT_MIN_COL_WIDTH = 120
+
 /**
- * Horizontal scroll width — the sum of the visible columns' declared widths
- * (plus the selection + actions columns). Columns without a declared width
- * are estimated at 140px. When the total comfortably fits a phone-width
- * container we leave `scroll-x` undefined so a sparse table still fills the
- * width; past ~640px of content the table scrolls horizontally instead of
- * crushing columns. Mobile uses cards, so this only governs tablet/desktop.
+ * Horizontal-scroll min-width. NDataTable applies this as the inner table's
+ * `min-width` while keeping the table `width: 100%`, so:
+ *  - container ≥ scrollX → columns stretch to fill (no scrollbar, no gap)
+ *  - container < scrollX → the table scrolls horizontally instead of crushing
+ * We sum each column's MINIMUM acceptable width — its `minWidth` (elastic
+ * floor), falling back to a fixed `width`, else a {@link DEFAULT_MIN_COL_WIDTH}
+ * floor — so a horizontal scrollbar appears only when the columns genuinely
+ * can't fit, not on every wide-ish or empty table the way the old fixed-width
+ * sum did. The selection + actions columns are `fixed`, which forces naive
+ * into scroll mode, so scrollX stays set whenever there is content to size.
+ * Mobile uses cards, so this only governs tablet/desktop.
  */
 const scrollX = computed<number | undefined>(() => {
   const cols = props.state.columnSettings.visibleColumns.value
   let total = props.showSelection ? 40 : 0
-  for (const c of cols) total += c.width ?? 140
+  for (const c of cols) total += c.width ?? c.minWidth ?? DEFAULT_MIN_COL_WIDTH
   if (hasRowActions.value) total += actionColumnWidth.value
-  return total > 640 ? total : undefined
+  return total > 0 ? total : undefined
 })
 
 /** Map the table column defs → the lighter card column shape. */

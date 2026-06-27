@@ -50,8 +50,8 @@ function fmtMoney(amount?: number, currency?: string): string {
 }
 
 export const refundColumns: ColumnDef<RefundRow>[] = [
-  { key: 'refundNo', title: 'columns.refundNo', width: 200, fixed: 'left' },
-  { key: 'paymentNo', title: 'columns.paymentNo', width: 200 },
+  { key: 'refundNo', title: 'columns.refundNo', minWidth: 150 },
+  { key: 'paymentNo', title: 'columns.paymentNo', minWidth: 150 },
   {
     key: 'refundAmount',
     title: 'columns.refundAmount',
@@ -63,7 +63,7 @@ export const refundColumns: ColumnDef<RefundRow>[] = [
         fmtMoney(row.refundAmount, row.currency),
       ),
   },
-  { key: 'reason', title: 'columns.reason' },
+  { key: 'reason', title: 'columns.reason', minWidth: 160 },
   {
     key: 'status',
     title: 'columns.status',
@@ -86,8 +86,7 @@ export const refundColumns: ColumnDef<RefundRow>[] = [
   {
     key: 'completedTime',
     title: 'columns.completedTime',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.completedTime }),
   },
 ]

@@ -16,6 +16,7 @@ import type {
   ResendEmailConfirmationDto,
   CaptchaDto,
   PasswordStrengthResultDto,
+  AuthConfigDto,
   // Quick register
   SendQuickRegisterCodeDto,
   QuickRegisterDto,
@@ -116,6 +117,14 @@ const ADMIN_TENANT_BASE = '/admin/tenants';
 
 export function useAuthApi(client: HttpClient) {
   return {
+    /**
+     * Get public auth config (which login methods / register / recovery /
+     * third-party providers are enabled). Anonymous — used by the login page
+     * to render itself per backend deployment config.
+     */
+    getConfig: () =>
+      client.get<AuthConfigDto>(`${AUTH_BASE}/config`),
+
     /** Login (returns JWT token string) */
     login: (data: LoginDto) =>
       client.post<string>(`${AUTH_BASE}/login`, data),
@@ -204,6 +213,23 @@ export function useAuthApi(client: HttpClient) {
     verifyTwoFactor: (data: VerifyTwoFactorDto) =>
       client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data),
   };
+}
+
+/**
+ * Build the absolute URL that starts a third-party OAuth login flow.
+ * The login page navigates the browser here (`window.location.assign(...)`);
+ * the backend (`GET /auth/oauth/{provider}/login`) then redirects to the
+ * provider's consent screen.
+ *
+ * @param client HTTP client (supplies the configured baseUrl).
+ * @param provider Provider key (lowercase, e.g. `'github'`, `'google'`).
+ * @param returnUrl Optional URL to return to once the flow completes.
+ */
+export function oauthLoginUrl(client: HttpClient, provider: string, returnUrl?: string): string {
+  return client.resolveUrl(
+    `${AUTH_BASE}/oauth/${provider}/login`,
+    returnUrl ? { returnUrl } : undefined,
+  );
 }
 
 // ============================================

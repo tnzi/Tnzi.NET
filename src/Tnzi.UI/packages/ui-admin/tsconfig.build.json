@@ -1,0 +1,21 @@
+{
+  // Declaration-emit config for `vue-tsc --emitDeclarationOnly` (run after the
+  // vite JS/CSS build). vue-tsc natively emits per-SFC `.vue.d.ts` + the barrels,
+  // which vite-plugin-dts (4.x/5.x + vue-tsc 3) fails to do here.
+  //
+  // `paths: {}` clears the dev mappings (`@tnzi/core` → ../core/src, etc.) so the
+  // emit program contains only this package's `src/**` — declarations land in
+  // `dist`, and `@tnzi/*` resolve to their node_modules dist `.d.ts`. (ui-admin
+  // does not use the internal `@/` alias, so clearing all paths is safe.)
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {},
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "dist",
+    "rootDir": "src"
+  }
+}

@@ -8,20 +8,24 @@ import { h } from 'vue'
 const mockToBlob = vi.fn((cb: (blob: Blob) => void) => {
   cb(new Blob(['cropped'], { type: 'image/jpeg' }))
 })
-const mockGetCroppedCanvas = vi.fn(() => ({ toBlob: mockToBlob }))
+// cropperjs v2 web-component API: configure the selection, then render it to a
+// canvas via the async `$toCanvas()`.
+const mockSelection = {
+  aspectRatio: 1,
+  initialCoverage: 0.9,
+  $reset: vi.fn(() => mockSelection),
+  $toCanvas: vi.fn(async () => ({ toBlob: mockToBlob })),
+}
 const mockCropperInstance = {
-  getCroppedCanvas: mockGetCroppedCanvas,
+  getCropperSelection: vi.fn(() => mockSelection),
+  getCropperImage: vi.fn(() => ({ $ready: vi.fn(async () => undefined) })),
   destroy: vi.fn(),
-  replace: vi.fn(),
 }
 const MockCropper = vi.fn(() => mockCropperInstance)
 
 vi.mock('cropperjs', () => ({
   default: MockCropper,
 }))
-
-// cropperjs/dist/cropper.css — no-op
-vi.mock('cropperjs/dist/cropper.css', () => ({}))
 
 // ---------------------------------------------------------------------------
 // Stub NModal so the dialog renders without Naive UI provider tree
@@ -31,7 +35,7 @@ vi.mock('naive-ui', () => ({
     name: 'NModal',
     props: ['show'],
     emits: ['update:show'],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     render(this: any) {
       if (!this.show) return h('div', { 'data-testid': 'modal-closed' })
       return h('div', { 'data-testid': 'modal-open' }, this.$slots.default?.())
@@ -41,7 +45,7 @@ vi.mock('naive-ui', () => ({
     name: 'NButton',
     props: ['type', 'disabled', 'loading'],
     emits: ['click'],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     render(this: any) {
       return h(
         'button',
@@ -53,14 +57,14 @@ vi.mock('naive-ui', () => ({
   NSpin: {
     name: 'NSpin',
     props: ['show'],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     render(this: any) {
       return h('div', { 'data-testid': 'spin' }, this.$slots.default?.())
     },
   },
   NSpace: {
     name: 'NSpace',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     render(this: any) {
       return h('div', {}, this.$slots.default?.())
     },

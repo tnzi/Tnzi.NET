@@ -28,8 +28,8 @@
     </template>
 
     <TKpiRow cols="1 s:2">
-      <TStatCard :label="t('kpi.count')" :value="files.length" icon="mdi:file-clock-outline" tone="warning" />
-      <TStatCard :label="t('kpi.totalSize')" :value="totalSizeLabel" icon="mdi:harddisk" />
+      <TKpiCard :label="t('kpi.count')" :value="files.length" icon="mdi:file-clock-outline" tone="warning" />
+      <TKpiCard :label="t('kpi.totalSize')" :value="totalSizeLabel" icon="mdi:harddisk" />
     </TKpiRow>
 
     <NCard size="small" :bordered="false" class="t-table-card" :title="t('list.title')">
@@ -54,7 +54,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
-import TStatCard from '../../components/data/TStatCard.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'

@@ -33,6 +33,10 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
             new EFCoreRepository<ChatTestDbContext, ConversationMember, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
         services.AddScoped<IRepository<ChatMessage, Guid>>(sp =>
             new EFCoreRepository<ChatTestDbContext, ChatMessage, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
+        services.AddScoped<IRepository<UserPresence, Guid>>(sp =>
+            new EFCoreRepository<ChatTestDbContext, UserPresence, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
+        services.AddScoped<IRepository<BroadcastLog, Guid>>(sp =>
+            new EFCoreRepository<ChatTestDbContext, BroadcastLog, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
 
         var userRepo = new Mock<IRepository<User, Guid>>();
         userRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
@@ -68,6 +72,11 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
 
         services.AddScoped<IChatContactService, ChatContactService>();
         services.AddScoped<IConversationService, ConversationService>();
+
+        // Admin maintenance service — IConnectionManager is an optional ctor dependency
+        // (no SignalR in the integration suite), so it falls back to null and online
+        // counts resolve to 0 / offline.
+        services.AddScoped<IChatAdminService, ChatAdminService>();
     }
 }
 
@@ -86,6 +95,7 @@ public class ChatTestDbContext : TnziDbContext<ChatTestDbContext>
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ConversationMemberConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ChatMessageConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.UserPresenceConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.BroadcastLogConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

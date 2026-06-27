@@ -64,7 +64,7 @@
             <NInput
               v-model:value="controllerFilter"
               :placeholder="t('filter.controller')"
-              clearable
+              clearable size="small"
               class="w-280px"
             >
               <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>

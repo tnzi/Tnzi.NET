@@ -5,7 +5,7 @@
  * Provides HTTP client and storage adapter injection.
  */
 
-import type { HttpClient } from '@tnzi/core/http/http';
+import type { HttpClient } from '@tnzi/core/http';
 import type { StorageAdapter } from '@tnzi/core/adapters';
 
 // ============================================

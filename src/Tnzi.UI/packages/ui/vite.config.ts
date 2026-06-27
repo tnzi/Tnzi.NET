@@ -1,19 +1,14 @@
 import { defineConfig } from 'vite';
 import UnoCSS from 'unocss/vite';
 import vue from '@vitejs/plugin-vue';
-import dts from 'vite-plugin-dts';
 import { resolve } from 'path';
 
 export default defineConfig({
+  // NOTE: .d.ts are emitted by `vue-tsc -p tsconfig.build.json` in the `build`
+  // script (vite-plugin-dts 4.x/5.x don't emit per-SFC `.vue.d.ts` with vue-tsc 3).
   plugins: [
     UnoCSS(),
     vue(),
-    dts({
-      include: ['src/**/*'],
-      exclude: ['src/__tests__/**'],
-      outDir: 'dist',
-      entryRoot: resolve(__dirname, 'src'),
-    }),
   ],
   build: {
     lib: {
@@ -27,6 +22,10 @@ export default defineConfig({
       },
       name: 'TnziUi',
       formats: ['es'],
+      // vite 6+ defaults the lib CSS file to the package name (→ `ui.css`);
+      // pin it back to `style.css` so the `./style.css` export + cross-package
+      // `@import '@tnzi/ui/style.css'` keep resolving.
+      cssFileName: 'style',
     },
     rollupOptions: {
       external: (id) =>

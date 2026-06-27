@@ -71,4 +71,15 @@ public interface IAuthService
     Task<Result<string>> ResetPasswordByCodeAsync(ResetPasswordByCodeDto input);
 
     #endregion
+
+    #region 认证配置
+
+    /// <summary>
+    /// 获取公开认证配置（登录方式 / 注册 / 找回 / 第三方登录的开关），供登录页按部署配置渲染。
+    /// 只读现有配置选项，仅返回布尔开关与已启用的第三方提供商，不含任何密钥。
+    /// </summary>
+    /// <returns>认证配置</returns>
+    Result<AuthConfigDto> GetAuthConfig();
+
+    #endregion
 }

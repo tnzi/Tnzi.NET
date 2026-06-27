@@ -69,7 +69,9 @@ export const useChatStore = defineStore('admin-chat', () => {
 
   function applyIncomingMessage(p: NewMessagePayload, myId?: string) {
     const isActive = activeId.value === p.conversationId
-    const fromOther = p.senderId && p.senderId !== (myId ?? useAdminAuthStore().userInfo?.id)
+    // senderId=null → system/broadcast message; "!== my id" treats it as from-other
+    // so it bumps the unread count (the realtime layer plays the sound in parallel).
+    const fromOther = p.senderId !== (myId ?? useAdminAuthStore().userInfo?.id)
     // Incremental append: the backend pushes the full message body so an already
     // open thread updates live without a full re-fetch. appendMessage dedupes by
     // id (our own optimistic send is ignored) and refreshes the conversation's

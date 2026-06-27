@@ -111,6 +111,8 @@ const MIN_WIDTH = 72
 function labelWidth(label: string): number {
   let w = 0
   for (const ch of label) {
+    // The class intentionally includes the full-width space (U+3000) to size CJK glyphs.
+    // eslint-disable-next-line no-irregular-whitespace
     w += /[㐀-鿿豈-﫿　-〿＀-￯]/.test(ch) ? 15 : 8
   }
   return Math.ceil(w) + BTN_PADDING

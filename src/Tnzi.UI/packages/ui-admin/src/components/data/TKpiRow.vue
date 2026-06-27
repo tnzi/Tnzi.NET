@@ -6,13 +6,13 @@ import { NGi, NGrid } from 'naive-ui'
  * TKpiRow — uniform KPI strip container. Wraps an `NGrid`
  * (`responsive="screen"`, default `cols="1 s:2 m:4"`, 12px gap) and
  * auto-wraps every default-slot child in an `NGi`, so pages drop
- * `TStatCard`s in directly (including via `v-for`) without grid-item
+ * `TKpiCard`s in directly (including via `v-for`) without grid-item
  * boilerplate:
  *
  * ```vue
  * <TKpiRow cols="1 s:2 m:3">
- *   <TStatCard :label="t('kpi.total')" :value="total" />
- *   <TStatCard :label="t('kpi.active')" :value="active" tone="success" />
+ *   <TKpiCard :label="t('kpi.total')" :value="total" />
+ *   <TKpiCard :label="t('kpi.active')" :value="active" tone="success" />
  * </TKpiRow>
  * ```
  *

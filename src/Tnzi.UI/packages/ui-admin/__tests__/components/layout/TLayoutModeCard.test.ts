@@ -63,23 +63,6 @@ describe('TLayoutModeCard', () => {
     expect(wrapper.find('.t-layout-card__sider--tertiary.t-layout-card__sider--w16').exists()).toBe(true)
   })
 
-  it('vertical-hybrid-header-first: 8px+16px siders + primary header', () => {
-    const wrapper = mount(TLayoutModeCard, {
-      props: { mode: 'vertical-hybrid-header-first' },
-    })
-    expect(wrapper.find('.t-layout-card__sider--primary.t-layout-card__sider--w8').exists()).toBe(true)
-    expect(wrapper.find('.t-layout-card__sider--tertiary.t-layout-card__sider--w16').exists()).toBe(true)
-    expect(wrapper.find('.t-layout-card__header--primary').exists()).toBe(true)
-  })
-
-  it('top-hybrid-sidebar-first: tertiary header + 18px primary sider', () => {
-    const wrapper = mount(TLayoutModeCard, {
-      props: { mode: 'top-hybrid-sidebar-first' },
-    })
-    expect(wrapper.find('.t-layout-card__header--tertiary').exists()).toBe(true)
-    expect(wrapper.find('.t-layout-card__sider--primary.t-layout-card__sider--w18').exists()).toBe(true)
-  })
-
   it('top-hybrid-header-first: primary header + neutral 18px sider', () => {
     const wrapper = mount(TLayoutModeCard, {
       props: { mode: 'top-hybrid-header-first' },

@@ -173,7 +173,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { formatDateTime } from '@tnzi/core'
+import { formatDateTime, formatFileSize } from '@tnzi/core'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
@@ -316,7 +316,7 @@ const documentColumns: DataTableColumns<KnowledgeDocumentDto> = [
     key: 'fileSize',
     title: () => t('columns.fileSize'),
     width: 110,
-    render: (row) => formatFileSize(row.fileSize),
+    render: (row) => formatFileSize(row.fileSize ?? 0),
   },
   {
     key: 'creationTime',
@@ -427,15 +427,7 @@ async function onSearchTest(): Promise<void> {
 }
 
 // --- formatting helpers ----------------------------------------------------
-function formatFileSize(bytes: number | null | undefined): string {
-  const value = bytes ?? 0
-  if (value <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  const size = value / Math.pow(1024, exponent)
-  return `${exponent === 0 ? size : size.toFixed(1)} ${units[exponent]}`
-}
-
+// formatFileSize is imported from @tnzi/core (single source of truth).
 function formatScore(score: number | null | undefined): string {
   return `${Math.round((score ?? 0) * 100)}%`
 }

@@ -42,7 +42,8 @@ const managerInstance = {
 }
 
 vi.mock('@tnzi/core/state', () => ({
-  UserStateManager: vi.fn(() => managerInstance),
+  // vitest 4: `new`-able mock must use a regular function (arrow impls are not constructors)
+  UserStateManager: vi.fn(function () { return managerInstance }),
 }))
 
 vi.mock('@tnzi/core/adapters/storage', () => ({

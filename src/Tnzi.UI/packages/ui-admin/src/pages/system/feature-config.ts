@@ -38,16 +38,16 @@ function valueTypeLabel(v?: number): string {
 }
 
 export const featureColumns: ColumnDef<FeatureRow>[] = [
-  { key: 'name', title: 'columns.name', width: 200, fixed: 'left' },
-  { key: 'displayName', title: 'columns.displayName', width: 180 },
-  { key: 'group', title: 'columns.group', width: 140 },
+  { key: 'name', title: 'columns.name', minWidth: 150 },
+  { key: 'displayName', title: 'columns.displayName', minWidth: 150 },
+  { key: 'group', title: 'columns.group', minWidth: 120 },
   {
     key: 'valueType',
     title: 'columns.valueType',
     width: 110,
     render: (row) => h('span', { style: 'font-family: monospace; font-size: 12px' }, valueTypeLabel(row.valueType)),
   },
-  { key: 'defaultValue', title: 'columns.defaultValue', width: 140 },
+  { key: 'defaultValue', title: 'columns.defaultValue', minWidth: 120 },
   {
     key: 'isEnabled',
     title: 'columns.isEnabled',
@@ -65,7 +65,6 @@ export const featureColumns: ColumnDef<FeatureRow>[] = [
     key: 'source',
     title: 'columns.source',
     width: 110,
-    fixed: 'right',
     render: (row) => h(TSourceBadge, { value: String(row.source ?? 'Database') }),
   },
 ]

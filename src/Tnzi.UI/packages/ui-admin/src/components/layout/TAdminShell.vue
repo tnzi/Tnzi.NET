@@ -41,6 +41,8 @@ interface SiderConfig {
   fixed?: boolean
   /** Brand title shown in the sider header (Phase I.7.6+). */
   brand?: string
+  /** Muted second line under the brand title in the (expanded) sider header. */
+  brandSubtitle?: string
   /** Iconify icon name for the brand logo. */
   brandIcon?: string
 }
@@ -238,25 +240,17 @@ function onMenuSelect(menu: AdminMenuItem): void {
 
 // Phase E — top menu select dispatches differently per layout mode:
 // - horizontal: leaf navigation, just emit
-// - vertical-hybrid-header-first / top-hybrid-header-first: 1st level
-//   click sets the active 1st level (sider re-renders with new children).
-//   If the item has no children, also navigate (it's a leaf 1st level).
-// - top-hybrid-sidebar-first: top renders 2nd level items — clicking
-//   one navigates directly.
+// - top-hybrid-header-first: 1st level click sets the active 1st level
+//   (sider re-renders with new children). If the item has no children,
+//   also navigate (it's a leaf 1st level).
 function onTopMenuSelect(menu: AdminMenuItem): void {
   const mode = effectiveMode.value
-  if (
-    mode === 'vertical-hybrid-header-first' ||
-    mode === 'top-hybrid-header-first'
-  ) {
+  if (mode === 'top-hybrid-header-first') {
     menuCtx.handleSelectFirstLevelMenu(menu.key)
     if (!menu.children || menu.children.length === 0) {
       emit('menuSelect', menu)
     }
     return
-  }
-  if (mode === 'top-hybrid-sidebar-first') {
-    menuCtx.handleSelectSecondLevelMenu(menu.key)
   }
   emit('menuSelect', menu)
 }
@@ -492,6 +486,12 @@ function onMixMouseleave(): void {
     :style="{
       '--tnzi-admin-header-height': themeStore.headerHeight + 'px',
       '--tnzi-admin-tab-height': themeStore.tabHeight + 'px',
+      // Sticky tab bar offset. In 'content' mode the bar's scroll context is
+      // `.t-admin-shell__main-stack`, which already sits below the header, so
+      // the offset is 0; in 'wrapper' mode the whole shell scrolls and the bar
+      // must clear the sticky header. See TAdminTabs `.t-admin-tabs--fixed`.
+      '--tnzi-admin-tab-sticky-top':
+        themeStore.scrollMode === 'wrapper' ? themeStore.headerHeight + 'px' : '0px',
     }"
   >
     <!-- vertical-mix mouse region — soybean parity.
@@ -558,11 +558,13 @@ function onMixMouseleave(): void {
       </div>
     </div>
 
-    <!-- Main sider for non-mix modes (vertical / horizontal-hybrid / etc).
-         Mix mode is handled by the wrapped region above so we exclude it
-         here. -->
+    <!-- Full-height primary sider — vertical mode only. vertical-mix is the
+         mouse-region above; the hybrid (top-hybrid-header-first) children
+         sider is rendered INSIDE the main column below the header (soybean
+         horizontal-mix parity) so the header spans the full width instead of
+         being shoved right by a full-height sider. -->
     <aside
-      v-else-if="showMainSider"
+      v-else-if="showMainSider && effectiveMode !== 'top-hybrid-header-first'"
       class="t-admin-shell__sider"
       :style="{ width: `${primarySiderWidth}px` }"
     >
@@ -571,6 +573,7 @@ function onMixMouseleave(): void {
         :width="primarySiderWidth"
         :collapsed-width="sider.collapsedWidth ?? themeStore.siderCollapsedWidth"
         :brand="sider.brand ?? title"
+        :brand-subtitle="sider.brandSubtitle"
         :brand-icon="sider.brandIcon"
         :inverted="siderInverted"
         :items="siderItems"
@@ -630,9 +633,16 @@ function onMixMouseleave(): void {
             @menu-select="onTopMenuSelect"
           />
         </template>
+        <!-- Breadcrumb is suppressed in horizontal / hybrid modes: the top
+             menu already lives in the header and provides the navigation
+             context, so a breadcrumb in the left region only steals
+             horizontal space from (and shifts) the menu. Keep it for the
+             vertical / vertical-mix modes where the header has no top menu. -->
         <template
           v-if="
-            header.showBreadcrumb !== false && themeStore.breadcrumbVisible
+            header.showBreadcrumb !== false &&
+            themeStore.breadcrumbVisible &&
+            !topMenuVariant
           "
           #breadcrumb
         >
@@ -659,29 +669,66 @@ function onMixMouseleave(): void {
         </template>
       </TAdminHeader>
 
-      <TAdminTabs
-        v-if="tabsVisible"
-        :fixed="themeStore.fixedTab"
-        :close-by-middle-click="tabs.closeByMiddleClick ?? true"
-        :draggable="tabs.draggable ?? true"
-        :show-reload="tabs.showReload ?? true"
-        @tab-click="(tab) => emit('tabClick', tab)"
-      />
-
-      <TAdminContent :transition-name="resolvedTransition">
-        <slot />
-      </TAdminContent>
-
-      <TAdminFooter
-        v-if="footerVisible"
-        :fixed="themeStore.fixedFooter"
-        :copyright="footer.copyright"
-        :links="footer.links"
+      <!-- Main body. In hybrid (top-hybrid-header-first) mode this is a ROW
+           that hosts the children sider BELOW the now-full-width header
+           (soybean horizontal-mix parity). In every other mode it's a plain
+           column that simply stacks tabs + content + footer. -->
+      <div
+        class="t-admin-shell__main-body"
+        :class="{
+          't-admin-shell__main-body--hybrid':
+            effectiveMode === 'top-hybrid-header-first' && showMainSider,
+        }"
       >
-        <template v-if="$slots['footer']" #default>
-          <slot name="footer" />
-        </template>
-      </TAdminFooter>
+        <!-- Hybrid children sider — sits under the full-width header, to the
+             left of the content. Header logo is rendered in the header so we
+             always hide the sider's own header. -->
+        <aside
+          v-if="effectiveMode === 'top-hybrid-header-first' && showMainSider"
+          class="t-admin-shell__hybrid-sider"
+          :style="{ width: `${primarySiderWidth}px` }"
+        >
+          <TAdminSidebar
+            mode="vertical"
+            :width="primarySiderWidth"
+            :collapsed-width="sider.collapsedWidth ?? themeStore.siderCollapsedWidth"
+            :inverted="siderInverted"
+            :items="siderItems"
+            :hide-header="true"
+            @menu-select="onMenuSelect"
+          >
+            <template v-if="$slots['sider-footer']" #footer>
+              <slot name="sider-footer" />
+            </template>
+          </TAdminSidebar>
+        </aside>
+
+        <div class="t-admin-shell__main-stack">
+          <TAdminTabs
+            v-if="tabsVisible"
+            :fixed="themeStore.fixedTab"
+            :close-by-middle-click="tabs.closeByMiddleClick ?? true"
+            :draggable="tabs.draggable ?? true"
+            :show-reload="tabs.showReload ?? true"
+            @tab-click="(tab) => emit('tabClick', tab)"
+          />
+
+          <TAdminContent :transition-name="resolvedTransition">
+            <slot />
+          </TAdminContent>
+
+          <TAdminFooter
+            v-if="footerVisible"
+            :fixed="themeStore.fixedFooter"
+            :copyright="footer.copyright"
+            :links="footer.links"
+          >
+            <template v-if="$slots['footer']" #default>
+              <slot name="footer" />
+            </template>
+          </TAdminFooter>
+        </div>
+      </div>
     </div>
 
     <!-- Watermark overlay (renders nothing when disabled) -->
@@ -711,6 +758,9 @@ function onMixMouseleave(): void {
           mode="vertical"
           :width="sider.width ?? 260"
           :collapsed-width="sider.collapsedWidth ?? themeStore.siderCollapsedWidth"
+          :brand="sider.brand ?? title"
+          :brand-subtitle="sider.brandSubtitle"
+          :brand-icon="sider.brandIcon"
           :inverted="siderInverted"
           @menu-select="onMenuSelect"
         />
@@ -833,6 +883,45 @@ function onMixMouseleave(): void {
   overflow: hidden;
 }
 
+/* Main body wrapper. The header always sits above this in
+   `.t-admin-shell__main`; this wrapper holds the rest (tabs/content/footer).
+   Column by default; hybrid flips it to a row so the children sider sits
+   beside the content, under the full-width header (soybean horizontal-mix). */
+.t-admin-shell__main-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.t-admin-shell__main-body--hybrid {
+  flex-direction: row;
+}
+
+/* Hybrid children sider — a vertical menu column under the full-width
+   header. Same chrome (bg + right border) as the primary sider; width is
+   set inline so it animates on collapse. */
+.t-admin-shell__hybrid-sider {
+  flex-shrink: 0;
+  min-width: 0;
+  height: 100%;
+  background: var(--tnzi-admin-sider-bg, var(--tnzi-container-bg, #ffffff));
+  border-right: 1px solid var(--tnzi-border, #e5e7eb);
+  transition: width var(--tnzi-admin-motion-duration-base, 0.25s) var(--tnzi-admin-motion-ease-in-out, ease);
+}
+
+/* Tabs + content + footer stack — to the right of the hybrid sider, or
+   full-width in every other mode. */
+.t-admin-shell__main-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Phase H1 A2: scrollMode='wrapper' lifts the scroll to the outer
    shell so the whole page (header + tabs + content + footer) scrolls
    together. When fixedHeader/fixedTab/fixedFooter is on, they
@@ -844,7 +933,9 @@ function onMixMouseleave(): void {
   min-height: 100vh;
   overflow-y: auto;
 }
-.t-admin-shell[data-scroll-mode='wrapper'] .t-admin-shell__main {
+.t-admin-shell[data-scroll-mode='wrapper'] .t-admin-shell__main,
+.t-admin-shell[data-scroll-mode='wrapper'] .t-admin-shell__main-body,
+.t-admin-shell[data-scroll-mode='wrapper'] .t-admin-shell__main-stack {
   overflow: visible;
 }
 .t-admin-shell[data-scroll-mode='wrapper'] :deep(.t-admin-content) {
@@ -855,6 +946,7 @@ function onMixMouseleave(): void {
 .t-admin-shell--full-content :deep(.t-admin-tabs),
 .t-admin-shell--full-content :deep(.t-admin-footer),
 .t-admin-shell--full-content .t-admin-shell__sider,
+.t-admin-shell--full-content .t-admin-shell__hybrid-sider,
 .t-admin-shell--full-content .t-admin-shell__sub-sider-wrapper,
 .t-admin-shell--full-content .t-admin-shell__sub-sider,
 .t-admin-shell--full-content .t-admin-shell__mix-region {

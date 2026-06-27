@@ -62,6 +62,7 @@ const getRules = vi.fn(async () => snapshot)
 const getPersistedRules = vi.fn(async () => persisted)
 const evaluate = vi.fn(async () => evalResult)
 const createPersistedRule = vi.fn(async (d: unknown) => ({ id: 'r-new', ...(d as object) }))
+const updatePersistedRule = vi.fn(async (id: string, d: unknown) => ({ id, ...(d as object) }))
 const deletePersistedRule = vi.fn(async () => undefined)
 
 vi.mock('../../../src/services/bridges/permission-bridge', () => ({
@@ -70,6 +71,7 @@ vi.mock('../../../src/services/bridges/permission-bridge', () => ({
     getPersistedRules,
     evaluate,
     createPersistedRule,
+    updatePersistedRule,
     deletePersistedRule,
   }),
   // Page imports these as types only, but re-export numeric enums for safety.
@@ -81,7 +83,7 @@ import ToolPermissions from '../../../src/pages/ai/permissions/ToolPermissions.v
 
 const stubs = {
   DataTable: { name: 'DataTable', props: ['data'], template: '<div class="n-data-table-stub" />' },
-  // TStatCard animates numbers via NNumberAnimation (tween from 0 over ~2s);
+  // TKpiCard animates numbers via NNumberAnimation (tween from 0 over ~2s);
   // stub it to render the target value synchronously so text assertions hold.
   NumberAnimation: { name: 'NumberAnimation', props: ['from', 'to', 'precision'], template: '<span>{{ to }}</span>' },
   Pagination: { name: 'Pagination', template: '<div class="n-pagination-stub" />' },
@@ -119,8 +121,18 @@ const stubs = {
 }
 
 type Vm = {
-  persistedRules: typeof persisted
-  sortedPersistedRules: typeof persisted
+  // Persisted rules now live in the TCrudPage state (crud.items); create/delete
+  // go through crud.submit / crud.handleDelete instead of bespoke methods.
+  crud: {
+    items: { value: typeof persisted }
+    total: { value: number }
+    openCreate: () => void
+    openEdit: (row: Record<string, unknown>) => void
+    submit: () => Promise<void>
+    handleDelete: (ids: string[]) => Promise<void>
+    formModal: { formData: { value: Record<string, unknown> | null } }
+  }
+  persistedCount: number
   sessionRules: unknown[]
   rulesSnapshot: typeof snapshot | null
   evalResult: typeof evalResult | null
@@ -139,6 +151,7 @@ describe('ToolPermissions page', () => {
     getPersistedRules.mockClear()
     evaluate.mockClear()
     createPersistedRule.mockClear()
+    updatePersistedRule.mockClear()
     deletePersistedRule.mockClear()
   })
 
@@ -161,7 +174,7 @@ describe('ToolPermissions page', () => {
     const wrapper = mount(ToolPermissions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as Vm
-    expect(vm.persistedRules).toHaveLength(3)
+    expect(vm.persistedCount).toBe(3)
     expect(vm.sessionRules).toHaveLength(1)
     expect(vm.rulesSnapshot?.hasRules).toBe(true)
     // KPI values are surfaced through NStatistic stubs.
@@ -172,11 +185,12 @@ describe('ToolPermissions page', () => {
     const wrapper = mount(ToolPermissions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as Vm
-    const order = vm.sortedPersistedRules.map((r) => r.id)
+    // The CRUD fetch sorts to Priority desc → Scope weight desc before storing.
+    const order = vm.crud.items.value.map((r) => r.id)
     // system (priority 200) → user (50) → session (10).
     expect(order).toEqual(['r-system', 'r-user', 'r-session'])
-    // Source array is NOT mutated by the visualization sort.
-    expect(vm.persistedRules.map((r) => r.id)).toEqual(['r-session', 'r-system', 'r-user'])
+    // Source array (the bridge mock) is NOT mutated by the sort (fetch spreads).
+    expect(persisted.map((r) => r.id)).toEqual(['r-session', 'r-system', 'r-user'])
   })
 
   it('scope/behavior weight helpers mirror the conflict-resolution model', async () => {
@@ -236,23 +250,53 @@ describe('ToolPermissions page', () => {
   it('creating a rule calls createPersistedRule then refreshes', async () => {
     const wrapper = mount(ToolPermissions, { global: { stubs } })
     await flushPromises()
-    const vm = wrapper.vm as unknown as {
-      newRule: { toolPattern: string }
-      submitCreate: () => Promise<void>
-    }
-    vm.newRule.toolPattern = 'delete_file'
-    await vm.submitCreate()
+    const vm = wrapper.vm as unknown as Vm
+    // Create now flows through the TCrudPage state: open → fill model → submit.
+    vm.crud.openCreate()
+    await flushPromises()
+    ;(vm.crud.formModal.formData.value as Record<string, unknown>).toolPattern = 'delete_file'
+    await vm.crud.submit()
     await flushPromises()
     expect(createPersistedRule).toHaveBeenCalledTimes(1)
-    // refresh re-pulls both snapshot + persisted rules (1 on mount + 1 here).
+    // refresh re-pulls the persisted rules (1 on mount + 1 after create).
+    expect(getPersistedRules).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects a blank tool pattern before calling createPersistedRule', async () => {
+    const wrapper = mount(ToolPermissions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as Vm
+    vm.crud.openCreate()
+    await flushPromises()
+    // Leave toolPattern blank — the page guards (schema-form `required` is
+    // visual only) so a blank-pattern rule never reaches the backend.
+    await expect(vm.crud.submit()).rejects.toThrow()
+    await flushPromises()
+    expect(createPersistedRule).not.toHaveBeenCalled()
+  })
+
+  it('editing a rule calls updatePersistedRule then refreshes', async () => {
+    const wrapper = mount(ToolPermissions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as Vm
+    // Edit flows through the declarative row action → crud.openEdit → submit.
+    vm.crud.openEdit({ ...persisted[1] }) // r-system
+    await flushPromises()
+    ;(vm.crud.formModal.formData.value as Record<string, unknown>).priority = 250
+    await vm.crud.submit()
+    await flushPromises()
+    expect(updatePersistedRule).toHaveBeenCalledTimes(1)
+    expect(updatePersistedRule.mock.calls[0][0]).toBe('r-system')
+    // refresh re-pulls the persisted rules (1 on mount + 1 after update).
     expect(getPersistedRules).toHaveBeenCalledTimes(2)
   })
 
   it('deleting a rule calls deletePersistedRule then refreshes', async () => {
     const wrapper = mount(ToolPermissions, { global: { stubs } })
     await flushPromises()
-    const vm = wrapper.vm as unknown as { deleteRule: (id: string) => Promise<void> }
-    await vm.deleteRule('r-system')
+    const vm = wrapper.vm as unknown as Vm
+    // Delete goes through the declarative row action → crud.handleDelete.
+    await vm.crud.handleDelete(['r-system'])
     await flushPromises()
     expect(deletePersistedRule).toHaveBeenCalledWith('r-system')
     expect(getPersistedRules).toHaveBeenCalledTimes(2)

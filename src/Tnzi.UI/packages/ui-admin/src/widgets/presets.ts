@@ -1,13 +1,13 @@
 /**
  * Default widget presets for the bundled Workbench page.
  *
- * The default `Workbench.vue` calls `defaultWorkbenchWidgets()` when no
+ * The default `Dashboard.vue` calls `defaultWorkbenchWidgets()` when no
  * consumer config is provided. Consumers can also import these helpers
  * to build on top of the defaults:
  *
  * ```ts
  * defineAdminApp({
- *   workbench: {
+ *   dashboard: {
  *     widgets: [
  *       ...defaultWorkbenchWidgets(),
  *       { id: 'my-app', component: MyAppWidget, span: 24 },
@@ -47,14 +47,14 @@ export function defaultKpiCards(): KpiCard[] {
   return [
     {
       key: 'visits',
-      title: 'admin.modules.workbench.kpi.visits',
+      title: 'admin.modules.dashboard.kpi.visits',
       value: 5083,
       icon: 'mdi:chart-areaspline',
       gradient: { start: '#ec4786', end: '#b955a4' },
     },
     {
       key: 'sales',
-      title: 'admin.modules.workbench.kpi.sales',
+      title: 'admin.modules.dashboard.kpi.sales',
       value: 537,
       unit: '$',
       icon: 'mdi:cash-multiple',
@@ -62,14 +62,14 @@ export function defaultKpiCards(): KpiCard[] {
     },
     {
       key: 'downloads',
-      title: 'admin.modules.workbench.kpi.downloads',
+      title: 'admin.modules.dashboard.kpi.downloads',
       value: 507471,
       icon: 'mdi:download',
       gradient: { start: '#56cdf3', end: '#719de3' },
     },
     {
       key: 'transactions',
-      title: 'admin.modules.workbench.kpi.transactions',
+      title: 'admin.modules.dashboard.kpi.transactions',
       value: 4980,
       icon: 'mdi:cart-arrow-down',
       gradient: { start: '#fcbc25', end: '#f68057' },
@@ -116,29 +116,29 @@ export function defaultTimelineItems(): TimelineItem[] {
   return [
     {
       key: '1',
-      title: 'admin.modules.workbench.activity.item1Title',
-      description: 'admin.modules.workbench.activity.item1Desc',
-      time: 'admin.modules.workbench.activity.item1Time',
+      title: 'admin.modules.dashboard.activity.item1Title',
+      description: 'admin.modules.dashboard.activity.item1Desc',
+      time: 'admin.modules.dashboard.activity.item1Time',
       tone: 'success',
     },
     {
       key: '2',
-      title: 'admin.modules.workbench.activity.item2Title',
-      description: 'admin.modules.workbench.activity.item2Desc',
-      time: 'admin.modules.workbench.activity.item2Time',
+      title: 'admin.modules.dashboard.activity.item2Title',
+      description: 'admin.modules.dashboard.activity.item2Desc',
+      time: 'admin.modules.dashboard.activity.item2Time',
       tone: 'info',
     },
     {
       key: '3',
-      title: 'admin.modules.workbench.activity.item3Title',
-      description: 'admin.modules.workbench.activity.item3Desc',
-      time: 'admin.modules.workbench.activity.item3Time',
+      title: 'admin.modules.dashboard.activity.item3Title',
+      description: 'admin.modules.dashboard.activity.item3Desc',
+      time: 'admin.modules.dashboard.activity.item3Time',
     },
     {
       key: '4',
-      title: 'admin.modules.workbench.activity.item4Title',
-      description: 'admin.modules.workbench.activity.item4Desc',
-      time: 'admin.modules.workbench.activity.item4Time',
+      title: 'admin.modules.dashboard.activity.item4Title',
+      description: 'admin.modules.dashboard.activity.item4Desc',
+      time: 'admin.modules.dashboard.activity.item4Time',
     },
   ]
 }
@@ -210,7 +210,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
     {
       id: 'activity',
       component: TWidgetActivityTimeline,
-      title: 'admin.modules.workbench.activity.title',
+      title: 'admin.modules.dashboard.activity.title',
       icon: 'mdi:timeline-text-outline',
       span: { xs: 24, sm: 24, md: 24, lg: 16 },
       // Auto-fetches recent audit log entries — `refreshable: true` so
@@ -242,12 +242,12 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
     {
       id: 'tips',
       component: TWidgetTips,
-      title: 'admin.modules.workbench.tips.title',
+      title: 'admin.modules.dashboard.tips.title',
       icon: 'mdi:lightbulb-on-outline',
       span: { xs: 24, sm: 24, md: 24, lg: 6 },
       refreshable: false,
       props: {
-        body: 'admin.modules.workbench.tips.body',
+        body: 'admin.modules.dashboard.tips.body',
       },
     },
   ]

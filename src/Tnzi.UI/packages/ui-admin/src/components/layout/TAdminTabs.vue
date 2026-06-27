@@ -489,7 +489,19 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
 }
 .t-admin-tabs--fixed {
   position: sticky;
-  top: var(--tnzi-admin-header-height, 56px);
+  /* The sticky offset depends on the shell's scrollMode, because that
+     changes which box is the tab bar's scroll context:
+     - 'content' (default): the bar lives inside `.t-admin-shell__main-stack`
+       (overflow:hidden), whose box already starts BELOW the header. Adding
+       a header-height offset here would push the bar a second header-height
+       down, leaving a blank strip under the header and clipping the content
+       top. The offset must be 0.
+     - 'wrapper': main/body/stack are overflow:visible, so the scroll context
+       is the outer shell (≈ viewport, starting at y=0) and the bar must clear
+       the sticky header, so it offsets by header-height.
+     TAdminShell sets `--tnzi-admin-tab-sticky-top` per scrollMode; the 0px
+     default also covers standalone use outside the shell. */
+  top: var(--tnzi-admin-tab-sticky-top, 0px);
 }
 .t-admin-tabs__list {
   flex: 1 1 auto;

@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, watch } from 'vue'
+import { computed, h, reactive, watch, type VNodeChild } from 'vue'
 import {
   NButton,
   NDatePicker,
@@ -44,6 +44,19 @@ import type { FormSchemaItem } from '../../pages/_shared/form-schema'
 import type { SearchableState } from './TCrudSearch.vue'
 
 /**
+ * A search field, optionally carrying a custom `render` escape hatch. When
+ * `render` is set it takes precedence over the built-in `type` switch, so a
+ * page can drop a daterange / cascader / any bespoke control into advanced
+ * search without the renderer needing to know the type. `render` receives the
+ * live search model and should write back via the model (e.g.
+ * `model.foo = v`). Backward compatible: every existing `FormSchemaItem[]`
+ * still satisfies this (render is optional).
+ */
+export interface SearchFieldItem extends FormSchemaItem {
+  render?: (model: Record<string, unknown>) => VNodeChild
+}
+
+/**
  * Advanced (multi-field) search grid. Extracted from {@link TCrudSearch} so
  * the same grid can be reused in two layouts:
  *  - inside {@link TCrudSearch} (collapsed below the simple keyword row), and
@@ -53,7 +66,7 @@ import type { SearchableState } from './TCrudSearch.vue'
  */
 interface Props {
   state: SearchableState
-  searchFields?: FormSchemaItem[]
+  searchFields?: SearchFieldItem[]
   translate?: (key: string) => string
   /** Hide the inline Search button (when an external footer drives apply/reset). */
   hideSubmit?: boolean
@@ -111,7 +124,10 @@ watch(
   { immediate: true, deep: false },
 )
 
-function renderSearchField(item: FormSchemaItem): unknown {
+function renderSearchField(item: SearchFieldItem): unknown {
+  // Custom render escape hatch wins over the builtin type switch — lets a page
+  // drop a daterange / cascader / bespoke control into advanced search.
+  if (item.render) return item.render(searchModel)
   const value = searchModel[item.key]
   const onUpdate = (v: unknown) => {
     searchModel[item.key] = v

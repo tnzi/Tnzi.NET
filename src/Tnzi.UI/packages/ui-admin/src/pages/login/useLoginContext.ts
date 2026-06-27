@@ -159,6 +159,57 @@ export interface LoginSceneState {
 }
 
 /**
+ * Feature flags driving which login methods / entries the page shows and what
+ * the password account field accepts. Sourced from the backend
+ * `GET /auth/config` (mapped in the login route) and optionally overridden by
+ * the consumer via `defineAdminApp({ login: { features } })`. The
+ * everything-enabled fallback keeps isolated module mounts and config-fetch
+ * failures behaving exactly as before this feature landed.
+ */
+export interface LoginFeatures {
+  /** Show the password-login form (almost always true). */
+  passwordLogin: boolean
+  /** Show the code-login entry + module. */
+  codeLogin: boolean
+  /** Show the register entry + module. */
+  register: boolean
+  /** Show the forgot-password entry + module. */
+  passwordRecovery: boolean
+  /** Identifier types the password-login account field accepts. */
+  identifiers: { userName: boolean; email: boolean; phone: boolean }
+  /** Channels available for code-based flows (code-login / register / recovery). */
+  codeChannels: { sms: boolean; email: boolean }
+}
+
+/**
+ * Everything-enabled defaults — the fallback when no backend config is loaded
+ * (isolated module mounts, `/auth/config` fetch failures, or a backend too old
+ * to ship the endpoint). Treated as read-only; callers that merge must clone.
+ */
+export const DEFAULT_LOGIN_FEATURES: LoginFeatures = Object.freeze({
+  passwordLogin: true,
+  codeLogin: true,
+  register: true,
+  passwordRecovery: true,
+  identifiers: Object.freeze({ userName: true, email: true, phone: true }),
+  codeChannels: Object.freeze({ sms: true, email: true }),
+}) as LoginFeatures
+
+/**
+ * Consumer-supplied feature overrides (merged on top of the backend config).
+ * Nested groups are shallow-merged, so a consumer can flip a single channel
+ * (e.g. `{ codeChannels: { sms: false } }`) without restating the rest.
+ */
+export interface PartialLoginFeatures {
+  passwordLogin?: boolean
+  codeLogin?: boolean
+  register?: boolean
+  passwordRecovery?: boolean
+  identifiers?: Partial<LoginFeatures['identifiers']>
+  codeChannels?: Partial<LoginFeatures['codeChannels']>
+}
+
+/**
  * A third-party sign-in provider rendered by `PwdLogin` as a round icon
  * button under an "Or continue with" divider. Purely consumer-driven —
  * the shell ships no OAuth flow; `onClick` typically starts a redirect.
@@ -219,6 +270,11 @@ export interface LoginContext {
    */
   thirdParty: LoginThirdPartyProvider[]
   /**
+   * Feature flags driving module/entry visibility + account field rules.
+   * Defaults to {@link DEFAULT_LOGIN_FEATURES} (everything on).
+   */
+  features: LoginFeatures
+  /**
    * Live form-interaction signals (see {@link LoginSceneState}). Reactive —
    * modules assign fields directly; decorative shell elements react.
    */
@@ -259,6 +315,7 @@ export function useLoginContext(): LoginContext {
     demoAccounts: [],
     ui: { labeled: false, pill: true },
     thirdParty: [],
+    features: DEFAULT_LOGIN_FEATURES,
     scene: reactive({ typing: false, passwordVisible: false, passwordLength: 0 }),
     pendingTwoFactor,
     helpers: {

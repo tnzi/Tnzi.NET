@@ -54,6 +54,85 @@ public class AuthService : ApplicationService, IAuthService
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
+    /// <summary>
+    /// 获取公开认证配置：把现有 IdentityOptions 中的登录方式 / 注册 / 找回 / 第三方开关
+    /// 映射为登录页可消费的布尔标志。只读，不含任何密钥。
+    /// </summary>
+    public Result<AuthConfigDto> GetAuthConfig()
+    {
+        var opt = IdentityOptions;
+        var signIn = opt.SignIn;
+        var registration = opt.Registration;
+        var recovery = opt.Recovery;
+        var otp = opt.Otp;
+        var captcha = opt.Captcha;
+
+        var dto = new AuthConfigDto
+        {
+            AllowUserNameLogin = signIn.AllowUserNameLogin,
+            AllowEmailLogin = signIn.AllowEmailLogin,
+            AllowSmsLogin = signIn.AllowSmsLogin,
+            UseEmailAsUserName = signIn.UseEmailAsUserName,
+
+            EnableCodeLogin = otp.EnableSms || otp.EnableEmail,
+            CodeLoginViaSms = otp.EnableSms,
+            CodeLoginViaEmail = otp.EnableEmail,
+
+            EnableRegistration = registration.EnableQuickRegisterEmail || registration.EnableQuickRegisterSms,
+            RegisterViaEmail = registration.EnableQuickRegisterEmail,
+            RegisterViaSms = registration.EnableQuickRegisterSms,
+
+            EnablePasswordRecovery = recovery.EnablePasswordResetByEmail || recovery.EnablePasswordResetBySms,
+            RecoveryViaEmail = recovery.EnablePasswordResetByEmail,
+            RecoveryViaSms = recovery.EnablePasswordResetBySms,
+
+            EnableCaptchaOnLogin = captcha.EnableCaptchaOnLogin,
+            EnableCaptchaOnRegister = captcha.EnableCaptchaOnRegister,
+
+            OAuthProviders = BuildEnabledOAuthProviders(opt.OAuth),
+        };
+
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// 已知第三方登录提供商注册表（key + 展示名 + 从 OAuthOptions 取对应配置的选择器）。
+    /// </summary>
+    private static List<AuthProviderRegistration> KnownOAuthProviders { get; } =
+    [
+        new("google", "Google", o => o.Google),
+        new("microsoft", "Microsoft", o => o.Microsoft),
+        new("facebook", "Facebook", o => o.Facebook),
+        new("twitter", "Twitter", o => o.Twitter),
+        new("github", "GitHub", o => o.GitHub),
+    ];
+
+    /// <summary>
+    /// 把 OAuth 配置中已填写 ClientId/ClientSecret（即 Enabled）的提供商映射为公开信息列表。
+    /// </summary>
+    private static List<OAuthProviderInfoDto> BuildEnabledOAuthProviders(OAuthOptions oauth)
+    {
+        var result = new List<OAuthProviderInfoDto>();
+        foreach (var registration in KnownOAuthProviders)
+        {
+            if (registration.Selector(oauth).Enabled)
+            {
+                result.Add(new OAuthProviderInfoDto
+                {
+                    Provider = registration.Key,
+                    DisplayName = registration.DisplayName,
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private sealed record AuthProviderRegistration(
+        string Key,
+        string DisplayName,
+        Func<OAuthOptions, OAuthProviderOptions> Selector);
+
     public async Task<Result<string>> LoginAsync(LoginDto input)
     {
         // 执行公共登录验证逻辑

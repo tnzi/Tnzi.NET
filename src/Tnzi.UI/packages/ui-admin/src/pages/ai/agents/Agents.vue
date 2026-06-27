@@ -25,7 +25,7 @@
     <!-- Health KPI strip — between the page header and the card grid. -->
     <template #kpis>
       <TKpiRow class="ai-agent-page__kpis">
-        <TStatCard
+        <TKpiCard
           v-for="kpi in kpiCards"
           :key="kpi.key"
           class="ai-agent-page__kpi"
@@ -133,7 +133,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
-import TStatCard, { type TStatCardTone } from '../../../components/data/TStatCard.vue'
+import TKpiCard, { type TKpiCardTone } from '../../../components/data/TKpiCard.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -211,7 +211,7 @@ async function loadHealth(): Promise<void> {
 }
 loadHealth().catch(() => undefined)
 
-const kpiCards = computed<Array<{ key: string; labelKey: string; icon: string; tone: TStatCardTone; value: number }>>(() => {
+const kpiCards = computed<Array<{ key: string; labelKey: string; icon: string; tone: TKpiCardTone; value: number }>>(() => {
   const h = health.value
   return [
     { key: 'total', labelKey: 'kpi.total', icon: 'mdi:robot-outline', tone: 'default', value: h?.totalAgents ?? 0 },

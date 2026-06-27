@@ -1,13 +1,13 @@
 <template>
   <div class="t-conv-list">
-    <TPresencePicker
-      v-if="myStatus != null"
-      :status="myStatus"
-      :name="myName"
-      :avatar-file-id="myAvatarFileId"
-      @change="(s) => emit('set-status', s)"
-    />
     <div class="t-conv-list__top">
+      <TPresencePicker
+        v-if="myStatus != null"
+        :status="myStatus"
+        :name="myName"
+        :avatar-file-id="myAvatarFileId"
+        @change="(s) => emit('set-status', s)"
+      />
       <div class="t-conv-list__search" :class="{ 't-conv-list__search--focused': focused }">
         <Icon icon="mdi:magnify" :width="16" class="t-conv-list__search-icon" />
         <input

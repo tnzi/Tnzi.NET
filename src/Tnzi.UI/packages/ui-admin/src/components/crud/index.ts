@@ -1,6 +1,4 @@
-export { default as TCrudToolbar } from './TCrudToolbar.vue'
 export { default as TCrudColumnSetting } from './TCrudColumnSetting.vue'
-export { default as TBatchActions } from './TBatchActions.vue'
 export { default as TFormModal } from './TFormModal.vue'
 export { default as TCrudPage } from './TCrudPage.vue'
 export { default as TRowActions } from './TRowActions.vue'

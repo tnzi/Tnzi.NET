@@ -1,10 +1,10 @@
 /**
  * @tnzi/core/services/chat
  *
- * Chat Service - Internal messaging, notifications, and inbox.
+ * Chat Service — system-level instant messaging (IM): conversations, messages,
+ * presence, broadcast, and admin maintenance.
  */
 
-export * from './metadata';
 export * from './types';
 export * from './api';
 export * from './signalr-client';

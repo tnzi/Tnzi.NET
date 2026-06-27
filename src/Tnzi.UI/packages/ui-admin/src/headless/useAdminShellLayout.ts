@@ -4,7 +4,7 @@
  * Sunk out of `TAdminShell.vue` in 0.2.72+ (B5). Bundles the 16 read-only
  * computed properties that decide which surface (top menu / primary
  * sider / sub-sider / header / footer / tabs) renders in each of the
- * 6 layout modes, plus their widths, transition, and mobile drawer
+ * 4 layout modes, plus their widths, transition, and mobile drawer
  * shape. Pure derivations on top of the admin app + theme stores +
  * `useBreakpoint()` — no DOM, no lifecycle hooks, no event handlers.
  *
@@ -32,8 +32,6 @@ import type { AdminMenuContext } from './useAdminMenuContext'
 /** Modes that surface the menu in the top header bar. */
 export const HORIZONTAL_HOSTED_MODES: AdminLayoutMode[] = [
   'horizontal',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
   'top-hybrid-header-first',
 ]
 
@@ -41,8 +39,6 @@ export const HORIZONTAL_HOSTED_MODES: AdminLayoutMode[] = [
 export const SIDER_HOSTED_MODES: AdminLayoutMode[] = [
   'vertical',
   'vertical-mix',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
   'top-hybrid-header-first',
 ]
 
@@ -196,16 +192,11 @@ export function useAdminShellLayout(
 
   // What the sider should render in each layout mode:
   //   vertical / vertical-mix → full menu tree
-  //   vertical-hybrid-header-first → children of the active 1st level
-  //   top-hybrid-sidebar-first → 1st level items only
   //   top-hybrid-header-first → children of the active 1st level
   const siderItems = computed<AdminMenuItem[] | undefined>(() => {
     switch (effectiveMode.value) {
-      case 'vertical-hybrid-header-first':
       case 'top-hybrid-header-first':
         return menuCtx.secondLevelMenus.value
-      case 'top-hybrid-sidebar-first':
-        return menuCtx.firstLevelMenus.value
       case 'vertical':
       case 'vertical-mix':
       default:
@@ -214,20 +205,14 @@ export function useAdminShellLayout(
   })
 
   // What the top menu should render in each layout mode:
-  //   horizontal → full tree (default)
-  //   vertical-hybrid-header-first / top-hybrid-header-first → 1st level only
-  //   top-hybrid-sidebar-first → children of the active 1st level
-  const topItems = computed<AdminMenuItem[] | undefined>(() => {
-    if (effectiveMode.value === 'top-hybrid-sidebar-first') {
-      return menuCtx.secondLevelMenus.value
-    }
-    return undefined
-  })
+  //   horizontal → full tree (default, via NMenu dropdowns)
+  //   top-hybrid-header-first → 1st level only (TAdminTopMenu slices the full
+  //                             tree itself when topMenuVariant is 'first-level')
+  // Both leave the items undefined and let TAdminTopMenu default to
+  // `routeStore.menus`; the variant decides how many levels render.
+  const topItems = computed<AdminMenuItem[] | undefined>(() => undefined)
 
   const topActiveKey = computed<string | undefined>(() => {
-    if (effectiveMode.value === 'top-hybrid-sidebar-first') {
-      return menuCtx.activeSecondLevelMenuKey.value || undefined
-    }
     if (HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) {
       return menuCtx.activeFirstLevelMenuKey.value || undefined
     }
@@ -236,13 +221,12 @@ export function useAdminShellLayout(
 
   // Render brand logo in the header for layout modes where the sider
   // doesn't have its own header logo. horizontal mode has no sider;
-  // top-hybrid-* keep a sider but it's compact / context-dependent, so
-  // the brand belongs in the header. vertical / vertical-mix /
-  // vertical-hybrid-header-first keep it in the sider.
+  // top-hybrid-header-first keeps a sider but it's compact /
+  // context-dependent (and may hide entirely), so the brand belongs in the
+  // header. vertical / vertical-mix keep it in the sider.
   const shouldRenderHeaderLogo = computed<boolean>(
     () =>
       effectiveMode.value === 'horizontal' ||
-      effectiveMode.value === 'top-hybrid-sidebar-first' ||
       effectiveMode.value === 'top-hybrid-header-first',
   )
 

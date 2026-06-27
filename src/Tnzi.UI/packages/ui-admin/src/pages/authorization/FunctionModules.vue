@@ -23,45 +23,13 @@
       >
         {{ t('systemManagedHint') }}
       </NAlert>
-      <NForm :disabled="mode === 'view'" label-placement="left" label-width="140px">
-        <NFormItem :label="t('form.code')" required>
-          <NInput
-            :value="(formData as Row)?.code ?? ''"
-            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
-            @update:value="(v: string) => set('code', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.name')" required>
-          <NInput
-            :value="(formData as Row)?.name ?? ''"
-            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
-            @update:value="(v: string) => set('name', v)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.parentId')">
-          <NSelect
-            :value="(formData as Row)?.parentId ?? null"
-            :options="parentOptions"
-            :placeholder="t('form.parentIdPlaceholder')"
-            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
-            clearable
-            filterable
-            @update:value="(v: string | null) => set('parentId', v ?? undefined)"
-          />
-        </NFormItem>
-        <NFormItem :label="t('form.order')">
-          <NInputNumber :value="(formData as Row)?.order ?? 0" :min="0" @update:value="(v: number | null) => set('order', v ?? 0)" />
-        </NFormItem>
-        <NFormItem :label="t('form.description')">
-          <NInput
-            type="textarea"
-            :rows="2"
-            :value="(formData as Row)?.description ?? ''"
-            :disabled="mode === 'view' || (formData as Row)?.isSystemManaged"
-            @update:value="(v: string) => set('description', v)"
-          />
-        </NFormItem>
-      </NForm>
+      <TFormSchemaRenderer
+        :schema="functionModuleFormSchema"
+        :model="(formData ?? {}) as Record<string, unknown>"
+        :readonly="mode === 'view'"
+        :translate="t"
+        :field-renderers="fieldRenderers"
+      />
     </template>
   </TCrudPage>
 
@@ -138,10 +106,7 @@ import { computed, h, reactive, ref, onMounted } from 'vue'
 import {
   NAlert,
   NButton,
-  NForm,
-  NFormItem,
   NInput,
-  NInputNumber,
   NModal,
   NSelect,
   NSpin,
@@ -149,6 +114,7 @@ import {
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TSvgIcon } from '@tnzi/ui'
+import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import {
@@ -160,7 +126,7 @@ import { interpolate, translatePageKey } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FunctionModuleDto } from '@tnzi/core/services/authorization'
-import type { FunctionModuleRow } from './function-module-config'
+import { functionModuleFormSchema, type FunctionModuleRow } from './function-module-config'
 
 type Row = FunctionModuleRow
 
@@ -197,8 +163,7 @@ const columns: ColumnDef<Row>[] = [
   {
     key: 'name',
     title: 'columns.name',
-    width: 240,
-    fixed: 'left',
+    minWidth: 160,
     // System-managed rows get a small badge next to the name so admins
     // see at a glance that these are code-owned (and the Edit form will
     // be partly read-only). Cheap visual cue beats a separate column.
@@ -218,24 +183,23 @@ const columns: ColumnDef<Row>[] = [
           : null,
       ]),
   },
-  { key: 'code', title: 'columns.code', width: 200 },
+  { key: 'code', title: 'columns.code', minWidth: 150 },
   {
     key: 'parentName',
     title: 'columns.parentName',
-    width: 180,
+    minWidth: 140,
     render: (row) => {
       if (!row.parentId) return h('span', { class: 'text-muted' }, '—')
       const p = moduleById.value.get(row.parentId)
       return p?.name ?? row.parentId
     },
   },
-  { key: 'description', title: 'columns.description', ellipsis: { tooltip: true } },
+  { key: 'description', title: 'columns.description', minWidth: 160, ellipsis: { tooltip: true } },
   { key: 'order', title: 'columns.order', width: 80 },
   {
     key: 'isEnabled',
     title: 'columns.isEnabled',
     width: 110,
-    fixed: 'right',
     render: (row) =>
       h(TStatusBadge, {
         value: row.isEnabled ?? false,
@@ -300,11 +264,37 @@ const parentOptions = computed(() => {
     }))
 })
 
-function set(key: keyof Row, value: unknown): void {
-  if (!crud.formModal.formData.value) {
-    crud.formModal.formData.value = {} as Row
-  }
-  ;(crud.formModal.formData.value as unknown as Record<string, unknown>)[key as string] = value
+// Code-managed rows lock Code/Name/ParentId/Description (the backend reverts
+// such edits anyway); the form-schema renderer has no per-field disable, so
+// the lockable fields go through custom renderers that read this flag off the
+// live form model. Order stays a plain editable number field.
+const locked = computed(() => !!(crud.formModal.formData.value as Row | null)?.isSystemManaged)
+
+const fieldRenderers = {
+  'fm-text': (ctx: FieldRenderContext) =>
+    h(NInput, {
+      value: (ctx.value as string) ?? '',
+      disabled: ctx.readonly || locked.value,
+      'onUpdate:value': (v: string) => ctx.onUpdate(v),
+    }),
+  'fm-textarea': (ctx: FieldRenderContext) =>
+    h(NInput, {
+      type: 'textarea',
+      rows: 2,
+      value: (ctx.value as string) ?? '',
+      disabled: ctx.readonly || locked.value,
+      'onUpdate:value': (v: string) => ctx.onUpdate(v),
+    }),
+  'fm-parent': (ctx: FieldRenderContext) =>
+    h(NSelect, {
+      value: (ctx.value as string | null) ?? null,
+      options: parentOptions.value,
+      placeholder: t('form.parentIdPlaceholder'),
+      clearable: true,
+      filterable: true,
+      disabled: ctx.readonly || locked.value,
+      'onUpdate:value': (v: string | null) => ctx.onUpdate(v ?? undefined),
+    }),
 }
 
 // Row actions: Enable/Disable via the backend's dedicated cascading endpoints.

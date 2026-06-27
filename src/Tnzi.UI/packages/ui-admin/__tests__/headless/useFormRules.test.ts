@@ -86,6 +86,26 @@ describe('useFormRules', () => {
     expect(runValidator(rule, 'wrong')).toBeInstanceOf(Error)
   })
 
+  it('account rule accepts username, email, or phone (length only)', () => {
+    const chain = rules.account()
+    expect(runValidator(chain[1]!, 'admin')).toBe(true)
+    expect(runValidator(chain[1]!, 'user@example.com')).toBe(true)
+    expect(runValidator(chain[1]!, '+8613800138000')).toBe(true)
+  })
+
+  it('account rule enforces max length', () => {
+    const chain = rules.account({ min: 1, max: 5 })
+    expect(runValidator(chain[1]!, 'abcdef')).toBeInstanceOf(Error)
+    expect(runValidator(chain[1]!, 'abc')).toBe(true)
+  })
+
+  it('emailOrPhone accepts either an email or a phone, rejects neither', () => {
+    const chain = rules.emailOrPhone()
+    expect(runValidator(chain[1]!, 'user@example.com')).toBe(true)
+    expect(runValidator(chain[1]!, '+8613800138000')).toBe(true)
+    expect(runValidator(chain[1]!, 'not-an-account!')).toBeInstanceOf(Error)
+  })
+
   it('url regex requires http/https', () => {
     const regex = rules.url[1] as { pattern: RegExp }
     expect(regex.pattern.test('https://tnzi.cc')).toBe(true)

@@ -7,13 +7,13 @@
       </button>
 
       <div v-if="conversation" class="t-conv-pane__titles">
-        <span class="t-conv-pane__title">{{ conversation.title }}</span>
-        <span v-if="conversation.type === ConversationType.Group" class="t-conv-pane__subtitle">
-          {{ conversation.memberCount }} {{ t('window.members') }}
-        </span>
+        <span class="t-conv-pane__title">{{ headerTitle }}</span>
       </div>
       <div v-else class="t-conv-pane__titles" />
 
+      <!-- Content actions only — window controls (maximize/close) live in the
+           window title bar, so the "..." info button never reads as a window
+           control (it used to sit next to close and looked like a minimize). -->
       <div class="t-conv-pane__actions">
         <button
           v-if="conversation"
@@ -23,17 +23,6 @@
           @click="emit('toggle-info')"
         >
           <Icon icon="mdi:dots-horizontal" :width="18" />
-        </button>
-        <button
-          v-if="showMaximize"
-          class="t-conv-pane__icon-btn"
-          :title="maximized ? t('window.restore') : t('window.maximize')"
-          @click="emit('toggle-maximize')"
-        >
-          <Icon :icon="maximized ? 'mdi:window-restore' : 'mdi:window-maximize'" :width="16" />
-        </button>
-        <button class="t-conv-pane__icon-btn" :title="t('close')" @click="emit('close')">
-          <Icon icon="mdi:close" :width="18" />
         </button>
       </div>
     </div>
@@ -55,6 +44,7 @@
             :my-name="myName"
             :my-avatar-file-id="myAvatarFileId"
             :is-group="conversation.type === ConversationType.Group"
+            :is-system="conversation.type === ConversationType.System"
           />
         </div>
 
@@ -66,7 +56,8 @@
           :upload-kind="uploadKind"
           :upload-name="uploadName"
           @send="emit('send', $event)"
-          @pick-file="emit('pick-file', $event)"
+          @pick-file="emit('pick-file')"
+          @drop-file="emit('drop-file', $event)"
         />
       </div>
 
@@ -86,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ConversationType } from '@tnzi/core/services/chat'
 import type { ConversationListItemDto, ChatMessageDto } from '@tnzi/core/services/chat'
@@ -106,24 +98,29 @@ const props = defineProps<{
   uploadKind?: 'image' | 'file'
   uploadName?: string
   infoShow?: boolean
-  maximized?: boolean
-  showMaximize?: boolean
 }>()
 
 const emit = defineEmits<{
   send: [text: string]
-  'pick-file': [type: 'image' | 'file']
+  'pick-file': []
+  'drop-file': [file: File]
   'toggle-info': []
   'update:info-show': [v: boolean]
-  'toggle-maximize': []
   'panel-changed': []
   'open-conversation': [id: string]
   back: []
-  close: []
 }>()
 
 const t = (k: string) => translatePageKey('chat', k)
 const { isSm } = useBreakpoint()
+
+// Group title carries the member count in parentheses — `Team (5)` — matching
+// the direct-chat title style (no separate "N Members" subtitle).
+const headerTitle = computed(() => {
+  const c = props.conversation
+  if (!c) return ''
+  return c.type === ConversationType.Group ? `${c.title} (${c.memberCount})` : c.title
+})
 </script>
 
 <style scoped>
@@ -140,7 +137,7 @@ const { isSm } = useBreakpoint()
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 56px;
+  height: 44px;
   padding: 0 12px 0 18px;
   border-bottom: 1px solid var(--chat-border, #e6e6e6);
   flex-shrink: 0;
@@ -161,11 +158,6 @@ const { isSm } = useBreakpoint()
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.t-conv-pane__subtitle {
-  font-size: 12px;
-  color: var(--chat-text-3, #a8a8a8);
 }
 
 .t-conv-pane__actions {

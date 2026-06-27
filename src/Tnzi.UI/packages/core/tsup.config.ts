@@ -49,7 +49,15 @@ export default defineConfig({
         "services/localization/index": "src/services/localization/index.ts",
     },
     format: ["cjs", "esm"],
-    dts: true,
+    // tsup 8.5.1 hard-injects `baseUrl: "."` into the DTS program's compilerOptions
+    // (rollup.js: `baseUrl: compilerOptions.baseUrl || "."`). Under TypeScript 6 a set
+    // `baseUrl` raises TS5101 (deprecated, removed in TS 7) and aborts the DTS build.
+    // tsup reads these options only from `dts.compilerOptions`, so silence it here.
+    dts: {
+        compilerOptions: {
+            ignoreDeprecations: "6.0",
+        },
+    },
     splitting: false,
     sourcemap: true,
     clean: true,

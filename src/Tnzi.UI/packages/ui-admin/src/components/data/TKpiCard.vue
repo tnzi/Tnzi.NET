@@ -1,12 +1,15 @@
 <template>
   <!--
-    TStatCard — unified KPI statistic card (white NCard, small, borderless).
+    TKpiCard — unified KPI statistic card (white NCard, small, borderless).
+    Renamed from TStatCard in the 2026-06 component audit to avoid a name
+    collision with @tnzi/ui's globally-registered <TStatCard> (a different
+    NStatistic-based component). Pairs with TKpiRow for the responsive grid.
     Layout: optional icon in a light rounded block on the left; label (12px,
     muted) above the value (24px, semibold). Numbers animate via
     NNumberAnimation (default on); strings render verbatim; `null` renders
     an em dash. `tone` colours the value (and the icon block) with the
-    standard status palette. Compose inside `TKpiRow` for the responsive
-    grid; pages pass already-translated `label` text (the page owns t()).
+    standard status palette. Pages pass already-translated `label` text
+    (the page owns t()).
   -->
   <NCard size="small" :bordered="false" class="t-stat-card">
     <div class="t-stat-card__inner">
@@ -39,9 +42,9 @@ import { computed } from 'vue'
 import { NCard, NNumberAnimation } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 
-export type TStatCardTone = 'default' | 'success' | 'warning' | 'error'
+export type TKpiCardTone = 'default' | 'success' | 'warning' | 'error'
 
-export interface TStatCardProps {
+export interface TKpiCardProps {
   /** Already-translated label text (the page side owns t()). */
   label: string
   /** `null` renders an em dash; numbers animate (see `animated`); strings render verbatim. */
@@ -51,12 +54,12 @@ export interface TStatCardProps {
   /** mdi:* icon rendered in a light rounded block on the left. */
   icon?: string
   /** Value (and icon block) colour. */
-  tone?: TStatCardTone
+  tone?: TKpiCardTone
   /** Animate numeric values via NNumberAnimation (default true). */
   animated?: boolean
 }
 
-const props = withDefaults(defineProps<TStatCardProps>(), {
+const props = withDefaults(defineProps<TKpiCardProps>(), {
   suffix: undefined,
   icon: undefined,
   tone: 'default',

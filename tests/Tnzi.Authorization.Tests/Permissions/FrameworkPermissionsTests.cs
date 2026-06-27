@@ -29,7 +29,7 @@ public class FrameworkPermissionsTests
         // Locked counts — bump these deliberately when adding/removing codes so
         // an accidental drift (front-end route added without a backend code, or
         // vice versa) shows up as a failing test.
-        codes.Count.ShouldBe(69);
+        codes.Count.ShouldBe(68);
         context.Groups.Count.ShouldBe(10);
     }
 
@@ -41,7 +41,7 @@ public class FrameworkPermissionsTests
     [InlineData("authorization.roleFunction.view")]
     [InlineData("system.view")]
     [InlineData("system.menu.view")]
-    [InlineData("workbench.view")]
+    [InlineData("dashboard.view")]
     [InlineData("feature.view")]
     [InlineData("storage.file.view")]
     [InlineData("audit.log.view")]

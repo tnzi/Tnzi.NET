@@ -56,7 +56,7 @@ describe('WorkflowRunViewer page (Tier 3: timeline)', () => {
   it('mounts the master-detail layout and renders run rows', async () => {
     const wrapper = mount(WorkflowRunViewer)
     await flushPromises()
-    expect(wrapper.find('.t-wf-run-page__layout').exists()).toBe(true)
+    expect(wrapper.find('.t-master-detail').exists()).toBe(true)
     const items = wrapper.findAll('.t-wf-run-page__run-item')
     expect(items.length).toBe(2)
   })

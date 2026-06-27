@@ -1,6 +1,6 @@
 <template>
   <div class="t-member-grid">
-    <div class="t-member-grid__cells">
+    <div class="t-member-grid__cells" :style="gridStyle">
       <!-- Member cells (collapsed or all) -->
       <template v-for="m in visibleMembers" :key="m.userId">
         <TMemberPopover
@@ -18,22 +18,24 @@
               :size="AVATAR_SIZE"
               :status="m.status"
             />
-            <span class="t-member-grid__name">{{ m.name }}</span>
+            <span class="t-member-grid__name">{{ m.alias || m.name }}</span>
           </div>
         </TMemberPopover>
       </template>
 
-      <!-- Add button — same outer cell footprint as a member cell (56px wide) -->
+      <!-- Add button — always the last cell, same row (never wraps onto its own
+           line): in collapsed mode it sits as the final cell of the last row. -->
       <div v-if="canAdd" class="t-member-grid__cell t-member-grid__add-cell" @click="emit('add')">
         <div class="t-member-grid__add">
-          <Icon icon="mdi:plus" :width="AVATAR_SIZE * 0.55" :height="AVATAR_SIZE * 0.55" class="t-member-grid__add-icon" />
+          <Icon icon="mdi:plus" :width="AVATAR_SIZE * 0.5" :height="AVATAR_SIZE * 0.5" class="t-member-grid__add-icon" />
         </div>
+        <span class="t-member-grid__name">{{ t('window.add') }}</span>
       </div>
     </div>
 
-    <!-- Show All / Show Less toggle -->
+    <!-- Show All / Show Less toggle (only when members overflow the collapsed rows) -->
     <div
-      v-if="members.length > collapsedCount"
+      v-if="hasMore"
       class="t-member-grid__show-all"
       @click="expanded = !expanded"
     >
@@ -51,15 +53,19 @@ import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
 import TMemberPopover from './TMemberPopover.vue'
 
-const AVATAR_SIZE = 40
+const AVATAR_SIZE = 36
 
 const props = withDefaults(
   defineProps<{
     members: ConversationMemberDto[]
     canAdd: boolean
-    collapsedCount?: number
+    /** Grid columns — narrower avatars + more columns fill the 250px panel width
+     *  (avoids the right-side whitespace of the old 3-per-row layout). */
+    columns?: number
+    /** Max rows shown while collapsed (the Add cell counts toward the last row). */
+    maxRows?: number
   }>(),
-  { collapsedCount: 10 },
+  { columns: 5, maxRows: 3 },
 )
 
 const emit = defineEmits<{
@@ -71,10 +77,16 @@ const t = (k: string) => translatePageKey('chat', k)
 
 const expanded = ref(false)
 
+const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${props.columns}, 1fr)` }))
+
+// Cells available while collapsed; the Add button claims one of them when present.
+const collapsedMemberCount = computed(() => props.columns * props.maxRows - (props.canAdd ? 1 : 0))
+const hasMore = computed(() => props.members.length > collapsedMemberCount.value)
+
 const visibleMembers = computed(() =>
-  expanded.value || props.members.length <= props.collapsedCount
+  expanded.value || !hasMore.value
     ? props.members
-    : props.members.slice(0, props.collapsedCount),
+    : props.members.slice(0, collapsedMemberCount.value),
 )
 </script>
 
@@ -86,9 +98,8 @@ const visibleMembers = computed(() =>
 }
 
 .t-member-grid__cells {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 11px 10px;
+  display: grid;
+  gap: 10px 4px;
 }
 
 .t-member-grid__cell {
@@ -97,7 +108,7 @@ const visibleMembers = computed(() =>
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  width: 48px;
+  min-width: 0;
 }
 
 .t-member-grid__name {
@@ -106,20 +117,20 @@ const visibleMembers = computed(() =>
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 48px;
+  max-width: 100%;
   text-align: center;
   line-height: 1.2;
 }
 
-/* Add cell: same 48px column footprint as a member cell */
+/* Add cell */
 .t-member-grid__add-cell {
   cursor: pointer;
 }
 
-/* Inner dashed box: avatar-sized (40×40) centered within the cell */
+/* Inner dashed box: avatar-sized, centered within the cell */
 .t-member-grid__add {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,6 +155,7 @@ const visibleMembers = computed(() =>
   cursor: pointer;
   padding: 2px 0;
   user-select: none;
+  align-self: flex-start;
 }
 
 .t-member-grid__show-all:hover {

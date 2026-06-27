@@ -147,7 +147,7 @@
 
     <!-- Optional KPI strip — sits between the white header card and the list
          card (content-page standard: header → KPI row → list). Typically a
-         `TKpiRow` of `TStatCard`s. -->
+         `TKpiRow` of `TKpiCard`s. -->
     <div v-if="$slots.kpis" class="t-list-shell__kpis">
       <slot name="kpis" />
     </div>

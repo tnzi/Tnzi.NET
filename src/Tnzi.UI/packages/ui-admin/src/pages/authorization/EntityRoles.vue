@@ -16,6 +16,7 @@
                 :options="entityOptions"
                 :placeholder="t('entityPlaceholder')"
                 :loading="entitiesLoading"
+                size="small"
                 clearable
                 filterable
                 class="w-360px max-w-full"
@@ -81,17 +82,19 @@
         <NTabPane name="inspect" :tab="t('tabs.inspect')">
           <p class="t-entity-role-page__hint">{{ t('inspect.hint') }}</p>
           <NSpace class="t-entity-role-page__inspect-toolbar" align="center">
-            <NInput
-              v-model:value="inspect.userId"
+            <TUserSelector
+              :value="inspect.userId || null"
+              :fetcher="userFetcher"
               :placeholder="t('inspect.userIdPlaceholder')"
-              clearable
+              size="small"
               class="w-320px max-w-full"
-              @keyup.enter="runInspect"
+              @update:value="onInspectUserChange"
             />
             <NButton
               type="primary"
+              size="small"
               :loading="inspect.loading"
-              :disabled="!inspect.userId.trim()"
+              :disabled="!inspect.userId"
               @click="runInspect"
             >
               {{ t('inspect.lookup') }}
@@ -124,9 +127,11 @@
 import { computed, h, reactive, ref, onMounted, watch } from 'vue'
 import {
   NCard, NSpace, NButton, NSelect, NTag, NCheckbox, NSpin,
-  NInput, NTabPane, NTabs,
+  NTabPane, NTabs,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TUserSelector from '../../components/forms/TUserSelector.vue'
+import type { SelectorOption } from '../../components/forms/_selector-factory'
 import type { DataTableColumns } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
@@ -305,6 +310,32 @@ const entityNameById = computed(() => {
   }
   return m
 })
+
+// Inspect-user picker fetcher (reuses the shared TUserSelector) — remote search
+// users by keyword so admins pick a user instead of pasting a raw userId.
+const userFetcher = async (keyword: string): Promise<SelectorOption[]> => {
+  try {
+    const res = await idBridge.users.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: keyword.trim(),
+      sortField: undefined,
+      sortOrder: null,
+      filters: {},
+    })
+    return res.items.map((u) => ({
+      label: u.email ? `${u.userName} (${u.email})` : u.userName,
+      value: u.id,
+    }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return []
+  }
+}
+
+function onInspectUserChange(v: unknown): void {
+  inspect.userId = (v as string | null) ?? ''
+}
 
 async function runInspect(): Promise<void> {
   const userId = inspect.userId.trim()

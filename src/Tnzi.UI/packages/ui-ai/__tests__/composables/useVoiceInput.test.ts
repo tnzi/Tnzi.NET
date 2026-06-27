@@ -13,7 +13,8 @@ describe('useVoiceInput', () => {
 
   beforeEach(() => {
     recognitionLang = 'en-US';
-    const SpeechRecognition = vi.fn(() => ({
+    // vitest 4: `new`-able mock must use a regular function (arrow impls are not constructors)
+    const SpeechRecognition = vi.fn(function () { return {
       start: vi.fn(),
       stop: vi.fn(),
       continuous: false,
@@ -28,7 +29,7 @@ describe('useVoiceInput', () => {
       set onerror(v) { handlers.onerror = v; },
       get onend() { return handlers.onend; },
       set onend(v) { handlers.onend = v; },
-    }));
+    }; });
     (globalThis as Record<string, unknown>).SpeechRecognition = SpeechRecognition;
   });
 

@@ -68,7 +68,7 @@ function statusBadge(v?: number): 'warning' | 'info' | 'success' | 'error' | 'de
 }
 
 export const notificationMessageColumns: ColumnDef<NotificationMessageRow>[] = [
-  { key: 'subject', title: 'columns.subject', width: 240, fixed: 'left', ellipsis: { tooltip: true } },
+  { key: 'subject', title: 'columns.subject', minWidth: 160, ellipsis: { tooltip: true } },
   {
     key: 'type',
     title: 'columns.type',
@@ -83,7 +83,7 @@ export const notificationMessageColumns: ColumnDef<NotificationMessageRow>[] = [
     render: (row) =>
       h(TStatusBadge, { value: row.status ?? 0, type: statusBadge(row.status), label: statusLabel(row.status) }),
   },
-  { key: 'templateName', title: 'columns.templateName', width: 180 },
+  { key: 'templateName', title: 'columns.templateName', minWidth: 140 },
   {
     key: 'recipients',
     title: 'columns.recipients',
@@ -95,13 +95,12 @@ export const notificationMessageColumns: ColumnDef<NotificationMessageRow>[] = [
         `${row.successCount ?? 0}/${row.totalRecipientCount ?? 0}`,
       ),
   },
-  { key: 'failureReason', title: 'columns.failureReason', ellipsis: { tooltip: true } },
+  { key: 'failureReason', title: 'columns.failureReason', minWidth: 160, ellipsis: { tooltip: true } },
   { key: 'retryCount', title: 'columns.retryCount', width: 90 },
   {
     key: 'sentTime',
     title: 'columns.sentTime',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.sentTime ?? row.creationTime }),
   },
 ]

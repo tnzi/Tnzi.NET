@@ -68,7 +68,7 @@
 
   /* Surface "one shade deeper than container" — used by readonly textareas,
      agent meta panels, code/JSON viewers, hover-on-card highlights. NOT a
-     terminal black; LogViewer/TLogViewer hardcode their own deep colours
+     terminal black; LogViewer hardcodes its own deep colours
      since terminal output stays dark in both modes. */
   --tnzi-bg-deep: rgb(246, 248, 250);
   --tnzi-bg-deep-rgb: 246 248 250;

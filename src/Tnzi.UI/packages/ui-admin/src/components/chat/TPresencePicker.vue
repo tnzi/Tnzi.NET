@@ -1,24 +1,43 @@
 <template>
-  <NDropdown
+  <NPopover
     trigger="click"
-    :options="options"
-    :render-option="renderOption"
-    @select="onSelect"
+    :show="open"
+    :show-arrow="true"
+    :z-index="POPOVER_Z"
+    placement="bottom-start"
+    :width="160"
+    raw
+    @update:show="open = $event"
   >
-    <div class="t-presence-picker">
-      <TChatAvatar :name="name" :file-id="avatarFileId" :status="status" :size="32" />
-      <span class="t-presence-picker__name">{{ name || '—' }}</span>
-      <Icon icon="mdi:chevron-down" :width="14" class="t-presence-picker__caret" />
+    <template #trigger>
+      <button class="t-presence-picker" type="button" :title="t('presence.myStatus')">
+        <TChatAvatar :name="name" :file-id="avatarFileId" :status="status" :size="30" />
+      </button>
+    </template>
+
+    <div class="t-presence-menu">
+      <div class="t-presence-menu__head">{{ t('presence.myStatus') }}</div>
+      <button
+        v-for="opt in STATUS_OPTIONS"
+        :key="opt.key"
+        type="button"
+        class="t-presence-menu__opt"
+        :class="{ 't-presence-menu__opt--active': opt.key === status }"
+        @click="select(opt.key)"
+      >
+        <TPresenceDot :status="opt.key" :size="9" />
+        <span class="t-presence-menu__label">{{ t(opt.labelKey) }}</span>
+        <Icon v-if="opt.key === status" icon="mdi:check" :width="15" class="t-presence-menu__check" />
+      </button>
     </div>
-  </NDropdown>
+  </NPopover>
 </template>
 
 <script setup lang="ts">
-import { h, computed } from 'vue'
-import { NDropdown } from 'naive-ui'
-import type { DropdownOption } from 'naive-ui'
-import { UserPresenceStatus } from '@tnzi/core/services/chat'
+import { ref } from 'vue'
+import { NPopover } from 'naive-ui'
 import { Icon } from '@iconify/vue'
+import { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
 import TPresenceDot from './TPresenceDot.vue'
@@ -33,6 +52,10 @@ const emit = defineEmits<{ change: [status: UserPresenceStatus] }>()
 
 const t = (k: string) => translatePageKey('chat', k)
 
+// Popover must clear the chat NModal.
+const POPOVER_Z = 3000
+const open = ref(false)
+
 const STATUS_OPTIONS: { key: UserPresenceStatus; labelKey: string }[] = [
   { key: UserPresenceStatus.Online, labelKey: 'presence.online' },
   { key: UserPresenceStatus.Away, labelKey: 'presence.away' },
@@ -40,19 +63,9 @@ const STATUS_OPTIONS: { key: UserPresenceStatus; labelKey: string }[] = [
   { key: UserPresenceStatus.Invisible, labelKey: 'presence.invisible' },
 ]
 
-const options = computed<DropdownOption[]>(() =>
-  STATUS_OPTIONS.map(({ key, labelKey }) => ({ key, label: t(labelKey) }))
-)
-
-function renderOption({ option }: { option: DropdownOption }) {
-  return h('div', { class: 't-presence-picker__opt' }, [
-    h(TPresenceDot, { status: option.key as UserPresenceStatus, size: 10 }),
-    h('span', { class: 't-presence-picker__opt-label' }, option.label as string),
-  ])
-}
-
-function onSelect(key: string | number) {
-  emit('change', key as UserPresenceStatus)
+function select(key: UserPresenceStatus) {
+  open.value = false
+  emit('change', key)
 }
 </script>
 
@@ -60,46 +73,59 @@ function onSelect(key: string | number) {
 .t-presence-picker {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  justify-content: center;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
   cursor: pointer;
-  border-bottom: 1px solid var(--chat-border, #eaeaea);
-  background: var(--chat-list-bg, #fafafa);
-  transition: background 0.12s;
-  flex-shrink: 0;
-}
-
-.t-presence-picker:hover {
-  background: var(--chat-hover, #e0e0e0);
-}
-
-.t-presence-picker__name {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--chat-text, #1f1f1f);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.t-presence-picker__caret {
-  flex-shrink: 0;
-  color: var(--chat-text-3, #9b9b9b);
+  border-radius: 50%;
 }
 </style>
 
 <style>
-/* Unscoped — styles the dropdown option content rendered via h() outside the component root */
-.t-presence-picker__opt {
+/* Unscoped — the menu renders inside the teleported popover (`raw`). */
+.t-presence-menu {
+  background: var(--chat-surface, #fff);
+  border: 1px solid var(--chat-border, #e6e6e6);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  box-shadow: var(--tnzi-shadow-popover, 0 6px 24px rgba(0, 0, 0, 0.16));
+  padding: 5px;
+  overflow: hidden;
+}
+
+.t-presence-menu__head {
+  font-size: 11px;
+  color: var(--chat-text-3, #a8a8a8);
+  padding: 4px 8px 6px;
+}
+
+.t-presence-menu__opt {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 4px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--chat-text, #1f1f1f);
+  text-align: left;
 }
 
-.t-presence-picker__opt-label {
-  font-size: 13px;
+.t-presence-menu__opt:hover {
+  background: var(--chat-hover, rgb(51 54 57 / 0.06));
+}
+
+.t-presence-menu__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.t-presence-menu__check {
+  flex-shrink: 0;
+  color: var(--chat-send, #158278);
 }
 </style>

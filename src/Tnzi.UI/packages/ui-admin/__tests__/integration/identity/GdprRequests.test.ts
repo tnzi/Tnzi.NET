@@ -127,7 +127,7 @@ describe('GdprRequests (Phase 3 page)', () => {
     const wrapper = mount(GdprRequests, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    // With no rows selected, TBatchActions doesn't render — the
+    // With no rows selected, the batch-actions bar doesn't render — the
     // gdpr-approve / gdpr-deny triggers should not exist in the DOM.
     expect(wrapper.find('.gdpr-approve').exists()).toBe(false)
     expect(wrapper.find('.gdpr-deny').exists()).toBe(false)

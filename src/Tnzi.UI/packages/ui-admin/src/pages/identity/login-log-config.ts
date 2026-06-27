@@ -36,8 +36,8 @@ interface LoginLogRow {
 }
 
 export const loginLogColumns: ColumnDef<LoginLogRow>[] = [
-  { key: 'userName', title: 'columns.userName', width: 160, fixed: 'left' },
-  { key: 'ipAddress', title: 'columns.ipAddress', width: 140 },
+  { key: 'userName', title: 'columns.userName', minWidth: 130 },
+  { key: 'ipAddress', title: 'columns.ipAddress', minWidth: 120 },
   {
     key: 'isSuccess',
     title: 'columns.isSuccess',
@@ -51,13 +51,12 @@ export const loginLogColumns: ColumnDef<LoginLogRow>[] = [
         },
       }),
   },
-  { key: 'failureReason', title: 'columns.failureReason', width: 200 },
-  { key: 'userAgent', title: 'columns.userAgent' },
+  { key: 'failureReason', title: 'columns.failureReason', minWidth: 160 },
+  { key: 'userAgent', title: 'columns.userAgent', minWidth: 180 },
   {
     key: 'loginTime',
     title: 'columns.loginTime',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.loginTime }),
   },
 ]

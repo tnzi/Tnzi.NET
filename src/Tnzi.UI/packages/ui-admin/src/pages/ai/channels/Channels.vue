@@ -214,7 +214,7 @@ const adapterColumns: DataTableColumns<ChannelAdapterDto> = [
   {
     title: () => t('cols.name'),
     key: 'name',
-    width: 220,
+    minWidth: 150,
     render: (row) =>
       h('div', { class: 'flex items-center gap-8px' }, [
         h(TSvgIcon, { icon: adapterIcon(row.name), size: 16 }),

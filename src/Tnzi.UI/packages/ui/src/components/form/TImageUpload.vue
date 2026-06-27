@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { NModal, NButton, NSpin, NSpace } from 'naive-ui'
+import type CropperJs from 'cropperjs'
 
 // ---------------------------------------------------------------------------
 // Props / Emits
@@ -46,9 +47,8 @@ const cropperModalOpen = ref(false)
 const cropperImageSrc = ref('')
 const cropperContainerRef = ref<HTMLImageElement | null>(null)
 
-// Cropper instance (set lazily after dynamic import)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let cropperInstance: any = null
+// Cropper instance (set lazily after dynamic import; cropperjs v2 web-component API)
+let cropperInstance: CropperJs | null = null
 
 // ---------------------------------------------------------------------------
 // Computed
@@ -140,34 +140,41 @@ async function openCropper(file: File): Promise<void> {
 async function initCropperOnMount(): Promise<void> {
   if (!cropperContainerRef.value) return
 
-  // Lazy-load cropperjs CSS (ignore TS — Vite resolves CSS imports at runtime)
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  await import('cropperjs/dist/cropper.css')
-  const CropperModule = await import('cropperjs')
-  const Cropper = CropperModule.default
+  // cropperjs v2 ships its styles inside the web components' shadow DOM,
+  // so there is no separate stylesheet to import anymore.
+  const { default: Cropper } = await import('cropperjs')
 
   if (cropperInstance) {
     cropperInstance.destroy()
     cropperInstance = null
   }
 
-  cropperInstance = new Cropper(cropperContainerRef.value, {
-    aspectRatio: props.aspectRatio,
-    viewMode: 1,
-    dragMode: 'move',
-    autoCropArea: 1,
-    ...(props.shape === 'circle' ? { cropBoxResizable: false } : {}),
-  })
+  const cropper = new Cropper(cropperContainerRef.value)
+  cropperInstance = cropper
+
+  // v2 configures the crop ratio + initial size on the selection web component;
+  // the old `aspectRatio`/`viewMode`/`autoCropArea` constructor options are gone.
+  const selection = cropper.getCropperSelection()
+  if (selection) {
+    selection.aspectRatio = props.aspectRatio
+    selection.initialCoverage = 0.9
+    selection.$reset()
+  }
 }
 
 async function confirmCrop(): Promise<void> {
   if (!cropperInstance) return
 
-  const canvas = cropperInstance.getCroppedCanvas()
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, 'image/jpeg', 0.9)
-  })
+  // v2: render the current selection to a real canvas (async), then export a JPEG blob.
+  const selection = cropperInstance.getCropperSelection()
+  const blob = selection
+    ? await new Promise<Blob | null>((resolve) => {
+        selection
+          .$toCanvas()
+          .then((canvas) => canvas.toBlob(resolve, 'image/jpeg', 0.9))
+          .catch(() => resolve(null))
+      })
+    : null
 
   cropperModalOpen.value = false
   cropperInstance.destroy()

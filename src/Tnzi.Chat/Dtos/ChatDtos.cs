@@ -147,6 +147,15 @@ public class ChatContactProfileDto
     public string? AvatarFileId { get; set; }
     public UserPresenceStatus Status { get; set; }
     public DateTime? LastSeenAt { get; set; }
+
+    /// <summary>Contact email — shown on the profile card when available.</summary>
+    public string? Email { get; set; }
+
+    /// <summary>Contact phone number — shown on the profile card when available.</summary>
+    public string? Phone { get; set; }
+
+    /// <summary>Short personal signature / bio — shown on the profile card when available.</summary>
+    public string? Bio { get; set; }
 }
 
 public class ConversationMemberSettingsDto

@@ -5,9 +5,8 @@
     </template>
 
     <NCard :bordered="false" class="t-role-func-page__card">
-      <div class="t-role-func-page__layout">
-        <!-- Left: role list -->
-        <aside class="t-role-func-page__roles">
+      <TMasterDetailLayout :master-width="280">
+        <template #master>
           <NInput
             v-model:value="roleFilter"
             :placeholder="t('searchRole')"
@@ -31,10 +30,9 @@
               </li>
             </ul>
           </NSpin>
-        </aside>
-
-        <!-- Right: function tree with checkboxes -->
-        <section class="t-role-func-page__tree">
+        </template>
+        <template #detail>
+          <section class="t-role-func-page__tree">
           <div v-if="!selectedRoleId" class="t-role-func-page__placeholder">
             {{ t('selectRolePrompt') }}
           </div>
@@ -86,22 +84,19 @@
               <div v-if="!treeData.length" class="t-role-func-page__empty">
                 {{ t('noFunctions') }}
               </div>
-              <NTree
+              <TPermissionTree
                 v-else
                 :data="treeData"
                 :checked-keys="checkedFunctionIds"
-                :default-expand-all="true"
-                checkable
-                cascade
                 check-strategy="all"
-                block-line
                 class="t-role-func-page__naive-tree"
                 @update:checked-keys="onCheckedChange"
               />
             </NSpin>
           </div>
-        </section>
-      </div>
+          </section>
+        </template>
+      </TMasterDetailLayout>
     </NCard>
 
     <!--
@@ -225,9 +220,10 @@ import { computed, h, reactive, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import type { SelectOption, TreeOption } from 'naive-ui'
 import {
-  NCard, NSpace, NButton, NTree, NInput, NSpin, NTag, NPopconfirm,
+  NCard, NSpace, NButton, NInput, NSpin, NTag, NPopconfirm,
   NModal, NForm, NFormItem, NSelect,
 } from 'naive-ui'
+import TPermissionTree from '../../components/forms/TPermissionTree.vue'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
@@ -242,6 +238,7 @@ import type {
 } from '@tnzi/core/services/authorization'
 import type { RoleDto } from '@tnzi/core/services/identity'
 import TContentPage from '../../components/layout/TContentPage.vue'
+import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 
 interface Role { id: string; code: string; name: string; description?: string | null }
 
@@ -618,39 +615,8 @@ onMounted(async () => {
   flex: 1 1 auto;
   min-height: 0;
 }
-.t-role-func-page__layout {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  /* Single explicit row capped to the container so the panes (grid items)
-     get a definite height and their own overflow-y can engage. */
-  grid-template-rows: minmax(0, 1fr);
-  gap: 16px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.t-role-func-page__roles {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 16px;
-  min-height: 0;
-  overflow-y: auto;
-}
-/* Phone: stack the role list above the function matrix. The layout itself
-   becomes the single scroller (rows go back to natural auto height). */
-@media (max-width: 767px) {
-  .t-role-func-page__layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-    overflow-y: auto;
-  }
-  .t-role-func-page__roles {
-    border-right: none;
-    padding-right: 0;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-bottom: 12px;
-    max-height: 36vh;
-    overflow: auto;
-  }
-}
+/* Master/detail grid, responsive stacking and pane scroll come from
+   <TMasterDetailLayout>. Only page-specific content styling stays here. */
 .t-role-func-page__role-list {
   list-style: none;
   padding: 0;
@@ -687,15 +653,6 @@ onMounted(async () => {
 }
 .t-role-func-page__tree {
   padding: 0 4px;
-  min-height: 0;
-  overflow-y: auto;
-}
-/* Phone: the stacked layout is the single scroller — the pane itself
-   must not trap the scroll. After the base rule so the override wins. */
-@media (max-width: 767px) {
-  .t-role-func-page__tree {
-    overflow: visible;
-  }
 }
 .t-role-func-page__placeholder {
   color: var(--tnzi-base-text-muted);

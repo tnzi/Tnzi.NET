@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import UnoCSS from 'unocss/vite';
-import dts from 'vite-plugin-dts';
 import { resolve } from 'path';
 
 export default defineConfig({
@@ -12,11 +11,7 @@ export default defineConfig({
     // the library — the atoms are already baked in.
     UnoCSS(),
     vue(),
-    dts({
-      include: ['src/**/*'],
-      outDir: 'dist',
-      entryRoot: resolve(__dirname, 'src'),
-    }),
+    // .d.ts emitted by `vue-tsc -p tsconfig.build.json` in the build script.
   ],
   resolve: {
     alias: {
@@ -40,6 +35,9 @@ export default defineConfig({
       },
       name: 'TnziUiAdmin',
       formats: ['es'],
+      // vite 6+ defaults the lib CSS file to the package name; pin to `style.css`
+      // so the `./style.css` export keeps resolving.
+      cssFileName: 'style',
     },
     rollupOptions: {
       external: (id) =>

@@ -32,10 +32,10 @@ interface NotificationTemplateRow {
 }
 
 export const notificationTemplateColumns: ColumnDef<NotificationTemplateRow>[] = [
-  { key: 'templateName', title: 'columns.templateName', width: 240, fixed: 'left' },
-  { key: 'category', title: 'columns.category', width: 140 },
-  { key: 'description', title: 'columns.description', ellipsis: { tooltip: true } },
-  { key: 'defaultLayoutName', title: 'columns.defaultLayoutName', width: 160 },
+  { key: 'templateName', title: 'columns.templateName', minWidth: 160 },
+  { key: 'category', title: 'columns.category', minWidth: 120 },
+  { key: 'description', title: 'columns.description', minWidth: 160, ellipsis: { tooltip: true } },
+  { key: 'defaultLayoutName', title: 'columns.defaultLayoutName', minWidth: 130 },
   {
     key: 'isActive',
     title: 'columns.isActive',
@@ -53,7 +53,6 @@ export const notificationTemplateColumns: ColumnDef<NotificationTemplateRow>[] =
     key: 'source',
     title: 'columns.source',
     width: 110,
-    fixed: 'right',
     render: (row) => h(TSourceBadge, { value: String(row.source ?? 'Database') }),
   },
 ]

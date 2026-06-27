@@ -1,6 +1,15 @@
 <template>
-  <!-- System notice: centered grey pill, no bubble or avatar -->
-  <div v-if="message.contentType === MessageContentType.System" class="t-bubble-system">
+  <!-- System-conversation notification: a left-aligned card. Distinct from the
+       centered grey pill below — in a System feed every item is a notice, so
+       centered pills would blend with the timestamp separators and read as
+       trivial. A card makes each broadcast read as an actual notification. -->
+  <div v-if="message.contentType === MessageContentType.System && isSystem" class="t-bubble-notice">
+    <span class="t-bubble-notice__icon"><Icon icon="mdi:bell-outline" :width="15" /></span>
+    <div class="t-bubble-notice__card">{{ message.content }}</div>
+  </div>
+
+  <!-- Inline system notice (group created / member joined): centered grey pill -->
+  <div v-else-if="message.contentType === MessageContentType.System" class="t-bubble-system">
     <span class="t-bubble-system__pill">{{ message.content }}</span>
   </div>
 
@@ -59,6 +68,10 @@ const props = defineProps<{
   message: ChatMessageDto
   mine: boolean
   showSender: boolean
+  /** True when rendered inside a System (notifications) conversation — system
+   *  messages then render as left-aligned notification cards instead of the
+   *  inline centered pill used for group notices. */
+  isSystem?: boolean
   /** Current user's display name — used for the avatar initial on own messages
    *  (locally-appended messages have no senderName until the server round-trips). */
   myName?: string
@@ -128,6 +141,40 @@ const fileSizeLabel = computed(() => {
 </script>
 
 <style scoped>
+/* ── System-conversation notification card (left-aligned) ───────────────── */
+.t-bubble-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 16px;
+}
+
+.t-bubble-notice__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: rgb(var(--tnzi-primary-rgb, 13 148 136) / 0.12);
+  color: var(--chat-send, var(--tnzi-primary-600, #158278));
+}
+
+.t-bubble-notice__card {
+  max-width: 78%;
+  background: var(--chat-surface, #fff);
+  color: var(--chat-text, #1f1f1f);
+  border-radius: 6px;
+  padding: 9px 13px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
 /* ── System notice ─────────────────────────────────────────────────────── */
 .t-bubble-system {
   display: flex;

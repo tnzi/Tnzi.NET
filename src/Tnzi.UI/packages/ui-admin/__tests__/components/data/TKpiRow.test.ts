@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import TKpiRow from '../../../src/components/data/TKpiRow.vue'
-import TStatCard from '../../../src/components/data/TStatCard.vue'
+import TKpiCard from '../../../src/components/data/TKpiCard.vue'
 
 describe('TKpiRow', () => {
   it('renders an NGrid (responsive screen, default cols "1 s:2 m:4", 12px gap)', () => {
     const w = mount(TKpiRow, {
-      slots: { default: () => [h(TStatCard, { label: 'A', value: 1, animated: false })] },
+      slots: { default: () => [h(TKpiCard, { label: 'A', value: 1, animated: false })] },
     })
     const grid = w.findComponent({ name: 'Grid' })
     expect(grid.exists()).toBe(true)
@@ -21,7 +21,7 @@ describe('TKpiRow', () => {
   it('accepts a custom cols string and gap', () => {
     const w = mount(TKpiRow, {
       props: { cols: '1 s:2 m:3', gap: 16 },
-      slots: { default: () => [h(TStatCard, { label: 'A', value: 1, animated: false })] },
+      slots: { default: () => [h(TKpiCard, { label: 'A', value: 1, animated: false })] },
     })
     const grid = w.findComponent({ name: 'Grid' })
     expect(grid.props('cols')).toBe('1 s:2 m:3')
@@ -32,23 +32,23 @@ describe('TKpiRow', () => {
     const w = mount(TKpiRow, {
       slots: {
         default: () => [
-          h(TStatCard, { label: 'A', value: 1, animated: false }),
-          h(TStatCard, { label: 'B', value: 2, animated: false }),
-          h(TStatCard, { label: 'C', value: 3, animated: false }),
+          h(TKpiCard, { label: 'A', value: 1, animated: false }),
+          h(TKpiCard, { label: 'B', value: 2, animated: false }),
+          h(TKpiCard, { label: 'C', value: 3, animated: false }),
         ],
       },
     })
     expect(w.findAllComponents({ name: 'GridItem' })).toHaveLength(3)
-    expect(w.findAllComponents(TStatCard)).toHaveLength(3)
+    expect(w.findAllComponents(TKpiCard)).toHaveLength(3)
   })
 
   it('flattens v-for fragments and skips v-if placeholders', () => {
     const Host = defineComponent({
-      components: { TKpiRow, TStatCard },
+      components: { TKpiRow, TKpiCard },
       template: `
         <TKpiRow>
-          <TStatCard v-for="n in 3" :key="n" :label="'L' + n" :value="n" :animated="false" />
-          <TStatCard v-if="false" label="hidden" :value="0" :animated="false" />
+          <TKpiCard v-for="n in 3" :key="n" :label="'L' + n" :value="n" :animated="false" />
+          <TKpiCard v-if="false" label="hidden" :value="0" :animated="false" />
         </TKpiRow>
       `,
     })
@@ -63,7 +63,7 @@ describe('TKpiRow', () => {
   it('passes extra classes through to the grid root (page-level hooks survive)', () => {
     const w = mount(TKpiRow, {
       attrs: { class: 'orders-page__stats' },
-      slots: { default: () => [h(TStatCard, { label: 'A', value: 1, animated: false })] },
+      slots: { default: () => [h(TKpiCard, { label: 'A', value: 1, animated: false })] },
     })
     expect(w.classes()).toContain('orders-page__stats')
     expect(w.classes()).toContain('t-kpi-row')

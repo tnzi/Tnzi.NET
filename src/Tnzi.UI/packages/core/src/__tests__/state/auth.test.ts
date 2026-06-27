@@ -254,6 +254,41 @@ describe('AuthStateManager', () => {
   });
 
   // ------------------------------------------
+  // applyTokenSession (token-only login: code login / OAuth)
+  // ------------------------------------------
+
+  describe('applyTokenSession', () => {
+    it('establishes a persisted session AND fetches permissions from tokens only', async () => {
+      // permissionsFetchFn is the only thing that populates this.permissions —
+      // locks the M1 regression where applyTokenSession skipped it.
+      const permissionsFetchFn = vi.fn().mockResolvedValue(['perm.a', 'perm.b']);
+      const localDeps = createDeps({ permissionsFetchFn });
+      const localAuth = new AuthStateManager(localDeps);
+
+      await localAuth.applyTokenSession({ accessToken: 'code-tok', refreshToken: 'code-refresh', expiresIn: 3600 });
+
+      expect(localAuth.isAuthenticated).toBe(true);
+      expect(localAuth.accessToken).toBe('code-tok');
+      expect(localAuth.refreshToken).toBe('code-refresh');
+      expect(localDeps.httpClient.setAccessToken).toHaveBeenCalledWith('code-tok');
+      // Persisted (unlike setAuth) so a hard refresh can restore the session.
+      expect(localDeps.storage.get('tnzi:auth:token')).toBe('code-tok');
+      // Permissions populated — every hasPermission()/guard depends on this.
+      expect(permissionsFetchFn).toHaveBeenCalled();
+      expect(localAuth.permissions).toEqual(['perm.a', 'perm.b']);
+    });
+
+    it('tolerates a missing refresh token / expiry', async () => {
+      const localDeps = createDeps({ permissionsFetchFn: vi.fn().mockResolvedValue([]) });
+      const localAuth = new AuthStateManager(localDeps);
+      await localAuth.applyTokenSession({ accessToken: 'tok-only' });
+      expect(localAuth.isAuthenticated).toBe(true);
+      expect(localAuth.refreshToken).toBeNull();
+      expect(localAuth.tokenExpiry).toBeNull();
+    });
+  });
+
+  // ------------------------------------------
   // setError
   // ------------------------------------------
 

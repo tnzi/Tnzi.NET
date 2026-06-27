@@ -59,6 +59,21 @@ public class DefaultAuthController : ApiControllerBase
     }
 
     /// <summary>
+    /// 获取公开认证配置
+    /// 供登录页按部署配置（登录方式 / 注册 / 找回 / 第三方登录）决定显隐。匿名可访问，
+    /// 仅返回布尔开关与已启用的第三方提供商，不含任何密钥。
+    /// </summary>
+    /// <returns>认证配置</returns>
+    [HttpGet("config")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual ApiResult<AuthConfigDto> GetConfig()
+    {
+        var result = AuthService.GetAuthConfig();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 用户登录
     /// </summary>
     /// <param name="input">登录信息</param>

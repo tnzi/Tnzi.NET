@@ -7,6 +7,7 @@
  *   • POST   /admin/permissions/rules/evaluate             (debug / dry-run)
  *   • GET    /admin/permissions/persisted-rules            (DB-persisted rules)
  *   • POST   /admin/permissions/persisted-rules            (create)
+ *   • PUT    /admin/permissions/persisted-rules/{id}       (update)
  *   • DELETE /admin/permissions/persisted-rules/{id}       (delete)
  *
  * DTOs + enums + the raw API factory live in `@tnzi/core/services/ai`
@@ -55,6 +56,7 @@ export interface PermissionBridge {
   evaluate(req: PermissionEvaluateRequestDto): Promise<PermissionEvaluateResultDto | null>
   getPersistedRules(): Promise<PersistedPermissionRuleDto[]>
   createPersistedRule(input: CreatePersistedPermissionRuleDto): Promise<PersistedPermissionRuleDto | null>
+  updatePersistedRule(id: string, input: CreatePersistedPermissionRuleDto): Promise<PersistedPermissionRuleDto | null>
   deletePersistedRule(id: string): Promise<void>
 }
 
@@ -68,6 +70,7 @@ export function createPermissionBridge(deps: PermissionBridgeDeps = {}): Permiss
       evaluate: noOp as never,
       getPersistedRules: noOp as never,
       createPersistedRule: noOp as never,
+      updatePersistedRule: noOp as never,
       deletePersistedRule: noOp as never,
     }
   }
@@ -83,6 +86,8 @@ export function createPermissionBridge(deps: PermissionBridgeDeps = {}): Permiss
       unwrap<PersistedPermissionRuleDto[]>(await api.getPersistedRules()) ?? [],
     createPersistedRule: async (input) =>
       unwrap<PersistedPermissionRuleDto | null>(await api.createPersistedRule(input)),
+    updatePersistedRule: async (id, input) =>
+      unwrap<PersistedPermissionRuleDto | null>(await api.updatePersistedRule(id, input)),
     deletePersistedRule: async (id: string) => {
       await api.deletePersistedRule(id)
     },

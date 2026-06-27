@@ -18,10 +18,10 @@
     </template>
 
     <TKpiRow class="t-signalr-page__kpis">
-      <TStatCard :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? 0" icon="mdi:account-group" />
-      <TStatCard :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? 0" icon="mdi:lan-connect" />
-      <TStatCard :label="t('kpi.hubs')" :value="hubCount" icon="mdi:hub" />
-      <TStatCard :label="t('kpi.groups')" :value="groupCount" icon="mdi:account-group-outline" />
+      <TKpiCard :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? 0" icon="mdi:account-group" />
+      <TKpiCard :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? 0" icon="mdi:lan-connect" />
+      <TKpiCard :label="t('kpi.hubs')" :value="hubCount" icon="mdi:hub" />
+      <TKpiCard :label="t('kpi.groups')" :value="groupCount" icon="mdi:account-group-outline" />
     </TKpiRow>
 
     <NCard :title="t('sections.users')" size="small" :bordered="false" class="t-signalr-page__list-card">
@@ -67,7 +67,7 @@ import {
   NText,
 } from 'naive-ui'
 import TKpiRow from '../../components/data/TKpiRow.vue'
-import TStatCard from '../../components/data/TStatCard.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
@@ -266,7 +266,7 @@ onMounted(() => { void refresh() })
    at the bottom. Naive UI's content wrapper class is `n-card-content`
    (dash, NOT BEM `n-card__content`) — must be a flex column with
    min-height: 0 for `flex-height` to compute correctly. Targeted by an
-   explicit class so the TStatCard NCards in the KPI strip stay untouched. */
+   explicit class so the TKpiCard NCards in the KPI strip stay untouched. */
 :deep(.t-signalr-page__list-card) {
   flex: 1 1 auto;
   min-height: 0;

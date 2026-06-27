@@ -31,7 +31,6 @@ export const accessLogColumns: ColumnDef<AccessLogRow>[] = [
     key: 'method',
     title: 'columns.method',
     width: 90,
-    fixed: 'left',
     render: (row) =>
       h(TStatusBadge, {
         value: row.method ?? '?',
@@ -39,7 +38,7 @@ export const accessLogColumns: ColumnDef<AccessLogRow>[] = [
         label: row.method ?? '—',
       }),
   },
-  { key: 'path', title: 'columns.path' },
+  { key: 'path', title: 'columns.path', minWidth: 200 },
   {
     key: 'statusCode',
     title: 'columns.statusCode',
@@ -51,14 +50,13 @@ export const accessLogColumns: ColumnDef<AccessLogRow>[] = [
         label: row.statusCode ? String(row.statusCode) : '—',
       }),
   },
-  { key: 'responseTime', title: 'columns.responseTime', width: 130 },
-  { key: 'ipAddress', title: 'columns.ipAddress', width: 140 },
-  { key: 'userName', title: 'columns.userName', width: 140 },
+  { key: 'responseTime', title: 'columns.responseTime', width: 120 },
+  { key: 'ipAddress', title: 'columns.ipAddress', minWidth: 120 },
+  { key: 'userName', title: 'columns.userName', minWidth: 120 },
   {
     key: 'creationTime',
     title: 'columns.creationTime',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },
 ]

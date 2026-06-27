@@ -13,9 +13,12 @@ global using FileNotFoundException = Tnzi.Storage.Exceptions.FileNotFoundExcepti
 global using FileShare = Tnzi.Storage.Entities.FileShare;
 global using FileUploadSession = Tnzi.Storage.Entities.FileUploadSession;
 global using Microsoft.AspNetCore.Authorization;
+global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Hosting;
 global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Http.Features;
 global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.AspNetCore.Server.Kestrel.Core;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
 global using Microsoft.Extensions.Configuration;

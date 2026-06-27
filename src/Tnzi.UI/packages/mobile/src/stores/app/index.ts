@@ -9,6 +9,9 @@ import { computed } from 'vue';
 import { defineStore } from 'pinia';
 import { AppStateManager } from '@tnzi/core/state';
 import type { StateDeps } from '@tnzi/core/state';
+// Named import from the stable `./types` subpath so the emitted useApp() .d.ts
+// can reference ThemeMode portably (avoids TS2883 pointing at a core dist chunk).
+import type { ThemeMode } from '@tnzi/core/types';
 import { getStoreStorage, getStoreHttpClient } from '../factory';
 
 // ============================================
@@ -119,7 +122,7 @@ export function useApp() {
 
   return {
     // State
-    theme: computed(() => store.theme),
+    theme: computed((): ThemeMode => store.theme),
     language: computed(() => store.language),
     isDarkMode: computed(() => store.isDarkMode),
     onlineStatus: computed(() => store.onlineStatus),

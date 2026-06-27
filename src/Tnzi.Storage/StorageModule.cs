@@ -32,6 +32,16 @@ public class StorageModule : TnziApplicationModule
     {
         var services = context.Services;
 
+        // 请求体大小上限：放开到配置的 MaxFileSize，让"最大文件"真正生效。
+        // 否则 Kestrel 默认 30MB（IIS 同样有默认上限）会在 FileStorageService 的
+        // MaxFileSize 校验之前就把更大的请求体以不透明的 413 拒绝，使配置的上限
+        // （默认 100MB）形同虚设。多租户/分片上传不受影响（分片走小请求）。
+        var maxFileSize = context.Configuration.GetValue<long?>("Storage:MaxFileSize") ?? (100L * 1024 * 1024);
+        var bodyLimit = maxFileSize + (1L * 1024 * 1024); // 预留 multipart 边界/表单字段的余量
+        services.Configure<KestrelServerOptions>(o => o.Limits.MaxRequestBodySize = bodyLimit);
+        services.Configure<IISServerOptions>(o => o.MaxRequestBodySize = bodyLimit);
+        services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = bodyLimit);
+
         // 注册存储服务（默认使用 LocalStorage）
         // 用户可以通过配置选择不同的存储提供者（Local, S3, R2, Azure 等）
         // 自定义提供者: 在模块的 PreConfigureServicesAsync 中调用 StorageProviderFactory.Register()

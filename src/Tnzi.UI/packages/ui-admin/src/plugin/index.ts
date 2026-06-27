@@ -16,9 +16,9 @@ import {
   type AdminLoginConfig,
 } from './loginConfig'
 import {
-  provideAdminWorkbenchConfig,
-  type AdminWorkbenchConfig,
-} from './workbenchConfig'
+  provideAdminDashboardConfig,
+  type AdminDashboardConfig,
+} from './dashboardConfig'
 import {
   provideAdminSettingsConfig,
   type AdminSettingsConfig,
@@ -73,14 +73,14 @@ export interface TnziUiAdminOptions {
    */
   login?: AdminLoginConfig
   /**
-   * Phase J / 0.2.71+ — configuration for the built-in Workbench page.
+   * Phase J / 0.2.71+ — configuration for the built-in Dashboard page.
    * When omitted, the page falls back to `defaultWorkbenchWidgets()`
    * (HeaderBanner + KPIs + business stats + activity timeline + tips).
    * Pass `widgets` to fully control the dashboard, `layout: 'draggable'`
    * to let users re-order cards, and an `addModules` of your own
    * widget components for app-specific cards.
    */
-  workbench?: AdminWorkbenchConfig
+  dashboard?: AdminDashboardConfig
   /**
    * Configuration for the built-in Settings Center page (`/admin/settings`).
    * Pass `sections` to append app-specific sections, `hideGroups` to hide
@@ -114,11 +114,11 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // resolves to a stable object.
   provideAdminLoginConfig(app, options.login ?? {})
 
-  // Phase J — install the workbench config so the bundled dashboard page
+  // Phase J — install the dashboard config so the bundled dashboard page
   // can pull consumer-supplied widget descriptors. Provide null when no
   // config supplied so the page falls back to the bundled default deck.
-  if (options.workbench) {
-    provideAdminWorkbenchConfig(app, options.workbench)
+  if (options.dashboard) {
+    provideAdminDashboardConfig(app, options.dashboard)
   }
 
   // Settings Center — install the consumer-supplied section registry so the
@@ -181,6 +181,7 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
 }
 
 export { TnziUiAdminResolver } from './resolver'
+export { registerBrandIcon, type BrandIconData } from './brandIcon'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
 export { defineAdminApp } from './defineAdminApp'
 export { installDirectives, vPermission } from '../directives'
@@ -192,11 +193,11 @@ export {
   type AdminLoginConfig,
 } from './loginConfig'
 export {
-  ADMIN_WORKBENCH_CONFIG_KEY,
-  provideAdminWorkbenchConfig,
-  useAdminWorkbenchConfig,
-  type AdminWorkbenchConfig,
-} from './workbenchConfig'
+  ADMIN_DASHBOARD_CONFIG_KEY,
+  provideAdminDashboardConfig,
+  useAdminDashboardConfig,
+  type AdminDashboardConfig,
+} from './dashboardConfig'
 export {
   ADMIN_SETTINGS_CONFIG_KEY,
   provideAdminSettingsConfig,

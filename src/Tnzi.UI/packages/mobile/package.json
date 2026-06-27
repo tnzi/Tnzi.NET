@@ -42,7 +42,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vue-tsc -p tsconfig.build.json",
     "dev": "vite build --watch",
     "typecheck": "vue-tsc --noEmit --skipLibCheck",
     "test": "vitest run --passWithNoTests",
@@ -53,21 +53,20 @@
   },
   "dependencies": {
     "@tnzi/core": "workspace:*",
-    "vant": "^4.9.0"
+    "vant": "^4.9.24"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
-    "pinia": "^3.0.0",
-    "typescript": "^5.9.3",
-    "vite": "^5.4.0",
-    "vite-plugin-dts": "^3.9.0",
-    "vitest": "^3.0.0",
-    "vue": "^3.5.0",
-    "vue-tsc": "^2.0.0"
+    "@vitejs/plugin-vue": "^6.0.7",
+    "pinia": "catalog:",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.5",
+    "vitest": "^4.1.9",
+    "vue": "catalog:",
+    "vue-tsc": "^3.3.5"
   },
   "peerDependencies": {
-    "vue": ">=3.5.0",
-    "pinia": ">=3.0.0"
+    "pinia": ">=3.0.0",
+    "vue": ">=3.5.0"
   },
   "keywords": [
     "tnzi",

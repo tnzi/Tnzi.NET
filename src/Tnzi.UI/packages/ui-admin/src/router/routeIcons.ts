@@ -11,8 +11,8 @@
  * available) so the visual feel matches a soybean side-by-side review.
  */
 export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
-  // ── Top-level workbench ─────────────────────────────────────────
-  workbench: 'mdi:view-dashboard-outline',
+  // ── Top-level dashboard ─────────────────────────────────────────
+  dashboard: 'mdi:view-dashboard-outline',
 
   // ── Top-level module entries ────────────────────────────────────
   identity: 'mdi:account-key-outline',
@@ -59,6 +59,10 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'storage.files': 'mdi:file-outline',
   'storage.chunks': 'mdi:puzzle-outline',
   'storage.versions': 'mdi:history',
+  'storage.shares': 'mdi:share-variant-outline',
+  'storage.integrity': 'mdi:shield-check-outline',
+  'storage.userUsage': 'mdi:account-details-outline',
+  'storage.maintenance': 'mdi:broom',
 
   // ── Audit sub-routes ────────────────────────────────────────────
   'audit.logs': 'mdi:clipboard-text-outline',
@@ -70,8 +74,8 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'notification.subscriptions': 'mdi:bell-ring-outline',
 
   // ── Chat sub-routes ─────────────────────────────────────────────
-  'chat.sessions': 'mdi:chat-outline',
-  'chat.messages': 'mdi:message-outline',
+  'chat.overview': 'mdi:view-dashboard-outline',
+  'chat.conversations': 'mdi:forum-outline',
 
   // ── Payment sub-routes ──────────────────────────────────────────
   'payment.orders': 'mdi:cart-outline',

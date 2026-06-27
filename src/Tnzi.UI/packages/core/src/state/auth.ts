@@ -369,6 +369,40 @@ export class AuthStateManager {
     this.deps.httpClient.setAccessToken(this.accessToken);
   }
 
+  /**
+   * Establish an authenticated session from tokens obtained OUTSIDE the
+   * password flow — code login, OAuth callback, magic link, etc. — where the
+   * response carries the access/refresh tokens but no user object.
+   *
+   * Mirrors the tail of {@link login}: it sets + persists the tokens, syncs
+   * the HTTP client, then fetches the user profile so getters / permissions
+   * populate. Use this instead of {@link setAuth} when you only have tokens
+   * (setAuth requires a full `LoginResultDto` including the user).
+   */
+  async applyTokenSession(tokens: {
+    accessToken: string;
+    refreshToken?: string | null;
+    expiresIn?: number | null;
+  }): Promise<void> {
+    this.isAuthenticated = true;
+    this.accessToken = tokens.accessToken;
+    this.refreshToken = tokens.refreshToken ?? null;
+    this.tokenExpiry = tokens.expiresIn ? new Date(Date.now() + tokens.expiresIn * 1000) : null;
+    this.error = null;
+
+    // Sync + persist so a hard refresh can restore the session. NOTE: restoreAuth
+    // requires BOTH an access and a refresh token, so a token-only session (no
+    // refresh token) lives only for the current tab and is NOT restored on hard
+    // reload. setAuth deliberately persists nothing.
+    this.deps.httpClient.setAccessToken(this.accessToken);
+    this.persistTokens();
+
+    // Mirror login()/restoreAuth(): fetch BOTH profile and permissions, otherwise
+    // every hasPermission() / route guard / menu fails until a refresh or reload
+    // happens to repopulate this.permissions.
+    await Promise.all([this.fetchUserProfile(), this._fetchPermissions()]);
+  }
+
   clearAuth(): void {
     Object.assign(this, createInitialAuthState());
     // Clear token from HTTP client

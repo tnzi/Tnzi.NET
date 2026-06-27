@@ -14,7 +14,7 @@ public class DefaultChatContactController : ApiControllerBase
     }
 
     [HttpGet("search")]
-    public virtual async Task<ApiResult<IReadOnlyList<ChatContactDto>>> Search([FromQuery] string keyword)
+    public virtual async Task<ApiResult<IReadOnlyList<ChatContactDto>>> Search([FromQuery] string? keyword)
         => (await Contacts.SearchUsersAsync(keyword)).ToApiResult();
 
     [HttpGet("{userId:guid}/profile")]

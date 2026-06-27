@@ -16,7 +16,9 @@ import { computed, h, ref, watch } from 'vue'
 import { NDropdown, NButton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { translatePageKey } from '../../pages/_shared/translate'
+import TPresenceDot from '../chat/TPresenceDot.vue'
 
 interface Props {
   /** Display name shown next to the avatar. */
@@ -40,6 +42,14 @@ interface Props {
   signedIn?: boolean
   /** Called when an unsigned user clicks "Sign in". */
   onSignIn?: () => void | Promise<void>
+  /**
+   * Current presence status. When provided together with `onSetPresence`, the
+   * avatar shows a status dot and the dropdown gains a "Status" submenu so the
+   * user can switch online/away/busy/invisible from the admin header.
+   */
+  presence?: UserPresenceStatus | null
+  /** Called when the user picks a new presence status from the dropdown. */
+  onSetPresence?: (status: UserPresenceStatus) => void | Promise<void>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -51,9 +61,27 @@ const props = withDefaults(defineProps<Props>(), {
   translate: undefined,
   signedIn: true,
   onSignIn: undefined,
+  presence: null,
+  onSetPresence: undefined,
 })
 
 const dialog = useDialog()
+
+// Presence switching is only offered when both the current status and a setter
+// are supplied (i.e. chat is enabled and wired by the shell).
+const presenceEnabled = computed(() => props.presence != null && !!props.onSetPresence)
+
+const PRESENCE_OPTIONS: { key: UserPresenceStatus; labelKey: string; fallback: string }[] = [
+  { key: UserPresenceStatus.Online, labelKey: 'admin.user.presence.online', fallback: 'Online' },
+  { key: UserPresenceStatus.Away, labelKey: 'admin.user.presence.away', fallback: 'Away' },
+  { key: UserPresenceStatus.Busy, labelKey: 'admin.user.presence.busy', fallback: 'Busy' },
+  { key: UserPresenceStatus.Invisible, labelKey: 'admin.user.presence.invisible', fallback: 'Invisible' },
+]
+
+const currentPresenceLabel = computed(() => {
+  const o = PRESENCE_OPTIONS.find((x) => x.key === props.presence)
+  return o ? t(o.labelKey, o.fallback) : ''
+})
 
 // Track image load failures so a broken/expired avatar URL degrades to the
 // name initial instead of a broken-image glyph. Reset whenever the URL
@@ -81,21 +109,41 @@ function t(key: string, fallback: string): string {
   return fallback
 }
 
-const options = computed<DropdownOption[]>(() => [
-  {
+const options = computed<DropdownOption[]>(() => {
+  const items: DropdownOption[] = []
+  if (presenceEnabled.value) {
+    items.push({
+      key: 'status',
+      label: `${t('admin.user.status', 'Status')} · ${currentPresenceLabel.value}`,
+      icon: () => h(TPresenceDot, { status: props.presence, size: 10 }),
+      children: PRESENCE_OPTIONS.map((o) => ({
+        key: `presence:${o.key}`,
+        label: o.key === props.presence ? `${t(o.labelKey, o.fallback)} ✓` : t(o.labelKey, o.fallback),
+        icon: () => h(TPresenceDot, { status: o.key, size: 10 }),
+      })),
+    })
+    items.push({ type: 'divider', key: 'divider-status' })
+  }
+  items.push({
     key: 'user-center',
     label: t('admin.user.center', 'User Center'),
     icon: () => h(TSvgIcon, { icon: 'mdi:account-circle', size: 18 }),
-  },
-  { type: 'divider', key: 'divider' },
-  {
+  })
+  items.push({ type: 'divider', key: 'divider' })
+  items.push({
     key: 'logout',
     label: t('admin.user.logout', 'Logout'),
     icon: () => h(TSvgIcon, { icon: 'mdi:logout', size: 18 }),
-  },
-])
+  })
+  return items
+})
 
 function handleSelect(key: string | number): void {
+  if (typeof key === 'string' && key.startsWith('presence:')) {
+    const status = Number(key.slice('presence:'.length)) as UserPresenceStatus
+    void props.onSetPresence?.(status)
+    return
+  }
   if (key === 'logout') {
     confirmLogout()
     return
@@ -130,15 +178,18 @@ function confirmLogout(): void {
     @select="handleSelect"
   >
     <button class="t-admin-user-avatar" type="button" :title="userName">
-      <img
-        v-if="showAvatarImage"
-        :src="avatarUrl ?? ''"
-        :alt="userName"
-        class="t-admin-user-avatar__img"
-        @error="imgFailed = true"
-      />
-      <span v-else-if="initial" class="t-admin-user-avatar__initial" aria-hidden="true">{{ initial }}</span>
-      <TSvgIcon v-else :icon="avatarIcon" :size="22" class="t-admin-user-avatar__icon" />
+      <span class="t-admin-user-avatar__pic">
+        <img
+          v-if="showAvatarImage"
+          :src="avatarUrl ?? ''"
+          :alt="userName"
+          class="t-admin-user-avatar__img"
+          @error="imgFailed = true"
+        />
+        <span v-else-if="initial" class="t-admin-user-avatar__initial" aria-hidden="true">{{ initial }}</span>
+        <TSvgIcon v-else :icon="avatarIcon" :size="22" class="t-admin-user-avatar__icon" />
+        <TPresenceDot v-if="presenceEnabled" :status="presence" :size="9" class="t-admin-user-avatar__dot" />
+      </span>
       <span class="t-admin-user-avatar__name">{{ userName }}</span>
     </button>
   </NDropdown>
@@ -165,6 +216,19 @@ function confirmLogout(): void {
 }
 .t-admin-user-avatar__icon {
   color: var(--tnzi-primary);
+}
+/* Avatar wrapper — anchors the presence status dot. */
+.t-admin-user-avatar__pic {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.t-admin-user-avatar__dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  /* Border matches the header surface so the dot reads as an overlay badge. */
+  border-color: var(--tnzi-container-bg, #fff);
 }
 /* Real avatar picture — circular, cover-cropped, sized to match the icon. */
 .t-admin-user-avatar__img {

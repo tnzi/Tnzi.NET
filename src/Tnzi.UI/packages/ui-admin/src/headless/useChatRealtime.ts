@@ -23,7 +23,10 @@ export function useChatRealtime(opts: UseChatRealtimeOptions) {
   const onNew = (raw: unknown) => {
     const p = raw as NewMessagePayload
     opts.store.applyIncomingMessage(p, opts.getUserId())
-    const fromOther = p.senderId && p.senderId !== opts.getUserId()
+    // System / broadcast messages carry senderId=null. Treat "not my own message"
+    // as from-other so a broadcast raises the unread badge + notification sound +
+    // surfaces a new System conversation, exactly like an incoming DM.
+    const fromOther = p.senderId !== opts.getUserId()
     if (fromOther) opts.onNewMessage?.(p)
   }
   const onRead = (raw: unknown) => opts.store.applyRead(raw as MessageReadPayload)

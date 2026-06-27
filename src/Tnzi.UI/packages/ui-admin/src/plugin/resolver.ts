@@ -7,7 +7,7 @@ const LAYOUT_COMPONENTS = new Set([
   'TThemeDrawer', 'TGlobalSearch',
 ])
 const CRUD_COMPONENTS = new Set([
-  'TCrudPage', 'TCrudToolbar', 'TCrudColumnSetting', 'TBatchActions', 'TFormModal',
+  'TCrudPage', 'TCrudColumnSetting', 'TFormModal',
   'TListShell', 'TCardPage',
 ])
 // Renderers live in the `crud/renderers/` subdirectory (different from-path).
@@ -16,7 +16,7 @@ const FORM_COMPONENTS = new Set([
   'TPermissionTree', 'TMenuTree',
   'TDictSelector', 'TRoleSelector', 'TUserSelector', 'TTenantSelector',
 ])
-const DATA_COMPONENTS = new Set(['TLogViewer', 'TChunkFileUpload'])
+const DATA_COMPONENTS = new Set(['TChunkFileUpload'])
 
 export function TnziUiAdminResolver(): Resolver {
   return {

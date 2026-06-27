@@ -110,7 +110,7 @@ import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
 import { personaFormSchema, personaSearchFields as searchFields } from './persona-config'
-import { ResourceScope } from '@tnzi/core/services/ai'
+import { ResourceScope } from '@tnzi/core/enums'
 import type {
   AgentDto,
   AgentPersonaDto,

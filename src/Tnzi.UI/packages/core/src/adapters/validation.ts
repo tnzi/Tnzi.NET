@@ -81,8 +81,11 @@ function buildFieldSchema(key: string, rule: FieldRule): z.ZodTypeAny {
 }
 
 function buildStringSchema(key: string, rule: FieldRule): z.ZodTypeAny {
+  // zod 4 unified the legacy `required_error`/`invalid_type_error` options into a
+  // single `error` map; an `undefined` input is the "missing/required" case.
   let schema = z.string({
-    required_error: rule.requiredMessage ?? `${key} is required`,
+    error: (issue) =>
+      issue.input === undefined ? (rule.requiredMessage ?? `${key} is required`) : undefined,
   });
 
   if (rule.min !== undefined) {
@@ -105,9 +108,12 @@ function buildStringSchema(key: string, rule: FieldRule): z.ZodTypeAny {
 }
 
 function buildNumberSchema(key: string, rule: FieldRule): z.ZodTypeAny {
+  // zod 4: `undefined` input → required message; any other invalid input → type message.
   let schema = z.number({
-    required_error: rule.requiredMessage ?? `${key} is required`,
-    invalid_type_error: `${key} must be a number`,
+    error: (issue) =>
+      issue.input === undefined
+        ? (rule.requiredMessage ?? `${key} is required`)
+        : `${key} must be a number`,
   });
 
   if (rule.min !== undefined) {

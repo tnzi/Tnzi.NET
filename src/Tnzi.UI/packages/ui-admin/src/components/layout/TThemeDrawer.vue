@@ -91,8 +91,6 @@ const LAYOUT_MODES: AdminLayoutMode[] = [
   'vertical',
   'horizontal',
   'vertical-mix',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
   'top-hybrid-header-first',
 ]
 
@@ -100,8 +98,6 @@ const LAYOUT_LABEL_KEY: Record<AdminLayoutMode, string> = {
   'vertical': 'admin.theme.layout.vertical',
   'horizontal': 'admin.theme.layout.horizontal',
   'vertical-mix': 'admin.theme.layout.verticalMix',
-  'vertical-hybrid-header-first': 'admin.theme.layout.verticalHybridHeaderFirst',
-  'top-hybrid-sidebar-first': 'admin.theme.layout.topHybridSidebarFirst',
   'top-hybrid-header-first': 'admin.theme.layout.topHybridHeaderFirst',
 }
 
@@ -163,8 +159,6 @@ const drawerWidth = computed<number | string>(() => {
 // silently no-op-ing.
 const HEADER_HOSTED_MODES: AdminLayoutMode[] = [
   'horizontal',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
   'top-hybrid-header-first',
 ]
 const headerVisibilityForcedOn = computed(() =>
@@ -732,7 +726,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               />
             </section>
             <section
-              v-if="themeStore.layoutMode === 'vertical-mix' || themeStore.layoutMode === 'vertical-hybrid-header-first'"
+              v-if="themeStore.layoutMode === 'vertical-mix'"
               class="t-theme-drawer__row"
             >
               <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.mixChildMenuWidth') }}</span>
@@ -1112,11 +1106,27 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 </template>
 
 <style scoped>
+/* Group divider (with title) — naive's default `margin: 24px 0` leaves a
+   cavernous gap above and below each section title inside the drawer.
+   Tighten it: a little breathing room above the title to separate groups,
+   a small gap below before the group's controls. The scoped attribute
+   (`.t-theme-drawer__divider[data-v-…]`, specificity 0,2,0) outranks
+   naive's `.n-divider` (0,1,0) without `!important`. */
+.t-theme-drawer__divider {
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+/* The first divider in a tab pane sits right under the tabs — no extra
+   top gap needed. */
+.t-theme-drawer__divider:first-child {
+  margin-top: 2px;
+}
+
 /* Group container — no border-bottom now that NDivider provides the
    visual separator between groups. The old `border-bottom: 1px solid`
    stacked with the next NDivider and rendered as two parallel lines. */
 .t-theme-drawer__section {
-  padding: var(--tnzi-space-md, 16px) 0;
+  padding: var(--tnzi-space-sm, 8px) 0;
 }
 .t-theme-drawer__section-title {
   margin: 0 0 var(--tnzi-space-sm, 8px) 0;
@@ -1212,16 +1222,13 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   display: flex;
   justify-content: center;
 }
-/* Phase G — soybean parity: 6 layout cards arrange as 2 rows x 3 cols.
-   `repeat(3, 1fr)` evenly partitions the drawer width into 3 cells so
-   the column gap reads as a tight 16px (not the previous 42px from
-   `space-between` over fixed-96px columns). Each card is fixed 96px
-   wide so it centres inside its cell via `justify-self: center` (set
-   on .t-layout-card itself in TLayoutModeCard). */
+/* 2026-06-27: with 4 layout modes (2 buggy ones removed earlier), the cards
+   fit a single row — `repeat(4, 1fr)` + a tight 8px gap. Cards flex to fill
+   their cell (capped at the original 96px canvas) via TLayoutModeCard. */
 .t-theme-drawer__layout-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  column-gap: 16px;
+  grid-template-columns: repeat(4, 1fr);
+  column-gap: 8px;
   row-gap: 12px;
 }
 /* Phase D: .t-theme-drawer__reset deleted — reset moved to the persistent

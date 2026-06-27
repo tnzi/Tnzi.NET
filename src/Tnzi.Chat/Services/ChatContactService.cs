@@ -19,14 +19,16 @@ public class ChatContactService : ApplicationService, IChatContactService
         _presence = Check.NotNull(presence);
     }
 
-    public async Task<Result<IReadOnlyList<ChatContactDto>>> SearchUsersAsync(string keyword)
+    public async Task<Result<IReadOnlyList<ChatContactDto>>> SearchUsersAsync(string? keyword)
     {
-        Check.NotNullOrWhiteSpace(keyword, nameof(keyword));
         var me = GetRequiredCurrentUser().Id!.Value;
-        var kw = keyword.Trim().ToLower();
+        var kw = keyword?.Trim().ToLower();
 
-        var users = await _userRepository.ToListAsync(
-            u => u.Id != me && u.UserName != null && u.UserName.ToLower().Contains(kw));
+        // Blank keyword → first page of the directory (excluding self) so the picker can
+        // show a starting contact list. A keyword narrows by username (case-insensitive).
+        var users = string.IsNullOrEmpty(kw)
+            ? await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null)
+            : await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && u.UserName.ToLower().Contains(kw));
 
         var taken = users.Take(SearchLimit).ToList();
         var detailByUserId = await LoadDetailsAsync(taken.Select(u => u.Id).ToList());
@@ -51,16 +53,22 @@ public class ChatContactService : ApplicationService, IChatContactService
 
     public async Task<Result<ChatContactProfileDto>> GetProfileAsync(Guid userId)
     {
-        var profiles = await ResolveProfilesAsync(new[] { userId });
-        if (!profiles.TryGetValue(userId, out var c))
+        var user = await _userRepository.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
             return Fail<ChatContactProfileDto>("User not found.", 404);
 
+        var detail = (await LoadDetailsAsync(new[] { userId })).GetValueOrDefault(userId);
         var pr = (await _presence.ResolveEffectiveAsync(new[] { userId })).FirstOrDefault();
         return Ok(new ChatContactProfileDto
         {
             UserId = userId,
-            Name = c.Name,
-            AvatarFileId = c.AvatarFileId,
+            Name = ResolveDisplayName(user, detail),
+            AvatarFileId = detail?.AvatarId?.ToString(),
+            // Email/Phone live on the Identity User; Bio on UserDetail. All optional —
+            // the profile card only renders the rows that carry a value.
+            Email = user.Email,
+            Phone = user.PhoneNumber,
+            Bio = detail?.Bio,
             Status = pr?.Status ?? UserPresenceStatus.Offline,
             LastSeenAt = pr?.LastSeenAt
         });

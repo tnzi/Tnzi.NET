@@ -144,7 +144,7 @@ import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
-import { ResourceScope } from '@tnzi/core/services/ai'
+import { ResourceScope } from '@tnzi/core/enums'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
 import {

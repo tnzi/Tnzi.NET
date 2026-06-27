@@ -1,7 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*", "../ui/src/*"],
       "@tnzi/core": ["../core/src"],
@@ -25,6 +24,7 @@
     "src/styles/**/*",
     "src/index.ts",
     "src/shims-ui-ai.d.ts",
+    "src/env.d.ts",
     "src/pages/index.ts",
     "src/pages/identity/UserManagement.vue",
     "src/pages/identity/user-config.ts"

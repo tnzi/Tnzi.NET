@@ -1,5 +1,5 @@
 import { inject, type InjectionKey } from 'vue'
-import type { HttpClient } from '@tnzi/core/http/http'
+import type { HttpClient } from '@tnzi/core/http'
 
 /**
  * Injection key for the HttpClient that admin bridges consume.

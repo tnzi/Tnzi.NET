@@ -5,11 +5,6 @@ import { mount } from '@vue/test-utils'
 import { useAdminMenu } from '../../src/headless/useAdminMenu'
 import { usePermissionGuard } from '../../src/headless/usePermissionGuard'
 import {
-  provideMixMenuContext,
-  injectMixMenuContext,
-  useMixMenuContext,
-} from '../../src/headless/useMixMenuContext'
-import {
   provideTabContext,
   injectTabContext,
   useTabContext,
@@ -106,44 +101,6 @@ describe('usePermissionGuard', () => {
   })
 })
 
-describe('useMixMenuContext', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-  })
-
-  it('injects context provided by ancestor', async () => {
-    let injected: ReturnType<typeof useMixMenuContext> | null = null
-    const Child = defineComponent({
-      setup() {
-        injected = useMixMenuContext()
-        return () => h('div')
-      },
-    })
-    const Parent = defineComponent({
-      setup() {
-        provideMixMenuContext()
-        return () => h(Child)
-      },
-    })
-    const wrapper = mount(Parent)
-    await nextTick()
-    expect(injected).not.toBeNull()
-    expect(injected!.activeFirstLevelKey).toBeDefined()
-    expect(Array.isArray(injected!.secondLevelMenus.value)).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('throws when injected without provider', () => {
-    const Child = defineComponent({
-      setup() {
-        injectMixMenuContext()
-        return () => h('div')
-      },
-    })
-    expect(() => mount(Child)).toThrow(/provideMixMenuContext/)
-  })
-})
-
 describe('useTabContext', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -172,5 +129,5 @@ describe('useTabContext', () => {
   })
 })
 
-// Suppress unused import warning for injectTabContext — used for symmetry with injectMixMenuContext
+// Suppress unused import warning for injectTabContext — imported for API symmetry.
 void injectTabContext

@@ -3,7 +3,9 @@ namespace Tnzi.Chat.Services.Interfaces;
 public interface IChatContactService
 {
     /// <summary>
-    /// Search the user directory by keyword.
+    /// Search the user directory by keyword. A blank keyword returns the first page of the
+    /// directory (excluding self) so the "new chat" picker can show a starting contact list
+    /// without forcing the user to type first.
     /// </summary>
     /// <remarks>
     /// Intentional open-directory design (not an oversight): like Slack/Teams internal IM,
@@ -11,7 +13,7 @@ public interface IChatContactService
     /// Users who want to hide their availability set <c>Invisible</c>, which presence resolution
     /// surfaces as <c>Offline</c> to others. Do NOT add a restriction here.
     /// </remarks>
-    Task<Result<IReadOnlyList<ChatContactDto>>> SearchUsersAsync(string keyword);
+    Task<Result<IReadOnlyList<ChatContactDto>>> SearchUsersAsync(string? keyword);
 
     Task<IReadOnlyDictionary<Guid, ChatContactDto>> ResolveProfilesAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default);
 

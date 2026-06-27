@@ -32,8 +32,8 @@ export interface TenantRow {
 }
 
 export const tenantColumns: ColumnDef<TenantRow>[] = [
-  { key: 'name', title: 'columns.name', width: 200, fixed: 'left' },
-  { key: 'code', title: 'columns.code', width: 160 },
+  { key: 'name', title: 'columns.name', minWidth: 150 },
+  { key: 'code', title: 'columns.code', minWidth: 130 },
   {
     key: 'isEnabled',
     title: 'columns.isEnabled',
@@ -53,12 +53,11 @@ export const tenantColumns: ColumnDef<TenantRow>[] = [
     width: 160,
     render: (row) => h(TRelativeTime, { value: row.expiredAt }),
   },
-  { key: 'remark', title: 'columns.remark' },
+  { key: 'remark', title: 'columns.remark', minWidth: 160 },
   {
     key: 'creationTime',
     title: 'columns.creationTime',
-    width: 140,
-    fixed: 'right',
+    width: 150,
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },
 ]

@@ -37,7 +37,7 @@ function stateType(state?: string): 'success' | 'warning' | 'error' | 'info' | '
 }
 
 export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
-  { key: 'id', title: 'columns.id', width: 220, fixed: 'left' },
+  { key: 'id', title: 'columns.id', minWidth: 160 },
   {
     key: 'cron',
     title: 'columns.cron',
@@ -49,7 +49,7 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
         row.cron ?? '—',
       ),
   },
-  { key: 'queue', title: 'columns.queue', width: 100 },
+  { key: 'queue', title: 'columns.queue', minWidth: 100 },
   {
     key: 'lastJobState',
     title: 'columns.lastJobState',
@@ -79,7 +79,6 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
     key: 'removed',
     title: 'columns.removed',
     width: 110,
-    fixed: 'right',
     render: (row) =>
       h(TStatusBadge, {
         value: row.removed ?? false,

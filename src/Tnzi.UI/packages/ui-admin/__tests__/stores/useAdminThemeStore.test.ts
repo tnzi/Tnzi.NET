@@ -51,20 +51,29 @@ describe('useAdminThemeStore', () => {
     expect(store.pageTransition).toBe('slide-left')
   })
 
-  it('accepts all 6 layout modes including the 3 hybrid variants', () => {
+  it('accepts all 4 layout modes', () => {
     const store = useAdminThemeStore()
     const validModes = [
       'vertical',
       'horizontal',
       'vertical-mix',
-      'vertical-hybrid-header-first',
-      'top-hybrid-sidebar-first',
       'top-hybrid-header-first',
     ] as const
     for (const m of validModes) {
       store.setLayoutMode(m)
       expect(store.layoutMode).toBe(m)
     }
+  })
+
+  it('ignores the two removed hybrid layout modes', () => {
+    const store = useAdminThemeStore()
+    store.setLayoutMode('vertical')
+    // @ts-expect-error — removed modes are no longer part of AdminLayoutMode
+    store.setLayoutMode('vertical-hybrid-header-first')
+    expect(store.layoutMode).toBe('vertical')
+    // @ts-expect-error — removed modes are no longer part of AdminLayoutMode
+    store.setLayoutMode('top-hybrid-sidebar-first')
+    expect(store.layoutMode).toBe('vertical')
   })
 
   it('watermark defaults to disabled with sensible fallbacks', () => {

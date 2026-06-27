@@ -166,6 +166,14 @@ describe('adapters/dialog', () => {
     }
   }
 
+  beforeEach(() => {
+    // happy-dom 20 no longer ships window.confirm/alert/prompt stubs;
+    // define no-op placeholders so vi.spyOn has a function to attach to.
+    if (typeof window.confirm !== 'function') window.confirm = () => false
+    if (typeof window.alert !== 'function') window.alert = () => {}
+    if (typeof window.prompt !== 'function') window.prompt = () => null
+  })
+
   afterEach(() => {
     delete (window as any).$dialog
   })

@@ -1,15 +1,18 @@
 <script setup lang="ts">
 /**
- * `TLayoutModeCard` — soybean-parity preview card for one of the six
+ * `TLayoutModeCard` — soybean-parity preview card for one of the four
  * admin layout modes. Renders a 96x64 canvas with primary-tinted boxes
  * arranged to mimic each mode's chrome (sider/header/main combinations).
  *
  * Phase G rewrite: dropped the previous `geometry switch + content-line`
- * abstraction in favour of six explicit `v-if` blocks that mirror
- * soybean's `layout-mode.vue:18-60` template-by-template structure. The
- * old abstraction couldn't express which sider was the "primary tint"
- * vs the "drawer tint" vs the "menu rail tint", so all hybrid cards
- * looked identical.
+ * abstraction in favour of explicit `v-if` blocks that mirror soybean's
+ * `layout-mode.vue:18-60` template-by-template structure. The old
+ * abstraction couldn't express which sider was the "primary tint" vs the
+ * "drawer tint" vs the "menu rail tint", so all hybrid cards looked
+ * identical.
+ *
+ * 2026-06-26: dropped the `vertical-hybrid-header-first` and
+ * `top-hybrid-sidebar-first` cards along with their (buggy) layout modes.
  *
  * Reference: D:\Github\soybean-admin-main\src\layouts\modules\theme-drawer\
  *   modules\layout\modules\layout-mode.vue
@@ -61,17 +64,6 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
         </span>
       </span>
 
-      <!-- vertical-hybrid-header-first: 8px rail + 16px drawer + (primary header + main).
-           Distinguished from vertical-mix by the header being primary-tinted. -->
-      <span v-else-if="mode === 'vertical-hybrid-header-first'" class="t-layout-card__row">
-        <span class="t-layout-card__sider t-layout-card__sider--primary t-layout-card__sider--w8" />
-        <span class="t-layout-card__sider t-layout-card__sider--tertiary t-layout-card__sider--w16" />
-        <span class="t-layout-card__col">
-          <span class="t-layout-card__header t-layout-card__header--primary" />
-          <span class="t-layout-card__main" />
-        </span>
-      </span>
-
       <!-- horizontal: full-width primary header + main below (no sider) -->
       <span v-else-if="mode === 'horizontal'" class="t-layout-card__col">
         <span class="t-layout-card__header t-layout-card__header--primary" />
@@ -80,17 +72,9 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
         </span>
       </span>
 
-      <!-- top-hybrid-sidebar-first: tertiary header strip + (primary sider + main) -->
-      <span v-else-if="mode === 'top-hybrid-sidebar-first'" class="t-layout-card__col">
-        <span class="t-layout-card__header t-layout-card__header--tertiary" />
-        <span class="t-layout-card__row t-layout-card__row--grow">
-          <span class="t-layout-card__sider t-layout-card__sider--primary t-layout-card__sider--w18" />
-          <span class="t-layout-card__main" />
-        </span>
-      </span>
-
       <!-- top-hybrid-header-first: primary header + (default-tinted sider + main).
-           Distinguished from top-hybrid-sidebar-first by sider being plain. -->
+           The sider is plain (not primary-tinted) — it hosts the active
+           first-level's children. -->
       <span v-else-if="mode === 'top-hybrid-header-first'" class="t-layout-card__col">
         <span class="t-layout-card__header t-layout-card__header--primary" />
         <span class="t-layout-card__row t-layout-card__row--grow">
@@ -114,23 +98,24 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  width: 96px;
-  /* When dropped into an auto-sizing grid cell (`1fr`), centre the
-     fixed-96px card horizontally inside the cell so column gaps look
-     even rather than left-bunched. */
-  justify-self: center;
+  /* Fill the grid cell so 4 cards share the row evenly; the canvas caps
+     itself at the original 96px so it never grows past the soybean size. */
+  width: 100%;
+  min-width: 0;
   padding: 0;
   background: transparent;
   border: none;
   cursor: pointer;
 }
 
-/* Canvas is the 96x64 chrome preview. Soybean uses a ring (box-shadow)
-   for active/hover state — this avoids reflow on selection change. */
+/* Canvas is the chrome preview — keeps the 96x64 (3:2) proportions but
+   scales down to fit narrower cells (4-in-a-row). Soybean uses a ring
+   (box-shadow) for active/hover state — avoids reflow on selection. */
 .t-layout-card__canvas {
   display: flex;
-  width: 96px;
-  height: 64px;
+  width: 100%;
+  max-width: 96px;
+  aspect-ratio: 96 / 64;
   padding: 6px;
   gap: 6px;
   border-radius: 4px;
@@ -212,11 +197,13 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
 
 .t-layout-card__label {
   width: 100%;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.25;
   text-align: center;
   color: var(--tnzi-base-text, #4b5563);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Allow a 2-line wrap (e.g. "Vertical Mix" in a narrow 4-in-a-row cell)
+     and reserve the height so every card's canvas stays vertically aligned. */
+  min-height: calc(2 * 1.25em);
+  overflow-wrap: anywhere;
 }
 </style>

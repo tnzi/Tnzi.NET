@@ -24,6 +24,11 @@ export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
 // Layout primitives
 export { default as TPageHeader } from './layout/TPageHeader.vue'
 export { default as TContentPage } from './layout/TContentPage.vue'
+// Master-detail layout primitive — list/tree pane + detail pane with a
+// built-in responsive grid + fill-height chain + mobile stacking. Replaces the
+// hand-rolled `grid Npx 1fr` + @media 767 master-detail CSS in the built-in
+// Organizations / Permissions / RoleFunctions pages.
+export { default as TMasterDetailLayout } from './layout/TMasterDetailLayout.vue'
 export { default as TDarkModeContainer } from './layout/TDarkModeContainer.vue'
 
 // Data primitives — responsive table (auto card-stacking on phones) and the
@@ -34,12 +39,19 @@ export { default as TResponsiveTable } from './data/TResponsiveTable.vue'
 export type { TResponsiveTableProps, TResponsivePagination } from './data/TResponsiveTable.vue'
 export { default as TDataCardList } from './data/TDataCardList.vue'
 export type { CardColumn } from './data/TDataCardList.vue'
-// KPI primitives — unified stat card + responsive KPI strip (one per page,
+// KPI primitives — unified KPI card + responsive KPI strip (one per page,
 // rendered between the page header and the list/content per the content-page
 // standard). TEmpty is the unified empty-state visual used by the card
 // renderers and available to bespoke pages.
-export { default as TStatCard } from './data/TStatCard.vue'
-export type { TStatCardProps, TStatCardTone } from './data/TStatCard.vue'
+// TKpiCard was renamed from TStatCard in the 2026-06 audit to avoid colliding
+// with @tnzi/ui's globally-registered <TStatCard>; a deprecated TStatCard
+// alias is kept for back-compat.
+export { default as TKpiCard } from './data/TKpiCard.vue'
+export type { TKpiCardProps, TKpiCardTone } from './data/TKpiCard.vue'
+/** @deprecated use TKpiCard. */
+export { default as TStatCard } from './data/TKpiCard.vue'
+/** @deprecated use TKpiCardProps / TKpiCardTone. */
+export type { TKpiCardProps as TStatCardProps, TKpiCardTone as TStatCardTone } from './data/TKpiCard.vue'
 export { default as TKpiRow } from './data/TKpiRow.vue'
 export { default as TEmpty } from './data/TEmpty.vue'
 export type { TEmptyProps, TEmptySize } from './data/TEmpty.vue'

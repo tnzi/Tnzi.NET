@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import TStatCard from '../../../src/components/data/TStatCard.vue'
+import TKpiCard from '../../../src/components/data/TKpiCard.vue'
 
 function mountCard(props: Record<string, unknown>, slots: Record<string, unknown> = {}) {
-  return mount(TStatCard, {
+  return mount(TKpiCard, {
     props: { label: 'Label', value: 0, ...props },
     slots,
   })
 }
 
-describe('TStatCard', () => {
+describe('TKpiCard', () => {
   it('renders the label (12px muted, above) and a static numeric value when animated=false', () => {
     const w = mountCard({ label: 'Total Users', value: 42, animated: false })
     expect(w.find('.t-stat-card__label').text()).toBe('Total Users')

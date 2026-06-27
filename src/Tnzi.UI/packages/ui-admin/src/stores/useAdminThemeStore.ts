@@ -4,21 +4,26 @@ import { THEME_CONTEXT_KEY } from '@tnzi/ui'
 import 'pinia-plugin-persistedstate'
 
 /**
- * Admin layout modes — 6 variants modeled after soybean-admin.
+ * Admin layout modes — 4 variants modeled after soybean-admin.
  *
  * - `vertical`              — left sidebar (default)
  * - `horizontal`            — top menu only, no sidebar
  * - `vertical-mix`          — narrow first-level sidebar + sub-sidebar with children
- * - `vertical-hybrid-header-first` — top first-level menu + sidebar always shows children
- * - `top-hybrid-sidebar-first`     — top first-level menu + sidebar with children (sidebar always visible)
- * - `top-hybrid-header-first`      — top first-level menu + sidebar conditionally (only if active first-level has children)
+ * - `top-hybrid-header-first` — top first-level menu + sidebar with the active
+ *                               first-level's children (sider hides when it has none)
+ *
+ * The two header-first/sidebar-first hybrid variants soybean ships were
+ * dropped (2026-06-26): `vertical-hybrid-header-first` rendered an empty
+ * sider whenever the active first-level had no children (e.g. the Dashboard
+ * landing page), and `top-hybrid-sidebar-first` double-rendered the menu
+ * (full tree in the sider + second level in the header). Both are redundant
+ * under Tnzi's wide-but-shallow (11 top-level × 2 deep) menu — they only pay
+ * off with soybean's 3-level menus.
  */
 export type AdminLayoutMode =
   | 'vertical'
   | 'horizontal'
   | 'vertical-mix'
-  | 'vertical-hybrid-header-first'
-  | 'top-hybrid-sidebar-first'
   | 'top-hybrid-header-first'
 
 /**
@@ -71,8 +76,6 @@ const VALID_LAYOUT_MODES: AdminLayoutMode[] = [
   'vertical',
   'horizontal',
   'vertical-mix',
-  'vertical-hybrid-header-first',
-  'top-hybrid-sidebar-first',
   'top-hybrid-header-first',
 ]
 const VALID_TRANSITIONS: PageTransition[] = [
@@ -759,5 +762,17 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'contentBg',
       'containerBg',
     ],
+    // Migration: a user who persisted one of the two removed hybrid layout
+    // modes (vertical-hybrid-header-first / top-hybrid-sidebar-first) would
+    // hydrate into an unknown mode that renders neither a sider nor a top
+    // menu — i.e. no navigation at all. Coerce any stale/unknown persisted
+    // mode back to the default vertical layout. Hydration bypasses
+    // `setLayoutMode`, so this is the only place that can catch it.
+    afterHydrate: (ctx) => {
+      const store = ctx.store as unknown as { layoutMode: AdminLayoutMode }
+      if (!VALID_LAYOUT_MODES.includes(store.layoutMode)) {
+        store.layoutMode = 'vertical'
+      }
+    },
   },
 })

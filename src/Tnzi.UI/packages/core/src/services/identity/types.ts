@@ -479,6 +479,49 @@ export interface UpdateOrganizationBatchDto {
 // ============================================
 
 /**
+ * Public auth configuration returned by `GET /auth/config` (anonymous).
+ * Drives which login methods / register / recovery / third-party buttons the
+ * login page shows, per backend deployment config. Contains only boolean
+ * switches and the list of enabled OAuth providers — never any secret.
+ */
+export interface AuthConfigDto {
+  // Account identifiers accepted by password login
+  allowUserNameLogin: boolean;
+  allowEmailLogin: boolean;
+  allowSmsLogin: boolean;
+  useEmailAsUserName: boolean;
+  // Code login
+  enableCodeLogin: boolean;
+  codeLoginViaSms: boolean;
+  codeLoginViaEmail: boolean;
+  // Registration (quick register: account + code)
+  enableRegistration: boolean;
+  registerViaSms: boolean;
+  registerViaEmail: boolean;
+  // Password recovery
+  enablePasswordRecovery: boolean;
+  recoveryViaEmail: boolean;
+  recoveryViaSms: boolean;
+  // Image captcha
+  enableCaptchaOnLogin: boolean;
+  enableCaptchaOnRegister: boolean;
+  // Third-party (only enabled providers are listed).
+  // NOTE: camelCase of C# `OAuthProviders` is `oAuthProviders` (only the first
+  // letter is lowered), not `oauthProviders`.
+  oAuthProviders: OAuthProviderInfoDto[];
+}
+
+/**
+ * An enabled third-party login provider (public, no secrets).
+ */
+export interface OAuthProviderInfoDto {
+  /** Provider key (lowercase, used to build `/auth/oauth/{provider}/login`). */
+  provider: string;
+  /** Display name (e.g. "GitHub"). */
+  displayName: string;
+}
+
+/**
  * Login request
  */
 export interface LoginDto {

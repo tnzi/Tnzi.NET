@@ -62,7 +62,7 @@ public class FrameworkPermissions : IPermissionDefinitionProvider
         //    which the admin sidebar groups under System) ─────────────────────
         context.AddGroup("system", "System");
         context.AddPermission("system.view", "View System", parentName: "system");
-        context.AddPermission("workbench.view", "View Workbench", parentName: "system");
+        context.AddPermission("dashboard.view", "View Dashboard", parentName: "system");
         context.AddPermission("feature.view", "View Feature Flags", parentName: "system");
         context.AddPermission("system.menu.view", "View Menus", parentName: "system");
         context.AddPermission("system.parameter.view", "View Parameters", parentName: "system");
@@ -100,7 +100,6 @@ public class FrameworkPermissions : IPermissionDefinitionProvider
         context.AddGroup("chat", "Chat");
         context.AddPermission("chat.view", "View Chat", parentName: "chat");
         context.AddPermission("chat.session.view", "View Chat Sessions", parentName: "chat");
-        context.AddPermission("chat.message.view", "View Chat Messages", parentName: "chat");
 
         // ── Payment ─────────────────────────────────────────────────────────
         context.AddGroup("payment", "Payment");

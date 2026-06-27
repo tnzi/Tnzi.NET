@@ -5,6 +5,20 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
   title: string
   visible?: boolean
   width?: number
+  /**
+   * Minimum column width (px). Unlike `width` (a fixed size), `minWidth`
+   * makes the column ELASTIC: it grows to fill the available horizontal
+   * space and only shrinks down to this floor. The table therefore fills
+   * its container (no right-hand gap) and a horizontal scrollbar appears
+   * only when the sum of every column's minimum width genuinely exceeds the
+   * container — not on every wide-ish or empty table the way a fixed-`width`
+   * sum did. Prefer `minWidth` for text columns (name, email, description);
+   * keep `width` for fixed-content columns (status badges, dates, icons,
+   * numbers, the operation column). Forwarded to NDataTable's column
+   * `minWidth`. If both `width` and `minWidth` are set, `width` wins (naive
+   * treats the column as fixed).
+   */
+  minWidth?: number
   fixed?: 'left' | 'right'
   /** Horizontal cell alignment. Forwarded to NDataTable's column `align`. */
   align?: 'left' | 'center' | 'right'

@@ -40,24 +40,24 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     path: '/admin',
     name: 'admin-root',
     component: AdminShellRoot,
-    redirect: '/admin/workbench',
+    redirect: '/admin/dashboard',
     meta: { requiresAuth: true, title: 'Admin' },
     children: [
-      // ── Workbench (default landing page) ─────────────────────
+      // ── Dashboard (default landing page) ─────────────────────
       // Default `meta.order` values on top-level modules (step 10 leaves
-      // room for consumer-injected entries). Workbench sits at 0 so it
+      // room for consumer-injected entries). Dashboard sits at 0 so it
       // always lands first; consumer modules registered via `addModules`
-      // with `meta.order` in 1..99 slot between Workbench and Identity,
+      // with `meta.order` in 1..99 slot between Dashboard and Identity,
       // and 200+ for after the last framework module — no consumer
       // mutation required. Override per-route via
-      // `defineAdminApp({ routeOrders: { 'workbench': 5 } })`.
+      // `defineAdminApp({ routeOrders: { 'dashboard': 5 } })`.
       {
-        path: 'workbench',
-        name: 'workbench',
-        component: () => import('../pages/dashboard/Workbench.vue'),
+        path: 'dashboard',
+        name: 'dashboard',
+        component: () => import('../pages/dashboard/Dashboard.vue'),
         meta: {
-          title: 'tnzi.admin.modules.workbench.title',
-          permission: 'workbench.view',
+          title: 'tnzi.admin.modules.dashboard.title',
+          permission: 'dashboard.view',
           keepAlive: true,
           fixedIndexInTab: 0,
           order: 0,
@@ -410,16 +410,6 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
           {
-            path: 'references',
-            name: 'storage.references',
-            component: () => import('../pages/storage/References.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.storage.references.title',
-              permission: 'storage.file.view',
-              keepAlive: true,
-            },
-          },
-          {
             path: 'maintenance',
             name: 'storage.maintenance',
             component: () => import('../pages/storage/Maintenance.vue'),
@@ -507,12 +497,21 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
         meta: { title: 'tnzi.admin.modules.chat.label', permission: 'chat.view', order: 140 },
         children: [
           {
-            path: 'broadcast',
-            name: 'chat.broadcast',
-            component: () => import('../pages/chat/Broadcast.vue'),
+            path: 'overview',
+            name: 'chat.overview',
+            component: () => import('../pages/chat/Overview.vue'),
             meta: {
-              title: 'tnzi.admin.modules.chat.broadcast.title',
-              permission: 'chat.broadcast',
+              title: 'tnzi.admin.modules.chat.overview.title',
+              permission: 'chat.view',
+            },
+          },
+          {
+            path: 'conversations',
+            name: 'chat.conversations',
+            component: () => import('../pages/chat/Conversations.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.chat.conversations.title',
+              permission: 'chat.session.view',
             },
           },
         ],

@@ -27,7 +27,7 @@
       <!-- KPI strip — getUsageStats; between the page header and the grid. -->
       <template #kpis>
         <TKpiRow class="ai-skills-kpis">
-          <TStatCard
+          <TKpiCard
             v-for="kpi in kpiCards"
             :key="kpi.key"
             class="ai-skills-kpi"
@@ -283,7 +283,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
-import TStatCard from '../../../components/data/TStatCard.vue'
+import TKpiCard from '../../../components/data/TKpiCard.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'

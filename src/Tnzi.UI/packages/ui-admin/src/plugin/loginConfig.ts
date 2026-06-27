@@ -34,6 +34,7 @@ import type {
   LoginCallbacks,
   LoginDemoAccount,
   LoginThirdPartyProvider,
+  PartialLoginFeatures,
 } from '../pages/login/useLoginContext'
 
 export interface AdminLoginConfig {
@@ -47,6 +48,13 @@ export interface AdminLoginConfig {
   layout?: 'wave' | 'split'
   /** Brand title shown next to the logo. */
   brand?: string
+  /**
+   * Secondary line shown under the brand title in the admin sidebar header
+   * (brand name on top, this muted sub-line below). Omit for a single-line
+   * brand. Not rendered on the login page (which uses `tagline` instead) nor
+   * in collapsed / vertical-mix sidebars (icon-only there).
+   */
+  brandSubtitle?: string
   /** Iconify icon name for the brand logo. */
   brandIcon?: string
   /** Pixel size of the brand logo. */
@@ -65,10 +73,33 @@ export interface AdminLoginConfig {
   copyright?: string
   /**
    * Third-party sign-in providers rendered by the password module as round
-   * icon buttons under an "Or continue with" divider. Empty/omitted hides
-   * the section — the shell ships no OAuth flow of its own.
+   * icon buttons under an "Or continue with" divider. When omitted, the page
+   * auto-renders the OAuth providers the backend reports as enabled (from
+   * `GET /auth/config`); pass an explicit array to override that entirely.
    */
   thirdParty?: LoginThirdPartyProvider[]
+  /**
+   * Feature overrides for which login methods / entries the page shows and
+   * which identifiers the account field accepts. Merged on top of the backend
+   * `GET /auth/config` (consumer wins). Omit to use the backend config as-is.
+   */
+  features?: PartialLoginFeatures
+  /**
+   * Whether to fetch `GET /auth/config` on mount to drive feature visibility +
+   * auto-rendered third-party buttons per the backend deployment. Defaults to
+   * **true**. Set false for a fully static, consumer-configured page.
+   */
+  loadConfigFromServer?: boolean
+  /**
+   * Replace the split-layout left panel (brand / animation area) entirely.
+   * Renders in place of the built-in `LoginBrandPanel`. Split layout only.
+   */
+  asideComponent?: Component
+  /**
+   * Replace the entire right-hand content area (heading + login modules). The
+   * consumer takes over rendering the form. Split layout only.
+   */
+  contentComponent?: Component
   /**
    * Consumer-rendered QR sign-in panel (fetches + polls its own QR token).
    * When provided, a corner-fold toggle appears on the pwd-login /

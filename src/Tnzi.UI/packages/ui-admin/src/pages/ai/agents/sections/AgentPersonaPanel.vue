@@ -206,7 +206,7 @@ import { translatePageKey } from '../../../_shared/translate'
 import { createAiBridge } from '../../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../../plugin/client'
 import { useAdminAuthStore } from '../../../../stores/useAdminAuthStore'
-import { ResourceScope } from '@tnzi/core/services/ai'
+import { ResourceScope } from '@tnzi/core/enums'
 import type { AgentPersonaDto, AgentVersionDto } from '@tnzi/core/services/ai'
 
 interface Props {

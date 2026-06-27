@@ -427,3 +427,32 @@ body *::-webkit-scrollbar-thumb:active {
 .n-button.n-button.n-button--disabled {
   background-color: var(--n-color-disabled);
 }
+
+/* ===== Naive UI image-preview toolbar icon restoration (UnoCSS preflight) =====
+ *
+ * The lightbox toolbar renders each control as
+ *   `<i class="n-base-icon"><svg viewBox="0 0 20 20">…`
+ * Naive sizes the icon box to 1em (28px) and the SVG to `width/height: 1em`.
+ * But the global svg reset leaves `min-width: 0` on the SVG, so its *used*
+ * width collapses to the glyph's min-content (~12px) — the icons end up the
+ * right height but visibly thin/squished. Restoring `min-width: 1em` pins the
+ * SVG back to its intended square 28×28 box. Scoped to the preview toolbar so
+ * no other naive icon is affected. */
+.n-image-preview-toolbar .n-base-icon svg {
+  width: 1em;
+  height: 1em;
+  min-width: 1em;
+}
+
+/* More breathing room between the toolbar controls (naive packs them tight). */
+.n-image-preview-toolbar {
+  gap: 8px;
+  padding: 0 16px;
+}
+
+/* Darker preview backdrop — naive's default 30% black is too light, so a small
+   image floats ambiguously over the page (no clear front/back separation). A
+   stronger scrim makes any preview, large or small, read as a distinct layer. */
+.n-image-preview-overlay {
+  background-color: rgba(0, 0, 0, 0.7);
+}

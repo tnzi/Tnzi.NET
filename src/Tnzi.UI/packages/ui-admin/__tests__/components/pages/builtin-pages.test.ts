@@ -9,6 +9,7 @@ import PwdLogin from '../../../src/pages/login/modules/PwdLogin.vue'
 import { reactive } from 'vue'
 import {
   LOGIN_CONTEXT_KEY,
+  DEFAULT_LOGIN_FEATURES,
   type LoginContext,
 } from '../../../src/pages/login/useLoginContext'
 
@@ -223,6 +224,7 @@ describe('TLoginPage', () => {
       scene: reactive({ typing: false, passwordVisible: false, passwordLength: 0 }),
       pendingTwoFactor: ref(null),
       helpers: { setTwoFactorRequired: () => undefined, clearTwoFactor: () => undefined },
+      features: DEFAULT_LOGIN_FEATURES,
       ...overrides,
     }
   }
@@ -270,6 +272,32 @@ describe('TLoginPage', () => {
     await wrapper.find('.t-pwd-login__eye-toggle').trigger('click')
     expect(ctx.scene.passwordVisible).toBe(true)
     expect((pwdInput.element as HTMLInputElement).type).toBe('text')
+  })
+
+  it('PwdLogin shows enabled+wired entries, hides backend-disabled register', () => {
+    const ctx = makeLoginContext({
+      callbacks: { codeLogin: vi.fn(), register: vi.fn(), resetPwd: vi.fn() },
+      features: { ...DEFAULT_LOGIN_FEATURES, register: false },
+    })
+    const wrapper = mount(PwdLogin, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels).toContain('Code login')
+    expect(labels).toContain('Forgot password?')
+    expect(labels).not.toContain('Register') // disabled by backend features
+  })
+
+  it('PwdLogin hides secondary entries when the consumer did not wire the callback', () => {
+    // All backend-enabled (default features) but no callbacks → double-gated off.
+    const ctx = makeLoginContext({ callbacks: {}, features: DEFAULT_LOGIN_FEATURES })
+    const wrapper = mount(PwdLogin, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels).not.toContain('Code login')
+    expect(labels).not.toContain('Register')
+    expect(labels).not.toContain('Forgot password?')
   })
 })
 

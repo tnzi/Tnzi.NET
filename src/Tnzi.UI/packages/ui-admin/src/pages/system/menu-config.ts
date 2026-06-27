@@ -50,7 +50,7 @@ function menuTypeBadgeType(v?: number): 'info' | 'success' | 'warning' | 'defaul
 }
 
 export const menuColumns: ColumnDef<MenuRow>[] = [
-  { key: 'name', title: 'columns.name', width: 220, fixed: 'left' },
+  { key: 'name', title: 'columns.name', minWidth: 150 },
   {
     key: 'icon',
     title: 'columns.icon',
@@ -62,8 +62,8 @@ export const menuColumns: ColumnDef<MenuRow>[] = [
           ])
         : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—'),
   },
-  { key: 'path', title: 'columns.path', width: 220 },
-  { key: 'permission', title: 'columns.permission', width: 180 },
+  { key: 'path', title: 'columns.path', minWidth: 160 },
+  { key: 'permission', title: 'columns.permission', minWidth: 150 },
   {
     key: 'type',
     title: 'columns.type',
@@ -80,7 +80,6 @@ export const menuColumns: ColumnDef<MenuRow>[] = [
     key: 'isHidden',
     title: 'columns.isHidden',
     width: 110,
-    fixed: 'right',
     render: (row) =>
       h(TStatusBadge, {
         value: row.isHidden ?? false,
@@ -106,10 +105,14 @@ export const menuFormSchema: FormSchemaItem[] = [
       { label: 'Button', value: 2 },
     ],
   },
-  { key: 'parentId', labelKey: 'form.parentId', label: 'Parent', type: 'text' },
+  // `menu-parent` is a page-supplied custom field renderer (filterable +
+  // clearable parent-menu picker built from the runtime menu tree) — see
+  // Menus.vue `fieldRenderers`. Falls back to a read-only value if unrendered.
+  { key: 'parentId', labelKey: 'form.parentId', label: 'Parent', type: 'menu-parent' },
   { key: 'path', labelKey: 'form.path', label: 'Path', type: 'text' },
   { key: 'component', labelKey: 'form.component', label: 'Component', type: 'text' },
-  { key: 'icon', labelKey: 'form.icon', label: 'Icon', type: 'text' },
+  // `icon` renders the shared TIconPicker via the admin form-schema renderer.
+  { key: 'icon', labelKey: 'form.icon', label: 'Icon', type: 'icon' },
   { key: 'permission', labelKey: 'form.permission', label: 'Permission Code', type: 'text' },
   { key: 'sortOrder', labelKey: 'form.sortOrder', label: 'Sort', type: 'number', min: 0 },
   { key: 'isHidden', labelKey: 'form.isHidden', label: 'Hidden', type: 'switch' },

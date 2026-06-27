@@ -1,3 +1,15 @@
 packages:
   - 'packages/*'
   - 'packages/*/playground'
+
+# Shared runtime/UI deps versioned in one place (pnpm catalog).
+# Packages reference these via "catalog:" in dependencies/devDependencies.
+# peerDependencies keep their own hand-written (looser) ranges on purpose.
+catalog:
+  vue: ^3.5.38
+  vue-router: ^5.1.0
+  pinia: ^3.0.4
+  naive-ui: ^2.44.1
+  echarts: ^6.1.0
+  '@vueuse/core': ^14.3.0
+  '@iconify/vue': ^5.0.1

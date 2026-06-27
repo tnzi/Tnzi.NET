@@ -9,9 +9,9 @@
     :title-help-title="t('banner.title')"
   >
     <!-- Batch approve / deny only surface once at least one row is
-         selected. TBatchActions inside TCrudPage already gates render on
-         `state.hasSelection.value`, so this slot stays hidden in the
-         default empty state and the always-on toolbar stops competing
+         selected. TListShell's batch bar inside TCrudPage already gates
+         render on `state.hasSelection.value`, so this slot stays hidden in
+         the default empty state and the always-on toolbar stops competing
          with the data table for attention. -->
     <template #batchActions="{ selectedIds }">
       <NPopconfirm @positive-click="handleApprove(selectedIds as string[])">

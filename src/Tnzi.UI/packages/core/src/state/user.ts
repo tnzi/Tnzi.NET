@@ -41,7 +41,6 @@ const MAX_FAVORITES = 50;
 // Debounce utility
 // ============================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): (...args: Parameters<T>) => void {
   let timerId: ReturnType<typeof setTimeout> | null = null;
   return (...args: Parameters<T>) => {

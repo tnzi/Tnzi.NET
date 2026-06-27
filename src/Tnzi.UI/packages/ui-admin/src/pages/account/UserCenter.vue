@@ -443,13 +443,12 @@ import {
   NTag,
 } from 'naive-ui'
 import { TSvgIcon, TImageUpload } from '@tnzi/ui'
-import { useStorageApi } from '@tnzi/core/services/storage'
+import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import TDetailLayout from '../../components/detail/TDetailLayout.vue'
 import type { DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { deviceIconColor, parseDeviceInfo } from '../_shared/device-info'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
-import { unwrapResult } from '../../services/_mappers'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { resolveAvatarUrl } from '../../utils/resolveAvatarUrl'
@@ -466,7 +465,9 @@ import type {
 
 const client = useAdminClient()
 const bridge = createIdentityBridge({ client })
-const storageApi = useStorageApi(client)
+const storageBridge = createStorageBridge({ client })
+// Avatar rendering only needs the (synchronous) preview-URL builder.
+const avatarStorage = { getPreviewUrl: storageBridge.files.previewUrl }
 const message = useSafeMessage()
 const router = useRouter()
 const authStore = useAdminAuthStore()
@@ -629,7 +630,7 @@ const avatarInitials = computed(() => {
 // drops back to the name initial; the broken flag resets whenever the resolved
 // URL changes (a fresh upload should get a fresh chance to load).
 const resolvedAvatarUrl = computed<string | null>(
-  () => resolveAvatarUrl(detail.value, storageApi) ?? resolveAvatarUrl(profile.value, storageApi),
+  () => resolveAvatarUrl(detail.value, avatarStorage) ?? resolveAvatarUrl(profile.value, avatarStorage),
 )
 const headerAvatarBroken = ref(false)
 watch(resolvedAvatarUrl, () => { headerAvatarBroken.value = false })
@@ -655,12 +656,11 @@ async function handleAvatarUpload(file: File | Blob): Promise<{ id?: string; url
     // wrap it with a sensible filename when needed.
     const toUpload =
       file instanceof File ? file : new File([file], 'avatar.png', { type: file.type || 'image/png' })
-    // `storageApi.upload` resolves to the raw `ApiResult<FileUploadResultDto>`
-    // envelope (unlike bridge methods, which pre-unwrap) — peel it here.
-    const uploaded = unwrapResult(await storageApi.upload(toUpload))
+    // The storage bridge pre-unwraps the ApiResult envelope → FileUploadResultDto.
+    const uploaded = await storageBridge.files.upload(toUpload)
     const id = uploaded?.id
     if (!id) throw new Error(t('profile.avatarUploadFailed'))
-    const url = storageApi.getPreviewUrl(id)
+    const url = storageBridge.files.previewUrl(id)
 
     // Persist the new avatar id. CRITICAL: the backend detail update is
     // REPLACE-semantics (Mapster maps every field, nulls included), so a

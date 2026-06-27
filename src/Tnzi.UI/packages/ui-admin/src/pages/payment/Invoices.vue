@@ -157,14 +157,14 @@ const tableColumns: ColumnDef[] = [
   {
     key: 'invoiceNo',
     title: t('cols.invoiceNo'),
-    width: 180,
+    minWidth: 140,
     render: (row) => {
       const r = row as unknown as InvoiceDto
       return h('code', { class: 'tnzi-mono text-12px' }, r.invoiceNo)
     },
   },
-  { key: 'customerName', title: t('cols.customer'), ellipsis: { tooltip: true } },
-  { key: 'customerEmail', title: t('cols.customerEmail'), width: 220, ellipsis: { tooltip: true } },
+  { key: 'customerName', title: t('cols.customer'), minWidth: 140, ellipsis: { tooltip: true } },
+  { key: 'customerEmail', title: t('cols.customerEmail'), minWidth: 170, ellipsis: { tooltip: true } },
   {
     key: 'amount',
     title: t('cols.amount'),

@@ -1,5 +1,12 @@
 <template>
-  <NPopover trigger="click" :show="popoverVisible" @update:show="onUpdateShow">
+  <NPopover
+    trigger="click"
+    :show="popoverVisible"
+    :z-index="POPOVER_Z"
+    placement="left-start"
+    :flip="true"
+    @update:show="onUpdateShow"
+  >
     <template #trigger>
       <slot>
         <TChatAvatar :name="name" :file-id="avatarFileId" :seed="userId" :size="36" />
@@ -30,6 +37,22 @@
           </div>
         </div>
 
+        <!-- Contact info (shown only when the field carries a value) -->
+        <div v-if="profile.bio || profile.email || profile.phone" class="t-member-popover__info">
+          <div v-if="profile.bio" class="t-member-popover__info-row">
+            <Icon icon="mdi:card-text-outline" :width="14" class="t-member-popover__info-icon" />
+            <span class="t-member-popover__info-text">{{ profile.bio }}</span>
+          </div>
+          <div v-if="profile.email" class="t-member-popover__info-row">
+            <Icon icon="mdi:email-outline" :width="14" class="t-member-popover__info-icon" />
+            <span class="t-member-popover__info-text">{{ profile.email }}</span>
+          </div>
+          <div v-if="profile.phone" class="t-member-popover__info-row">
+            <Icon icon="mdi:phone-outline" :width="14" class="t-member-popover__info-icon" />
+            <span class="t-member-popover__info-text">{{ profile.phone }}</span>
+          </div>
+        </div>
+
         <!-- Last seen (offline only) -->
         <div v-if="isOffline(profile.status) && profile.lastSeenAt" class="t-member-popover__last-seen">
           {{ t('window.lastSeen') }}: {{ formatDateTime(profile.lastSeenAt) }}
@@ -50,12 +73,19 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { NPopover, NButton, NSpin } from 'naive-ui'
+import { Icon } from '@iconify/vue'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
 import type { ChatContactProfileDto } from '@tnzi/core/services/chat'
 import { formatDateTime } from '@tnzi/core'
 import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
+
+// Popover must clear the chat NModal — give it a z-index above it. It also opens
+// to the LEFT (into the message area, like WeChat) rather than the default "top":
+// the member grid sits in the narrow right-side info panel, so a top-row avatar's
+// "top" popover would extend above the window and get clipped by the viewport.
+const POPOVER_Z = 3000
 
 const props = defineProps<{
   userId: string
@@ -176,6 +206,34 @@ function isOffline(status: UserPresenceStatus): boolean {
 .t-member-popover__last-seen {
   font-size: 11px;
   color: var(--chat-text-muted, var(--tnzi-base-text-muted, #888));
+}
+
+.t-member-popover__info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+  border-top: 1px solid var(--chat-border, rgb(51 54 57 / 0.08));
+}
+
+.t-member-popover__info-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--chat-text-2, var(--tnzi-base-text-muted, #6f6f6f));
+}
+
+.t-member-popover__info-icon {
+  flex-shrink: 0;
+  color: var(--chat-text-3, #a8a8a8);
+}
+
+.t-member-popover__info-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .t-member-popover__actions {

@@ -75,9 +75,8 @@ describe('TConversationInfoPanel', () => {
     const renameSpy = vi.spyOn(store, 'renameGroup')
     await (wrapper.vm as unknown as { loadDetail: () => Promise<void> }).loadDetail()
     await wrapper.vm.$nextTick()
-    const vm = wrapper.vm as unknown as { editTitle: string; onRename: () => Promise<void> }
-    vm.editTitle = 'New Name'
-    await vm.onRename()
+    // TInfoField emits the new value; onRename takes it as an argument.
+    await (wrapper.vm as unknown as { onRename: (v: string) => Promise<void> }).onRename('New Name')
     expect(renameSpy).toHaveBeenCalledWith('g1', 'New Name')
   })
 
@@ -103,20 +102,23 @@ describe('TConversationInfoPanel', () => {
     expect(wrapper.emitted('update:show')?.[0]).toEqual([false])
   })
 
-  it('addMembers filters out existing members from candidates', async () => {
-    const { store, wrapper } = mountPanel(makeBridge(true))
+  it('add members: opens the picker dialog excluding existing members', async () => {
+    const { wrapper } = mountPanel(makeBridge(true))
     await (wrapper.vm as unknown as { loadDetail: () => Promise<void> }).loadDetail()
     await wrapper.vm.$nextTick()
     const vm = wrapper.vm as unknown as {
-      addCandidates: { userId: string; name: string }[]
+      openAddMembers: () => void
+      pickerOpen: boolean
+      pickerMode: string
+      pickerExcludeIds: string[]
     }
-    const results = await store.searchContacts('Carol')
-    const detail = (wrapper.vm as unknown as { detail: { members: { userId: string }[] } | null }).detail
-    const existingIds = new Set(detail?.members.map((m) => m.userId) ?? [])
-    vm.addCandidates = results.filter((c) => !existingIds.has(c.userId))
+    vm.openAddMembers()
     await wrapper.vm.$nextTick()
-    // Carol (u3) is not an existing member, so she should appear.
-    expect(vm.addCandidates.some((c) => c.userId === 'u3')).toBe(true)
+    expect(vm.pickerOpen).toBe(true)
+    expect(vm.pickerMode).toBe('add')
+    // Existing members are excluded from the candidate list by the dialog.
+    expect(vm.pickerExcludeIds).toContain('me')
+    expect(vm.pickerExcludeIds).toContain('other')
   })
 
   it('clearHistory called, reloads detail and emits changed', async () => {

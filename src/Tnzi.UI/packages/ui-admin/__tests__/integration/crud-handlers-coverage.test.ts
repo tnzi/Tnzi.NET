@@ -76,7 +76,22 @@ vi.mock('../../src/services/bridges/payment-bridge', () => ({
   createPaymentBridge: () => ({ orders: mkCrud(), refunds: mkCrud(), subscriptions: mkCrud(), invoices: mkCrud() }),
 }))
 vi.mock('../../src/services/bridges/chat-bridge', () => ({
-  createChatBridge: () => ({ broadcast: vi.fn(async () => 1) }),
+  createChatBridge: () => ({
+    broadcast: vi.fn(async () => 1),
+    statistics: vi.fn(async () => ({
+      totalConversations: 0, directConversations: 0, groupConversations: 0, systemConversations: 0,
+      totalMessages: 0, messagesToday: 0, activeMembers: 0, onlineUsers: 0,
+    })),
+    conversations: {
+      fetch: vi.fn(async () => pagedOne('c1')),
+      detail: vi.fn(async () => ({ id: 'c1', members: [] })),
+      messages: vi.fn(async () => ({ messages: [], hasMore: false })),
+      delete: vi.fn(async () => undefined),
+    },
+    deleteMessage: vi.fn(async () => undefined),
+    presence: vi.fn(async () => ({ total: 0, online: 0, away: 0, busy: 0, offline: 0, users: [] })),
+    broadcasts: vi.fn(async () => pagedOne('b1')),
+  }),
 }))
 vi.mock('../../src/services/bridges/notification-bridge', () => ({
   createNotificationBridge: () => ({ messages: mkCrud(), templates: mkCrud(), subscriptions: mkCrud() }),
@@ -102,7 +117,24 @@ vi.mock('../../src/services/bridges/authorization-bridge', () => ({
 }))
 vi.mock('../../src/services/bridges/storage-bridge', () => ({
   createStorageBridge: () => ({
-    records: mkCrud(), chunks: mkCrud(), versions: mkCrud(), files: mkCrud(),
+    records: mkCrud(), chunks: mkCrud(), versions: mkCrud(),
+    files: {
+      ...mkCrud(),
+      downloadUrl: vi.fn(() => '/api/files/x/download'),
+      previewUrl: vi.fn(() => '/api/files/x/preview'),
+      upload: vi.fn(async () => ({ id: 'f-new', url: '/files/f-new' })),
+      moveTo: vi.fn(async () => undefined),
+      initUpload: vi.fn(async () => ({ uploadId: 'u1' })),
+      uploadChunk: vi.fn(async () => undefined),
+      completeUpload: vi.fn(async () => ({ url: '/files/f-new' })),
+    },
+    folders: {
+      getTree: vi.fn(async () => []), getById: vi.fn(), create: vi.fn(),
+      update: vi.fn(), delete: vi.fn(async () => undefined), move: vi.fn(async () => undefined),
+    },
+    preview: { canPreview: vi.fn(async () => true), url: vi.fn(async () => '/api/files/x/preview') },
+    tags: { set: vi.fn(async () => ({})), byTag: vi.fn() },
+    metadata: { get: vi.fn(async () => ({})), set: vi.fn(async () => ({})) },
     shares: { ...mkCrud(), byFile: vi.fn(async () => []), batchRevoke: vi.fn(async () => 1) },
   }),
 }))
@@ -157,6 +189,7 @@ import Files from '../../src/pages/storage/Files.vue'
 import Chunks from '../../src/pages/storage/Chunks.vue'
 import Versions from '../../src/pages/storage/Versions.vue'
 import Shares from '../../src/pages/storage/Shares.vue'
+import ChatConversations from '../../src/pages/chat/Conversations.vue'
 
 const stubs = {
   DataTable: { props: ['data', 'rowKey'], template: '<div class="dt" />' },
@@ -270,6 +303,8 @@ const PAGES: Array<[string, any]> = [
   ['FunctionModules', FunctionModules], ['EntityRoles', EntityRoles],
   ['RoleFunctions', RoleFunctions], ['Permissions', Permissions],
   ['Files', Files], ['Chunks', Chunks], ['Versions', Versions],
+  // Chat
+  ['ChatConversations', ChatConversations],
 ]
 
 describe('CRUD handlers coverage booster', () => {

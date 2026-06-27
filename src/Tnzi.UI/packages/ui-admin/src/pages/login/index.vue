@@ -5,23 +5,36 @@
  * `src/views/_builtin/login/index.vue`.
  *
  * Responsibilities:
- *   - Read `route.params.module` (defaults to `'pwd-login'`).
- *   - Validate against the known module set; fall back to `'pwd-login'` on any
- *     unrecognised value so deep-links can't break the page.
- *   - Inject `useAdminLoginConfig()` (Phase I.7.2+) and forward
- *     callbacks / brand / demoAccounts to `TLoginPage`.
- *   - Wire `toggleLoginModule` to `router.replace({ path: '/login/' + name })`
- *     so URL stays canonical for refreshes and browser back/forward.
+ *   - Resolve the active module from `route.params.module`, falling back to the
+ *     first reachable module when an unknown/disabled module is deep-linked.
+ *   - Inject `useAdminLoginConfig()` and forward callbacks / brand / etc.
+ *   - Fetch `GET /auth/config` (unless `loadConfigFromServer === false`) and
+ *     map it to login features, merged with the consumer's `features` override
+ *     (consumer wins). On fetch failure the merged defaults (everything on)
+ *     keep the page behaving as before this landed.
+ *   - Auto-render the backend's enabled OAuth providers as third-party buttons
+ *     unless the consumer supplied its own `thirdParty` array (an explicit `[]`
+ *     force-hides them).
+ *   - Wire `toggleLoginModule` to `router.replace({ path: '/login/' + name })`.
  *
  * Consumers configure the page via `defineAdminApp({ login: { … } })`. To
  * fully replace the route component, pass `loginComponent` to `defineAdminApp`.
  */
-import { computed } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthApi } from '@tnzi/core/services/identity'
 import TLoginPage from '../../components/pages/TLoginPage.vue'
+import { useAdminClient } from '../../plugin/client'
 import { useAdminLoginConfig } from '../../plugin/loginConfig'
+import { buildOAuthProviders } from '../../headless/oauthProviders'
+import { mapAuthConfig, mergeFeatures, isModuleAvailable, firstReachableModule } from '../../headless/loginFeatures'
 import { humanise, translatePageKey } from '../_shared/translate'
-import { type LoginModule } from './useLoginContext'
+import {
+  DEFAULT_LOGIN_FEATURES,
+  type LoginModule,
+  type LoginFeatures,
+  type LoginThirdPartyProvider,
+} from './useLoginContext'
 import PwdLogin from './modules/PwdLogin.vue'
 import CodeLogin from './modules/CodeLogin.vue'
 import Register from './modules/Register.vue'
@@ -52,14 +65,31 @@ const moduleComponents = {
 const route = useRoute()
 const router = useRouter()
 const config = useAdminLoginConfig()
+// Optional — isolated mounts / tests may have no client; the config fetch and
+// OAuth auto-render are simply skipped in that case.
+const client = useAdminClient(false)
+
+// ---- Feature flags ----------------------------------------------------------
+// Backend `GET /auth/config` mapped to login features, then merged with the
+// consumer's `features` override (consumer wins). A reactive object so the
+// async fetch updates the modules in place; the everything-on defaults keep
+// the page usable until the fetch resolves (or if it fails / opted out).
+const features = reactive<LoginFeatures>(mergeFeatures(DEFAULT_LOGIN_FEATURES, config.features))
 
 const activeModule = computed<LoginModule>(() => {
   const raw = route.params.module
   const value = Array.isArray(raw) ? raw[0] : raw
-  if (typeof value === 'string' && (KNOWN_MODULES as readonly string[]).includes(value)) {
-    return value as LoginModule
+  const requested =
+    typeof value === 'string' && (KNOWN_MODULES as readonly string[]).includes(value)
+      ? (value as LoginModule)
+      : 'pwd-login'
+  // Guard feature-gated modules reached by direct URL when the backend disabled
+  // them (or the consumer never wired the callback): redirect to the first
+  // reachable module so a disabled method can't be used via a deep link.
+  if (!isModuleAvailable(requested, features, config.callbacks ?? {})) {
+    return firstReachableModule(features, config.callbacks ?? {})
   }
-  return 'pwd-login'
+  return requested
 })
 
 function toggleLoginModule(name: LoginModule): void {
@@ -76,24 +106,36 @@ function toggleLoginModule(name: LoginModule): void {
  * translate functions keep working.
  */
 function defaultTranslate(key: string, fallback?: string): string {
-  // `translatePageKey('', absoluteKey)` resolves keys under `admin.*` against
-  // the active locale and humanises misses; we prefer the caller-supplied
-  // fallback over the humanised form so English copy stays clean when a
-  // bundled locale doesn't yet ship the key.
   const hit = translatePageKey('', key)
-  // translatePageKey returns the humanised last segment on miss (e.g.
-  // `admin.login.userNamePlaceholder` → `User Name Placeholder`); that is
-  // worse than the caller-supplied English fallback. Treat any humanised
-  // tail as a miss when a fallback is available.
   if (!hit) return fallback ?? key
-  // Cheap miss detection: if the lookup just returned the shared
-  // `humanise` fallback (last segment, camelCase→spaced) we'd rather use
-  // the caller-supplied English fallback.
   if (fallback && hit === humanise(key)) return fallback
   return hit
 }
 
 const activeTranslate = computed(() => config.translate ?? defaultTranslate)
+
+// Consumer-supplied third-party providers win; otherwise we auto-render the
+// backend's enabled OAuth providers once the config resolves. An explicit `[]`
+// counts as "provided" → force-hides third-party (distinguished from omitted).
+const autoThirdParty = ref<LoginThirdPartyProvider[]>([])
+const hasConsumerThirdParty = computed(() => config.thirdParty !== undefined)
+const resolvedThirdParty = computed<LoginThirdPartyProvider[]>(() =>
+  hasConsumerThirdParty.value ? config.thirdParty! : autoThirdParty.value,
+)
+
+onMounted(async () => {
+  if (config.loadConfigFromServer === false || !client) return
+  try {
+    const res = await useAuthApi(client).getConfig()
+    if (!res.succeeded || !res.data) return
+    Object.assign(features, mergeFeatures(mapAuthConfig(res.data), config.features))
+    if (!hasConsumerThirdParty.value) {
+      autoThirdParty.value = buildOAuthProviders(res.data.oAuthProviders ?? [], client)
+    }
+  } catch {
+    // Backend too old / unreachable — keep the merged defaults (everything on).
+  }
+})
 </script>
 
 <template>
@@ -110,7 +152,10 @@ const activeTranslate = computed(() => config.translate ?? defaultTranslate)
     :translate="activeTranslate"
     :callbacks="config.callbacks ?? {}"
     :demo-accounts="config.demoAccounts ?? []"
-    :third-party="config.thirdParty ?? []"
+    :third-party="resolvedThirdParty"
+    :features="features"
+    :aside-component="config.asideComponent"
+    :content-component="config.contentComponent"
     :qr-component="config.qrComponent"
     :show-lang-switch="config.showLangSwitch"
     :show-theme-switch="config.showThemeSwitch"

@@ -200,19 +200,20 @@ describe('TThemeDrawer', () => {
     expect(store.layoutMode).toBe('horizontal')
   })
 
-  it('renders all 6 layout mode cards', () => {
+  it('renders all 4 layout mode cards', () => {
     const wrapper = mount(TThemeDrawer, {
       props: { show: true, themeContext: createCtx() },
     })
     const cards = wrapper.findAll('.layout-mode-card')
-    expect(cards.length).toBe(6)
+    expect(cards.length).toBe(4)
     const modes = cards.map((c) => c.attributes('data-mode'))
     expect(modes).toContain('vertical')
     expect(modes).toContain('horizontal')
     expect(modes).toContain('vertical-mix')
-    expect(modes).toContain('vertical-hybrid-header-first')
-    expect(modes).toContain('top-hybrid-sidebar-first')
     expect(modes).toContain('top-hybrid-header-first')
+    // The two buggy hybrid modes were removed (2026-06-26).
+    expect(modes).not.toContain('vertical-hybrid-header-first')
+    expect(modes).not.toContain('top-hybrid-sidebar-first')
   })
 
   it('buildSnapshot exposes a v1 admin + ui shape', () => {

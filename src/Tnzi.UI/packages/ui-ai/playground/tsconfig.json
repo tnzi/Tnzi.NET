@@ -1,7 +1,6 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@tnzi/ui-ai": ["../src"],
       "@tnzi/ui-ai/*": ["../src/*"]

@@ -5,26 +5,34 @@
  * Soybean reference: `src/views/_builtin/login/modules/register.vue` (88 lines).
  * Endpoints (Tnzi.Identity.DefaultAuthController):
  *   - `POST /auth/quick-register/send-code` — `SendQuickRegisterCodeDto`
- *   - `POST /auth/register`                 — `RegisterDto` → `TokenResultDto`, or
- *   - `POST /auth/quick-register`           — `QuickRegisterDto` (no-password path)
+ *   - `POST /auth/quick-register`           — `QuickRegisterDto` (+ set-password), or
+ *   - `POST /auth/register`                 — `RegisterDto` → `TokenResultDto`
  *
  * Wired via `useLoginContext().callbacks.sendCode` (purpose='register') +
- * `callbacks.register`. On success the page can either auto-navigate or
- * the consumer can return to `pwd-login` via `toggleLoginModule`.
+ * `callbacks.register`. The account field accepts email OR phone — rule + label
+ * adapt to the backend-enabled channels (`features.codeChannels`) and the
+ * `type` is auto-detected per submit. On success the page returns to
+ * `pwd-login` (the consumer's `register` callback may also navigate elsewhere).
  */
 import { computed, reactive, ref } from 'vue'
 import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
 import { useFormRules } from '../../../headless/useFormRules'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
 import { useCaptcha } from '../../../headless/useCaptcha'
+import { useLoginAccountField } from '../../../headless/useLoginAccountField'
+import { detectAccountType } from '../../../headless/accountType'
 import { useLoginContext } from '../useLoginContext'
 
 defineOptions({ name: 'Register' })
 
-const { translate, toggleLoginModule, callbacks, ui } = useLoginContext()
+const { translate, toggleLoginModule, callbacks, ui, features } = useLoginContext()
 const { rules: r } = useFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
+const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useLoginAccountField(
+  translate,
+  () => features.codeChannels,
+)
 
 interface FormModel {
   account: string
@@ -38,7 +46,7 @@ const submitting = ref(false)
 const submitError = ref('')
 
 const rules = computed<FormRules>(() => ({
-  account: r.phone,
+  account: accountRule.value,
   code: [
     { required: true, trigger: ['blur', 'input'], message: translate('admin.login.errorEmptyCode', 'Please enter the verification code') },
   ],
@@ -63,7 +71,7 @@ async function handleSendCode(): Promise<void> {
       )
       throw new Error('sendCode callback missing')
     }
-    await callbacks.sendCode({ account: model.account, purpose: 'register' })
+    await callbacks.sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'register' })
   })
 }
 
@@ -79,7 +87,7 @@ async function handleSubmit(): Promise<void> {
   }
   submitting.value = true
   try {
-    await callbacks.register({ account: model.account, code: model.code, password: model.password })
+    await callbacks.register({ account: model.account, code: model.code, password: model.password, type: detectAccountType(model.account) })
     // Successful registration → bounce back to pwd-login (the consumer's
     // `register` callback may also navigate elsewhere; this is the safe
     // default that matches soybean's flow).
@@ -94,8 +102,8 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <NForm ref="formRef" :model="model" :rules="rules" size="large" :show-label="ui.labeled" :show-require-mark="false" label-placement="top" @keyup.enter="handleSubmit">
-    <NFormItem path="account" :label="translate('admin.login.labels.phone', 'Phone / Email')">
-      <NInput v-model:value="model.account" :placeholder="translate('admin.login.phonePlaceholder', 'Enter phone or email')" />
+    <NFormItem path="account" :label="accountLabel">
+      <NInput v-model:value="model.account" :placeholder="accountPlaceholder" />
     </NFormItem>
     <NFormItem path="code" :label="translate('admin.login.labels.code', 'Verification code')">
       <div class="w-full flex-y-center gap-16px">

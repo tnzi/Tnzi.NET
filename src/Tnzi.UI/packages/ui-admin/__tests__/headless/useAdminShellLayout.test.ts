@@ -1,5 +1,27 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
+
+// @vueuse 14's useBreakpoints returns strictly-readonly computed refs, so the
+// store's `isMobile`/`isTablet`/`isDesktop` (bp.smaller/between/greaterOrEqual)
+// can no longer be flipped by assigning `appStore.isMobile = true` in tests
+// (worked under @vueuse 11 where they were plain refs). Mock useBreakpoints to
+// hand back writable refs so these layout tests can drive the responsive state
+// directly; production still uses the real window-driven breakpoints.
+vi.mock('@vueuse/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vueuse/core')>()
+  const { ref: vueRef } = await import('vue')
+  const flag = () => vueRef(false)
+  return {
+    ...actual,
+    useBreakpoints: () => ({
+      smaller: flag,
+      smallerOrEqual: flag,
+      greater: flag,
+      greaterOrEqual: flag,
+      between: flag,
+    }),
+  }
+})
 import { createPinia, setActivePinia } from 'pinia'
 import {
   useAdminShellLayout,
@@ -146,21 +168,20 @@ describe('useAdminShellLayout', () => {
     expect(setupShell({ mode: 'vertical-mix' }).siderItems.value).toBeUndefined()
   })
 
-  it('siderItems: secondLevelMenus in vertical-hybrid-header-first', () => {
+  it('siderItems: secondLevelMenus in top-hybrid-header-first', () => {
     const children: AdminMenuItem[] = [{ key: 'a', label: 'A' }]
     const menuCtx = makeMenuCtx({
       secondLevelMenus: ref(children) as never,
     })
     const layout = setupShell({
-      mode: 'vertical-hybrid-header-first',
+      mode: 'top-hybrid-header-first',
       menuCtx,
     })
     expect(layout.siderItems.value).toEqual(children)
   })
 
-  it('shouldRenderHeaderLogo: true for top-hybrid + horizontal modes only', () => {
+  it('shouldRenderHeaderLogo: true for top-hybrid-header-first + horizontal only', () => {
     expect(setupShell({ mode: 'horizontal' }).shouldRenderHeaderLogo.value).toBe(true)
-    expect(setupShell({ mode: 'top-hybrid-sidebar-first' }).shouldRenderHeaderLogo.value).toBe(true)
     expect(setupShell({ mode: 'top-hybrid-header-first' }).shouldRenderHeaderLogo.value).toBe(true)
     expect(setupShell({ mode: 'vertical' }).shouldRenderHeaderLogo.value).toBe(false)
     expect(setupShell({ mode: 'vertical-mix' }).shouldRenderHeaderLogo.value).toBe(false)

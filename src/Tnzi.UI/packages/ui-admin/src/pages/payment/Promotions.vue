@@ -234,7 +234,7 @@ const tableColumns: ColumnDef[] = [
   {
     key: 'promotionCode',
     title: t('cols.code'),
-    width: 180,
+    minWidth: 140,
     render: (row) => {
       const r = row as unknown as PromotionDto
       return h('code', { class: 'tnzi-mono text-12px font-600' }, r.promotionCode)

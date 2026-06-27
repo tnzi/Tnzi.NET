@@ -84,28 +84,28 @@ useWidgetData(async () => {
   dynamicKpis.value = [
     {
       key: 'users',
-      title: 'admin.modules.workbench.kpi.users',
+      title: 'admin.modules.dashboard.kpi.users',
       value: pickTotal(users),
       icon: 'mdi:account-group',
       gradient: { start: '#ec4786', end: '#b955a4' },
     },
     {
       key: 'access-logs',
-      title: 'admin.modules.workbench.kpi.accessLogs',
+      title: 'admin.modules.dashboard.kpi.accessLogs',
       value: pickTotal(access),
       icon: 'mdi:chart-areaspline',
       gradient: { start: '#865ec0', end: '#5144b4' },
     },
     {
       key: 'ai-requests',
-      title: 'admin.modules.workbench.kpi.aiRequests',
+      title: 'admin.modules.dashboard.kpi.aiRequests',
       value: aiUsage.status === 'fulfilled' ? (aiUsage.value.requestCount ?? 0) : 0,
       icon: 'mdi:robot-outline',
       gradient: { start: '#56cdf3', end: '#719de3' },
     },
     {
       key: 'orders',
-      title: 'admin.modules.workbench.kpi.orders',
+      title: 'admin.modules.dashboard.kpi.orders',
       value: pickTotal(orders),
       icon: 'mdi:cart-arrow-down',
       gradient: { start: '#fcbc25', end: '#f68057' },

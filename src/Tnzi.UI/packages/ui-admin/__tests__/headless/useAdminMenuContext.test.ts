@@ -9,9 +9,9 @@ import type { AdminMenuItem } from '../../src/stores/useAdminRouteStore'
 function makeMenus(): AdminMenuItem[] {
   return [
     {
-      key: 'workbench',
-      label: 'Workbench',
-      path: '/admin/workbench',
+      key: 'dashboard',
+      label: 'Dashboard',
+      path: '/admin/dashboard',
     },
     {
       key: 'identity',
@@ -58,7 +58,7 @@ describe('useAdminMenuContext', () => {
   it('exposes 1st level menu list directly from input', () => {
     const { ctx } = makeContext()
     expect(ctx.firstLevelMenus.value.map((m) => m.key)).toEqual([
-      'workbench',
+      'dashboard',
       'identity',
       'system',
     ])
@@ -75,10 +75,10 @@ describe('useAdminMenuContext', () => {
   })
 
   it('keeps a 1st level leaf as active when the route matches it directly', () => {
-    // workbench is a 1st level item with no children — UI components decide
+    // dashboard is a 1st level item with no children — UI components decide
     // (via isActiveFirstLevelMenuHasChildren) whether to show a sub-rail.
-    const { ctx } = makeContext('workbench')
-    expect(ctx.activeFirstLevelMenuKey.value).toBe('workbench')
+    const { ctx } = makeContext('dashboard')
+    expect(ctx.activeFirstLevelMenuKey.value).toBe('dashboard')
     expect(ctx.isActiveFirstLevelMenuHasChildren.value).toBe(false)
   })
 
@@ -108,11 +108,11 @@ describe('useAdminMenuContext', () => {
   it('isActiveFirstLevelMenuHasChildren reflects current selection', () => {
     const { ctx } = makeContext('users')
     expect(ctx.isActiveFirstLevelMenuHasChildren.value).toBe(true)
-    ctx.handleSelectFirstLevelMenu('workbench')
-    // Workbench has no children — but the watcher would have refilled it...
+    ctx.handleSelectFirstLevelMenu('dashboard')
+    // Dashboard has no children — but the watcher would have refilled it...
     // routeName is still 'users' so activeFirstLevel would re-sync. Force
     // a route change too.
-    expect(ctx.activeFirstLevelMenuKey.value).toBe('workbench')
+    expect(ctx.activeFirstLevelMenuKey.value).toBe('dashboard')
     expect(ctx.isActiveFirstLevelMenuHasChildren.value).toBe(false)
   })
 
@@ -135,13 +135,13 @@ describe('useAdminMenuContext', () => {
   it('autoSelectFirstWith=false leaves activeFirstLevelMenuKey at first item', () => {
     const menusRef = ref(makeMenus())
     const menus = computed(() => menusRef.value)
-    const routeName = ref<string>('workbench')
+    const routeName = ref<string>('dashboard')
     const ctx = useAdminMenuContext({
       menus,
       routeName: computed(() => routeName.value ?? ''),
       autoSelectFirstWith: false,
     })
-    // workbench matches first item directly so result is 'workbench'.
-    expect(ctx.activeFirstLevelMenuKey.value).toBe('workbench')
+    // dashboard matches first item directly so result is 'dashboard'.
+    expect(ctx.activeFirstLevelMenuKey.value).toBe('dashboard')
   })
 })

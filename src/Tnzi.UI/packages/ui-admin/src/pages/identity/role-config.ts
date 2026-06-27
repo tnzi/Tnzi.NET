@@ -41,8 +41,8 @@ export interface RoleRow {
 }
 
 export const roleColumns: ColumnDef<RoleRow>[] = [
-  { key: 'name', title: 'columns.name', width: 200, fixed: 'left' },
-  { key: 'description', title: 'columns.description' },
+  { key: 'name', title: 'columns.name', minWidth: 150 },
+  { key: 'description', title: 'columns.description', minWidth: 180 },
   // Binary flags render positive-state-only: a grey "Custom"/"User" tag on
   // every ordinary row is visual noise — show a tag only when the flag is
   // set, an em dash otherwise.
@@ -76,7 +76,6 @@ export const roleColumns: ColumnDef<RoleRow>[] = [
     // 170 — absolute timestamps ("05/12/2026, 00:03:58") wrap onto two
     // lines at the previous 140.
     width: 170,
-    fixed: 'right',
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },
 ]

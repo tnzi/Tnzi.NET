@@ -282,7 +282,7 @@ describe('defineAdminApp', () => {
       const route = childByName(name)
       return (route?.meta as Record<string, unknown> | undefined)?.order as number | undefined
     }
-    expect(metaOrder('workbench')).toBe(0)
+    expect(metaOrder('dashboard')).toBe(0)
     expect(metaOrder('identity')).toBe(100)
     expect(metaOrder('authorization')).toBe(110)
     expect(metaOrder('system')).toBe(120)
@@ -298,20 +298,20 @@ describe('defineAdminApp', () => {
   it('routeOrders overrides the default order of a framework route', () => {
     const { routes } = defineAdminApp({
       client: dummyClient,
-      routeOrders: { workbench: 5 },
+      routeOrders: { dashboard: 5 },
     })
     const admin = findAdminRoute(routes)
-    const workbench = admin?.children?.find(
-      (c) => typeof c.name === 'string' && c.name === 'workbench',
+    const dashboard = admin?.children?.find(
+      (c) => typeof c.name === 'string' && c.name === 'dashboard',
     )
-    expect(workbench).toBeTruthy()
-    expect((workbench!.meta as Record<string, unknown>).order).toBe(5)
+    expect(dashboard).toBeTruthy()
+    expect((dashboard!.meta as Record<string, unknown>).order).toBe(5)
   })
 
   it('routeOrders does not affect routes not listed in it', () => {
     const { routes } = defineAdminApp({
       client: dummyClient,
-      routeOrders: { workbench: 5 },
+      routeOrders: { dashboard: 5 },
     })
     const admin = findAdminRoute(routes)
     const identity = admin?.children?.find(
@@ -327,7 +327,7 @@ describe('defineAdminApp', () => {
       client: dummyClient,
       hideModules: ['payment'],
       hideRoutes: ['identity.tenants'],
-      routeOrders: { workbench: 5, authorization: 95 },
+      routeOrders: { dashboard: 5, authorization: 95 },
     })
     const admin = findAdminRoute(routes)
     const childNames = namesOfChildren(admin)
@@ -338,9 +338,9 @@ describe('defineAdminApp', () => {
     const tenants = identity?.children?.find((c) => c.name === 'identity.tenants')
     expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBe(true)
     // routeOrders applies its overrides to the same tree.
-    const workbench = admin?.children?.find((c) => c.name === 'workbench')
+    const dashboard = admin?.children?.find((c) => c.name === 'dashboard')
     const authorization = admin?.children?.find((c) => c.name === 'authorization')
-    expect((workbench!.meta as Record<string, unknown>).order).toBe(5)
+    expect((dashboard!.meta as Record<string, unknown>).order).toBe(5)
     expect((authorization!.meta as Record<string, unknown>).order).toBe(95)
     // Untouched framework default remains intact.
     expect((identity!.meta as Record<string, unknown>).order).toBe(100)
@@ -433,7 +433,7 @@ describe('defineAdminApp', () => {
         basePath: '/console',
         hideModules: ['payment'],
         hideRoutes: ['identity.tenants'],
-        routeOrders: { workbench: 5, authorization: 95 },
+        routeOrders: { dashboard: 5, authorization: 95 },
       })
       const adminRoot = findByName(routes, 'admin-root')
       expect(adminRoot?.path).toBe('/console')
@@ -446,9 +446,9 @@ describe('defineAdminApp', () => {
       const tenants = identity?.children?.find((c) => c.name === 'identity.tenants')
       expect((tenants!.meta as Record<string, unknown>).hideInMenu).toBe(true)
       // routeOrders overrides land on the prefixed tree.
-      const workbench = adminRoot?.children?.find((c) => c.name === 'workbench')
+      const dashboard = adminRoot?.children?.find((c) => c.name === 'dashboard')
       const authorization = adminRoot?.children?.find((c) => c.name === 'authorization')
-      expect((workbench!.meta as Record<string, unknown>).order).toBe(5)
+      expect((dashboard!.meta as Record<string, unknown>).order).toBe(5)
       expect((authorization!.meta as Record<string, unknown>).order).toBe(95)
     })
 

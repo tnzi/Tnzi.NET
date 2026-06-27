@@ -1,237 +1,12 @@
 /**
- * Chat Module Types - Internal messaging system
- * Aligned with Tnzi.NET backend Chat module (Tnzi.Chat/Dtos/ChatDtos.cs)
+ * Chat Module Types — system-level instant messaging (IM)
+ * Aligned with Tnzi.NET backend Chat module (Tnzi.Chat/Dtos/*.cs)
  */
 
 import type { SortedPagedQueryDto } from '../../types/pagination';
-import { MessageType } from './metadata';
-
-export { MessageType };
 
 // ============================================
-// Message Types
-// ============================================
-
-/**
- * Message list item DTO (without replies and full content)
- * Backend: MessageListItemDto
- */
-export interface MessageListItemDto {
-  id: string;
-  title: string;
-  messageType: MessageType;
-  senderId: string;
-  senderName?: string | null;
-  canReply: boolean;
-  creationTime: string;
-  isRead: boolean;
-  replyCount: number;
-  isImportant: boolean;
-}
-
-/**
- * Message detail DTO (with replies and full content)
- * Backend: MessageDto
- */
-export interface MessageDto {
-  id: string;
-  title: string;
-  content: string;
-  messageType: MessageType;
-  senderId: string;
-  senderName?: string | null;
-  isSent: boolean;
-  canReply: boolean;
-  beginDate?: string | null;
-  endDate?: string | null;
-  creationTime: string;
-  isRead: boolean;
-  readTime?: string | null;
-  replyCount: number;
-  isImportant: boolean;
-  replies: MessageReplyDto[];
-}
-
-/**
- * Message reply DTO (tree structure)
- * Backend: MessageReplyDto
- */
-export interface MessageReplyDto {
-  id: string;
-  content: string;
-  userId: string;
-  userName?: string | null;
-  belongMessageId: string;
-  parentReplyId?: string | null;
-  creationTime: string;
-  replies: MessageReplyDto[];
-}
-
-// ============================================
-// Request Types
-// ============================================
-
-/**
- * Create message request
- * Backend: CreateMessageDto
- */
-export interface CreateMessageDto {
-  title: string;
-  content: string;
-  messageType: MessageType;
-  roleIds?: string[];
-  recipientIds?: string[];
-  canReply?: boolean;
-  isImportant?: boolean;
-  beginDate?: string;
-  endDate?: string;
-}
-
-/**
- * Update message request (only sender can update)
- * Backend: UpdateMessageDto
- */
-export interface UpdateMessageDto {
-  title?: string;
-  content?: string;
-  canReply?: boolean;
-  isImportant?: boolean;
-  beginDate?: string;
-  endDate?: string;
-}
-
-/**
- * Create reply request
- * Backend: CreateMessageReplyDto
- */
-export interface CreateMessageReplyDto {
-  messageId: string;
-  content: string;
-  parentReplyId?: string;
-}
-
-/**
- * Message query (user inbox)
- * Backend: MessageQueryDto extends PagedQueryDto
- */
-export interface MessageQueryDto extends SortedPagedQueryDto {
-  messageType?: MessageType;
-  isRead?: boolean;
-  isImportant?: boolean;
-  keyword?: string;
-  startDate?: string;
-  endDate?: string;
-}
-
-/**
- * Admin message query
- * Backend: AdminMessageQueryDto extends PagedQueryDto
- */
-export interface AdminMessageQueryDto extends SortedPagedQueryDto {
-  messageType?: MessageType;
-  isSent?: boolean;
-  senderId?: string;
-  keyword?: string;
-  startDate?: string;
-  endDate?: string;
-}
-
-// ============================================
-// Statistics Types
-// ============================================
-
-/**
- * Chat statistics
- * Backend: ChatStatisticsDto
- */
-export interface ChatStatisticsDto {
-  totalMessages: number;
-  sentMessages: number;
-  draftMessages: number;
-  publicMessages: number;
-  privateMessages: number;
-  totalReplies: number;
-  activeSenders: number;
-  importantMessages: number;
-}
-
-// ============================================
-// Chat Session Types (admin-curated groupings; 2026-04-14)
-// ============================================
-
-/**
- * ChatSession lifecycle status — aligned with backend
- * <c>Tnzi.Chat.Entities.ChatSessionStatus</c>.
- */
-export enum ChatSessionStatus {
-  Active = 1,
-  Archived = 2,
-}
-
-/**
- * Chat session detail DTO.
- * Backend: ChatSessionDto
- */
-export interface ChatSessionDto {
-  id: string;
-  title: string;
-  description?: string | null;
-  status: ChatSessionStatus;
-  participants: string[];
-  messageCount: number;
-  lastMessageAt?: string | null;
-  creationTime: string;
-  lastModificationTime?: string | null;
-}
-
-/**
- * Chat session list item DTO (paging-optimised).
- * Backend: ChatSessionListItemDto
- */
-export interface ChatSessionListItemDto {
-  id: string;
-  title: string;
-  status: ChatSessionStatus;
-  participants: string[];
-  messageCount: number;
-  lastMessageAt?: string | null;
-  creationTime: string;
-}
-
-/**
- * Create chat session request.
- * Backend: CreateChatSessionDto
- */
-export interface CreateChatSessionDto {
-  title: string;
-  description?: string | null;
-  status?: ChatSessionStatus;
-  participants?: string[];
-}
-
-/**
- * Update chat session request.
- * Backend: UpdateChatSessionDto
- */
-export interface UpdateChatSessionDto {
-  title: string;
-  description?: string | null;
-  status?: ChatSessionStatus;
-  participants?: string[];
-}
-
-/**
- * Chat session paged query.
- * Backend: ChatSessionQueryDto
- */
-export interface ChatSessionQueryDto extends SortedPagedQueryDto {
-  status?: ChatSessionStatus;
-  keyword?: string;
-  participantId?: string;
-}
-
-// ============================================
-// IM (Instant Messaging) Types
+// IM (Instant Messaging) Types — /conversations/*
 // ============================================
 
 export enum ConversationType { Direct = 1, Group = 2, System = 3 }
@@ -275,7 +50,114 @@ export interface ChatContactDto { userId: string; name: string; avatarFileId?: s
 export enum UserPresenceStatus { Online = 1, Away = 2, Busy = 3, Invisible = 4, Offline = 5 }
 export interface UserPresenceDto { userId: string; status: UserPresenceStatus; lastSeenAt?: string | null }
 export interface SetPresenceDto { status: UserPresenceStatus }
-export interface ChatContactProfileDto { userId: string; name: string; avatarFileId?: string | null; status: UserPresenceStatus; lastSeenAt?: string | null }
+export interface ChatContactProfileDto { userId: string; name: string; avatarFileId?: string | null; status: UserPresenceStatus; lastSeenAt?: string | null; email?: string | null; phone?: string | null; bio?: string | null }
 export interface ConversationMemberSettingsDto { isMuted?: boolean; isSticky?: boolean; remark?: string | null; alias?: string | null }
 export interface UpdateNoticeDto { notice?: string | null }
 export interface SearchMessagesParams { keyword: string; before?: string; limit?: number }
+
+// ============================================
+// IM Admin (system maintenance) Types — /admin/chat/*
+// ============================================
+
+/** Global chat statistics overview. Backend: ChatStatisticsDto */
+export interface ChatStatisticsDto {
+  totalConversations: number;
+  directConversations: number;
+  groupConversations: number;
+  systemConversations: number;
+  totalMessages: number;
+  messagesToday: number;
+  activeMembers: number;
+  onlineUsers: number;
+}
+
+/** Admin conversation paged query. Backend: AdminConversationQueryDto */
+export interface AdminConversationQueryDto extends SortedPagedQueryDto {
+  type?: ConversationType;
+  keyword?: string;
+  userId?: string;
+}
+
+/** Admin conversation list item. Backend: AdminConversationListItemDto */
+export interface AdminConversationListItemDto {
+  id: string;
+  type: ConversationType;
+  title?: string | null;
+  ownerId?: string | null;
+  ownerName?: string | null;
+  memberCount: number;
+  lastMessagePreview?: string | null;
+  lastMessageAt?: string | null;
+  creationTime: string;
+}
+
+/** Admin conversation member view. Backend: AdminConversationMemberDto */
+export interface AdminConversationMemberDto {
+  userId: string;
+  name: string;
+  avatarFileId?: string | null;
+  role: MemberRole;
+  alias?: string | null;
+  unreadCount: number;
+  lastReadAt?: string | null;
+  joinedAt: string;
+}
+
+/** Admin conversation detail. Backend: AdminConversationDetailDto */
+export interface AdminConversationDetailDto {
+  id: string;
+  type: ConversationType;
+  title?: string | null;
+  notice?: string | null;
+  ownerId?: string | null;
+  ownerName?: string | null;
+  directKey?: string | null;
+  memberCount: number;
+  messageCount: number;
+  lastMessageAt?: string | null;
+  creationTime: string;
+  members: AdminConversationMemberDto[];
+}
+
+/** Admin presence overview query. Backend: PresenceOverviewQueryDto */
+export interface PresenceOverviewQueryDto {
+  status?: UserPresenceStatus;
+  onlineOnly?: boolean;
+}
+
+/** Admin presence user detail. Backend: PresenceUserDto */
+export interface PresenceUserDto {
+  userId: string;
+  name: string;
+  avatarFileId?: string | null;
+  intentStatus: UserPresenceStatus;
+  effectiveStatus: UserPresenceStatus;
+  hasConnection: boolean;
+  lastSeenAt?: string | null;
+  lastChangedAt?: string | null;
+}
+
+/** Admin presence overview. Backend: PresenceOverviewDto */
+export interface PresenceOverviewDto {
+  total: number;
+  online: number;
+  away: number;
+  busy: number;
+  offline: number;
+  users: PresenceUserDto[];
+}
+
+/** Broadcast target type. Backend: BroadcastTargetType */
+export enum BroadcastTargetType { All = 1, Roles = 2, Users = 3 }
+
+/** Broadcast history entry. Backend: BroadcastLogDto */
+export interface BroadcastLogDto {
+  id: string;
+  content: string;
+  targetType: BroadcastTargetType;
+  targetSummary?: string | null;
+  recipientCount: number;
+  senderId?: string | null;
+  senderName?: string | null;
+  creationTime: string;
+}

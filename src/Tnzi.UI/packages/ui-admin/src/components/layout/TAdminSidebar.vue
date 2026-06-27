@@ -32,6 +32,9 @@ interface Props {
   collapsedWidth?: number
   /** Brand title shown in the sider header (matches soybean's logo + title block). */
   brand?: string
+  /** Muted second line under the brand title. Hidden in the collapsed /
+   *  vertical-mix (icon-only) header so it never clips the narrow rail. */
+  brandSubtitle?: string
   /** Iconify icon name for the brand logo. When omitted, TSystemLogo
    *  renders the built-in TBrandMark inline SVG (3-cube motif). */
   brandIcon?: string
@@ -76,6 +79,7 @@ const props = withDefaults(defineProps<Props>(), {
   width: 220,
   collapsedWidth: 64,
   brand: 'Tnzi Admin',
+  brandSubtitle: undefined,
   brandIcon: undefined,
   hideHeader: false,
   activeMenuKeyOverride: undefined,
@@ -264,6 +268,7 @@ function onSelect(key: string): void {
              which only shows the logo. -->
         <TSystemLogo
           :title="isHeaderCompact ? '' : brand"
+          :subtitle="isHeaderCompact ? '' : brandSubtitle"
           :icon="brandIcon"
           :icon-size="32"
           :layout="isHeaderCompact ? 'icon-only' : 'full'"
@@ -443,6 +448,10 @@ function onSelect(key: string): void {
   /* Brand text remains primary-tinted but on a dark backdrop the saturated
      primary reads weak; soybean uses a soft-white tint. */
   color: var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92));
+}
+.t-admin-sidebar--inverted .t-admin-sidebar__header :deep(.t-system-logo__subtitle) {
+  /* Muted sub-line needs a lighter tint on the dark inverted backdrop. */
+  color: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.55));
 }
 .t-admin-sidebar--inverted .t-admin-sidebar__footer {
   border-top-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));

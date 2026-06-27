@@ -30,8 +30,8 @@ function valueTypeLabel(v?: number): string {
 }
 
 export const parameterColumns: ColumnDef<ParameterRow>[] = [
-  { key: 'key', title: 'columns.key', width: 240, fixed: 'left' },
-  { key: 'value', title: 'columns.value' },
+  { key: 'key', title: 'columns.key', minWidth: 160 },
+  { key: 'value', title: 'columns.value', minWidth: 180 },
   {
     key: 'valueType',
     title: 'columns.valueType',
@@ -43,18 +43,18 @@ export const parameterColumns: ColumnDef<ParameterRow>[] = [
         valueTypeLabel(row.valueType),
       ),
   },
-  { key: 'group', title: 'columns.group', width: 160 },
+  { key: 'group', title: 'columns.group', minWidth: 120 },
   { key: 'description', title: 'columns.description', visible: false },
 ]
 
 // Value editor switches on the sibling `valueType` enum via typeFn:
-//   0=String→text, 1=Integer→number, 2=Boolean→switch, 3=JSON→textarea.
+//   0=String→text, 1=Integer→number, 2=Boolean→switch, 3=JSON→json (TJsonEditor).
 // Default is 'text' when valueType is null/undefined (e.g. during create).
-function valueEditorType(model: Record<string, unknown>): 'text' | 'number' | 'switch' | 'textarea' {
+function valueEditorType(model: Record<string, unknown>): 'text' | 'number' | 'switch' | 'json' {
   switch (model.valueType) {
     case 1: return 'number'
     case 2: return 'switch'
-    case 3: return 'textarea'
+    case 3: return 'json'
     default: return 'text'
   }
 }

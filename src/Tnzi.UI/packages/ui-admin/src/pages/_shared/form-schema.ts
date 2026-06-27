@@ -11,9 +11,13 @@
  *     translators (e.g. `translatePageKey('ai.agents', k)`) pass straight
  *     through — falls back to a global-namespace `translatePageKey('', k)`
  *     resolver when the caller doesn't supply one.
- *   - Re-exports the `FormSchemaItem` type so config files keep their
- *     existing `import type { FormSchemaItem } from '_shared/form-schema'`
- *     paths.
+ *   - Injects admin-specific built-in field renderers (`icon` → TIconPicker,
+ *     `json` → TJsonEditor) so any config can use `type: 'icon'` / `type:
+ *     'json'` as a first-class field without the page hand-wiring the control.
+ *     A page can register more (or override these) via the `fieldRenderers`
+ *     prop — the page-supplied map wins on key collision.
+ *   - Re-exports the `FormSchemaItem` / `FieldRenderer` types so config files
+ *     keep their existing import paths.
  *
  * New code outside the admin shell should import directly from
  * `@tnzi/ui`:
@@ -21,16 +25,52 @@
  *   import { TSchemaForm, type FormSchemaItem } from '@tnzi/ui'
  */
 import { defineComponent, h, type PropType } from 'vue'
-import { TSchemaForm, type FormSchemaItem } from '@tnzi/ui'
+import { NInput } from 'naive-ui'
+import { TSchemaForm, type FormSchemaItem, type FieldRenderer } from '@tnzi/ui'
+import TIconPicker from '../../components/inputs/TIconPicker.vue'
+import TJsonEditor from '../../components/inputs/TJsonEditor.vue'
 import { translatePageKey } from './translate'
 
-export type { FormSchemaItem, FormSchemaFieldType } from '@tnzi/ui'
+export type { FormSchemaItem, FormSchemaFieldType, FieldRenderer, FieldRenderContext } from '@tnzi/ui'
 
 // Default admin translator — used only when the caller does NOT supply a
 // `translate` prop. Resolves absolute `admin.*` keys via the shared
 // dictionary; page-scoped callers should pass their own page-namespaced
 // `translate` so `form.x` resolves to `admin.modules.{pageNs}.form.x`.
 const defaultAdminTranslate = (key: string): string => translatePageKey('', key)
+
+// Built-in admin field renderers — activate the rich inputs as first-class
+// form-schema field types so configs can declare `type: 'icon'` / `type:
+// 'json'` and the renderer wires the control (value/onUpdate) automatically.
+const adminFieldRenderers: Record<string, FieldRenderer> = {
+  icon: (ctx) =>
+    ctx.readonly
+      // Read-only mode: render the icon identifier as plain text (the picker is
+      // a popover trigger, meaningless when non-interactive).
+      ? h('span', { class: 't-form-schema__icon-view' }, String(ctx.value ?? '') || '—')
+      : h(TIconPicker, {
+          value: (ctx.value as string) ?? '',
+          'onUpdate:value': (v: string) => ctx.onUpdate(v),
+        }),
+  json: (ctx) =>
+    h(TJsonEditor, {
+      value: (ctx.value as string) ?? '',
+      readonly: ctx.readonly,
+      'onUpdate:value': (v: string) => ctx.onUpdate(v),
+    }),
+  // Masked password input (click-to-reveal) — lets a create form declare
+  // `type: 'password'` instead of hand-wiring an NInput. Read-only view mode
+  // never echoes a password back, so it degrades to a muted dash.
+  password: (ctx) =>
+    ctx.readonly
+      ? h('span', { class: 't-form-schema__password-view' }, '••••••')
+      : h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          value: (ctx.value as string) ?? '',
+          'onUpdate:value': (v: string) => ctx.onUpdate(v),
+        }),
+}
 
 const TFormSchemaRenderer = defineComponent({
   name: 'TFormSchemaRenderer',
@@ -40,6 +80,8 @@ const TFormSchemaRenderer = defineComponent({
     readonly: { type: Boolean, default: false },
     columns: { type: Number, default: 1 },
     translate: { type: Function as PropType<(key: string) => string>, default: undefined },
+    /** Extra/override field renderers, merged over the admin built-ins. */
+    fieldRenderers: { type: Object as PropType<Record<string, FieldRenderer>>, default: undefined },
   },
   setup(props) {
     return () =>
@@ -49,6 +91,7 @@ const TFormSchemaRenderer = defineComponent({
         readonly: props.readonly,
         columns: props.columns,
         translate: props.translate ?? defaultAdminTranslate,
+        fieldRenderers: { ...adminFieldRenderers, ...(props.fieldRenderers ?? {}) },
       })
   },
 })

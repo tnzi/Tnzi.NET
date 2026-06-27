@@ -22,15 +22,14 @@ interface DictionaryRow {
 }
 
 export const dictionaryColumns: ColumnDef<DictionaryRow>[] = [
-  { key: 'key', title: 'columns.key', width: 220, fixed: 'left' },
-  { key: 'value', title: 'columns.value', width: 260 },
-  { key: 'group', title: 'columns.group', width: 160 },
-  { key: 'description', title: 'columns.description' },
+  { key: 'key', title: 'columns.key', minWidth: 160 },
+  { key: 'value', title: 'columns.value', minWidth: 180 },
+  { key: 'group', title: 'columns.group', minWidth: 120 },
+  { key: 'description', title: 'columns.description', minWidth: 160 },
   {
     key: 'isSystem',
     title: 'columns.isSystem',
     width: 110,
-    fixed: 'right',
     render: (row) =>
       row.isSystem
         ? h(TStatusBadge, { value: 'system', type: 'info', label: 'System' })

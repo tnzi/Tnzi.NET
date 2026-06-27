@@ -1,217 +1,228 @@
 <template>
   <TContentPage :title="t('title')" :translate="t" card scroll="fill">
     <template #actions>
-      <NButton size="small" @click="loadFolders">{{ t('refresh') }}</NButton>
-      <NButton size="small" @click="openCreateFolder(null)">
-        {{ t('newRootFolder') }}
+      <NButtonGroup size="small">
+        <NButton :type="viewMode === 'grid' ? 'primary' : 'default'" @click="viewMode = 'grid'">
+          <template #icon><TSvgIcon icon="mdi:view-grid-outline" :size="14" /></template>
+        </NButton>
+        <NButton :type="viewMode === 'list' ? 'primary' : 'default'" @click="viewMode = 'list'">
+          <template #icon><TSvgIcon icon="mdi:format-list-bulleted" :size="14" /></template>
+        </NButton>
+      </NButtonGroup>
+      <NButton size="small" tertiary @click="openCreateFolder(currentFolderId)">
+        <template #icon><TSvgIcon icon="mdi:folder-plus-outline" :size="14" /></template>
+        {{ t('newFolder') }}
       </NButton>
-      <TChunkFileUpload
-        :uploader="bridge.files"
-        :translate="t"
-        @success="onUploadSuccess"
-        @error="onUploadError"
+      <NButton size="small" type="primary" :loading="uploading" @click="triggerUpload">
+        <template #icon><TSvgIcon icon="mdi:upload" :size="14" /></template>
+        {{ t('upload') }}
+      </NButton>
+      <NButton size="small" @click="reload">{{ t('refresh') }}</NButton>
+      <input
+        ref="fileInput"
+        type="file"
+        multiple
+        class="t-storage-file-page__file-input"
+        @change="onFileInputChange"
       />
     </template>
 
-      <div class="t-storage-file-page__layout">
-        <!-- Left: folder tree -->
-        <aside class="t-storage-file-page__tree">
-          <NInput
-            v-model:value="folderFilter"
-            :placeholder="t('folderFilter')"
-            size="small"
-            clearable
-          />
-          <NSpin :show="foldersLoading" class="mt-8px">
-            <ul class="t-storage-file-page__root-list">
-              <li
-                class="t-storage-file-page__root-item"
-                :class="{ 'is-active': scope === 'all' }"
-                @click="selectScope('all')"
-              >
-                <span class="t-storage-file-page__root-icon">📂</span>
-                {{ t('scope.all') }}
-              </li>
-              <li
-                class="t-storage-file-page__root-item"
-                :class="{ 'is-active': scope === 'unfiled' }"
-                @click="selectScope('unfiled')"
-              >
-                <span class="t-storage-file-page__root-icon">📥</span>
-                {{ t('scope.unfiled') }}
-              </li>
-            </ul>
-            <div class="t-storage-file-page__tree-divider"></div>
-            <NTree
-              v-if="treeData.length"
-              :data="treeData"
-              :pattern="folderFilter"
-              :selected-keys="selectedFolderId ? [selectedFolderId] : []"
-              :default-expand-all="true"
-              :show-irrelevant-nodes="false"
-              block-line
-              class="t-storage-file-page__naive-tree"
-              @update:selected-keys="onSelectFolder"
-            />
-            <div v-else-if="!foldersLoading" class="t-storage-file-page__empty">
-              {{ t('noFolders') }}
-            </div>
-          </NSpin>
-        </aside>
-
-        <!-- Right: file list -->
-        <section class="t-storage-file-page__main">
-          <!--
-            Single-line compact toolbar: scope label + count tag on the
-            left, search controls in the middle, folder actions on the
-            right. Wraps to multiple lines below 1024px so phones still
-            get the same buttons without horizontal scroll.
-          -->
-          <header class="t-storage-file-page__toolbar">
-            <div class="t-storage-file-page__scope">
-              <h3 class="t-storage-file-page__scope-title">{{ scopeLabel }}</h3>
-              <NTag size="small" round :bordered="false" type="info">
-                {{ t('fileCount', { n: totalFiles }) }}
-              </NTag>
-            </div>
-
-            <div class="t-storage-file-page__filters">
-              <NInput
-                v-model:value="search.originalName"
-                :placeholder="t('search.originalName')"
-                size="small"
-                clearable
-                class="t-storage-file-page__filter-name"
-                @change="applyFilters"
-              />
-              <NSelect
-                v-model:value="search.contentType"
-                :options="contentTypeOptions"
-                :placeholder="t('search.contentType')"
-                size="small"
-                clearable
-                class="t-storage-file-page__filter-type"
-                @update:value="applyFilters"
-              />
-              <NButton size="small" type="primary" @click="applyFilters">
-                <template #icon>
-                  <TSvgIcon icon="mdi:magnify" :size="14" />
-                </template>
-                {{ t('search.search') }}
-              </NButton>
-            </div>
-
-            <NSpace
-              v-if="selectedFolderId"
-              size="small"
-              class="t-storage-file-page__folder-actions"
+    <div class="t-storage-file-page__layout">
+      <!-- Full-width main: breadcrumb + toolbar + grid/list -->
+      <section class="t-storage-file-page__main">
+        <header class="t-storage-file-page__bar">
+          <nav class="t-storage-file-page__breadcrumb">
+            <button
+              type="button"
+              class="t-storage-file-page__crumb"
+              :class="{ 'is-active': !currentFolderId && !isSearching }"
+              @click="goRoot"
             >
-              <NButton size="small" tertiary @click="openCreateFolder(selectedFolderId)">
-                <template #icon>
-                  <TSvgIcon icon="mdi:folder-plus-outline" :size="14" />
-                </template>
-                {{ t('newSubFolder') }}
-              </NButton>
-              <NButton size="small" tertiary @click="openRenameFolder">
-                <template #icon>
-                  <TSvgIcon icon="mdi:pencil-outline" :size="14" />
-                </template>
-                {{ t('renameFolder') }}
-              </NButton>
-              <NPopconfirm
-                :disabled="!canDeleteSelectedFolder"
-                @positive-click="deleteSelectedFolder"
+              {{ t('root') }}
+            </button>
+            <template v-for="(f, idx) in breadcrumb" :key="f.id">
+              <span class="t-storage-file-page__crumb-sep">/</span>
+              <button
+                type="button"
+                class="t-storage-file-page__crumb"
+                :class="{ 'is-active': idx === breadcrumb.length - 1 && !isSearching }"
+                @click="openFolder(f.id)"
               >
-                <template #trigger>
-                  <NButton
-                    size="small"
-                    type="error"
-                    ghost
-                    :disabled="!canDeleteSelectedFolder"
-                    :title="canDeleteSelectedFolder ? '' : t('cannotDeleteNonEmpty')"
-                  >
-                    <template #icon>
-                      <TSvgIcon icon="mdi:trash-can-outline" :size="14" />
-                    </template>
-                    {{ t('deleteFolder') }}
-                  </NButton>
-                </template>
-                {{ t('confirmDeleteFolder') }}
-              </NPopconfirm>
-            </NSpace>
-          </header>
+                {{ f.name }}
+              </button>
+            </template>
+            <template v-if="isSearching">
+              <span class="t-storage-file-page__crumb-sep">/</span>
+              <span class="t-storage-file-page__crumb is-active">{{ t('searchResults') }}</span>
+            </template>
+          </nav>
 
-          <div v-if="selectedIds.length" class="t-storage-file-page__batch">
-            <span>{{ t('selected', { n: selectedIds.length }) }}</span>
-            <NSelect
-              v-model:value="moveTarget"
-              :options="moveTargetOptions"
-              :placeholder="t('moveToPlaceholder')"
+          <div class="t-storage-file-page__filters">
+            <NInput
+              v-model:value="search.originalName"
+              :placeholder="t('search.originalName')"
               size="small"
               clearable
-              filterable
-              class="w-260px max-w-full"
+              class="t-storage-file-page__filter-name"
+              @keyup.enter="applyFilters"
+              @clear="applyFilters"
             />
-            <NButton
+            <NSelect
+              v-model:value="search.contentType"
+              :options="contentTypeOptions"
+              :placeholder="t('search.contentType')"
               size="small"
-              type="primary"
-              :disabled="moveTarget === undefined"
-              :loading="moving"
-              @click="batchMoveFiles"
-            >
-              {{ t('moveButton') }}
+              clearable
+              class="t-storage-file-page__filter-type"
+              @update:value="applyFilters"
+            />
+            <NButton size="small" type="primary" @click="applyFilters">
+              <template #icon><TSvgIcon icon="mdi:magnify" :size="14" /></template>
             </NButton>
-            <NPopconfirm @positive-click="batchDeleteFiles">
-              <template #trigger>
-                <NButton size="small" type="error" ghost :loading="deleting">
-                  {{ t('batchDelete') }}
-                </NButton>
-              </template>
-              {{ t('confirmBatchDelete') }}
-            </NPopconfirm>
           </div>
 
-          <NSpin :show="filesLoading" class="t-storage-file-page__table-spin">
-            <!-- File rows carry a selection checkbox (batch move/delete), so
-                 on phones we keep the table with horizontal scroll rather
-                 than collapsing to cards. -->
+          <NSpace
+            v-if="currentFolder"
+            size="small"
+            class="t-storage-file-page__folder-actions"
+          >
+            <NButton size="small" tertiary @click="openRenameFolder(currentFolder)">
+              <template #icon><TSvgIcon icon="mdi:pencil-outline" :size="14" /></template>
+              {{ t('renameFolder') }}
+            </NButton>
+            <NPopconfirm
+              :disabled="!canDeleteFolder(currentFolder)"
+              @positive-click="deleteFolder(currentFolder)"
+            >
+              <template #trigger>
+                <NButton
+                  size="small"
+                  type="error"
+                  ghost
+                  :disabled="!canDeleteFolder(currentFolder)"
+                  :title="canDeleteFolder(currentFolder) ? '' : t('cannotDeleteNonEmpty')"
+                >
+                  <template #icon><TSvgIcon icon="mdi:trash-can-outline" :size="14" /></template>
+                  {{ t('deleteFolder') }}
+                </NButton>
+              </template>
+              {{ t('confirmDeleteFolder') }}
+            </NPopconfirm>
+          </NSpace>
+        </header>
+
+        <div v-if="selectedIds.length" class="t-storage-file-page__batch">
+          <span>{{ t('selected', { n: selectedIds.length }) }}</span>
+          <NSelect
+            v-model:value="moveTarget"
+            :options="moveTargetOptions"
+            :placeholder="t('moveToPlaceholder')"
+            size="small"
+            clearable
+            filterable
+            class="w-260px max-w-full"
+          />
+          <NButton
+            size="small"
+            type="primary"
+            :disabled="moveTarget === undefined"
+            :loading="moving"
+            @click="batchMoveFiles"
+          >
+            {{ t('moveButton') }}
+          </NButton>
+          <NPopconfirm @positive-click="batchDeleteFiles">
+            <template #trigger>
+              <NButton size="small" type="error" ghost :loading="deleting">
+                {{ t('batchDelete') }}
+              </NButton>
+            </template>
+            {{ t('confirmBatchDelete') }}
+          </NPopconfirm>
+        </div>
+
+        <!-- Grid view -->
+        <TFileExplorer
+          v-if="viewMode === 'grid'"
+          :folders="subfolders"
+          :files="files"
+          :selected-file-ids="selectedIds"
+          :loading="filesLoading"
+          :translate="t"
+          @open-folder="openFolder"
+          @preview-file="openPreview"
+          @context-folder="onContextFolder"
+          @context-file="onContextFile"
+          @update:selected-file-ids="selectedIds = $event"
+          @move-file="onMoveFile"
+          @move-folder="onMoveFolder"
+          @upload-drop="onUploadDrop"
+        />
+
+        <!-- List view — folders + files unified in one table (Explorer-style):
+             folders sort first, double-click a folder row to drill in. -->
+        <div
+          v-else
+          class="t-storage-file-page__list"
+          :class="{ 't-storage-file-page__list--drop': listDropActive }"
+          @dragover="onListDragOver"
+          @dragleave="onListDragLeave"
+          @drop="onListDrop"
+        >
+          <NSpin :show="filesLoading || foldersLoading" class="t-storage-file-page__table-spin">
             <TResponsiveTable
               mobile="scroll"
               class="t-storage-file-page__table"
-              :data="files"
+              :data="tableRows"
               :columns="columns"
-              :row-key="(r: FileRecordDto) => r.id"
+              :row-key="(r: ExplorerRow) => r.id"
+              :row-props="rowProps"
               :checked-row-keys="selectedIds"
+              :empty-text="t('emptyDir')"
               size="small"
               :bordered="false"
               :flex-height="true"
               :pagination="false"
-              @update:checked-row-keys="(keys: Array<string | number>) => selectedIds = keys.map(String)"
+              @update:checked-row-keys="onUpdateChecked"
             />
           </NSpin>
-          <!-- Pagination lives outside NSpin so it stays pinned to the main
-               section's bottom even while the table area is loading. Matches
-               TCrudPage's footer-row pattern. -->
-          <div class="t-storage-file-page__pagination">
-            <NPagination
-              v-model:page="pageIndex"
-              :item-count="totalFiles"
-              :page-size="pageSize"
-              :page-sizes="[20, 50, 100]"
-              show-size-picker
-              @update:page="loadFiles"
-              @update:page-size="onPageSizeChange"
-            />
-          </div>
-        </section>
-      </div>
+        </div>
+
+        <div class="t-storage-file-page__pagination">
+          <NPagination
+            v-model:page="pageIndex"
+            :item-count="totalFiles"
+            :page-size="pageSize"
+            :page-sizes="[20, 50, 100]"
+            show-size-picker
+            @update:page="loadFiles"
+            @update:page-size="onPageSizeChange"
+          />
+        </div>
+      </section>
+    </div>
+
+    <!-- Context menu (file + folder) -->
+    <NDropdown
+      trigger="manual"
+      placement="bottom-start"
+      :show="ctx.show"
+      :x="ctx.x"
+      :y="ctx.y"
+      :options="ctxOptions"
+      @select="onCtxSelect"
+      @clickoutside="ctx.show = false"
+    />
+
+    <!-- Preview lightbox -->
+    <TFilePreviewModal v-model:show="preview.show" :file="preview.file" :translate="t" />
 
     <!-- Create / rename folder modal -->
     <NModal
       v-model:show="folderModal.show"
       :title="folderModal.mode === 'rename' ? t('renameFolder') : t('newFolder')"
       preset="card"
-      :style="folderModalStyle"
+      :style="modalStyle"
     >
       <NForm label-placement="left" label-width="100px">
         <NFormItem :label="t('folderFields.name')" required>
@@ -240,52 +251,26 @@
     </NModal>
 
     <!-- Tags modal -->
-    <NModal
-      v-model:show="tagsModal.show"
-      :title="t('tags.title')"
-      preset="card"
-      :style="folderModalStyle"
-    >
+    <NModal v-model:show="tagsModal.show" :title="t('tags.title')" preset="card" :style="modalStyle">
       <p class="text-13px text-muted mb-8px">{{ tagsModal.fileName }}</p>
       <NDynamicTags v-model:value="tagsModal.tags" />
       <template #footer>
         <div class="flex justify-end gap-8px">
           <NButton @click="tagsModal.show = false">{{ t('cancel') }}</NButton>
-          <NButton type="primary" :loading="tagsModal.saving" @click="saveTags">
-            {{ t('save') }}
-          </NButton>
+          <NButton type="primary" :loading="tagsModal.saving" @click="saveTags">{{ t('save') }}</NButton>
         </div>
       </template>
     </NModal>
 
     <!-- Metadata modal -->
-    <NModal
-      v-model:show="metadataModal.show"
-      :title="t('metadata.title')"
-      preset="card"
-      :style="folderModalStyle"
-    >
+    <NModal v-model:show="metadataModal.show" :title="t('metadata.title')" preset="card" :style="modalStyle">
       <p class="text-13px text-muted mb-8px">{{ metadataModal.fileName }}</p>
       <NSpin :show="metadataModal.loading">
         <NEmpty v-if="!metadataModal.rows.length" :description="t('metadata.empty')" class="my-12px" />
         <NSpace v-else vertical size="small">
-          <div
-            v-for="(row, i) in metadataModal.rows"
-            :key="i"
-            class="flex items-center gap-8px"
-          >
-            <NInput
-              v-model:value="row.key"
-              :placeholder="t('metadata.key')"
-              size="small"
-              class="flex-1"
-            />
-            <NInput
-              v-model:value="row.value"
-              :placeholder="t('metadata.value')"
-              size="small"
-              class="flex-1"
-            />
+          <div v-for="(row, i) in metadataModal.rows" :key="i" class="flex items-center gap-8px">
+            <NInput v-model:value="row.key" :placeholder="t('metadata.key')" size="small" class="flex-1" />
+            <NInput v-model:value="row.value" :placeholder="t('metadata.value')" size="small" class="flex-1" />
             <NButton size="small" quaternary @click="removeMetadataRow(i)">
               <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
             </NButton>
@@ -299,59 +284,128 @@
       <template #footer>
         <div class="flex justify-end gap-8px">
           <NButton @click="metadataModal.show = false">{{ t('cancel') }}</NButton>
-          <NButton type="primary" :loading="metadataModal.saving" @click="saveMetadata">
-            {{ t('save') }}
-          </NButton>
+          <NButton type="primary" :loading="metadataModal.saving" @click="saveMetadata">{{ t('save') }}</NButton>
         </div>
       </template>
     </NModal>
+
+    <!-- File detail drawer (right) — opened by a file row's "View" action. -->
+    <NDrawer v-model:show="detailDrawer.show" :width="bp.isSm.value ? 320 : 420" placement="right">
+      <NDrawerContent :title="t('detail.title')" closable>
+        <template v-if="detailDrawer.file">
+          <NDescriptions label-placement="left" :column="1" size="small" bordered>
+            <NDescriptionsItem :label="t('detail.name')">
+              <span class="break-all">{{ detailDrawer.file.originalName }}</span>
+            </NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.size')">{{ formatSize(detailDrawer.file.size) }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.type')">{{ detailDrawer.file.contentType }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.storage')">{{ detailDrawer.file.provider }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.uploader')">
+              {{ detailDrawer.file.creatorName || detailDrawer.file.creatorId || '—' }}
+            </NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.createdAt')">
+              {{ detailDrawer.file.creationTime ? new Date(detailDrawer.file.creationTime).toLocaleString() : '—' }}
+            </NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.hash')">
+              <span class="break-all text-12px">{{ detailDrawer.file.md5Hash || '—' }}</span>
+            </NDescriptionsItem>
+          </NDescriptions>
+
+          <div v-if="detailFileTags.length" class="mt-14px">
+            <p class="text-13px font-600 mb-6px">{{ t('detail.tags') }}</p>
+            <NSpace size="small">
+              <NTag v-for="tag in detailFileTags" :key="tag" size="small">{{ tag }}</NTag>
+            </NSpace>
+          </div>
+
+          <div class="mt-16px">
+            <p class="text-13px font-600 mb-6px">{{ t('detail.references') }}</p>
+            <NSpin :show="detailDrawer.loadingRefs" size="small">
+              <NEmpty
+                v-if="!detailDrawer.references.length && !detailDrawer.loadingRefs"
+                :description="t('detail.noReferences')"
+                size="small"
+                class="my-8px"
+              />
+              <div v-else class="t-storage-file-page__refs">
+                <div v-for="ref in detailDrawer.references" :key="ref.id" class="t-storage-file-page__ref">
+                  <div class="text-13px font-500">{{ ref.entityType }}</div>
+                  <div class="text-12px text-muted">{{ t('detail.field') }}: {{ ref.fieldName }}</div>
+                  <div class="text-12px text-muted break-all">{{ t('detail.entityId') }}: {{ ref.entityId }}</div>
+                </div>
+              </div>
+            </NSpin>
+          </div>
+        </template>
+        <template #footer>
+          <NButton type="primary" :disabled="!detailDrawer.file" @click="detailDrawer.file && downloadFile(detailDrawer.file)">
+            <template #icon><TSvgIcon icon="mdi:download" :size="14" /></template>
+            {{ t('detail.download') }}
+          </NButton>
+        </template>
+      </NDrawerContent>
+    </NDrawer>
   </TContentPage>
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, ref, onMounted } from 'vue'
-import type { TreeOption, DataTableColumns } from 'naive-ui'
+import { computed, h, reactive, ref, watch, onMounted } from 'vue'
+import type { Component } from 'vue'
+import type { DataTableColumns, DropdownOption } from 'naive-ui'
 import {
-  NButton, NTree, NInput, NSelect, NSpin, NPagination,
-  NModal, NForm, NFormItem, NInputNumber, NPopconfirm, NTag,
+  NButton, NButtonGroup, NInput, NSelect, NSpin, NPagination,
+  NModal, NForm, NFormItem, NInputNumber, NPopconfirm,
   NDropdown, NDynamicTags, NEmpty, NSpace,
+  NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NTag,
 } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import TChunkFileUpload from '../../components/data/TChunkFileUpload.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
+import type { RowAction } from '../../headless/rowActions'
 import { TSvgIcon } from '@tnzi/ui'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import type { FileRecordDto, FileFolderDto } from '@tnzi/core/services/storage'
-
-type Scope = 'all' | 'unfiled' | 'folder'
+import TFileExplorer from './components/TFileExplorer.vue'
+import TFilePreviewModal from './components/TFilePreviewModal.vue'
+import { FOLDER_GLYPH, fileGlyph } from './file-icons'
+import type { FileRecordDto, FileFolderDto, FileReferenceDto } from '@tnzi/core/services/storage'
 
 const bridge = createStorageBridge({ client: useAdminClient() })
 const t = makePageTranslator('storage.files')
-
 const message = useSafeMessage()
 const bp = useBreakpoint()
 
-// Folder modal width — phone fullscreen, desktop fixed 460. Avoids the
-// useFormModal refactor since folderModal carries `mode` + `parentId`
-// metadata alongside the form payload.
-const folderModalStyle = computed(() =>
-  bp.isSm.value
-    ? { width: '100vw', maxWidth: '100vw' }
-    : { width: 'min(460px, 95vw)' },
+const modalStyle = computed(() =>
+  bp.isSm.value ? { width: '100vw', maxWidth: '100vw' } : { width: 'min(460px, 95vw)' },
 )
 
-// ---- State ----------------------------------------------------------------
+// ---- view mode (persisted) ----
+const VIEW_KEY = 'tnzi-admin:storage-view'
+function readView(): 'grid' | 'list' {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'
+  } catch {
+    return 'grid'
+  }
+}
+const viewMode = ref<'grid' | 'list'>(readView())
+watch(viewMode, (v) => {
+  try {
+    localStorage.setItem(VIEW_KEY, v)
+  } catch {
+    // ignore storage errors
+  }
+})
 
+// ---- state ----
 const folders = ref<FileFolderDto[]>([])
 const files = ref<FileRecordDto[]>([])
 const totalFiles = ref(0)
-const scope = ref<Scope>('all')
-const selectedFolderId = ref<string | null>(null)
-const folderFilter = ref('')
+/** Current directory; null = root (top folders + unfiled files). */
+const currentFolderId = ref<string | null>(null)
 const pageIndex = ref(1)
 const pageSize = ref(20)
 const foldersLoading = ref(false)
@@ -359,47 +413,52 @@ const filesLoading = ref(false)
 const moving = ref(false)
 const deleting = ref(false)
 const folderSaving = ref(false)
+const uploading = ref(false)
 const selectedIds = ref<string[]>([])
-/**
- * NSelect doesn't accept `null` as an option value, so the "to root" target
- * is represented by the sentinel below. `undefined` = no selection yet.
- */
+const fileInput = ref<HTMLInputElement | null>(null)
+const listDropActive = ref(false)
+
 const ROOT_TARGET = '__ROOT__'
 const moveTarget = ref<string | undefined>(undefined)
 
-const search = reactive({
-  originalName: '',
-  contentType: '',
-})
+const search = reactive({ originalName: '', contentType: '' })
 
 const folderModal = reactive({
   show: false,
   mode: 'create' as 'create' | 'rename',
   parentId: null as string | null,
+  targetId: null as string | null,
   form: { name: '', description: '' as string | undefined, sortOrder: 0 },
 })
 
-// Tags modal — edits FileRecord.Tags via PUT /admin/files/{id}/tags.
-const tagsModal = reactive({
-  show: false,
-  fileId: '' as string,
-  fileName: '' as string,
-  tags: [] as string[],
-  saving: false,
-})
-
-// Metadata modal — key/value rows persisted via PUT /admin/files/{id}/metadata.
+const tagsModal = reactive({ show: false, fileId: '', fileName: '', tags: [] as string[], saving: false })
 const metadataModal = reactive({
-  show: false,
-  fileId: '' as string,
-  fileName: '' as string,
-  rows: [] as Array<{ key: string; value: string }>,
-  loading: false,
-  saving: false,
+  show: false, fileId: '', fileName: '',
+  rows: [] as Array<{ key: string; value: string }>, loading: false, saving: false,
 })
 
-// ---- Derived --------------------------------------------------------------
+const ctx = reactive({
+  show: false, x: 0, y: 0,
+  type: 'file' as 'file' | 'folder',
+  file: null as FileRecordDto | null,
+  folder: null as FileFolderDto | null,
+})
+const preview = reactive({ show: false, file: null as FileRecordDto | null })
 
+/** Right-side detail drawer — opened from a file row's primary "View" action.
+ *  Shows the file's metadata + where it is referenced (loaded async). */
+const detailDrawer = reactive({
+  show: false,
+  file: null as FileRecordDto | null,
+  references: [] as FileReferenceDto[],
+  loadingRefs: false,
+})
+const detailFileTags = computed<string[]>(() => {
+  const tags = (detailDrawer.file as { tags?: string[] } | null)?.tags
+  return Array.isArray(tags) ? tags : []
+})
+
+// ---- derived ----
 const flatFolders = computed(() => {
   const map = new Map<string, FileFolderDto>()
   const walk = (nodes: FileFolderDto[]) => {
@@ -412,52 +471,54 @@ const flatFolders = computed(() => {
   return map
 })
 
-const selectedFolder = computed(() =>
-  selectedFolderId.value ? flatFolders.value.get(selectedFolderId.value) ?? null : null,
+const currentFolder = computed(() =>
+  currentFolderId.value ? flatFolders.value.get(currentFolderId.value) ?? null : null,
 )
 
-/**
- * The backend rejects deletion of a non-empty folder. Pre-check both direct
- * children (`children`) and direct files (`fileCount`) so the UI can disable
- * the delete button + tooltip the reason instead of relying on a 4xx round trip.
- */
-const canDeleteSelectedFolder = computed(() => {
-  const f = selectedFolder.value
+const isSearching = computed(() => !!search.originalName.trim() || !!search.contentType)
+
+/** Sub-folders shown in the main area for the current directory. */
+const subfolders = computed<FileFolderDto[]>(() => {
+  if (isSearching.value) return []
+  if (!currentFolderId.value) return folders.value
+  return currentFolder.value?.children ?? []
+})
+
+/** Ancestor chain (root → current) for the breadcrumb. */
+const breadcrumb = computed<FileFolderDto[]>(() => {
+  const chain: FileFolderDto[] = []
+  let f = currentFolder.value
+  while (f) {
+    chain.unshift(f)
+    f = f.parentId ? flatFolders.value.get(f.parentId) ?? null : null
+  }
+  return chain
+})
+
+function canDeleteFolder(f: FileFolderDto | null): boolean {
   if (!f) return false
   if ((f.fileCount ?? 0) > 0) return false
   if (f.children && f.children.length > 0) return false
   return true
-})
+}
 
-const scopeLabel = computed(() => {
-  if (scope.value === 'all') return t('scope.allTitle')
-  if (scope.value === 'unfiled') return t('scope.unfiledTitle')
-  return selectedFolder.value?.name ?? '—'
-})
+/**
+ * Unified list-view row model — sub-folders and files share one table so
+ * folders appear as rows (Explorer-style) instead of a separate strip.
+ * Folders sort first; double-click a folder row drills in (see `rowProps`).
+ */
+type ExplorerRow =
+  | { kind: 'folder'; id: string; folder: FileFolderDto }
+  | { kind: 'file'; id: string; file: FileRecordDto }
 
-const treeData = computed<TreeOption[]>(() => {
-  const adapt = (nodes: FileFolderDto[]): TreeOption[] =>
-    nodes.map((n) => ({
-      key: n.id,
-      label: n.name,
-      children: n.children?.length ? adapt(n.children) : undefined,
-      suffix: () =>
-        h(
-          'span',
-          { class: 'text-muted text-11px ml-4px' },
-          `(${n.fileCount})`,
-        ),
-    }))
-  return adapt(folders.value)
-})
+const tableRows = computed<ExplorerRow[]>(() => [
+  ...subfolders.value.map((folder) => ({ kind: 'folder' as const, id: folder.id, folder })),
+  ...files.value.map((file) => ({ kind: 'file' as const, id: file.id, file })),
+])
 
 const moveTargetOptions = computed(() => {
-  const opts: Array<{ label: string; value: string }> = [
-    { label: t('scope.unfiled'), value: ROOT_TARGET },
-  ]
-  for (const [id, f] of flatFolders.value) {
-    opts.push({ label: f.path || f.name, value: id })
-  }
+  const opts: Array<{ label: string; value: string }> = [{ label: t('root'), value: ROOT_TARGET }]
+  for (const [id, f] of flatFolders.value) opts.push({ label: f.path || f.name, value: id })
   return opts
 })
 
@@ -477,85 +538,179 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${u[i]}`
 }
 
-const columns = computed<DataTableColumns<FileRecordDto>>(() => [
-  { type: 'selection' },
+/** Name cell — icon (folder glyph or file-type glyph) + label. `min-w-0` on
+ *  both the flex row and the label lets it truncate inside the table cell. The
+ *  label is clickable (`onClick`): a file name previews, a folder name opens. */
+function renderNameCell(icon: string, color: string, label: string, onClick: () => void) {
+  return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
+    h(TSvgIcon, { icon, size: 18, class: 'shrink-0', style: { color } }),
+    h(
+      'span',
+      {
+        class: 't-storage-file-page__name-link truncate min-w-0',
+        title: label,
+        onClick: (e: MouseEvent) => { e.stopPropagation(); onClick() },
+      },
+      label,
+    ),
+  ])
+}
+
+/**
+ * Operation-column actions per row kind, rendered through the framework's
+ * declarative `TRowActions` (C5 convention): auto-collapse to one inline
+ * primary action + a `More▾` overflow, destructive ops gated by a confirm.
+ * Replaces the previous hand-rolled Download / 👁 / ⋯ button cluster.
+ */
+function rowActionList(row: ExplorerRow): RowAction<ExplorerRow>[] {
+  if (row.kind === 'folder') {
+    const folder = row.folder
+    return [
+      { key: 'open', label: 'open', icon: 'mdi:folder-open-outline', type: 'primary', onClick: () => openFolder(folder.id) },
+      { key: 'newSub', label: 'newSubFolder', icon: 'mdi:folder-plus-outline', onClick: () => openCreateFolder(folder.id) },
+      { key: 'rename', label: 'renameFolder', icon: 'mdi:pencil-outline', onClick: () => openRenameFolder(folder) },
+      {
+        key: 'delete', label: 'deleteFolder', icon: 'mdi:trash-can-outline', type: 'error',
+        confirm: 'confirmDeleteFolder', disabled: () => !canDeleteFolder(folder), onClick: () => void deleteFolder(folder),
+      },
+    ]
+  }
+  const file = row.file
+  return [
+    { key: 'view', label: 'actions.view', icon: 'mdi:eye-outline', type: 'primary', onClick: () => openDetail(file) },
+    { key: 'download', label: 'actions.download', icon: 'mdi:download', onClick: () => downloadFile(file) },
+    { key: 'preview', label: 'actions.preview', icon: 'mdi:image-outline', onClick: () => openPreview(file) },
+    { key: 'tags', label: 'actions.tags', icon: 'mdi:tag-outline', onClick: () => openTagsModal(file) },
+    { key: 'metadata', label: 'actions.metadata', icon: 'mdi:information-outline', onClick: () => void openMetadataModal(file) },
+    { key: 'delete', label: 'actions.delete', icon: 'mdi:trash-can-outline', type: 'error', confirm: 'confirmDeleteFile', onClick: () => void deleteSingleFile(file) },
+  ]
+}
+
+const columns = computed<DataTableColumns<ExplorerRow>>(() => [
+  { type: 'selection', disabled: (row: ExplorerRow) => row.kind === 'folder' },
   {
-    key: 'originalName',
-    title: t('columns.originalName'),
-    minWidth: 200,
-    ellipsis: { tooltip: true },
-  },
-  {
-    key: 'size',
-    title: t('columns.size'),
-    width: 100,
-    render: (row) => formatSize(row.size),
-  },
-  { key: 'contentType', title: t('columns.contentType'), width: 160, ellipsis: { tooltip: true } },
-  // `creatorName` is NOT on the backend `FileRecord` (only creatorId), so the
-  // column used to be blank everywhere. Show `provider` + `referenceCount`
-  // instead — both are useful for admins inspecting storage health.
-  { key: 'provider', title: t('columns.provider'), width: 100 },
-  {
-    key: 'referenceCount',
-    title: t('columns.referenceCount'),
-    width: 110,
-    render: (row) => String(row.referenceCount ?? 0),
-  },
-  {
-    key: 'creationTime',
-    title: t('columns.creationTime'),
-    width: 160,
-    render: (row) => (row.creationTime ? new Date(row.creationTime).toLocaleString() : '—'),
-  },
-  {
-    key: 'actions',
-    title: t('columns.actions'),
-    width: 180,
+    key: 'name', title: t('columns.originalName'), minWidth: 220,
     render: (row) =>
-      h('div', { class: 'flex items-center gap-4px' }, [
-        h(
-          NButton,
-          { size: 'small', ghost: true, onClick: () => downloadFile(row) },
-          { default: () => t('actions.download') },
-        ),
-        h(
-          NDropdown,
-          {
-            trigger: 'click',
-            options: rowMenuOptions,
-            onSelect: (key: string) => onRowMenuSelect(key, row),
-          },
-          {
-            default: () =>
-              h(
-                NButton,
-                { size: 'small', tertiary: true },
-                {
-                  icon: () => h(TSvgIcon, { icon: 'mdi:dots-horizontal', size: 16 }),
-                },
-              ),
-          },
-        ),
-      ]),
+      row.kind === 'folder'
+        ? renderNameCell(FOLDER_GLYPH.icon, FOLDER_GLYPH.color, row.folder.name, () => openFolder(row.folder.id))
+        : renderNameCell(
+            fileGlyph(row.file.contentType, row.file.extension).icon,
+            fileGlyph(row.file.contentType, row.file.extension).color,
+            row.file.originalName,
+            () => openPreview(row.file),
+          ),
+  },
+  {
+    key: 'size', title: t('columns.size'), width: 110,
+    render: (row) => (row.kind === 'folder' ? t('itemCount', { n: row.folder.fileCount ?? 0 }) : formatSize(row.file.size)),
+  },
+  {
+    key: 'contentType', title: t('columns.contentType'), minWidth: 140, ellipsis: { tooltip: true },
+    render: (row) => (row.kind === 'folder' ? t('folder') : row.file.contentType),
+  },
+  {
+    key: 'provider', title: t('columns.provider'), width: 100,
+    render: (row) => (row.kind === 'folder' ? '' : (row.file.provider ?? '')),
+  },
+  {
+    key: 'referenceCount', title: t('columns.referenceCount'), width: 90,
+    render: (row) => (row.kind === 'folder' ? '' : String(row.file.referenceCount ?? 0)),
+  },
+  {
+    key: 'creationTime', title: t('columns.creationTime'), width: 160,
+    render: (row) =>
+      row.kind === 'folder'
+        ? ''
+        : (row.file.creationTime ? new Date(row.file.creationTime).toLocaleString() : ''),
+  },
+  {
+    key: 'actions', title: t('columns.actions'), width: 188, align: 'center',
+    // TRowActions is generic on the row type; `h()` can't infer it, so render
+    // through the loose `Component` type and pass the typed actions list.
+    render: (row) => h(TRowActions as Component, { row, actions: rowActionList(row), translate: t }),
   },
 ])
 
-// Per-row More menu: preview / set tags / view+edit metadata.
-const rowMenuOptions = [
-  { key: 'preview', label: t('actions.preview') },
-  { key: 'tags', label: t('actions.tags') },
-  { key: 'metadata', label: t('actions.metadata') },
-]
-
-function onRowMenuSelect(key: string, row: FileRecordDto): void {
-  if (key === 'preview') void previewFile(row)
-  else if (key === 'tags') openTagsModal(row)
-  else if (key === 'metadata') void openMetadataModal(row)
+/** Row interactions — double-click drills into a folder / previews a file;
+ *  right-click opens the matching context menu. Only files are selectable. */
+function rowProps(row: ExplorerRow) {
+  return {
+    style: 'cursor: pointer',
+    onDblclick: () => {
+      if (row.kind === 'folder') openFolder(row.id)
+      else openPreview(row.file)
+    },
+    onContextmenu: (e: MouseEvent) => {
+      e.preventDefault()
+      if (row.kind === 'folder') onContextFolder({ folder: row.folder, x: e.clientX, y: e.clientY })
+      else onContextFile({ file: row.file, x: e.clientX, y: e.clientY })
+    },
+  }
 }
 
-// ---- Actions --------------------------------------------------------------
+/** Selection only tracks file ids (folder rows are disabled / never checked). */
+function onUpdateChecked(keys: Array<string | number>): void {
+  const fileIds = new Set(files.value.map((f) => f.id))
+  selectedIds.value = keys.map(String).filter((k) => fileIds.has(k))
+}
 
+// ---- context menu ----
+const ctxOptions = computed<DropdownOption[]>(() => {
+  if (ctx.type === 'folder') {
+    return [
+      { key: 'open', label: t('open') },
+      { key: 'newSub', label: t('newSubFolder') },
+      { key: 'rename', label: t('renameFolder') },
+      { type: 'divider', key: 'd1' },
+      { key: 'delete', label: t('deleteFolder'), disabled: !canDeleteFolder(ctx.folder) },
+    ]
+  }
+  return [
+    { key: 'preview', label: t('actions.preview') },
+    { key: 'download', label: t('actions.download') },
+    { type: 'divider', key: 'd1' },
+    { key: 'tags', label: t('actions.tags') },
+    { key: 'metadata', label: t('actions.metadata') },
+    { type: 'divider', key: 'd2' },
+    { key: 'delete', label: t('actions.delete') },
+  ]
+})
+
+function onContextFile(payload: { file: FileRecordDto; x: number; y: number }): void {
+  ctx.type = 'file'
+  ctx.file = payload.file
+  ctx.folder = null
+  ctx.x = payload.x
+  ctx.y = payload.y
+  ctx.show = true
+}
+function onContextFolder(payload: { folder: FileFolderDto; x: number; y: number }): void {
+  ctx.type = 'folder'
+  ctx.folder = payload.folder
+  ctx.file = null
+  ctx.x = payload.x
+  ctx.y = payload.y
+  ctx.show = true
+}
+function onCtxSelect(key: string): void {
+  ctx.show = false
+  if (ctx.type === 'file' && ctx.file) {
+    const f = ctx.file
+    if (key === 'preview') openPreview(f)
+    else if (key === 'download') downloadFile(f)
+    else if (key === 'tags') openTagsModal(f)
+    else if (key === 'metadata') void openMetadataModal(f)
+    else if (key === 'delete') void deleteSingleFile(f)
+  } else if (ctx.type === 'folder' && ctx.folder) {
+    const f = ctx.folder
+    if (key === 'open') openFolder(f.id)
+    else if (key === 'newSub') openCreateFolder(f.id)
+    else if (key === 'rename') openRenameFolder(f)
+    else if (key === 'delete') void deleteFolder(f)
+  }
+}
+
+// ---- data loading ----
 async function loadFolders(): Promise<void> {
   foldersLoading.value = true
   try {
@@ -566,6 +721,18 @@ async function loadFolders(): Promise<void> {
   } finally {
     foldersLoading.value = false
   }
+}
+
+function buildFilters(): Record<string, unknown> {
+  const f: Record<string, unknown> = {}
+  const name = search.originalName.trim()
+  if (name) f.originalName = name
+  if (search.contentType) f.contentType = search.contentType
+  if (!isSearching.value) {
+    if (currentFolderId.value) f.folderId = currentFolderId.value
+    else f.includeUnfiled = true
+  }
+  return f
 }
 
 async function loadFiles(): Promise<void> {
@@ -592,68 +759,60 @@ async function loadFiles(): Promise<void> {
   }
 }
 
-function buildFilters(): Record<string, unknown> {
-  const f: Record<string, unknown> = {}
-  if (search.originalName.trim()) f.originalName = search.originalName.trim()
-  if (search.contentType) f.contentType = search.contentType
-  if (scope.value === 'unfiled') {
-    f.includeUnfiled = true
-  } else if (scope.value === 'folder' && selectedFolderId.value) {
-    f.folderId = selectedFolderId.value
-  }
-  return f
+async function reload(): Promise<void> {
+  await Promise.all([loadFolders(), loadFiles()])
 }
 
-function selectScope(s: Scope): void {
-  scope.value = s
-  selectedFolderId.value = null
+// ---- navigation ----
+function openFolder(id: string): void {
+  currentFolderId.value = id
+  search.originalName = ''
+  search.contentType = ''
   pageIndex.value = 1
   void loadFiles()
 }
-
-function onSelectFolder(keys: Array<string | number>): void {
-  const key = keys[0] as string | undefined
-  if (!key) {
-    selectedFolderId.value = null
-    return
-  }
-  selectedFolderId.value = key
-  scope.value = 'folder'
+function goRoot(): void {
+  currentFolderId.value = null
+  search.originalName = ''
+  search.contentType = ''
   pageIndex.value = 1
   void loadFiles()
 }
-
 function applyFilters(): void {
   pageIndex.value = 1
   void loadFiles()
 }
-
 function onPageSizeChange(next: number): void {
   pageSize.value = next
   pageIndex.value = 1
   void loadFiles()
 }
 
+// ---- file actions ----
 function downloadFile(row: FileRecordDto): void {
-  const url = bridge.files.downloadUrl(row.id)
-  window.open(url, '_blank')
+  window.open(`/api/files/${row.id}/download`, '_blank')
 }
-
-// ---- Preview / tags / metadata --------------------------------------------
-
-async function previewFile(row: FileRecordDto): Promise<void> {
+function openPreview(row: FileRecordDto): void {
+  preview.file = row
+  preview.show = true
+}
+/** Open the right-side detail drawer and lazily load the file's references. */
+function openDetail(row: FileRecordDto): void {
+  detailDrawer.file = row
+  detailDrawer.references = []
+  detailDrawer.show = true
+  detailDrawer.loadingRefs = true
+  bridge.references
+    .byFile(row.id)
+    .then((refs) => { detailDrawer.references = refs })
+    .catch(() => { detailDrawer.references = [] })
+    .finally(() => { detailDrawer.loadingRefs = false })
+}
+async function deleteSingleFile(row: FileRecordDto): Promise<void> {
   try {
-    const can = await bridge.preview.canPreview(row.id)
-    if (!can) {
-      message.warning(t('preview.unsupported'))
-      return
-    }
-    const url = await bridge.preview.url(row.id)
-    if (url) {
-      window.open(url, '_blank')
-    } else {
-      message.warning(t('preview.unsupported'))
-    }
+    await bridge.files.delete([row.id])
+    message.success(t('deleteSuccess'))
+    await reload()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
@@ -662,12 +821,10 @@ async function previewFile(row: FileRecordDto): Promise<void> {
 function openTagsModal(row: FileRecordDto): void {
   tagsModal.fileId = row.id
   tagsModal.fileName = row.originalName
-  // FileRecordDto has no typed `tags` field; read it defensively when present.
   const existing = (row as { tags?: string[] }).tags
   tagsModal.tags = Array.isArray(existing) ? [...existing] : []
   tagsModal.show = true
 }
-
 async function saveTags(): Promise<void> {
   tagsModal.saving = true
   try {
@@ -697,15 +854,12 @@ async function openMetadataModal(row: FileRecordDto): Promise<void> {
     metadataModal.loading = false
   }
 }
-
 function addMetadataRow(): void {
   metadataModal.rows = [...metadataModal.rows, { key: '', value: '' }]
 }
-
 function removeMetadataRow(index: number): void {
   metadataModal.rows = metadataModal.rows.filter((_, i) => i !== index)
 }
-
 async function saveMetadata(): Promise<void> {
   metadataModal.saving = true
   try {
@@ -724,6 +878,7 @@ async function saveMetadata(): Promise<void> {
   }
 }
 
+// ---- batch ----
 async function batchMoveFiles(): Promise<void> {
   if (!selectedIds.value.length || moveTarget.value === undefined) return
   moving.value = true
@@ -731,21 +886,20 @@ async function batchMoveFiles(): Promise<void> {
     const target = moveTarget.value === ROOT_TARGET ? null : moveTarget.value
     await bridge.files.moveTo(selectedIds.value, target)
     message.success(t('moveSuccess'))
-    await Promise.all([loadFolders(), loadFiles()])
+    await reload()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
     moving.value = false
   }
 }
-
 async function batchDeleteFiles(): Promise<void> {
   if (!selectedIds.value.length) return
   deleting.value = true
   try {
     await bridge.files.delete(selectedIds.value)
     message.success(t('deleteSuccess'))
-    await Promise.all([loadFolders(), loadFiles()])
+    await reload()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
@@ -753,25 +907,136 @@ async function batchDeleteFiles(): Promise<void> {
   }
 }
 
+// ---- drag move ----
+async function onMoveFile(payload: { fileId: string; folderId: string }): Promise<void> {
+  try {
+    await bridge.files.moveTo([payload.fileId], payload.folderId)
+    message.success(t('moveSuccess'))
+    await reload()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+/** Whether `ancestorCandidate` lies on the path from `folderId` down (i.e. is a descendant of folderId). */
+function isDescendantOf(folderId: string, candidateId: string): boolean {
+  let f: FileFolderDto | null = flatFolders.value.get(candidateId) ?? null
+  while (f) {
+    if (f.id === folderId) return true
+    f = f.parentId ? flatFolders.value.get(f.parentId) ?? null : null
+  }
+  return false
+}
+async function onMoveFolder(payload: { folderId: string; newParentId: string }): Promise<void> {
+  if (payload.folderId === payload.newParentId || isDescendantOf(payload.folderId, payload.newParentId)) {
+    message.warning(t('invalidMove'))
+    return
+  }
+  try {
+    await bridge.folders.move(payload.folderId, payload.newParentId)
+    message.success(t('moveSuccess'))
+    await reload()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// ---- upload (folder-aware; chunked fallback for large files) ----
+const CHUNK_THRESHOLD = 90 * 1024 * 1024
+const CHUNK_SIZE = 5 * 1024 * 1024
+
+async function chunkedUpload(file: File): Promise<void> {
+  const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE))
+  const { uploadId } = await bridge.files.initUpload({ name: file.name, size: file.size, chunkCount })
+  for (let i = 0; i < chunkCount; i++) {
+    const blob = file.slice(i * CHUNK_SIZE, Math.min(file.size, (i + 1) * CHUNK_SIZE))
+    await bridge.files.uploadChunk(uploadId, i, blob)
+  }
+  await bridge.files.completeUpload(uploadId)
+}
+
+/** Upload one file; returns true when it went chunked-to-root despite a target folder. */
+async function uploadOne(file: File, target: string | null): Promise<boolean> {
+  if (file.size > CHUNK_THRESHOLD) {
+    await chunkedUpload(file)
+    return target != null
+  }
+  const res = await bridge.files.upload(file)
+  if (target) await bridge.files.moveTo([res.id], target)
+  return false
+}
+
+async function uploadFiles(list: File[], target: string | null): Promise<void> {
+  if (!list.length) return
+  uploading.value = true
+  let ok = 0
+  let largeToRoot = false
+  for (const file of list) {
+    try {
+      if (await uploadOne(file, target)) largeToRoot = true
+      ok++
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+  uploading.value = false
+  if (ok) {
+    message.success(t('uploadSuccess', { n: ok }))
+    if (largeToRoot) message.info(t('largeUploadedToRoot'))
+    await reload()
+  }
+}
+
+function triggerUpload(): void {
+  fileInput.value?.click()
+}
+function onFileInputChange(e: Event): void {
+  const input = e.target as HTMLInputElement
+  const list = input.files ? Array.from(input.files) : []
+  void uploadFiles(list, currentFolderId.value)
+  input.value = ''
+}
+function onUploadDrop(payload: { files: File[]; folderId: string | null }): void {
+  void uploadFiles(payload.files, payload.folderId ?? currentFolderId.value)
+}
+
+// list-view drop zone (OS files → upload to current dir)
+function onListDragOver(e: DragEvent): void {
+  if (e.dataTransfer?.types?.includes('Files')) {
+    e.preventDefault()
+    listDropActive.value = true
+  }
+}
+function onListDragLeave(e: DragEvent): void {
+  if (e.currentTarget === e.target) listDropActive.value = false
+}
+function onListDrop(e: DragEvent): void {
+  listDropActive.value = false
+  const osFiles = e.dataTransfer?.files
+  if (osFiles && osFiles.length) {
+    e.preventDefault()
+    void uploadFiles(Array.from(osFiles), currentFolderId.value)
+  }
+}
+
+// ---- folder CRUD ----
 function openCreateFolder(parentId: string | null): void {
   folderModal.mode = 'create'
   folderModal.parentId = parentId
+  folderModal.targetId = null
   folderModal.form = { name: '', description: undefined, sortOrder: 0 }
   folderModal.show = true
 }
-
-function openRenameFolder(): void {
-  if (!selectedFolder.value) return
+function openRenameFolder(folder: FileFolderDto): void {
   folderModal.mode = 'rename'
-  folderModal.parentId = selectedFolder.value.parentId ?? null
+  folderModal.parentId = folder.parentId ?? null
+  folderModal.targetId = folder.id
   folderModal.form = {
-    name: selectedFolder.value.name,
-    description: selectedFolder.value.description ?? undefined,
-    sortOrder: selectedFolder.value.sortOrder,
+    name: folder.name,
+    description: folder.description ?? undefined,
+    sortOrder: folder.sortOrder,
   }
   folderModal.show = true
 }
-
 async function submitFolderModal(): Promise<void> {
   folderSaving.value = true
   try {
@@ -785,12 +1050,9 @@ async function submitFolderModal(): Promise<void> {
       message.success(t('createFolderSuccess'))
       folderModal.show = false
       await loadFolders()
-      selectedFolderId.value = created.id
-      scope.value = 'folder'
-      pageIndex.value = 1
-      await loadFiles()
-    } else if (selectedFolder.value) {
-      await bridge.folders.update(selectedFolder.value.id, {
+      openFolder(created.id)
+    } else if (folderModal.targetId) {
+      await bridge.folders.update(folderModal.targetId, {
         name: folderModal.form.name,
         description: folderModal.form.description ?? null,
         sortOrder: folderModal.form.sortOrder,
@@ -805,27 +1067,21 @@ async function submitFolderModal(): Promise<void> {
     folderSaving.value = false
   }
 }
-
-async function deleteSelectedFolder(): Promise<void> {
-  if (!selectedFolder.value) return
+async function deleteFolder(folder: FileFolderDto): Promise<void> {
+  if (!canDeleteFolder(folder)) {
+    message.warning(t('cannotDeleteNonEmpty'))
+    return
+  }
   try {
-    await bridge.folders.delete(selectedFolder.value.id)
+    await bridge.folders.delete(folder.id)
     message.success(t('deleteFolderSuccess'))
-    selectedFolderId.value = null
-    scope.value = 'all'
-    await Promise.all([loadFolders(), loadFiles()])
+    if (currentFolderId.value === folder.id) {
+      currentFolderId.value = folder.parentId ?? null
+    }
+    await reload()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   }
-}
-
-function onUploadSuccess(_result: { url: string }): void {
-  void loadFiles()
-  void loadFolders()
-}
-
-function onUploadError(_error: Error): void {
-  // Inline status surfaced by TChunkFileUpload — keep page state untouched
 }
 
 onMounted(async () => {
@@ -835,131 +1091,65 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.t-storage-file-page {
-  /* no padding — owned by TAdminContent */
+.t-storage-file-page__file-input {
+  display: none;
 }
 .t-storage-file-page__layout {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 16px;
-  /* No min-height: card-level flex-fill (from global polish rule) gives
-     the layout a definite height; grid items inherit it. */
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
-}
-.t-storage-file-page__tree {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 16px;
-}
-/* Phone: stack the folder tree above the file list. */
-@media (max-width: 767px) {
-  .t-storage-file-page__layout {
-    grid-template-columns: 1fr;
-    height: auto;
-  }
-  .t-storage-file-page__tree {
-    border-right: none;
-    padding-right: 0;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-bottom: 12px;
-    max-height: 38vh;
-    overflow: auto;
-  }
-}
-.t-storage-file-page__root-list {
-  list-style: none;
-  padding: 0;
-  margin: 8px 0;
-}
-.t-storage-file-page__root-item {
-  padding: 8px 12px;
-  border-radius: var(--tnzi-admin-radius-md, 4px);
-  cursor: pointer;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-.t-storage-file-page__root-item:hover {
-  background: var(--tnzi-layout-bg);
-}
-.t-storage-file-page__root-item.is-active {
-  background: rgb(var(--tnzi-primary-rgb) / 0.12);
-  color: var(--tnzi-primary);
-}
-.t-storage-file-page__root-icon {
-  font-size: 14px;
-}
-.t-storage-file-page__tree-divider {
-  height: 1px;
-  background: var(--tnzi-border);
-  margin: 8px 0;
-}
-.t-storage-file-page__naive-tree {
-  max-height: 48vh;
-  overflow: auto;
-}
-.t-storage-file-page__empty {
-  color: var(--tnzi-base-text-muted);
-  text-align: center;
-  padding: 16px 8px;
-  font-size: 13px;
+  min-width: 0;
 }
 .t-storage-file-page__main {
-  padding: 0 4px;
-  /* flex column so the table area can grow and pagination can pin to
-     the bottom. min-height: 0 lets the flex children actually shrink. */
   display: flex;
   flex-direction: column;
-  min-height: 0;
-}
-/* Wrapper around NSpin → NDataTable. NSpin defaults to inline-block,
-   so we need to coax it into a flex column too — and reach into its
-   internal `.n-spin-container`/`.n-spin-content` (which it uses for
-   the overlay + content layering) so the table inside actually has a
-   definite height for `flex-height` to read. */
-.t-storage-file-page__table-spin {
+  /* Fill the layout's height so the flex-height table inside resolves to a
+     real height (a flex-column child collapses to content height without
+     `flex: 1` — the former grid cell got this stretch for free). */
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  /* Allow the pane to shrink below the table's intrinsic min-width (NDataTable
+     scroll-x) so the table scrolls horizontally inside it instead of pushing
+     the page past the right edge. */
+  min-width: 0;
 }
-.t-storage-file-page__table-spin :deep(.n-spin-container),
-.t-storage-file-page__table-spin :deep(.n-spin-content) {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.t-storage-file-page__table {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* Compact single-row toolbar — scope on the left, filters in the
-   middle (growing to consume slack), folder actions on the right.
-   Total height ~36-40px instead of the previous 150px header+search
-   stack. Wraps cleanly under 1024px. */
-.t-storage-file-page__toolbar {
+.t-storage-file-page__bar {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 10px;
   flex-wrap: wrap;
 }
-.t-storage-file-page__scope {
-  display: inline-flex;
+.t-storage-file-page__breadcrumb {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  /* Push filters + folder-actions to the right edge of the toolbar. */
+  gap: 4px;
+  flex-wrap: wrap;
   margin-right: auto;
+  min-width: 0;
 }
-.t-storage-file-page__scope-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+.t-storage-file-page__crumb {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: var(--tnzi-admin-radius-sm, 3px);
+  color: var(--tnzi-base-text-muted);
+}
+.t-storage-file-page__crumb:hover {
+  background: var(--tnzi-layout-bg);
   color: var(--tnzi-base-text);
+}
+.t-storage-file-page__crumb.is-active {
+  color: var(--tnzi-base-text);
+  font-weight: 600;
+}
+.t-storage-file-page__crumb-sep {
+  color: var(--tnzi-base-text-muted);
+  font-size: 12px;
 }
 .t-storage-file-page__filters {
   display: flex;
@@ -968,10 +1158,10 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 .t-storage-file-page__filter-name {
-  width: 200px;
+  width: 180px;
 }
 .t-storage-file-page__filter-type {
-  width: 160px;
+  width: 140px;
 }
 .t-storage-file-page__folder-actions {
   flex-shrink: 0;
@@ -987,10 +1177,59 @@ onMounted(async () => {
   border-radius: var(--tnzi-admin-radius-md, 4px);
   font-size: 13px;
 }
+.t-storage-file-page__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--tnzi-admin-radius-md, 4px);
+}
+.t-storage-file-page__list--drop {
+  box-shadow: inset 0 0 0 2px var(--tnzi-primary);
+  background: rgb(var(--tnzi-primary-rgb) / 0.04);
+}
+.t-storage-file-page__table-spin {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-storage-file-page__table-spin :deep(.n-spin-container),
+.t-storage-file-page__table-spin :deep(.n-spin-content) {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.t-storage-file-page__table {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
 .t-storage-file-page__pagination {
   flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   padding: 12px 4px 4px;
+}
+.t-storage-file-page__name-link {
+  cursor: pointer;
+}
+.t-storage-file-page__name-link:hover {
+  color: var(--tnzi-primary);
+  text-decoration: underline;
+}
+.t-storage-file-page__refs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.t-storage-file-page__ref {
+  padding: 8px 10px;
+  border: 1px solid var(--tnzi-border);
+  border-radius: var(--tnzi-admin-radius-md, 4px);
 }
 </style>

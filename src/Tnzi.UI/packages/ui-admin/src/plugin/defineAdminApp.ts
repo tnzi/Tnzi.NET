@@ -55,7 +55,7 @@ import {
   type TnziUiAdminOptions,
 } from './index'
 import type { AdminLoginConfig } from './loginConfig'
-import type { AdminWorkbenchConfig } from './workbenchConfig'
+import type { AdminDashboardConfig } from './dashboardConfig'
 import type { AdminSettingsConfig } from './settingsConfig'
 import {
   useAdminRouteStore,
@@ -179,16 +179,16 @@ export interface DefineAdminAppOptions {
 
   /**
    * Override the default `meta.order` of any framework route. Keyed by
-   * exact vue-router route `name` (case-sensitive — `"workbench"` matches,
-   * `"Workbench"` does not). Walks `/admin` children + grandchildren and
+   * exact vue-router route `name` (case-sensitive — `"dashboard"` matches,
+   * `"Dashboard"` does not). Walks `/admin` children + grandchildren and
    * writes `meta.order = routeOrders[route.name]` on every match.
    *
    * Useful when the default ordering ships the modules in a position you
    * don't want — e.g. lift `authorization` ahead of `identity`, or push
-   * `workbench` down a notch.
+   * `dashboard` down a notch.
    *
    * Framework defaults (step 10, leaving room for consumer entries):
-   *   - `workbench` = 0
+   *   - `dashboard` = 0
    *   - `identity` = 100
    *   - `authorization` = 110
    *   - `system` = 120
@@ -201,7 +201,7 @@ export interface DefineAdminAppOptions {
    *   - `template` = 190
    *
    * Consumer modules registered via `addModules` with `meta.order` in
-   * `1..99` slot between Workbench and the first framework module, and
+   * `1..99` slot between Dashboard and the first framework module, and
    * `200+` slot after the last one — no mutation of the route table
    * needed.
    *
@@ -213,7 +213,7 @@ export interface DefineAdminAppOptions {
    * defineAdminApp({
    *   client,
    *   routeOrders: {
-   *     workbench: 5,        // shift Workbench from 0
+   *     dashboard: 5,        // shift Dashboard from 0
    *     authorization: 95,    // pull ahead of identity (100)
    *   },
    * })
@@ -253,12 +253,12 @@ export interface DefineAdminAppOptions {
   login?: AdminLoginConfig
 
   /**
-   * Configuration for the built-in Workbench dashboard. Declare your
+   * Configuration for the built-in Dashboard landing page. Declare your
    * widget deck inline; omit to use the bundled
    * `defaultWorkbenchWidgets()` set (HeaderBanner + KPIs + business
    * stats + activity timeline + tips).
    */
-  workbench?: AdminWorkbenchConfig
+  dashboard?: AdminDashboardConfig
 
   /**
    * Configuration for the built-in Settings Center page — register custom
@@ -742,7 +742,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       client: options.client,
       pinia,
       login: wrapLoginCallbacks(options.login),
-      workbench: options.workbench,
+      dashboard: options.dashboard,
       settings: options.settings,
       chat: options.chat,
     })

@@ -34,10 +34,12 @@ import LoginWaves from './login/LoginWaves.vue'
 import LoginBrandPanel from './login/LoginBrandPanel.vue'
 import {
   provideLoginContext,
+  DEFAULT_LOGIN_FEATURES,
   type LoginContext,
   type LoginModule,
   type LoginCallbacks,
   type LoginDemoAccount,
+  type LoginFeatures,
   type LoginSceneState,
   type LoginThirdPartyProvider,
   type LoginUiStyle,
@@ -100,6 +102,22 @@ interface Props {
    * Defaults to **true**.
    */
   showThemeSwitch?: boolean
+  /**
+   * Feature flags driving module/entry visibility + account field rules,
+   * passed down to modules via `useLoginContext().features`. Defaults to
+   * everything enabled.
+   */
+  features?: LoginFeatures
+  /**
+   * Replace the split-layout left panel (brand / animation area) entirely.
+   * Falls back to the `#aside` slot, then the built-in `LoginBrandPanel`.
+   */
+  asideComponent?: Component
+  /**
+   * Replace the split-layout right content area (heading + modules). Falls
+   * back to the `#content` slot, then the built-in form body.
+   */
+  contentComponent?: Component
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -121,6 +139,9 @@ const props = withDefaults(defineProps<Props>(), {
   transitionName: 'fade-slide',
   showLangSwitch: false,
   showThemeSwitch: true,
+  features: () => DEFAULT_LOGIN_FEATURES,
+  asideComponent: undefined,
+  contentComponent: undefined,
 })
 
 const theme = useTheme()
@@ -263,6 +284,7 @@ const loginContext: LoginContext = {
   demoAccounts: props.demoAccounts,
   ui,
   thirdParty: props.thirdParty,
+  features: props.features,
   scene,
   pendingTwoFactor,
   helpers,
@@ -338,14 +360,17 @@ provideLoginContext(loginContext)
     :class="{ 't-login--dark': isDark, 't-login--entered': entered }"
   >
     <div class="t-login__panel">
-      <LoginBrandPanel
-        :brand="brand"
-        :brand-icon="brandIcon"
-        :tagline="resolvedTagline"
-        :tagline-sub="resolvedTaglineSub"
-        :copyright="resolvedCopyright"
-        :scene="scene"
-      />
+      <component :is="asideComponent" v-if="asideComponent" />
+      <slot v-else name="aside">
+        <LoginBrandPanel
+          :brand="brand"
+          :brand-icon="brandIcon"
+          :tagline="resolvedTagline"
+          :tagline-sub="resolvedTaglineSub"
+          :copyright="resolvedCopyright"
+          :scene="scene"
+        />
+      </slot>
     </div>
     <div
       data-test="t-login-page-toolbar"
@@ -369,20 +394,23 @@ provideLoginContext(loginContext)
       >
         <TSvgIcon :icon="qrMode ? 'mdi:monitor' : 'mdi:qrcode'" :size="18" />
       </button>
-      <div class="t-login__form t-login-stagger">
-        <div class="t-login__form-head">
-          <h2 data-test="t-login-page-module-label" class="t-login__form-title">{{ splitHeading }}</h2>
-          <p v-if="splitHeadingSub" class="t-login__form-sub">{{ splitHeadingSub }}</p>
-        </div>
-        <div v-if="qrMode && qrComponent" class="t-login__qr" data-test="t-login-page-qr-panel">
-          <div class="t-login__qr-frame">
-            <component :is="qrComponent" />
+      <component :is="contentComponent" v-if="contentComponent" class="t-login__form" />
+      <slot v-else name="content">
+        <div class="t-login__form t-login-stagger">
+          <div class="t-login__form-head">
+            <h2 data-test="t-login-page-module-label" class="t-login__form-title">{{ splitHeading }}</h2>
+            <p v-if="splitHeadingSub" class="t-login__form-sub">{{ splitHeadingSub }}</p>
           </div>
+          <div v-if="qrMode && qrComponent" class="t-login__qr" data-test="t-login-page-qr-panel">
+            <div class="t-login__qr-frame">
+              <component :is="qrComponent" />
+            </div>
+          </div>
+          <Transition v-else :name="transitionName" mode="out-in" appear>
+            <component :is="activeComponent" :key="module" />
+          </Transition>
         </div>
-        <Transition v-else :name="transitionName" mode="out-in" appear>
-          <component :is="activeComponent" :key="module" />
-        </Transition>
-      </div>
+      </slot>
     </div>
   </div>
 </template>
