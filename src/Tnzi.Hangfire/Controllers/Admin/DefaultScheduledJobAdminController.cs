@@ -22,6 +22,7 @@ namespace Tnzi.Hangfire.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/scheduled-jobs")]
+[ApiAuthorize(PermissionName = "system.scheduledJob.view")]
 public class DefaultScheduledJobAdminController : ApiAdminControllerBase
 {
     /// <summary>

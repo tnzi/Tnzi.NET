@@ -27,8 +27,8 @@ const presence = vi.fn(async () => ({
   busy: 0,
   offline: 0,
   users: [
-    { userId: 'u1', name: 'Alice', intentStatus: 1, effectiveStatus: 1, hasConnection: true, lastSeenAt: null, lastChangedAt: null },
-    { userId: 'u2', name: 'Bob', intentStatus: 2, effectiveStatus: 2, hasConnection: true, lastSeenAt: null, lastChangedAt: null },
+    { userId: 'u1', name: 'Alice', intentStatus: 'Online', effectiveStatus: 'Online', hasConnection: true, lastSeenAt: null, lastChangedAt: null },
+    { userId: 'u2', name: 'Bob', intentStatus: 'Away', effectiveStatus: 'Away', hasConnection: true, lastSeenAt: null, lastChangedAt: null },
   ],
 }))
 vi.mock('../../../src/services/bridges/chat-bridge', () => ({

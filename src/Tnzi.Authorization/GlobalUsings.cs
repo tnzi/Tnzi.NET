@@ -18,6 +18,7 @@ global using System.Collections.Frozen;
 global using System.Collections.Generic;
 global using System.Linq;
 global using System.Linq.Expressions;
+global using System.Text.Json.Serialization;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi;

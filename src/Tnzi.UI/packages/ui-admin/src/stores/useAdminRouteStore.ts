@@ -266,6 +266,41 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     return items
   })
 
+  /**
+   * Route names the current user is NOT allowed to open — the inverse of the
+   * sidebar filter, computed over the FULL route table (hidden-in-menu routes
+   * included). Feeds `useAdminTabStore.pruneTabs` so a persisted tab pointing at
+   * a page the freshly-signed-in user can't access is dropped instead of
+   * lingering and 403'ing on click (the cross-session tab leak, sibling of the
+   * `isSuperUser` leak).
+   *
+   * Uses the SAME fail-open rules as `menus`: empty (deny nothing) for super
+   * users and before the permission list loads — the backend `[ApiAuthorize]`
+   * stays the real enforcement. A route with no `meta.permission` (and no plural
+   * `permissions`) is public and never denied, so hidden utility routes
+   * (user-center, settings, id-driven detail pages) survive.
+   */
+  const deniedRouteNames = computed<Set<string>>(() => {
+    const authStore = useAdminAuthStore()
+    const denied = new Set<string>()
+    const permissionsLoaded = authStore.userInfo !== null
+    if (authStore.isSuperUser || !permissionsLoaded) return denied
+    const granted = new Set(authStore.userPermissions.map((p) => p.toLowerCase()))
+    function isAllowed(route: AdminRouteRecord): boolean {
+      const single = route.meta?.permission
+      if (single) return granted.has(single.toLowerCase())
+      const multi = route.meta?.permissions
+      if (multi && multi.length > 0) return multi.some((p) => granted.has(p.toLowerCase()))
+      return true
+    }
+    function walk(route: AdminRouteRecord): void {
+      if (!isAllowed(route)) denied.add(route.name)
+      route.children?.forEach(walk)
+    }
+    allRoutes.value.forEach(walk)
+    return denied
+  })
+
   function collectCacheRouteNames(routes: AdminRouteRecord[]): string[] {
     const names: string[] = []
     for (const route of routes) {
@@ -323,6 +358,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     routesLoaded,
     backendMenuNodes,
     menus,
+    deniedRouteNames,
     cacheRoutes,
     setConstantRoutes,
     setAuthRoutes,

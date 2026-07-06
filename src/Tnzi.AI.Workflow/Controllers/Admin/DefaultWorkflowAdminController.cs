@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/workflows")]
+[ApiAuthorize(PermissionName = "ai.workflow.view")]
 public class DefaultWorkflowAdminController : ApiAdminControllerBase
 {
     protected readonly IWorkflowService WorkflowService;

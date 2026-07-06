@@ -69,6 +69,10 @@ public class SignalRModule : TnziFrameworkModule
             }
         });
 
+        // 与 MVC 层保持同一 wire 契约:枚举按成员名序列化(实时推送载荷与 REST 响应一致)
+        signalRBuilder.AddJsonProtocol(options =>
+            options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
         // 配置 Redis Backplane（仅使用 SignalR:Backplane:ConnectionString，无回退）
         ConfigureBackplane(signalRBuilder, signalROptions.Backplane, configuration);
 

@@ -84,7 +84,7 @@
        The page intentionally stays on synchronous run (not SSE stream) —
        streaming-trace UI lives on the WorkflowRunViewer page where the user
        can also Resume / Approve / Reject. -->
-  <NModal v-model:show="runModal.show" :title="runModalTitle" preset="card" class="max-w-560px">
+  <NModal v-model:show="runModal.show" :title="runModalTitle" preset="card" size="small" class="max-w-560px">
     <NForm label-placement="left" label-width="100px">
       <NFormItem :label="t('run.input')" required>
         <NInput
@@ -117,7 +117,7 @@
   </NModal>
 
   <!-- Validate result modal -->
-  <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" class="max-w-520px">
+  <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" size="small" class="max-w-520px">
     <div v-if="validateModal.loading" class="t-wf-list__validate-loading">
       <NSpin />
     </div>
@@ -165,7 +165,6 @@ import {
   NAlert,
   NDropdown,
   useDialog,
-  useMessage,
   type DropdownOption,
 } from 'naive-ui'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
@@ -175,6 +174,7 @@ import { useCrudPage } from '../../../headless/useCrudPage'
 import { type RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import { useSafeMessage } from '../../_shared/safeMessage'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { interpolate, translatePageKey } from '../../_shared/translate'
 import { workflowColumns, workflowFormSchema } from './workflow-config'
@@ -193,8 +193,17 @@ type Row = WorkflowDefinitionDto
 const title = 'title'
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
-const message = useMessage()
-const dialog = useDialog()
+// ui-admin shells don't always wrap with NMessage/NDialog providers (and unit
+// tests mount bare), so guard both — `useSafeMessage` no-ops without a provider,
+// and `useDialog` is wrapped so a missing provider falls back to native confirm.
+const message = useSafeMessage()
+const dialog = (() => {
+  try {
+    return useDialog()
+  } catch {
+    return null
+  }
+})()
 
 const t = (key: string, params?: Record<string, unknown>) =>
   interpolate(translatePageKey('ai.workflows', key), params)
@@ -209,16 +218,19 @@ const crud = useCrudPage<WorkflowDefinitionDto>({
   // steps in the dedicated editor (graph + JSON modes).
   createData: async (data) => {
     const partial = data as Partial<WorkflowDefinitionDto>
-    // Coerce executionMode to the numeric enum (server expects a number,
-    // not "Sequential"/"Parallel" strings) — Vue's NSelect already binds
-    // to the enum value, but the partial form data type erases the
-    // narrowing so we normalise defensively.
+    // executionMode is a string enum whose values are the member names the
+    // backend serializes/accepts. The form select binds one of those names;
+    // normalise a legacy numeric value defensively, else default to Sequential.
     const modeRaw = partial.executionMode as unknown
     let mode: WorkflowExecutionMode = WorkflowExecutionMode.Sequential
-    if (typeof modeRaw === 'number') mode = modeRaw as WorkflowExecutionMode
-    else if (typeof modeRaw === 'string') {
-      const named = WorkflowExecutionMode[modeRaw as keyof typeof WorkflowExecutionMode]
-      if (typeof named === 'number') mode = named
+    if (typeof modeRaw === 'string' && modeRaw in WorkflowExecutionMode) {
+      mode = modeRaw as WorkflowExecutionMode
+    } else if (typeof modeRaw === 'number') {
+      mode = ([
+        WorkflowExecutionMode.Sequential,
+        WorkflowExecutionMode.Parallel,
+        WorkflowExecutionMode.Dag,
+      ][modeRaw]) ?? WorkflowExecutionMode.Sequential
     }
     const payload: CreateWorkflowDefinitionDto = {
       name: String(partial.name ?? '').trim(),
@@ -243,8 +255,6 @@ const crud = useCrudPage<WorkflowDefinitionDto>({
   updateData: (id, data) => bridge.workflows.update(String(id), data as UpdateWorkflowDefinitionDto),
   deleteData: (ids) => bridge.workflows.delete(ids.map(String)),
 })
-
-crud.refresh().catch(() => undefined)
 
 // Edit graph + run/clone/validate/delete are rendered by the page itself in the
 // #prepend ("Edit graph") and #middle ("More▾") slots, so the inner
@@ -296,6 +306,14 @@ function handleRowMenu(key: string, row: Row): void {
 }
 
 function confirmDelete(row: Row): void {
+  if (!dialog) {
+    // No dialog provider (bare mount / test harness) — fall back to the native
+    // confirm so the confirmation gate is never silently skipped.
+    if (typeof window !== 'undefined' && window.confirm(t('admin.crud.confirmDelete'))) {
+      void crud.handleDelete([row.id])
+    }
+    return
+  }
   dialog.warning({
     title: t('admin.crud.delete'),
     content: t('admin.crud.confirmDelete'),

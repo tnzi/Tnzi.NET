@@ -8,6 +8,11 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
 
         builder.Property(i => i.InvoiceNo).HasMaxLength(64).IsRequired();
         builder.Property(i => i.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
+        builder.Property(i => i.Amount).HasMoneyPrecision();
+        builder.Property(i => i.TaxAmount).HasMoneyPrecision();
+        builder.Property(i => i.DiscountAmount).HasMoneyPrecision();
+        builder.Property(i => i.DueAmount).HasMoneyPrecision();
+        builder.Property(i => i.PaidAmount).HasMoneyPrecision();
         builder.Property(i => i.CustomerName).HasMaxLength(128);
         builder.Property(i => i.CustomerEmail).HasMaxLength(256);
         builder.Property(i => i.CustomerCompany).HasMaxLength(256);

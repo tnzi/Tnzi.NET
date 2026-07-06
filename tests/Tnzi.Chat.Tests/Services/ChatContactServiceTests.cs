@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using Moq;
+using Tnzi.Chat.Options;
 using Tnzi.Chat.Services;
 using Tnzi.Domain.Repositories;
 using Tnzi.Identity.Entities;
@@ -7,9 +9,20 @@ namespace Tnzi.Chat.Tests.Services;
 
 public class ChatContactServiceTests
 {
+    private static ChatContactService BuildService(IServiceProvider sp)
+        => new(sp,
+            sp.GetRequiredService<IRepository<User, Guid>>(),
+            sp.GetRequiredService<IRepository<UserDetail, Guid>>(),
+            sp.GetRequiredService<IPresenceService>(),
+            sp.GetRequiredService<IOptionsSnapshot<ChatOptions>>());
+
     private static IServiceProvider BuildSp(List<User> users, Guid currentUserId, List<UserDetail>? details = null)
     {
         var services = new ServiceCollection();
+
+        var optionsMock = new Mock<IOptionsSnapshot<ChatOptions>>();
+        optionsMock.SetupGet(o => o.Value).Returns(new ChatOptions());
+        services.AddSingleton(optionsMock.Object);
 
         var userRepo = new Mock<IRepository<User, Guid>>();
         userRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
@@ -49,7 +62,7 @@ public class ChatContactServiceTests
         var bob = new User { Id = Guid.NewGuid(), UserName = "bob" };
         var meUser = new User { Id = me, UserName = "alpha" };
         var sp = BuildSp(new List<User> { alice, bob, meUser }, me);
-        var svc = new ChatContactService(sp, sp.GetRequiredService<IRepository<User, Guid>>(), sp.GetRequiredService<IRepository<UserDetail, Guid>>(), sp.GetRequiredService<IPresenceService>());
+        var svc = BuildService(sp);
 
         var result = await svc.SearchUsersAsync("al");
 
@@ -66,7 +79,7 @@ public class ChatContactServiceTests
         var bob = new User { Id = Guid.NewGuid(), UserName = "bob" };
         var meUser = new User { Id = me, UserName = "alpha" };
         var sp = BuildSp(new List<User> { alice, bob, meUser }, me);
-        var svc = new ChatContactService(sp, sp.GetRequiredService<IRepository<User, Guid>>(), sp.GetRequiredService<IRepository<UserDetail, Guid>>(), sp.GetRequiredService<IPresenceService>());
+        var svc = BuildService(sp);
 
         // Blank keyword returns the first page of the directory (so the new-chat picker
         // can show a starting list) but still excludes the current user.
@@ -84,7 +97,7 @@ public class ChatContactServiceTests
         var me = Guid.NewGuid();
         // Directory has only "me"; the looked-up id is not present.
         var sp = BuildSp(new List<User> { new() { Id = me, UserName = "alpha" } }, me);
-        var svc = new ChatContactService(sp, sp.GetRequiredService<IRepository<User, Guid>>(), sp.GetRequiredService<IRepository<UserDetail, Guid>>(), sp.GetRequiredService<IPresenceService>());
+        var svc = BuildService(sp);
 
         var result = await svc.GetProfileAsync(Guid.NewGuid());
 
@@ -99,7 +112,7 @@ public class ChatContactServiceTests
         var target = new User { Id = Guid.NewGuid(), UserName = "carol", Email = "carol@example.com", PhoneNumber = "+1-555-0100" };
         var detail = new UserDetail { UserId = target.Id, Nickname = "Carol", Bio = "Hello there" };
         var sp = BuildSp(new List<User> { new() { Id = me, UserName = "alpha" }, target }, me, new List<UserDetail> { detail });
-        var svc = new ChatContactService(sp, sp.GetRequiredService<IRepository<User, Guid>>(), sp.GetRequiredService<IRepository<UserDetail, Guid>>(), sp.GetRequiredService<IPresenceService>());
+        var svc = BuildService(sp);
 
         var result = await svc.GetProfileAsync(target.Id);
 

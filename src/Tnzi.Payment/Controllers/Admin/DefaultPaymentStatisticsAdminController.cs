@@ -5,6 +5,7 @@ namespace Tnzi.Payment.Controllers.Admin;
 /// </summary>
 [Route("admin/payment-statistics")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "payment.statistics.view")]
 public class DefaultPaymentStatisticsAdminController : ApiAdminControllerBase
 {
     private readonly IPaymentStatisticsService _statisticsService;

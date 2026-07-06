@@ -55,6 +55,11 @@ public class DefaultConversationController : ApiControllerBase
     public virtual async Task<ApiResult> ClearHistory(Guid id)
         => (await Conversations.ClearHistoryAsync(id)).ToApiResult();
 
+    /// <summary>Per-user delete: wipes my history view and hides the conversation from my list.</summary>
+    [HttpPost("{id:guid}/delete-for-me")]
+    public virtual async Task<ApiResult> DeleteForMe(Guid id)
+        => (await Conversations.DeleteForMeAsync(id)).ToApiResult();
+
     [HttpGet("{id:guid}/messages/search")]
     public virtual async Task<ApiResult<MessageThreadDto>> SearchMessages(
         Guid id, [FromQuery] string keyword, [FromQuery] Guid? before, [FromQuery] int limit = 30)

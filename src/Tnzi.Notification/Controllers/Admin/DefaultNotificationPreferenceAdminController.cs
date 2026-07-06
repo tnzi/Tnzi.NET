@@ -12,6 +12,7 @@ namespace Tnzi.Notification.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/notification-preferences")]
+[ApiAuthorize(PermissionName = "notification.subscription.view")]
 public class DefaultNotificationPreferenceAdminController : ApiAdminControllerBase
 {
     protected readonly INotificationPreferenceService PreferenceService;

@@ -24,6 +24,7 @@ import TAdminUserAvatar from '../components/layout/TAdminUserAvatar.vue'
 import TAdminRouterView from '../components/layout/TAdminRouterView.vue'
 import TThemeDrawer from '../components/layout/TThemeDrawer.vue'
 import type { AdminMenuItem } from '../stores/useAdminRouteStore'
+import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { useAdminTabStore, type AdminTab } from '../stores/useAdminTabStore'
@@ -43,7 +44,23 @@ const route = useRoute()
 const appStore = useAdminAppStore()
 const themeStore = useAdminThemeStore()
 const tabStore = useAdminTabStore()
+const routeStore = useAdminRouteStore()
 const authStore = useAdminAuthStore()
+
+// Reactively drop persisted tabs the current user isn't allowed to open. This
+// is the shell-level twin of the loadPermissions-time prune: it also fires on a
+// page RELOAD, where the auth store hydrates from localStorage (userInfo already
+// non-null) so the consumer's "load permissions only when userInfo === null"
+// idempotency guard skips loadPermissions — without this, a prior session's
+// Diagnostics / MCP / Sandbox tabs would still sit in the bar (clicking one is
+// already blocked by the permission guard, but the ghost tab shouldn't linger).
+// `deniedRouteNames` is empty for super users / before permissions load, so this
+// is a no-op except on a real privilege downgrade.
+watch(
+  () => routeStore.deniedRouteNames,
+  (denied) => tabStore.pruneTabs(denied),
+  { immediate: true },
+)
 
 // Resolve the header avatar from the signed-in user (auth store). The store
 // only carries an external `avatar` link today, but routing it through

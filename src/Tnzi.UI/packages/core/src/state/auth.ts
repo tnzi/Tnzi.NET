@@ -236,7 +236,7 @@ export class AuthStateManager {
         // Ignore errors from logout callback
       }
 
-      this.deps.router?.push('/login');
+      this.deps.router?.push(this.deps.loginPath ?? '/login');
     }
   }
 
@@ -291,10 +291,24 @@ export class AuthStateManager {
       // Fetch updated permissions after token refresh
       await this._fetchPermissions();
     } catch (error) {
-      this.error = 'Session expired, please login again';
-      // Clear mutex BEFORE logout so concurrent callers don't await a failed promise
+      // Clear mutex BEFORE cleanup so concurrent callers don't await a failed promise
       this._refreshPromise = null;
-      await this.logout();
+      // Local sign-out only. The refresh token is already dead, so the backend
+      // logout endpoint would just reject the stale access token; going through
+      // logout() used to POST /auth/logout with that expired token, and the
+      // resulting 401 stalled inside the HttpClient refresh cycle, delaying the
+      // session-expired signal by a full request timeout.
+      this.clearAuth();
+      this.clearPersistedTokens();
+      // Set AFTER clearAuth (which resets error) so the message survives for
+      // the login page to display.
+      this.error = 'Session expired, please login again';
+      try {
+        await this.deps.onLogout?.();
+      } catch {
+        // Ignore errors from logout callback
+      }
+      this.deps.router?.push(this.deps.loginPath ?? '/login');
       throw error;
     } finally {
       this.isRefreshing = false;

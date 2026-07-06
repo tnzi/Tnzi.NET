@@ -141,10 +141,19 @@ function toggleContact(c: ChatContactDto) {
   if (selectedIds.has(c.userId)) {
     selectedIds.delete(c.userId)
     selected.value = selected.value.filter((s) => s.userId !== c.userId)
-  } else {
-    selectedIds.add(c.userId)
-    selected.value = [...selected.value, c]
+    return
   }
+  const cfg = store.config
+  // Groups disabled: single-select (picking another contact replaces the
+  // current one), so multi-select can never escalate into "create group".
+  if (!cfg.enableGroups && selected.value.length >= 1) {
+    selectedIds.clear()
+    selected.value = []
+  }
+  // Member cap: me + selected must stay within MaxGroupMembers (0 = unlimited).
+  if (cfg.enableGroups && cfg.maxGroupMembers > 0 && selected.value.length + 1 >= cfg.maxGroupMembers) return
+  selectedIds.add(c.userId)
+  selected.value = [...selected.value, c]
 }
 
 function reset() {

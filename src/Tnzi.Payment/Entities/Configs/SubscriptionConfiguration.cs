@@ -10,6 +10,9 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         builder.Property(s => s.CancelReason).HasMaxLength(500);
         builder.Property(s => s.ChannelCode).HasMaxLength(32).IsRequired();
         builder.Property(s => s.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
+        builder.Property(s => s.DiscountAmount).HasMoneyPrecision();
+        builder.Property(s => s.OriginalPrice).HasMoneyPrecision();
+        builder.Property(s => s.PaidAmount).HasMoneyPrecision();
         builder.Property(s => s.ProviderCustomerId).HasMaxLength(128);
         builder.Property(s => s.PaymentMethodToken).HasMaxLength(128);
         builder.Property(s => s.LastBillingTradeNo).HasMaxLength(64);

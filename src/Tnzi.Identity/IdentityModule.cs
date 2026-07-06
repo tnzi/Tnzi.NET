@@ -153,6 +153,32 @@ public class IdentityModule : TnziApplicationModule
                     // JwtTokenService.GetPrincipalFromExpiredToken 的手动 alg 校验一致。
                     ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 }
                 };
+
+                // SignalR 的 WebSocket / ServerSentEvents 传输无法发送 Authorization 头，
+                // JS 客户端改用 `access_token` 查询参数携带 JWT。这里把它读入 context.Token，
+                // 让这两种传输也能通过 Bearer 校验（LongPolling 走 Authorization 头，本就可用）。
+                // Hub 统一挂在 "/hubs" 前缀下（如 Tnzi.Chat 的 "/hubs/chat"）；即便部署在
+                // "/api" 之类 PathBase 下，Request.Path 已被剥离为 "/hubs/..."，段匹配各环境一致。
+                // 安全：仅对 /hubs 路径读取查询参数中的 token。
+                jwtBearerOptions.Events ??= new JwtBearerEvents();
+                var previousOnMessageReceived = jwtBearerOptions.Events.OnMessageReceived;
+                jwtBearerOptions.Events.OnMessageReceived = async messageContext =>
+                {
+                    if (previousOnMessageReceived is not null)
+                    {
+                        await previousOnMessageReceived(messageContext);
+                    }
+
+                    if (string.IsNullOrEmpty(messageContext.Token))
+                    {
+                        var accessToken = messageContext.Request.Query["access_token"];
+                        var path = messageContext.HttpContext.Request.Path;
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                        {
+                            messageContext.Token = accessToken;
+                        }
+                    }
+                };
             });
 
         // 然后添加 JWT Bearer 认证

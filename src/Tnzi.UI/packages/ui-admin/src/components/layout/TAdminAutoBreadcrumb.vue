@@ -53,25 +53,53 @@ function resolveLabel(r: RouteLocationNormalizedLoaded['matched'][number]): stri
   return humanise(raw)
 }
 
-const items = computed<TAdminBreadcrumbItem[]>(() =>
-  route.matched
+type MatchedRecord = RouteLocationNormalizedLoaded['matched'][number]
+
+function toCrumb(r: MatchedRecord): TAdminBreadcrumbItem {
+  const name = typeof r.name === 'string' ? r.name : ''
+  return {
+    label: resolveLabel(r),
+    // Only leaf routes (no children) are navigable; branch nodes have
+    // no dedicated page, so `to` stays undefined and the item is shown
+    // as static text.
+    to: r.children?.length ? undefined : r.path,
+    icon: (r.meta?.icon as string | undefined) ?? DEFAULT_ROUTE_ICONS[name],
+  }
+}
+
+const items = computed<TAdminBreadcrumbItem[]>(() => {
+  // Hidden detail/sub routes (e.g. `ai.agents.detail`) are NOT part of their
+  // list page's `matched` chain (they're siblings under the module branch) and
+  // carry `hideInMenu`, so a plain matched-walk would collapse the breadcrumb to
+  // just the module ("AI"). When such a route declares `meta.activeMenu`, build
+  // the trail from the PARENT list route's matched chain (→ "AI / Agents") and
+  // append the current page's own title as a trailing, non-navigable crumb
+  // (→ "AI / Agents / Agent Detail").
+  const activeMenu = (route.meta as { activeMenu?: string } | undefined)?.activeMenu
+  let chain = route.matched as readonly MatchedRecord[]
+  let trailing: TAdminBreadcrumbItem | null = null
+  if (activeMenu) {
+    try {
+      const resolved = router.resolve({ name: activeMenu })
+      if (resolved.matched.length) {
+        chain = resolved.matched as readonly MatchedRecord[]
+        const self = route.matched[route.matched.length - 1]
+        if (self) trailing = { ...toCrumb(self), to: undefined }
+      }
+    } catch {
+      // Unknown activeMenu name — fall back to the plain matched walk.
+    }
+  }
+  const crumbs = chain
     .filter((r) => {
       if (r.path === '/admin') return false
       if (r.meta?.hideInMenu) return false
       return true
     })
-    .map((r) => {
-      const name = typeof r.name === 'string' ? r.name : ''
-      return {
-        label: resolveLabel(r),
-        // Only leaf routes (no children) are navigable; branch nodes have
-        // no dedicated page, so `to` stays undefined and the item is shown
-        // as static text.
-        to: r.children?.length ? undefined : r.path,
-        icon: (r.meta?.icon as string | undefined) ?? DEFAULT_ROUTE_ICONS[name],
-      } satisfies TAdminBreadcrumbItem
-    }),
-)
+    .map(toCrumb)
+  if (trailing) crumbs.push(trailing)
+  return crumbs
+})
 
 function onItemClick(item: TAdminBreadcrumbItem): void {
   if (item.to) void router.push(item.to)

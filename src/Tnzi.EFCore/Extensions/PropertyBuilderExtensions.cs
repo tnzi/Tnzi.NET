@@ -383,6 +383,65 @@ public static class PropertyBuilderExtensions
 
     #endregion
 
+    #region Decimal 精度约定
+
+    /// <summary>
+    /// 金额字段精度约定：decimal(19, 4)
+    /// </summary>
+    /// <remarks>
+    /// 框架统一的货币金额存储精度。19 位总长度可覆盖万亿级金额，4 位小数满足
+    /// 多币种最小货币单位与中间计算精度要求（展示时按币种舍入到展示精度）。
+    /// 所有货币金额字段（价格、税额、余额、借贷金额等）MUST 使用此约定，
+    /// 避免各数据库提供者默认精度不一致导致的静默截断。
+    /// </remarks>
+    public static PropertyBuilder<decimal> HasMoneyPrecision(this PropertyBuilder<decimal> builder)
+        => builder.HasPrecision(19, 4);
+
+    /// <inheritdoc cref="HasMoneyPrecision(PropertyBuilder{decimal})"/>
+    public static PropertyBuilder<decimal?> HasMoneyPrecision(this PropertyBuilder<decimal?> builder)
+        => builder.HasPrecision(19, 4);
+
+    /// <summary>
+    /// 汇率字段精度约定：decimal(18, 8)
+    /// </summary>
+    /// <remarks>
+    /// 8 位小数覆盖绝大多数货币对的报价精度（含日元/越南盾等小面值货币的反向汇率）。
+    /// </remarks>
+    public static PropertyBuilder<decimal> HasExchangeRatePrecision(this PropertyBuilder<decimal> builder)
+        => builder.HasPrecision(18, 8);
+
+    /// <inheritdoc cref="HasExchangeRatePrecision(PropertyBuilder{decimal})"/>
+    public static PropertyBuilder<decimal?> HasExchangeRatePrecision(this PropertyBuilder<decimal?> builder)
+        => builder.HasPrecision(18, 8);
+
+    /// <summary>
+    /// 数量字段精度约定：decimal(18, 4)
+    /// </summary>
+    /// <remarks>
+    /// 用于单据行数量、工时等非货币计量字段。
+    /// </remarks>
+    public static PropertyBuilder<decimal> HasQuantityPrecision(this PropertyBuilder<decimal> builder)
+        => builder.HasPrecision(18, 4);
+
+    /// <inheritdoc cref="HasQuantityPrecision(PropertyBuilder{decimal})"/>
+    public static PropertyBuilder<decimal?> HasQuantityPrecision(this PropertyBuilder<decimal?> builder)
+        => builder.HasPrecision(18, 4);
+
+    /// <summary>
+    /// 比率/百分比字段精度约定：decimal(9, 6)
+    /// </summary>
+    /// <remarks>
+    /// 用于税率、折扣率等比率字段（无论存储为百分数 8.875 还是小数 0.088750 均可覆盖）。
+    /// </remarks>
+    public static PropertyBuilder<decimal> HasRatePrecision(this PropertyBuilder<decimal> builder)
+        => builder.HasPrecision(9, 6);
+
+    /// <inheritdoc cref="HasRatePrecision(PropertyBuilder{decimal})"/>
+    public static PropertyBuilder<decimal?> HasRatePrecision(this PropertyBuilder<decimal?> builder)
+        => builder.HasPrecision(9, 6);
+
+    #endregion
+
     #region 数学函数默认值
 
     /// <summary>

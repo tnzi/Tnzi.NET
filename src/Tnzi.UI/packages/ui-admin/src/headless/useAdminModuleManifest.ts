@@ -8,9 +8,10 @@
  * modules the backend has loaded — so the same admin app installed against
  * different backends shows different menus automatically.
  *
- * Consumers normally don't call this directly. `defineAdminApp({...})`
- * (in `plugin/defineAdminApp.ts`) drives the composable and feeds the
- * resulting routes into vue-router on bootstrap.
+ * This is an OPT-IN consumer composable (exported from the headless barrel);
+ * `defineAdminApp` does not call it — the built-in sidebar derives from the
+ * static route table. Pass `basePath` matching your `defineAdminApp` config
+ * so generated menu paths line up with the rewritten route table.
  */
 
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
@@ -48,6 +49,14 @@ export interface UseAdminModuleManifestOptions {
    * Skip fetching and use this pre-built manifest. Useful for tests and SSR.
    */
   manifest?: AdminManifest
+  /**
+   * Route-table prefix the generated menu paths sit under. MUST match the
+   * `basePath` passed to `defineAdminApp` (default `'/admin'`); pass `'/'`
+   * for a prefix-free route table (the recommended sub-path deployment
+   * shape). Never hardcode a deployment prefix into entity routes — this is
+   * the single knob.
+   */
+  basePath?: string
 }
 
 export interface UseAdminModuleManifestReturn {
@@ -101,7 +110,8 @@ export function useAdminModuleManifest(
     })
   })
 
-  const menuTree = computed<AdminMenuNode[]>(() => buildMenuTree(modules.value))
+  const prefix = normalizePathPrefix(options.basePath)
+  const menuTree = computed<AdminMenuNode[]>(() => buildMenuTree(modules.value, prefix))
 
   async function refresh(): Promise<void> {
     if (options.manifest) {
@@ -127,13 +137,29 @@ export function useAdminModuleManifest(
 }
 
 /**
+ * Normalize the menu path prefix the same way `defineAdminApp` normalizes
+ * `basePath`: leading slash, no trailing slash, default `'/admin'`. The
+ * domain-root sentinel `'/'` collapses to `''` so paths come out as
+ * `/identity/users` (no leading `//`).
+ */
+function normalizePathPrefix(basePath?: string | null): string {
+  if (basePath == null) return '/admin'
+  let bp = String(basePath).trim()
+  if (bp === '') return '/admin'
+  if (bp === '/') return ''
+  if (!bp.startsWith('/')) bp = '/' + bp
+  while (bp.length > 1 && bp.endsWith('/')) bp = bp.slice(0, -1)
+  return bp
+}
+
+/**
  * Build a 2-level menu tree from the manifest:
  *   Module (label = module name) → Entity (label = entity name)
  *
  * Modules with a single entity collapse into a single leaf at the top level.
  * This keeps menus compact when a module only exposes one admin surface.
  */
-function buildMenuTree(modules: AdminManifestModule[]): AdminMenuNode[] {
+function buildMenuTree(modules: AdminManifestModule[], prefix: string): AdminMenuNode[] {
   return modules.map((module) => {
     const moduleKey = normalizeName(module.name)
 
@@ -142,7 +168,7 @@ function buildMenuTree(modules: AdminManifestModule[]): AdminMenuNode[] {
       return {
         key: `${moduleKey}/${entity.name}`,
         label: titleCase(module.name),
-        path: `/admin/${entity.route.replace(/^admin\//, '')}`,
+        path: `${prefix}/${entity.route.replace(/^admin\//, '')}`,
         i18nKey: `tnzi.admin.modules.${moduleKey}.${slugify(entity.name)}.title`,
         entity,
       }
@@ -155,7 +181,7 @@ function buildMenuTree(modules: AdminManifestModule[]): AdminMenuNode[] {
       children: module.entities.map((entity) => ({
         key: `${moduleKey}/${entity.name}`,
         label: titleCase(entity.name.split('/').pop() ?? entity.name),
-        path: `/admin/${entity.route.replace(/^admin\//, '')}`,
+        path: `${prefix}/${entity.route.replace(/^admin\//, '')}`,
         i18nKey: `tnzi.admin.modules.${moduleKey}.${slugify(entity.name)}.title`,
         entity,
       })),

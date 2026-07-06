@@ -8,26 +8,23 @@
     is rendered inline so consumers don't register five sub-routes.
   -->
   <div class="t-user-center">
-    <TDetailLayout
+    <TDetailHost
+      :state="pageDetail"
       layout="side"
       :sections="sections"
-      :active-section="activeTab"
+      :back="false"
       :translate="t"
-      @update:active-section="(k) => (activeTab = k)"
     >
       <!-- Slim header: avatar + name + roles -->
       <template #title>
         <div class="t-user-center__head">
-          <div class="t-user-center__avatar t-user-center__avatar--sm">
-            <img
-              v-if="avatarUrl"
-              :src="avatarUrl"
-              :alt="profile?.userName ?? t('title')"
-              class="t-user-center__avatar-img"
-              @error="onHeaderAvatarError"
-            />
-            <span v-else class="t-user-center__avatar-initials">{{ avatarInitials }}</span>
-          </div>
+          <TAvatar
+            :src="resolvedAvatarUrl"
+            :name="profile?.nickname || profile?.userName || t('title')"
+            :size="36"
+            color="rgb(var(--tnzi-primary-rgb) / 0.12)"
+            text-color="var(--tnzi-primary)"
+          />
           <div class="t-user-center__head-text">
             <span class="t-user-center__head-name">{{ profile?.nickname || profile?.userName || t('title') }}</span>
             <span class="t-user-center__head-meta">
@@ -58,7 +55,7 @@
                   <TImageUpload
                     shape="circle"
                     :cropper="true"
-                    :model-value="avatarUrl"
+                    :model-value="resolvedAvatarUrl"
                     :disabled="savingAvatar"
                     :upload="handleAvatarUpload"
                     @error="(msg: string) => message.error(msg)"
@@ -375,10 +372,10 @@
           </NSpin>
         </div>
       </template>
-    </TDetailLayout>
+    </TDetailHost>
 
     <!-- Change email / phone (two-step verify) -->
-    <NModal v-model:show="changeModal.show" preset="card" class="w-480px">
+    <NModal v-model:show="changeModal.show" preset="card" size="small" class="w-480px">
       <template #header>
         <span>{{ changeModalTitle }}</span>
       </template>
@@ -423,7 +420,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { DataTableColumns } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -442,10 +439,11 @@ import {
   NSpin,
   NTag,
 } from 'naive-ui'
-import { TSvgIcon, TImageUpload } from '@tnzi/ui'
+import { TSvgIcon, TImageUpload, TAvatar } from '@tnzi/ui'
+import { formatDateTime } from '@tnzi/core'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
-import TDetailLayout from '../../components/detail/TDetailLayout.vue'
-import type { DetailSection } from '../../headless/useDetail'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { useDetail, type DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { deviceIconColor, parseDeviceInfo } from '../_shared/device-info'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
@@ -529,8 +527,6 @@ function createGuardedLoader<T>(options: {
 }
 
 // ---- Active section -------------------------------------------------------
-const activeTab = ref<string>('profile')
-
 // Sections are grouped into three buckets in the left menu (BotDetail-style
 // grouped NMenu): Account (profile/security), Activity (sessions/history),
 // Advanced (linked/danger). `group` is the pre-translated label; TDetailLayout
@@ -543,6 +539,17 @@ const sections = computed<DetailSection[]>(() => [
   { key: 'linked', label: t('nav.linked'), icon: 'mdi:link-variant', group: t('nav.groups.advanced') },
   { key: 'danger', label: t('nav.danger'), icon: 'mdi:alert-circle-outline', group: t('nav.groups.advanced') },
 ])
+
+// Active section is two-way bound to `?section=` (deep-linkable + the browser
+// Back/Forward buttons step through sections) via the shared composable;
+// defaults to the Profile section.
+const pageDetail = useDetail({
+  mode: 'page',
+  sectionUrl: true,
+  sections,
+  defaultSection: 'profile',
+})
+const activeTab = pageDetail.activeSection
 
 // ---- Profile state --------------------------------------------------------
 const profile = ref<UserDto | null>(null)
@@ -619,27 +626,13 @@ function resetProfileForm(): void {
   if (profile.value) applyProfileToForm(profile.value)
 }
 
-const avatarInitials = computed(() => {
-  const name = profile.value?.nickname || profile.value?.userName || '?'
-  return name.slice(0, 1).toUpperCase()
-})
-
-// Resolved avatar URL for the header + the upload widget's preview. Reads the
-// (possibly newer) `detail` first since the detail endpoint owns `avatarUrl`,
-// then falls back to the basic `profile` (`avatar`/`avatarId`). A broken image
-// drops back to the name initial; the broken flag resets whenever the resolved
-// URL changes (a fresh upload should get a fresh chance to load).
+// Resolved avatar URL for the header `TAvatar` + the upload widget's preview.
+// Reads the (possibly newer) `detail` first since the detail endpoint owns
+// `avatarUrl`, then falls back to the basic `profile` (`avatar`/`avatarId`).
+// `TAvatar` handles the broken-image → name-initial degradation internally.
 const resolvedAvatarUrl = computed<string | null>(
   () => resolveAvatarUrl(detail.value, avatarStorage) ?? resolveAvatarUrl(profile.value, avatarStorage),
 )
-const headerAvatarBroken = ref(false)
-watch(resolvedAvatarUrl, () => { headerAvatarBroken.value = false })
-const avatarUrl = computed<string | null>(() =>
-  headerAvatarBroken.value ? null : resolvedAvatarUrl.value,
-)
-function onHeaderAvatarError(): void {
-  headerAvatarBroken.value = true
-}
 
 const savingAvatar = ref(false)
 
@@ -852,11 +845,12 @@ async function sendChangeCode(): Promise<void> {
   }
   changeModal.sending = true
   try {
-    if (changeModal.kind === 'email') {
-      await bridge.me.sendChangeEmailCode({ newEmail: changeModal.target.trim() } as never)
-    } else {
-      await bridge.me.sendChangePhoneCode({ newPhoneNumber: changeModal.target.trim() } as never)
-    }
+    // Step 1 sends the code to the NEW address. Backend
+    // `SendChangeVerificationCodeDto` carries a single `newAddress` field for
+    // both email and phone (it is the destination the code is sent to).
+    await (changeModal.kind === 'email'
+      ? bridge.me.sendChangeEmailCode({ newAddress: changeModal.target.trim() })
+      : bridge.me.sendChangePhoneCode({ newAddress: changeModal.target.trim() }))
     changeModal.step = 'confirm'
     message.success(t('changeModal.codeSent'))
   } catch (e) {
@@ -872,16 +866,20 @@ async function confirmChange(): Promise<void> {
   }
   changeModal.confirming = true
   try {
+    // Step 2 confirms with the new address + the emailed/texted code. Backend
+    // DTOs are `ChangeEmailDto { newEmail, code }` /
+    // `ChangePhoneNumberDto { newPhoneNumber, code }` — the verification field
+    // is `code`, not `verificationCode`.
     if (changeModal.kind === 'email') {
       await bridge.me.confirmChangeEmail({
         newEmail: changeModal.target.trim(),
-        verificationCode: changeModal.code.trim(),
-      } as never)
+        code: changeModal.code.trim(),
+      })
     } else {
       await bridge.me.confirmChangePhone({
         newPhoneNumber: changeModal.target.trim(),
-        verificationCode: changeModal.code.trim(),
-      } as never)
+        code: changeModal.code.trim(),
+      })
     }
     message.success(t('changeModal.success'))
     changeModal.show = false
@@ -951,7 +949,7 @@ const sessionColumns = computed<DataTableColumns<UserSessionDto>>(() => [
   {
     key: 'lastActivityTime',
     title: t('sessions.cols.lastActive'),
-    render: (row) => formatTime(row.lastActivityTime),
+    render: (row) => formatDateTime(row.lastActivityTime, { fallback: '—' }),
   },
   {
     key: 'actions',
@@ -990,7 +988,7 @@ const historyColumns = computed<DataTableColumns<LoginLogDto>>(() => [
   {
     key: 'loginTime',
     title: t('history.cols.time'),
-    render: (row) => formatTime(row.loginTime),
+    render: (row) => formatDateTime(row.loginTime, { fallback: '—' }),
   },
   { key: 'ipAddress', title: t('history.cols.ip') },
   { key: 'deviceInfo', title: t('history.cols.device') },
@@ -1081,21 +1079,6 @@ async function deleteAccount(): Promise<void> {
 }
 
 // ---- Helpers + lifecycle --------------------------------------------------
-function formatTime(v?: string | Date | null): string {
-  if (!v) return '—'
-  try {
-    const d = new Date(v)
-    const y = d.getFullYear()
-    const M = String(d.getMonth() + 1).padStart(2, '0')
-    const D = String(d.getDate()).padStart(2, '0')
-    const hh = String(d.getHours()).padStart(2, '0')
-    const mm = String(d.getMinutes()).padStart(2, '0')
-    return `${y}-${M}-${D} ${hh}:${mm}`
-  } catch {
-    return ''
-  }
-}
-
 async function reloadAll(): Promise<void> {
   await Promise.all([
     loadProfile(),
@@ -1199,35 +1182,6 @@ onMounted(() => {
 .t-user-center__table {
   flex: 1 1 auto;
   min-height: 0;
-}
-
-.t-user-center__avatar {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: rgb(var(--tnzi-primary-rgb) / 0.12);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-.t-user-center__avatar--sm {
-  width: 36px;
-  height: 36px;
-}
-.t-user-center__avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.t-user-center__avatar-initials {
-  color: var(--tnzi-primary);
-  font-weight: 600;
-  line-height: 1;
-}
-.t-user-center__avatar--sm .t-user-center__avatar-initials {
-  font-size: 16px;
 }
 
 /* Profile-section avatar uploader: the circular picker + a label/hint column. */

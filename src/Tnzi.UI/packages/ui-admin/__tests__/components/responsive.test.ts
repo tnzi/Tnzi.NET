@@ -187,8 +187,9 @@ describe('responsive integration', () => {
       const classes = (modal.attributes('class') ?? '') + (modal.attributes('data-fullscreen') ?? '')
       expect(modal.exists()).toBe(true)
       // The class binding flows through naive's wrapper; assert the modal
-      // received the fullscreen class via the wrapper's classnames.
-      expect(wrapper.html()).toContain('t-form-modal--fullscreen')
+      // received the fullscreen class via the wrapper's classnames. The
+      // fullscreen chrome now lives in the shared TModalShell primitive.
+      expect(wrapper.html()).toContain('t-modal-shell--fullscreen')
       expect(classes.length).toBeGreaterThan(0)
     })
 
@@ -198,7 +199,7 @@ describe('responsive integration', () => {
         props: { state: makeState(), title: 'Edit', width: 560 },
         global: { stubs: naiveStubs },
       })
-      expect(wrapper.html()).not.toContain('t-form-modal--fullscreen')
+      expect(wrapper.html()).not.toContain('t-modal-shell--fullscreen')
     })
   })
 

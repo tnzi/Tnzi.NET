@@ -22,22 +22,23 @@
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
         :translate="t"
+        :field-renderers="fieldRenderers"
       />
     </template>
   </TCrudPage>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { h, ref } from 'vue'
 import { NInput } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
-import TFormSchemaRenderer from '../_shared/form-schema'
+import TFormSchemaRenderer, { type FieldRenderer } from '../_shared/form-schema'
 import { parameterColumns, parameterFormSchema } from './parameter-config'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import type { SettingDto } from '@tnzi/core/services/system'
 
 // Mapped to SettingDto — no separate Parameter entity in the backend.
@@ -56,6 +57,13 @@ const crud = useCrudPage<SettingDto, string>({
 
 const rowActions: RowAction<SettingDto>[] = [editAction(crud), deleteAction(crud)]
 
+// The key is immutable once the setting exists (UpdateSettingDto has no Key).
+// parameter-config's typeFn swaps the key field to this locked renderer in edit
+// mode so the value is still visible but not editable.
+const fieldRenderers: Record<string, FieldRenderer> = {
+  'param-key-locked': (ctx) => h(NInput, { value: (ctx.value as string) ?? '', disabled: true }),
+}
+
 const groupPrefix = ref('')
 function onGroupPrefixChange(v: string | null): void {
   groupPrefix.value = v ?? ''
@@ -63,7 +71,5 @@ function onGroupPrefixChange(v: string | null): void {
   crud.refresh().catch(() => undefined)
 }
 
-crud.refresh().catch(() => undefined)
-
-const t = (key: string) => translatePageKey('system.parameters', key)
+const t = makePageTranslator('system.parameters')
 </script>

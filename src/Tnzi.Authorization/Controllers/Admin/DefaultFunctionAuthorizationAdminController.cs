@@ -6,6 +6,9 @@ namespace Tnzi.Authorization.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/function-authorization")]
+// 该控制器承载前端登录链路的自服务端点（当前用户权限名列表 / 模块树），是任何已登录后台用户
+// 加载自身权限所必需的。因此刻意不叠加模块级权限码，只保留基类 Admin.Manage 外层门，避免把所有
+// 后台用户锁在“查不到自己有哪些权限”的死循环之外。
 public class DefaultFunctionAuthorizationAdminController : ApiAdminControllerBase
 {
     protected readonly IFunctionAuthorizationService FunctionAuthorizationService;

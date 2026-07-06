@@ -5,6 +5,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [Route("admin/tenants")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "tenant.view")]
 public class DefaultTenantAdminController : ApiAdminControllerBase
 {
     protected readonly ITenantService TenantService;

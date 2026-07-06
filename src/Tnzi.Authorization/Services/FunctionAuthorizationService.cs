@@ -41,21 +41,59 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// True when the user is a member of any role configured under
-    /// <c>Authorization:SuperAdminRoles</c>. Super admins skip the regular
-    /// permission table and are treated as having every enabled function.
+    /// Admin tier resolved from role membership — the two-tier admin model.
     /// </summary>
-    private async Task<bool> IsSuperAdminAsync(Guid userId)
+    private enum AdminTier
     {
-        var superRoles = _options?.Value?.SuperAdminRoles;
-        if (superRoles == null || superRoles.Count == 0) return false;
-        if (_userRoleService == null) return false;
+        /// <summary>Regular user: explicit grants only.</summary>
+        None,
+
+        /// <summary>
+        /// Member of <c>Authorization:BusinessAdminRoles</c>: implicitly
+        /// granted every enabled Business-category permission (plus explicit
+        /// grants), but not Technical ones.
+        /// </summary>
+        BusinessAdmin,
+
+        /// <summary>
+        /// Member of <c>Authorization:SuperAdminRoles</c>: bypasses every
+        /// permission check and sees the full enabled-function catalogue.
+        /// </summary>
+        SuperAdmin,
+    }
+
+    /// <summary>
+    /// Resolve the user's admin tier from <c>Authorization:SuperAdminRoles</c> /
+    /// <c>Authorization:BusinessAdminRoles</c> (case-insensitive role-name
+    /// match). A role listed in both resolves as super admin — the super check
+    /// runs first. Single role fetch covers both checks.
+    /// </summary>
+    private async Task<AdminTier> GetAdminTierAsync(Guid userId)
+    {
+        var opts = _options?.Value;
+        var superRoles = opts?.SuperAdminRoles;
+        var businessRoles = opts?.BusinessAdminRoles;
+        var superConfigured = superRoles is { Count: > 0 };
+        var businessConfigured = businessRoles is { Count: > 0 };
+        if ((!superConfigured && !businessConfigured) || _userRoleService == null)
+            return AdminTier.None;
 
         var lookup = await _userRoleService.GetUserRolesAsync(new[] { userId });
-        if (!lookup.TryGetValue(userId, out var userRoles)) return false;
+        if (!lookup.TryGetValue(userId, out var userRoles)) return AdminTier.None;
 
-        var superSet = new HashSet<string>(superRoles, StringComparer.OrdinalIgnoreCase);
-        return userRoles.Any(r => superSet.Contains(r));
+        if (superConfigured)
+        {
+            var superSet = new HashSet<string>(superRoles!, StringComparer.OrdinalIgnoreCase);
+            if (userRoles.Any(r => superSet.Contains(r))) return AdminTier.SuperAdmin;
+        }
+
+        if (businessConfigured)
+        {
+            var businessSet = new HashSet<string>(businessRoles!, StringComparer.OrdinalIgnoreCase);
+            if (userRoles.Any(r => businessSet.Contains(r))) return AdminTier.BusinessAdmin;
+        }
+
+        return AdminTier.None;
     }
 
     /// <summary>
@@ -69,16 +107,20 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (string.IsNullOrEmpty(permissionName))
             return false;
 
-        // SuperAdmin bypass — short-circuit before touching the function tables.
-        if (await IsSuperAdminAsync(userId)) return true;
+        // SuperAdmin bypass — short-circuit before touching the function
+        // tables. BusinessAdmin is NOT a bypass: it resolves through the
+        // permission-name set below (business catalogue ∪ explicit grants),
+        // so Technical codes correctly deny for business admins.
+        var tier = await GetAdminTierAsync(userId);
+        if (tier == AdminTier.SuperAdmin) return true;
 
-        // Permission codes are matched case-insensitively. The SuperAdmin-roles
+        // Permission codes are matched case-insensitively. The admin-roles
         // comparison above already uses OrdinalIgnoreCase; this brings the
         // regular check in line so a stored `Catalog.Product.Create` matches
         // a controller-declared `catalog.product.create` (and vice versa).
         // Without this, a single character-case mismatch between the DB row
         // and the [ApiAuthorize(PermissionName=...)] attribute silently 403s.
-        var userPermissionNames = await GetUserPermissionNamesAsync(userId);
+        var userPermissionNames = await GetUserPermissionNamesCoreAsync(userId, tier);
         return ToCaseInsensitiveSet(userPermissionNames).Contains(permissionName);
     }
 
@@ -141,11 +183,47 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
+    /// Resolve the business-admin catalogue (enabled functions whose
+    /// <see cref="PermissionCategory"/> is Business) with cache — same
+    /// shared-key semantics as the super-admin catalogue.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetBusinessAdminCatalogueAsync()
+    {
+        if (_functionAuthCache != null)
+        {
+            var cached = await _functionAuthCache.GetBusinessAdminCatalogueAsync();
+            if (cached != null) return cached;
+        }
+
+        var codes = await _moduleFunctionRepository
+            .Where(f => f.IsEnabled && f.Category == PermissionCategory.Business)
+            .Select(f => f.Code)
+            .Distinct()
+            .ToListAsync();
+
+        if (_functionAuthCache != null)
+        {
+            await _functionAuthCache.SetBusinessAdminCatalogueAsync(codes);
+        }
+        return codes;
+    }
+
+    /// <summary>
     /// 获取用户的所有权限名称
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <returns>权限名称集合</returns>
     public async Task<IEnumerable<string>> GetUserPermissionNamesAsync(Guid userId)
+    {
+        var tier = await GetAdminTierAsync(userId);
+        return await GetUserPermissionNamesCoreAsync(userId, tier);
+    }
+
+    /// <summary>
+    /// Tier-aware permission-name resolution. Split from the public method so
+    /// <see cref="CheckPermissionAsync"/> can resolve the tier once and reuse it.
+    /// </summary>
+    private async Task<IEnumerable<string>> GetUserPermissionNamesCoreAsync(Guid userId, AdminTier tier)
     {
         // SuperAdmin bypass — return the full catalogue of enabled functions so
         // both the legacy "has X" check and any caller that enumerates the user's
@@ -154,11 +232,33 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // shared cache key (1h TTL), invalidated by Function/Module enable
         // changes. This avoids a full ModuleFunction scan per super-admin
         // request when a UI repeatedly enumerates permissions.
-        if (await IsSuperAdminAsync(userId))
+        if (tier == AdminTier.SuperAdmin)
         {
             return await GetSuperAdminCatalogueAsync();
         }
 
+        // BusinessAdmin — implicit Business-category catalogue ∪ explicit
+        // grants. The union is computed per call from two independent caches
+        // (shared business catalogue + per-user grants) rather than cached as
+        // a third key, so catalogue and grant invalidations stay independent.
+        if (tier == AdminTier.BusinessAdmin)
+        {
+            var businessCatalogue = await GetBusinessAdminCatalogueAsync();
+            var explicitGrants = await GetExplicitUserPermissionNamesAsync(userId);
+            return businessCatalogue
+                .Union(explicitGrants, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return await GetExplicitUserPermissionNamesAsync(userId);
+    }
+
+    /// <summary>
+    /// Explicitly-granted permission names (ModuleUser + ModuleRole +
+    /// RoleFunction union), tier-independent, with per-user cache.
+    /// </summary>
+    private async Task<IEnumerable<string>> GetExplicitUserPermissionNamesAsync(Guid userId)
+    {
         // 1. 尝试从缓存获取
         if (_functionAuthCache != null)
         {
@@ -849,6 +949,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         function.IsEnabled = true;
 
         await _moduleFunctionRepository.InsertAsync(function);
+        // A new enabled function belongs in the admin-tier catalogues
+        // immediately; without this, it would be invisible to super/business
+        // admins until the catalogue TTL (1h) expires.
+        if (_functionAuthCache != null)
+        {
+            await _functionAuthCache.InvalidateAdminCataloguesAsync();
+        }
         LogInformation("Module function created: {Code}, Name: {Name}", request.Code, request.Name);
         return Ok(function, "Module function created successfully");
     }
@@ -908,7 +1015,18 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail<ModuleFunction>("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // Category needs guarding around the blanket MapTo below:
+        // - system-managed rows: category is a code-owned contract (the seeder
+        //   re-asserts it), protected like Code/ModuleId — admin edits ignored;
+        // - admin-created rows: apply only when the request explicitly provides
+        //   a value. A nullable-with-default would silently downgrade Technical
+        //   to Business on any update that omits the field, instantly granting
+        //   the permission to every business admin (privilege escalation).
+        var currentCategory = function.Category;
         request.MapTo(function);
+        function.Category = function.IsSystemManaged
+            ? currentCategory
+            : request.Category ?? currentCategory;
         await _moduleFunctionRepository.UpdateAsync(function);
         // 全局清理功能权限缓存，因为功能变更可能影响广泛
         await InvalidateAllCacheAsync();
@@ -1526,9 +1644,10 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 await _functionAuthCache.RemoveUserPermissionNamesAsync(affectedUserIds);
             }
 
-            // The super-admin catalogue is "all enabled functions" — any
-            // function enable/disable affects it.
-            await _functionAuthCache.InvalidateSuperAdminCatalogueAsync();
+            // The admin-tier catalogues are derived from "all enabled
+            // functions" (full set / Business subset) — any function
+            // enable/disable or category change affects them.
+            await _functionAuthCache.InvalidateAdminCataloguesAsync();
         }
         catch (Exception ex)
         {

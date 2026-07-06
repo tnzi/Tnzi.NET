@@ -19,11 +19,14 @@ public class RequestTrackingMiddleware
     private static readonly ConcurrentDictionary<string, Regex> _regexCache = new();
 
     /// <summary>
-    /// 默认排除路径（当用户未配置 ExcludePaths 时使用）
+    /// 默认排除路径（当用户未配置 ExcludePaths 时使用）。
+    /// "/hubs/*" 必须排除：SignalR WebSocket/SSE 经 access_token 查询参数携带 JWT，
+    /// 本中间件原样记录 QueryString，不排除会把完整令牌写进请求日志。
+    /// 注意匹配是锚定全串（* 为通配符），故须带 "/*" 才能覆盖 "/hubs/chat" 等子路径。
     /// </summary>
     private static readonly List<string> DefaultExcludePaths =
     [
-        "/health", "/metrics", "/favicon.ico", "/swagger", "/api-docs"
+        "/health", "/metrics", "/favicon.ico", "/swagger", "/api-docs", "/hubs/*"
     ];
 
     public RequestTrackingMiddleware(

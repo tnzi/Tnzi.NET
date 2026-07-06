@@ -17,6 +17,8 @@
     :show-batch="showBatch"
     :show-pagination="showPagination"
     :form-modal-width="formModalWidth"
+    :detail-width="detailWidth"
+    :detail-title="detailTitle"
     :title-help="titleHelp"
     :title-help-title="titleHelpTitle"
     :translate="translate"
@@ -49,6 +51,8 @@
     <template v-if="$slots.error" #error="e"><slot name="error" v-bind="e" /></template>
     <template #form="f"><slot name="form" v-bind="f" /></template>
     <template v-if="$slots.formFooter" #formFooter><slot name="formFooter" /></template>
+    <template v-if="$slots.detail" #detail="d"><slot name="detail" v-bind="d" /></template>
+    <template v-if="$slots.detailFooter" #detailFooter="d"><slot name="detailFooter" v-bind="d" /></template>
   </TListShell>
 </template>
 
@@ -93,6 +97,11 @@ export interface TCardPageProps<T, TId extends string | number = string | number
   showBatch?: boolean
   showPagination?: boolean
   formModalWidth?: number
+  /** Width of the read-only view drawer (the `#detail` slot). Default 640.
+      Accepts a string (e.g. `'100vw'`) for responsive full-screen on phones. */
+  detailWidth?: number | string
+  /** Title for the view drawer, derived from the viewed record. */
+  detailTitle?: (data: T) => string
   titleHelp?: string
   titleHelpTitle?: string
   translate?: (key: string) => string
@@ -118,6 +127,8 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   showBatch: false,
   showPagination: true,
   formModalWidth: 560,
+  detailWidth: 640,
+  detailTitle: undefined,
   titleHelp: undefined,
   titleHelpTitle: undefined,
   translate: undefined,
@@ -136,5 +147,7 @@ defineSlots<{
   error?: (props: { error: Error; retry: () => Promise<void>; dismiss: () => void }) => unknown
   form?: (props: { formData: Partial<T> | null; mode: FormModalMode | null }) => unknown
   formFooter?: () => unknown
+  detail?: (props: { data: Partial<T> | null; mode: FormModalMode | null }) => unknown
+  detailFooter?: (props: { data: Partial<T> | null }) => unknown
 }>()
 </script>

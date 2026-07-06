@@ -64,7 +64,7 @@ export const knowledgeEditFormSchema: FormSchemaItem[] = [
   { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
 ]
 
-/** Keyword search over the knowledge base name. */
-export const knowledgeSearchFields: FormSchemaItem[] = [
-  { key: 'keyword', labelKey: 'search.keyword', label: 'Keyword', type: 'text' },
-]
+// The keyword search lives in the page-header bar (drives `query.searchText`,
+// which the bridge forwards as the backend `keyword` param). A single-field
+// advanced-search schema wrote `filters.keyword` — a key the bridge never read —
+// so it was removed; the header search already covers keyword lookup.

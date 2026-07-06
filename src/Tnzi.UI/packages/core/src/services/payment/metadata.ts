@@ -1,20 +1,29 @@
 /**
  * Payment Module Metadata
+ *
+ * Enums are declared as STRING enums whose member value equals the C# member
+ * name. The backend serialises every enum with `JsonStringEnumConverter`
+ * (PascalCase member name) and accepts either the name or the number on input,
+ * so string-valued members let status maps / comparisons / select options all
+ * key off the exact wire value (`PaymentStatus.Succeeded === 'Succeeded'`).
+ *
+ * `TrendGranularity` stays numeric: it is only ever sent as a query-string
+ * param, where ASP.NET Core's enum model binder accepts the number.
  */
 
 /**
- * Payment status
+ * Payment status — mirrors Tnzi.Payment.Metadata.PaymentStatus.
  */
 export enum PaymentStatus {
-  Pending = 0,
-  Processing = 1,
-  Succeeded = 2,
-  Failed = 3,
-  Closed = 4,
-  Cancelled = 5,
-  Expired = 6,
-  Refunded = 7,
-  PartialRefunded = 8,
+  Pending = 'Pending',
+  Processing = 'Processing',
+  Succeeded = 'Succeeded',
+  Failed = 'Failed',
+  Closed = 'Closed',
+  Cancelled = 'Cancelled',
+  Expired = 'Expired',
+  Refunded = 'Refunded',
+  PartialRefunded = 'PartialRefunded',
 }
 
 /**
@@ -69,18 +78,16 @@ export function isPaymentFailed(status: PaymentStatus): boolean {
 }
 
 /**
- * Payment method
+ * Payment method — mirrors Tnzi.Payment.Metadata.PaymentMethod.
  */
 export enum PaymentMethod {
-  CreditCard = 1,
-  DebitCard = 2,
-  PayPal = 3,
-  ApplePay = 4,
-  GooglePay = 5,
-  BankTransfer = 6,
-  Alipay = 7,
-  WeChatPay = 8,
-  Offline = 99,
+  CreditCard = 'CreditCard',
+  DebitCard = 'DebitCard',
+  PayPal = 'PayPal',
+  ApplePay = 'ApplePay',
+  GooglePay = 'GooglePay',
+  BankTransfer = 'BankTransfer',
+  Offline = 'Offline',
 }
 
 /**
@@ -100,10 +107,6 @@ export function getPaymentMethodLabel(method: PaymentMethod): string {
       return 'Google Pay';
     case PaymentMethod.BankTransfer:
       return 'Bank Transfer';
-    case PaymentMethod.Alipay:
-      return 'Alipay';
-    case PaymentMethod.WeChatPay:
-      return 'WeChat Pay';
     case PaymentMethod.Offline:
       return 'Offline Payment';
     default:
@@ -112,15 +115,13 @@ export function getPaymentMethodLabel(method: PaymentMethod): string {
 }
 
 /**
- * Business type for payment
+ * Business type for payment — mirrors Tnzi.Payment.Metadata.BusinessType.
  */
 export enum BusinessType {
-  Order = 1,
-  Subscription = 2,
-  Recharge = 3,
-  Donation = 4,
-  Service = 5,
-  Other = 99,
+  Order = 'Order',
+  Subscription = 'Subscription',
+  Recharge = 'Recharge',
+  Other = 'Other',
 }
 
 /**
@@ -134,10 +135,6 @@ export function getBusinessTypeLabel(type: BusinessType): string {
       return 'Subscription';
     case BusinessType.Recharge:
       return 'Recharge';
-    case BusinessType.Donation:
-      return 'Donation';
-    case BusinessType.Service:
-      return 'Service';
     case BusinessType.Other:
       return 'Other';
     default:
@@ -146,17 +143,17 @@ export function getBusinessTypeLabel(type: BusinessType): string {
 }
 
 /**
- * Refund status
+ * Refund status — mirrors Tnzi.Payment.Metadata.RefundStatus.
  */
 export enum RefundStatus {
-  Pending = 0,
-  Processing = 1,
-  Approved = 2,
-  Rejected = 3,
-  Refunding = 4,
-  Succeeded = 5,
-  Failed = 6,
-  Cancelled = 7,
+  Pending = 'Pending',
+  Processing = 'Processing',
+  Approved = 'Approved',
+  Rejected = 'Rejected',
+  Refunding = 'Refunding',
+  Succeeded = 'Succeeded',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled',
 }
 
 /**
@@ -186,17 +183,17 @@ export function getRefundStatusLabel(status: RefundStatus): string {
 }
 
 /**
- * Subscription status
+ * Subscription status — mirrors Tnzi.Payment.Metadata.SubscriptionStatus.
  */
 export enum SubscriptionStatus {
-  Pending = 0,
-  Trial = 1,
-  Active = 2,
-  PendingRenewal = 3,
-  Paused = 4,
-  Cancelled = 5,
-  Expired = 6,
-  PastDue = 7,
+  Pending = 'Pending',
+  Trial = 'Trial',
+  Active = 'Active',
+  PendingRenewal = 'PendingRenewal',
+  Paused = 'Paused',
+  Cancelled = 'Cancelled',
+  Expired = 'Expired',
+  PastDue = 'PastDue',
 }
 
 /**
@@ -226,14 +223,14 @@ export function getSubscriptionStatusLabel(status: SubscriptionStatus): string {
 }
 
 /**
- * Billing cycle type
+ * Billing cycle type — mirrors Tnzi.Payment.Metadata.BillingCycleType.
  */
 export enum BillingCycleType {
-  Day = 1,
-  Week = 2,
-  Month = 3,
-  Year = 4,
-  OneTime = 5,
+  Day = 'Day',
+  Week = 'Week',
+  Month = 'Month',
+  Year = 'Year',
+  OneTime = 'OneTime',
 }
 
 /**
@@ -257,15 +254,15 @@ export function getBillingCycleTypeLabel(type: BillingCycleType): string {
 }
 
 /**
- * Invoice status
+ * Invoice status — mirrors Tnzi.Payment.Metadata.InvoiceStatus.
  */
 export enum InvoiceStatus {
-  Draft = 0,
-  Pending = 1,
-  Sent = 2,
-  Paid = 3,
-  Overdue = 4,
-  Cancelled = 5,
+  Draft = 'Draft',
+  Pending = 'Pending',
+  Sent = 'Sent',
+  Paid = 'Paid',
+  Overdue = 'Overdue',
+  Cancelled = 'Cancelled',
 }
 
 /**
@@ -291,12 +288,12 @@ export function getInvoiceStatusLabel(status: InvoiceStatus): string {
 }
 
 /**
- * Invoice type
+ * Invoice type — mirrors Tnzi.Payment.Metadata.InvoiceType.
  */
 export enum InvoiceType {
-  Standard = 1,
-  Vat = 2,
-  Receipt = 3,
+  Standard = 'Standard',
+  Vat = 'Vat',
+  Receipt = 'Receipt',
 }
 
 /**
@@ -316,14 +313,14 @@ export function getInvoiceTypeLabel(type: InvoiceType): string {
 }
 
 /**
- * Promotion type
+ * Promotion type — mirrors Tnzi.Payment.Metadata.PromotionType.
  */
 export enum PromotionType {
-  PercentageDiscount = 1,
-  FixedAmountDiscount = 2,
-  FirstSubscription = 3,
-  LimitedTime = 4,
-  ThresholdDiscount = 5,
+  PercentageDiscount = 'PercentageDiscount',
+  FixedAmountDiscount = 'FixedAmountDiscount',
+  FirstSubscription = 'FirstSubscription',
+  LimitedTime = 'LimitedTime',
+  ThresholdDiscount = 'ThresholdDiscount',
 }
 
 /**
@@ -347,11 +344,11 @@ export function getPromotionTypeLabel(type: PromotionType): string {
 }
 
 /**
- * Discount type
+ * Discount type — mirrors Tnzi.Payment.Metadata.DiscountType.
  */
 export enum DiscountType {
-  Percentage = 1,
-  Fixed = 2,
+  Percentage = 'Percentage',
+  Fixed = 'Fixed',
 }
 
 /**
@@ -369,26 +366,28 @@ export function getDiscountTypeLabel(type: DiscountType): string {
 }
 
 /**
- * Product type (for promotion scope)
+ * Product type (for promotion scope) — mirrors Tnzi.Payment.Metadata.ProductType.
  */
 export enum ProductType {
-  Subscription = 1,
-  OneTime = 2,
-  Recharge = 3,
-  All = 99,
+  Subscription = 'Subscription',
+  OneTime = 'OneTime',
+  Recharge = 'Recharge',
+  All = 'All',
 }
 
 /**
- * Apply scope (for promotions)
+ * Apply scope (for promotions) — mirrors Tnzi.Payment.Metadata.ApplyScope.
  */
 export enum ApplyScope {
-  Global = 0,
-  Plan = 1,
-  Product = 2,
+  Global = 'Global',
+  Plan = 'Plan',
+  Product = 'Product',
 }
 
 /**
- * Trend granularity (for revenue trend queries)
+ * Trend granularity (for revenue trend queries). Sent as a query-string param
+ * only — kept numeric because ASP.NET Core's enum model binder accepts the
+ * number for `RevenueTrendQueryDto.Granularity`.
  */
 export enum TrendGranularity {
   Day = 1,
@@ -397,7 +396,7 @@ export enum TrendGranularity {
 }
 
 /**
- * Coupon type
+ * Coupon type (legacy compatibility for the admin promotion listing DTOs).
  */
 export enum CouponType {
   Fixed = 1,

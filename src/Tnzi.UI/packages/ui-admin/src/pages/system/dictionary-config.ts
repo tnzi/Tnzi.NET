@@ -1,15 +1,21 @@
 /**
- * Dictionary config — Phase 3 Task 3.13.
+ * Dictionary config — a Settings view scoped to the `Dictionary` group.
  *
- * PLAN DEVIATION: The plan expected a DictionaryService from @tnzi/core/services/system.
- * No such service exists. The real system module exposes Settings (key/value pairs),
- * which is functionally equivalent. This page maps to the settings bridge sub-contract.
- * Field names match the real SettingDto backend fields.
+ * There is no separate Dictionary entity: the backend exposes key/value
+ * Settings, so this page maps to the settings bridge sub-contract with its
+ * field names matching the real `SettingDto`. Dictionaries.vue hard-limits the
+ * list + create to the dedicated `Dictionary` group so this page never overlaps
+ * with Parameters (which shows every system setting).
  */
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
+
+/** Group every dictionary entry lives under (see Dictionaries.vue). */
+export const DICTIONARY_GROUP = 'Dictionary'
+/** List filter prefix — matches the dedicated group so parameters stay out. */
+export const DICTIONARY_GROUP_PREFIX = 'Dict'
 
 interface DictionaryRow {
   id?: string
@@ -38,9 +44,19 @@ export const dictionaryColumns: ColumnDef<DictionaryRow>[] = [
 ]
 
 export const dictionaryFormSchema: FormSchemaItem[] = [
-  { key: 'key',         labelKey: 'form.key', label: 'Key',         type: 'text',     required: true },
+  // The key is immutable once created (UpdateSettingDto has no Key), so typeFn
+  // swaps it to the locked renderer (registered in Dictionaries.vue) on edit.
+  {
+    key: 'key',
+    labelKey: 'form.key', label: 'Key',
+    type: 'text',
+    required: true,
+    typeFn: (model) => (model.id ? 'dict-key-locked' : 'text'),
+  },
   { key: 'value',       labelKey: 'form.value', label: 'Value',        type: 'text',     required: true },
-  { key: 'group',       labelKey: 'form.group', label: 'Group',        type: 'text' },
+  // `group` is intentionally absent: every dictionary entry is pinned to the
+  // dedicated `Dictionary` group (injected on create by Dictionaries.vue) so
+  // the page never overlaps Parameters. It stays visible in the list column.
   { key: 'description', labelKey: 'form.description', label: 'Description',  type: 'textarea' },
   { key: 'sortOrder',   labelKey: 'form.sortOrder', label: 'Sort',         type: 'number',   min: 0 },
 ]

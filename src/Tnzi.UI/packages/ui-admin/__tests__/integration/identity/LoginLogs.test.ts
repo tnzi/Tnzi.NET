@@ -4,6 +4,26 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import LoginLogs from '../../../src/pages/identity/LoginLogs.vue'
 
+// Hoisted so the vi.mock factories (evaluated before module init) can close
+// over them. `mockRoute.query` is mutated per-test to drive the ?userId= deep
+// link; `mockFetch` is asserted for the seeded filter.
+const { mockRoute, mockFetch } = vi.hoisted(() => ({
+  mockRoute: { query: {} as Record<string, unknown> },
+  mockFetch: vi.fn(async () => ({
+    items: [
+      { id: 'l1', userName: 'alice', ipAddress: '127.0.0.1', userAgent: 'Chrome', isSuccess: true, loginTime: '2026-01-01' },
+      { id: 'l2', userName: 'bob', ipAddress: '10.0.0.1', userAgent: 'Firefox', isSuccess: false, loginTime: '2026-01-02' },
+    ],
+    totalCount: 2,
+    pageIndex: 1,
+    pageSize: 20,
+  })),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => mockRoute,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+}))
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
@@ -17,17 +37,8 @@ vi.mock('../../../src/services/bridges/identity-bridge', () => ({
       fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(),
     },
     loginLogs: {
-      fetch: vi.fn(async () => ({
-        items: [
-          { id: 'l1', username: 'alice', ip: '127.0.0.1', userAgent: 'Chrome', success: true, loginAt: '2026-01-01' },
-          { id: 'l2', username: 'bob',   ip: '10.0.0.1',  userAgent: 'Firefox', success: false, loginAt: '2026-01-02' },
-        ],
-        totalCount: 2,
-        pageIndex: 1,
-        pageSize: 20,
-      })),
+      fetch: mockFetch,
     },
-    gdpr: { requestExport: vi.fn(), requestDeletion: vi.fn() },
   }),
 }))
 
@@ -50,7 +61,11 @@ const stubs = {
 }
 
 describe('LoginLogs (Phase 3 read-only page)', () => {
-  beforeEach(() => { setActivePinia(createPinia()) })
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockRoute.query = {}
+    mockFetch.mockClear()
+  })
 
   it('mounts and fetches login logs on load', async () => {
     const wrapper = mount(LoginLogs, { global: { stubs } })
@@ -65,5 +80,28 @@ describe('LoginLogs (Phase 3 read-only page)', () => {
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
     expect(wrapper.find('.t-crud-page__create').exists()).toBe(false)
+  })
+
+  it('seeds the userId filter from a ?userId= deep link before loading', async () => {
+    mockRoute.query = { userId: 'u1' }
+    mount(LoginLogs, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(mockFetch).toHaveBeenCalled()
+    const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as unknown as [
+      { filters: Record<string, unknown> },
+    ]
+    expect(lastCall[0].filters).toMatchObject({ userId: 'u1' })
+  })
+
+  it('loads unfiltered when no ?userId= is present', async () => {
+    mount(LoginLogs, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(mockFetch).toHaveBeenCalled()
+    const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as unknown as [
+      { filters: Record<string, unknown> },
+    ]
+    expect(lastCall[0].filters.userId).toBeUndefined()
   })
 })

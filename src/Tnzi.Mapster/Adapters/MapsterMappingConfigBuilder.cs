@@ -57,8 +57,8 @@ internal class MapsterMappingConfigBuilder<TSource, TDestination>
     public IMappingConfigBuilder<TSource, TDestination> Ignore<TProperty>(
         Expression<Func<TDestination, TProperty>> destinationMember)
     {
-        // 将表达式转换为 Mapster 要求的 object 类型
-        var converted = Expression.Lambda<Func<TDestination, object>>(
+        // 将表达式转换为 Mapster 要求的 object? 类型（Mapster 10 的 Ignore 签名为 Func<TDestination, object?>）
+        var converted = Expression.Lambda<Func<TDestination, object?>>(
             Expression.Convert(destinationMember.Body, typeof(object)),
             destinationMember.Parameters);
         _setter.Ignore(converted);

@@ -5,6 +5,7 @@ namespace Tnzi.Payment.Controllers.Admin;
 /// </summary>
 [Route("admin/payments")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "payment.order.view")]
 public class DefaultPaymentAdminController : ApiAdminControllerBase
 {
     private readonly IPaymentService _paymentService;

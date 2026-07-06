@@ -7,7 +7,7 @@
  */
 
 import { computed } from 'vue';
-import { Icon } from '@iconify/vue';
+import { TAvatar } from '@tnzi/ui';
 import type { ChatMessage } from '@/composables/useChat';
 import type { FeedbackValue } from './MessageFeedback.vue';
 import MessageResponse from './MessageResponse.vue';
@@ -56,15 +56,13 @@ const hasAttachments = computed(
     <!-- Avatar -->
     <div class="shrink-0">
       <slot name="avatar">
-        <div
-          class="t-chat-message__avatar"
-          :class="{ 't-chat-message__avatar--user': isUser, 't-chat-message__avatar--assistant': isAssistant }"
-        >
-          <Icon
-            :icon="isUser ? 'lucide:user' : 'lucide:bot'"
-            class="size-4"
-          />
-        </div>
+        <TAvatar
+          :icon="isUser ? 'lucide:user' : 'lucide:bot'"
+          prefer-icon
+          :size="32"
+          :color="isUser ? 'var(--tnzi-primary)' : 'var(--tnzi-border)'"
+          :text-color="isUser ? '#fff' : 'var(--tnzi-base-text-muted)'"
+        />
       </slot>
     </div>
 
@@ -162,23 +160,6 @@ const hasAttachments = computed(
 }
 .t-chat-message--user {
   flex-direction: row-reverse;
-}
-.t-chat-message__avatar {
-  display: flex;
-  width: 32px;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.t-chat-message__avatar--user {
-  background-color: var(--tnzi-primary);
-  color: #fff;
-}
-.t-chat-message__avatar--assistant {
-  background-color: var(--tnzi-border);
-  color: var(--tnzi-base-text-muted);
 }
 .t-chat-message__content {
   display: flex;

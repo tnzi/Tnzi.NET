@@ -126,6 +126,9 @@
                 size="small"
                 remote
                 :row-key="(r: OrgMemberRow) => r.id"
+                :row-actions="memberRowActions"
+                :row-actions-title="t('members.actions')"
+                :translate="t"
               />
             </div>
           </div>
@@ -133,41 +136,45 @@
       </template>
     </TMasterDetailLayout>
 
-    <!-- Create modal — works for both root and child create -->
-    <NModal
-      v-model:show="createModal.show"
-      :title="t(createModal.parentId ? 'addChild' : 'addRoot')"
-      preset="card"
-      :style="createModalStyle"
+    <!-- Create overlay — works for both root and child create. useDetail owns
+         the open-state + `?create=new` deep link; TDetailHost renders the modal
+         chrome (auto-fullscreen on narrow viewports via TModalShell). -->
+    <TDetailHost
+      :state="createDetail"
+      :title="t(createParentId ? 'addChild' : 'addRoot')"
+      :width="500"
+      :translate="t"
     >
-      <NForm label-placement="left" label-width="100px">
-        <NFormItem :label="t('fields.name')" required>
-          <NInput v-model:value="createModal.form.name" />
-        </NFormItem>
-        <NFormItem :label="t('fields.code')">
-          <NInput v-model:value="createModal.form.code" />
-        </NFormItem>
-        <NFormItem :label="t('fields.remark')">
-          <NInput
-            v-model:value="createModal.form.remark"
-            type="textarea"
-            :rows="2"
-            :placeholder="t('fields.remarkPlaceholder')"
-          />
-        </NFormItem>
-        <NFormItem :label="t('fields.sortOrder')">
-          <NInputNumber v-model:value="createModal.form.sortOrder" :min="0" />
-        </NFormItem>
-      </NForm>
-      <template #footer>
+      <template #default>
+        <NForm label-placement="left" label-width="100px">
+          <NFormItem :label="t('fields.name')" required>
+            <NInput v-model:value="createForm.name" />
+          </NFormItem>
+          <NFormItem :label="t('fields.code')">
+            <NInput v-model:value="createForm.code" />
+          </NFormItem>
+          <NFormItem :label="t('fields.remark')">
+            <NInput
+              v-model:value="createForm.remark"
+              type="textarea"
+              :rows="2"
+              :placeholder="t('fields.remarkPlaceholder')"
+            />
+          </NFormItem>
+          <NFormItem :label="t('fields.sortOrder')">
+            <NInputNumber v-model:value="createForm.sortOrder" :min="0" />
+          </NFormItem>
+        </NForm>
+      </template>
+      <template #footer="{ close }">
         <div class="flex justify-end gap-8px">
-          <NButton @click="createModal.show = false">{{ t('cancel') }}</NButton>
-          <NButton type="primary" :disabled="!createModal.form.name" :loading="saving" @click="submitCreate">
+          <NButton @click="close">{{ t('cancel') }}</NButton>
+          <NButton type="primary" :disabled="!createForm.name" :loading="saving" @click="submitCreate">
             {{ t('create') }}
           </NButton>
         </div>
       </template>
-    </NModal>
+    </TDetailHost>
   </TContentPage>
 </template>
 
@@ -176,36 +183,26 @@ import { computed, reactive, ref, h, onMounted, watch } from 'vue'
 import type { DataTableColumns, TreeOption } from 'naive-ui'
 import {
   NTree, NSpace, NButton, NCheckbox, NInput, NInputNumber,
-  NSwitch, NSpin, NForm, NFormItem, NPopconfirm, NModal,
+  NSwitch, NSpin, NForm, NFormItem, NPopconfirm,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import { type RowAction } from '../../headless/rowActions'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { useBreakpoint } from '../../headless/useBreakpoint'
 import { createIdentityBridge, type OrganizationTreeNodeDto, type OrganizationDto } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { useDetail } from '../../headless/useDetail'
 import type { UserListItemDto } from '@tnzi/core/services/identity'
 
 const bridge = createIdentityBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('identity.organizations', key), params)
+const t = makePageTranslator('identity.organizations')
 
 type OrgMemberRow = UserListItemDto
 
 const message = useSafeMessage()
-const bp = useBreakpoint()
-
-// Phase 1 responsive parity: cap modal width at viewport - margins so
-// the dialog never escapes a phone screen. Mirrors TFormModal's
-// behaviour without the full state-machine refactor (reactive
-// metadata + form is convoluted to migrate to useFormModal).
-const createModalStyle = computed(() =>
-  bp.isSm.value
-    ? { width: '100vw', maxWidth: '100vw' }
-    : { width: 'min(500px, 95vw)' },
-)
 
 const tree = ref<OrganizationTreeNodeDto[]>([])
 const loading = ref(false)
@@ -221,11 +218,23 @@ const form = reactive({
   isEnabled: true,
 })
 
-const createModal = reactive({
-  show: false,
-  parentId: null as string | null,
-  form: { name: '', code: '' as string | undefined, remark: '' as string | undefined, sortOrder: 0 },
+// Create overlay: useDetail owns the open-state + `?create=new` deep link;
+// the form fields bind to a page-local reactive object (parentId is set by
+// which "Add" button was clicked, so it lives outside the form payload).
+interface OrgCreateForm {
+  name: string
+  code: string | undefined
+  remark: string | undefined
+  sortOrder: number
+}
+const createParentId = ref<string | null>(null)
+const createForm = reactive<OrgCreateForm>({
+  name: '',
+  code: undefined,
+  remark: undefined,
+  sortOrder: 0,
 })
+const createDetail = useDetail({ mode: 'modal', url: 'create' })
 
 // Flat lookup by id (built whenever tree changes).
 const flatById = computed(() => {
@@ -326,23 +335,26 @@ async function handleDelete(): Promise<void> {
 }
 
 function openCreate(parentId: string | null): void {
-  createModal.parentId = parentId
-  createModal.form = { name: '', code: undefined, remark: undefined, sortOrder: 0 }
-  createModal.show = true
+  createParentId.value = parentId
+  createForm.name = ''
+  createForm.code = undefined
+  createForm.remark = undefined
+  createForm.sortOrder = 0
+  void createDetail.open('create', {})
 }
 
 async function submitCreate(): Promise<void> {
   saving.value = true
   try {
     const created = await bridge.organizations.create({
-      name: createModal.form.name,
-      code: createModal.form.code ?? null,
-      remark: createModal.form.remark ?? null,
-      parentId: createModal.parentId ?? null,
-      sortOrder: createModal.form.sortOrder,
+      name: createForm.name,
+      code: createForm.code ?? null,
+      remark: createForm.remark ?? null,
+      parentId: createParentId.value ?? null,
+      sortOrder: createForm.sortOrder,
     })
     message.success(t('createSuccess'))
-    createModal.show = false
+    createDetail.close()
     await loadTree()
     selectedKey.value = (created as OrganizationDto).id
     onSelect([(created as OrganizationDto).id])
@@ -424,27 +436,19 @@ const memberColumns = computed<DataTableColumns<OrgMemberRow>>(() => [
     ellipsis: { tooltip: true },
     render: (row) => row.organizationName ?? '—',
   },
-  {
-    key: 'actions',
-    title: t('members.actions'),
-    width: 100,
-    align: 'right',
-    render: (row) =>
-      h(
-        NPopconfirm,
-        { onPositiveClick: () => removeMember(row) },
-        {
-          trigger: () =>
-            h(
-              NButton,
-              { size: 'tiny', type: 'error', ghost: true },
-              { default: () => t('members.remove') },
-            ),
-          default: () => t('members.confirmRemove', { user: row.userName }),
-        },
-      ),
-  },
 ])
+
+// Declarative operation column for the members sub-table — "Remove" detaches
+// the user from the org (confirm gated) via the existing removeMember handler.
+const memberRowActions: RowAction<OrgMemberRow>[] = [
+  {
+    key: 'remove',
+    label: 'members.remove',
+    type: 'error',
+    confirm: (row) => t('members.confirmRemove', { user: row.userName }),
+    onClick: (row) => void removeMember(row),
+  },
+]
 
 onMounted(() => {
   void loadTree()

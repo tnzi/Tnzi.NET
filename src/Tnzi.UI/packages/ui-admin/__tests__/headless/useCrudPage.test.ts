@@ -35,7 +35,12 @@ function createFakeBridge() {
 
 function makeCrud(
   overrides: Partial<ReturnType<typeof createFakeBridge>> = {},
-  extraOptions: { retryFetch?: number; retryDelayMs?: number; onError?: (err: Error, op: string) => boolean | void } = {},
+  extraOptions: {
+    retryFetch?: number
+    retryDelayMs?: number
+    onError?: (err: Error, op: string) => boolean | void
+    onView?: (row: User) => void
+  } = {},
 ) {
   const bridge = { ...createFakeBridge(), ...overrides }
   const crud = useCrudPage<User>({
@@ -49,6 +54,9 @@ function makeCrud(
     // Default to no retries in tests so existing assertions about call
     // counts stay stable; tests that need retry behavior pass their own.
     retryFetch: 0,
+    // These tests drive refresh() manually and assert fetch call counts, so
+    // opt out of the constructor auto-load (default true in production).
+    autoLoad: false,
     ...extraOptions,
   })
   return { crud, bridge }
@@ -118,6 +126,32 @@ describe('useCrudPage', () => {
     expect(crud.formModal.visible.value).toBe(true)
     expect(crud.formModal.mode.value).toBe('edit')
     expect(crud.formModal.formData.value).toEqual(sampleUsers[0])
+  })
+
+  it('openView opens the detail in view mode', () => {
+    const { crud } = makeCrud()
+    crud.openView(sampleUsers[1])
+    expect(crud.formModal.visible.value).toBe(true)
+    expect(crud.formModal.mode.value).toBe('view')
+    expect(crud.formModal.formData.value).toEqual(sampleUsers[1])
+  })
+
+  it('onView fires with the viewed row when the view state opens', async () => {
+    const onView = vi.fn()
+    const { crud } = makeCrud({}, { onView })
+    crud.openView(sampleUsers[0])
+    await nextTick()
+    expect(onView).toHaveBeenCalledTimes(1)
+    expect(onView).toHaveBeenCalledWith(sampleUsers[0])
+  })
+
+  it('onView does NOT fire for create/edit (only view)', async () => {
+    const onView = vi.fn()
+    const { crud } = makeCrud({}, { onView })
+    crud.openCreate()
+    crud.openEdit(sampleUsers[2])
+    await nextTick()
+    expect(onView).not.toHaveBeenCalled()
   })
 
   it('submit in create mode calls createData then refreshes + closes', async () => {

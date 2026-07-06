@@ -165,7 +165,8 @@ describe('Agents page (production card grid)', () => {
     await flushPromises()
     const vm = wrapper.vm as unknown as AgentsVm
     vm.openDetail({ id: 'a1', name: 'Writer' })
-    expect(routerPush).toHaveBeenCalledWith('/admin/ai/agents/a1')
+    // By NAME so the link follows any basePath / history-base prefix.
+    expect(routerPush).toHaveBeenCalledWith({ name: 'ai.agents.detail', params: { id: 'a1' } })
   })
 
   it('Clone calls bridge.agents.clone and refreshes', async () => {

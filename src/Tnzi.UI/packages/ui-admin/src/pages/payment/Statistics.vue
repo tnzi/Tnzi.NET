@@ -27,43 +27,25 @@
       </NButton>
     </template>
 
-    <div class="t-pay-stats-page">
-    <div class="t-pay-stats-page__kpis">
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.revenue')" :value="formatMoney(overview?.totalRevenue)">
-          <template #suffix><TSvgIcon icon="mdi:cash" :size="14" /></template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.transactions')" :value="overview?.totalTransactions ?? 0">
-          <template #suffix>
-            <NTag size="tiny" :bordered="false" type="success">
-              {{ t('kpi.successCount', { n: overview?.successfulTransactions ?? 0 }) }}
-            </NTag>
-          </template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.refundRate')" :value="formatPercent(overview?.refundRate)">
-          <template #suffix>
-            <NTag size="tiny" :bordered="false" type="error">
-              {{ formatMoney(overview?.totalRefunds) }}
-            </NTag>
-          </template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.mrr')" :value="formatMoney(metrics?.monthlyRecurringRevenue)">
-          <template #suffix><TSvgIcon icon="mdi:repeat" :size="14" /></template>
-        </NStatistic>
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.activeSubs')" :value="metrics?.activeSubscriptions ?? overview?.activeSubscriptions ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.churn')" :value="formatPercent(metrics?.churnRate)" />
-      </NCard>
-    </div>
+    <div class="t-pay-stats-page flex flex-col gap-16px min-h-0">
+    <TKpiRow cols="2 s:3 m:6">
+      <TKpiCard :label="t('kpi.revenue')" :value="formatMoney(overview?.totalRevenue)" icon="mdi:cash" />
+      <TKpiCard :label="t('kpi.transactions')" :value="overview?.totalTransactions ?? 0">
+        <template #extra>
+          <NTag size="tiny" :bordered="false" type="success">
+            {{ t('kpi.successCount', { n: overview?.successfulTransactions ?? 0 }) }}
+          </NTag>
+        </template>
+      </TKpiCard>
+      <TKpiCard :label="t('kpi.refundRate')" :value="formatPercent(overview?.refundRate)">
+        <template #extra>
+          <NTag size="tiny" :bordered="false" type="error">{{ formatMoney(overview?.totalRefunds) }}</NTag>
+        </template>
+      </TKpiCard>
+      <TKpiCard :label="t('kpi.mrr')" :value="formatMoney(metrics?.monthlyRecurringRevenue)" icon="mdi:repeat" />
+      <TKpiCard :label="t('kpi.activeSubs')" :value="metrics?.activeSubscriptions ?? overview?.activeSubscriptions ?? 0" />
+      <TKpiCard :label="t('kpi.churn')" :value="formatPercent(metrics?.churnRate)" />
+    </TKpiRow>
 
     <NCard :title="t('sections.revenueTrend')" size="small" :bordered="false">
       <TWidgetLineChart
@@ -75,7 +57,7 @@
       <NEmpty v-else size="small" :description="t('empty.trend')" />
     </NCard>
 
-    <div class="t-pay-stats-page__split">
+    <div class="t-pay-stats-page__split" style="display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr))">
       <NCard :title="t('sections.channels')" size="small" :bordered="false">
         <TResponsiveTable
           :columns="channelColumns"
@@ -123,12 +105,12 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import { TKpiCard, TKpiRow } from '../../components/data'
 import {
   NButton,
   NCard,
   NEmpty,
   NSelect,
-  NStatistic,
   NTag,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -146,11 +128,10 @@ import {
   type SubscriptionMetricsDto,
   type TrendGranularity,
 } from '../../services/bridges/payment-statistics-bridge'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 
 const bridge = createPaymentStatisticsBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('payment.statistics', key), params)
+const t = makePageTranslator('payment.statistics')
 
 const loading = ref(false)
 const overview = ref<PaymentStatisticsDto | null>(null)
@@ -253,31 +234,9 @@ onMounted(() => { void refresh() })
 </script>
 
 <style scoped>
-.t-pay-stats-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
-}
-.t-pay-stats-page__kpis {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 12px;
-}
-@media (max-width: 1200px) {
-  .t-pay-stats-page__kpis { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 640px) {
-  .t-pay-stats-page__kpis { grid-template-columns: repeat(2, 1fr); }
-}
-.t-pay-stats-page__split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-@media (max-width: 900px) {
-  .t-pay-stats-page__split { grid-template-columns: 1fr; }
-}
+/* Layout (page container + responsive split) is done with unocss + an
+   auto-fit inline grid on the template; only the dashed sub-metrics list keeps
+   bespoke styling here. */
 .t-pay-stats-page__sub-list {
   display: flex;
   flex-direction: column;

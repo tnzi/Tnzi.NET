@@ -6,6 +6,7 @@ namespace Tnzi.Storage.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/files")]
+[ApiAuthorize(PermissionName = "storage.file.view")]
 public class DefaultStorageAdminController : ApiAdminControllerBase
 {
     protected readonly IFileStorageService FileStorageService;

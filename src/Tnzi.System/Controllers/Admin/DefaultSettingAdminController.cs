@@ -7,6 +7,7 @@ namespace Tnzi.System.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/settings")]
+[ApiAuthorize(PermissionName = "system.parameter.view")]
 public class DefaultSettingAdminController : ApiAdminControllerBase
 {
     protected readonly ISettingService SettingService;

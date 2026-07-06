@@ -4,18 +4,22 @@ import type { StateDeps } from '../../state/types';
 import type { HttpClient } from '../../http/http';
 import type { StorageAdapter } from '../../adapters/storage';
 
-// Mock service imports
+// Mock service imports. Shared (hoisted) spies so tests can assert on
+// which auth endpoints were (not) hit, e.g. "refresh failure must NOT call
+// the backend logout endpoint".
+const authApiMocks = vi.hoisted(() => ({
+  loginWithRefreshToken: vi.fn(),
+  refreshToken: vi.fn(),
+  logout: vi.fn(),
+}));
+const profileApiMocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  update: vi.fn(),
+  changePassword: vi.fn(),
+}));
 vi.mock('../../services/identity/index', () => ({
-  useAuthApi: () => ({
-    loginWithRefreshToken: vi.fn(),
-    refreshToken: vi.fn(),
-    logout: vi.fn(),
-  }),
-  useProfileApi: () => ({
-    get: vi.fn(),
-    update: vi.fn(),
-    changePassword: vi.fn(),
-  }),
+  useAuthApi: () => authApiMocks,
+  useProfileApi: () => profileApiMocks,
 }));
 
 function createMockStorage(): StorageAdapter {
@@ -337,6 +341,94 @@ describe('AuthStateManager', () => {
       // so the consumer's session-expired handler actually fires.
       expect(auth.refreshToken).toBeNull();
       await expect(auth.refreshAccessToken()).rejects.toThrow(/no refresh token/i);
+    });
+  });
+
+  // ------------------------------------------
+  // Refresh failure = session expired (local sign-out)
+  // ------------------------------------------
+
+  describe('refresh failure (session expired)', () => {
+    beforeEach(() => {
+      authApiMocks.refreshToken.mockReset();
+      authApiMocks.logout.mockReset();
+    });
+
+    function seedSession(manager: AuthStateManager): void {
+      manager.isAuthenticated = true;
+      manager.accessToken = 'stale-access';
+      manager.refreshToken = 'dead-refresh';
+      manager.user = {
+        id: '1',
+        userName: 'john',
+        nickname: null,
+        email: null,
+        phoneNumber: null,
+        avatar: null,
+        roles: [],
+        permissions: [],
+      };
+    }
+
+    it('clears auth locally WITHOUT calling the backend logout endpoint', async () => {
+      // Regression: the failure path used to run the full logout(), whose
+      // POST /auth/logout carried the expired access token, 401'd, and
+      // stalled inside the HttpClient refresh cycle for a whole request
+      // timeout before the session-expired signal could reach the app.
+      const onLogout = vi.fn();
+      const localDeps = createDeps({ onLogout });
+      const localAuth = new AuthStateManager(localDeps);
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({
+        succeeded: false,
+        message: 'Invalid or expired refresh token',
+        code: 400,
+      });
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(authApiMocks.logout).not.toHaveBeenCalled();
+      expect(localAuth.isAuthenticated).toBe(false);
+      expect(localAuth.accessToken).toBeNull();
+      expect(localAuth.refreshToken).toBeNull();
+      expect(localAuth.error).toMatch(/session expired/i);
+      expect(onLogout).toHaveBeenCalledTimes(1);
+      expect(localDeps.httpClient.setAccessToken).toHaveBeenLastCalledWith(null);
+    });
+
+    it('clears persisted tokens and pushes the router to /login', async () => {
+      const storage = createMockStorage();
+      storage.set('tnzi:auth:token', 'stale-access');
+      storage.set('tnzi:auth:refresh', 'dead-refresh');
+      const push = vi.fn();
+      const localDeps = createDeps({
+        storage,
+        router: { push } as unknown as StateDeps['router'],
+      });
+      const localAuth = new AuthStateManager(localDeps);
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 400 });
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(storage.get('tnzi:auth:token')).toBeNull();
+      expect(storage.get('tnzi:auth:refresh')).toBeNull();
+      expect(push).toHaveBeenCalledWith('/login');
+    });
+
+    it('honors a custom deps.loginPath (sub-path deployments)', async () => {
+      const push = vi.fn();
+      const localDeps = createDeps({
+        router: { push } as unknown as StateDeps['router'],
+        loginPath: '/admin/login',
+      });
+      const localAuth = new AuthStateManager(localDeps);
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 400 });
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(push).toHaveBeenCalledWith('/admin/login');
     });
   });
 

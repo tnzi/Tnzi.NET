@@ -19,8 +19,11 @@
         <TMemberGrid
           :members="filteredMembers"
           :can-add="isOwner"
+          :can-remove="isOwner"
+          :my-id="myId"
           @add="openAddMembers"
           @message="onMessageMember"
+          @remove="onRemoveMember"
         />
       </div>
 
@@ -294,6 +297,13 @@ async function onSaveRemark(value: string) {
   } finally {
     savingRemark.value = false
   }
+}
+
+// ── Member removal (owner-only, confirmed inside the member popover) ─────────
+async function onRemoveMember(userId: string) {
+  if (!props.conversationId) return
+  await store.removeMember(props.conversationId, userId)
+  await reload()
 }
 
 // ── Toggles (optimistic) ─────────────────────────────────────────────────────

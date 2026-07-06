@@ -98,6 +98,24 @@ interface Props {
   fieldRenderers?: Record<string, FieldRenderer>
 }
 
+/**
+ * date 字段值兼容：编辑回填的模型里日期常是后端 ISO 字符串（date-only = UTC 午夜），
+ * 而 NDatePicker 只接受 number 时间戳。字符串按**日历日**解析为本地午夜时间戳——
+ * 直接 `new Date(iso).getTime()` 会让 UTC 以西时区显示成前一天。
+ */
+function toDateTimestamp(value: unknown): number | null {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && value.length >= 10) {
+    const y = Number(value.slice(0, 4))
+    const m = Number(value.slice(5, 7))
+    const d = Number(value.slice(8, 10))
+    if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d) && m >= 1 && m <= 12) {
+      return new Date(y, m - 1, d).getTime()
+    }
+  }
+  return null
+}
+
 const TSchemaForm = defineComponent({
   name: 'TSchemaForm',
   props: {
@@ -185,7 +203,7 @@ const TSchemaForm = defineComponent({
           return h(NSelect, { value: value as string | number | null, disabled: viewMode, options: opts, 'onUpdate:value': onUpdate })
         }
         case 'date':
-          return h(NDatePicker, { value: value as number | null, disabled: viewMode, type: 'date', 'onUpdate:value': onUpdate })
+          return h(NDatePicker, { value: toDateTimestamp(value), disabled: viewMode, type: 'date', 'onUpdate:value': onUpdate })
         default:
           // Unknown field type without a registered renderer: degrade to a
           // visible read-only text rendering rather than silently rendering

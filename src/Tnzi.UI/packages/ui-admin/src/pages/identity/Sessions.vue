@@ -75,6 +75,9 @@
         :columns="columns"
         :row-key="(r: UserSessionRow) => r.id"
         :loading="loading"
+        :row-actions="rowActions"
+        :row-actions-title="t('columns.actions')"
+        :translate="t"
         size="small"
         :bordered="false"
         :flex-height="true"
@@ -103,6 +106,7 @@ import {
   NCheckbox, NPopconfirm, NTag,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import { type RowAction } from '../../headless/rowActions'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { useSafeMessage } from '../_shared/safeMessage'
@@ -323,25 +327,20 @@ const columns = computed<DataTableColumns<UserSessionRow>>(() => [
         { default: () => (row.isRevoked ? t('status.revoked') : t('status.active')) },
       ),
   },
-  {
-    key: 'actions',
-    title: t('columns.actions'),
-    width: 100,
-    render: (row) =>
-      row.isRevoked
-        ? h('span', { class: 'text-muted' }, '—')
-        : h(
-            NButton,
-            {
-              size: 'small',
-              type: 'error',
-              ghost: true,
-              onClick: () => handleRevokeSession(row.id),
-            },
-            { default: () => t('actions.revoke') },
-          ),
-  },
 ])
+
+// Declarative operation column — revoke is offered only for still-active
+// sessions (`show`); revoked rows render no action.
+const rowActions: RowAction<UserSessionRow>[] = [
+  {
+    key: 'revoke',
+    label: 'actions.revoke',
+    type: 'error',
+    confirm: true,
+    show: (row) => !row.isRevoked,
+    onClick: (row) => void handleRevokeSession(row.id),
+  },
+]
 
 onMounted(() => {
   void refreshAll()

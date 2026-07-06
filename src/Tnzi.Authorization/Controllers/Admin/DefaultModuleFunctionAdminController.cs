@@ -6,6 +6,7 @@ namespace Tnzi.Authorization.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/module-functions")]
+[ApiAuthorize(PermissionName = "authorization.permission.view")]
 public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
 {
     protected readonly IModuleManagementService ModuleManagementService;

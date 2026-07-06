@@ -67,6 +67,32 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
         return result;
     }
 
+    /// <summary>
+    /// 确保物理数据库事务已开启（幂等；供事务内的裸 SQL 操作加入事务）
+    /// </summary>
+    public async Task EnsureTransactionStartedAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsEnabledTransaction || _transaction != null)
+        {
+            return;
+        }
+
+        await _transactionSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            // 双重检查：并发调用时后进入者直接返回，不重复 BEGIN
+            if (_transaction == null)
+            {
+                _transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                _hasCommitted = false;
+            }
+        }
+        finally
+        {
+            _transactionSemaphore.Release();
+        }
+    }
+
     public async Task BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
         // 使用 SemaphoreSlim 保护事务初始化，防止并发调用导致重复创建事务

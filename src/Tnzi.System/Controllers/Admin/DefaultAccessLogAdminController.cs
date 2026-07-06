@@ -7,6 +7,7 @@ namespace Tnzi.System.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/access-logs")]
+[ApiAuthorize(PermissionName = "system.accessLog.view")]
 public class DefaultAccessLogAdminController : ApiAdminControllerBase
 {
     protected readonly IAccessLogService AccessLogService;

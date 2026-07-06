@@ -32,4 +32,13 @@ export interface StateDeps {
    * to isolate multiple apps that share the same storage origin.
    */
   storagePrefix?: string;
+  /**
+   * Route path the optional `router` adapter is pushed to after logout /
+   * session expiry. Defaults to `'/login'`. Set this when the app's login
+   * route lives elsewhere (e.g. under a basePath prefix like
+   * `'/admin/login'`). Admin apps built on `@tnzi/ui-admin` usually leave
+   * `router` unset here: the framework's session-expired handler redirects
+   * by route name instead, which is deployment-prefix agnostic.
+   */
+  loginPath?: string;
 }

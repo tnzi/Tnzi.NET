@@ -7,13 +7,15 @@ namespace Tnzi.Json;
 public static class TnziJsonDefaults
 {
     /// <summary>
-    /// Default JSON serializer options: camelCase naming, no indentation, case-insensitive reading.
+    /// Default JSON serializer options: camelCase naming, no indentation, case-insensitive reading,
+    /// enums serialized as PascalCase member names (numeric input still accepted for compatibility).
     /// </summary>
     public static JsonSerializerOptions Options { get; } = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
         PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
     };
 }

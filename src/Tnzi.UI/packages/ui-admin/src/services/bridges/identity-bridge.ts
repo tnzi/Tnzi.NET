@@ -74,17 +74,6 @@ export interface IdentityBridgeDeps {
   profileApi?: ReturnType<typeof useProfileApi>
 }
 
-/** A pending GDPR request from a user (admin view). */
-export interface GdprRequestDto {
-  id: string
-  userId: string
-  username: string
-  requestType: 'export' | 'deletion'
-  status: 'pending' | 'approved' | 'denied'
-  requestedAt: string
-  notes?: string
-}
-
 // Re-export core's OrganizationDto for bridge consumers.
 export type OrganizationDto = CoreOrganizationDto
 export type { OrganizationTreeNodeDto, CreateOrganizationDto, UpdateOrganizationDto } from '@tnzi/core/services/identity'
@@ -206,16 +195,6 @@ export interface IdentityBridge {
   loginLogs: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>>
   }
-  gdpr: {
-    requestExport(userId: string): Promise<Blob>
-    requestDeletion(userId: string): Promise<void>
-    /** List pending/processed GDPR requests (admin view). */
-    fetchRequests(query: CrudPageQuery): Promise<CrudPageResult<GdprRequestDto>>
-    /** Approve a GDPR request by ID. */
-    approveRequest(id: string): Promise<void>
-    /** Deny a GDPR request by ID. */
-    denyRequest(id: string): Promise<void>
-  }
   /**
    * Current-user self-service section ("me"). Wires the
    * `DefaultUserProfileController` endpoints (`/users/profile/*`) used by
@@ -271,6 +250,26 @@ export interface IdentityBridge {
   }
 }
 
+/**
+ * Coerce the named filter keys from the string values `'true'` / `'false'`
+ * (emitted by the Users / LoginLogs search `NSelect`s, whose options bind
+ * string values) into real booleans. The backend query DTOs type these as
+ * `bool?`; a JSON string in the POST body fails model binding with a 400.
+ * Empty string / null / undefined are dropped so an unset select means "no
+ * filter" rather than sending a blank value. Returns a shallow copy — the
+ * incoming query object is never mutated.
+ */
+function coerceBoolFilters(q: CrudPageQuery, keys: string[]): CrudPageQuery {
+  const filters: Record<string, unknown> = { ...q.filters }
+  for (const key of keys) {
+    const v = filters[key]
+    if (v === 'true' || v === true) filters[key] = true
+    else if (v === 'false' || v === false) filters[key] = false
+    else if (v === '' || v == null) delete filters[key]
+  }
+  return { ...q, filters }
+}
+
 function toCrudResult<T>(p: PagedList<T> | null | undefined): CrudPageResult<T> {
   // Defensive: when the backend errors mid-bind (e.g. ASP.NET rejects an
   // abstract `[FromQuery] PagedQueryDto` with 500 + empty body), the
@@ -324,7 +323,9 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     fetch: async (q) =>
       toCrudResult(
         unwrap<PagedList<UserListItemDto>>(
-          await userApi.getList(mapQuery(q) as unknown as UserListQueryDto),
+          await userApi.getList(
+            mapQuery(coerceBoolFilters(q, ['isLockedOut', 'isEmailConfirmed'])) as unknown as UserListQueryDto,
+          ),
         ),
       ),
     create: async (data) => unwrap(await userApi.create(data)) as UserListItemDto,
@@ -430,42 +431,11 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>> =>
       toCrudResult(
         unwrap<PagedList<LoginLogDto>>(
-          await loginLogApi.getList(mapQuery(q) as unknown as LoginLogQueryDto),
+          await loginLogApi.getList(
+            mapQuery(coerceBoolFilters(q, ['isSuccess'])) as unknown as LoginLogQueryDto,
+          ),
         ),
       ),
-  }
-
-  // TODO(phase-3): admin GDPR endpoints currently only exist for the current user
-  // via profileApi (exportPersonalData / deleteAccount). When backend adds
-  // admin-by-id GDPR endpoints, route them here.
-  // fetchRequests / approveRequest / denyRequest are stub-only until backend ships
-  // the admin GDPR management endpoints (tracked as a backend task).
-  const gdpr = {
-    requestExport: async (_userId: string): Promise<Blob> => {
-      throw new Error(
-        'GDPR export by userId not supported until admin endpoints land',
-      )
-    },
-    requestDeletion: async (_userId: string): Promise<void> => {
-      throw new Error(
-        'GDPR delete by userId not supported until admin endpoints land',
-      )
-    },
-    fetchRequests: async (_query: CrudPageQuery): Promise<CrudPageResult<GdprRequestDto>> => {
-      throw new Error(
-        'GDPR request list not supported until admin endpoints land',
-      )
-    },
-    approveRequest: async (_id: string): Promise<void> => {
-      throw new Error(
-        'GDPR approve not supported until admin endpoints land',
-      )
-    },
-    denyRequest: async (_id: string): Promise<void> => {
-      throw new Error(
-        'GDPR deny not supported until admin endpoints land',
-      )
-    },
   }
 
   const organizations: IdentityBridge['organizations'] = organizationApi
@@ -633,5 +603,5 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         disableTotp: () => missing('me.disableTotp'),
       }
 
-  return { users, roles, tenants, organizations, sessions, loginLogs, gdpr, me }
+  return { users, roles, tenants, organizations, sessions, loginLogs, me }
 }

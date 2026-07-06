@@ -6,6 +6,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/login-logs")]
+[ApiAuthorize(PermissionName = "identity.loginLog.view")]
 public class DefaultLoginLogAdminController : ApiAdminControllerBase
 {
     protected readonly ILoginLogService LoginLogService;

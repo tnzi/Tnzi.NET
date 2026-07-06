@@ -20,7 +20,7 @@
   <ItemGroup>
     <PackageReference Include="Telegram.Bot" Version="22.*" />
     <!-- Ed25519 signature verification for Discord webhooks (libsodium-backed; .NET 10 BCL has no classic Ed25519). -->
-    <PackageReference Include="NSec.Cryptography" Version="24.4.0" />
+    <PackageReference Include="NSec.Cryptography" Version="26.4.0" />
   </ItemGroup>
 
 </Project>

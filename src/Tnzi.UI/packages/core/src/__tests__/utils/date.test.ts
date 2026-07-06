@@ -41,6 +41,22 @@ describe('formatDateOnly', () => {
     expect(formatDateOnly(null)).toBe('');
     expect(formatDateOnly(undefined, { fallback: 'n/a' })).toBe('n/a');
   });
+
+  it('utc: true renders the UTC calendar date regardless of local timezone', () => {
+    // A date-only value stored as UTC midnight must not shift a day for
+    // viewers west of UTC.
+    const utcMidnight = '2026-07-01T00:00:00Z';
+    expect(formatDateOnly(utcMidnight, { utc: true })).toBe(
+      new Date(utcMidnight).toLocaleDateString(undefined, { timeZone: 'UTC' }),
+    );
+    // Sanity: the rendered string contains the UTC day (1), whatever the locale.
+    expect(formatDateOnly(utcMidnight, { utc: true })).toMatch(/1/);
+  });
+
+  it('utc option keeps null/invalid semantics', () => {
+    expect(formatDateOnly(null, { utc: true, fallback: '—' })).toBe('—');
+    expect(formatDateOnly('not-a-date', { utc: true })).toBe('not-a-date');
+  });
 });
 
 describe('formatDate (fixed template)', () => {

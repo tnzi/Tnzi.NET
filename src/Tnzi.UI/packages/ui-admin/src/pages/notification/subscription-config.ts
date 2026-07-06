@@ -14,6 +14,8 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
  * PUT /admin/notification-preferences/user/{userId}.
  */
 export const notificationSubscriptionColumns: ColumnDef[] = [
+  // Shows the raw userId — a resolved user-name column needs a backend join
+  // (NotificationPreferenceDto carries only userId), so that is left out.
   { key: 'userId',              title: 'columns.userId' },
   { key: 'channel',             title: 'columns.channel' },
   { key: 'category',            title: 'columns.category' },
@@ -36,7 +38,9 @@ export const notificationSubscriptionColumns: ColumnDef[] = [
 ]
 
 export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
-  { key: 'userId',    labelKey: 'form.userId', label: 'User',    type: 'text',   required: true },
+  // `type: 'user'` is a custom field rendered by the page via a TUserSelector
+  // fieldRenderer (remote user search) instead of a raw GUID text input.
+  { key: 'userId',    labelKey: 'form.userId', label: 'User',    type: 'user',   required: true },
   { key: 'channel',   labelKey: 'form.channel', label: 'Channel', type: 'select', required: true, options: [
     { label: 'Email',   value: 'Email' },
     { label: 'SMS',     value: 'Sms' },

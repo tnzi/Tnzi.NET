@@ -272,6 +272,45 @@ body *::-webkit-scrollbar-thumb:active {
   flex: 1 1 auto;
   min-height: 0;
 }
+/* A pane whose content is variable-height mixed blocks (reports, status
+   boards) owns its own vertical scroll; single-table panes leave this off
+   (the table flex-fills and scrolls internally). Set via TTabsPage's
+   `section.scroll`. */
+.t-table-tabs__pane--scroll {
+  overflow-y: auto;
+}
+/* Card-in-a-card flattening. When a full list-shell page (TCrudPage table /
+   TCardPage cards) is embedded as a tab's content, its own white list-card
+   would double the tab container's surface — a second card + a second 12px
+   inset + a stray shadow, pushing the content out of line with the tab bar.
+   Drop the inner card's shadow and its content padding so the table OR the
+   card grid sits flush inside the pane. Tables and cards are treated alike, so
+   this is the single owner of the fix (was a per-page scoped hack on Taxes). */
+.t-table-tabs .t-list-shell__list-card {
+  box-shadow: none;
+}
+.t-table-tabs .t-list-shell__list-card > .n-card__content,
+.t-table-tabs .t-list-shell__list-card > .n-card-content {
+  padding: 0;
+}
+/* Titled section flush on a tab surface (opt-in `class="t-tab-card"`). A page
+   sometimes wraps a titled block (a table, a descriptions grid, an eval result)
+   in a border-less NCard purely for its title + header-extra action. But the
+   tab container already IS the white surface, so that NCard's 16px horizontal
+   inset just pushes the block out of line with the flush KPI rows / tables /
+   forms beside it — the "double inset" a card-in-a-card creates. Drop only the
+   horizontal padding; the title's own top/bottom rhythm is kept. Opt-in so it
+   never touches TKpiCard (`.t-stat-card`), TEntityCard, list-shell cards, or
+   any deliberately padded/shadowed dashboard tile. */
+.t-table-tabs__pane .t-tab-card > .n-card-header,
+.t-table-tabs__pane .t-tab-card > .n-card__header,
+.t-table-tabs__pane .t-tab-card > .n-card-content,
+.t-table-tabs__pane .t-tab-card > .n-card__content,
+.t-table-tabs__pane .t-tab-card > .n-card-footer,
+.t-table-tabs__pane .t-tab-card > .n-card__footer {
+  padding-left: 0;
+  padding-right: 0;
+}
 
 /* ── Reading-width caps for form-centric pages ──
  *

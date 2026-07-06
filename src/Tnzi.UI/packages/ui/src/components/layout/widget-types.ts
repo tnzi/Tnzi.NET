@@ -16,9 +16,12 @@
  *  3. **Lazy-loading friendly** — `component` accepts either a Component
  *     or a `() => Promise<Component>` (treated as a
  *     `defineAsyncComponent`).
- *  4. **Permission-aware** — `permission` is forwarded to the surrounding
- *     `TWidgetCard`, which hides itself when the active permission
- *     checker rejects the key. Hidden widgets don't even mount.
+ *  4. **Permission-aware** — a widget may declare a `permission` key. The
+ *     HOST page filters the widget list by it before render (the admin
+ *     Dashboard checks it against the signed-in user's permissions, super-user
+ *     bypass + fail-open, mirroring the sidebar), so a widget the user can't
+ *     use never mounts and never fires a doomed fetch. `@tnzi/ui` treats
+ *     `permission` as opaque metadata — the filtering policy lives in the host.
  *  5. **Persistable order** — widget `id` is stable so the user-drag-to-
  *     reorder layout can be persisted to localStorage and restored.
  *
@@ -107,8 +110,11 @@ export interface WidgetDef {
   props?: Record<string, unknown>
 
   /**
-   * Permission key — when set, the surrounding `TWidgetCard` runs it
-   * through the active permission checker and skips render on deny.
+   * Permission key — when set, the HOST page drops this widget from the deck
+   * for users who lack the permission (the admin Dashboard filters here with a
+   * super-user bypass + fail-open, like the sidebar). Opaque to `@tnzi/ui`;
+   * omit for widgets that are always shown (business tiles, or mixed tiles that
+   * degrade their own inaccessible rows to "—").
    */
   permission?: string
 

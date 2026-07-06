@@ -29,6 +29,15 @@ public interface IRepository<TEntity> : IReadOnlyRepository<TEntity>
     /// land at commit time. Default implementation is a no-op; EF Core repository overrides.
     /// </summary>
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+
+    /// <summary>
+    /// 确保当前工作单元的物理数据库事务已开启（幂等）。
+    /// 在事务内执行绕过变更跟踪的裸 SQL 操作（ExecuteUpdate/ExecuteDelete/Raw SQL）前
+    /// MUST 调用本方法使其加入事务；物理事务默认延迟到首次 SaveChanges 才开启，
+    /// 不调用则裸 SQL 在自动提交模式下执行（行锁不持有到事务结束、回滚无法撤销）。
+    /// 未启用事务时为无操作。默认实现为 no-op；EF Core 仓储覆盖实现。
+    /// </summary>
+    Task EnsureTransactionStartedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
 /// <summary>

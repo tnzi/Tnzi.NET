@@ -20,32 +20,48 @@ public class AuthorizationOptionsValidator : OptionsValidatorBase<AuthorizationO
     /// <inheritdoc />
     protected override void ValidateOptions(AuthorizationOptions options, List<string> errors)
     {
-        // SuperAdmin 配置形态校验。空 List 是合法（= 不启用 super-admin
-        // 旁路），但若用户*提供*了 List 又写了垃圾值则提前 fail。
-        if (options.SuperAdminRoles != null && options.SuperAdminRoles.Count > 0)
+        // 管理员角色列表形态校验。空 List 是合法（= 不启用该档位），但若
+        // 用户*提供*了 List 又写了垃圾值则提前 fail。两档共用同一套规则。
+        ValidateRoleList(options.SuperAdminRoles, "Authorization.SuperAdminRoles", errors);
+        ValidateRoleList(options.BusinessAdminRoles, "Authorization.BusinessAdminRoles", errors);
+
+        // PermissionCategoryOverrides 键形态校验（值是枚举，绑定阶段已保证合法）。
+        if (options.PermissionCategoryOverrides is { Count: > 0 })
         {
-            for (var i = 0; i < options.SuperAdminRoles.Count; i++)
+            foreach (var key in options.PermissionCategoryOverrides.Keys)
             {
-                var name = options.SuperAdminRoles[i];
-                if (string.IsNullOrWhiteSpace(name))
+                if (string.IsNullOrWhiteSpace(key))
                 {
-                    errors.Add($"Authorization.SuperAdminRoles[{i}] is empty or whitespace.");
+                    errors.Add("Authorization.PermissionCategoryOverrides contains an empty or whitespace permission code key.");
                 }
             }
+        }
+    }
 
-            var distinct = options.SuperAdminRoles
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n.Trim())
-                .GroupBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
-                .Select(g => g.Key)
-                .ToList();
-            if (distinct.Count > 0)
+    private static void ValidateRoleList(List<string>? roles, string optionPath, List<string> errors)
+    {
+        if (roles == null || roles.Count == 0) return;
+
+        for (var i = 0; i < roles.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(roles[i]))
             {
-                errors.Add(
-                    $"Authorization.SuperAdminRoles contains duplicate entries (case-insensitive): " +
-                    $"{string.Join(", ", distinct)}.");
+                errors.Add($"{optionPath}[{i}] is empty or whitespace.");
             }
+        }
+
+        var duplicates = roles
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim())
+            .GroupBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+        if (duplicates.Count > 0)
+        {
+            errors.Add(
+                $"{optionPath} contains duplicate entries (case-insensitive): " +
+                $"{string.Join(", ", duplicates)}.");
         }
     }
 }

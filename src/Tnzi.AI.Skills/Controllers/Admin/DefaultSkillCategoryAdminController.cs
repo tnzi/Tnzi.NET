@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/ai/skill-categories")]
+[ApiAuthorize(PermissionName = "ai.skill.view")]
 public class DefaultSkillCategoryAdminController : ApiAdminControllerBase
 {
     protected readonly ISkillCategoryService CategoryService;

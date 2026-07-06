@@ -32,3 +32,4 @@ global using Tnzi.AI.Tools.Attributes;
 global using Tnzi.AI.Skills;
 global using Tnzi.AI.Skills.Models;
 global using Tnzi.Utilities;
+global using Tnzi.Security.Authorization;

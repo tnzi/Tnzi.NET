@@ -10,10 +10,11 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+// Enum fields are now PascalCase member-name strings (global JsonStringEnumConverter).
 const fetch = vi.fn(async () => ({
   items: [
     {
-      id: 'c1', type: 2, title: 'Team Alpha', ownerId: 'o1', ownerName: 'Bob',
+      id: 'c1', type: 'Group', title: 'Team Alpha', ownerId: 'o1', ownerName: 'Bob',
       memberCount: 3, lastMessagePreview: 'hello', lastMessageAt: null, creationTime: '2026-01-01T00:00:00Z',
     },
   ],
@@ -25,15 +26,15 @@ const fetch = vi.fn(async () => ({
   hasNextPage: false,
 }))
 const detail = vi.fn(async () => ({
-  id: 'c1', type: 2, title: 'Team Alpha', notice: null, ownerId: 'o1', ownerName: 'Bob',
+  id: 'c1', type: 'Group', title: 'Team Alpha', notice: null, ownerId: 'o1', ownerName: 'Bob',
   directKey: null, memberCount: 3, messageCount: 2, lastMessageAt: null, creationTime: '2026-01-01T00:00:00Z',
   members: [
-    { userId: 'o1', name: 'Bob', role: 1, alias: null, unreadCount: 0, lastReadAt: null, joinedAt: '2026-01-01T00:00:00Z' },
+    { userId: 'o1', name: 'Bob', role: 'Owner', alias: null, unreadCount: 0, lastReadAt: null, joinedAt: '2026-01-01T00:00:00Z' },
   ],
 }))
 const messages = vi.fn(async () => ({
   messages: [
-    { id: 'm1', conversationId: 'c1', senderId: 'o1', senderName: 'Bob', contentType: 1, content: 'hello world', sentAt: '2026-01-01T00:00:00Z' },
+    { id: 'm1', conversationId: 'c1', senderId: 'o1', senderName: 'Bob', contentType: 'Text', content: 'hello world', sentAt: '2026-01-01T00:00:00Z' },
   ],
   hasMore: false,
 }))

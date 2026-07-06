@@ -10,6 +10,9 @@ public class PromotionConfiguration : EntityTypeConfigurationBase<Promotion, Gui
         builder.Property(p => p.Name).HasMaxLength(128).IsRequired();
         builder.Property(p => p.Description).HasMaxLength(500);
         builder.Property(p => p.StripeCouponId).HasMaxLength(128);
+        builder.Property(p => p.DiscountValue).HasMoneyPrecision();
+        builder.Property(p => p.MaxDiscountAmount).HasMoneyPrecision();
+        builder.Property(p => p.MinimumOrderAmount).HasMoneyPrecision();
         // ScopeIds 存储 JSON 数组，不指定类型以保持数据库兼容性
 
         builder.HasMany(p => p.CouponUsages)

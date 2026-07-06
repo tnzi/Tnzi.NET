@@ -6,6 +6,7 @@
 import { NDropdown, NButton } from 'naive-ui';
 import { h, computed } from 'vue';
 import { Icon } from '@iconify/vue';
+import { TAvatar } from '@tnzi/ui';
 import { useAiI18n } from '@/locale/index';
 const t = useAiI18n();
 
@@ -26,20 +27,13 @@ const emit = defineEmits<{
   select: [personaId: string];
 }>();
 
-function getInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
-}
-
 const options = computed(() =>
   props.personas.length === 0
     ? [{ key: 'empty', type: 'render' as const, render: () => h('div', { style: 'padding: 16px; text-align: center; font-size: 14px; color: var(--tnzi-base-text-muted)' }, t.value.persona.noPersonas) }]
     : props.personas.map((persona) => ({
         key: persona.id,
         label: persona.name,
-        icon: () =>
-          persona.avatarUrl
-            ? h('img', { src: persona.avatarUrl, style: 'width: 20px; height: 20px; border-radius: 50%' })
-            : h('span', { style: 'display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 50%; background: var(--tnzi-container-bg); font-size: 10px; font-weight: 500' }, getInitials(persona.name)),
+        icon: () => h(TAvatar, { src: persona.avatarUrl, name: persona.name, size: 20, maxInitials: 2 }),
         class: persona.id === props.selectedId ? 't-persona-selected' : '',
       })),
 );

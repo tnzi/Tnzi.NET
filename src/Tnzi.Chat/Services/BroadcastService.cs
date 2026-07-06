@@ -84,6 +84,8 @@ public class BroadcastService : ApplicationService, IBroadcastService
                     if (existingMember != null)
                     {
                         existingMember.UnreadCount += 1;
+                        // A new broadcast re-surfaces a hidden System conversation.
+                        existingMember.IsHidden = false;
                         await _memberRepository.UpdateAsync(existingMember, ct);
                     }
                     else

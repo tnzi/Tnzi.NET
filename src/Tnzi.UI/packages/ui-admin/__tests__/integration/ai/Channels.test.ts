@@ -91,11 +91,10 @@ const stubs = {
   },
   TabPane: { name: 'TabPane', props: ['name', 'tab'], template: '<div class="n-tab-pane-stub" :data-name="name"><slot /></div>' },
   Card: { name: 'Card', template: '<div class="n-card-stub"><slot /></div>' },
-  Statistic: {
-    name: 'Statistic',
-    props: ['label', 'value'],
-    template: '<div class="n-statistic-stub" :data-label="label" :data-value="value">{{ value }}<slot name="suffix" /></div>',
-  },
+  // The KPI strip now uses TKpiCard, which animates numeric values via
+  // NNumberAnimation (tween from 0). Stub it to render the target synchronously
+  // so the count assertions hold.
+  NumberAnimation: { name: 'NumberAnimation', props: ['from', 'to', 'precision'], template: '<span>{{ to }}</span>' },
   Tag: { name: 'Tag', template: '<span class="n-tag-stub"><slot /></span>' },
   Alert: {
     name: 'Alert',
@@ -161,8 +160,8 @@ describe('Channels page (KPI strip + adapters / connections / bindings tabs)', (
     const wrapper = mount(Channels, { global: { stubs } })
     await flushPromises()
     const values = wrapper
-      .findAll('.n-statistic-stub')
-      .map((s) => s.attributes('data-value'))
+      .findAll('.t-stat-card__number')
+      .map((s) => s.text())
     // adapters (3 from getAdapters), websocket connections (5), active sessions (3), bindings (1)
     expect(values).toEqual(['3', '5', '3', '1'])
   })

@@ -29,11 +29,16 @@ useWidgetData(async () => {
     bridge.sessions.statistics(),
     bridge.users.fetch({ pageIndex: 1, pageSize: 1, searchText: '', filters: {} }),
   ])
-  if (stats.status === 'fulfilled') {
+  // `sessions.statistics()` is gated by session.view (Technical) — a business
+  // admin's call fulfils with an undefined/empty body rather than rejecting, so
+  // guard `stats.value` before reading it (else "Cannot read properties of
+  // undefined (reading 'activeSessionCount')" tanks the whole widget). The
+  // session rows then stay em-dash while total users still renders.
+  if (stats.status === 'fulfilled' && stats.value) {
     activeSessions.value = stats.value.activeSessionCount ?? 0
     onlineUsers.value = stats.value.onlineUserCount ?? 0
   }
-  if (users.status === 'fulfilled') {
+  if (users.status === 'fulfilled' && users.value) {
     totalUsers.value = users.value.totalCount ?? 0
   }
 })

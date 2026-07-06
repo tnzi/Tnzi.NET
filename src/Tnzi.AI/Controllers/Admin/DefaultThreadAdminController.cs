@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/threads")]
+[ApiAuthorize(PermissionName = "ai.thread.view")]
 public class DefaultThreadAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentThreadService ThreadService;

@@ -54,6 +54,15 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Include credentials (cookies) */
   withCredentials?: boolean;
+  /**
+   * Marks a request that belongs to the auth flow itself (login, token
+   * refresh, logout). A 401 on such a request is returned to the caller
+   * as-is: it never triggers the client's token-refresh-and-retry logic
+   * nor the `onUnauthorized` callback. Without this, the refresh/logout
+   * calls issued DURING a refresh re-enter the refresh mutex and stall
+   * every queued request until the refresh timeout elapses.
+   */
+  skipAuthRefresh?: boolean;
 }
 
 /**

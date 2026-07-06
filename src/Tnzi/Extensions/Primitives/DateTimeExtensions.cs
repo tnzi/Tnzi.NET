@@ -19,6 +19,18 @@ public static class DateTimeExtensions
         return dateTime?.ToUtc();
     }
 
+    /// <summary>
+    /// 归一化为 "UTC 日期"：截断时间部分并将 Kind 置为 Utc。
+    /// </summary>
+    /// <remarks>
+    /// 用于以 date-only 语义存入 timestamptz 类列的字段（过账日期、汇率生效日期、会计年度区间等）。
+    /// PostgreSQL 的 Npgsql 拒绝 Kind=Unspecified 的 DateTime 参数写入 "timestamp with time zone"，
+    /// 而 JSON 反序列化得到的日期恰为 Unspecified —— 凡 date-only 字段在持久化/查询参数前
+    /// MUST 经本方法归一化，跨数据库行为才一致。
+    /// </remarks>
+    public static DateTime ToUtcDate(this DateTime dateTime)
+        => DateTime.SpecifyKind(dateTime.Date, DateTimeKind.Utc);
+
     public static long ToUnixTimeSeconds(this DateTime dateTime)
     {
         var epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);

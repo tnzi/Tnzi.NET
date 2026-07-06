@@ -4,7 +4,8 @@
     A "Verify" button triggers `integrity.batchVerify(maxFiles)`; results land
     in a KPI strip (TotalChecked / Healthy / Missing+Corrupted / Errors) and a
     problem-files table (the backend only returns problematic rows in
-    `problems`). Single-file verify is reachable from the Files page actions.
+    `problems`). Single-file verify lives on the Files page row actions
+    (More -> Verify -> `integrity.verifyOne`).
   -->
   <TContentPage :title="t('title')" :translate="t" scroll="fill">
     <template #actions>
@@ -54,12 +55,12 @@ import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { buildProblemColumns } from './integrity-config'
 import type { BatchIntegrityResultDto, FileIntegrityResultDto } from '@tnzi/core/services/storage'
 
-const t = (key: string) => translatePageKey('storage.integrity', key)
+const t = makePageTranslator('storage.integrity')
 const message = useSafeMessage()
 const bridge = createStorageBridge({ client: useAdminClient() })
 

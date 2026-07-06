@@ -1,15 +1,18 @@
 <template>
   <!--
     Templates page — Phase 3.36
-    Admin CRUD for notification/email templates.
+    Admin CRUD for the cross-module template library (Module column shown,
+    since these span every consuming module — email, sms, ...).
     Row actions "Preview" and "Clone":
-      Preview: calls bridge.templates.render(id, {}) and displays rendered HTML in modal.
+      Preview: renders the template via bridge.templates.render(id, {}) into a
+               deep-linkable modal (?preview=view:<id>).
       Clone:   calls bridge.templates.clone(id) then refreshes the table.
   -->
   <TCrudPage
     :state="crud"
     :all-columns="templateColumns"
     :title="t('title')"
+    :title-help="t('titleHelp')"
     :translate="t"
     :form-modal-width="760"
     :row-actions="rowActions"
@@ -25,38 +28,32 @@
     </template>
   </TCrudPage>
 
-  <!-- Preview modal -->
-  <Modal
-    v-if="previewVisible"
-    :show="previewVisible"
-    :title="t('previewTitle')"
-    class="w-640px"
-    @update:show="(v: boolean) => { if (!v) previewVisible = false }"
-  >
-    <div
-      v-if="previewContent"
-      class="t-template-preview__content"
-      v-html="previewContent"
-    />
-    <p v-else class="t-template-preview__empty">{{ t('admin.common.noPreview') }}</p>
-    <div class="t-template-preview__footer">
-      <Button @click="previewVisible = false">{{ t('admin.common.close') }}</Button>
-    </div>
-  </Modal>
+  <!-- Preview overlay — rendered template HTML, deep-linkable via ?preview=view:<id> -->
+  <TDetailHost :state="previewDetail" :title="t('previewTitle')" :width="640" :footer="false" :translate="t">
+    <template #default>
+      <div
+        v-if="previewContent"
+        class="t-template-preview__content"
+        v-html="previewContent"
+      />
+      <p v-else class="t-template-preview__empty">{{ t('admin.common.noPreview') }}</p>
+    </template>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import { NButton as Button, NModal as Modal } from 'naive-ui'
+import { ref } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { useDetail } from '../../headless/useDetail'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createTemplateBridge } from '../../services/bridges/template-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { templateColumns, templateFormSchema } from './template-config'
-import { translatePageKey } from '../_shared/translate'
-import type { TemplateInfoDto, TemplateEntityDto } from '@tnzi/core/services/template'
+import { makePageTranslator } from '../_shared/translate'
+import type { TemplateInfoDto } from '@tnzi/core/services/template'
 
 type TemplateRow = TemplateInfoDto & { id: string }
 
@@ -81,6 +78,11 @@ const crud = useCrudPage<TemplateInfoDto, string>({
 
 // FileSystem-source templates ship with the binaries and the backend rejects
 // edit/delete on them. Hide those actions to avoid 4xx.
+//
+// The list response already projects `subjectTemplate` / `contentTemplate`
+// (QueryTemplatesAsync uses `ProjectTo<TemplateEntity, TemplateInfoDto>()`,
+// no ignore config), so the edit/view form reads real body content directly
+// from the row — no getById hydration needed.
 const rowActions: RowAction<TemplateRow>[] = [
   editAction(crud, { show: (row) => !(row as TemplateRow).isReadOnly }),
   { key: 'preview', label: 'actions.preview', onClick: (row) => void openPreview(row) },
@@ -88,50 +90,18 @@ const rowActions: RowAction<TemplateRow>[] = [
   deleteAction(crud, { show: (row) => !(row as TemplateRow).isReadOnly }),
 ]
 
-// TemplateInfoDto (paged list shape) drops the heavy `subjectTemplate` /
-// `contentTemplate` fields. When the form modal opens for view / edit we
-// need to hydrate those from the full TemplateEntityDto via getById so the
-// form schema fields render real content (otherwise the modal looks empty).
-watch(
-  () => [crud.formModal.visible.value, crud.formModal.mode.value] as const,
-  async ([show, mode]) => {
-    if (!show) return
-    if (mode !== 'edit' && mode !== 'view') return
-    const row = crud.formModal.formData.value as (TemplateRow | null)
-    if (!row || !row.id) return
-    // File-source rows have id = Guid.Empty — skip hydration because
-    // there's no DB row to fetch. The form will read whatever info the
-    // list response already populated.
-    if (row.id === '00000000-0000-0000-0000-000000000000') return
-    const merged = row as unknown as Record<string, unknown>
-    if (merged.contentTemplate) return // already hydrated
-    try {
-      const full = await bridge.templates.getById(row.id)
-      if (full && crud.formModal.formData.value) {
-        crud.formModal.formData.value = {
-          ...crud.formModal.formData.value,
-          ...full,
-        } as TemplateInfoDto
-      }
-    } catch {
-      // Network/permission errors leave the row as-is; the form just shows
-      // the partial list fields.
-    }
-  },
-)
-
-
-// Preview dialog state
-const previewVisible = ref(false)
+// Preview overlay state
+const previewDetail = useDetail<TemplateInfoDto>({ mode: 'modal', url: 'preview' })
 const previewContent = ref('')
 
 async function openPreview(row: TemplateRow): Promise<void> {
+  previewContent.value = ''
+  await previewDetail.open('view', row)
   try {
     previewContent.value = await bridge.templates.render(row.id, {})
   } catch {
     previewContent.value = ''
   }
-  previewVisible.value = true
 }
 
 async function handleClone(row: TemplateRow): Promise<void> {
@@ -143,11 +113,7 @@ async function handleClone(row: TemplateRow): Promise<void> {
   }
 }
 
-onMounted(() => {
-  crud.refresh().catch(() => undefined)
-})
-
-const t = (key: string) => translatePageKey('template.templates', key)
+const t = makePageTranslator('template.templates')
 </script>
 
 <style scoped>
@@ -167,10 +133,5 @@ const t = (key: string) => translatePageKey('template.templates', key)
   margin: 0;
   padding: 24px 8px;
   text-align: center;
-}
-.t-template-preview__footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
 }
 </style>

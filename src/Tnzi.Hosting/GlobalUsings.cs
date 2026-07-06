@@ -16,6 +16,7 @@ global using Tnzi.Audit;
 global using Tnzi.Authorization;
 global using Tnzi.EventBus;
 global using Tnzi.Feature;
+global using Tnzi.Finance;
 global using Tnzi.Hangfire;
 global using Tnzi.Hosting.Events.Handlers;
 global using Tnzi.Identity;

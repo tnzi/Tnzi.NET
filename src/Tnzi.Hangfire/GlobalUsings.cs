@@ -21,4 +21,5 @@ global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Results;
+global using Tnzi.Security.Authorization;
 global using Tnzi.Utilities;

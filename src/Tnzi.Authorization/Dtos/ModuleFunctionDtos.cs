@@ -48,6 +48,13 @@ public class ModuleFunctionDto
     /// still toggle IsEnabled for emergency disable without redeploying.
     /// </summary>
     public bool IsSystemManaged { get; set; }
+
+    /// <summary>
+    /// Permission category: Business (reachable by business admins via
+    /// BusinessAdminRoles) or Technical (explicit grant / super-admin only).
+    /// Admin UI shows a "technical" badge and can group assignments by it.
+    /// </summary>
+    public PermissionCategory Category { get; set; }
 }
 
 /// <summary>
@@ -79,6 +86,11 @@ public class CreateModuleFunctionRequest
     /// 排序号
     /// </summary>
     public int Order { get; set; }
+
+    /// <summary>
+    /// 权限分类（默认 Business）
+    /// </summary>
+    public PermissionCategory Category { get; set; } = PermissionCategory.Business;
 }
 
 /// <summary>
@@ -110,4 +122,12 @@ public class UpdateModuleFunctionRequest
     /// 排序号
     /// </summary>
     public int Order { get; set; }
+
+    /// <summary>
+    /// 权限分类。可空:未显式提供时保留现值——若为非空默认值(Business=0),
+    /// 任何漏传该字段的更新请求都会把 Technical 权限静默降级为 Business,
+    /// 使业务管理员立刻隐式获得该权限(提权)。系统托管行无论传什么都
+    /// 忽略(分类是 code-owned 契约,与 Code/ModuleId 同级保护)。
+    /// </summary>
+    public PermissionCategory? Category { get; set; }
 }

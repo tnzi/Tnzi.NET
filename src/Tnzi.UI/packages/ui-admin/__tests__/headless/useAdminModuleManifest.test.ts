@@ -130,6 +130,38 @@ describe('useAdminModuleManifest', () => {
     expect(payment!.path).toBe('/admin/payment-orders')
   })
 
+  it('prefixes menu paths with a custom basePath', () => {
+    const { menuTree } = useAdminModuleManifest({
+      client: dummyClient as never,
+      manifest: manifestFixture(),
+      basePath: '/console',
+    })
+    const identity = menuTree.value.find((n) => n.key === 'identity')!
+    expect(identity.children![0]!.path).toBe('/console/users')
+    const payment = menuTree.value.find((n) => n.key.startsWith('payment'))!
+    expect(payment.path).toBe('/console/payment-orders')
+  })
+
+  it('basePath "/" yields prefix-free menu paths (no leading //)', () => {
+    const { menuTree } = useAdminModuleManifest({
+      client: dummyClient as never,
+      manifest: manifestFixture(),
+      basePath: '/',
+    })
+    const identity = menuTree.value.find((n) => n.key === 'identity')!
+    expect(identity.children![0]!.path).toBe('/users')
+  })
+
+  it('normalizes basePath variants like defineAdminApp does', () => {
+    const { menuTree } = useAdminModuleManifest({
+      client: dummyClient as never,
+      manifest: manifestFixture(),
+      basePath: 'console/',
+    })
+    const identity = menuTree.value.find((n) => n.key === 'identity')!
+    expect(identity.children![0]!.path).toBe('/console/users')
+  })
+
   it('generates i18n keys following the tnzi.admin.modules.* convention', () => {
     const { menuTree } = useAdminModuleManifest({
       client: dummyClient as never,

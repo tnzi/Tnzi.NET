@@ -8,16 +8,16 @@ function makeBridge() {
   return {
     listConversations: vi.fn(async () => []),
     getMessages: vi.fn(async () => ({ messages: [], hasMore: false })),
-    sendMessage: vi.fn(async () => ({ id: 'm1', conversationId: 'c1', contentType: 1, content: '', sentAt: '' })),
+    sendMessage: vi.fn(async () => ({ id: 'm1', conversationId: 'c1', contentType: 'Text', content: '', sentAt: '' })),
     markRead: vi.fn(async () => {}),
     getUnreadCount: vi.fn(async () => 0),
     searchContacts: vi.fn(async () => [
       { userId: 'u1', name: 'Alice' },
       { userId: 'u2', name: 'Bob' },
     ]),
-    getOrCreateDirect: vi.fn(async () => ({ id: 'c-direct', type: 1, title: 'Alice', memberCount: 2, members: [] })),
-    createGroup: vi.fn(async () => ({ id: 'c-group', type: 2, title: 'My Group', memberCount: 3, members: [] })),
-    getConversation: vi.fn(async () => ({ id: 'c1', type: 2, title: 'Group', memberCount: 2, members: [] })),
+    getOrCreateDirect: vi.fn(async () => ({ id: 'c-direct', type: 'Direct', title: 'Alice', memberCount: 2, members: [] })),
+    createGroup: vi.fn(async () => ({ id: 'c-group', type: 'Group', title: 'My Group', memberCount: 3, members: [] })),
+    getConversation: vi.fn(async () => ({ id: 'c1', type: 'Group', title: 'Group', memberCount: 2, members: [] })),
     addMembers: vi.fn(async () => {}),
     removeMember: vi.fn(async () => {}),
     renameGroup: vi.fn(async () => {}),
@@ -59,7 +59,7 @@ describe('TNewChatDialog', () => {
     store.init(bridge as never)
     // Setup fake conversations for fetchConversations
     bridge.listConversations.mockResolvedValue([
-      { id: 'c-direct', type: 1, title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
+      { id: 'c-direct', type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
     ])
     const startDirectSpy = vi.spyOn(store, 'startDirect')
     const wrapper = mount(TNewChatDialog, { props: { show: true } })
@@ -83,7 +83,7 @@ describe('TNewChatDialog', () => {
     const store = useChatStore()
     store.init(bridge as never)
     bridge.listConversations.mockResolvedValue([
-      { id: 'c-group', type: 2, title: 'My Group', unreadCount: 0, isMuted: false, memberCount: 3, lastMessageAt: '' },
+      { id: 'c-group', type: 'Group', title: 'My Group', unreadCount: 0, isMuted: false, memberCount: 3, lastMessageAt: '' },
     ])
     const createGroupSpy = vi.spyOn(store, 'createGroup')
     const wrapper = mount(TNewChatDialog, { props: { show: true } })

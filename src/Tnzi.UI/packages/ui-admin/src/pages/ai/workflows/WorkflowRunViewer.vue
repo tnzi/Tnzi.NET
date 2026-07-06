@@ -52,7 +52,7 @@
               >
                 <div class="t-wf-run-page__run-header">
                   <NTag size="small" :type="statusTypeFor(run.status)" :bordered="false">
-                    {{ run.status }}
+                    {{ statusLabel(run.status) }}
                   </NTag>
                   <span class="t-wf-run-page__run-time">{{ formatTime(run.creationTime) }}</span>
                 </div>
@@ -83,7 +83,7 @@
                   <h3 class="t-wf-run-page__detail-title">
                     {{ t('detail.title') }}
                     <NTag size="small" :type="statusTypeFor(detail.status)" :bordered="false">
-                      {{ detail.status }}
+                      {{ statusLabel(detail.status) }}
                     </NTag>
                   </h3>
                   <code class="t-wf-run-page__detail-id">{{ detail.id }}</code>
@@ -209,7 +209,7 @@ const route = useRoute()
 
 const message = useSafeMessage()
 
-interface Filters { status?: number; workflowDefinitionId?: string }
+interface Filters { status?: string; workflowDefinitionId?: string }
 const filters = reactive<Filters>({})
 const pageSize = 20
 const pageIndex = ref(1)
@@ -225,16 +225,17 @@ const rejectReasonByStep = reactive<Record<string, string>>({})
 
 const hasMore = computed(() => runs.value.length < total.value)
 
-// Backend enum is numeric: Running=0, Completed=1, Failed=2, Paused=3,
-// AwaitingApproval=4 — there is no `Pending` / `Cancelled` value. Passing
-// the string `Pending` made the model binder reject the query with 400.
-// Mirror the real enum + use numeric wire values.
+// Backend serializes WorkflowExecutionStatus as its PascalCase member NAME
+// (global JsonStringEnumConverter) and accepts the same on input, so the filter
+// sends the member-name string. Mirrors the real enum order + members.
 const statusOptions = [
-  { label: t('status.running'),          value: 0 },
-  { label: t('status.completed'),        value: 1 },
-  { label: t('status.failed'),           value: 2 },
-  { label: t('status.paused'),           value: 3 },
-  { label: t('status.awaitingApproval'), value: 4 },
+  { label: t('status.running'),          value: 'Running' },
+  { label: t('status.completed'),        value: 'Completed' },
+  { label: t('status.failed'),           value: 'Failed' },
+  { label: t('status.cancelled'),        value: 'Cancelled' },
+  { label: t('status.paused'),           value: 'Paused' },
+  { label: t('status.awaitingApproval'), value: 'AwaitingApproval' },
+  { label: t('status.awaitingInput'),    value: 'AwaitingInput' },
 ]
 
 // --- Workflow dropdown options (replaces the freeform ID input) ------------
@@ -265,15 +266,23 @@ async function loadWorkflows(): Promise<void> {
 }
 
 function statusTypeFor(status: unknown): 'success' | 'error' | 'warning' | 'info' | 'default' {
-  switch (status) {
+  switch (String(status)) {
     case 'Completed': return 'success'
     case 'Failed': return 'error'
     case 'Cancelled': return 'warning'
     case 'Running':
-    case 'Pending':
-    case 'Paused': return 'info'
+    case 'Paused':
+    case 'AwaitingApproval':
+    case 'AwaitingInput': return 'info'
     default: return 'default'
   }
+}
+
+/** i18n label for a WorkflowExecutionStatus member (humanised fallback on miss). */
+function statusLabel(status: unknown): string {
+  const s = String(status ?? '')
+  if (!s) return ''
+  return t(`status.${s.charAt(0).toLowerCase()}${s.slice(1)}`)
 }
 
 function shortId(id: string): string {
@@ -342,12 +351,15 @@ const stepTimeline = computed<StepRow[]>(() => {
 
 const canResume = computed(() => {
   if (!detail.value) return false
-  // Backend stores status via HasConversion<string>(), so runtime is a
-  // plain string (`'Paused'` / `'AwaitingApproval'` / …). The DTO type
-  // declares it as the numeric `WorkflowExecutionStatus` enum, hence the
-  // cast — comparing as string matches the actual wire payload.
+  // `WorkflowExecutionStatus` is a string enum whose values are the member
+  // names the backend serializes, so a direct string compare matches the wire
+  // payload. A paused / awaiting run, or one with steps pending approval,
+  // can be resumed.
   const status = String(detail.value.status)
-  return status === 'Paused' || status === 'AwaitingApproval' || (detail.value.stepsAwaitingApproval?.length ?? 0) > 0
+  return status === 'Paused'
+    || status === 'AwaitingApproval'
+    || status === 'AwaitingInput'
+    || (detail.value.stepsAwaitingApproval?.length ?? 0) > 0
 })
 
 async function loadRuns(append = false): Promise<void> {

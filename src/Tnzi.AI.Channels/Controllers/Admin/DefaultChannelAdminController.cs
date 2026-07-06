@@ -9,6 +9,7 @@ namespace Tnzi.AI.Channels.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/channels")]
+[ApiAuthorize(PermissionName = "ai.channels.view")]
 public class DefaultChannelAdminController : ApiAdminControllerBase
 {
     private readonly IEnumerable<IChannelAdapter>? _adapters;

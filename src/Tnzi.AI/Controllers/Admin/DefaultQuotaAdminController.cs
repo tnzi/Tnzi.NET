@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/quotas")]
+[ApiAuthorize(PermissionName = "ai.quota.view")]
 public class DefaultQuotaAdminController : ApiAdminControllerBase
 {
     protected readonly IQuotaService QuotaService;

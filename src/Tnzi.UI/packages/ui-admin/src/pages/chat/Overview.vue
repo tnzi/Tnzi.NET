@@ -68,12 +68,12 @@ import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { buildPresenceColumns } from './presence-config'
 import type { ChatStatisticsDto, PresenceOverviewDto, PresenceUserDto } from '@tnzi/core/services/chat'
 
-const t = (key: string) => translatePageKey('chat.overview', key)
+const t = makePageTranslator('chat.overview')
 const message = useSafeMessage()
 const bridge = createChatBridge({ client: useAdminClient() })
 
@@ -112,6 +112,6 @@ onMounted(refresh)
 .t-presence-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--tnzi-text-color-1, #333);
+  color: var(--tnzi-base-text);
 }
 </style>

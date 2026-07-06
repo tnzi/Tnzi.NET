@@ -31,6 +31,11 @@ public class PermissionGroupDefinition
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    /// 组内权限的默认分类：AddPermission 未显式指定 category 时继承此值。
+    /// </summary>
+    public PermissionCategory DefaultCategory { get; set; } = PermissionCategory.Business;
+
+    /// <summary>
     /// 权限列表（对应Module.Functions）
     /// </summary>
     public List<PermissionDefinition> Permissions { get; set; } = new();

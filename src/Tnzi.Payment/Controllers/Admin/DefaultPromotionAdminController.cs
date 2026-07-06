@@ -5,6 +5,7 @@ namespace Tnzi.Payment.Controllers.Admin;
 /// </summary>
 [Route("admin/promotions")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "payment.promotion.view")]
 public class DefaultPromotionAdminController : ApiAdminControllerBase
 {
     private readonly IPromotionService _promotionService;

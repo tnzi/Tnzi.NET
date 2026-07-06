@@ -15,6 +15,12 @@ public class InvoiceLineItemConfiguration : EntityTypeConfigurationBase<InvoiceL
 
         builder.Property(l => l.Description).HasMaxLength(500).IsRequired();
         builder.Property(l => l.ProductCode).HasMaxLength(64);
+        builder.Property(l => l.Quantity).HasQuantityPrecision();
+        builder.Property(l => l.UnitPrice).HasMoneyPrecision();
+        builder.Property(l => l.Amount).HasMoneyPrecision();
+        builder.Property(l => l.DiscountAmount).HasMoneyPrecision();
+        builder.Property(l => l.TaxRate).HasRatePrecision();
+        builder.Property(l => l.TaxAmount).HasMoneyPrecision();
 
         if (multiTenancyEnabled)
         {

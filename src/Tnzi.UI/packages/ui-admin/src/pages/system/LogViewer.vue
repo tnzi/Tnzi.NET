@@ -10,7 +10,12 @@
     `RetainedFileCountLimit` per level.
   -->
   <TContentPage :title="t('title')" :translate="t" card scroll="fill">
-    <div class="t-log-viewer-page">
+    <!-- Master (level/file navigator) + detail (tail viewer). TMasterDetailLayout
+         gives the responsive stacking for free: below 768px the navigator moves
+         above the viewer instead of clinging to a fixed 280px column that made
+         the page unusable on phones. -->
+    <TMasterDetailLayout :master-width="280" :bordered="false" :detail-scroll="false">
+    <template #master>
     <div class="t-log-viewer-page__sidebar">
       <div class="t-log-viewer-page__sidebar-header">
         <span class="t-log-viewer-page__title">{{ t('levels') }}</span>
@@ -89,7 +94,9 @@
         </NSpin>
       </div>
     </div>
+    </template>
 
+    <template #detail>
     <div class="t-log-viewer-page__main">
       <div class="t-log-viewer-page__toolbar">
         <div class="t-log-viewer-page__file-title">
@@ -215,7 +222,8 @@
         </div>
       </div>
     </div>
-    </div>
+    </template>
+    </TMasterDetailLayout>
   </TContentPage>
 </template>
 
@@ -234,13 +242,13 @@ import type {
   LogSearchHitDto,
   LogSearchResultDto,
 } from '@tnzi/core/services/logging'
-import { translatePageKey, interpolate } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
+import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 
 const bridge = createLoggingBridge({ client: useAdminClient() })
 
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('system.logFiles', key), params)
+const t = makePageTranslator('system.logFiles')
 
 const levels = ref<LogLevelInfoDto[]>([])
 const levelsLoading = ref(false)
@@ -412,15 +420,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.t-log-viewer-page {
-  display: flex;
-  gap: 12px;
-  height: 100%;
-  min-height: 0;
-}
+/* The two-pane grid + responsive stacking is owned by TMasterDetailLayout; the
+   sidebar just fills its master column and scrolls internally. */
 .t-log-viewer-page__sidebar {
-  width: 280px;
-  flex-shrink: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -499,12 +502,22 @@ onMounted(() => {
   padding: 48px 24px;
 }
 .t-log-viewer-page__main {
-  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
   min-height: 0;
+}
+/* Stacked (phone): the detail pane flows at natural height under the navigator,
+   so the terminal needs an explicit height to stay usable. */
+@media (max-width: 767px) {
+  .t-log-viewer-page__main {
+    height: auto;
+  }
+  .t-log-viewer-page__tail {
+    min-height: 360px;
+  }
 }
 .t-log-viewer-page__toolbar {
   display: flex;

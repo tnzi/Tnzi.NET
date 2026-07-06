@@ -163,9 +163,12 @@ const httpClient = createHttpClient({
     return result.accessToken
   },
 
-  // Token 刷新失败时跳转登录
+  // Token 刷新失败时的回调(清理本地状态等)。
+  // 注意: admin 应用不需要在这里写跳转 —— defineAdminApp().install(app, pinia, router)
+  // 内置了会话过期处理: 自动清空 admin auth store 并跳转 /login?next=<当前页>
+  // (auth: { sessionExpiredRedirect: false } 可关闭)。
   onUnauthorized: () => {
-    router.push('/login')
+    authManager.clearAuth()
   },
 
   // 请求拦截器（如添加语言头）
@@ -972,6 +975,42 @@ app.mount('#app')
 | `TCrudPage` | 完整 CRUD 模板（列表 + 表单弹窗 + 搜索 + 分页） |
 | `TModuleManagement` | 模块管理页 |
 | `TPermissionManagement` | 权限管理页 |
+
+### 部署：子路径 / IIS 子应用（重要）
+
+admin SPA 挂在站点子路径下（如 IIS 站点 `example.com` 下名为 `admin` 的子应用，访问地址 `example.com/admin`）时，涉及两个互相独立的前缀：
+
+- **部署前缀**（浏览器 URL 里的 `/admin/`）：由 Vite `base` + `createWebHistory(base)` 决定；
+- **路由表内部前缀**（`defineAdminApp({ basePath })`，默认 `'/admin'`）：**全部**顶级路由（含 login/403）都在它之下。
+
+**推荐配方（标准形态）** — 让 Vite `base` 成为部署前缀的单一真值源：
+
+```typescript
+// vite.config.ts
+export default defineConfig({ base: '/admin/' })
+
+// main.ts
+const router = createRouter({
+  history: createWebHistory(import.meta.env.BASE_URL), // 跟随 Vite base
+  routes,
+})
+defineAdminApp({ client, basePath: '/' })              // 路由表内部无前缀
+```
+
+**偷懒形态（也完全支持）**：`createWebHistory()`（默认 base）+ 默认 `basePath: '/admin'`，让内部前缀客串部署前缀。前提是 **IIS 子应用名必须与 basePath 同为 `admin`**。
+
+**⚠️ 改 IIS 子应用名（如 `admin` → `console`）的影响：**
+
+| 形态 | 需要改什么 |
+|---|---|
+| 标准形态 | 只改 Vite `base: '/console/'` 一行，重新构建。代码零改动（框架跳转全按命名路由，自动跟随前缀） |
+| 偷懒形态 | 必须同步改 `basePath: '/console'` **和** Vite `base` 两处，重新构建，否则浏览器 URL 与路由表整体失配（应用直接打不开） |
+
+**为什么改名后必须重新构建**：history 模式 SPA 的资源与路由绝对前缀在构建期烧进产物——深链刷新时 `index.html` 由任意深路径返回，相对路径资源会解析错。若确实需要"一次构建、任意路径部署"，用 hash 路由 `createWebHashHistory()`（URL 带 `#`，天然前缀无关、免 rewrite），或由服务端动态注入 `<base href>`；内部管理后台一般不值得。
+
+**IIS 侧要求**：子应用必须配 SPA fallback（URL Rewrite 把非文件请求重写到子应用自己的 `index.html`），否则深链刷新 404。
+
+**代码铁律**：应用内跳转一律用**命名路由**（`{ name: 'login' }`、`{ name: 'ai.agents.detail', params }`），禁止写死 `'/login'`、`'/admin/xxx'` 这类 path 字面量——path 随前缀变化，name 永远解析到路由表的真实位置。`useAdminModuleManifest` 等生成路径的 API 均提供 `basePath` 选项，与 `defineAdminApp` 保持一致即可。
 
 ---
 

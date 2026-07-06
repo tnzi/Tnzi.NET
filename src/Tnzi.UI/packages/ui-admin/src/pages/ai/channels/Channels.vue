@@ -10,7 +10,13 @@
     bridge surfaces `null`/empty values and the page renders a friendly
     "module not enabled" notice instead of failing.
   -->
-  <TContentPage :title="t('title')" :translate="t" :card="false" scroll="fill">
+  <TTabsPage
+    v-if="loading || moduleLoaded"
+    :title="t('title')"
+    :translate="t"
+    :sections="tabs"
+    default-section="adapters"
+  >
     <template #actions>
       <NButton size="small" :loading="loading" @click="refresh">
         <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
@@ -18,125 +24,127 @@
       </NButton>
     </template>
 
-    <template #default>
-      <!-- Module not loaded (getStatus → null / 404): friendly "unavailable" state. -->
+    <!-- Page-level summary + config notice sit above the tab surface, on the
+         canvas, visible on every tab. -->
+    <template #kpis>
+      <TKpiRow cols="1 s:2 m:4">
+        <TKpiCard :label="t('kpi.adapters')" :value="adapters.length">
+          <template #extra>
+            <NTag size="small" :type="channelStatus?.enabled ? 'success' : 'default'" :bordered="false">
+              {{ channelStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
+            </NTag>
+          </template>
+        </TKpiCard>
+        <TKpiCard :label="t('kpi.gatewayConn')" :value="gatewayStatus?.connectedWebSocketCount ?? 0">
+          <template #extra>
+            <NTag size="small" :type="gatewayStatus?.enabled ? 'success' : 'default'" :bordered="false">
+              {{ gatewayStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
+            </NTag>
+          </template>
+        </TKpiCard>
+        <TKpiCard :label="t('kpi.activeSessions')" :value="gatewayStatus?.activeSessionCount ?? 0" />
+        <TKpiCard :label="t('kpi.bindings')" :value="bindings.length" />
+      </TKpiRow>
+
+      <!-- Channels loaded but disabled by configuration. -->
       <NAlert
-        v-if="!loading && !moduleLoaded"
-        :title="t('disabled.notLoaded.title')"
-        type="info"
+        v-if="channelStatus && !channelStatus.enabled"
+        :title="t('disabled.channels.title')"
+        type="warning"
         :closable="false"
+        class="mt-12px"
       >
-        {{ t('disabled.notLoaded.body') }}
+        {{ t('disabled.channels.body') }}
       </NAlert>
+    </template>
 
+    <!-- ── Adapters ─────────────────────────────────────────── -->
+    <template #adapters>
+      <NEmpty
+        v-if="!loading && adapters.length === 0"
+        :description="t('empty.adapters')"
+        class="my-32px"
+      />
       <template v-else>
-        <div class="t-channels-page__kpis">
-          <NCard size="small" :bordered="false">
-            <NStatistic :label="t('kpi.adapters')" :value="adapters.length">
-              <template #suffix>
-                <NTag size="small" :type="channelStatus?.enabled ? 'success' : 'default'" :bordered="false">
-                  {{ channelStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
-                </NTag>
-              </template>
-            </NStatistic>
-          </NCard>
-          <NCard size="small" :bordered="false">
-            <NStatistic :label="t('kpi.gatewayConn')" :value="gatewayStatus?.connectedWebSocketCount ?? 0">
-              <template #suffix>
-                <NTag size="small" :type="gatewayStatus?.enabled ? 'success' : 'default'" :bordered="false">
-                  {{ gatewayStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
-                </NTag>
-              </template>
-            </NStatistic>
-          </NCard>
-          <NCard size="small" :bordered="false">
-            <NStatistic :label="t('kpi.activeSessions')" :value="gatewayStatus?.activeSessionCount ?? 0" />
-          </NCard>
-          <NCard size="small" :bordered="false">
-            <NStatistic :label="t('kpi.bindings')" :value="bindings.length" />
-          </NCard>
+        <TResponsiveTable
+          :columns="adapterColumns"
+          :data="adapters"
+          :loading="loading"
+          :pagination="false"
+          :bordered="false"
+          size="small"
+          :flex-height="true"
+        />
+        <div v-if="channelStatus" class="mt-8px flex gap-8px text-12px text-muted">
+          <span>{{ t('meta.maxConcurrency', { n: channelStatus.maxConcurrency }) }}</span>
+          <span>·</span>
+          <span>{{ t('meta.throttle', { ms: channelStatus.streamingThrottleMs }) }}</span>
         </div>
-
-        <!-- Channels loaded but disabled by configuration. -->
-        <NAlert
-          v-if="channelStatus && !channelStatus.enabled"
-          :title="t('disabled.channels.title')"
-          type="warning"
-          :closable="false"
-          class="mt-12px"
-        >
-          {{ t('disabled.channels.body') }}
-        </NAlert>
-
-        <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
-          <NTabPane name="adapters" :tab="t('tabs.adapters')">
-            <div class="t-table-tabs__pane">
-              <NEmpty
-                v-if="!loading && adapters.length === 0"
-                :description="t('empty.adapters')"
-                class="my-32px"
-              />
-              <template v-else>
-                <TResponsiveTable
-                  :columns="adapterColumns"
-                  :data="adapters"
-                  :loading="loading"
-                  :pagination="false"
-                  :bordered="false"
-                  size="small"
-                  :flex-height="true"
-                />
-                <div v-if="channelStatus" class="t-channels-page__meta">
-                  <span>{{ t('meta.maxConcurrency', { n: channelStatus.maxConcurrency }) }}</span>
-                  <span>·</span>
-                  <span>{{ t('meta.throttle', { ms: channelStatus.streamingThrottleMs }) }}</span>
-                </div>
-              </template>
-            </div>
-          </NTabPane>
-
-          <NTabPane name="connections" :tab="t('tabs.connections')">
-            <div class="t-table-tabs__pane">
-              <NEmpty
-                v-if="!loading && connections.length === 0"
-                :description="t('empty.connections')"
-                class="my-32px"
-              />
-              <TResponsiveTable
-                v-else
-                :columns="connectionColumns"
-                :data="connections"
-                :loading="loading"
-                :pagination="{ pageSize: 15 }"
-                :bordered="false"
-                size="small"
-                :flex-height="true"
-              />
-            </div>
-          </NTabPane>
-
-          <NTabPane name="bindings" :tab="t('tabs.bindings')">
-            <div class="t-table-tabs__pane">
-              <NEmpty
-                v-if="!loading && bindings.length === 0"
-                :description="t('empty.bindings')"
-                class="my-32px"
-              />
-              <TResponsiveTable
-                v-else
-                :columns="bindingColumns"
-                :data="bindings"
-                :loading="loading"
-                :pagination="{ pageSize: 15 }"
-                :bordered="false"
-                size="small"
-                :flex-height="true"
-              />
-            </div>
-          </NTabPane>
-        </NTabs>
       </template>
     </template>
+
+    <!-- ── Connections ──────────────────────────────────────── -->
+    <template #connections>
+      <NEmpty
+        v-if="!loading && connections.length === 0"
+        :description="t('empty.connections')"
+        class="my-32px"
+      />
+      <TResponsiveTable
+        v-else
+        :columns="connectionColumns"
+        :data="connections"
+        :loading="loading"
+        :pagination="{ pageSize: 15 }"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      />
+    </template>
+
+    <!-- ── Bindings ─────────────────────────────────────────── -->
+    <template #bindings>
+      <NEmpty
+        v-if="!loading && bindings.length === 0"
+        :description="t('empty.bindings')"
+        class="my-32px"
+      />
+      <TResponsiveTable
+        v-else
+        :columns="bindingColumns"
+        :data="bindings"
+        :loading="loading"
+        :pagination="{ pageSize: 15 }"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      />
+    </template>
+  </TTabsPage>
+
+  <!-- Module not loaded (getStatus → null / 404): friendly "unavailable" state.
+       The page header (title + refresh) is preserved; no tabs are rendered. -->
+  <TContentPage
+    v-else
+    :title="t('title')"
+    :translate="t"
+    :card="false"
+    scroll="fill"
+  >
+    <template #actions>
+      <NButton size="small" :loading="loading" @click="refresh">
+        <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+        {{ t('actions.refresh') }}
+      </NButton>
+    </template>
+
+    <NAlert
+      :title="t('disabled.notLoaded.title')"
+      type="info"
+      :closable="false"
+    >
+      {{ t('disabled.notLoaded.body') }}
+    </NAlert>
   </TContentPage>
 </template>
 
@@ -145,16 +153,14 @@ import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
-  NCard,
   NEmpty,
-  NStatistic,
-  NTabPane,
-  NTabs,
   NTag,
 } from 'naive-ui'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+import { TKpiCard, TKpiRow } from '../../../components/data'
 import type { DataTableColumns } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, type StatusType } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../../plugin/client'
 import {
@@ -165,20 +171,45 @@ import {
   type GatewayStatusDto,
   type SessionBindingRuleDto,
 } from '../../../services/bridges/channels-bridge'
-import { interpolate, translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import TContentPage from '../../../components/layout/TContentPage.vue'
+import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage.vue'
 
 const bridge = createChannelsBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('ai.channels', key), params)
+const t = makePageTranslator('ai.channels')
 
 const loading = ref(false)
-const activeTab = ref<'adapters' | 'connections' | 'bindings'>('adapters')
+// Primary tabs. TTabsPage owns the `?section=` deep-linking + Back/Forward.
+const tabs: TabSection[] = [
+  { name: 'adapters', label: t('tabs.adapters') },
+  { name: 'connections', label: t('tabs.connections') },
+  { name: 'bindings', label: t('tabs.bindings') },
+]
 const channelStatus = ref<ChannelModuleStatusDto | null>(null)
 const gatewayStatus = ref<GatewayStatusDto | null>(null)
 const adapters = ref<ChannelAdapterDto[]>([])
 const connections = ref<GatewayConnectionInfo[]>([])
 const bindings = ref<SessionBindingRuleDto[]>([])
+
+// Absolute i18n namespace — TStatusBadge's admin wrapper resolves `labelKey`
+// from the locale root, so mapping keys must be fully qualified.
+const CH_NS = 'admin.modules.ai.channels'
+
+// SessionScope enum → unified status pill. The backend serialises it as the
+// PascalCase member NAME (JsonStringEnumConverter: Global / PerPeer /
+// PerChannelPeer / PerThread); the legacy numeric ordinals are kept too so
+// TStatusBadge's `String(value)` lookup resolves regardless of wire form. All
+// scopes share the neutral `info` tone (matches the pre-migration look).
+const scopeBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
+  0: { type: 'info', labelKey: `${CH_NS}.scope.global` },
+  1: { type: 'info', labelKey: `${CH_NS}.scope.perPeer` },
+  2: { type: 'info', labelKey: `${CH_NS}.scope.perChannelPeer` },
+  3: { type: 'info', labelKey: `${CH_NS}.scope.perThread` },
+  Global: { type: 'info', labelKey: `${CH_NS}.scope.global` },
+  PerPeer: { type: 'info', labelKey: `${CH_NS}.scope.perPeer` },
+  PerChannelPeer: { type: 'info', labelKey: `${CH_NS}.scope.perChannelPeer` },
+  PerThread: { type: 'info', labelKey: `${CH_NS}.scope.perThread` },
+}
 
 /**
  * The module counts as "loaded" when either control plane reports a status.
@@ -186,17 +217,6 @@ const bindings = ref<SessionBindingRuleDto[]>([])
  * 404), and we show the "module not enabled" notice instead of the tabs.
  */
 const moduleLoaded = computed(() => channelStatus.value !== null || gatewayStatus.value !== null)
-
-function scopeLabel(s: number): string {
-  // SessionScope enum: 0=Global / 1=PerPeer / 2=PerChannelPeer / 3=PerThread
-  switch (s) {
-    case 0: return t('scope.global')
-    case 1: return t('scope.perPeer')
-    case 2: return t('scope.perChannelPeer')
-    case 3: return t('scope.perThread')
-    default: return String(s)
-  }
-}
 
 function adapterIcon(name: string): string {
   switch ((name ?? '').toLowerCase()) {
@@ -226,9 +246,13 @@ const adapterColumns: DataTableColumns<ChannelAdapterDto> = [
     key: 'supportsStreaming',
     width: 140,
     render: (row) =>
-      h(NTag, { size: 'small', bordered: false, type: row.supportsStreaming ? 'success' : 'default' }, () =>
-        row.supportsStreaming ? t('status.supported') : t('status.notSupported'),
-      ),
+      h(TStatusBadge, {
+        value: Boolean(row.supportsStreaming),
+        mapping: {
+          true: { type: 'success', labelKey: `${CH_NS}.status.supported` },
+          false: { type: 'default', labelKey: `${CH_NS}.status.notSupported` },
+        },
+      }),
   },
 ]
 
@@ -265,9 +289,14 @@ const bindingColumns: DataTableColumns<SessionBindingRuleDto> = [
     key: 'isEnabled',
     width: 90,
     render: (r) =>
-      h(NTag, { size: 'tiny', bordered: false, type: r.isEnabled ? 'success' : 'default' }, () =>
-        r.isEnabled ? t('status.enabled') : t('status.disabled'),
-      ),
+      h(TStatusBadge, {
+        value: Boolean(r.isEnabled),
+        size: 'tiny',
+        mapping: {
+          true: { type: 'success', labelKey: `${CH_NS}.status.enabled` },
+          false: { type: 'default', labelKey: `${CH_NS}.status.disabled` },
+        },
+      }),
   },
   { title: () => t('cols.channel'), key: 'channel', width: 140, render: (r) => r.channel ?? '*' },
   { title: () => t('cols.peerKind'), key: 'peerKind', width: 100, render: (r) => r.peerKind ?? '*' },
@@ -276,7 +305,7 @@ const bindingColumns: DataTableColumns<SessionBindingRuleDto> = [
     title: () => t('cols.scope'),
     key: 'scope',
     width: 140,
-    render: (r) => h(NTag, { size: 'tiny', bordered: false, type: 'info' }, () => scopeLabel(r.scope)),
+    render: (r) => h(TStatusBadge, { value: r.scope, size: 'tiny', mapping: scopeBadgeMapping }),
   },
   {
     title: () => t('cols.agentId'),
@@ -317,21 +346,3 @@ onMounted(() => { void refresh() })
 
 defineExpose({ refresh, channelStatus, gatewayStatus, adapters, connections, bindings, moduleLoaded })
 </script>
-
-<style scoped>
-.t-channels-page__kpis {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-@media (max-width: 900px) {
-  .t-channels-page__kpis { grid-template-columns: repeat(2, 1fr); }
-}
-.t-channels-page__meta {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
-  display: flex;
-  gap: 8px;
-}
-</style>

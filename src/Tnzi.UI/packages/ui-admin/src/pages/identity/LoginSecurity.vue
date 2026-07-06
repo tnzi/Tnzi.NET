@@ -102,6 +102,9 @@
           :data="failures"
           :loading="loading"
           :pagination="failuresPagination"
+          :row-actions="rowActions"
+          :row-actions-title="t('cols.actions')"
+          :translate="t"
           :flex-height="true"
           :bordered="false"
           size="small"
@@ -118,14 +121,12 @@ import {
   NButton,
   NCard,
   NInputNumber,
-  NPopconfirm,
   NProgress,
   NSelect,
-  NSpace,
   NTag,
-  NTooltip,
 } from 'naive-ui'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
+import { type RowAction } from '../../headless/rowActions'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import type { DataTableColumns } from 'naive-ui'
@@ -140,7 +141,7 @@ import {
 } from '../../services/bridges/login-security-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 
 const client = useAdminClient()
 const bridge = createLoginSecurityBridge({ client })
@@ -151,8 +152,7 @@ const bridge = createLoginSecurityBridge({ client })
 const identityBridge = createIdentityBridge({ client })
 const message = useSafeMessage()
 const router = useRouter()
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('identity.loginSecurity', key), params)
+const t = makePageTranslator('identity.loginSecurity')
 
 const loading = ref(false)
 const overview = ref<SecurityOverviewDto | null>(null)
@@ -260,68 +260,28 @@ const failuresColumns = computed<DataTableColumns<UserFailedLoginSummaryDto>>(()
         ),
       ),
   },
-  {
-    title: () => t('cols.actions'),
-    key: 'actions',
-    width: 180,
-    align: 'right',
-    fixed: 'right',
-    render: (row) =>
-      h(
-        NSpace,
-        { size: 'small', justify: 'end', wrapItem: false },
-        {
-          default: () => [
-            h(
-              NTooltip,
-              {},
-              {
-                trigger: () =>
-                  h(
-                    NButton,
-                    { size: 'tiny', tertiary: true, onClick: () => goToLoginLogs(row) },
-                    {
-                      default: () => t('rowActions.viewLogs'),
-                      icon: () => h(TSvgIcon, { icon: 'mdi:history', size: 12 }),
-                    },
-                  ),
-                default: () => t('rowActions.viewLogs'),
-              },
-            ),
-            h(
-              NPopconfirm,
-              { onPositiveClick: () => handleLock(row) },
-              {
-                trigger: () =>
-                  h(
-                    NTooltip,
-                    {},
-                    {
-                      trigger: () =>
-                        h(
-                          NButton,
-                          {
-                            size: 'tiny',
-                            type: 'warning',
-                            ghost: true,
-                            loading: pendingRows.value.has(row.userId),
-                          },
-                          {
-                            default: () => t('rowActions.lock'),
-                            icon: () => h(TSvgIcon, { icon: 'mdi:lock-outline', size: 12 }),
-                          },
-                        ),
-                      default: () => t('rowActions.lockTooltip'),
-                    },
-                  ),
-                default: () => t('rowActions.confirmLock', { user: row.userName ?? row.userId }),
-              },
-            ),
-          ],
-        },
-      ),
-  },
 ])
+
+// Declarative operation column: drill into the raw login logs (no confirm)
+// + permanently lock the account (confirm gated, disabled while a lock/unlock
+// round-trip for that row is in flight). Reuses the existing handlers.
+const rowActions: RowAction<UserFailedLoginSummaryDto>[] = [
+  {
+    key: 'viewLogs',
+    label: 'rowActions.viewLogs',
+    icon: 'mdi:history',
+    onClick: (row) => goToLoginLogs(row),
+  },
+  {
+    key: 'lock',
+    label: 'rowActions.lock',
+    icon: 'mdi:lock-outline',
+    type: 'warning',
+    confirm: (row) => t('rowActions.confirmLock', { user: row.userName ?? row.userId }),
+    disabled: (row) => pendingRows.value.has(row.userId),
+    onClick: (row) => void handleLock(row),
+  },
+]
 
 async function refresh(): Promise<void> {
   loading.value = true

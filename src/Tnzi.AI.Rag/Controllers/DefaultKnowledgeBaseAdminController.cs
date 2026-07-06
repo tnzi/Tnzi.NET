@@ -5,6 +5,7 @@ namespace Tnzi.AI.Rag.Controllers;
 /// </summary>
 [Route("admin/knowledge-bases")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "ai.knowledge.view")]
 public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
 {
     protected readonly IKnowledgeBaseService KnowledgeBaseService;

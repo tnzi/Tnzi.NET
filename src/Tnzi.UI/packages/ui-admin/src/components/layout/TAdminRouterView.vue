@@ -21,9 +21,10 @@
  *     </TAdminContent>
  */
 import { computed, watchEffect } from 'vue'
-import { RouterView, useRoute } from 'vue-router'
+import { RouterView, useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
+import { isMultiInstanceRoute, multiInstanceKey } from '../../stores/useAdminTabStore'
 
 interface Props {
   /**
@@ -78,6 +79,22 @@ const wrapperKey = computed(() =>
   appStore.reloadFlag ? `mounted-${route.fullPath}` : 'unmounted',
 )
 
+/**
+ * Component identity key. Single-instance routes key by name so re-visiting the
+ * same page (incl. query-only changes on a list) reuses the cached instance.
+ * Multi-instance routes (detail pages with dynamic params, or `meta.multiTab`
+ * deep-links) key by their per-instance key (param routes → `path`, so volatile
+ * `?section=` deep-links don't remount; multiTab+query → `fullPath`) so customer
+ * A's detail and customer B's detail mount as SEPARATE component instances —
+ * without this they share one instance (same route name) and B's page would
+ * render A's stale data. This stays in lockstep with the tab store's id so a tab
+ * and its component instance map 1:1.
+ */
+function keyOf(r: RouteLocationNormalizedLoaded): string {
+  if (isMultiInstanceRoute(r)) return multiInstanceKey(r)
+  return (typeof r.name === 'string' ? r.name : undefined) ?? r.fullPath
+}
+
 // Defensive: log a hint if no name attached to current route — keep-alive
 // silently skips those entries.
 watchEffect(() => {
@@ -126,7 +143,7 @@ watchEffect(() => {
       <component
         :is="Component"
         v-if="appStore.reloadFlag"
-        :key="(r.name as string | undefined) ?? r.fullPath"
+        :key="keyOf(r)"
       />
     </KeepAlive>
   </RouterView>

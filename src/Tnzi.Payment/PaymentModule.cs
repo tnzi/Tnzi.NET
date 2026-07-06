@@ -27,20 +27,15 @@ public class PaymentModule : TnziApplicationModule
     {
         var configuration = context.Configuration;
 
-        // 注册配置选项
-        context.Services.Configure<PaymentOptions>(configuration.GetSection("Payment"));
+        // 注册配置选项（统一走 AddTnziOptions：Bind + 启动期验证）
+        context.Services.AddTnziOptions<PaymentOptions, PaymentOptionsValidator>(configuration);
         // 支付渠道配置（独立 Options 类）
-        context.Services.Configure<StripeOptions>(configuration.GetSection("Payment:Stripe"));
-        context.Services.Configure<PayPalOptions>(configuration.GetSection("Payment:PayPal"));
+        context.Services.AddTnziOptions<StripeOptions, StripeOptionsValidator>(configuration, "Payment:Stripe");
+        context.Services.AddTnziOptions<PayPalOptions, PayPalOptionsValidator>(configuration, "Payment:PayPal");
         // 子模块配置 — 虽为 PaymentOptions 嵌套属性，但服务中单独注入 IOptions<T>
-        context.Services.Configure<InvoiceOptions>(configuration.GetSection("Payment:Invoice"));
-        context.Services.Configure<PromotionOptions>(configuration.GetSection("Payment:Promotion"));
-        context.Services.Configure<TaxOptions>(configuration.GetSection("Payment:Tax"));
-
-        // 注册配置验证器
-        context.Services.AddSingleton<IValidateOptions<PaymentOptions>, PaymentOptionsValidator>();
-        context.Services.AddSingleton<IValidateOptions<StripeOptions>, StripeOptionsValidator>();
-        context.Services.AddSingleton<IValidateOptions<PayPalOptions>, PayPalOptionsValidator>();
+        context.Services.AddTnziOptions<InvoiceOptions>(configuration, "Payment:Invoice");
+        context.Services.AddTnziOptions<PromotionOptions>(configuration, "Payment:Promotion");
+        context.Services.AddTnziOptions<TaxOptions>(configuration, "Payment:Tax");
 
         return Task.CompletedTask;
     }

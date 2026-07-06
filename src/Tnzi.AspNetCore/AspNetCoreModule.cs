@@ -52,7 +52,9 @@ public class AspNetCoreModule : TnziFrameworkModule
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 自动添加 Controllers 支持
-        var mvcBuilder = context.Services.AddControllers();
+        // 枚举按成员名(PascalCase)序列化是框架 wire 契约;入参仍兼容数字(JsonStringEnumConverter 默认 allowIntegerValues)
+        var mvcBuilder = context.Services.AddControllers()
+            .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         // 自动注册所有已加载模块的程序集到 ApplicationPartManager
         // 扫描范围：所有模块（含 Framework/Infrastructure），让各模块可提供 [DefaultController]

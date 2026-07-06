@@ -52,10 +52,28 @@ export const providerFormSchema: FormSchemaItem[] = [
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
 ]
 
-/** Keyword search over name / provider type / endpoint / default model. */
-export const providerSearchFields: FormSchemaItem[] = [
-  { key: 'keyword', labelKey: 'search.keyword', label: 'Keyword', type: 'text' },
-]
+/**
+ * Normalise a provider `scope` to its canonical ResourceScope member name. The
+ * backend serialises the enum as the PascalCase member name
+ * (JsonStringEnumConverter); a numeric ordinal is still accepted for backward
+ * compatibility. Tenant is the safe default (private, not the shared System row).
+ */
+export function resourceScopeName(scope: unknown): 'System' | 'Tenant' | 'User' {
+  const map: Record<string, 'System' | 'Tenant' | 'User'> = {
+    '0': 'System',
+    '1': 'Tenant',
+    '2': 'User',
+    System: 'System',
+    Tenant: 'Tenant',
+    User: 'User',
+  }
+  return map[String(scope)] ?? 'Tenant'
+}
+
+/** True when a provider is a shared System-scope entry. */
+export function isSystemProviderScope(scope: unknown): boolean {
+  return resourceScopeName(scope) === 'System'
+}
 
 /**
  * Map a provider name / type to an mdi icon. Matching is case-insensitive and

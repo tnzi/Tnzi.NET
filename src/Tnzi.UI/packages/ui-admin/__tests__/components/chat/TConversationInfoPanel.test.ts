@@ -3,24 +3,25 @@ import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useChatStore } from '../../../src/stores/useChatStore'
 import TConversationInfoPanel from '../../../src/components/chat/TConversationInfoPanel.vue'
-import { MemberRole } from '@tnzi/core/services/chat'
+import { ConversationType, MemberRole, MessageContentType } from '@tnzi/core/services/chat'
 
-function makeBridge(isOwner = true, type: 1 | 2 = 2) {
+function makeBridge(isOwner = true, convType: ConversationType = ConversationType.Group) {
   const myId = 'me'
   const ownerId = isOwner ? myId : 'other'
+  const isGroup = convType === ConversationType.Group
   return {
     listConversations: vi.fn(async () => []),
     getMessages: vi.fn(async () => ({ messages: [], hasMore: false })),
-    sendMessage: vi.fn(async () => ({ id: 'm1', conversationId: 'c1', contentType: 1, content: '', sentAt: '' })),
+    sendMessage: vi.fn(async () => ({ id: 'm1', conversationId: 'c1', contentType: MessageContentType.Text, content: '', sentAt: '' })),
     markRead: vi.fn(async () => {}),
     getUnreadCount: vi.fn(async () => 0),
     searchContacts: vi.fn(async () => [{ userId: 'u3', name: 'Carol' }]),
-    getOrCreateDirect: vi.fn(async () => ({ id: 'd-new', type: 1, title: 'Carol', memberCount: 2, members: [] })),
+    getOrCreateDirect: vi.fn(async () => ({ id: 'd-new', type: ConversationType.Direct, title: 'Carol', memberCount: 2, members: [] })),
     createGroup: vi.fn(),
     getConversation: vi.fn(async () => ({
-      id: type === 2 ? 'g1' : 'd1',
-      type,
-      title: type === 2 ? 'Test Group' : 'Carol',
+      id: isGroup ? 'g1' : 'd1',
+      type: convType,
+      title: isGroup ? 'Test Group' : 'Carol',
       memberCount: 2,
       ownerId,
       notice: 'Welcome',
@@ -48,11 +49,11 @@ function makeBridge(isOwner = true, type: 1 | 2 = 2) {
   }
 }
 
-function mountPanel(bridge: ReturnType<typeof makeBridge>, type: 1 | 2 = 2) {
+function mountPanel(bridge: ReturnType<typeof makeBridge>, convType: ConversationType = ConversationType.Group) {
   const store = useChatStore()
   store.init(bridge as never)
   const wrapper = mount(TConversationInfoPanel, {
-    props: { show: true, conversationId: type === 2 ? 'g1' : 'd1', myId: 'me' },
+    props: { show: true, conversationId: convType === ConversationType.Group ? 'g1' : 'd1', myId: 'me' },
   })
   return { store, wrapper }
 }
@@ -144,7 +145,7 @@ describe('TConversationInfoPanel', () => {
   })
 
   it('direct conversation: isGroup false, message member starts direct', async () => {
-    const { store, wrapper } = mountPanel(makeBridge(true, 1), 1)
+    const { store, wrapper } = mountPanel(makeBridge(true, ConversationType.Direct), ConversationType.Direct)
     const startSpy = vi.spyOn(store, 'startDirect')
     await (wrapper.vm as unknown as { loadDetail: () => Promise<void> }).loadDetail()
     await wrapper.vm.$nextTick()

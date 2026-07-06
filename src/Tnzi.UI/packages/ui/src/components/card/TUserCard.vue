@@ -7,19 +7,7 @@
   >
     <template #header>
       <div class="flex items-center gap-3">
-        <n-avatar
-          v-if="user.avatar"
-          :src="user.avatar"
-          :size="avatarSize"
-          round
-        />
-        <n-avatar
-          v-else
-          :size="avatarSize"
-          round
-        >
-          {{ userInitial }}
-        </n-avatar>
+        <TAvatar :src="user.avatar" :name="user.name" :size="avatarSize" />
         <span :class="nameClass">{{ user.name }}</span>
       </div>
     </template>
@@ -69,7 +57,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NCard, NAvatar, NTag, NText, NButton, NSpace } from 'naive-ui'
+import { NCard, NTag, NText, NButton, NSpace } from 'naive-ui'
+import TAvatar from '../display/TAvatar.vue'
 
 interface UserInfo {
   id: string | number
@@ -118,10 +107,6 @@ const nameClass = computed(() => {
     large: 'font-600 text-[17px]',
   }
   return sizeMap[props.size] ?? sizeMap.medium
-})
-
-const userInitial = computed(() => {
-  return props.user.name.charAt(0).toUpperCase()
 })
 
 const avatarSize = computed(() => {

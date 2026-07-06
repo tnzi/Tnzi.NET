@@ -9,6 +9,7 @@ public class RefundConfiguration : EntityTypeConfigurationBase<Refund, Guid>
 
         builder.Property(r => r.RefundNo).HasMaxLength(64).IsRequired();
         builder.Property(r => r.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
+        builder.Property(r => r.RefundAmount).HasMoneyPrecision();
         builder.Property(r => r.Reason).HasMaxLength(500);
         builder.Property(r => r.ExternalRefundNo).HasMaxLength(128);
         builder.Property(r => r.ApproveRemark).HasMaxLength(500);

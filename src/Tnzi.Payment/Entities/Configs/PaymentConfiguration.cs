@@ -12,6 +12,9 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.Property(p => p.ChannelCode).HasMaxLength(32).IsRequired();
         builder.Property(p => p.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
         builder.Property(p => p.Description).HasMaxLength(500);
+        builder.Property(p => p.OriginalAmount).HasMoneyPrecision();
+        builder.Property(p => p.PaidAmount).HasMoneyPrecision();
+        builder.Property(p => p.DiscountAmount).HasMoneyPrecision();
         // ChannelResponse和ExtraData存储JSON数据，不指定类型以保持数据库兼容性
         // EF Core会根据数据库提供者自动选择合适的类型
 

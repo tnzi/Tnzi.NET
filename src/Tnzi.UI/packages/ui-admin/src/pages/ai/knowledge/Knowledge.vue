@@ -6,7 +6,6 @@
       :title="t('title')"
       :title-help="t('banner')"
       :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
-      :search-fields="searchFields"
       :search-placeholder="t('search.placeholder')"
       :form-modal-width="640"
       :translate="t"
@@ -66,10 +65,16 @@
       </template>
     </TCardPage>
 
-    <!-- Document management drawer — per knowledge base: documents + search test. -->
-    <NDrawer v-model:show="manageVisible" :width="720" placement="right">
-      <NDrawerContent v-if="managed" :title="managed.name" closable>
-        <NTabs v-model:value="manageTab" type="line" animated>
+    <!--
+      Document management drawer — per knowledge base: documents + search test.
+      A custom secondary surface driven by `useDetail` (mode 'drawer') + rendered
+      by the single `TDetailHost` renderer, so it is deep-linkable
+      (`?manage=view:<kbId>`), refresh-survivable and Back-closeable for free.
+      `:footer="false"` — the panel's controls live in the body; the X closes it.
+    -->
+    <TDetailHost :state="manageDetail" :title="managed?.name ?? ''" :width="720" :footer="false" :translate="t">
+      <template #default>
+        <NTabs v-if="managed" v-model:value="manageTab" type="line" animated>
           <!-- (A) Documents ------------------------------------------------ -->
           <NTabPane name="documents" :tab="t('manage.documentsTab')">
             <div class="ai-knowledge-upload">
@@ -99,6 +104,9 @@
               :row-key="(row: KnowledgeDocumentDto) => row.id"
               :pagination="false"
               :empty-text="t('manage.noDocuments')"
+              :row-actions="documentRowActions"
+              :row-actions-title="t('columns.actions')"
+              :translate="t"
               size="small"
             />
           </NTabPane>
@@ -150,18 +158,15 @@
             </div>
           </NTabPane>
         </NTabs>
-      </NDrawerContent>
-    </NDrawer>
+      </template>
+    </TDetailHost>
   </div>
 </template>
 
 <script setup lang="ts">
-import { h, ref } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import {
   NButton,
-  NCard,
-  NDrawer,
-  NDrawerContent,
   NInput,
   NInputNumber,
   NPopconfirm,
@@ -175,28 +180,29 @@ import {
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime, formatFileSize } from '@tnzi/core'
 import TCardPage from '../../../components/crud/TCardPage.vue'
+import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import { useDetail } from '../../../headless/useDetail'
+import type { RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
-import { translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import {
   knowledgeCreateFormSchema,
   knowledgeEditFormSchema,
-  knowledgeSearchFields as searchFields,
 } from './knowledge-config'
 import type {
   KnowledgeBaseDto,
   KnowledgeBaseCreateParams,
   KnowledgeBaseUpdateParams,
   KnowledgeDocumentDto,
-  DocumentStatus,
   SearchResultDto,
 } from '@tnzi/core/services/ai'
 
-const t = (key: string) => translatePageKey('ai.knowledge', key)
+const t = makePageTranslator('ai.knowledge')
 
 // ui-admin does not wrap the shell with NMessageProvider in every host, so
 // `useMessage()` may throw — guard and fall back to inline status panels.
@@ -219,7 +225,6 @@ const crud = useCrudPage<KnowledgeBaseDto>({
   updateData: (id, data) => bridge.knowledge.update(String(id), data as KnowledgeBaseUpdateParams),
   deleteData: (ids) => bridge.knowledge.delete(ids.map(String)),
 })
-crud.refresh().catch(() => undefined)
 
 async function removeOne(item: KnowledgeBaseDto): Promise<void> {
   await crud.handleDelete([item.id])
@@ -245,28 +250,43 @@ async function onReindex(item: KnowledgeBaseDto): Promise<void> {
 }
 
 // --- document management drawer --------------------------------------------
-const managed = ref<KnowledgeBaseDto | null>(null)
-const manageVisible = ref(false)
+// A custom secondary overlay driven by the single detail engine (`useDetail`,
+// mode 'drawer') — deep-linked as `?manage=view:<kbId>`, refresh-survivable and
+// Back-closeable for free. `source: crud` hydrates a cold-load deep link from
+// the loaded list, waiting for the first fetch automatically.
+const manageDetail = useDetail<KnowledgeBaseDto>({
+  mode: 'drawer',
+  url: 'manage',
+  source: crud,
+})
+const managed = computed(() => manageDetail.data.value)
+const manageVisible = manageDetail.visible
 const manageTab = ref<'documents' | 'search'>('documents')
 
 const documents = ref<KnowledgeDocumentDto[]>([])
 const documentsLoading = ref(false)
 
 async function openManage(row: KnowledgeBaseDto): Promise<void> {
-  managed.value = row
-  manageVisible.value = true
+  await manageDetail.open('view', row)
+}
+
+// Reset the panel + load documents whenever the drawer (re)binds to a KB —
+// covers in-session open AND a `#manage:view:<id>` deep link / refresh.
+watch(() => manageDetail.data.value, async (kb) => {
+  if (!kb) return
   manageTab.value = 'documents'
   uploadStatus.value = null
   searchResults.value = []
   searchedOnce.value = false
   await loadDocuments()
-}
+})
 
 async function loadDocuments(): Promise<void> {
-  if (!managed.value) return
+  const kb = manageDetail.data.value
+  if (!kb) return
   documentsLoading.value = true
   try {
-    const page = await bridge.knowledge.getDocuments(managed.value.id)
+    const page = await bridge.knowledge.getDocuments(kb.id)
     documents.value = page.items
   } catch {
     documents.value = []
@@ -275,10 +295,26 @@ async function loadDocuments(): Promise<void> {
   }
 }
 
-const STATUS_META: Record<DocumentStatus, { type: 'default' | 'success' | 'error'; key: string }> = {
-  0: { type: 'default', key: 'status.processing' },
-  1: { type: 'success', key: 'status.completed' },
-  2: { type: 'error', key: 'status.failed' },
+// DocumentStatus arrives as the PascalCase member name (JsonStringEnumConverter)
+// or, for legacy payloads, the numeric ordinal — normalise both to a stable
+// member-name key so the status badge + processing-row detection stay correct.
+type DocStatusName = 'Processing' | 'Completed' | 'Failed'
+function documentStatusName(status: unknown): DocStatusName {
+  const map: Record<string, DocStatusName> = {
+    '0': 'Processing',
+    '1': 'Completed',
+    '2': 'Failed',
+    Processing: 'Processing',
+    Completed: 'Completed',
+    Failed: 'Failed',
+  }
+  return map[String(status)] ?? 'Processing'
+}
+
+const STATUS_META: Record<DocStatusName, { type: 'default' | 'success' | 'error'; key: string }> = {
+  Processing: { type: 'default', key: 'status.processing' },
+  Completed: { type: 'success', key: 'status.completed' },
+  Failed: { type: 'error', key: 'status.failed' },
 }
 
 const documentColumns: DataTableColumns<KnowledgeDocumentDto> = [
@@ -288,13 +324,14 @@ const documentColumns: DataTableColumns<KnowledgeDocumentDto> = [
     title: () => t('columns.status'),
     width: 150,
     render: (row) => {
-      const meta = STATUS_META[row.status] ?? STATUS_META[0]
+      const name = documentStatusName(row.status)
+      const meta = STATUS_META[name]
       const tag = h(
         NTag,
         { size: 'small', type: meta.type, bordered: false },
         { default: () => t(meta.key) },
       )
-      if (row.status !== 0) return tag
+      if (name !== 'Processing') return tag
       // Processing rows expose a "Refresh status" action to re-poll.
       return h('div', { class: 'flex items-center gap-6px' }, [
         tag,
@@ -324,24 +361,17 @@ const documentColumns: DataTableColumns<KnowledgeDocumentDto> = [
     width: 170,
     render: (row) => formatDateTime(row.creationTime),
   },
+]
+
+// Declarative row action for the document table — TResponsiveTable synthesises
+// the trailing operation column (and folds it into the mobile card footer).
+const documentRowActions: RowAction<KnowledgeDocumentDto>[] = [
   {
-    key: 'actions',
-    title: () => t('columns.actions'),
-    width: 90,
-    render: (row) =>
-      h(
-        NPopconfirm,
-        { onPositiveClick: () => deleteDoc(row) },
-        {
-          trigger: () =>
-            h(
-              NButton,
-              { size: 'tiny', type: 'error', text: true },
-              { default: () => t('actions.delete') },
-            ),
-          default: () => t('manage.deleteDocConfirm'),
-        },
-      ),
+    key: 'delete',
+    label: 'actions.delete',
+    type: 'error',
+    confirm: 'manage.deleteDocConfirm',
+    onClick: (row) => deleteDoc(row),
   },
 ]
 
@@ -382,7 +412,7 @@ async function onFilePicked(event: Event): Promise<void> {
   uploadStatus.value = null
   try {
     const result = await bridge.knowledge.uploadDocument(managed.value.id, file)
-    const statusLabel = t(STATUS_META[result.status]?.key ?? 'status.processing')
+    const statusLabel = t(STATUS_META[documentStatusName(result.status)].key)
     uploadStatus.value = {
       kind: 'success',
       message: result.isDuplicate

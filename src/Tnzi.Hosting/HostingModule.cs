@@ -28,6 +28,7 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(SignalRModule))]
 [OptionalDependsOn(typeof(ChatModule))]
 [OptionalDependsOn(typeof(PaymentModule))]
+[OptionalDependsOn(typeof(FinanceModule))]
 [OptionalDependsOn(typeof(RagModule))]
 [OptionalDependsOn(typeof(Tnzi.AI.Sandbox.SandboxModule))]
 [OptionalDependsOn(typeof(ChannelsModule))]

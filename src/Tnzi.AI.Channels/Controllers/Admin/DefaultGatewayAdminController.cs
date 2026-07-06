@@ -9,6 +9,7 @@ namespace Tnzi.AI.Channels.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/gateway")]
+[ApiAuthorize(PermissionName = "ai.channels.view")]
 public class DefaultGatewayAdminController : ApiAdminControllerBase
 {
     private readonly IGateway? _gateway;

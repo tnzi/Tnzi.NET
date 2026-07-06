@@ -237,6 +237,108 @@ describe('HttpClient', () => {
   });
 
   // ------------------------------------------
+  // skipAuthRefresh (auth-flow requests)
+  // ------------------------------------------
+
+  describe('skipAuthRefresh', () => {
+    it('should return 401 as-is without calling refreshTokenFn', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('new-token');
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      const result = await c.post('/auth/login', { u: 'x' }, { skipAuthRefresh: true });
+      expect(result.code).toBe(401);
+      expect(refreshFn).not.toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not trigger onUnauthorized for auth-flow 401s', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', onUnauthorized });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.post('/auth/login', { u: 'x' }, { skipAuthRefresh: true });
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+
+    it('should not deadlock when a skipAuthRefresh request 401s during an active refresh', async () => {
+      // Regression: the logout/refresh POST issued from inside refreshTokenFn
+      // used to re-enter tryRefreshAndRetry, await its own _refreshPromise,
+      // and stall until the refresh timeout. With skipAuthRefresh the inner
+      // call settles immediately and the whole cycle finishes fast.
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      const onUnauthorized = vi.fn();
+      let innerResult: { code: number } | null = null;
+      const c: HttpClient = new HttpClient({
+        baseUrl: '/api',
+        onUnauthorized,
+        refreshTokenFn: async () => {
+          // Simulates AuthStateManager's cleanup POST during a failed refresh.
+          innerResult = await c.post('/auth/logout', undefined, { skipAuthRefresh: true });
+          throw new Error('refresh failed');
+        },
+      });
+      const result = await c.get('/protected');
+      expect(result.code).toBe(401);
+      expect(innerResult!.code).toBe(401);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ------------------------------------------
+  // addUnauthorizedListener (multicast)
+  // ------------------------------------------
+
+  describe('addUnauthorizedListener', () => {
+    it('should fire listeners alongside onUnauthorized', async () => {
+      const onUnauthorized = vi.fn();
+      const listener = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', onUnauthorized });
+      c.addUnauthorizedListener(listener);
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.get('/protected');
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('should fire listeners even without a config-level handler', async () => {
+      const listener = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api' });
+      c.addUnauthorizedListener(listener);
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.get('/protected');
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('should still run listeners when the config handler throws', async () => {
+      const listener = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        onUnauthorized: () => {
+          throw new Error('consumer handler exploded');
+        },
+      });
+      c.addUnauthorizedListener(listener);
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      const result = await c.get('/protected');
+      expect(result.code).toBe(401);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('should support unsubscribe and share the dedup guard', async () => {
+      const listener = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api' });
+      const off = c.addUnauthorizedListener(listener);
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+      await c.get('/a');
+      await c.get('/b'); // deduplicated: same auth cycle
+      expect(listener).toHaveBeenCalledTimes(1);
+      off();
+      c.setAccessToken('fresh'); // resets the dedup guard
+      await c.get('/c');
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ------------------------------------------
   // Request interceptor
   // ------------------------------------------
 

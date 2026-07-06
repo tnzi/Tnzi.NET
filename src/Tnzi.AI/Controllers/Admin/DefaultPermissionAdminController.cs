@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/permissions")]
+[ApiAuthorize(PermissionName = "ai.permissions.view")]
 public class DefaultPermissionAdminController : ApiAdminControllerBase
 {
     protected readonly IToolPermissionEvaluator PermissionEvaluator;

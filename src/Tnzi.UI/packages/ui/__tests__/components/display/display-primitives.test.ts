@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import TSvgIcon from '../../../src/components/display/TSvgIcon.vue'
 import TCountTo from '../../../src/components/display/TCountTo.vue'
 import TWaveBg from '../../../src/components/display/TWaveBg.vue'
+import TSourceBadge from '../../../src/components/display/TSourceBadge.vue'
 
 describe('TSvgIcon', () => {
   it('renders Iconify when icon prop is set', () => {
@@ -121,5 +122,52 @@ describe('TWaveBg', () => {
       // Each stop should be a 7-character hex string the palette helper produced.
       expect(color).toMatch(/^#[0-9a-f]{6}$/i)
     }
+  })
+})
+
+describe('TSourceBadge', () => {
+  // Primary wire form: PascalCase member name string (JsonStringEnumConverter).
+  const memberNameCases: Array<[string, string]> = [
+    ['FileSystem', 'File'],
+    ['Database', 'Database'],
+    ['Plugin', 'Plugin'],
+    ['Managed', 'Managed'],
+    ['Project', 'Project'],
+    ['Workspace', 'Workspace'],
+    ['Configuration', 'Config'],
+    ['EmbeddedResource', 'Built-in'],
+  ]
+  it.each(memberNameCases)('maps member name %s → label %s', (value, label) => {
+    const wrapper = mount(TSourceBadge, { props: { value } })
+    expect(wrapper.text()).toContain(label)
+  })
+
+  // Legacy numeric compatibility: raw SkillSource ordinals still map correctly.
+  const numericCases: Array<[number, string]> = [
+    [0, 'File'],
+    [1, 'Database'],
+    [2, 'Plugin'],
+    [3, 'Managed'],
+    [4, 'Project'],
+  ]
+  it.each(numericCases)('maps legacy ordinal %s → label %s', (value, label) => {
+    const wrapper = mount(TSourceBadge, { props: { value } })
+    expect(wrapper.text()).toContain(label)
+  })
+
+  it('falls back to Database for an unknown value', () => {
+    const wrapper = mount(TSourceBadge, { props: { value: 'somethingUnknown' } })
+    expect(wrapper.text()).toContain('Database')
+  })
+
+  it('resolves the label via the translate prop when provided', () => {
+    const translate = (key: string) => (key === 'admin.shared.source.filesystem' ? '文件' : '')
+    const wrapper = mount(TSourceBadge, { props: { value: 'FileSystem', translate } })
+    expect(wrapper.text()).toContain('文件')
+  })
+
+  it('honours an explicit label override', () => {
+    const wrapper = mount(TSourceBadge, { props: { value: 'Database', label: 'Custom' } })
+    expect(wrapper.text()).toContain('Custom')
   })
 })

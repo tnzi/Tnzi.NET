@@ -113,6 +113,64 @@ describe('identity-bridge', () => {
     expect(result.totalCount).toBe(1)
   })
 
+  it('users.fetch coerces isLockedOut/isEmailConfirmed string filters to booleans', async () => {
+    const userApi = mockUserApi()
+    const bridge = createIdentityBridge({
+      userApi,
+      roleApi: mockRoleApi(),
+      tenantApi: mockTenantApi(),
+      loginLogApi: mockLoginLogApi(),
+    })
+    await bridge.users.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { isLockedOut: 'true', isEmailConfirmed: 'false' },
+    })
+    // String 'true'/'false' from the search NSelect must become real booleans
+    // so the backend bool? binds instead of 400-ing on a JSON string.
+    expect(userApi.getList).toHaveBeenCalledWith(
+      expect.objectContaining({ isLockedOut: true, isEmailConfirmed: false }),
+    )
+  })
+
+  it('users.fetch drops empty-string boolean filters (unset select = no filter)', async () => {
+    const userApi = mockUserApi()
+    const bridge = createIdentityBridge({
+      userApi,
+      roleApi: mockRoleApi(),
+      tenantApi: mockTenantApi(),
+      loginLogApi: mockLoginLogApi(),
+    })
+    await bridge.users.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { isLockedOut: '' },
+    })
+    const arg = userApi.getList.mock.calls[0][0]
+    expect('isLockedOut' in arg).toBe(false)
+  })
+
+  it('loginLogs.fetch coerces isSuccess string filter to a boolean', async () => {
+    const loginLogApi = mockLoginLogApi()
+    const bridge = createIdentityBridge({
+      userApi: mockUserApi(),
+      roleApi: mockRoleApi(),
+      tenantApi: mockTenantApi(),
+      loginLogApi,
+    })
+    await bridge.loginLogs.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { isSuccess: 'false' },
+    })
+    expect(loginLogApi.getList).toHaveBeenCalledWith(
+      expect.objectContaining({ isSuccess: false }),
+    )
+  })
+
   it('users.create delegates to userApi.create', async () => {
     const userApi = mockUserApi()
     const bridge = createIdentityBridge({

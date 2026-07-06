@@ -1,0 +1,13 @@
+global using Microsoft.Extensions.DependencyInjection;
+global using Tnzi.Data;
+global using Tnzi.Domain.Repositories;
+global using Tnzi.EFCore;
+global using Tnzi.TestBase;
+global using Tnzi.Finance.Dtos;
+global using Tnzi.Finance.Entities;
+global using Tnzi.Finance.Metadata;
+global using Tnzi.Finance.Options;
+global using Tnzi.Finance.Services;
+global using Tnzi.Finance.Services.Interfaces;
+global using Tnzi.Results;
+global using Tnzi.Exceptions;

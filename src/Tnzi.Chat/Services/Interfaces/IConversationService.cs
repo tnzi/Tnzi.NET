@@ -19,4 +19,10 @@ public interface IConversationService
     Task<Result> UpdateMemberSettingsAsync(Guid conversationId, ConversationMemberSettingsDto settings);
     Task<Result> ClearHistoryAsync(Guid conversationId);
     Task<Result<MessageThreadDto>> SearchMessagesAsync(Guid conversationId, string keyword, MessageThreadQueryDto query);
+
+    /// <summary>
+    /// 按用户删除会话：清空本人历史水位 + 从本人列表隐藏（其他成员不受影响；
+    /// 新消息到达时会话重新浮现，但历史为空）。共享数据永不硬删。
+    /// </summary>
+    Task<Result> DeleteForMeAsync(Guid conversationId);
 }

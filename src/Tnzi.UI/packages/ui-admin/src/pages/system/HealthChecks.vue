@@ -81,16 +81,16 @@ import {
   NTag,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
 
 const client = useAdminClient()
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('system.healthchecks', key), params)
+const t = makePageTranslator('system.healthchecks')
 
 interface HealthEntry {
   name: string
@@ -141,15 +141,6 @@ const overallLabel = computed(() => {
   return report.value?.status ?? t('overall.unknown')
 })
 
-function entryTone(s: string): 'success' | 'warning' | 'error' | 'default' {
-  switch ((s ?? '').toLowerCase()) {
-    case 'healthy': return 'success'
-    case 'degraded': return 'warning'
-    case 'unhealthy': return 'error'
-    default: return 'default'
-  }
-}
-
 function formatMs(v: number | undefined | null): string {
   if (v == null) return '—'
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
@@ -161,8 +152,19 @@ const columns: DataTableColumns<HealthEntry> = [
     title: () => t('cols.status'),
     key: 'status',
     width: 130,
+    // Unified status pill. `value` (lowercased) selects the tone via the
+    // mapping; the explicit `label` keeps the backend's original casing
+    // ("Healthy"/"Degraded"/"Unhealthy") as the displayed text.
     render: (row) =>
-      h(NTag, { size: 'small', bordered: false, type: entryTone(row.status) }, () => row.status),
+      h(TStatusBadge, {
+        value: (row.status ?? '').toLowerCase(),
+        label: row.status,
+        mapping: {
+          healthy: { type: 'success' },
+          degraded: { type: 'warning' },
+          unhealthy: { type: 'error' },
+        },
+      }),
   },
   { title: () => t('cols.name'), key: 'name', width: 220 },
   {

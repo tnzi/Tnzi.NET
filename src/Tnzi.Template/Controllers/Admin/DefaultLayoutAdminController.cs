@@ -6,6 +6,7 @@ namespace Tnzi.Template.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/layouts")]
+[ApiAuthorize(PermissionName = "template.layout.view")]
 public class DefaultLayoutAdminController : ApiAdminControllerBase
 {
     protected readonly ILayoutStoreService LayoutStoreService;

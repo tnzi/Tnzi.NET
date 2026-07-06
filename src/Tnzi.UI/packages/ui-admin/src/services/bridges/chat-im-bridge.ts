@@ -15,6 +15,7 @@ import type {
   SendMessageDto,
   CreateGroupDto,
   ChatContactDto,
+  ChatClientConfigDto,
   ConversationMemberSettingsDto,
   ChatContactProfileDto,
   UserPresenceDto,
@@ -44,12 +45,14 @@ export interface ChatImBridge {
   searchContacts(keyword: string): Promise<ChatContactDto[]>
   updateMemberSettings(id: string, settings: ConversationMemberSettingsDto): Promise<void>
   clearHistory(id: string): Promise<void>
+  deleteForMe(id: string): Promise<void>
   searchMessages(id: string, params: { keyword: string; before?: string; limit?: number }): Promise<MessageThreadDto>
   updateNotice(id: string, notice: string | null): Promise<void>
   getContactProfile(userId: string): Promise<ChatContactProfileDto>
   setStatus(status: UserPresenceStatus): Promise<void>
   getMyStatus(): Promise<UserPresenceStatus>
   getPresence(userIds: string[]): Promise<UserPresenceDto[]>
+  getConfig(): Promise<ChatClientConfigDto>
 }
 
 export function createChatImBridge(deps: { client?: HttpClient; api?: ChatImApi }): ChatImBridge {
@@ -75,11 +78,13 @@ export function createChatImBridge(deps: { client?: HttpClient; api?: ChatImApi 
     searchContacts: async (keyword) => unwrap(await api.searchContacts(keyword)),
     updateMemberSettings: async (id, s) => { await api.updateMemberSettings(id, s) },
     clearHistory: async (id) => { await api.clearHistory(id) },
+    deleteForMe: async (id) => { await api.deleteForMe(id) },
     searchMessages: async (id, p) => unwrap(await api.searchMessages(id, p)),
     updateNotice: async (id, notice) => { await api.updateNotice(id, notice) },
     getContactProfile: async (userId) => unwrap(await api.getContactProfile(userId)),
     setStatus: async (status) => { await presence!.setStatus(status) },
     getMyStatus: async () => unwrap(await presence!.getMyStatus()),
     getPresence: async (userIds) => unwrap(await presence!.getPresence(userIds)),
+    getConfig: async () => unwrap(await api.getConfig()),
   }
 }

@@ -14,6 +14,8 @@
 import { h } from 'vue'
 import { NTag, NTooltip } from 'naive-ui'
 import { formatDateTime } from '@tnzi/core'
+import type { StatusType } from '@tnzi/ui'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import type {
@@ -24,56 +26,114 @@ import type {
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
+// Absolute i18n namespace for this page — TStatusBadge's admin wrapper
+// resolves `labelKey` from the locale root, so the mapping keys must be fully
+// qualified (not the page-scoped short keys the page translator accepts).
+const PERM_NS = 'admin.modules.ai.permissions'
+
+// ── Enum normalisation ──────────────────────────────────────────────────────
+// The backend serialises these enums as their PascalCase member NAME
+// (JsonStringEnumConverter); a numeric ordinal is still accepted for backward
+// compatibility. Every helper below normalises through these so a `"Deny"`
+// string OR a legacy `2` both resolve to the same tone/weight/label.
+type BehaviorName = 'Allow' | 'Ask' | 'Deny'
+type ScopeName = 'System' | 'Project' | 'User' | 'Session'
+
+/** Normalise a behavior value (member name OR ordinal) to its member name. */
+export function behaviorName(b: PermissionBehavior | string | number): BehaviorName {
+  const map: Record<string, BehaviorName> = {
+    '0': 'Allow', '1': 'Ask', '2': 'Deny',
+    Allow: 'Allow', Ask: 'Ask', Deny: 'Deny',
+  }
+  return map[String(b)] ?? 'Allow'
+}
+
+/** Normalise a scope value (member name OR ordinal) to its member name. */
+export function scopeName(s: ToolPermissionScope | string | number): ScopeName {
+  const map: Record<string, ScopeName> = {
+    '0': 'System', '1': 'Project', '2': 'User', '3': 'Session',
+    System: 'System', Project: 'Project', User: 'User', Session: 'Session',
+  }
+  return map[String(s)] ?? 'System'
+}
+
+/** behavior enum → unified status pill. Both the member-name (`"Allow"`) and the
+ *  legacy ordinal (`0`) key each entry so TStatusBadge's `String(value)` lookup
+ *  resolves regardless of wire form. Shared by the persisted-rules columns
+ *  (config) and the session-rules columns (page). */
+export const behaviorBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
+  0: { type: 'success', labelKey: `${PERM_NS}.behavior.allow` },
+  1: { type: 'warning', labelKey: `${PERM_NS}.behavior.ask` },
+  2: { type: 'error', labelKey: `${PERM_NS}.behavior.deny` },
+  Allow: { type: 'success', labelKey: `${PERM_NS}.behavior.allow` },
+  Ask: { type: 'warning', labelKey: `${PERM_NS}.behavior.ask` },
+  Deny: { type: 'error', labelKey: `${PERM_NS}.behavior.deny` },
+}
+
+/** scope enum → unified status pill (member-name + legacy-ordinal keys).
+ *  All scopes share the neutral `info` tone (matches the pre-migration look);
+ *  the relative weight is surfaced via the tooltip in the persisted columns. */
+export const scopeBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
+  0: { type: 'info', labelKey: `${PERM_NS}.scope.system` },
+  1: { type: 'info', labelKey: `${PERM_NS}.scope.project` },
+  2: { type: 'info', labelKey: `${PERM_NS}.scope.user` },
+  3: { type: 'info', labelKey: `${PERM_NS}.scope.session` },
+  System: { type: 'info', labelKey: `${PERM_NS}.scope.system` },
+  Project: { type: 'info', labelKey: `${PERM_NS}.scope.project` },
+  User: { type: 'info', labelKey: `${PERM_NS}.scope.user` },
+  Session: { type: 'info', labelKey: `${PERM_NS}.scope.session` },
+}
+
 // ── Conflict-resolution helpers (mirror the backend evaluator) ──────────────
 //   Scope:    Session=4 > User=3 > Project=2 > System=1
 //   Behavior: Deny=2 (wins ties) > Ask=1 > Allow=0
-export function behaviorTone(b: PermissionBehavior): 'success' | 'warning' | 'error' {
-  switch (b) {
-    case 0: return 'success'
-    case 1: return 'warning'
-    case 2: return 'error'
+export function behaviorTone(b: PermissionBehavior | string | number): 'success' | 'warning' | 'error' {
+  switch (behaviorName(b)) {
+    case 'Allow': return 'success'
+    case 'Ask': return 'warning'
+    case 'Deny': return 'error'
     default: return 'error'
   }
 }
-export function behaviorIcon(b: PermissionBehavior): string {
-  switch (b) {
-    case 0: return 'mdi:check-circle'
-    case 1: return 'mdi:help-circle'
-    case 2: return 'mdi:close-circle'
+export function behaviorIcon(b: PermissionBehavior | string | number): string {
+  switch (behaviorName(b)) {
+    case 'Allow': return 'mdi:check-circle'
+    case 'Ask': return 'mdi:help-circle'
+    case 'Deny': return 'mdi:close-circle'
     default: return 'mdi:help-circle'
   }
 }
-export function scopeWeight(s: ToolPermissionScope): number {
-  switch (s) {
-    case 3: return 4 // Session
-    case 2: return 3 // User
-    case 1: return 2 // Project
-    case 0: return 1 // System
+export function scopeWeight(s: ToolPermissionScope | string | number): number {
+  switch (scopeName(s)) {
+    case 'Session': return 4
+    case 'User': return 3
+    case 'Project': return 2
+    case 'System': return 1
     default: return 0
   }
 }
-export function behaviorWeight(b: PermissionBehavior): number {
-  switch (b) {
-    case 2: return 2 // Deny
-    case 1: return 1 // Ask
-    case 0: return 0 // Allow
+export function behaviorWeight(b: PermissionBehavior | string | number): number {
+  switch (behaviorName(b)) {
+    case 'Deny': return 2
+    case 'Ask': return 1
+    case 'Allow': return 0
     default: return 0
   }
 }
-export function behaviorLabel(b: PermissionBehavior, t: Translate): string {
-  switch (b) {
-    case 0: return t('behavior.allow')
-    case 1: return t('behavior.ask')
-    case 2: return t('behavior.deny')
+export function behaviorLabel(b: PermissionBehavior | string | number, t: Translate): string {
+  switch (behaviorName(b)) {
+    case 'Allow': return t('behavior.allow')
+    case 'Ask': return t('behavior.ask')
+    case 'Deny': return t('behavior.deny')
     default: return String(b)
   }
 }
-export function scopeLabel(s: ToolPermissionScope, t: Translate): string {
-  switch (s) {
-    case 0: return t('scope.system')
-    case 1: return t('scope.project')
-    case 2: return t('scope.user')
-    case 3: return t('scope.session')
+export function scopeLabel(s: ToolPermissionScope | string | number, t: Translate): string {
+  switch (scopeName(s)) {
+    case 'System': return t('scope.system')
+    case 'Project': return t('scope.project')
+    case 'User': return t('scope.user')
+    case 'Session': return t('scope.session')
     default: return String(s)
   }
 }
@@ -89,7 +149,7 @@ export function buildPersistedColumns(t: Translate): ColumnDef[] {
       key: 'behavior',
       title: 'cols.behavior',
       width: 110,
-      render: (row) => h(NTag, { size: 'small', bordered: false, type: behaviorTone(row.behavior) }, () => behaviorLabel(row.behavior, t)),
+      render: (row) => h(TStatusBadge, { value: row.behavior, mapping: behaviorBadgeMapping }),
     },
     { key: 'priority', title: 'cols.priority', width: 90, render: (row) => String(row.priority ?? '—') },
     {
@@ -101,7 +161,7 @@ export function buildPersistedColumns(t: Translate): ColumnDef[] {
           NTooltip,
           { trigger: 'hover' },
           {
-            trigger: () => h(NTag, { size: 'small', bordered: false, type: 'info' }, () => scopeLabel(row.scope, t)),
+            trigger: () => h(TStatusBadge, { value: row.scope, mapping: scopeBadgeMapping }),
             default: () => t('scope.weight', { n: scopeWeight(row.scope) }),
           },
         ),
@@ -120,9 +180,12 @@ export function buildPersistedColumns(t: Translate): ColumnDef[] {
       width: 150,
       render: (row) =>
         h('div', { class: 'flex flex-wrap gap-4px' }, [
+          // `destructive` / `subagent` are decorative feature-flag chips (not a
+          // semantic status value), so they stay plain NTags. The enabled state
+          // is a real status → unified status pill.
           row.isDestructiveOnly ? h(NTag, { size: 'tiny', bordered: false, type: 'warning' }, () => 'destructive') : null,
           row.isSubAgentOnly ? h(NTag, { size: 'tiny', bordered: false, type: 'info' }, () => 'subagent') : null,
-          !row.isEnabled ? h(NTag, { size: 'tiny', bordered: false }, () => t('status.disabled')) : null,
+          !row.isEnabled ? h(TStatusBadge, { value: false, size: 'tiny', type: 'default', labelKey: `${PERM_NS}.status.disabled` }) : null,
         ]),
     },
     { key: 'creationTime', title: 'cols.creationTime', width: 170, render: (row) => formatDateTime(row.creationTime) },
@@ -141,10 +204,12 @@ export const persistedFormSchema: FormSchemaItem[] = [
     labelKey: 'form.behavior', label: 'Behavior',
     type: 'select',
     required: true,
+    // Option values are the enum MEMBER NAMES so an edit prefill matches the
+    // wire form (JsonStringEnumConverter). The backend accepts strings on write.
     options: [
-      { value: 0, labelKey: 'behavior.allow', label: 'Allow' },
-      { value: 1, labelKey: 'behavior.ask', label: 'Ask' },
-      { value: 2, labelKey: 'behavior.deny', label: 'Deny' },
+      { value: 'Allow', labelKey: 'behavior.allow', label: 'Allow' },
+      { value: 'Ask', labelKey: 'behavior.ask', label: 'Ask' },
+      { value: 'Deny', labelKey: 'behavior.deny', label: 'Deny' },
     ],
   },
   {
@@ -153,10 +218,10 @@ export const persistedFormSchema: FormSchemaItem[] = [
     type: 'select',
     required: true,
     options: [
-      { value: 0, labelKey: 'scope.system', label: 'System' },
-      { value: 1, labelKey: 'scope.project', label: 'Project' },
-      { value: 2, labelKey: 'scope.user', label: 'User' },
-      { value: 3, labelKey: 'scope.session', label: 'Session' },
+      { value: 'System', labelKey: 'scope.system', label: 'System' },
+      { value: 'Project', labelKey: 'scope.project', label: 'Project' },
+      { value: 'User', labelKey: 'scope.user', label: 'User' },
+      { value: 'Session', labelKey: 'scope.session', label: 'Session' },
     ],
   },
   { key: 'priority', labelKey: 'form.priority', label: 'Priority', type: 'number', min: 0, max: 1000 },

@@ -1,29 +1,38 @@
 <template>
   <div class="t-conv-pane">
-    <!-- Header (always present so the window has a consistent top bar + close) -->
-    <div class="t-conv-pane__header">
-      <button v-if="isSm && conversation" class="t-conv-pane__icon-btn t-conv-pane__back" :title="t('back')" @click="emit('back')">
+    <!-- Header (always present): a single 52px bar matching the conversation
+         list's avatar/search row. It doubles as the window drag strip
+         (drag-start handled by TChatWindow) and hosts the window controls via
+         the #winctl slot on desktop, so the two columns share one top line. -->
+    <div class="t-conv-pane__header" @mousedown="emit('drag-start', $event)">
+      <button v-if="isSm && conversation" class="t-conv-pane__icon-btn t-conv-pane__back" :title="t('back')" @mousedown.stop @click="emit('back')">
         <Icon icon="mdi:arrow-left" :width="20" />
       </button>
 
-      <div v-if="conversation" class="t-conv-pane__titles">
-        <span class="t-conv-pane__title">{{ headerTitle }}</span>
+      <div class="t-conv-pane__titles">
+        <template v-if="conversation">
+          <span class="t-conv-pane__title">{{ headerTitle }}</span>
+          <!-- Info panel toggle: a quiet thin-stroke gear right after the
+               title (a content action, clearly apart from the window controls
+               at the far right). Lucide's stroke style keeps it unobtrusive
+               next to the title text. System conversations have no settings
+               (no members/remark/mute of interest), so no toggle at all. -->
+          <button
+            v-if="showInfoToggle"
+            class="t-conv-pane__icon-btn t-conv-pane__info-toggle"
+            :class="{ 't-conv-pane__icon-btn--active': infoShow }"
+            :title="t('window.info')"
+            @mousedown.stop
+            @click="emit('toggle-info')"
+          >
+            <Icon icon="lucide:settings" :width="15" />
+          </button>
+        </template>
       </div>
-      <div v-else class="t-conv-pane__titles" />
 
-      <!-- Content actions only — window controls (maximize/close) live in the
-           window title bar, so the "..." info button never reads as a window
-           control (it used to sit next to close and looked like a minimize). -->
-      <div class="t-conv-pane__actions">
-        <button
-          v-if="conversation"
-          class="t-conv-pane__icon-btn"
-          :class="{ 't-conv-pane__icon-btn--active': infoShow }"
-          :title="t('window.info')"
-          @click="emit('toggle-info')"
-        >
-          <Icon icon="mdi:dots-horizontal" :width="18" />
-        </button>
+      <!-- Window controls (maximize/close) injected by TChatWindow on desktop. -->
+      <div class="t-conv-pane__actions" @mousedown.stop>
+        <slot name="winctl" />
       </div>
     </div>
 
@@ -34,7 +43,9 @@
       <div class="t-conv-pane__col">
         <div class="t-conv-pane__main">
           <div v-if="!conversation" class="t-conv-pane__empty">
-            <Icon icon="mdi:message-text-outline" :width="56" class="t-conv-pane__empty-icon" />
+            <!-- Same glyph as the chat launcher so the empty state reads as
+                 part of the same feature. -->
+            <Icon icon="nimbus:chat-dots" :width="56" class="t-conv-pane__empty-icon" />
             <span class="t-conv-pane__empty-text">{{ t('window.emptyPane') }}</span>
           </div>
           <TMessageList
@@ -55,6 +66,7 @@
           :upload-progress="uploadProgress"
           :upload-kind="uploadKind"
           :upload-name="uploadName"
+          :attachments="attachments"
           @send="emit('send', $event)"
           @pick-file="emit('pick-file')"
           @drop-file="emit('drop-file', $event)"
@@ -98,6 +110,8 @@ const props = defineProps<{
   uploadKind?: 'image' | 'file'
   uploadName?: string
   infoShow?: boolean
+  /** Deployment file-message toggle — false hides the attachment entry. */
+  attachments?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -108,6 +122,7 @@ const emit = defineEmits<{
   'update:info-show': [v: boolean]
   'panel-changed': []
   'open-conversation': [id: string]
+  'drag-start': [e: MouseEvent]
   back: []
 }>()
 
@@ -121,6 +136,11 @@ const headerTitle = computed(() => {
   if (!c) return ''
   return c.type === ConversationType.Group ? `${c.title} (${c.memberCount})` : c.title
 })
+
+// System conversations are read-only announcements — no info panel to open.
+const showInfoToggle = computed(
+  () => !!props.conversation && props.conversation.type !== ConversationType.System,
+)
 </script>
 
 <style scoped>
@@ -137,21 +157,26 @@ const headerTitle = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 44px;
+  /* Same height as the list's avatar/search row (.t-conv-list__top:
+     12px + 30px content + 10px), so both columns share one top line. */
+  height: 52px;
   padding: 0 12px 0 18px;
   border-bottom: 1px solid var(--chat-border, #e6e6e6);
   flex-shrink: 0;
+  /* The whole bar is the window drag handle. */
+  cursor: move;
 }
 
 .t-conv-pane__titles {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 4px;
 }
 
 .t-conv-pane__title {
+  min-width: 0;
   font-size: 16px;
   font-weight: 500;
   color: var(--chat-text, #1f1f1f);
@@ -189,6 +214,14 @@ const headerTitle = computed(() => {
 .t-conv-pane__icon-btn--active {
   background: var(--chat-active, #e0e0e0);
   color: var(--chat-text, #1f1f1f);
+}
+
+/* Info toggle next to the title: quieter than a regular icon button (faint
+   until hovered) and slightly smaller so it reads as part of the title. */
+.t-conv-pane__info-toggle {
+  width: 22px;
+  height: 22px;
+  color: var(--chat-text-3, #9b9b9b);
 }
 
 /* ── Body row: message column + slide-in panel ──────────────────────────── */
@@ -252,6 +285,13 @@ const headerTitle = computed(() => {
    column. Let it cover the body (absolute, full-width) instead — desktop keeps
    the side-by-side slide-in. */
 @media (max-width: 768px) {
+  /* Match the conversation list's 12px edge padding so the back arrow sits on
+     the same left line as the list avatars (the desktop 18px is tuned for a
+     leading title, not a leading icon button). */
+  .t-conv-pane__header {
+    padding: 0 12px;
+  }
+
   .t-conv-pane__body {
     position: relative;
   }

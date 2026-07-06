@@ -15,32 +15,37 @@ export type { MenuBadgeType, FeatureRequirementType };
 // Enums
 // ============================================
 
+// The backend registers a global JsonStringEnumConverter, so every enum-typed
+// response field serializes as its PascalCase member name (and input still
+// accepts both the name and the legacy integer). These enums use string member
+// values to match the wire shape exactly.
+
 /**
  * Menu type
  */
 export enum MenuType {
-  Directory = 0,
-  Menu = 1,
-  Button = 2,
+  Directory = 'Directory',
+  Menu = 'Menu',
+  Button = 'Button',
 }
 
 /**
  * Setting value type
  */
 export enum SettingValueType {
-  String = 0,
-  Integer = 1,
-  Boolean = 2,
-  Json = 3,
+  String = 'String',
+  Integer = 'Integer',
+  Boolean = 'Boolean',
+  Json = 'Json',
 }
 
 /**
  * Setting scope
  */
 export enum SettingScope {
-  Global = 0,
-  Tenant = 1,
-  User = 2,
+  Global = 'Global',
+  Tenant = 'Tenant',
+  User = 'User',
 }
 
 /**

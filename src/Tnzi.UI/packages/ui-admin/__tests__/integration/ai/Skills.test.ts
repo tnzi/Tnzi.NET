@@ -226,17 +226,21 @@ describe('Skills page (production-grade card grid)', () => {
     expect(activate).toHaveBeenCalledWith('s2')
   })
 
-  it('openDetail loads full content via getBySlug', async () => {
+  it('opening the view state loads full content via getBySlug', async () => {
     const wrapper = mount(Skills, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openDetail: (s: { slug: string; name: string }) => Promise<void>
-      detailVisible: boolean
+      crud: {
+        openView: (s: { slug: string; name: string }) => void
+        formModal: { visible: { value: boolean }; mode: { value: string | null } }
+      }
       detailContent: { content: string }
     }
-    await vm.openDetail({ slug: 'write-blog-post', name: 'Write Blog Post' })
+    // The detail rides the CRUD `view` open-state; `onView` lazy-loads the body.
+    vm.crud.openView({ slug: 'write-blog-post', name: 'Write Blog Post' })
     await flushPromises()
-    expect(vm.detailVisible).toBe(true)
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
     expect(getBySlug).toHaveBeenCalledWith('write-blog-post')
     expect(vm.detailContent.content).toContain('Full SKILL.md body')
   })

@@ -28,6 +28,13 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
   creatorName?: string | null;
   /** Owning folder id; null = root / unfiled. */
   folderId?: string | null;
+  /**
+   * Custom tags. The backend stores + serializes these as a single
+   * comma-separated string (e.g. `"invoice,2026,paid"`), not an array — split
+   * on `,` (trimming + dropping blanks) to read individual tags. Null / empty
+   * when the file has no tags.
+   */
+  tags?: string | null;
   url: string;
   thumbnailUrl?: string | null;
 }

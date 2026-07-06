@@ -3,27 +3,26 @@
     Quotas — budget cost dashboard + per-user AI token quota CRUD.
 
     Top:  a budget dashboard strip fed by `quota.getBudgetSummary()`
-          (GET /admin/quotas/budget/summary — defaults to the current month
+          (GET /admin/quotas/budget/summary - defaults to the current month
           when no time range is supplied). KPI cards (spend / limit / usage %
           with a progress bar / status badge) + a per-agent spend breakdown.
     Body: the quota rules table (TCrudPage). Create/edit upsert via
           quota.setQuota (idempotent, keyed on userId). Delete is not
-          supported by the bridge — `deleteData` is omitted so the delete
+          supported by the bridge - `deleteData` is omitted so the delete
           affordance is hidden automatically.
   -->
   <!--
     Tabbed layout: a normal screen height can't show the per-agent spend
     breakdown table AND the quota-rules table stacked. Two tabs give each list
-    the full residual height (t-table-tabs); the rules tab is the default.
-    The page-header bar (TContentPage) owns the single title + the user-ID
-    search; the tabs sit right below it.
+    the full residual height; the rules tab is the default. TTabsPage owns the
+    white page-header bar (title + the user-ID search) and the tab surface.
   -->
-  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+  <TTabsPage :title="t('title')" :translate="t" :sections="tabs" default-section="rules">
     <!-- User-ID search in the page-header bar (C2). The quota query endpoint
          filters on `userId` (free-text searchText is ignored by the bridge),
          so the input drives `filters.userId` directly. Rules tab only. -->
-    <template #actions>
-      <div v-if="activeTab === 'rules'" class="ai-quota-page__search">
+    <template #actions="{ active }">
+      <div v-if="active === 'rules'" class="ai-quota-page__search">
         <NInput
           v-model:value="userIdQuery"
           size="small"
@@ -41,111 +40,158 @@
       </div>
     </template>
 
-    <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
-      <!-- ── Quota rules ───────────────────────────────────────────── -->
-      <NTabPane name="rules" :tab="t('tabs.rules')" display-directive="show">
-        <div class="t-table-tabs__pane">
-          <!-- show-header=false suppresses the shell's header bar — title +
-               search live on the outer TContentPage (otherwise the shell
-               falls back to the route meta title and renders a duplicate
-               bar). -->
-          <TCrudPage
-            :state="crud"
-            :all-columns="quotaColumns"
-            :form-modal-width="640"
-            :show-header="false"
-            :translate="t"
-            :row-actions="rowActions"
-          >
-            <template #form="{ formData, mode }">
-              <TFormSchemaRenderer
-                :schema="quotaFormSchema"
-                :model="(formData ?? {}) as Record<string, unknown>"
-                :readonly="mode === 'view'"
-                :translate="t"
-                :columns="2"
+    <!-- ── Quota rules (card list) ───────────────────────────────── -->
+    <template #rules>
+      <!-- show-header=false suppresses the shell's header bar - title +
+           search live on the outer TTabsPage header (otherwise the shell
+           falls back to the route meta title and renders a duplicate
+           bar). Create is upsert-by-userId; there is no per-row delete. -->
+      <TCardPage
+        :state="crud"
+        mode="page"
+        :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
+        :form-modal-width="640"
+        :show-header="false"
+        :translate="t"
+      >
+        <template #card="{ item }">
+          <TEntityCard clickable @click="crud.openEdit(item)">
+            <div class="flex items-center justify-between gap-8px mb-8px">
+              <code class="ai-quota-card__uid" :title="item.userId">{{ shortId(item.userId) }}</code>
+              <div class="flex items-center gap-4px flex-shrink-0">
+                <TStatusBadge :value="warningLevelValue(item)" :mapping="warningLevelBadgeMapping" size="small" />
+                <TStatusBadge :value="Boolean(item.isEnabled)" :mapping="enabledBadgeMapping" size="small" />
+              </div>
+            </div>
+
+            <div class="ai-quota-card__limits">
+              <div class="ai-quota-card__limit">
+                <span class="ai-quota-card__limit-label">{{ t('columns.dailyTokenLimit') }}</span>
+                <span class="ai-quota-card__limit-value">{{ formatLimit(item.dailyTokenLimit) }}</span>
+              </div>
+              <div class="ai-quota-card__limit">
+                <span class="ai-quota-card__limit-label">{{ t('columns.monthlyTokenLimit') }}</span>
+                <span class="ai-quota-card__limit-value">{{ formatLimit(item.monthlyTokenLimit) }}</span>
+              </div>
+            </div>
+
+            <div class="ai-quota-card__usage">
+              <div class="ai-quota-card__usage-head">
+                <span>{{ t('card.dailyUsage') }}</span>
+                <span class="font-mono">{{ formatTokens(item.currentDailyUsage) }} · {{ formatPercent(item.dailyUsagePercentage) }}</span>
+              </div>
+              <NProgress
+                type="line"
+                :percentage="percentValue(item.dailyUsagePercentage)"
+                :height="6"
+                :show-indicator="false"
+                :status="usageStatus(item.dailyUsagePercentage)"
               />
-            </template>
-          </TCrudPage>
-        </div>
-      </NTabPane>
+            </div>
+            <div class="ai-quota-card__usage">
+              <div class="ai-quota-card__usage-head">
+                <span>{{ t('card.monthlyUsage') }}</span>
+                <span class="font-mono">{{ formatTokens(item.currentMonthlyUsage) }} · {{ formatPercent(item.monthlyUsagePercentage) }}</span>
+              </div>
+              <NProgress
+                type="line"
+                :percentage="percentValue(item.monthlyUsagePercentage)"
+                :height="6"
+                :show-indicator="false"
+                :status="usageStatus(item.monthlyUsagePercentage)"
+              />
+            </div>
 
-      <!-- ── Budget (KPIs + per-agent spend breakdown) ─────────────── -->
-      <NTabPane name="budget" :tab="t('tabs.budget')" display-directive="show">
-        <div class="t-table-tabs__pane">
-          <div class="ai-quota-budget__kpis">
-            <NCard size="small" :bordered="false">
-              <NStatistic :label="t('budget.spend')">
-                <span class="text-success font-600">${{ formatUsd(budget.currentSpendUsd) }}</span>
-              </NStatistic>
-            </NCard>
-            <NCard size="small" :bordered="false">
-              <NStatistic :label="t('budget.limit')">
-                <span class="font-600">{{ budget.budgetLimitUsd > 0 ? `$${formatUsd(budget.budgetLimitUsd)}` : t('budget.noLimit') }}</span>
-              </NStatistic>
-            </NCard>
-            <NCard size="small" :bordered="false">
-              <NStatistic :label="t('budget.usage')">
-                <div class="flex flex-col gap-6px">
-                  <span class="font-600">{{ formatPercent(budget.usagePercentage) }}</span>
-                  <NProgress
-                    type="line"
-                    :percentage="usagePercent"
-                    :status="progressStatus"
-                    :show-indicator="false"
-                    :height="6"
-                  />
-                </div>
-              </NStatistic>
-            </NCard>
-            <NCard size="small" :bordered="false">
-              <NStatistic :label="t('budget.status')">
-                <NTag size="small" :type="statusTagType" :bordered="false">
-                  {{ t(`budget.statusValue.${budget.status}`) }}
-                </NTag>
-              </NStatistic>
-            </NCard>
-          </div>
-
-          <!-- Per-agent spend breakdown — fills the residual height + scrolls. -->
-          <NCard size="small" :bordered="false" class="ai-quota-budget__breakdown t-table-card" :title="t('budget.byAgent')">
-            <template #header-extra>
-              <NButton size="small" tertiary :loading="budgetLoading" @click="refreshBudget">
-                <template #icon><TSvgIcon icon="mdi:refresh" :size="16" /></template>
-                {{ t('budget.refresh') }}
-              </NButton>
+            <template #actions>
+              <span class="ai-quota-card__modified mr-auto">{{ formatModified(item) }}</span>
+              <NButton size="small" ghost @click="crud.openEdit(item)">{{ t('actions.edit') }}</NButton>
             </template>
-            <TResponsiveTable
-              :columns="agentSpendColumns"
-              :data="budget.byAgent ?? []"
-              :loading="budgetLoading"
-              :row-key="(r: AgentSpendDto) => r.agentId ?? r.agentName"
-              :pagination="false"
-              :flex-height="true"
-              size="small"
-              :empty-text="t('budget.noSpend')"
+          </TEntityCard>
+        </template>
+
+        <template #form="{ formData, mode }">
+          <TFormSchemaRenderer
+            :schema="quotaFormSchema"
+            :model="(formData ?? {}) as Record<string, unknown>"
+            :readonly="mode === 'view'"
+            :translate="t"
+            :columns="2"
+          />
+        </template>
+      </TCardPage>
+    </template>
+
+    <!-- ── Budget (KPIs + per-agent spend breakdown) ─────────────── -->
+    <template #budget>
+      <TKpiRow cols="1 s:2 m:4" class="ai-quota-budget__kpis">
+        <TKpiCard :label="t('budget.spend')" :value="`$${formatUsd(budget.currentSpendUsd)}`" tone="success" />
+        <TKpiCard
+          :label="t('budget.limit')"
+          :value="budget.budgetLimitUsd > 0 ? `$${formatUsd(budget.budgetLimitUsd)}` : t('budget.noLimit')"
+        />
+        <TKpiCard :label="t('budget.usage')" :value="formatPercent(budget.usagePercentage)">
+          <template #footer>
+            <NProgress
+              type="line"
+              :percentage="usagePercent"
+              :status="progressStatus"
+              :show-indicator="false"
+              :height="6"
             />
-          </NCard>
-        </div>
-      </NTabPane>
-    </NTabs>
-  </TContentPage>
+          </template>
+        </TKpiCard>
+        <TKpiCard :label="t('budget.status')" :value="t(`budget.statusValue.${budgetStatusValue}`)" :tone="statusTagType" />
+      </TKpiRow>
+
+      <!-- Per-agent spend breakdown - fills the residual height + scrolls. -->
+      <NCard size="small" :bordered="false" class="ai-quota-budget__breakdown t-table-card t-tab-card" :title="t('budget.byAgent')">
+        <template #header-extra>
+          <NButton size="small" tertiary :loading="budgetLoading" @click="refreshBudget">
+            <template #icon><TSvgIcon icon="mdi:refresh" :size="16" /></template>
+            {{ t('budget.refresh') }}
+          </NButton>
+        </template>
+        <TResponsiveTable
+          :columns="agentSpendColumns"
+          :data="budget.byAgent ?? []"
+          :loading="budgetLoading"
+          :row-key="(r: AgentSpendDto) => r.agentId ?? r.agentName"
+          :pagination="false"
+          :flex-height="true"
+          size="small"
+          :empty-text="t('budget.noSpend')"
+        />
+      </NCard>
+    </template>
+  </TTabsPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NCard, NInput, NProgress, NStatistic, NTabPane, NTabs, NTag, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NInput, NProgress, NTag, type DataTableColumns } from 'naive-ui'
+import { formatDateTime } from '@tnzi/core'
+import { TKpiCard, TKpiRow } from '../../../components/data'
 import { TSvgIcon } from '@tnzi/ui'
-import TContentPage from '../../../components/layout/TContentPage.vue'
-import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage.vue'
+import TCardPage from '../../../components/crud/TCardPage.vue'
+import TEntityCard from '../../../components/data/TEntityCard.vue'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
-import { editAction, type RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
-import { translatePageKey } from '../../_shared/translate'
-import { quotaColumns, quotaFormSchema } from './quota-config'
+import { makePageTranslator } from '../../_shared/translate'
+import {
+  quotaColumns,
+  quotaFormSchema,
+  formatLimit,
+  formatTokens,
+  percentValue,
+  warningLevelBadgeMapping,
+  enabledBadgeMapping,
+  warningLevelValue,
+} from './quota-config'
 import type {
   UserQuotaDto,
   SetQuotaDto,
@@ -153,11 +199,18 @@ import type {
   AgentSpendDto,
 } from '@tnzi/core/services/ai'
 
-const t = (key: string) => translatePageKey('ai.quota', key)
+const t = makePageTranslator('ai.quota')
 
 const bridge = createAiBridge({ client: useAdminClient() })
 
-const activeTab = ref<'rules' | 'budget'>('rules')
+// Primary tabs. TTabsPage owns the `?section=` deep-linking + Back/Forward.
+// Rules is a single flex-height table; budget is a KPI strip + a flex-height
+// breakdown table - neither pane owns its own scroll. Both keep every pane
+// mounted (displayDirective 'show') so state survives tab switches.
+const tabs: TabSection[] = [
+  { name: 'rules', label: t('tabs.rules'), displayDirective: 'show' },
+  { name: 'budget', label: t('tabs.budget'), displayDirective: 'show' },
+]
 
 const crud = useCrudPage<UserQuotaDto>({
   pageId: 'ai.quota',
@@ -166,14 +219,35 @@ const crud = useCrudPage<UserQuotaDto>({
   fetchData: (query) => bridge.quota.fetch(query),
   createData: (data) => bridge.quota.create(data as SetQuotaDto),
   updateData: (_id, data) => bridge.quota.update(String(_id), data as SetQuotaDto),
-  // No deleteData — quota.delete is not supported by the bridge (the delete
+  // No deleteData - quota.delete is not supported by the bridge (the delete
   // affordance is hidden automatically when deleteData is omitted).
 })
 
-// Edit only — quotas are upserted by userId; there is no per-row delete.
-const rowActions: RowAction<UserQuotaDto>[] = [editAction(crud)]
+// --- card helpers -----------------------------------------------------------
+/** GUID truncated to its first 8 chars for the card header (full in `title`). */
+function shortId(value: string | null | undefined): string {
+  const full = value ?? ''
+  if (!full) return '—'
+  return full.length > 8 ? `${full.slice(0, 8)}…` : full
+}
 
-// Header user-ID search — drives the query's `filters.userId` (the backend
+/** Colour a usage progress bar by how close it is to the limit. */
+function usageStatus(ratio: number | null | undefined): 'default' | 'warning' | 'error' {
+  const pct = percentValue(ratio)
+  if (pct >= 90) return 'error'
+  if (pct >= 70) return 'warning'
+  return 'default'
+}
+
+/** Last-modified line shown in the card footer (falls back to an em dash). */
+function formatModified(row: UserQuotaDto): string {
+  return formatDateTime(
+    (row as { lastModificationTime?: string | null }).lastModificationTime,
+    { fallback: '—' },
+  )
+}
+
+// Header user-ID search - drives the query's `filters.userId` (the backend
 // quota query has no free-text keyword; userId is the supported filter).
 const userIdQuery = ref('')
 function onUserIdSearch(): void {
@@ -193,7 +267,7 @@ const emptyBudget: BudgetSummaryDto = {
   currentSpendUsd: 0,
   budgetLimitUsd: 0,
   usagePercentage: 0,
-  status: 0,
+  status: 'WithinBudget',
   byAgent: [],
 }
 
@@ -205,8 +279,19 @@ const usagePercent = computed(() => {
   return Math.max(0, Math.min(100, pct))
 })
 
+// BudgetStatus enum → number. The backend serialises it as the PascalCase
+// member NAME (JsonStringEnumConverter: WithinBudget / WarningThreshold /
+// BudgetExceeded); a numeric ordinal is still accepted for backward
+// compatibility. Normalising to a number keeps the `budget.statusValue.<n>`
+// i18n key + the tone comparison below working.
+const BUDGET_STATUS_VALUE: Record<string, number> = {
+  '0': 0, '1': 1, '2': 2,
+  WithinBudget: 0, WarningThreshold: 1, BudgetExceeded: 2,
+}
+const budgetStatusValue = computed(() => BUDGET_STATUS_VALUE[String(budget.value.status ?? 0)] ?? 0)
+
 const progressStatus = computed<'success' | 'warning' | 'error'>(() =>
-  budget.value.status === 2 ? 'error' : budget.value.status === 1 ? 'warning' : 'success',
+  budgetStatusValue.value === 2 ? 'error' : budgetStatusValue.value === 1 ? 'warning' : 'success',
 )
 
 const statusTagType = computed<'success' | 'warning' | 'error'>(() => progressStatus.value)
@@ -275,7 +360,6 @@ async function refreshBudget(): Promise<void> {
 }
 
 onMounted(() => {
-  crud.refresh().catch(() => undefined)
   refreshBudget().catch(() => undefined)
 })
 </script>
@@ -295,24 +379,59 @@ onMounted(() => {
   .ai-quota-page__search { flex-wrap: wrap; }
   .ai-quota-page__search-input { width: 100%; }
 }
-/* KPI strip: responsive grid (4 → 2 → 1) so it stays readable at 375px. Sits
-   above the breakdown table inside the Budget tab pane — fixed height, the
-   table below claims the rest. */
+/* KPI strip (TKpiRow) sits above the breakdown table inside the Budget tab
+   pane - fixed height, the table below claims the rest. The responsive grid is
+   TKpiRow's own; this only adds the separating gap (the pane has no row gap). */
 .ai-quota-budget__kpis {
   flex-shrink: 0;
   margin-bottom: 12px;
+}
+
+/* ── Quota rule card ──────────────────────────────────────────────────── */
+.ai-quota-card__uid {
+  font-family: var(--tnzi-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-quota-card__limits {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
 }
-@media (max-width: 1023px) {
-  .ai-quota-budget__kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.ai-quota-card__limit {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
-@media (max-width: 575px) {
-  .ai-quota-budget__kpis {
-    grid-template-columns: 1fr;
-  }
+.ai-quota-card__limit-label {
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.ai-quota-card__limit-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+.ai-quota-card__usage {
+  margin-bottom: 8px;
+}
+.ai-quota-card__usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+  margin-bottom: 4px;
+}
+.ai-quota-card__modified {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+  align-self: center;
 }
 </style>

@@ -8,7 +8,9 @@
           :name="m.name"
           :avatar-file-id="m.avatarFileId"
           :alias="m.alias"
+          :removable="canRemove && m.userId !== myId"
           @message="(uid) => emit('message', uid)"
+          @remove="(uid) => emit('remove', uid)"
         >
           <div class="t-member-grid__cell">
             <TChatAvatar
@@ -16,7 +18,7 @@
               :file-id="m.avatarFileId"
               :seed="m.userId"
               :size="AVATAR_SIZE"
-              :status="m.status"
+              :status="chatStore.config.enablePresence ? m.status : null"
             />
             <span class="t-member-grid__name">{{ m.alias || m.name }}</span>
           </div>
@@ -50,8 +52,11 @@ import { ref, computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import type { ConversationMemberDto } from '@tnzi/core/services/chat'
 import { translatePageKey } from '../../pages/_shared/translate'
+import { useChatStore } from '../../stores/useChatStore'
 import TChatAvatar from './TChatAvatar.vue'
 import TMemberPopover from './TMemberPopover.vue'
+
+const chatStore = useChatStore()
 
 const AVATAR_SIZE = 36
 
@@ -59,6 +64,10 @@ const props = withDefaults(
   defineProps<{
     members: ConversationMemberDto[]
     canAdd: boolean
+    /** Owner-only: expose "remove from group" on every member except myId. */
+    canRemove?: boolean
+    /** Current user id — the owner can never remove themselves. */
+    myId?: string
     /** Grid columns — narrower avatars + more columns fill the 250px panel width
      *  (avoids the right-side whitespace of the old 3-per-row layout). */
     columns?: number
@@ -71,6 +80,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   add: []
   message: [userId: string]
+  remove: [userId: string]
 }>()
 
 const t = (k: string) => translatePageKey('chat', k)

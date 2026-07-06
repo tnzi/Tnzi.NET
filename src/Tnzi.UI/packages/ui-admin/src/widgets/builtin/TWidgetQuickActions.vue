@@ -10,6 +10,7 @@ import { computed } from 'vue'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
 import { TSvgIcon } from '@tnzi/ui'
 import { maybeTranslate } from '../../pages/_shared/translate'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 
 export interface QuickAction {
   /** Stable key for the v-for list. */
@@ -28,6 +29,13 @@ export interface QuickAction {
    * the rest of the dashboard.
    */
   tone?: 'primary' | 'info' | 'success' | 'warning' | 'error'
+  /**
+   * Permission the action's destination requires. When set, the tile is hidden
+   * from users who lack it (super-user bypass + fail-open) so a business admin
+   * doesn't get a shortcut that only lands on a 403 (e.g. Settings →
+   * system.parameter.view). Omit for always-shown actions.
+   */
+  permission?: string
 }
 
 interface Props {
@@ -44,6 +52,16 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const router = useRouter()
+const authStore = useAdminAuthStore()
+
+// Hide actions whose destination the user can't reach (super-user bypass +
+// fail-open before permissions load), so a business admin never sees a tile
+// that only bounces to /403.
+const visibleActions = computed<QuickAction[]>(() => {
+  const bypass = authStore.isSuperUser || authStore.userInfo === null
+  if (bypass) return props.actions
+  return props.actions.filter((a) => !a.permission || authStore.hasPermission(a.permission))
+})
 
 const gridStyle = computed(() => ({
   '--t-widget-actions-cols': String(props.cols),
@@ -67,7 +85,7 @@ async function handleClick(action: QuickAction): Promise<void> {
 <template>
   <div class="t-widget-quick-actions" :style="gridStyle">
     <button
-      v-for="action in actions"
+      v-for="action in visibleActions"
       :key="action.key"
       type="button"
       class="t-widget-quick-actions__tile"

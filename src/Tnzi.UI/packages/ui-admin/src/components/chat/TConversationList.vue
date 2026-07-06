@@ -2,11 +2,18 @@
   <div class="t-conv-list">
     <div class="t-conv-list__top">
       <TPresencePicker
-        v-if="myStatus != null"
+        v-if="presence !== false && myStatus != null"
         :status="myStatus"
         :name="myName"
         :avatar-file-id="myAvatarFileId"
         @change="(s) => emit('set-status', s)"
+      />
+      <!-- Presence disabled: keep the self avatar (no dot, no status menu). -->
+      <TChatAvatar
+        v-else-if="myName"
+        :name="myName"
+        :file-id="myAvatarFileId"
+        :size="30"
       />
       <div class="t-conv-list__search" :class="{ 't-conv-list__search--focused': focused }">
         <Icon icon="mdi:magnify" :width="16" class="t-conv-list__search-icon" />
@@ -29,6 +36,9 @@
       <button class="t-conv-list__add" :title="t('window.newChat')" @click="emit('new-chat')">
         <Icon icon="mdi:plus" :width="18" />
       </button>
+      <!-- Window-level controls appended by the host (phone-only close button,
+           so the list view keeps the same 52px top line as the pane). -->
+      <slot name="actions" />
     </div>
     <NScrollbar class="t-conv-list__scroll">
       <TConversationItem
@@ -36,21 +46,41 @@
         :key="c.id"
         :item="c"
         :active="c.id === activeId"
+        :presence="presence"
         @select="emit('select', c.id)"
+        @context-menu="(e) => onItemContextMenu(e, c)"
       />
       <div v-if="ordered.length === 0" class="t-conv-list__empty">{{ t('window.empty') }}</div>
     </NScrollbar>
+
+    <!-- Right-click quick actions (pin / mute / mark-read / hide / delete).
+         Manual x/y dropdown at the cursor; z-index must clear the chat NModal. -->
+    <NDropdown
+      trigger="manual"
+      placement="bottom-start"
+      size="small"
+      :show="ctxShow"
+      :x="ctxX"
+      :y="ctxY"
+      :options="ctxOptions"
+      :z-index="POPOVER_Z"
+      @select="onCtxSelect"
+      @clickoutside="ctxShow = false"
+    />
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { NScrollbar } from 'naive-ui'
+import { ref, computed, h } from 'vue'
+import { NScrollbar, NDropdown, useDialog } from 'naive-ui'
+import type { DropdownOption, DropdownDividerOption } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import type { ConversationListItemDto } from '@tnzi/core/services/chat'
 import { ConversationType, UserPresenceStatus } from '@tnzi/core/services/chat'
 import TConversationItem from './TConversationItem.vue'
 import TPresencePicker from './TPresencePicker.vue'
+import TChatAvatar from './TChatAvatar.vue'
 import { translatePageKey } from '../../pages/_shared/translate'
 
 const props = defineProps<{
@@ -59,12 +89,19 @@ const props = defineProps<{
   myStatus?: UserPresenceStatus
   myName?: string
   myAvatarFileId?: string
+  /** Deployment presence toggle — false hides status dots and the status picker. */
+  presence?: boolean
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
   'new-chat': []
   'set-status': [UserPresenceStatus]
+  'set-sticky': [id: string, sticky: boolean]
+  'set-muted': [id: string, muted: boolean]
+  'mark-read': [id: string]
+  hide: [id: string]
+  delete: [id: string]
 }>()
 
 const t = (k: string) => translatePageKey('chat', k)
@@ -73,15 +110,97 @@ const keyword = ref('')
 const focused = ref(false)
 defineExpose({ keyword })
 
+// ── Right-click context menu (quick actions) ────────────────────────────────
+// The dropdown must clear the chat NModal, same as every popover in the window.
+const POPOVER_Z = 3000
+const ctxShow = ref(false)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxItem = ref<ConversationListItemDto | null>(null)
+
+function onItemContextMenu(e: MouseEvent, c: ConversationListItemDto) {
+  ctxItem.value = c
+  ctxX.value = e.clientX
+  ctxY.value = e.clientY
+  ctxShow.value = true
+}
+
+// Menu items reuse the info panel's exact wording (Sticky on Top / Mute
+// Notifications); the currently-active toggle carries a leading checkmark.
+// Inactive items get a same-width blank so labels stay aligned.
+const checkIcon = () => h(Icon, { icon: 'mdi:check', width: 15 })
+const blankIcon = () => h('span', { style: 'display:inline-block;width:15px' })
+
+const ctxOptions = computed<(DropdownOption | DropdownDividerOption)[]>(() => {
+  const c = ctxItem.value
+  if (!c) return []
+  const options: (DropdownOption | DropdownDividerOption)[] = []
+  // System notifications are plain announcements: no sticky / no mute (they
+  // follow the ordinary sort rules and always notify).
+  if (c.type !== ConversationType.System) {
+    options.push(
+      { key: 'sticky', label: t('window.sticky'), icon: c.isSticky ? checkIcon : blankIcon },
+      { key: 'mute', label: t('window.mute'), icon: c.isMuted ? checkIcon : blankIcon },
+    )
+  }
+  if (c.unreadCount > 0) options.push({ key: 'mark-read', label: t('window.ctxMarkRead'), icon: blankIcon })
+  options.push(
+    { key: 'hide', label: t('window.ctxHide'), icon: blankIcon },
+    { key: 'ctx-divider', type: 'divider' },
+    // Destructive: red label; selection opens a confirm dialog first.
+    { key: 'delete', label: t('window.ctxDelete'), icon: blankIcon, props: { style: { color: 'var(--chat-danger, #e64340)' } } },
+  )
+  return options
+})
+
+// Standard confirm dialog (same chrome as the admin Log out confirm). Resolved
+// defensively so the component still mounts in unit tests without an
+// <n-dialog-provider>; the admin shell always provides one in the real app.
+let dialog: ReturnType<typeof useDialog> | null = null
+try {
+  dialog = useDialog()
+} catch {
+  dialog = null
+}
+
+function confirmDelete(id: string) {
+  if (!dialog) {
+    // No dialog provider (bare/test mounts): fall back to the native confirm
+    // rather than silently skipping the destructive-action gate.
+    if (globalThis.confirm?.(t('window.deleteConversationConfirm'))) emit('delete', id)
+    return
+  }
+  dialog.error({
+    title: t('window.ctxDelete'),
+    content: t('window.deleteConversationConfirm'),
+    positiveText: t('window.ctxDelete'),
+    negativeText: t('window.cancel'),
+    onPositiveClick: () => {
+      emit('delete', id)
+    },
+  })
+}
+
+function onCtxSelect(key: string | number) {
+  ctxShow.value = false
+  const c = ctxItem.value
+  if (!c) return
+  if (key === 'sticky') emit('set-sticky', c.id, !c.isSticky)
+  else if (key === 'mute') emit('set-muted', c.id, !c.isMuted)
+  else if (key === 'mark-read') emit('mark-read', c.id)
+  else if (key === 'hide') emit('hide', c.id)
+  else if (key === 'delete') confirmDelete(c.id)
+}
+
 const ordered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   const filtered = kw
     ? props.conversations.filter((c) => (c.title ?? '').toLowerCase().includes(kw))
     : props.conversations
 
+  // System conversations sort by the SAME rules as everything else (no forced
+  // pin): sticky first, then latest activity.
   return [...filtered].sort((a, b) => {
-    if (a.type === ConversationType.System && b.type !== ConversationType.System) return -1
-    if (b.type === ConversationType.System && a.type !== ConversationType.System) return 1
     if (a.isSticky !== b.isSticky) return a.isSticky ? -1 : 1
     return new Date(b.lastMessageAt ?? 0).getTime() - new Date(a.lastMessageAt ?? 0).getTime()
   })

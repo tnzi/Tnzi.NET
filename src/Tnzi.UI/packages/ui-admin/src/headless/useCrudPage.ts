@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { PagedList } from '@tnzi/core'
 import {
   useColumnSettings,
@@ -6,8 +6,8 @@ import {
   type UseColumnSettingsReturn,
 } from './useColumnSettings'
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
-import { useFormModal, type UseFormModalReturn } from './useFormModal'
-import type { DetailMode } from './useDetail'
+import type { UseFormModalReturn } from './useFormModal'
+import { useDetail, type DetailMode } from './useDetail'
 
 /**
  * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
@@ -99,6 +99,39 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   retryDelayMs?: number
   /** Presentation mode for the add/edit/view detail. Default 'modal'. */
   detailMode?: DetailMode
+  /**
+   * Two-way sync the add/edit/view overlay (which mode + which record) to a
+   * URL query key so it is **deep-linkable, refresh-survivable and
+   * Back-closeable** — `?detail=view:<id>` / `=edit:<id>` / `=new`. On by
+   * default (key `'detail'`); a string renames the key (only to avoid a clash);
+   * `false` opts the page out. Coexists with section deep-links and business
+   * query params in the same URL (`?detail=view:42&section=overview`). No-ops
+   * without a router.
+   */
+  detailUrl?: boolean | string
+  /**
+   * Resolve a record by its (string) id so a deep-linked / refreshed
+   * `?detail=view:<id>` can hydrate even when the row isn't on the current page.
+   * Without it, deep-link restore falls back to the loaded `items` and quietly
+   * drops the URL key if the id isn't found once the list has finished loading.
+   */
+  loadDetailById?: (id: string) => Promise<T | null>
+  /**
+   * Called whenever the detail opens in **view** mode — both an in-session
+   * `openView(row)` AND a deep-link / refresh that restores `?detail=view:<id>`.
+   * Use it to lazy-load the record's related data for a read-only `#detail`
+   * drawer (e.g. the agents using a persona, a thread's messages) without
+   * re-implementing open-state plumbing. Fires once per opened record.
+   */
+  onView?: (row: T) => void
+  /**
+   * Load the first page automatically on construction. Default `true` — the
+   * hook fires `refresh()` once so pages no longer need the boilerplate
+   * `crud.refresh().catch(() => undefined)` line in setup. Set `false` for
+   * pages that must configure filters or await a parent resource before the
+   * initial fetch, then call `refresh()` themselves.
+   */
+  autoLoad?: boolean
 }
 
 export interface UseCrudPageReturn<T, TId = string | number> {
@@ -195,14 +228,44 @@ export function useCrudPage<T, TId = string | number>(
 
   const hasData = computed(() => items.value.length > 0)
 
-  const detailMode = ref<DetailMode>(options.detailMode ?? 'modal')
-
   const columnSettings = useColumnSettings({
     pageId: options.pageId,
     columns: options.columns,
   })
   const batchActions = useBatchActions<TId>()
-  const formModal = useFormModal<T>()
+
+  // The add/edit/view overlay is a `useDetail` instance — the single detail
+  // engine. useCrudPage keeps its own create/update/refresh business logic
+  // (`submit` below) and exposes `detail.form` AS its public `formModal`, so the
+  // 60+ consuming pages' API is unchanged while the overlay open-state ⇄ URL
+  // deep-linking lives in ONE place (useDetail). `source` makes deep-link
+  // restore resolve from the loaded `items` first, then `loadDetailById`, and
+  // an initial `?detail=edit:<id>` waits for the first page of items instead
+  // of self-wiping. No-ops without a router (degrades to a plain form modal).
+  const detail = useDetail<T>({
+    mode: options.detailMode ?? 'modal',
+    url: options.detailUrl ?? true,
+    getId: (row) => options.rowKey(row) as string | number,
+    source: { items, loading, loadById: options.loadDetailById },
+  })
+  const formModal = detail.form
+  const detailMode = detail.mode
+
+  // Fire `onView` whenever the detail opens (or restores via deep-link) in view
+  // mode, keyed on the viewed record — so a page can lazy-load related data for
+  // its read-only `#detail` drawer without touching open-state plumbing. Keyed
+  // on identity so re-opening the SAME record after a close fires again.
+  if (options.onView) {
+    watch(
+      () =>
+        formModal.visible.value && formModal.mode.value === 'view'
+          ? formModal.formData.value
+          : null,
+      (row) => {
+        if (row) options.onView!(row as T)
+      },
+    )
+  }
 
   /**
    * Run `op` and route any thrown error through `options.onError` plus
@@ -359,6 +422,14 @@ export function useCrudPage<T, TId = string | number>(
     if (!options.importData) return
     await runWithErrorHandling('import', () => options.importData!(file))
     await refresh()
+  }
+
+  // Auto-load the first page unless the caller opts out. Replaces the per-page
+  // `crud.refresh().catch(() => undefined)` line: refresh() already captures
+  // its failure into `error` + the global toast, so the swallowed reject here
+  // only prevents an unhandled-rejection warning on the initial load.
+  if (options.autoLoad !== false) {
+    void refresh().catch(() => undefined)
   }
 
   return {

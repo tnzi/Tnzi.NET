@@ -31,6 +31,12 @@ public class PermissionDefinition
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
+    /// 权限分类（对应ModuleFunction.Category）。
+    /// Business = 业务管理员可达；Technical = 仅显式授权或超管可达。
+    /// </summary>
+    public PermissionCategory Category { get; set; } = PermissionCategory.Business;
+
+    /// <summary>
     /// 权限组（对应Module）
     /// </summary>
     public PermissionGroupDefinition? Group { get; set; }

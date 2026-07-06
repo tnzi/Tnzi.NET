@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/agent-runs")]
+[ApiAuthorize(PermissionName = "ai.agentRun.view")]
 public class DefaultAgentRunAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentRunService RunService;

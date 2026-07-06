@@ -11,9 +11,6 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
   createPaymentBridge: () => ({
     orders: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(async () => { throw new Error('backend gap') }),
-      update: vi.fn(async () => { throw new Error('backend gap') }),
-      delete: vi.fn(async () => { throw new Error('backend gap') }),
       statistics: vi.fn(async () => ({
         totalRevenue: 0, totalTransactions: 0, successfulTransactions: 0,
         failedTransactions: 0, totalRefunds: 0, refundCount: 0, refundRate: 0,
@@ -29,8 +26,8 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
             userId: 'u1',
             planId: 'plan-1',
             planName: 'Basic',
-            status: 1,
-            cycleType: 1,
+            status: 'Trial',
+            cycleType: 'Month',
             cycleValue: 1,
             startTime: '2026-01-01T00:00:00Z',
             nextBillingTime: '2026-02-01T00:00:00Z',
@@ -46,15 +43,10 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
         pageIndex: 1,
         pageSize: 20,
       })),
-      create: vi.fn(async () => { throw new Error('backend gap') }),
-      update: vi.fn(async () => ({ id: 's1' })),
-      delete: vi.fn(async () => { throw new Error('backend gap') }),
+      cancelAtPeriodEnd: vi.fn(),
     },
     refunds: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
       approve: vi.fn(),
       reject: vi.fn(),
     },
@@ -102,9 +94,9 @@ describe('Subscriptions page (Phase 3.33)', () => {
 })
 
 describe('subscription-config', () => {
-  it('exports columns with required keys', async () => {
-    const { paymentSubscriptionColumns } = await import('../../../src/pages/payment/subscription-config')
-    const keys = paymentSubscriptionColumns.map((c) => c.key)
+  it('builds columns keyed on real SubscriptionDto fields', async () => {
+    const { buildSubscriptionColumns } = await import('../../../src/pages/payment/subscription-config')
+    const keys = buildSubscriptionColumns((k) => k).map((c) => c.key)
     expect(keys).toContain('subscriptionNo')
     expect(keys).toContain('userId')
     expect(keys).toContain('planName')
@@ -113,11 +105,12 @@ describe('subscription-config', () => {
     expect(keys).toContain('nextBillingTime')
   })
 
-  it('exports formSchema with required fields', async () => {
+  it('exports formSchema with real fields', async () => {
     const { paymentSubscriptionFormSchema } = await import('../../../src/pages/payment/subscription-config')
     const keys = paymentSubscriptionFormSchema.map((f) => f.key)
+    expect(keys).toContain('subscriptionNo')
     expect(keys).toContain('userId')
-    expect(keys).toContain('planId')
+    expect(keys).toContain('planName')
     expect(keys).toContain('cycleType')
   })
 })

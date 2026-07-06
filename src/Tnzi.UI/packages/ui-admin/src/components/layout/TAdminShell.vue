@@ -183,13 +183,24 @@ const currentRouteName = computed<string>(() => {
   return typeof name === 'string' ? name : ''
 })
 
+// Effective menu key for highlighting: hidden detail/sub routes (e.g.
+// `ai.agents.detail`) point back to their list page via `meta.activeMenu`, so
+// the rail / hybrid sider / mix drawer highlight + expand the PARENT entry
+// instead of going blank while a detail page is open. Falls back to the raw
+// route name for ordinary pages.
+const effectiveMenuKey = computed<string>(() => {
+  const active = (route?.meta as { activeMenu?: string } | undefined)?.activeMenu
+  if (typeof active === 'string' && active) return active
+  return currentRouteName.value
+})
+
 // Phase E: layered menu state (active 1st level, 2nd level slices, etc.)
 // shared across hybrid layout modes. Mirrors soybean's
 // `provideMixMenuContext()`. Without this, the 4 hybrid modes can only
 // render the full menu tree everywhere — they look identical.
 const menuCtx = useAdminMenuContext({
   menus: computed(() => routeStore.menus),
-  routeName: currentRouteName,
+  routeName: effectiveMenuKey,
   // Bind to themeStore.autoSelectFirstMenu so the Theme Drawer's
   // "auto-select first child" toggle actually controls the headless logic.
   autoSelectSecondLevel: computed(() => themeStore.autoSelectFirstMenu),
@@ -356,7 +367,7 @@ const mixDrawerExpandedKeys = computed<string[]>(() => {
   const path: string[] = []
   function walk(items: AdminMenuItem[]): boolean {
     for (const item of items) {
-      if (item.key === currentRouteName.value) return true
+      if (item.key === effectiveMenuKey.value) return true
       if (item.children?.length) {
         if (walk(item.children)) {
           path.unshift(item.key)
@@ -464,7 +475,7 @@ onBeforeUnmount(() => {
 function onMixMouseleave(): void {
   if (appStore.mixSiderFixed) return
   mixDrawerVisible.value = false
-  const ownerKey = menuCtx.resolveFirstLevelKeyForRoute(currentRouteName.value)
+  const ownerKey = menuCtx.resolveFirstLevelKeyForRoute(effectiveMenuKey.value)
   if (ownerKey && ownerKey !== menuCtx.activeFirstLevelMenuKey.value) {
     menuCtx.handleSelectFirstLevelMenu(ownerKey)
   }
@@ -547,7 +558,7 @@ function onMixMouseleave(): void {
           <div class="t-admin-shell__sub-sider-body">
             <NMenu
               :options="mixChildOptions"
-              :value="currentRouteName || undefined"
+              :value="effectiveMenuKey || undefined"
               :expanded-keys="mixDrawerExpandedKeys"
               mode="vertical"
               :indent="18"

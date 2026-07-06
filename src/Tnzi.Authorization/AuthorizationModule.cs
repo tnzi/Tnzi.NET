@@ -118,7 +118,23 @@ public class AuthorizationModule : TnziApplicationModule
                 try
                 {
                     var seeder = seedScope.ServiceProvider.GetRequiredService<PermissionDbSeeder>();
-                    await seeder.SeedAsync(providers);
+                    var touched = await seeder.SeedAsync(providers);
+
+                    // Seed writes can flip Category (declaration change or
+                    // PermissionCategoryOverrides). With a SHARED cache (e.g.
+                    // Redis) and rolling deploys, instances still running keep
+                    // a hot admin-tier catalogue for up to its TTL — a
+                    // permission just reclassified to Technical would stay
+                    // reachable by business admins. Invalidate explicitly;
+                    // no-op for a cold per-process cache.
+                    if (touched > 0)
+                    {
+                        var functionAuthCache = seedScope.ServiceProvider.GetService<FunctionAuthCache>();
+                        if (functionAuthCache != null)
+                        {
+                            await functionAuthCache.InvalidateAdminCataloguesAsync();
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -136,16 +152,30 @@ public class AuthorizationModule : TnziApplicationModule
         var permissionManager = context.ServiceProvider.GetRequiredService<IPermissionManager>();
         await permissionManager.RefreshAsync();
 
-        // SuperAdmin role-existence diagnostic. Logged at Information so the
-        // current super-admin mode is visible on every startup (helps the
-        // "why am I locked out?" runbook), and at Warning when configured
-        // roles aren't found in Identity (typo / role renamed). Non-fatal
-        // by design: an empty SuperAdminRoles list is legitimate, and
-        // failing startup over an Identity row mismatch would create a
-        // chicken-and-egg with the seeder.
         var optionsSnapshot = context.ServiceProvider
             .GetRequiredService<IOptions<Tnzi.Authorization.Options.AuthorizationOptions>>().Value;
         var logger = context.ServiceProvider.GetRequiredService<ILogger<AuthorizationModule>>();
+
+        // Opt-in built-in role seeding: create an IsSystem role for every
+        // configured admin-tier role name that doesn't exist yet, so the
+        // two-tier convention (SuperAdmin / Admin) works without an
+        // application-side seeder. Runs BEFORE the existence diagnostics
+        // below so freshly seeded roles don't trigger the missing-role
+        // warning. Never modifies existing roles; user-role assignment
+        // remains an application / operator task.
+        if (optionsSnapshot.SeedBuiltInAdminRoles)
+        {
+            await SeedBuiltInAdminRolesAsync(context.ServiceProvider, optionsSnapshot, logger);
+        }
+
+        // Admin-tier role-existence diagnostics. Logged at Information so the
+        // current admin-tier mode is visible on every startup (helps the
+        // "why am I locked out?" runbook), and at Warning when configured
+        // roles aren't found in Identity (typo / role renamed). Non-fatal
+        // by design: empty role lists are legitimate, and failing startup
+        // over an Identity row mismatch would create a chicken-and-egg with
+        // the seeder.
+
         if (optionsSnapshot.SuperAdminRoles.Count == 0)
         {
             logger.LogInformation(
@@ -157,10 +187,44 @@ public class AuthorizationModule : TnziApplicationModule
             logger.LogInformation(
                 "Authorization SuperAdmin bypass enabled for roles: {Roles}",
                 string.Join(", ", optionsSnapshot.SuperAdminRoles));
+        }
 
-            // Verify every configured super-admin role actually exists in
-            // Identity_Role. A missing role means the configured name will
-            // never match — same outcome as misconfiguring the JSON key.
+        if (optionsSnapshot.BusinessAdminRoles.Count == 0)
+        {
+            logger.LogInformation(
+                "Authorization BusinessAdmin tier is DISABLED (BusinessAdminRoles is empty). " +
+                "No role is implicitly granted the Business permission catalogue.");
+        }
+        else
+        {
+            logger.LogInformation(
+                "Authorization BusinessAdmin tier enabled for roles: {Roles} " +
+                "(implicitly granted every enabled Business-category permission).",
+                string.Join(", ", optionsSnapshot.BusinessAdminRoles));
+        }
+
+        // A role listed in both tiers resolves as super admin — the business
+        // entry is redundant and probably a config mistake worth surfacing.
+        var overlap = optionsSnapshot.SuperAdminRoles
+            .Intersect(optionsSnapshot.BusinessAdminRoles, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (overlap.Count > 0)
+        {
+            logger.LogWarning(
+                "Roles listed in BOTH Authorization.SuperAdminRoles and Authorization.BusinessAdminRoles resolve as super admin; " +
+                "the BusinessAdminRoles entries are redundant: {Overlap}.",
+                string.Join(", ", overlap));
+        }
+
+        // Verify every configured admin-tier role actually exists in
+        // Identity_Role. A missing role means the configured name will
+        // never match — same outcome as misconfiguring the JSON key.
+        var configuredRoles = optionsSnapshot.SuperAdminRoles
+            .Select(name => (name, list: "SuperAdminRoles"))
+            .Concat(optionsSnapshot.BusinessAdminRoles.Select(name => (name, list: "BusinessAdminRoles")))
+            .ToList();
+        if (configuredRoles.Count > 0)
+        {
             await using var scope = context.ServiceProvider.CreateAsyncScope();
             var roleRepo = scope.ServiceProvider.GetService<IRepository<Tnzi.Identity.Entities.Role, Guid>>();
             if (roleRepo != null)
@@ -170,16 +234,78 @@ public class AuthorizationModule : TnziApplicationModule
                     .Select(r => r.Name!)
                     .ToListAsync();
                 var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
-                var missing = optionsSnapshot.SuperAdminRoles
-                    .Where(name => !existingSet.Contains(name))
-                    .ToList();
-                if (missing.Count > 0)
+                foreach (var listGroup in configuredRoles
+                             .Where(entry => !existingSet.Contains(entry.name))
+                             .GroupBy(entry => entry.list))
                 {
                     logger.LogWarning(
-                        "Authorization.SuperAdminRoles contains role names that do not exist in Identity: {Missing}. " +
-                        "Users will never be treated as super-admin via those entries until a matching Identity role is created.",
-                        string.Join(", ", missing));
+                        "Authorization.{List} contains role names that do not exist in Identity: {Missing}. " +
+                        "Users will never be matched via those entries until a matching Identity role is created.",
+                        listGroup.Key,
+                        string.Join(", ", listGroup.Select(e => e.name)));
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Create an <c>IsSystem</c> Identity role for every configured admin-tier
+    /// role name that doesn't exist yet. Additive only; failures are logged
+    /// and never block startup (a startup race across instances is settled by
+    /// the unique index on the normalized role name).
+    /// </summary>
+    private static async Task SeedBuiltInAdminRolesAsync(
+        IServiceProvider serviceProvider,
+        Tnzi.Authorization.Options.AuthorizationOptions options,
+        ILogger logger)
+    {
+        var roleNames = options.SuperAdminRoles
+            .Concat(options.BusinessAdminRoles)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (roleNames.Count == 0)
+        {
+            logger.LogWarning(
+                "Authorization.SeedBuiltInAdminRoles is enabled but both SuperAdminRoles and BusinessAdminRoles are empty; nothing to seed.");
+            return;
+        }
+
+        await using var scope = serviceProvider.CreateAsyncScope();
+        var roleRepo = scope.ServiceProvider.GetService<IRepository<Tnzi.Identity.Entities.Role, Guid>>();
+        if (roleRepo == null)
+        {
+            logger.LogWarning(
+                "Authorization.SeedBuiltInAdminRoles is enabled but the Identity role repository is unavailable; skipping.");
+            return;
+        }
+
+        var existingNames = await roleRepo
+            .Where(r => r.Name != null)
+            .Select(r => r.Name!)
+            .ToListAsync();
+        var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in roleNames.Where(n => !existingSet.Contains(n)))
+        {
+            try
+            {
+                await roleRepo.InsertAsync(new Tnzi.Identity.Entities.Role
+                {
+                    Name = name,
+                    NormalizedName = name.ToUpperInvariant(),
+                    Description = "Built-in admin-tier role seeded by Authorization:SeedBuiltInAdminRoles.",
+                    IsSystem = true,
+                });
+                logger.LogInformation("Seeded built-in admin role '{Role}' (IsSystem).", name);
+            }
+            catch (Exception ex)
+            {
+                // Most likely a startup race with another instance — the
+                // unique index on NormalizedName settles the winner; either
+                // way the role exists afterwards, which is all we need.
+                logger.LogWarning(ex, "Seeding built-in admin role '{Role}' failed; continuing startup.", name);
             }
         }
     }

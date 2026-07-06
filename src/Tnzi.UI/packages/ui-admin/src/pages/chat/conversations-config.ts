@@ -1,9 +1,15 @@
 import { h } from 'vue'
+import type { DataTableColumns } from 'naive-ui'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
-import { ConversationType, type AdminConversationListItemDto } from '@tnzi/core/services/chat'
+import {
+  ConversationType,
+  MemberRole,
+  type AdminConversationListItemDto,
+  type AdminConversationMemberDto,
+} from '@tnzi/core/services/chat'
 
 const TYPE_NS = 'admin.modules.chat.conversations.type'
 
@@ -59,3 +65,21 @@ const columns: ColumnDef<AdminConversationListItemDto>[] = [
 // to the prop's `ColumnDef[]` (Record<string, unknown>) shape — the render
 // closures keep their typed row internally.
 export const conversationColumns = columns as unknown as ColumnDef[]
+
+/**
+ * Columns for the detail-drawer member table (rendered via TResponsiveTable so
+ * it collapses to cards on mobile instead of a hand-written NTable). Role uses
+ * the MemberRole enum member (now a string) rather than a hardcoded `=== 1`.
+ */
+export function buildMemberColumns(t: (k: string) => string): DataTableColumns<AdminConversationMemberDto> {
+  return [
+    { title: t('detail.memberName'), key: 'name', minWidth: 140, render: (m) => m.name || m.userId },
+    {
+      title: t('detail.role'),
+      key: 'role',
+      width: 110,
+      render: (m) => (m.role === MemberRole.Owner ? t('detail.roleOwner') : t('detail.roleMember')),
+    },
+    { title: t('detail.unread'), key: 'unreadCount', width: 90 },
+  ]
+}

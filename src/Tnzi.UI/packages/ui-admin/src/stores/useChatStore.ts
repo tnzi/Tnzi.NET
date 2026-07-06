@@ -1,16 +1,34 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ConversationListItemDto, ChatMessageDto, PresenceChangedPayload, ConversationMemberSettingsDto } from '@tnzi/core/services/chat'
+import type { ConversationListItemDto, ChatMessageDto, PresenceChangedPayload, ConversationMemberSettingsDto, ChatClientConfigDto } from '@tnzi/core/services/chat'
 import type { ChatImBridge } from '../services/bridges/chat-im-bridge'
 import type { NewMessagePayload, MessageReadPayload } from '@tnzi/core/services/chat'
 import { MessageContentType, UserPresenceStatus } from '@tnzi/core/services/chat'
 import { useAdminAuthStore } from './useAdminAuthStore'
 
+/** Everything enabled — used until GET /chat/config resolves (and as the
+ *  fallback when it fails, e.g. against an older backend without the endpoint). */
+export const DEFAULT_CHAT_CONFIG: ChatClientConfigDto = Object.freeze({
+  enableGroups: true,
+  maxGroupMembers: 0,
+  groupAvatarMemberCount: 9,
+  enablePresence: true,
+  enableMessageSound: true,
+  enableFileMessages: true,
+})
+
 export const useChatStore = defineStore('admin-chat', () => {
   let bridge: ChatImBridge | null = null
 
   const conversations = ref<ConversationListItemDto[]>([])
+  // Deployment-level feature config (server ChatOptions projection).
+  const config = ref<ChatClientConfigDto>({ ...DEFAULT_CHAT_CONFIG })
   const activeId = ref<string | null>(null)
+  // Whether the chat window (NModal) is currently open. "User is viewing a
+  // conversation" = window visible AND conversation active: activeId alone
+  // survives closing the window (so reopening lands on the same thread), and
+  // must therefore never suppress the unread badge / notification sound.
+  const windowVisible = ref(false)
   const messagesByConv = ref<Record<string, ChatMessageDto[]>>({})
   const loading = ref(false)
   const presenceByUser = ref<Record<string, { status: UserPresenceStatus; lastSeenAt?: string | null }>>({})
@@ -33,13 +51,23 @@ export const useChatStore = defineStore('admin-chat', () => {
     finally { loading.value = false }
   }
 
+  /** Load the deployment feature config; keeps the all-enabled defaults on any
+   *  failure so the chat window still works against older backends. */
+  async function loadConfig() {
+    try {
+      config.value = { ...DEFAULT_CHAT_CONFIG, ...(await requireBridge().getConfig()) }
+    } catch {
+      config.value = { ...DEFAULT_CHAT_CONFIG }
+    }
+  }
+
   async function openConversation(id: string) {
     activeId.value = id
     const thread = await requireBridge().getMessages(id, { limit: 30 })
     messagesByConv.value = { ...messagesByConv.value, [id]: thread.messages }
     await markRead(id)
     const conv = conversations.value.find(c => c.id === id)
-    if (conv?.peerUserId) loadPresence([conv.peerUserId]).catch(() => undefined)
+    if (conv?.peerUserId && config.value.enablePresence) loadPresence([conv.peerUserId]).catch(() => undefined)
   }
 
   async function sendText(id: string, content: string) {
@@ -67,8 +95,10 @@ export const useChatStore = defineStore('admin-chat', () => {
     return m.content
   }
 
+  function setWindowVisible(v: boolean) { windowVisible.value = v }
+
   function applyIncomingMessage(p: NewMessagePayload, myId?: string) {
-    const isActive = activeId.value === p.conversationId
+    const isActive = windowVisible.value && activeId.value === p.conversationId
     // senderId=null → system/broadcast message; "!== my id" treats it as from-other
     // so it bumps the unread count (the realtime layer plays the sound in parallel).
     const fromOther = p.senderId !== (myId ?? useAdminAuthStore().userInfo?.id)
@@ -149,9 +179,9 @@ export const useChatStore = defineStore('admin-chat', () => {
 
   // Presence
   function applyPresenceChange(p: PresenceChangedPayload) {
-    presenceByUser.value = { ...presenceByUser.value, [p.userId]: { status: p.status as UserPresenceStatus, lastSeenAt: p.lastSeenAt } }
+    presenceByUser.value = { ...presenceByUser.value, [p.userId]: { status: p.status, lastSeenAt: p.lastSeenAt } }
     const conv = conversations.value.find(c => c.peerUserId === p.userId)
-    if (conv) conversations.value = conversations.value.map(c => c.peerUserId === p.userId ? { ...c, peerStatus: p.status as UserPresenceStatus } : c)
+    if (conv) conversations.value = conversations.value.map(c => c.peerUserId === p.userId ? { ...c, peerStatus: p.status } : c)
   }
 
   async function loadPresence(userIds: string[]) {
@@ -178,6 +208,22 @@ export const useChatStore = defineStore('admin-chat', () => {
     messagesByConv.value = { ...messagesByConv.value, [id]: [] }
   }
 
+  /** Hide from my list (server re-surfaces it automatically on a new message). */
+  async function hideConversation(id: string) {
+    await requireBridge().updateMemberSettings(id, { isHidden: true })
+    if (activeId.value === id) activeId.value = null
+    await fetchConversations()
+  }
+
+  /** Per-user delete: wipes my history view + hides from my list. */
+  async function deleteConversation(id: string) {
+    await requireBridge().deleteForMe(id)
+    const { [id]: _dropped, ...rest } = messagesByConv.value
+    messagesByConv.value = rest
+    if (activeId.value === id) activeId.value = null
+    await fetchConversations()
+  }
+
   async function setNotice(id: string, notice: string | null) { await requireBridge().updateNotice(id, notice) }
 
   async function searchMessages(id: string, keyword: string) { return requireBridge().searchMessages(id, { keyword, limit: 50 }) }
@@ -196,15 +242,16 @@ export const useChatStore = defineStore('admin-chat', () => {
   }
 
   return {
-    conversations, activeId, messagesByConv, loading,
-    presenceByUser, myStatus,
+    conversations, activeId, windowVisible, messagesByConv, loading,
+    presenceByUser, myStatus, config,
     totalUnread, activeConversation, sortedConversations,
-    init, fetchConversations, openConversation, sendText, markRead,
+    init, setWindowVisible, fetchConversations, loadConfig, openConversation, sendText, markRead,
     appendMessage, applyIncomingMessage, applyRead, refreshUnread,
     searchContacts, startDirect, createGroup,
     getConversationDetail, addMembers, removeMember, renameGroup,
     dissolveGroup, leaveGroup, sendMedia,
     applyPresenceChange, loadPresence, loadMyStatus, setMyStatus,
-    setMemberSettings, clearHistory, setNotice, searchMessages, getContactProfile,
+    setMemberSettings, clearHistory, hideConversation, deleteConversation,
+    setNotice, searchMessages, getContactProfile,
   }
 })

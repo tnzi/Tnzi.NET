@@ -19,6 +19,7 @@
 import {
   useAdminNotificationApi,
   useAdminNotificationPreferenceApi,
+  NotificationType,
   type NotificationInfo,
   type QueryNotificationRequest,
   type NotificationPreferenceDto,
@@ -58,7 +59,8 @@ export interface NotificationMessageContract extends BridgeCrudContract<Notifica
 /** Request shape for template preview / test-send actions. */
 export interface NotificationTemplatePreviewRequest {
   templateName?: string | null
-  type?: number
+  /** Notification channel (defaults to Email). Serializes as the member-name string. */
+  type?: NotificationType
   subject?: string | null
   content?: string | null
   variables?: Record<string, unknown> | null
@@ -215,7 +217,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
           const result = unwrap(
             await api.preview({
-              type: req.type ?? 1,
+              type: req.type ?? NotificationType.Email,
               subject: req.subject ?? 'Preview',
               content: req.content ?? '',
               templateName: req.templateName ?? undefined,
@@ -238,7 +240,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             throw new Error('sendTest: recipientAddress is required.')
           }
           await api.createAndSend({
-            type: req.type ?? 1,
+            type: req.type ?? NotificationType.Email,
             subject: req.subject ?? 'Test Send',
             content: req.content ?? '',
             templateName: req.templateName ?? undefined,
@@ -255,7 +257,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
           const result = unwrap(
             await api.preview({
-              type: req.type ?? 1,
+              type: req.type ?? NotificationType.Email,
               subject: req.subject ?? 'Preview',
               content: req.content ?? '',
               templateName: req.templateName ?? undefined,
@@ -274,7 +276,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             throw new Error('sendTest: recipientAddress is required.')
           }
           await api.createAndSend({
-            type: req.type ?? 1,
+            type: req.type ?? NotificationType.Email,
             subject: req.subject ?? 'Test Send',
             content: req.content ?? '',
             templateName: req.templateName ?? undefined,

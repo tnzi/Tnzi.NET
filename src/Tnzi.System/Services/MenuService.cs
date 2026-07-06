@@ -362,24 +362,7 @@ public class MenuService : ApplicationService, IMenuService
     /// 构建菜单树（非递归实现，高性能）
     /// </summary>
     private static List<MenuTreeNode> BuildMenuTree(List<MenuTreeNode> allMenus)
-    {
-        var menuMap = allMenus.ToDictionary(m => m.Id);
-        var rootMenus = new List<MenuTreeNode>();
-
-        foreach (var menu in allMenus)
-        {
-            if (menu.ParentId.HasValue && menuMap.TryGetValue(menu.ParentId.Value, out var parent))
-            {
-                parent.Children.Add(menu);
-            }
-            else
-            {
-                rootMenus.Add(menu);
-            }
-        }
-
-        return rootMenus;
-    }
+        => TreeHelper.ToTree(allMenus, m => m.Id, m => m.ParentId, (p, c) => p.Children.Add(c)).ToList();
 
     #endregion
 }

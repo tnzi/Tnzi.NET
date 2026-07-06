@@ -7,8 +7,10 @@ import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi
 
 import TWidgetCard from '../../src/widgets/shell/TWidgetCard.vue'
 import TWorkbenchLayout from '../../src/components/pages/TWorkbenchLayout.vue'
+import TWidgetQuickActions from '../../src/widgets/builtin/TWidgetQuickActions.vue'
 import { useWidget } from '../../src/widgets/shell/useWidget'
 import { useWidgetData } from '../../src/widgets/shell/useWidgetData'
+import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import {
   defaultKpiCards,
   defaultQuickActions,
@@ -196,6 +198,52 @@ describe('TWorkbenchLayout', () => {
     })
     expect(wrapper.find('.t-widget-card--bare').exists()).toBe(true)
     expect(wrapper.find('.raw').exists()).toBe(true)
+  })
+})
+
+describe('TWidgetQuickActions permission filtering', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    if (typeof window !== 'undefined') window.localStorage.clear()
+  })
+
+  const actions = [
+    { key: 'open', icon: 'mdi:folder', label: 'Open', to: '/admin/a', permission: 'a.view' },
+    { key: 'settings', icon: 'mdi:cog', label: 'Settings', to: '/admin/s', permission: 'system.parameter.view' },
+    { key: 'always', icon: 'mdi:star', label: 'Always', to: '/admin/x' },
+  ]
+
+  function mountActions() {
+    return mount(TWidgetQuickActions, {
+      props: { actions },
+      global: { plugins: [mockRouter()], provide: themeProvide() },
+    })
+  }
+
+  it('hides tiles whose permission the signed-in user lacks', () => {
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: '1', username: 'biz', roles: [], permissions: ['a.view'] })
+    const wrapper = mountActions()
+    const tiles = wrapper.findAll('.t-widget-quick-actions__tile')
+    // 'a.view' granted + the permission-less 'always' tile; Settings hidden.
+    expect(tiles.length).toBe(2)
+    expect(wrapper.text()).toContain('Open')
+    expect(wrapper.text()).toContain('Always')
+    expect(wrapper.text()).not.toContain('Settings')
+  })
+
+  it('fails open (shows every tile) before permissions load', () => {
+    // userInfo === null — permissions not yet loaded, so don't hide anything.
+    const wrapper = mountActions()
+    expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(3)
+  })
+
+  it('shows every tile for a super user regardless of permissions', () => {
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: '1', username: 'root', roles: [], permissions: [] })
+    auth.setSuperUser(true)
+    const wrapper = mountActions()
+    expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(3)
   })
 })
 

@@ -27,6 +27,7 @@
  */
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Icon } from '@iconify/vue'
+import { TAvatar } from '@tnzi/ui'
 import TCollapsibleSidebar from '@/shell/TCollapsibleSidebar.vue'
 import TCommandPalette from '@/shell/TCommandPalette.vue'
 import TSettingsDialog from '@/shell/TSettingsDialog.vue'
@@ -350,8 +351,6 @@ const rootStyle = computed<Record<string, string> | undefined>(() => {
   const w = typeof props.contentWidth === 'number' ? `${props.contentWidth}px` : props.contentWidth
   return { '--tnzi-ai-content-width': w }
 })
-
-const accountInitial = computed(() => (props.accountName?.charAt(0) ?? '?').toUpperCase())
 
 // Stick-to-bottom auto-scroll for the message thread (re-attaches when the
 // user scrolls back to the bottom; pauses while they read scrollback).
@@ -836,7 +835,13 @@ function onArtifactWidthChange(w: number): void {
         <slot name="settings-account">
           <div class="t-chat-app__account">
             <div class="t-chat-app__account-card">
-              <div class="t-chat-app__account-avatar">{{ accountInitial }}</div>
+              <TAvatar
+                class="t-chat-app__account-avatar"
+                :name="accountName"
+                :size="52"
+                color="var(--tnzi-ai-accent)"
+                text-color="#fff"
+              />
               <div class="t-chat-app__account-meta">
                 <div class="t-chat-app__account-name">{{ accountName || 'User' }}</div>
                 <div v-if="accountRole" class="t-chat-app__account-role">{{ accountRole }}</div>
@@ -1590,19 +1595,6 @@ function onArtifactWidthChange(w: number): void {
   border: 1px solid var(--tnzi-ai-border);
   border-radius: 14px;
   background: var(--tnzi-ai-surface);
-}
-.t-chat-app__account-avatar {
-  width: 52px;
-  height: 52px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: var(--tnzi-ai-accent);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  font-weight: 600;
 }
 .t-chat-app__account-meta {
   flex: 1;

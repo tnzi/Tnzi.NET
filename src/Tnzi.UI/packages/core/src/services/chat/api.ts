@@ -8,6 +8,7 @@ import type {
   ConversationListItemDto, ConversationDto, ChatMessageDto, MessageThreadDto,
   SendMessageDto, CreateGroupDto, AddMembersDto, ChatContactDto, BroadcastDto,
   ConversationMemberSettingsDto, ChatContactProfileDto, UserPresenceDto, UserPresenceStatus,
+  ChatClientConfigDto,
   ChatStatisticsDto, AdminConversationQueryDto, AdminConversationListItemDto,
   AdminConversationDetailDto, PresenceOverviewDto, PresenceOverviewQueryDto,
   BroadcastLogDto,
@@ -94,6 +95,10 @@ export function useChatImApi(client: HttpClient) {
     clearHistory: (id: string) =>
       client.post<void>(`${CONV}/${id}/clear`),
 
+    /** Per-user delete (wipe my history + hide from my list) - POST /conversations/{id}/delete-for-me */
+    deleteForMe: (id: string) =>
+      client.post<void>(`${CONV}/${id}/delete-for-me`),
+
     /** Search messages in a conversation - GET /conversations/{id}/messages/search */
     searchMessages: (id: string, params: { keyword: string; before?: string; limit?: number }) =>
       client.get<MessageThreadDto>(`${CONV}/${id}/messages/search`, { params }),
@@ -109,6 +114,10 @@ export function useChatImApi(client: HttpClient) {
     /** Search contacts - GET /chat/contacts/search */
     searchContacts: (keyword: string) =>
       client.get<ChatContactDto[]>(`/chat/contacts/search`, { params: { keyword } }),
+
+    /** Deployment feature config - GET /chat/config */
+    getConfig: () =>
+      client.get<ChatClientConfigDto>('/chat/config'),
   };
 }
 

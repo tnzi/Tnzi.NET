@@ -6,6 +6,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/sessions")]
+[ApiAuthorize(PermissionName = "session.view")]
 public class DefaultSessionAdminController : ApiAdminControllerBase
 {
     protected readonly ISessionService SessionService;

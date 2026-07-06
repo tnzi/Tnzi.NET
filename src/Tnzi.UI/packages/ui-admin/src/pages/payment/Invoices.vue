@@ -1,17 +1,20 @@
 <template>
   <!--
-    Invoices — list view backed by /admin/invoices.
-    List chrome delegated to TListShell + TTableRenderer (useCrudPage fetch-only).
-    Read-mostly: list + lifecycle actions (send / mark-paid / cancel). The
-    mark-paid and cancel modals are kept as custom siblings because they are
-    lifecycle confirmations, not a CRUD create/edit form. Manual invoice
-    creation lives outside this page (line-items editing is rich-form territory).
+    Invoices — list view backed by /admin/invoices (TListShell + TTableRenderer,
+    useCrudPage fetch-only). Read-mostly: list + lifecycle actions
+    (send / mark-paid / cancel). Mark-paid and cancel route through
+    useDetail(modal) + TDetailHost (§5.5.2 — no hand-rolled NModal); send is a
+    direct call gated by a RowAction confirm. Manual invoice creation lives
+    outside this page (line-items editing is rich-form territory).
+
+    `InvoiceQueryDto` has no free-text field server-side, so the default keyword
+    box is disabled; `status` is exposed as a toolbar filter.
   -->
   <TListShell
     :state="crud"
     :title="t('title')"
     :show-batch="false"
-    :search-placeholder="t('filter.search')"
+    :show-default-search="false"
     :translate="t"
   >
     <template #toolbarLeft>
@@ -26,124 +29,117 @@
       />
     </template>
     <template #renderer>
-      <TTableRenderer :state="crud" :show-selection="false" :translate="t" />
+      <TTableRenderer :state="crud" :show-selection="false" :row-actions="rowActions" :translate="t" />
     </template>
   </TListShell>
 
-  <!-- Lifecycle modals — kept as custom siblings (not CRUD forms). -->
-  <NModal v-model:show="markPaidVisible" preset="card" :title="t('modal.markPaid')" class="max-w-540px">
-    <NForm label-placement="top" :show-feedback="false">
-      <NFormItem :label="t('form.paidAmount')" required>
-        <NInputNumber v-model:value="markPaidForm.paidAmount" :min="0.01" :precision="2" class="w-full" />
-      </NFormItem>
-      <NFormItem :label="t('form.remark')">
-        <NInput v-model:value="markPaidForm.remark" type="textarea" :rows="2" :placeholder="t('form.remarkPlaceholder')" />
-      </NFormItem>
-    </NForm>
-    <template #footer>
-      <NSpace justify="end">
-        <NButton @click="markPaidVisible = false">{{ t('actions.cancel') }}</NButton>
-        <NButton type="primary" :loading="actionLoading" :disabled="!markPaidForm.paidAmount || markPaidForm.paidAmount <= 0" @click="confirmMarkPaid">
-          {{ t('actions.confirm') }}
-        </NButton>
-      </NSpace>
+  <!-- Mark-paid overlay — paidAmount defaults to the outstanding due amount. -->
+  <TDetailHost :state="markPaidDetail" :title="t('modal.markPaid')" :width="480" :translate="t">
+    <template #default>
+      <NForm label-placement="top" :show-feedback="false">
+        <NFormItem :label="t('form.paidAmount')" required>
+          <NInputNumber v-model:value="markPaidForm.paidAmount" :min="0.01" :precision="2" class="w-full" />
+        </NFormItem>
+        <NFormItem :label="t('form.remark')">
+          <NInput v-model:value="markPaidForm.remark" type="textarea" :rows="2" :placeholder="t('form.remarkPlaceholder')" />
+        </NFormItem>
+      </NForm>
     </template>
-  </NModal>
+    <template #footer="{ close }">
+      <NButton @click="close">{{ t('actions.cancel') }}</NButton>
+      <NButton
+        type="primary"
+        :loading="actionLoading"
+        :disabled="!markPaidForm.paidAmount || markPaidForm.paidAmount <= 0"
+        @click="confirmMarkPaid"
+      >
+        {{ t('actions.confirm') }}
+      </NButton>
+    </template>
+  </TDetailHost>
 
-  <NModal v-model:show="cancelVisible" preset="card" :title="t('modal.cancel')" class="max-w-480px">
-    <NForm label-placement="top" :show-feedback="false">
-      <NFormItem :label="t('form.cancelReason')" required>
-        <NInput v-model:value="cancelReason" type="textarea" :rows="3" />
-      </NFormItem>
-    </NForm>
-    <template #footer>
-      <NSpace justify="end">
-        <NButton @click="cancelVisible = false">{{ t('actions.cancel') }}</NButton>
-        <NButton type="error" :loading="actionLoading" :disabled="!cancelReason" @click="confirmCancel">
-          {{ t('actions.confirmCancel') }}
-        </NButton>
-      </NSpace>
+  <!-- Cancel overlay — reason required. -->
+  <TDetailHost :state="cancelDetail" :title="t('modal.cancel')" :width="460" :translate="t">
+    <template #default>
+      <NForm label-placement="top" :show-feedback="false">
+        <NFormItem :label="t('form.cancelReason')" required>
+          <NInput v-model:value="cancelReason" type="textarea" :rows="3" />
+        </NFormItem>
+      </NForm>
     </template>
-  </NModal>
+    <template #footer="{ close }">
+      <NButton @click="close">{{ t('actions.cancel') }}</NButton>
+      <NButton type="error" :loading="actionLoading" :disabled="!cancelReason" @click="confirmCancel">
+        {{ t('actions.confirmCancel') }}
+      </NButton>
+    </template>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
-import { h, reactive, ref } from 'vue'
-import {
-  NButton,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
-  NModal,
-  NPopconfirm,
-  NSelect,
-  NSpace,
-  NTag,
-  useMessage,
-} from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
-import { formatDateOnly as formatDate } from '@tnzi/core'
+import { h, reactive, ref, watch } from 'vue'
+import { NButton, NForm, NFormItem, NInput, NInputNumber, NSelect, useMessage } from 'naive-ui'
+import { formatCurrency, formatDateOnly as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
   createInvoiceBridge,
   type InvoiceDto,
   type MarkInvoicePaidDto,
 } from '../../services/bridges/invoice-bridge'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { useDetail } from '../../headless/useDetail'
+import { type RowAction } from '../../headless/rowActions'
 import type { ColumnDef } from '../../headless/useColumnSettings'
+import type { StatusType } from '@tnzi/ui'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import TListShell from '../../components/crud/TListShell.vue'
 import TTableRenderer from '../../components/crud/renderers/TTableRenderer.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
 
 const bridge = createInvoiceBridge({ client: useAdminClient() })
 const message = useMessage()
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('payment.invoices', key), params)
+const t = makePageTranslator('payment.invoices')
 
 const actionLoading = ref(false)
 
 // ─── Status filter (drives crud.setFilters) ──────────────────────────
-// InvoiceStatus enum (mirrors backend Tnzi.Payment.Metadata.InvoiceStatus):
-// 0=Draft, 1=Pending, 2=Sent, 3=Paid, 4=Overdue, 5=Cancelled
-const statusFilter = ref<number | null>(null)
+// InvoiceStatus serialises as its member name (global JsonStringEnumConverter):
+// Draft / Pending / Sent / Paid / Overdue / Cancelled.
+const statusFilter = ref<string | null>(null)
 const statusOptions = [
-  { value: 0, label: t('status.draft') },
-  { value: 1, label: t('status.pending') },
-  { value: 2, label: t('status.sent') },
-  { value: 3, label: t('status.paid') },
-  { value: 4, label: t('status.overdue') },
-  { value: 5, label: t('status.cancelled') },
+  { value: 'Draft', label: t('status.draft') },
+  { value: 'Pending', label: t('status.pending') },
+  { value: 'Sent', label: t('status.sent') },
+  { value: 'Paid', label: t('status.paid') },
+  { value: 'Overdue', label: t('status.overdue') },
+  { value: 'Cancelled', label: t('status.cancelled') },
 ]
 function onStatusChange(): void {
   crud.setFilters({ status: statusFilter.value })
   void crud.refresh()
 }
 
-// ─── Helper label / format functions ─────────────────────────────────
-function statusTone(s: number): 'success' | 'warning' | 'error' | 'info' | 'default' {
-  switch (s) {
-    case 3: return 'success'
-    case 2: return 'info'
-    case 4: return 'error'
-    case 5: return 'default'
-    default: return 'default'
-  }
+// ─── Status badge mapping (tone + i18n label key per InvoiceStatus member) ─
+const INVOICE_STATUS_MAP: Record<string, { type: StatusType; labelKey: string }> = {
+  Draft: { type: 'default', labelKey: 'status.draft' },
+  Pending: { type: 'default', labelKey: 'status.pending' },
+  Sent: { type: 'info', labelKey: 'status.sent' },
+  Paid: { type: 'success', labelKey: 'status.paid' },
+  Overdue: { type: 'error', labelKey: 'status.overdue' },
+  Cancelled: { type: 'default', labelKey: 'status.cancelled' },
 }
-function statusLabel(s: number): string {
-  return statusOptions.find((o) => o.value === s)?.label ?? String(s)
-}
-function formatMoney(n: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD' }).format(n)
-  } catch {
-    return `${n.toFixed(2)} ${currency}`
-  }
+
+// Terminal states — mark-paid / cancel no longer apply.
+const TERMINAL = new Set(['Paid', 'Cancelled'])
+// Sendable states — draft / pending / sent may (re)send the invoice.
+const SENDABLE = new Set(['Draft', 'Pending', 'Sent'])
+
+function money(n: number, currency: string): string {
+  return formatCurrency(Number(n ?? 0), String(currency || 'USD'))
 }
 
 // ─── Column definitions (ColumnDef[]) ────────────────────────────────
-// `title` is a plain string (ColumnDef takes no thunk). `render` receives
-// `Record<string, unknown>`; cast to InvoiceDto inside each renderer.
 const tableColumns: ColumnDef[] = [
   {
     key: 'status',
@@ -151,7 +147,13 @@ const tableColumns: ColumnDef[] = [
     width: 120,
     render: (row) => {
       const r = row as unknown as InvoiceDto
-      return h(NTag, { size: 'small', bordered: false, type: statusTone(r.status) }, () => statusLabel(r.status))
+      const v = String(r.status ?? '')
+      const meta = INVOICE_STATUS_MAP[v]
+      return h(TStatusBadge, {
+        value: v,
+        type: meta?.type ?? 'default',
+        label: meta ? t(meta.labelKey) : v || '—',
+      })
     },
   },
   {
@@ -172,7 +174,7 @@ const tableColumns: ColumnDef[] = [
     align: 'right',
     render: (row) => {
       const r = row as unknown as InvoiceDto
-      return formatMoney(r.amount, r.currency)
+      return money(r.amount, r.currency)
     },
   },
   {
@@ -182,7 +184,7 @@ const tableColumns: ColumnDef[] = [
     align: 'right',
     render: (row) => {
       const r = row as unknown as InvoiceDto
-      return formatMoney(r.paidAmount, r.currency)
+      return money(r.paidAmount, r.currency)
     },
   },
   {
@@ -197,68 +199,19 @@ const tableColumns: ColumnDef[] = [
     width: 130,
     render: (row) => formatDate((row as unknown as InvoiceDto).dueDate),
   },
-  {
-    key: 'actions',
-    title: t('cols.actions'),
-    width: 240,
-    fixed: 'right',
-    align: 'right',
-    render: (row) => {
-      const r = row as unknown as InvoiceDto
-      const buttons = []
-      // Send: only when not yet sent/paid/cancelled
-      if (r.status === 0 || r.status === 1 || r.status === 2) {
-        buttons.push(
-          h(
-            NPopconfirm,
-            { onPositiveClick: () => sendInvoice(r) },
-            {
-              trigger: () => h(NButton, { size: 'tiny', tertiary: true }, {
-                icon: () => h(TSvgIcon, { icon: 'mdi:send', size: 12 }),
-                default: () => t('actions.send'),
-              }),
-              default: () => t('sendConfirm', { no: r.invoiceNo }),
-            },
-          ),
-        )
-      }
-      // Mark-paid: only when unpaid (not Paid / Cancelled)
-      if (r.status !== 3 && r.status !== 5) {
-        buttons.push(
-          h(NButton, { size: 'tiny', type: 'primary', tertiary: true, onClick: () => openMarkPaid(r) }, {
-            icon: () => h(TSvgIcon, { icon: 'mdi:cash-check', size: 12 }),
-            default: () => t('actions.markPaid'),
-          }),
-        )
-      }
-      // Cancel: only when not already cancelled / paid
-      if (r.status !== 3 && r.status !== 5) {
-        buttons.push(
-          h(NButton, { size: 'tiny', type: 'warning', tertiary: true, onClick: () => openCancel(r) }, {
-            icon: () => h(TSvgIcon, { icon: 'mdi:close-circle-outline', size: 12 }),
-            default: () => t('actions.cancel'),
-          }),
-        )
-      }
-      return h('div', { class: 'flex justify-end gap-4px' }, buttons)
-    },
-  },
 ]
 
 // ─── Fetch-only useCrudPage (no create/update/delete) ────────────────
-// Lifecycle actions (send / mark-paid / cancel) are handled by the page's
-// own bridge calls + modals, then crud.refresh().
 const crud = useCrudPage<InvoiceDto>({
   pageId: 'payment.invoices',
   columns: tableColumns,
   rowKey: (r) => r.id,
   fetchData: async (q) => {
-    const status = (q.filters.status as number | null | undefined) ?? null
+    const status = (q.filters.status as string | null | undefined) ?? null
     const r = await bridge.getList({
       pageIndex: q.pageIndex,
       pageSize: q.pageSize,
       status,
-      searchText: q.searchText || null,
     })
     const pageSize = q.pageSize
     return {
@@ -272,30 +225,24 @@ const crud = useCrudPage<InvoiceDto>({
     }
   },
 })
-crud.refresh().catch(() => undefined)
 
-// ─── Mark paid modal ──────────────────────────────────────────────
-const markPaidVisible = ref(false)
-const activeRow = ref<InvoiceDto | null>(null)
-const markPaidForm = reactive<MarkInvoicePaidDto>({
-  paidAmount: 0,
-  remark: '',
-})
-
-function openMarkPaid(row: InvoiceDto): void {
-  activeRow.value = row
+// ─── Mark-paid overlay (useDetail modal) ─────────────────────────────
+const markPaidDetail = useDetail<InvoiceDto>({ mode: 'modal', url: 'mark-paid', source: crud })
+const markPaidForm = reactive<MarkInvoicePaidDto>({ paidAmount: 0, remark: '' })
+watch(() => markPaidDetail.data.value, (inv) => {
+  if (!inv) return
   markPaidForm.remark = ''
   // Default to the outstanding due amount; backend RangeAttribute requires > 0.
-  markPaidForm.paidAmount = Number((row.dueAmount ?? row.amount).toFixed(2))
-  markPaidVisible.value = true
-}
+  markPaidForm.paidAmount = Number((inv.dueAmount ?? inv.amount).toFixed(2))
+})
 
 async function confirmMarkPaid(): Promise<void> {
-  if (!activeRow.value) return
+  const inv = markPaidDetail.data.value
+  if (!inv) return
   actionLoading.value = true
   try {
-    await bridge.markAsPaid(activeRow.value.id, { ...markPaidForm })
-    markPaidVisible.value = false
+    await bridge.markAsPaid(inv.id, { ...markPaidForm })
+    markPaidDetail.close()
     message.success(t('toast.markPaid'))
     await crud.refresh()
   } catch (e) {
@@ -305,22 +252,20 @@ async function confirmMarkPaid(): Promise<void> {
   }
 }
 
-// ─── Cancel modal ─────────────────────────────────────────────────
-const cancelVisible = ref(false)
+// ─── Cancel overlay (useDetail modal) ────────────────────────────────
+const cancelDetail = useDetail<InvoiceDto>({ mode: 'modal', url: 'cancel-invoice', source: crud })
 const cancelReason = ref('')
-
-function openCancel(row: InvoiceDto): void {
-  activeRow.value = row
-  cancelReason.value = ''
-  cancelVisible.value = true
-}
+watch(() => cancelDetail.data.value, (inv) => {
+  if (inv) cancelReason.value = ''
+})
 
 async function confirmCancel(): Promise<void> {
-  if (!activeRow.value) return
+  const inv = cancelDetail.data.value
+  if (!inv) return
   actionLoading.value = true
   try {
-    await bridge.cancel(activeRow.value.id, cancelReason.value)
-    cancelVisible.value = false
+    await bridge.cancel(inv.id, cancelReason.value)
+    cancelDetail.close()
     message.success(t('toast.cancelled'))
     await crud.refresh()
   } catch (e) {
@@ -339,4 +284,32 @@ async function sendInvoice(row: InvoiceDto): Promise<void> {
     message.error(t('toast.failed', { error: e instanceof Error ? e.message : String(e) }))
   }
 }
+
+// ─── Declarative row actions (send / mark-paid / cancel) ─────────────
+const rowActions: RowAction<InvoiceDto>[] = [
+  {
+    key: 'send',
+    label: 'actions.send',
+    icon: 'mdi:send',
+    show: (r) => SENDABLE.has(String(r.status ?? '')),
+    confirm: (r) => t('sendConfirm', { no: r.invoiceNo }),
+    onClick: (r) => sendInvoice(r),
+  },
+  {
+    key: 'markPaid',
+    label: 'actions.markPaid',
+    type: 'primary',
+    icon: 'mdi:cash-check',
+    show: (r) => !TERMINAL.has(String(r.status ?? '')),
+    onClick: (r) => void markPaidDetail.open('edit', r),
+  },
+  {
+    key: 'cancel',
+    label: 'actions.cancel',
+    type: 'warning',
+    icon: 'mdi:close-circle-outline',
+    show: (r) => !TERMINAL.has(String(r.status ?? '')),
+    onClick: (r) => void cancelDetail.open('edit', r),
+  },
+]
 </script>

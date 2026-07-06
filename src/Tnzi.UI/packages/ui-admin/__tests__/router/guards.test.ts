@@ -34,11 +34,18 @@ describe('createAuthGuard', () => {
     setActivePinia(createPinia())
   })
 
-  it('redirects to /login when not logged in and requiresAuth !== false', async () => {
+  it('redirects to an explicit loginPath when not logged in and requiresAuth !== false', async () => {
     const guard = createAuthGuard({ loginPath: '/login' }) as any
     const next = vi.fn()
     await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
     expect(next).toHaveBeenCalledWith('/login')
+  })
+
+  it('redirects by route NAME when no loginPath is configured (prefix-agnostic default)', async () => {
+    const guard = createAuthGuard() as any
+    const next = vi.fn()
+    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
+    expect(next).toHaveBeenCalledWith({ name: 'login' })
   })
 
   it('allows navigation when logged in', async () => {
@@ -69,7 +76,7 @@ describe('createPermissionGuard', () => {
     expect(next).toHaveBeenCalledWith()
   })
 
-  it('redirects to /403 when permission missing', async () => {
+  it('redirects to an explicit forbiddenPath when permission missing', async () => {
     loginAs([])
     const guard = createPermissionGuard({ forbiddenPath: '/403' }) as any
     const next = vi.fn()
@@ -79,6 +86,18 @@ describe('createPermissionGuard', () => {
       next,
     )
     expect(next).toHaveBeenCalledWith('/403')
+  })
+
+  it('redirects by route NAME when no forbiddenPath is configured', async () => {
+    loginAs([])
+    const guard = createPermissionGuard() as any
+    const next = vi.fn()
+    await guard(
+      fakeRoute('/admin/users', { permission: 'user.view' }),
+      fakeRoute('/'),
+      next,
+    )
+    expect(next).toHaveBeenCalledWith({ name: 'forbidden' })
   })
 
   it('passes when user has required permission', async () => {

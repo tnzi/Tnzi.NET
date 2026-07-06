@@ -81,10 +81,8 @@ export const skillFormSchema: FormSchemaItem[] = [
   { key: 'enabled', labelKey: 'form.enabled', label: 'Enabled', type: 'switch' },
 ]
 
-/** Keyword search over name / slug / description. */
-export const skillSearchFields: FormSchemaItem[] = [
-  { key: 'keyword', labelKey: 'search.keyword', label: 'Keyword', type: 'text' },
-]
+// The keyword search lives in the page-header bar (drives `query.searchText`).
+// A single-field advanced-search schema duplicated it, so it was removed.
 
 /** Truncate a multi-line description to a single-line card preview. */
 export function describePreview(text: string | null | undefined, max = 110): string {

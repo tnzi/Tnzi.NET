@@ -6,6 +6,7 @@ namespace Tnzi.Template.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/templates")]
+[ApiAuthorize(PermissionName = "template.template.view")]
 public class DefaultTemplateAdminController : ApiAdminControllerBase
 {
     protected readonly ITemplateStoreService TemplateStoreService;

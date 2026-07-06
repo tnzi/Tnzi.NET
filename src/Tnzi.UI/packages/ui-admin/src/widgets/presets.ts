@@ -86,6 +86,7 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.createUser',
       to: '/admin/identity/users',
       tone: 'primary',
+      permission: 'user.view',
     },
     {
       key: 'audit',
@@ -93,6 +94,7 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.audit',
       to: '/admin/audit/logs',
       tone: 'info',
+      permission: 'audit.log.view',
     },
     {
       key: 'agents',
@@ -100,6 +102,7 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.agents',
       to: '/admin/ai/agents',
       tone: 'success',
+      permission: 'ai.agent.view',
     },
     {
       key: 'settings',
@@ -107,6 +110,9 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.settings',
       to: '/admin/settings',
       tone: 'warning',
+      // Settings Center is gated by system.parameter.view (Technical) — hidden
+      // from business admins so the tile doesn't just bounce to /403.
+      permission: 'system.parameter.view',
     },
   ]
 }
@@ -206,6 +212,10 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.systemHealth.title',
       icon: 'mdi:heart-pulse',
       span: { xs: 24, sm: 24, md: 24, lg: 8 },
+      // Technical/ops surface — hidden from business admins (they lack
+      // system.health.view). Super admins and the pre-permission window still
+      // see it (Dashboard.vue fail-open).
+      permission: 'system.health.view',
     },
     {
       id: 'activity',
@@ -231,6 +241,10 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.opsHealth.title',
       icon: 'mdi:heart-pulse',
       span: { xs: 24, sm: 24, md: 12, lg: 12 },
+      // Technical/ops rollup (exceptions / P95 / SignalR / channels) — its
+      // probes are all Technical-gated, so it renders all-"—" for a business
+      // admin. Gate it away entirely instead (they lack system.performance.view).
+      permission: 'system.performance.view',
     },
     {
       id: 'chat-stats',

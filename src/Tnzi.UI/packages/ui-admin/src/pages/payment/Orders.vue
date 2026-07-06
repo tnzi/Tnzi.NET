@@ -1,15 +1,19 @@
 <template>
   <!--
-    Orders — Phase 3.32
-    Admin view of payment orders. Read-only (payment records are immutable for admin).
-    A KPI row (payment statistics) renders between the page header and the
-    list card via TCrudPage's #kpis slot (content-page standard: header →
-    KPI row → list). Statistics are fetched on mount and refreshed whenever
-    filters change.
+    Orders — admin view of payment orders. Read-only (payment records are an
+    immutable financial ledger); the only row action is a read-only View.
+    A KPI row (payment statistics) renders between the page header and the list
+    card via TCrudPage's #kpis slot. Statistics are fetched ONCE on mount (the
+    figures are a global overview, independent of list paging/filters).
+
+    The backend `PaymentQueryDto` has no free-text field, so the default
+    keyword box is disabled; `status` is exposed as an advanced-search filter.
   -->
   <TCrudPage
     :state="crud"
-    :all-columns="orderColumns"
+    :all-columns="columns"
+    :search-fields="searchFields"
+    :show-default-search="false"
     :title="t('title')"
     :translate="t"
     :form-modal-width="760"
@@ -24,11 +28,14 @@
       </TKpiRow>
     </template>
 
-    <template #form="{ formData, mode }">
+    <!-- Read-only quick preview (right drawer) — reached via the row View
+         action. A #detail slot (not #form) is required so the form modal mounts
+         even on this create/update-free page. -->
+    <template #detail="{ data }">
       <TFormSchemaRenderer
         :schema="orderFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
+        :model="(data ?? {}) as Record<string, unknown>"
+        readonly
         :translate="t"
         :columns="2"
       />
@@ -37,23 +44,41 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watchEffect, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { orderColumns, orderFormSchema } from './order-config'
-import { translatePageKey } from '../_shared/translate'
+import type { FormSchemaItem } from '../_shared/form-schema'
+import { buildOrderColumns, orderFormSchema, orderStatusOptions } from './order-config'
+import { makePageTranslator } from '../_shared/translate'
 import { formatCurrency } from '@tnzi/core'
 import type { PaymentDto, PaymentStatisticsDto } from '@tnzi/core/services/payment'
 
-// Wired to /admin/payments + /admin/payment-statistics via Plan C
-// 2026-04-14. Client is injected by createTnziUiAdmin({ client }).
+const t = makePageTranslator('payment.orders')
+
 const bridge = createPaymentBridge({ client: useAdminClient() })
+
+const columns = buildOrderColumns(t)
+
+// Status is the only server-side filter `PaymentQueryDto` supports for this
+// page; exposed through the advanced-search drawer (option value = enum member
+// name, e.g. 'Succeeded', which the backend binds directly).
+const searchFields: FormSchemaItem[] = [
+  {
+    key: 'status',
+    labelKey: 'form.status',
+    label: 'Status',
+    type: 'select',
+    placeholderKey: 'filter.statusAny',
+    placeholder: 'Status',
+    options: orderStatusOptions.map((o) => ({ value: o.value, label: o.value, labelKey: o.labelKey })),
+  },
+]
 
 const defaultStats: PaymentStatisticsDto = {
   startTime: '',
@@ -89,16 +114,16 @@ const paidRateDisplay = computed(() =>
 
 const crud = useCrudPage<PaymentDto>({
   pageId: 'payment.orders',
-  columns: orderColumns,
+  columns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.orders.fetch(query),
   // Payment orders are an immutable financial ledger — read-only from admin.
 })
 
-const rowActions: RowAction<PaymentDto>[] = []
+// Read-only quick preview only (no create/edit/delete on an immutable ledger).
+const rowActions: RowAction<PaymentDto>[] = [viewAction(crud)]
 
-
-async function refreshStats(): Promise<void> {
+async function loadStats(): Promise<void> {
   try {
     const result = await bridge.orders.statistics()
     // Bridge may return null/undefined when the backend endpoint is down or
@@ -111,16 +136,6 @@ async function refreshStats(): Promise<void> {
   }
 }
 
-// Refresh stats whenever the query changes (filters, pagination, search)
-watchEffect(() => {
-  // Access query to create reactive dependency
-  void crud.query.value
-  refreshStats().catch(() => undefined)
-})
-
-onMounted(() => {
-  crud.refresh().catch(() => undefined)
-})
-
-const t = (key: string) => translatePageKey('payment.orders', key)
+// Statistics are a global overview — fetch once on mount, not per page change.
+onMounted(() => { void loadStats() })
 </script>

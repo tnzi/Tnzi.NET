@@ -17,8 +17,9 @@ const getTree = vi.fn(async () => [
 ])
 const fetchFiles = vi.fn(async () => ({
   items: [
-    { id: 'f1', fileName: 'photo.jpg', originalName: 'photo.jpg', size: 1024, contentType: 'image/jpeg', url: '/files/f1', referenceCount: 0, extension: '.jpg', provider: 'local', folderId: null },
-    { id: 'f2', fileName: 'doc.pdf', originalName: 'doc.pdf', size: 2048, contentType: 'application/pdf', url: '/files/f2', referenceCount: 0, extension: '.pdf', provider: 'local', folderId: null },
+    // Backend serializes tags as a single comma-separated string (not an array).
+    { id: 'f1', fileName: 'photo.jpg', originalName: 'photo.jpg', size: 1024, contentType: 'image/jpeg', url: '/files/f1', referenceCount: 0, extension: '.jpg', provider: 'local', folderId: null, tags: 'holiday, 2026' },
+    { id: 'f2', fileName: 'doc.pdf', originalName: 'doc.pdf', size: 2048, contentType: 'application/pdf', url: '/files/f2', referenceCount: 0, extension: '.pdf', provider: 'local', folderId: null, tags: null },
   ],
   totalCount: 2,
   pageIndex: 1,
@@ -46,6 +47,7 @@ vi.mock('../../../src/services/bridges/storage-bridge', () => ({
     tags: { set: vi.fn(async () => ({})), byTag: vi.fn() },
     metadata: { get: vi.fn(async () => ({})), set: vi.fn(async () => ({})) },
     references: { byFile: vi.fn(async () => []), byEntity: vi.fn(async () => []) },
+    integrity: { verifyOne: vi.fn(async () => ({ status: 'Healthy' })), batchVerify: vi.fn() },
   }),
 }))
 

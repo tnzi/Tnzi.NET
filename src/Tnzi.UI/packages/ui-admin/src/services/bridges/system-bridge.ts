@@ -5,18 +5,18 @@
  * used by all TCrudPage-based system management pages.
  *
  * Sub-contracts:
- *   - menus       → useAdminMenuApi  (full CRUD + reorder)
- *   - settings    → useAdminSettingApi (full CRUD; used by Parameter page 3.14)
- *   - accessLogs  → useAdminAccessLogApi (read-only)
- *   - scheduledJobs → stub; Hangfire admin endpoints are NOT yet exposed via
- *                     @tnzi/core. Bridge rejects all calls until backend ships.
- *
- * PLAN DEVIATION: The plan (3.11) expected 5 sub-contracts including
- * DictionaryService and ScheduledJobService. Neither exists in
- * @tnzi/core/services/system. The system API ships Menu, Setting, and AccessLog.
- * scheduledJobs is exposed as a stub sub-contract so Task 3.16 (ScheduledJob page)
- * can be wired and tested without breaking builds.
- * Dictionary (Task 3.13) is re-scoped to Settings (same API, different UI label).
+ *   - menus         → useAdminMenuApi (full CRUD + reorder)
+ *   - settings      → useAdminSettingApi (full CRUD; backs both the Parameter
+ *                     and Dictionary pages — same /admin/settings endpoint,
+ *                     different UI framing)
+ *   - accessLogs    → useAdminAccessLogApi (read-only)
+ *   - scheduledJobs → live wiring to /admin/scheduled-jobs (Tnzi.Hangfire
+ *                     DefaultScheduledJobAdminController). Calls go through the
+ *                     HttpClient directly because @tnzi/core/services/system has
+ *                     not been regenerated since those endpoints shipped.
+ *   - features      → live wiring to /admin/feature-definitions (Tnzi.Feature),
+ *                     same direct-HttpClient reason as scheduledJobs.
+ *   - settingsCenter→ useAdminSettingsCenterApi (schema-driven module settings)
  */
 import {
   useAdminMenuApi,
@@ -58,12 +58,11 @@ export interface SystemBridge {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<AccessLogInfoDto>>
   }
   /**
-   * Scheduled jobs — Hangfire recurring-job admin, wired via direct HttpClient
-   * calls to /admin/scheduled-jobs. The Tnzi.Hangfire module ships
-   * DefaultScheduledJobAdminController as of 2026-04-14, but @tnzi/core/services/system
-   * has not been regenerated since then, so this path intentionally bypasses
-   * the generated factory. Replace with useAdminScheduledJobApi after the next
-   * `pnpm contracts:sync`.
+   * Scheduled jobs — Hangfire recurring-job admin, fully wired via direct
+   * HttpClient calls to /admin/scheduled-jobs (Tnzi.Hangfire ships
+   * DefaultScheduledJobAdminController). This bypasses the generated factory
+   * only because @tnzi/core/services/system has not been regenerated since those
+   * endpoints shipped; swap to useAdminScheduledJobApi after `pnpm contracts:sync`.
    */
   scheduledJobs: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<ScheduledJobDto>>
@@ -89,19 +88,22 @@ export interface SystemBridge {
  * Kept inline here until `pnpm contracts:sync` regenerates
  * `@tnzi/core/services/system` with the feature endpoints.
  *
- * `valueType` is the int form of `FeatureValueType` enum:
- *   0 = Boolean, 1 = Integer, 2 = String
+ * `valueType` is the `FeatureValueType` enum, serialized by the backend's global
+ * JsonStringEnumConverter as its member name: "Boolean" | "Integer" | "String"
+ * (input still accepts the legacy integer too).
  *
  * `source` is "Database" (DB-stored, fully editable) or "Code" (defined by
  * `IFeatureDefinitionProvider`, edit/delete disabled in the admin UI).
  */
+export type FeatureValueType = 'Boolean' | 'Integer' | 'String'
+
 export interface FeatureDto {
   id: string
   name: string
   displayName?: string | null
   description?: string | null
   defaultValue?: string | null
-  valueType: number
+  valueType: FeatureValueType
   parentName?: string | null
   isEnabled: boolean
   group?: string | null
@@ -114,7 +116,7 @@ export interface CreateFeatureDto {
   displayName?: string | null
   description?: string | null
   defaultValue?: string | null
-  valueType: number
+  valueType: FeatureValueType
   parentName?: string | null
   group?: string | null
 }
@@ -123,7 +125,7 @@ export interface UpdateFeatureDto {
   displayName?: string | null
   description?: string | null
   defaultValue?: string | null
-  valueType: number
+  valueType: FeatureValueType
   parentName?: string | null
   isEnabled?: boolean
   group?: string | null

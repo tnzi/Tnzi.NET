@@ -7,6 +7,8 @@ namespace Tnzi.System.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/menus")]
+// 用户菜单树端点是前端 'merge' 菜单模式的自服务链路，任何已登录后台用户都要能调用它来构建自己的
+// 导航。因此刻意不叠加模块级权限码，只保留基类 Admin.Manage 外层门。
 public class DefaultMenuAdminController : ApiAdminControllerBase
 {
     protected readonly IMenuService MenuService;

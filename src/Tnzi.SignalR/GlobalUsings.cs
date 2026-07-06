@@ -13,6 +13,7 @@ global using System.Diagnostics;
 global using System.Linq;
 global using System.Reflection;
 global using System.Security.Claims;
+global using System.Text.Json.Serialization;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Microsoft.AspNetCore.Mvc;

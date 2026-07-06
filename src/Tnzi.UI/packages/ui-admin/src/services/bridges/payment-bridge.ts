@@ -1,24 +1,18 @@
 /**
- * Payment bridge — full implementation (Phase 3 Task 3.31).
+ * Payment bridge — adapts the payment backend API to the shapes consumed by
+ * the TCrudPage-based payment pages.
  *
- * Adapts the payment backend API to BridgeCrudContract shapes used by
- * TCrudPage-based payment pages.
+ * Every payment record surfaced here is an immutable financial ledger entry:
+ * the admin pages are read-only lists plus lifecycle actions, never
+ * create/update/delete. The contracts therefore expose ONLY `fetch` plus the
+ * real lifecycle endpoints — there is no admin create/update/delete endpoint
+ * for payments, subscriptions or refunds, so no stubbed CRUD methods are
+ * carried.
  *
  * Sub-contracts:
- *   - orders        → useAdminPaymentApi (query, close, sync) + useAdminPaymentStatisticsApi
- *   - subscriptions → useAdminSubscriptionApi (query, cancel)
+ *   - orders        → useAdminPaymentApi (query) + useAdminPaymentStatisticsApi (overview)
+ *   - subscriptions → useAdminSubscriptionApi (query, cancel-at-period-end)
  *   - refunds       → useAdminRefundApi (query, approve, reject)
- *
- * Special contracts:
- *   - orders.statistics(query?) → PaymentStatisticsDto — fetches overview stats for the banner
- *   - refunds.approve(id)       → approves a pending refund
- *   - refunds.reject(id, reason) → rejects a pending refund with a remark
- *
- * BACKEND GAPS SUMMARY:
- *   orders.create: payment orders are initiated by users via checkout flow; no admin create.
- *   orders.update: payment records are immutable once created; status changes via close/sync only.
- *   subscriptions.create: subscriptions are initiated by users; no admin create endpoint.
- *   refunds.delete: refunds cannot be hard-deleted from admin; use cancel/reject to change state.
  */
 import {
   useAdminPaymentApi,
@@ -34,7 +28,7 @@ import {
   type RefundQueryDto,
   type SubscriptionQueryDto,
 } from '@tnzi/core/services/payment'
-import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
+import type { CrudPageQuery, CrudPageResult } from '../types'
 import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminPaymentApi>[0]
@@ -49,23 +43,29 @@ export interface PaymentBridgeDeps {
   adminStatisticsApi?: ReturnType<typeof useAdminPaymentStatisticsApi>
 }
 
-/** orders sub-contract with statistics action */
-export interface PaymentOrderContract extends BridgeCrudContract<PaymentDto> {
+/** orders sub-contract: read-only list + statistics overview. */
+export interface PaymentOrderContract {
+  fetch(query: CrudPageQuery): Promise<CrudPageResult<PaymentDto>>
   /**
-   * Fetch payment statistics overview for the Order page banner.
+   * Fetch payment statistics overview for the Order page KPI strip.
    * Maps to GET /admin/payment-statistics.
    */
   statistics(query?: StatisticsQueryDto): Promise<PaymentStatisticsDto>
 }
 
-/** subscriptions sub-contract with cancelAtPeriodEnd action */
-export interface PaymentSubscriptionContract extends BridgeCrudContract<SubscriptionDto> {
-  /** Cancel subscription at end of current billing period (immediate=false). */
+/** subscriptions sub-contract: read-only list + cancel-at-period-end. */
+export interface PaymentSubscriptionContract {
+  fetch(query: CrudPageQuery): Promise<CrudPageResult<SubscriptionDto>>
+  /**
+   * Cancel subscription at end of current billing period (immediate=false).
+   * There is NO admin subscription update endpoint — admins may only cancel.
+   */
   cancelAtPeriodEnd(id: string): Promise<void>
 }
 
-/** refunds sub-contract with approve/reject actions */
-export interface PaymentRefundContract extends BridgeCrudContract<RefundDto> {
+/** refunds sub-contract: read-only list + approve/reject. */
+export interface PaymentRefundContract {
+  fetch(query: CrudPageQuery): Promise<CrudPageResult<RefundDto>>
   /** Approve a pending refund. Maps to POST /admin/refunds/{id}/approve with approved=true. */
   approve(id: string): Promise<void>
   /** Reject a pending refund with a reason. Maps to POST /admin/refunds/{id}/approve with approved=false. */
@@ -79,7 +79,7 @@ export interface PaymentBridge {
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>
-  Promise.reject(new Error(`payment-bridge: ${name} — backend gap, no endpoint available`))
+  Promise.reject(new Error(`payment-bridge: ${name} — no HttpClient / API provided`))
 
 export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge {
   const paymentApi = deps.adminPaymentApi ?? (deps.client ? useAdminPaymentApi(deps.client) : null)
@@ -92,23 +92,14 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
     return {
       orders: {
         fetch: noFetch as never,
-        create: backendGapReject('orders.create'),
-        update: backendGapReject('orders.update'),
-        delete: backendGapReject('orders.delete'),
         statistics: backendGapReject('orders.statistics'),
       },
       subscriptions: {
         fetch: noFetch as never,
-        create: backendGapReject('subscriptions.create'),
-        update: backendGapReject('subscriptions.update'),
-        delete: backendGapReject('subscriptions.delete'),
         cancelAtPeriodEnd: backendGapReject('subscriptions.cancelAtPeriodEnd'),
       },
       refunds: {
         fetch: noFetch as never,
-        create: backendGapReject('refunds.create'),
-        update: backendGapReject('refunds.update'),
-        delete: backendGapReject('refunds.delete'),
         approve: backendGapReject('refunds.approve'),
         reject: backendGapReject('refunds.reject'),
       },
@@ -136,12 +127,6 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   const orders: PaymentOrderContract = {
     fetch: fetchOrders,
-    // BACKEND GAP: payment orders are initiated by users via checkout; no admin create.
-    create: backendGapReject('orders.create — payment orders are initiated by users, not admins'),
-    // BACKEND GAP: payment records are immutable; use close/sync for status transitions.
-    update: backendGapReject('orders.update — payment records are immutable; use close/sync for status transitions'),
-    // BACKEND GAP: payment orders cannot be hard-deleted from admin.
-    delete: backendGapReject('orders.delete — payment orders cannot be deleted; use close to void'),
     statistics: async (query?: StatisticsQueryDto): Promise<PaymentStatisticsDto> => {
       return unwrap<PaymentStatisticsDto>(await sta.getStatistics(query))
     },
@@ -162,11 +147,6 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   const subscriptions: PaymentSubscriptionContract = {
     fetch: fetchSubscriptions,
-    // BACKEND GAP: subscriptions are initiated by users via checkout; no admin create.
-    create: backendGapReject('subscriptions.create — subscriptions are initiated by users, not admins'),
-    update: backendGapReject('subscriptions.update — use cancelAtPeriodEnd for admin cancel action'),
-    // BACKEND GAP: admin subscription delete — use cancelAtPeriodEnd instead.
-    delete: backendGapReject('subscriptions.delete — subscriptions cannot be deleted; use cancelAtPeriodEnd'),
     cancelAtPeriodEnd: async (id: string): Promise<void> => {
       await sa.cancel(id, { reason: undefined, immediate: false })
     },
@@ -187,12 +167,6 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   const refunds: PaymentRefundContract = {
     fetch: fetchRefunds,
-    // BACKEND GAP: admin does not initiate refunds via this page; users request refunds.
-    create: backendGapReject('refunds.create — refund requests are initiated by users, not admins'),
-    // BACKEND GAP: refund records are immutable; use approve/reject to change status.
-    update: backendGapReject('refunds.update — refund records are immutable; use approve/reject'),
-    // BACKEND GAP: refunds cannot be hard-deleted from admin.
-    delete: backendGapReject('refunds.delete — refunds cannot be deleted; use cancel to void'),
     approve: async (id: string): Promise<void> => {
       await ra.approve(id, { approved: true })
     },

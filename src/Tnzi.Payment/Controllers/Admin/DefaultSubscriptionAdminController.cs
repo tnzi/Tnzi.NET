@@ -5,6 +5,7 @@ namespace Tnzi.Payment.Controllers.Admin;
 /// </summary>
 [Route("admin/subscriptions")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "payment.subscription.view")]
 public class DefaultSubscriptionAdminController : ApiAdminControllerBase
 {
     private readonly ISubscriptionService _subscriptionService;

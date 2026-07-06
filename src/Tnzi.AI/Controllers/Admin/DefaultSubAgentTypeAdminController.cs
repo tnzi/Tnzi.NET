@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/ai/sub-agent-types")]
+[ApiAuthorize(PermissionName = "ai.agent.view")]
 public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
 {
     protected readonly IRepository<SubAgentType, Guid> Repository;

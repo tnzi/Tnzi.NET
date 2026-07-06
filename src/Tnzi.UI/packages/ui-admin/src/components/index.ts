@@ -1,5 +1,7 @@
 // Public component surface for `@tnzi/ui-admin/components`.
 export * from './crud'
+// Overlay chrome primitives (shared NModal / NDrawer shells).
+export * from './overlay'
 export { default as TAdminLoginCard } from './auth/TAdminLoginCard.vue'
 export type { DemoAccount, LoginPayload } from './auth/TAdminLoginCard.vue'
 export { default as TIconPicker } from './inputs/TIconPicker.vue'
@@ -24,6 +26,12 @@ export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
 // Layout primitives
 export { default as TPageHeader } from './layout/TPageHeader.vue'
 export { default as TContentPage } from './layout/TContentPage.vue'
+// Batteries-included container for tabbed content pages — declare `:sections`,
+// drop each tab's content in a same-named slot; NTabs chrome, `t-table-tabs`
+// surface, per-pane wrapper, `?section=` deep-linking and card-in-a-card
+// flattening are all owned internally (no boilerplate at the call site).
+export { default as TTabsPage } from './layout/TTabsPage.vue'
+export type { TabSection } from './layout/TTabsPage.vue'
 // Master-detail layout primitive — list/tree pane + detail pane with a
 // built-in responsive grid + fill-height chain + mobile stacking. Replaces the
 // hand-rolled `grid Npx 1fr` + @media 767 master-detail CSS in the built-in

@@ -26,8 +26,13 @@ export interface RagChatParams {
   topK?: number;
 }
 
-/** Document ingestion status. 0=Processing / 1=Completed / 2=Failed (mirrors backend DocumentStatus enum). */
-export type DocumentStatus = 0 | 1 | 2;
+/**
+ * Document ingestion status — mirrors the backend `DocumentStatus` enum. The
+ * backend registers `JsonStringEnumConverter`, so responses carry the PascalCase
+ * member NAME string. The numeric ordinals (0=Processing / 1=Completed /
+ * 2=Failed) are kept in the union for backward compatibility with older payloads.
+ */
+export type DocumentStatus = 'Processing' | 'Completed' | 'Failed' | 0 | 1 | 2;
 
 /** A knowledge base (vector store + ingestion config). */
 export interface KnowledgeBaseDto {

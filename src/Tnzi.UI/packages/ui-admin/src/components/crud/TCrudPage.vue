@@ -18,6 +18,8 @@
       :show-batch="showBatchDelete"
       :show-pagination="true"
       :form-modal-width="formModalWidth"
+      :detail-width="detailWidth"
+      :detail-title="detailTitle"
       :title-help="titleHelp"
       :title-help-title="titleHelpTitle"
       :translate="translate"
@@ -98,6 +100,8 @@
       <template v-if="$slots.error" #error="e"><slot name="error" v-bind="e" /></template>
       <template #form="f"><slot name="form" v-bind="f" /></template>
       <template v-if="$slots.formFooter" #formFooter><slot name="formFooter" /></template>
+      <template v-if="$slots.detail" #detail="d"><slot name="detail" v-bind="d" /></template>
+      <template v-if="$slots.detailFooter" #detailFooter="d"><slot name="detailFooter" v-bind="d" /></template>
     </TListShell>
   </div>
 </template>
@@ -142,6 +146,11 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   defaultAdvancedMode?: boolean
   hideSimpleMode?: boolean
   formModalWidth?: number
+  /** Width of the read-only view drawer (the `#detail` slot). Default 640.
+      Accepts a string (e.g. `'100vw'`) for responsive full-screen on phones. */
+  detailWidth?: number | string
+  /** Title for the view drawer, derived from the viewed record. */
+  detailTitle?: (data: T) => string
   /** Explicit operation-column width. When set it always wins — including
       over the declarative `rowActions` auto-estimate. Leave unset (default)
       to let declarative actions auto-size the column; the legacy
@@ -176,6 +185,8 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
   defaultAdvancedMode: false,
   hideSimpleMode: false,
   formModalWidth: 560,
+  detailWidth: 640,
+  detailTitle: undefined,
   // No default width — undefined lets the renderer auto-size declarative
   // rowActions (the old fixed 150 was the source of clipped action cells).
   rowActionsWidth: undefined,
@@ -198,6 +209,8 @@ defineSlots<{
   error?: (props: { error: Error; retry: () => Promise<void>; dismiss: () => void }) => unknown
   form?: (props: { formData: Partial<T> | null; mode: FormModalMode | null }) => unknown
   formFooter?: () => unknown
+  detail?: (props: { data: Partial<T> | null; mode: FormModalMode | null }) => unknown
+  detailFooter?: (props: { data: Partial<T> | null }) => unknown
   rowActions?: (props: { row: T }) => unknown
 }>()
 

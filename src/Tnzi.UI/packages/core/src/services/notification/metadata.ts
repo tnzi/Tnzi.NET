@@ -3,13 +3,18 @@
  */
 
 /**
- * Notification type
+ * Notification type.
+ *
+ * String enum (member name = value) — the backend registers a global
+ * JsonStringEnumConverter, so every enum field serializes as its PascalCase
+ * member name; the enum members mirror Tnzi.Notification.Metadata.NotificationType
+ * (Email / Sms / Push — there is no InApp on the backend). Inbound query params
+ * accept both the string and the legacy numeric value.
  */
 export enum NotificationType {
-  Email = 1,
-  Sms = 2,
-  Push = 3,
-  InApp = 4,
+  Email = 'Email',
+  Sms = 'Sms',
+  Push = 'Push',
 }
 
 /**
@@ -23,8 +28,6 @@ export function getNotificationTypeLabel(type: NotificationType): string {
       return 'SMS';
     case NotificationType.Push:
       return 'Push';
-    case NotificationType.InApp:
-      return 'In-App';
     default:
       return 'Unknown';
   }
@@ -34,13 +37,13 @@ export function getNotificationTypeLabel(type: NotificationType): string {
  * Notification status
  */
 export enum NotificationStatus {
-  Pending = 0,
-  Sending = 1,
-  Sent = 2,
-  Failed = 3,
-  PartiallySent = 4,
-  Cancelled = 5,
-  Scheduled = 6,
+  Pending = 'Pending',
+  Sending = 'Sending',
+  Sent = 'Sent',
+  Failed = 'Failed',
+  PartiallySent = 'PartiallySent',
+  Cancelled = 'Cancelled',
+  Scheduled = 'Scheduled',
 }
 
 /**
@@ -71,10 +74,10 @@ export function getNotificationStatusLabel(status: NotificationStatus): string {
  * Notification priority
  */
 export enum NotificationPriority {
-  Low = 0,
-  Normal = 1,
-  High = 2,
-  Urgent = 3,
+  Low = 'Low',
+  Normal = 'Normal',
+  High = 'High',
+  Urgent = 'Urgent',
 }
 
 /**
@@ -112,9 +115,9 @@ export enum RecipientType {
  * Backend: TrendInterval
  */
 export enum TrendInterval {
-  Daily = 0,
-  Weekly = 1,
-  Monthly = 2,
+  Daily = 'Daily',
+  Weekly = 'Weekly',
+  Monthly = 'Monthly',
 }
 
 /**

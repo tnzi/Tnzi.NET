@@ -18,7 +18,7 @@
 import { reactive, ref, computed, onMounted, h } from 'vue'
 import {
   NCard, NButton, NForm, NFormItem, NGrid, NGi,
-  NDatePicker, NInput, NSpin, NTabs, NTabPane, NProgress, NTag,
+  NDatePicker, NInput, NSpin, NProgress, NTag,
   NStatistic, type DataTableColumns,
 } from 'naive-ui'
 import type { EChartsOption } from 'echarts'
@@ -29,10 +29,10 @@ import TDashboardPage, {
   type KpiCard,
 } from '../../../components/pages/TDashboardPage.vue'
 import { TSvgIcon } from '@tnzi/ui'
-import { translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import TContentPage from '../../../components/layout/TContentPage.vue'
+import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage.vue'
 import {
   STAT_CARDS,
   defaultDateRange,
@@ -59,7 +59,7 @@ import type {
 } from '@tnzi/core/services/ai'
 
 const bridge = createAiBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('ai.usageDashboard', key)
+const t = makePageTranslator('ai.usageDashboard')
 
 interface DashboardFilters {
   startTime: number | null
@@ -87,7 +87,15 @@ const logTotal = ref(0)
 const logPage = ref(1)
 const logPageSize = ref(20)
 
-const activeTab = ref<'overview' | 'cost' | 'feedback' | 'logs'>('overview')
+// Primary tabs. TTabsPage owns the `?section=` deep-linking + Back/Forward.
+// `show` keeps all panes mounted (the shared filter drives every tab at once).
+const tabs: TabSection[] = [
+  { name: 'overview', label: t('tabs.overview'), displayDirective: 'show' },
+  { name: 'cost', label: t('tabs.cost'), displayDirective: 'show' },
+  { name: 'feedback', label: t('tabs.feedback'), displayDirective: 'show' },
+  { name: 'logs', label: t('tabs.logs'), displayDirective: 'show' },
+]
+const activeTab = ref('overview')
 
 const loading = ref(false)
 const logsLoading = ref(false)
@@ -387,7 +395,14 @@ defineExpose({
 </script>
 
 <template>
-  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+  <TTabsPage
+    :title="t('title')"
+    :translate="t"
+    :sections="tabs"
+    default-section="overview"
+    v-model:section="activeTab"
+    data-test="usage-dashboard"
+  >
     <template #actions>
       <NButton
         size="small"
@@ -401,8 +416,9 @@ defineExpose({
       </NButton>
     </template>
 
-    <div class="t-usage-dashboard" data-test="usage-dashboard">
-      <!-- Shared filter card — drives every tab. -->
+    <!-- Shared filter + partial-error banner drive every tab; they sit above
+         the tab surface on the canvas. -->
+    <template #kpis>
       <NCard
         :bordered="false"
         size="small"
@@ -483,16 +499,10 @@ defineExpose({
           </li>
         </ul>
       </NCard>
+    </template>
 
-        <NTabs
-          v-model:value="activeTab"
-          type="line"
-          animated
-          data-test="usage-tabs"
-          class="t-table-tabs t-usage-dashboard__tabs"
-        >
-          <!-- ===== Overview ===== -->
-          <NTabPane name="overview" :tab="t('tabs.overview')" display-directive="show">
+    <!-- ===== Overview ===== -->
+    <template #overview>
             <div class="t-usage-dashboard__tab">
               <TDashboardPage
                 :kpis="kpiCards"
@@ -529,10 +539,10 @@ defineExpose({
                 </NCard>
               </NSpin>
             </div>
-          </NTabPane>
+    </template>
 
-          <!-- ===== Cost breakdown ===== -->
-          <NTabPane name="cost" :tab="t('tabs.cost')" display-directive="show">
+    <!-- ===== Cost breakdown ===== -->
+    <template #cost>
             <div class="t-usage-dashboard__tab" data-test="cost-tab">
               <NSpin :show="loading">
                 <NGrid :x-gap="16" :y-gap="16" responsive="screen" item-responsive cols="24">
@@ -572,10 +582,10 @@ defineExpose({
                 </NGrid>
               </NSpin>
             </div>
-          </NTabPane>
+    </template>
 
-          <!-- ===== Agent feedback ===== -->
-          <NTabPane name="feedback" :tab="t('tabs.feedback')" display-directive="show">
+    <!-- ===== Agent feedback ===== -->
+    <template #feedback>
             <div class="t-usage-dashboard__tab" data-test="feedback-tab">
               <NSpin :show="loading">
                 <ul class="t-usage-dashboard__feedback">
@@ -612,10 +622,10 @@ defineExpose({
                 </ul>
               </NSpin>
             </div>
-          </NTabPane>
+    </template>
 
-          <!-- ===== Usage logs ===== -->
-          <NTabPane name="logs" :tab="t('tabs.logs')" display-directive="show">
+    <!-- ===== Usage logs ===== -->
+    <template #logs>
             <div class="t-usage-dashboard__tab" data-test="logs-tab">
               <TResponsiveTable
                 :columns="logColumns"
@@ -627,12 +637,13 @@ defineExpose({
                 :empty-text="t('logs.empty')"
               />
             </div>
-          </NTabPane>
-        </NTabs>
+    </template>
 
-      <!-- Hidden stat-cards mirror — labels + formatted values so integration
-           tests can find them via [data-stat] without depending on the
-           TDashboardPage TCountTo animation completing under jsdom. -->
+    <!-- Hidden stat-cards mirror — labels + formatted values so integration
+         tests can find them via [data-stat] without depending on the
+         TDashboardPage TCountTo animation completing under jsdom. Tab-
+         independent, so it lives in #overlays. -->
+    <template #overlays>
       <div data-test="stat-cards" class="t-usage-dashboard__sr-only">
         <div
           v-for="card in STAT_CARDS"
@@ -650,30 +661,18 @@ defineExpose({
           </div>
         </div>
       </div>
-    </div>
-  </TContentPage>
+    </template>
+  </TTabsPage>
 </template>
 
 <style scoped>
-/* Fill the page height: the dashboard column fills the (scroll="fill") body and
-   the tabs widget claims the residual height; each tab pane scrolls internally
-   so the container never leaves a background gap. */
-.t-usage-dashboard {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+/* TTabsPage owns the page-fill + tab chrome; these are the page's own bits:
+   the shared card surface and each pane's internal scroll. */
 .t-usage-dashboard__card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }
-/* The filter + error cards keep their natural height; the tabs fill the rest. */
-.t-usage-dashboard > .t-usage-dashboard__card {
-  flex-shrink: 0;
-}
-/* Each tab pane owns its own scroll (the t-table-tabs nav stays pinned). */
+/* Each tab pane owns its own scroll (the tab nav stays pinned). */
 .t-usage-dashboard__tab {
   flex: 1 1 auto;
   min-height: 0;

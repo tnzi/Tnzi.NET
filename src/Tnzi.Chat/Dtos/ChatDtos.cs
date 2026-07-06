@@ -16,6 +16,13 @@ public class ConversationListItemDto
     public UserPresenceStatus? PeerStatus { get; set; }
     public bool IsSticky { get; set; }
     public string? Remark { get; set; }
+
+    /// <summary>
+    /// 群聊头像拼合数据：群主恒第一，其余按入群顺序取前 N 个成员（N 由
+    /// <c>ChatOptions.GroupAvatarMemberCount</c> 决定，1-9），前端按九宫格拼合渲染。
+    /// 仅 Group 会话返回；Direct/System 为 null。
+    /// </summary>
+    public List<ChatContactDto>? MemberAvatars { get; set; }
 }
 
 public class ConversationMemberDto
@@ -162,6 +169,10 @@ public class ConversationMemberSettingsDto
 {
     public bool? IsMuted { get; set; }
     public bool? IsSticky { get; set; }
+
+    /// <summary>隐藏会话（true=从列表移除；收到新消息时服务端自动取消隐藏）。</summary>
+    public bool? IsHidden { get; set; }
+
     public string? Remark { get; set; }
     public string? Alias { get; set; }
 }
@@ -169,4 +180,28 @@ public class ConversationMemberSettingsDto
 public class UpdateNoticeDto
 {
     public string? Notice { get; set; }
+}
+
+/// <summary>
+/// 聊天客户端功能配置（供前端裁剪 UI 入口；写路径仍由服务端强制）。
+/// </summary>
+public class ChatClientConfigDto
+{
+    /// <summary>是否启用群聊（建群/加人入口）。</summary>
+    public bool EnableGroups { get; set; }
+
+    /// <summary>单个群的最大成员数（0 = 不限制）。</summary>
+    public int MaxGroupMembers { get; set; }
+
+    /// <summary>群头像拼合选取的成员数上限（1-9）。</summary>
+    public int GroupAvatarMemberCount { get; set; }
+
+    /// <summary>是否启用在线状态展示。</summary>
+    public bool EnablePresence { get; set; }
+
+    /// <summary>新消息提示音默认开关。</summary>
+    public bool EnableMessageSound { get; set; }
+
+    /// <summary>是否允许发送图片/文件消息。</summary>
+    public bool EnableFileMessages { get; set; }
 }

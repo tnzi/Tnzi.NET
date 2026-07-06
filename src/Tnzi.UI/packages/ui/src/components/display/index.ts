@@ -7,6 +7,7 @@
 export { default as TRelativeTime } from './TRelativeTime.vue'
 export { default as TCountTo } from './TCountTo.vue'
 export { default as TSvgIcon } from './TSvgIcon.vue'
+export { default as TAvatar } from './TAvatar.vue'
 export { default as TButtonIcon } from './TButtonIcon.vue'
 export { default as TSourceBadge } from './TSourceBadge.vue'
 export type { SourceKind } from './TSourceBadge.vue'

@@ -27,6 +27,7 @@ public class AuthorizationTestDbContext : TnziDbContext<AuthorizationTestDbConte
     public DbSet<ModuleFunction> ModuleFunctions => Set<ModuleFunction>();
     public DbSet<ModuleRole> ModuleRoles => Set<ModuleRole>();
     public DbSet<ModuleUser> ModuleUsers => Set<ModuleUser>();
+    public DbSet<RoleFunction> RoleFunctions => Set<RoleFunction>();
     public DbSet<EntityInfo> EntityInfos => Set<EntityInfo>();
     public DbSet<EntityRole> EntityRoles => Set<EntityRole>();
 
@@ -37,6 +38,7 @@ public class AuthorizationTestDbContext : TnziDbContext<AuthorizationTestDbConte
         modelBuilder.ApplyConfiguration(new Entities.Configs.ModuleFunctionConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.ModuleRoleConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.ModuleUserConfiguration());
+        modelBuilder.ApplyConfiguration(new Entities.Configs.RoleFunctionConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.EntityInfoConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.EntityRoleConfiguration());
 

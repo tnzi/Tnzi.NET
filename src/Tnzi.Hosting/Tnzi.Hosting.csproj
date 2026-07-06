@@ -35,6 +35,7 @@
     <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Chat\Tnzi.Chat.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" PrivateAssets="all" />

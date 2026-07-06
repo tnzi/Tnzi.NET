@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/ai/tasks")]
+[ApiAuthorize(PermissionName = "ai.agentRun.view")]
 public class DefaultTaskAdminController : ApiAdminControllerBase
 {
     private readonly IAgentTaskService _taskService;

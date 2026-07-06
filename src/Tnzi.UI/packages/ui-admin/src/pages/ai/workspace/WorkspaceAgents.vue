@@ -1,157 +1,132 @@
 <template>
-  <TContentPage
+  <!--
+    WorkspaceAgents — read-only view of Agent definitions discovered from
+    AGENT.md / PERSONA.md files on disk. A standard TCardPage (mode="page"):
+    the shell owns the white header (title + help + keyword search), the scope
+    filter (All / Global / Project) is a segmented control in the toolbar, and
+    each card opens a read-only detail drawer (deep-linkable via the CRUD `view`
+    open-state). No create/edit/delete — the page is read-only, so those
+    affordances are hidden automatically (no create/update/delete callbacks).
+  -->
+  <TCardPage
+    :state="crud"
+    mode="page"
     :title="t('title')"
-    :help="t('banner')"
+    :title-help="t('banner')"
+    :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
+    :search-placeholder="t('search.placeholder')"
+    :show-pagination="false"
+    :detail-width="640"
+    :detail-title="(d: WorkspaceAgentDto) => d.name"
     :translate="t"
-    scroll="fill"
   >
-    <!-- Scope filter as a tab bar (All / Global / Project) — sits right under
-         the page-header bar; the panes are empty (they only drive the filter). -->
-    <NTabs
-      :value="scopeFilter"
-      type="line"
-      class="t-workspace-agent-page__scope"
-      @update:value="onScopeChange"
-    >
-      <NTabPane name="all" :tab="t('scope.all')" />
-      <NTabPane name="Global" :tab="t('scope.global')" />
-      <NTabPane name="Project" :tab="t('scope.project')" />
-    </NTabs>
+    <!-- Scope filter — a segmented control (All / Global / Project). It drives
+         the fetch query's `scope` filter; it is NOT navigation, so it stays a
+         toolbar control rather than a deep-linked tab. -->
+    <template #toolbarLeft>
+      <NRadioGroup :value="scopeFilter" size="small" @update:value="onScopeChange">
+        <NRadioButton value="all">{{ t('scope.all') }}</NRadioButton>
+        <NRadioButton value="Global">{{ t('scope.global') }}</NRadioButton>
+        <NRadioButton value="Project">{{ t('scope.project') }}</NRadioButton>
+      </NRadioGroup>
+    </template>
 
-    <div class="t-workspace-agent-page__list">
-      <!-- show-header=false suppresses the shell's header bar — the title/help
-           live on the outer TContentPage (otherwise the shell falls back to
-           the route meta title and renders a duplicate bar). -->
-      <TCardPage
-        :state="crud"
-        mode="page"
-        :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
-        :show-header="false"
-        :show-search="false"
-        :show-pagination="false"
-        :translate="t"
-      >
-        <template #card="{ item }">
-          <TEntityCard clickable @click="openDetail(item)">
-          <div class="t-workspace-agent-page__card-header">
-            <span class="t-workspace-agent-page__card-name">{{ item.name }}</span>
-            <NTag
-              size="small"
-              :type="item.workspaceScope === 'Project' ? 'warning' : 'info'"
-              :bordered="false"
-            >
-              {{ item.workspaceScope === 'Project' ? t('scope.project') : t('scope.global') }}
-            </NTag>
-          </div>
-          <div class="t-workspace-agent-page__card-id">{{ item.agentId }}</div>
-          <div class="t-workspace-agent-page__card-desc">
-            {{ item.description || '—' }}
-          </div>
-          <div v-if="item.provider" class="t-workspace-agent-page__card-provider">
-            {{ item.provider }}{{ item.model ? ` · ${item.model}` : '' }}
-          </div>
-          <div
-            v-if="(item.domains?.length ?? 0) > 0 || (item.roles?.length ?? 0) > 0 || item.hasPersona"
-            class="t-workspace-agent-page__card-tags"
+    <template #card="{ item }">
+      <TEntityCard clickable @click="crud.openView(item)">
+        <div class="flex items-center justify-between gap-8px mb-2px">
+          <span class="t-wsa__name flex-1 min-w-0">{{ item.name }}</span>
+          <NTag
+            size="small"
+            :type="item.workspaceScope === 'Project' ? 'warning' : 'info'"
+            :bordered="false"
+            class="flex-shrink-0"
           >
-            <NTag
-              v-for="d in (item.domains ?? [])"
-              :key="`d-${d}`"
-              size="small"
-              type="info"
-              :bordered="false"
-            >{{ d }}</NTag>
-            <NTag
-              v-for="r in (item.roles ?? [])"
-              :key="`r-${r}`"
-              size="small"
-              type="success"
-              :bordered="false"
-            >{{ r }}</NTag>
-            <NTag
-              v-if="item.hasPersona"
-              size="small"
-              type="success"
-              :bordered="false"
-            >{{ t('detail.persona') }}</NTag>
-          </div>
-          <template #actions>
-            <NButton size="small" ghost @click="copyPath(item.filePath)">
-              {{ t('actions.copyPath') }}
-            </NButton>
-          </template>
-        </TEntityCard>
+            {{ item.workspaceScope === 'Project' ? t('scope.project') : t('scope.global') }}
+          </NTag>
+        </div>
+        <div class="t-wsa__id font-mono">{{ item.agentId }}</div>
+        <div class="t-wsa__desc">{{ item.description || '—' }}</div>
+        <div v-if="item.provider" class="t-wsa__provider">
+          {{ item.provider }}{{ item.model ? ` · ${item.model}` : '' }}
+        </div>
+        <div v-if="hasTags(item)" class="flex flex-wrap gap-4px mt-4px">
+          <NTag v-for="d in (item.domains ?? [])" :key="`d-${d}`" size="small" type="info" :bordered="false">{{ d }}</NTag>
+          <NTag v-for="r in (item.roles ?? [])" :key="`r-${r}`" size="small" type="success" :bordered="false">{{ r }}</NTag>
+          <NTag v-if="item.hasPersona" size="small" type="success" :bordered="false">{{ t('detail.persona') }}</NTag>
+        </div>
+        <template #actions>
+          <NButton size="small" ghost @click="copyPath(item.filePath)">
+            <template #icon><TSvgIcon icon="mdi:content-copy" :size="14" /></template>
+            {{ t('actions.copyPath') }}
+          </NButton>
         </template>
-      </TCardPage>
-    </div>
+      </TEntityCard>
+    </template>
 
-    <!-- Detail drawer — read-only view of AGENT.md + PERSONA.md content. -->
-    <NDrawer
-      v-model:show="detailVisible"
-      :width="640"
-      placement="right"
-    >
-      <NDrawerContent v-if="detail" :title="detail.name" closable>
-        <div class="t-workspace-agent-page__detail-meta">
-          <div><strong>{{ t('detail.agentId') }}:</strong> <code>{{ detail.agentId }}</code></div>
-          <div><strong>{{ t('detail.scope') }}:</strong> {{ detail.workspaceScope }}</div>
-          <div><strong>{{ t('detail.filePath') }}:</strong> <code>{{ detail.filePath }}</code></div>
-          <div v-if="detail.provider">
-            <strong>{{ t('detail.provider') }}:</strong>
-            {{ detail.provider }}{{ detail.model ? ` · ${detail.model}` : '' }}
+    <!-- Read-only view of AGENT.md + PERSONA.md content. The card's `view`
+         open-state drives this drawer (deep-linkable for free). -->
+    <template #detail>
+      <template v-if="viewed">
+        <div class="t-wsa-detail__meta">
+          <div class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.agentId') }}</span>
+            <code>{{ viewed.agentId }}</code>
           </div>
-          <div v-if="detail.executionMode">
-            <strong>{{ t('detail.executionMode') }}:</strong> {{ detail.executionMode }}
+          <div class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.scope') }}</span>
+            <span>{{ viewed.workspaceScope }}</span>
           </div>
-          <div v-if="(detail.toolGroups?.length ?? 0) > 0">
-            <strong>{{ t('detail.toolGroups') }}:</strong>
-            <NTag
-              v-for="g in (detail.toolGroups ?? [])"
-              :key="g"
-              size="small"
-              class="ml-4px"
-            >{{ g }}</NTag>
+          <div class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.filePath') }}</span>
+            <code>{{ viewed.filePath }}</code>
           </div>
-          <div v-if="detail.description">
-            <strong>{{ t('detail.description') }}:</strong> {{ detail.description }}
+          <div v-if="viewed.provider" class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.provider') }}</span>
+            <span>{{ viewed.provider }}{{ viewed.model ? ` · ${viewed.model}` : '' }}</span>
+          </div>
+          <div v-if="viewed.executionMode" class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.executionMode') }}</span>
+            <span>{{ viewed.executionMode }}</span>
+          </div>
+          <div v-if="(viewed.toolGroups?.length ?? 0) > 0" class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.toolGroups') }}</span>
+            <span class="flex flex-wrap gap-4px">
+              <NTag v-for="g in (viewed.toolGroups ?? [])" :key="g" size="small" :bordered="false">{{ g }}</NTag>
+            </span>
+          </div>
+          <div v-if="viewed.description" class="t-wsa-detail__row">
+            <span class="t-wsa-detail__k">{{ t('detail.description') }}</span>
+            <span>{{ viewed.description }}</span>
           </div>
         </div>
 
-        <div class="t-workspace-agent-page__detail-section">
+        <div class="t-wsa-detail__section">
           <h3>{{ t('detail.instructions') }}</h3>
-          <pre class="t-workspace-agent-page__detail-body">{{ detail.instructions || t('detail.noInstructions') }}</pre>
+          <pre class="t-wsa-detail__body">{{ viewed.instructions || t('detail.noInstructions') }}</pre>
         </div>
 
-        <div v-if="detail.personaContent" class="t-workspace-agent-page__detail-section">
+        <div v-if="viewed.personaContent" class="t-wsa-detail__section">
           <h3>{{ t('detail.persona') }}</h3>
-          <pre class="t-workspace-agent-page__detail-body">{{ detail.personaContent }}</pre>
+          <pre class="t-wsa-detail__body">{{ viewed.personaContent }}</pre>
         </div>
-      </NDrawerContent>
-    </NDrawer>
-  </TContentPage>
+      </template>
+    </template>
+  </TCardPage>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import {
-  NButton,
-  NDrawer,
-  NDrawerContent,
-  NTabPane,
-  NTabs,
-  NTag,
-  useMessage,
-} from 'naive-ui'
+import { computed, ref } from 'vue'
+import { NButton, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../../plugin/client'
 import { createWorkspaceAgentsBridge } from '../../../services/bridges/ai-bridge'
 import type { WorkspaceAgentDto } from '@tnzi/core/services/ai'
-import { translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import { useCrudPage } from '../../../headless/useCrudPage'
-import TContentPage from '../../../components/layout/TContentPage.vue'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 
-const t = (key: string) => translatePageKey('ai.workspaceAgents', key)
+const t = makePageTranslator('ai.workspaceAgents')
 const message = (() => {
   try { return useMessage() } catch { return null }
 })()
@@ -162,14 +137,23 @@ const scopeFilter = ref<'all' | 'Global' | 'Project'>('all')
 
 const crud = useCrudPage<WorkspaceAgentDto>({
   pageId: 'ai.workspace-agents',
-  columns: [], // card page renders via #card slot; column defs unused (TCardPage has no column settings)
+  columns: [], // card page renders via #card slot; column defs unused
   rowKey: (r) => r.agentId,
   fetchData: async (q) => {
     const all = await bridge.list()
     const scope = q.filters.scope as string | undefined
-    const items = scope && scope !== 'all'
+    const kw = (q.searchText ?? '').trim().toLowerCase()
+    let items = scope && scope !== 'all'
       ? all.filter((a) => a.workspaceScope === scope)
       : all
+    if (kw) {
+      items = items.filter(
+        (a) =>
+          a.name.toLowerCase().includes(kw) ||
+          a.agentId.toLowerCase().includes(kw) ||
+          (a.description ?? '').toLowerCase().includes(kw),
+      )
+    }
     return {
       items,
       totalCount: items.length,
@@ -181,13 +165,16 @@ const crud = useCrudPage<WorkspaceAgentDto>({
     }
   },
 })
-crud.refresh().catch(() => undefined)
 
 function onScopeChange(value: string | number): void {
   const scope = String(value) as 'all' | 'Global' | 'Project'
   scopeFilter.value = scope
   crud.setFilters({ scope })
   crud.refresh().catch(() => undefined)
+}
+
+function hasTags(item: WorkspaceAgentDto): boolean {
+  return (item.domains?.length ?? 0) > 0 || (item.roles?.length ?? 0) > 0 || Boolean(item.hasPersona)
 }
 
 async function copyPath(path: string): Promise<void> {
@@ -201,52 +188,32 @@ async function copyPath(path: string): Promise<void> {
   }
 }
 
-const detail = ref<WorkspaceAgentDto | null>(null)
-const detailVisible = ref(false)
-function openDetail(row: WorkspaceAgentDto): void {
-  detail.value = row
-  detailVisible.value = true
-}
+// The viewed agent IS the CRUD `view` open-state (card click → `crud.openView`),
+// so it deep-links to `?detail=view:<id>` for free. Every field is already on
+// the row — no lazy load, hence no `onView`.
+const viewed = computed(() => crud.formModal.formData.value as WorkspaceAgentDto | null)
 </script>
 
 <style scoped>
-/* Scope tab bar: just the headers (the panes are empty — they only drive the
-   scope filter), so collapse the empty pane wrapper away. */
-.t-workspace-agent-page__scope {
-  flex-shrink: 0;
-}
-.t-workspace-agent-page__scope :deep(.n-tabs-pane-wrapper) {
-  display: none;
-}
-/* Card grid claims the residual height (TCardPage page mode scrolls inside). */
-.t-workspace-agent-page__list {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.t-workspace-agent-page__card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-.t-workspace-agent-page__card-name {
+/* Card body — only the ellipsis / line-clamp / mono treatments that unocss
+   atomic classes can't express live here (per C7). */
+.t-wsa__name {
   font-weight: 500;
   font-size: 14px;
   color: var(--tnzi-base-text);
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.t-workspace-agent-page__card-id {
-  font-family: var(--tnzi-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+.t-wsa__id {
   font-size: 11px;
   color: var(--tnzi-base-text-muted, #888);
   margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.t-workspace-agent-page__card-desc {
+.t-wsa__desc {
   font-size: 13px;
   color: var(--tnzi-base-text-muted, #888);
   line-height: 1.45;
@@ -256,35 +223,40 @@ function openDetail(row: WorkspaceAgentDto): void {
   overflow: hidden;
   margin-bottom: 6px;
 }
-.t-workspace-agent-page__card-provider {
+.t-wsa__provider {
   font-size: 12px;
   color: var(--tnzi-base-text-muted, #888);
-  margin-bottom: 6px;
 }
-.t-workspace-agent-page__card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.t-workspace-agent-page__detail-meta {
+
+/* Detail drawer */
+.t-wsa-detail__meta {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  gap: 8px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--tnzi-border, #e5e7eb);
 }
-.t-workspace-agent-page__detail-section {
+.t-wsa-detail__row {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.t-wsa-detail__k {
+  flex-shrink: 0;
+  width: 108px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-wsa-detail__section {
   margin-top: 16px;
 }
-.t-workspace-agent-page__detail-section h3 {
+.t-wsa-detail__section h3 {
   margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
   color: var(--tnzi-base-text);
 }
-.t-workspace-agent-page__detail-body {
+.t-wsa-detail__body {
   margin: 0;
   padding: 12px;
   background: var(--tnzi-bg-deep, #f6f8fa);

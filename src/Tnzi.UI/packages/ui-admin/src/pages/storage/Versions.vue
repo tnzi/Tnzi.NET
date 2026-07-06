@@ -3,17 +3,20 @@
   <TCrudPage
     :state="crud"
     :all-columns="versionColumns"
+    :search-fields="versionSearchFields"
     :title="title"
     :title-help="t('banner.body')"
     :title-help-title="t('banner.title')"
     :translate="t"
     :row-actions="rowActions"
   >
-    <template #form="{ formData, mode }">
+    <!-- Read-only view drawer (a `#detail` slot mounts it even on a page with no
+         create/update callbacks; a `#form` slot would not). -->
+    <template #detail="{ data }">
       <TFormSchemaRenderer
         :schema="versionFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
+        :model="(data ?? {}) as Record<string, unknown>"
+        :readonly="true"
         :translate="t"
       />
     </template>
@@ -23,19 +26,19 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createStorageBridge, type FileVersionAuditDto } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { versionColumns, versionFormSchema } from './version-config'
-import { translatePageKey } from '../_shared/translate'
+import { versionColumns, versionFormSchema, versionSearchFields } from './version-config'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 
 const title = 'title'
 // Wired to /admin/storage/audit/versions (Plan E, 2026-04-14). Restore reuses
 // the user-side /files/{id}/versions/{v}/restore endpoint via the bridge.
 const bridge = createStorageBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('storage.versions', key)
+const t = makePageTranslator('storage.versions')
 const message = useSafeMessage()
 
 const crud = useCrudPage<FileVersionAuditDto>({
@@ -47,13 +50,12 @@ const crud = useCrudPage<FileVersionAuditDto>({
   // admin operation is the per-row Restore action below.
 })
 
-crud.refresh().catch(() => undefined)
-
 // Restore lives in the per-row More menu — admins almost always restore a
 // single version at a time. Disabled for rows that are already `isCurrent`
 // since restoring the current version is a no-op that emits a confusing
 // audit log entry.
 const rowActions: RowAction<FileVersionAuditDto>[] = [
+  viewAction(crud),
   {
     key: 'restore',
     label: 'actions.restore',

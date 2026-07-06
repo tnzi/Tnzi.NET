@@ -2,19 +2,20 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
 import type { AgentExecutionMode } from '@tnzi/core/services/ai'
 
 /**
- * AgentExecutionMode numeric values, mirrored locally as a const map.
+ * AgentExecutionMode member names, mirrored locally as a const map.
  *
  * The page-layer ESLint guard (`no-restricted-imports`) forbids *value*
  * imports from `@tnzi/core/services/*` — only `import type` is allowed — and
- * the ai-bridge does not re-export this enum. The backend contract is stable
- * (Single=0 … Router=3); this local mirror keeps the page decoupled while
- * the `AgentExecutionMode` *type* is still imported for signatures.
+ * the ai-bridge does not re-export this enum. The backend serializes the enum
+ * as its PascalCase member NAME (global JsonStringEnumConverter), so this local
+ * mirror uses the name strings; the `AgentExecutionMode` *type* is still
+ * imported for signatures.
  */
 const ExecMode = {
-  Single: 0,
-  Handoff: 1,
-  AgentAsTools: 2,
-  Router: 3,
+  Single: 'Single',
+  Handoff: 'Handoff',
+  AgentAsTools: 'AgentAsTools',
+  Router: 'Router',
 } as const
 
 /**
@@ -42,10 +43,10 @@ export const agentProviderOptions: Array<{ label: string; value: string }> = [
 
 /**
  * Execution-mode options for the form select + advanced-search filter.
- * Values are the numeric AgentExecutionMode enum (what the backend stores);
+ * Values are the AgentExecutionMode member names (what the backend serializes);
  * `labelKey` resolves through translatePageKey('ai.agents', …) → `mode.*`.
  */
-export const agentExecutionModeOptions: Array<{ label: string; labelKey: string; value: number }> = [
+export const agentExecutionModeOptions: Array<{ label: string; labelKey: string; value: string }> = [
   { value: ExecMode.Single, labelKey: 'mode.single', label: 'Single' },
   { value: ExecMode.Handoff, labelKey: 'mode.handoff', label: 'Handoff' },
   { value: ExecMode.AgentAsTools, labelKey: 'mode.agentAsTools', label: 'Agent-as-tools' },
@@ -53,11 +54,14 @@ export const agentExecutionModeOptions: Array<{ label: string; labelKey: string;
 ]
 
 /**
- * Map an AgentExecutionMode enum value to a `mode.*` i18n key. Used by the card
- * to label the execution-mode badge. Unknown values fall back to `mode.unknown`.
+ * Map an AgentExecutionMode value to a `mode.*` i18n key. Used by the card to
+ * label the execution-mode badge. Accepts the serialized member name; a legacy
+ * numeric value is normalized defensively. Unknown values → `mode.unknown`.
  */
-export function executionModeKey(mode: AgentExecutionMode | number | null | undefined): string {
-  switch (mode) {
+export function executionModeKey(mode: AgentExecutionMode | number | string | null | undefined): string {
+  const name =
+    typeof mode === 'number' ? ['Single', 'Handoff', 'AgentAsTools', 'Router'][mode] : mode
+  switch (name) {
     case ExecMode.Single:
       return 'mode.single'
     case ExecMode.Handoff:

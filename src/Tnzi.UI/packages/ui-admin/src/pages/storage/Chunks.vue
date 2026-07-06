@@ -9,16 +9,20 @@
   <TCrudPage
     :state="crud"
     :all-columns="chunkColumns"
+    :search-fields="chunkSearchFields"
     :title="title"
     :title-help="t('banner.body')"
     :title-help-title="t('banner.title')"
     :translate="t"
+    :row-actions="rowActions"
   >
-    <template #form="{ formData, mode }">
+    <!-- Read-only view drawer (the `#detail` slot mounts it even on a page with
+         no create/update/delete callbacks; a `#form` slot would not). -->
+    <template #detail="{ data }">
       <TFormSchemaRenderer
         :schema="chunkFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
+        :model="(data ?? {}) as Record<string, unknown>"
+        :readonly="true"
         :translate="t"
       />
     </template>
@@ -28,11 +32,12 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createStorageBridge, type FileChunkAuditDto } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { chunkColumns, chunkFormSchema } from './chunk-config'
-import { translatePageKey } from '../_shared/translate'
+import { chunkColumns, chunkFormSchema, chunkSearchFields } from './chunk-config'
+import { makePageTranslator } from '../_shared/translate'
 
 const title = 'title'
 // Wired to /admin/storage/audit/chunks via DefaultStorageAuditAdminController
@@ -47,8 +52,8 @@ const crud = useCrudPage<FileChunkAuditDto>({
   // Chunks are owned by the upload lifecycle — no admin write surface.
 })
 
+const t = makePageTranslator('storage.chunks')
 
-crud.refresh().catch(() => undefined)
-
-const t = (key: string) => translatePageKey('storage.chunks', key)
+// Read-only "View" opens the chunk detail drawer (the already-defined schema).
+const rowActions: RowAction<FileChunkAuditDto>[] = [viewAction(crud)]
 </script>

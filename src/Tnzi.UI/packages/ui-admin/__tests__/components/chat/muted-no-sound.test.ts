@@ -21,8 +21,8 @@ const mockSoundPlay = vi.fn()
 // ── Fake bridge (two conversations: one muted, one not) ─────────────────────
 const fakeBridge = {
   listConversations: vi.fn().mockResolvedValue([
-    { id: 'c-muted',   type: 1, title: 'Alice', unreadCount: 0, isMuted: true,  memberCount: 2, lastMessageAt: '' },
-    { id: 'c-unmuted', type: 1, title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
+    { id: 'c-muted',   type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: true,  memberCount: 2, lastMessageAt: '' },
+    { id: 'c-unmuted', type: 'Direct', title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
   ]),
   getUnreadCount:  vi.fn().mockResolvedValue(0),
   getMessages:     vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
@@ -93,8 +93,8 @@ describe('TChatHost — muted conversations do not play sound', () => {
     vi.clearAllMocks()
     capturedOnNewMessage = undefined
     fakeBridge.listConversations.mockResolvedValue([
-      { id: 'c-muted',   type: 1, title: 'Alice', unreadCount: 0, isMuted: true,  memberCount: 2, lastMessageAt: '' },
-      { id: 'c-unmuted', type: 1, title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
+      { id: 'c-muted',   type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: true,  memberCount: 2, lastMessageAt: '' },
+      { id: 'c-unmuted', type: 'Direct', title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
     ])
   })
 

@@ -7,6 +7,7 @@ namespace Tnzi.AspNetCore.Controllers;
 /// </summary>
 [Route("admin/diagnostics")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "system.diagnostics.view")]
 public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
 {
     protected readonly IExceptionStatisticsService ExceptionStatisticsService;

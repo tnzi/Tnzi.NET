@@ -8,7 +8,8 @@ import { TSourceBadge } from '@tnzi/ui'
  * Feature definition admin — backs Tnzi.Feature `/admin/feature-definitions`.
  * Fields mirror backend `FeatureDefinitionDto`:
  *   name (unique id) / displayName / description / defaultValue
- *   valueType: FeatureValueType enum   (0=Boolean / 1=Integer / 2=String)
+ *   valueType: FeatureValueType enum — serialized by the backend's global
+ *     JsonStringEnumConverter as its member name: "Boolean" | "Integer" | "String"
  *   parentName (hierarchy) / isEnabled / group / source / isReadOnly
  *
  * `source = "Code"` rows come from IFeatureDefinitionProvider implementations
@@ -20,21 +21,12 @@ interface FeatureRow {
   displayName?: string
   description?: string
   defaultValue?: string
-  valueType?: number
+  valueType?: string
   parentName?: string
   isEnabled?: boolean
   group?: string
   source?: string
   isReadOnly?: boolean
-}
-
-function valueTypeLabel(v?: number): string {
-  switch (v) {
-    case 0: return 'Boolean'
-    case 1: return 'Integer'
-    case 2: return 'String'
-    default: return '—'
-  }
 }
 
 export const featureColumns: ColumnDef<FeatureRow>[] = [
@@ -45,7 +37,9 @@ export const featureColumns: ColumnDef<FeatureRow>[] = [
     key: 'valueType',
     title: 'columns.valueType',
     width: 110,
-    render: (row) => h('span', { style: 'font-family: monospace; font-size: 12px' }, valueTypeLabel(row.valueType)),
+    // valueType is already the human-readable member name ("Boolean" / "Integer"
+    // / "String"), so it renders verbatim.
+    render: (row) => h('span', { class: 'tnzi-mono text-12px' }, row.valueType ?? '—'),
   },
   { key: 'defaultValue', title: 'columns.defaultValue', minWidth: 120 },
   {
@@ -78,15 +72,17 @@ export const featureFormSchema: FormSchemaItem[] = [
     labelKey: 'form.valueType', label: 'Value Type',
     type: 'select',
     required: true,
-    // Maps to FeatureValueType enum: 0=Boolean / 1=Integer / 2=String
+    // FeatureValueType enum member names (JsonStringEnumConverter wire shape).
     options: [
-      { label: 'Boolean', value: 0 },
-      { label: 'Integer', value: 1 },
-      { label: 'String', value: 2 },
+      { label: 'Boolean', value: 'Boolean' },
+      { label: 'Integer', value: 'Integer' },
+      { label: 'String', value: 'String' },
     ],
   },
   { key: 'defaultValue', labelKey: 'form.defaultValue', label: 'Default Value', type: 'text' },
   { key: 'parentName', labelKey: 'form.parentName', label: 'Parent Feature', type: 'text' },
   { key: 'group', labelKey: 'form.group', label: 'Group', type: 'text' },
-  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
+  // isEnabled only exists on the update path — CreateFeatureDto has no such
+  // field, so hide the toggle in create mode (model has no id yet).
+  { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch', visible: (model) => !!model.id },
 ]

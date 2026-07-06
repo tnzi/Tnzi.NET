@@ -40,7 +40,10 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     path: '/admin',
     name: 'admin-root',
     component: AdminShellRoot,
-    redirect: '/admin/dashboard',
+    // Redirect by NAME, not path: `defineAdminApp({ basePath })` rewrites the
+    // top-level paths, so a literal '/admin/dashboard' would dangle under any
+    // custom prefix. Name resolution always lands on the rewritten route.
+    redirect: { name: 'dashboard' },
     meta: { requiresAuth: true, title: 'Admin' },
     children: [
       // ── Dashboard (default landing page) ─────────────────────
@@ -124,11 +127,10 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
-          // GDPR admin route is intentionally NOT registered by default — the
-          // backend has no admin-by-id GDPR endpoints yet (identity-bridge stubs
-          // `gdpr.*` to reject with "not supported until admin endpoints land").
-          // Consumers can re-add the route by registering it themselves once
-          // the backend ships `DefaultGdprAdminController`.
+          // GDPR admin has no route: the backend ships no admin GDPR endpoints,
+          // and the placeholder page/bridge stubs were removed in the 2026-07-05
+          // audit cleanup. Reintroduce page + bridge + route together once the
+          // backend ships `DefaultGdprAdminController`.
           {
             path: 'organizations',
             name: 'identity.organizations',
@@ -233,7 +235,11 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             component: () => import('../pages/system/Dictionaries.vue'),
             meta: {
               title: 'tnzi.admin.modules.system.dictionaries.title',
-              permission: 'system.dictionary.view',
+              // Dictionaries render off the same /admin/settings endpoint as
+              // Parameters, which the backend gates on system.parameter.view.
+              // system.dictionary.view is registered but not enforced there, so
+              // the menu must key off the code the endpoint actually checks.
+              permission: 'system.parameter.view',
               keepAlive: true,
             },
           },
@@ -580,6 +586,155 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             meta: {
               title: 'tnzi.admin.modules.payment.promotions.title',
               permission: 'payment.promotion.view',
+              keepAlive: true,
+            },
+          },
+        ],
+      },
+
+      // ── Finance ───────────────────────────────────────────────
+      {
+        path: 'finance',
+        name: 'finance',
+        meta: { title: 'tnzi.admin.modules.finance.label', permission: 'finance.view', order: 185 },
+        children: [
+          {
+            path: 'accounts',
+            name: 'finance.accounts',
+            component: () => import('../pages/finance/Accounts.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.accounts.title',
+              permission: 'finance.account.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'journal-entries',
+            name: 'finance.journals',
+            component: () => import('../pages/finance/JournalEntries.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.journals.title',
+              permission: 'finance.journal.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'exchange-rates',
+            name: 'finance.rates',
+            component: () => import('../pages/finance/ExchangeRates.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.rates.title',
+              permission: 'finance.rate.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'fiscal-years',
+            name: 'finance.fiscalYears',
+            component: () => import('../pages/finance/FiscalYears.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.fiscalYears.title',
+              permission: 'finance.fiscalYear.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'customers',
+            name: 'finance.customers',
+            component: () => import('../pages/finance/Customers.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.customers.title',
+              permission: 'finance.customer.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'vendors',
+            name: 'finance.vendors',
+            component: () => import('../pages/finance/Vendors.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.vendors.title',
+              permission: 'finance.vendor.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'items',
+            name: 'finance.items',
+            component: () => import('../pages/finance/Items.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.items.title',
+              permission: 'finance.item.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'taxes',
+            name: 'finance.taxes',
+            component: () => import('../pages/finance/Taxes.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.taxes.title',
+              permission: 'finance.tax.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'invoices',
+            name: 'finance.invoices',
+            component: () => import('../pages/finance/Invoices.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.invoices.title',
+              permission: 'finance.document.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'bills',
+            name: 'finance.bills',
+            component: () => import('../pages/finance/Bills.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.bills.title',
+              permission: 'finance.document.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'expenses',
+            name: 'finance.expenses',
+            component: () => import('../pages/finance/Expenses.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.expenses.title',
+              permission: 'finance.document.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'credit-memos',
+            name: 'finance.creditMemos',
+            component: () => import('../pages/finance/CreditMemos.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.creditMemos.title',
+              permission: 'finance.document.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'payments',
+            name: 'finance.payments',
+            component: () => import('../pages/finance/Payments.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.payments.title',
+              permission: 'finance.document.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'reports',
+            name: 'finance.reports',
+            component: () => import('../pages/finance/Reports.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.reports.title',
+              permission: 'finance.report.view',
               keepAlive: true,
             },
           },

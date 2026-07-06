@@ -121,6 +121,62 @@ describe('useAdminRouteStore', () => {
     expect(store.menus.map((m) => m.key)).not.toContain('group')
   })
 
+  it('deniedRouteNames: empty before a user is loaded (fail-open, matches menus)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(authRoutes)
+    expect(store.deniedRouteNames.size).toBe(0)
+  })
+
+  it('deniedRouteNames: empty for super-users', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(authRoutes)
+    login([], true)
+    expect(store.deniedRouteNames.size).toBe(0)
+  })
+
+  it('deniedRouteNames: collects route names whose meta.permission is not granted', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(authRoutes)
+    login(['user.view', 'role.view'])
+    const denied = store.deniedRouteNames
+    expect(denied.has('secret')).toBe(true) // lacks admin.super
+    expect(denied.has('multi')).toBe(true) // lacks a.view/b.view
+    expect(denied.has('users')).toBe(false) // granted
+    expect(denied.has('public')).toBe(false) // no requirement → never denied
+  })
+
+  it('deniedRouteNames: includes hidden (hideInMenu) routes, unlike menus', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes([
+      { name: 'hidden.secret', path: '/hidden', meta: { title: 'H', permission: 'never.granted', hideInMenu: true } },
+    ])
+    login(['user.view'])
+    // menus never shows it (hideInMenu); deniedRouteNames still flags it so its
+    // persisted tab can be pruned.
+    expect(store.menus.map((m) => m.key)).not.toContain('hidden.secret')
+    expect(store.deniedRouteNames.has('hidden.secret')).toBe(true)
+  })
+
+  it('deniedRouteNames: walks children (denies a technical sub-page under an allowed module)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes([
+      {
+        name: 'system',
+        path: '/system',
+        meta: { title: 'System', permission: 'system.view', order: 1 },
+        children: [
+          { name: 'system.menus', path: 'menus', meta: { title: 'Menus', permission: 'system.menu.view' } },
+          { name: 'system.diagnostics', path: 'diagnostics', meta: { title: 'Diag', permission: 'system.diagnostics.view' } },
+        ],
+      },
+    ])
+    login(['system.view', 'system.menu.view']) // has the module + one child, not diagnostics
+    const denied = store.deniedRouteNames
+    expect(denied.has('system')).toBe(false)
+    expect(denied.has('system.menus')).toBe(false)
+    expect(denied.has('system.diagnostics')).toBe(true)
+  })
+
   it('menus excludes hideInMenu routes', () => {
     const store = useAdminRouteStore()
     store.setConstantRoutes(constantRoutes)

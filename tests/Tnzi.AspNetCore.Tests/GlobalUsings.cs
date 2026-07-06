@@ -22,7 +22,6 @@ global using Tnzi.AspNetCore.Options;
 global using Tnzi.AspNetCore.ScopedContext;
 global using Tnzi.AspNetCore.Security;
 global using Tnzi.AspNetCore.Services;
-global using Tnzi.AspNetCore.Settings;
 global using Tnzi.AspNetCore.Dtos;
 global using Tnzi.AspNetCore.Versioning;
 global using Tnzi.Results;

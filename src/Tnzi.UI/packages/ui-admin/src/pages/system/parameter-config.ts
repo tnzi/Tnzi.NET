@@ -1,10 +1,9 @@
 /**
- * Parameter config — same backend as Dictionary (`/admin/settings`, SettingDto)
- * but the UI surface is the typed-parameter view: every row has a `valueType`
- * (SettingValueType enum) and the value editor switches input shape on it.
- *
- * `valueType` is rendered as a human label rather than the raw int.
- * SettingValueType: 0=String, 1=Integer, 2=Boolean, 3=Json.
+ * Parameter config — same backend as Dictionary (`/admin/settings`, SettingDto).
+ * The UI surface is the typed-parameter view: every row carries a `valueType`
+ * (SettingValueType, serialized by the backend's global JsonStringEnumConverter
+ * as its member name "String" | "Integer" | "Boolean" | "Json") and the value
+ * editor switches its input shape on it.
  */
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
@@ -14,19 +13,14 @@ interface ParameterRow {
   id?: string
   key?: string
   value?: string
-  valueType?: number
+  valueType?: string
   group?: string
   description?: string
 }
 
-function valueTypeLabel(v?: number): string {
-  switch (v) {
-    case 0: return 'String'
-    case 1: return 'Integer'
-    case 2: return 'Boolean'
-    case 3: return 'JSON'
-    default: return '—'
-  }
+function valueTypeLabel(v?: string): string {
+  // Wire value is the enum member name; only "Json" gets a nicer display cap.
+  return v === 'Json' ? 'JSON' : (v ?? '—')
 }
 
 export const parameterColumns: ColumnDef<ParameterRow>[] = [
@@ -48,29 +42,39 @@ export const parameterColumns: ColumnDef<ParameterRow>[] = [
 ]
 
 // Value editor switches on the sibling `valueType` enum via typeFn:
-//   0=String→text, 1=Integer→number, 2=Boolean→switch, 3=JSON→json (TJsonEditor).
+//   Integer→number, Boolean→switch, Json→json (TJsonEditor), else text.
 // Default is 'text' when valueType is null/undefined (e.g. during create).
 function valueEditorType(model: Record<string, unknown>): 'text' | 'number' | 'switch' | 'json' {
   switch (model.valueType) {
-    case 1: return 'number'
-    case 2: return 'switch'
-    case 3: return 'json'
+    case 'Integer': return 'number'
+    case 'Boolean': return 'switch'
+    case 'Json': return 'json'
     default: return 'text'
   }
 }
 
 export const parameterFormSchema: FormSchemaItem[] = [
-  { key: 'key', labelKey: 'form.key', label: 'Key', type: 'text', required: true },
+  // The setting key is immutable once created (UpdateSettingDto has no Key), so
+  // typeFn swaps it to the locked renderer (registered in Parameters.vue) when
+  // the model already has an id — new rows keep the editable text input.
+  {
+    key: 'key',
+    labelKey: 'form.key', label: 'Key',
+    type: 'text',
+    required: true,
+    typeFn: (model) => (model.id ? 'param-key-locked' : 'text'),
+  },
   {
     key: 'valueType',
     labelKey: 'form.valueType', label: 'Type',
     type: 'select',
     required: true,
+    // SettingValueType member names (JsonStringEnumConverter wire shape).
     options: [
-      { label: 'String', value: 0 },
-      { label: 'Integer', value: 1 },
-      { label: 'Boolean', value: 2 },
-      { label: 'JSON', value: 3 },
+      { label: 'String', value: 'String' },
+      { label: 'Integer', value: 'Integer' },
+      { label: 'Boolean', value: 'Boolean' },
+      { label: 'JSON', value: 'Json' },
     ],
   },
   { key: 'value', labelKey: 'form.value', label: 'Value', type: 'text', required: true, typeFn: valueEditorType },

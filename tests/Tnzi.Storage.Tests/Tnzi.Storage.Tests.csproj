@@ -32,8 +32,8 @@
 
   <ItemGroup>
     <!-- 测试需要这些包来编译存储实现类 -->
-    <PackageReference Include="AWSSDK.S3" Version="4.0.18.7" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.27.0" />
+    <PackageReference Include="AWSSDK.S3" Version="4.0.100.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
   </ItemGroup>
 
 </Project>

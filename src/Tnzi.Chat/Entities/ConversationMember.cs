@@ -19,6 +19,11 @@ public class ConversationMember : CreationAuditedEntity<Guid>, IMultiTenant
     /// <summary>本人维度置顶会话。</summary>
     public bool IsSticky { get; set; }
 
+    /// <summary>
+    /// 本人维度隐藏会话（不出现在会话列表）；收到新消息时服务端自动置回 false 重新浮现。
+    /// </summary>
+    public bool IsHidden { get; set; }
+
     /// <summary>清空记录水位：仅本人 GetMessages/Search 过滤掉 SentAt &lt;= ClearedAt 的消息。</summary>
     public DateTime? ClearedAt { get; set; }
 

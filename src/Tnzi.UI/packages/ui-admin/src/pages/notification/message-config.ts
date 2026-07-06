@@ -3,6 +3,12 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
+import {
+  NotificationType,
+  NotificationStatus,
+  getNotificationTypeLabel,
+  getNotificationStatusLabel,
+} from '@tnzi/core/services/notification'
 
 /**
  * Aligned with backend NotificationInfo (Tnzi.Notification):
@@ -12,14 +18,17 @@ import { TRelativeTime } from '@tnzi/ui'
  *   failureCount / creationTime / priority / senderId / category /
  *   templateName / scheduledTime / recipients[] / attachments[]
  *
- * Earlier columns used speculative names (templateCode/recipient/channel/
- * sentAt/error) that never matched the backend payload — list showed blanks.
+ * Both enums now serialize as their PascalCase member name strings (global
+ * JsonStringEnumConverter). The old hand-written numeric switch mismatched the
+ * backend (mapped 3→InApp / 4→Webhook, values NotificationType does not have),
+ * so type/status badges are now derived through the shared @tnzi/core label
+ * helpers + enum-member badge tones.
  */
 interface NotificationMessageRow {
   id?: string
-  type?: number          // NotificationType enum: 1=Email / 2=Sms / 3=InApp / 4=Webhook
+  type?: NotificationType
   subject?: string
-  status?: number        // NotificationStatus enum: 0=Pending / 1=Sending / 2=Sent / 3=Failed
+  status?: NotificationStatus
   templateName?: string
   totalRecipientCount?: number
   successCount?: number
@@ -30,39 +39,29 @@ interface NotificationMessageRow {
   creationTime?: string
 }
 
-function typeLabel(v?: number): string {
-  switch (v) {
-    case 1: return 'Email'
-    case 2: return 'SMS'
-    case 3: return 'InApp'
-    case 4: return 'Webhook'
-    default: return '—'
-  }
+function typeLabel(v?: NotificationType): string {
+  return v != null ? getNotificationTypeLabel(v) : '—'
 }
-function typeBadge(v?: number): 'info' | 'success' | 'warning' | 'default' {
+function typeBadge(v?: NotificationType): 'info' | 'success' | 'warning' | 'default' {
   switch (v) {
-    case 1: return 'info'
-    case 2: return 'success'
-    case 3: return 'warning'
+    case NotificationType.Email: return 'info'
+    case NotificationType.Sms: return 'success'
+    case NotificationType.Push: return 'warning'
     default: return 'default'
   }
 }
 
-function statusLabel(v?: number): string {
-  switch (v) {
-    case 0: return 'Pending'
-    case 1: return 'Sending'
-    case 2: return 'Sent'
-    case 3: return 'Failed'
-    default: return '—'
-  }
+function statusLabel(v?: NotificationStatus): string {
+  return v != null ? getNotificationStatusLabel(v) : '—'
 }
-function statusBadge(v?: number): 'warning' | 'info' | 'success' | 'error' | 'default' {
+function statusBadge(v?: NotificationStatus): 'warning' | 'info' | 'success' | 'error' | 'default' {
   switch (v) {
-    case 0: return 'warning'
-    case 1: return 'info'
-    case 2: return 'success'
-    case 3: return 'error'
+    case NotificationStatus.Pending:
+    case NotificationStatus.Scheduled:
+    case NotificationStatus.PartiallySent: return 'warning'
+    case NotificationStatus.Sending: return 'info'
+    case NotificationStatus.Sent: return 'success'
+    case NotificationStatus.Failed: return 'error'
     default: return 'default'
   }
 }
@@ -74,14 +73,14 @@ export const notificationMessageColumns: ColumnDef<NotificationMessageRow>[] = [
     title: 'columns.type',
     width: 100,
     render: (row) =>
-      h(TStatusBadge, { value: row.type ?? 0, type: typeBadge(row.type), label: typeLabel(row.type) }),
+      h(TStatusBadge, { value: row.type ?? '', type: typeBadge(row.type), label: typeLabel(row.type) }),
   },
   {
     key: 'status',
     title: 'columns.status',
     width: 100,
     render: (row) =>
-      h(TStatusBadge, { value: row.status ?? 0, type: statusBadge(row.status), label: statusLabel(row.status) }),
+      h(TStatusBadge, { value: row.status ?? '', type: statusBadge(row.status), label: statusLabel(row.status) }),
   },
   { key: 'templateName', title: 'columns.templateName', minWidth: 140 },
   {

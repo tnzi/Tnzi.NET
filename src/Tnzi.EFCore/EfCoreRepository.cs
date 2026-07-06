@@ -540,9 +540,52 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     /// the transaction-deferred policy. Use sparingly when subsequent operations within
     /// the same UnitOfWork need to observe writes (e.g. sequence-number computation).
     /// </summary>
-    public virtual Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// 事务已启用（UnitOfWork/UnitOfWorkManager）时必须经由 UnitOfWork 保存：
+    /// 物理数据库事务是延迟到 UnitOfWork 第一次 SaveChanges 才开启的，
+    /// 若直接调用 DbContext.SaveChangesAsync，首次 flush 会在自动提交模式下落库，
+    /// 脱离事务保护（后续回滚无法撤销），并使同事务内的裸 SQL 操作（如 ExecuteUpdate）
+    /// 无法加入事务。
+    /// </remarks>
+    public virtual async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return DbContext.SaveChangesAsync(cancellationToken);
+        if (_unitOfWorkManager != null && _unitOfWorkManager.IsEnabledTransaction)
+        {
+            var unitOfWork = _unitOfWorkManager.GetUnitOfWork<TDbContext>();
+            if (unitOfWork != null)
+            {
+                return await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        if (_unitOfWork != null && _unitOfWork.IsEnabledTransaction)
+        {
+            return await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        return await DbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 确保当前工作单元的物理数据库事务已开启（幂等）。
+    /// 事务内执行 ExecuteUpdate/ExecuteDelete/Raw SQL 前必须调用，使裸 SQL 加入事务。
+    /// </summary>
+    public virtual async Task EnsureTransactionStartedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_unitOfWorkManager != null && _unitOfWorkManager.IsEnabledTransaction)
+        {
+            var unitOfWork = _unitOfWorkManager.GetUnitOfWork<TDbContext>();
+            if (unitOfWork != null)
+            {
+                await unitOfWork.EnsureTransactionStartedAsync(cancellationToken);
+                return;
+            }
+        }
+
+        if (_unitOfWork != null && _unitOfWork.IsEnabledTransaction)
+        {
+            await _unitOfWork.EnsureTransactionStartedAsync(cancellationToken);
+        }
     }
 
     public virtual async Task InsertManyAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)

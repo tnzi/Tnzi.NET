@@ -36,6 +36,7 @@
     <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
     <Project Path="src/Tnzi.Chat/Tnzi.Chat.csproj" />
     <Project Path="src/Tnzi.Feature/Tnzi.Feature.csproj" />
+    <Project Path="src/Tnzi.Finance/Tnzi.Finance.csproj" />
     <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
     <Project Path="src/Tnzi.Notification/Tnzi.Notification.csproj" />
     <Project Path="src/Tnzi.Payment/Tnzi.Payment.csproj" />
@@ -61,6 +62,7 @@
     <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
     <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Feature.Tests/Tnzi.Feature.Tests.csproj" />
+    <Project Path="tests/Tnzi.Finance.Tests/Tnzi.Finance.Tests.csproj" />
     <Project Path="tests/Tnzi.Hangfire.Tests/Tnzi.Hangfire.Tests.csproj" />
     <Project Path="tests/Tnzi.HealthChecks.Tests/Tnzi.HealthChecks.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />

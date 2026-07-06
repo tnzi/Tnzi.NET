@@ -173,7 +173,6 @@ const crud = useCrudPage<AgentDto>({
   updateData: (id, data) => bridge.agents.update(String(id), data as UpdateAgentDto),
   deleteData: (ids) => bridge.agents.delete(ids.map(String)),
 })
-crud.refresh().catch(() => undefined)
 
 // --- provider dropdown (API-driven) ----------------------------------------
 // The static agent-config provider list uses lowercase slugs which won't match
@@ -223,7 +222,8 @@ const kpiCards = computed<Array<{ key: string; labelKey: string; icon: string; t
 
 // --- card actions ----------------------------------------------------------
 function openDetail(item: AgentDto): void {
-  router.push(`/admin/ai/agents/${item.id}`).catch(() => undefined)
+  // By route NAME: a literal '/admin/...' path breaks under a custom basePath.
+  router.push({ name: 'ai.agents.detail', params: { id: item.id } }).catch(() => undefined)
 }
 
 const cloningId = ref<string | null>(null)

@@ -1,10 +1,16 @@
 import { HubConnectionBuilder, LogLevel, type HubConnection } from '@microsoft/signalr';
-import type { ChatMessageDto } from './types';
+import type { ChatMessageDto, UserPresenceStatus } from './types';
 
 export interface NewMessagePayload {
   conversationId: string;
   messageId: string;
   senderId?: string | null;
+  /**
+   * Numeric MessageContentType. Stays a number: the SignalR handler emits an
+   * anonymous object with an explicit `(int)` cast, so this scalar is NOT
+   * affected by the global JsonStringEnumConverter. The full `message` body
+   * below (a ChatMessageDto) carries the string-enum `contentType`.
+   */
   contentType: number;
   preview: string;
   /** Full message body for incremental append (backend pushes it so clients need no refetch). */
@@ -19,12 +25,16 @@ export interface MessageReadPayload {
 
 export interface ConversationChangedPayload {
   conversationId: string;
+  /** Numeric ConversationChangeType — emitted via an explicit `(int)` cast, so
+   *  it is not string-serialized (unlike DTO enum fields). */
   changeType: number;
 }
 
 export interface PresenceChangedPayload {
   userId: string;
-  status: number; // UserPresenceStatus
+  /** Effective UserPresenceStatus — pushed as a UserPresenceDto whose enum
+   *  field IS string-serialized by the global converter. */
+  status: UserPresenceStatus;
   lastSeenAt?: string | null;
 }
 

@@ -8,184 +8,173 @@
 
     Read-mostly. No edits, no per-row modal — this is an ops console, not a CRUD page.
   -->
-  <TContentPage :title="t('title')" :translate="t" scroll="fill">
-    <template #actions>
-      <NStatistic :label="t('kpi.modules')" :value="modules.length">
-        <template #suffix>
-          <TSvgIcon icon="mdi:view-grid-outline" :size="14" />
-        </template>
-      </NStatistic>
-      <NStatistic :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? 0">
-        <template #suffix>
-          <TSvgIcon icon="mdi:router-network" :size="14" />
-        </template>
-      </NStatistic>
-      <NStatistic :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? 0">
-        <template #suffix>
-          <TSvgIcon icon="mdi:alert-circle-outline" :size="14" />
-        </template>
-      </NStatistic>
+  <TTabsPage
+    :title="t('title')"
+    :translate="t"
+    :sections="tabs"
+    default-section="modules"
+  >
+    <template #kpis>
+      <TKpiRow cols="1 s:3">
+        <TKpiCard :label="t('kpi.modules')" :value="modules.length" icon="mdi:view-grid-outline" />
+        <TKpiCard :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? 0" icon="mdi:router-network" />
+        <TKpiCard :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? 0" icon="mdi:alert-circle-outline" />
+      </TKpiRow>
     </template>
 
-    <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
-      <!-- ─── Modules ─── -->
-      <NTabPane name="modules" :tab="t('tabs.modules')">
-        <div class="t-table-tabs__pane">
-          <div class="t-table-tabs__toolbar">
-            <NInput
-              v-model:value="moduleFilter"
-              :placeholder="t('filter.module')"
-              clearable size="small"
-              class="w-280px"
-            >
-              <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
-            </NInput>
-            <NButton size="small" @click="refreshModules">
-              <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-              {{ t('actions.refresh') }}
+    <!-- ─── Modules ─── -->
+    <template #modules>
+      <div class="t-table-tabs__toolbar">
+        <NInput
+          v-model:value="moduleFilter"
+          :placeholder="t('filter.module')"
+          clearable size="small"
+          class="!w-280px max-w-full"
+        >
+          <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
+        </NInput>
+        <NButton size="small" @click="refreshModules">
+          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+          {{ t('actions.refresh') }}
+        </NButton>
+      </div>
+      <TResponsiveTable
+        :columns="moduleColumns"
+        :data="filteredModules"
+        :loading="modulesLoading"
+        :pagination="modulesPagination"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      />
+    </template>
+
+    <!-- ─── Controllers ─── -->
+    <template #controllers>
+      <div class="t-table-tabs__toolbar">
+        <NInput
+          v-model:value="controllerFilter"
+          :placeholder="t('filter.controller')"
+          clearable size="small"
+          class="!w-280px max-w-full"
+        >
+          <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
+        </NInput>
+        <NSelect
+          v-model:value="moduleFilterForCtrls"
+          :options="moduleSelectOptions"
+          :placeholder="t('filter.byModule')"
+          clearable
+          size="small"
+          class="!w-200px max-w-full"
+        />
+        <NButton size="small" @click="refreshControllers">
+          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+          {{ t('actions.refresh') }}
+        </NButton>
+      </div>
+      <TResponsiveTable
+        :columns="controllerColumns"
+        :data="filteredControllers"
+        :loading="controllersLoading"
+        :pagination="controllersPagination"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      />
+    </template>
+
+    <!-- ─── Exceptions ─── -->
+    <template #exceptions>
+      <div class="t-table-tabs__toolbar">
+        <NSelect
+          v-model:value="windowMinutes"
+          :options="windowOptions"
+          size="small"
+          class="!w-160px max-w-full"
+          @update:value="refreshExceptions"
+        />
+        <NButton size="small" @click="refreshExceptions">
+          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+          {{ t('actions.refresh') }}
+        </NButton>
+        <NPopconfirm @positive-click="clearExceptions">
+          <template #trigger>
+            <NButton size="small" type="warning" tertiary>
+              <template #icon><TSvgIcon icon="mdi:delete-sweep-outline" :size="14" /></template>
+              {{ t('actions.clear') }}
             </NButton>
-          </div>
-          <TResponsiveTable
-            :columns="moduleColumns"
-            :data="filteredModules"
-            :loading="modulesLoading"
-            :pagination="modulesPagination"
-            :bordered="false"
-            size="small"
-            :flex-height="true"
-          />
-        </div>
-      </NTabPane>
+          </template>
+          {{ t('clearConfirm') }}
+        </NPopconfirm>
+      </div>
 
-      <!-- ─── Controllers ─── -->
-      <NTabPane name="controllers" :tab="t('tabs.controllers')">
-        <div class="t-table-tabs__pane">
-          <div class="t-table-tabs__toolbar">
-            <NInput
-              v-model:value="controllerFilter"
-              :placeholder="t('filter.controller')"
-              clearable size="small"
-              class="w-280px"
-            >
-              <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
-            </NInput>
-            <NSelect
-              v-model:value="moduleFilterForCtrls"
-              :options="moduleSelectOptions"
-              :placeholder="t('filter.byModule')"
-              clearable
-              size="small"
-              class="w-200px"
-            />
-            <NButton size="small" @click="refreshControllers">
-              <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-              {{ t('actions.refresh') }}
-            </NButton>
-          </div>
-          <TResponsiveTable
-            :columns="controllerColumns"
-            :data="filteredControllers"
-            :loading="controllersLoading"
-            :pagination="controllersPagination"
-            :bordered="false"
-            size="small"
-            :flex-height="true"
-          />
-        </div>
-      </NTabPane>
+      <div v-if="summary && (summary.topExceptions?.length || statusCodeRows.length || errorCodeRows.length)" class="t-diagnostics-page__bd">
+        <NCard size="small" :title="t('top.byType')" :bordered="false" class="t-tab-card">
+          <NList v-if="summary.topExceptions?.length" hoverable>
+            <NListItem v-for="row in summary.topExceptions" :key="row.exceptionType">
+              <NThing>
+                <template #header>
+                  <code class="t-diagnostics-page__excname">{{ row.exceptionType }}</code>
+                </template>
+                <template #header-extra>
+                  <NTag :bordered="false" type="error">{{ row.count }}</NTag>
+                </template>
+              </NThing>
+            </NListItem>
+          </NList>
+          <NEmpty v-else size="small" :description="t('empty.exceptions')" />
+        </NCard>
+        <NCard size="small" :title="t('top.byStatusCode')" :bordered="false" class="t-tab-card">
+          <NList v-if="statusCodeRows.length" hoverable>
+            <NListItem v-for="row in statusCodeRows" :key="row.key">
+              <NThing>
+                <template #header>
+                  <code class="t-diagnostics-page__excname">{{ row.key }}</code>
+                </template>
+                <template #header-extra>
+                  <NTag :bordered="false" type="warning">{{ row.count }}</NTag>
+                </template>
+              </NThing>
+            </NListItem>
+          </NList>
+          <NEmpty v-else size="small" :description="t('empty.exceptions')" />
+        </NCard>
+        <NCard size="small" :title="t('top.byErrorCode')" :bordered="false" class="t-tab-card">
+          <NList v-if="errorCodeRows.length" hoverable>
+            <NListItem v-for="row in errorCodeRows" :key="row.key">
+              <NThing>
+                <template #header>
+                  <code class="t-diagnostics-page__excname">{{ row.key }}</code>
+                </template>
+                <template #header-extra>
+                  <NTag :bordered="false" type="info">{{ row.count }}</NTag>
+                </template>
+              </NThing>
+            </NListItem>
+          </NList>
+          <NEmpty v-else size="small" :description="t('empty.exceptions')" />
+        </NCard>
+      </div>
 
-      <!-- ─── Exceptions ─── -->
-      <NTabPane name="exceptions" :tab="t('tabs.exceptions')">
-        <div class="t-table-tabs__pane">
-          <div class="t-table-tabs__toolbar">
-            <NSelect
-              v-model:value="windowMinutes"
-              :options="windowOptions"
-              size="small"
-              class="w-160px"
-              @update:value="refreshExceptions"
-            />
-            <NButton size="small" @click="refreshExceptions">
-              <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
-              {{ t('actions.refresh') }}
-            </NButton>
-            <NPopconfirm @positive-click="clearExceptions">
-              <template #trigger>
-                <NButton size="small" type="warning" tertiary>
-                  <template #icon><TSvgIcon icon="mdi:delete-sweep-outline" :size="14" /></template>
-                  {{ t('actions.clear') }}
-                </NButton>
-              </template>
-              {{ t('clearConfirm') }}
-            </NPopconfirm>
-          </div>
-
-          <div v-if="summary && (summary.topExceptions?.length || statusCodeRows.length || errorCodeRows.length)" class="t-diagnostics-page__bd">
-            <NCard size="small" :title="t('top.byType')" :bordered="false">
-              <NList v-if="summary.topExceptions?.length" hoverable>
-                <NListItem v-for="row in summary.topExceptions" :key="row.exceptionType">
-                  <NThing>
-                    <template #header>
-                      <code class="t-diagnostics-page__excname">{{ row.exceptionType }}</code>
-                    </template>
-                    <template #header-extra>
-                      <NTag :bordered="false" type="error">{{ row.count }}</NTag>
-                    </template>
-                  </NThing>
-                </NListItem>
-              </NList>
-              <NEmpty v-else size="small" :description="t('empty.exceptions')" />
-            </NCard>
-            <NCard size="small" :title="t('top.byStatusCode')" :bordered="false">
-              <NList v-if="statusCodeRows.length" hoverable>
-                <NListItem v-for="row in statusCodeRows" :key="row.key">
-                  <NThing>
-                    <template #header>
-                      <code class="t-diagnostics-page__excname">{{ row.key }}</code>
-                    </template>
-                    <template #header-extra>
-                      <NTag :bordered="false" type="warning">{{ row.count }}</NTag>
-                    </template>
-                  </NThing>
-                </NListItem>
-              </NList>
-              <NEmpty v-else size="small" :description="t('empty.exceptions')" />
-            </NCard>
-            <NCard size="small" :title="t('top.byErrorCode')" :bordered="false">
-              <NList v-if="errorCodeRows.length" hoverable>
-                <NListItem v-for="row in errorCodeRows" :key="row.key">
-                  <NThing>
-                    <template #header>
-                      <code class="t-diagnostics-page__excname">{{ row.key }}</code>
-                    </template>
-                    <template #header-extra>
-                      <NTag :bordered="false" type="info">{{ row.count }}</NTag>
-                    </template>
-                  </NThing>
-                </NListItem>
-              </NList>
-              <NEmpty v-else size="small" :description="t('empty.exceptions')" />
-            </NCard>
-          </div>
-
-          <TResponsiveTable
-            :columns="exceptionColumns"
-            :data="exceptions"
-            :loading="exceptionsLoading"
-            :pagination="exceptionsPagination"
-            :bordered="false"
-            size="small"
-            :flex-height="true"
-          />
-        </div>
-      </NTabPane>
-    </NTabs>
-  </TContentPage>
+      <!-- No flex-height: the scroll pane owns the vertical scroll, so the
+           table flows at natural height below the breakdown cards. -->
+      <TResponsiveTable
+        :columns="exceptionColumns"
+        :data="exceptions"
+        :loading="exceptionsLoading"
+        :pagination="exceptionsPagination"
+        :bordered="false"
+        size="small"
+      />
+    </template>
+  </TTabsPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
+import { TKpiCard, TKpiRow } from '../../components/data'
 import {
   NButton,
   NCard,
@@ -195,9 +184,6 @@ import {
   NListItem,
   NPopconfirm,
   NSelect,
-  NStatistic,
-  NTabPane,
-  NTabs,
   NTag,
   NThing,
 } from 'naive-ui'
@@ -213,16 +199,23 @@ import {
   type ExceptionSummaryDto,
   type ModuleDiagnosticsDto,
 } from '../../services/bridges/diagnostics-bridge'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { methodTone } from '../_shared/http-method'
-import TContentPage from '../../components/layout/TContentPage.vue'
+import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 
 const bridge = createDiagnosticsBridge({ client: useAdminClient() })
 
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('system.diagnostics', key), params)
+const t = makePageTranslator('system.diagnostics')
 
-const activeTab = ref<'modules' | 'controllers' | 'exceptions'>('modules')
+// Deep-linkable primary tabs (?section=) - TTabsPage owns the deep-linking +
+// Back/Forward; the page just declares the tabs.
+const tabs: TabSection[] = [
+  { name: 'modules', label: t('tabs.modules') },
+  { name: 'controllers', label: t('tabs.controllers') },
+  // Exceptions mixes a breakdown card grid + a table, so the pane owns the
+  // vertical scroll (the table flows at natural height, not flex-height).
+  { name: 'exceptions', label: t('tabs.exceptions'), scroll: true },
+]
 
 /**
  * Client-side pagination config shared by the three tabs: a "Total N" prefix

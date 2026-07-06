@@ -149,6 +149,7 @@
           :selected-file-ids="selectedIds"
           :loading="filesLoading"
           :translate="t"
+          :preview-url="bridge.files.previewUrl"
           @open-folder="openFolder"
           @preview-file="openPreview"
           @context-folder="onContextFolder"
@@ -215,99 +216,103 @@
     />
 
     <!-- Preview lightbox -->
-    <TFilePreviewModal v-model:show="preview.show" :file="preview.file" :translate="t" />
+    <TFilePreviewModal
+      v-model:show="preview.show"
+      :file="preview.file"
+      :translate="t"
+      :preview-url="bridge.files.previewUrl"
+      :download-url="bridge.files.downloadUrl"
+    />
 
-    <!-- Create / rename folder modal -->
-    <NModal
-      v-model:show="folderModal.show"
-      :title="folderModal.mode === 'rename' ? t('renameFolder') : t('newFolder')"
-      preset="card"
-      :style="modalStyle"
-    >
-      <NForm label-placement="left" label-width="100px">
-        <NFormItem :label="t('folderFields.name')" required>
-          <NInput v-model:value="folderModal.form.name" />
-        </NFormItem>
-        <NFormItem :label="t('folderFields.description')">
-          <NInput v-model:value="folderModal.form.description" type="textarea" :rows="2" />
-        </NFormItem>
-        <NFormItem :label="t('folderFields.sortOrder')">
-          <NInputNumber v-model:value="folderModal.form.sortOrder" :min="0" />
-        </NFormItem>
-      </NForm>
-      <template #footer>
-        <div class="flex justify-end gap-8px">
-          <NButton @click="folderModal.show = false">{{ t('cancel') }}</NButton>
-          <NButton
-            type="primary"
-            :disabled="!folderModal.form.name"
-            :loading="folderSaving"
-            @click="submitFolderModal"
-          >
-            {{ folderModal.mode === 'rename' ? t('save') : t('create') }}
-          </NButton>
-        </div>
+    <!-- Create / rename folder overlay — useDetail(modal) + TDetailHost
+         (deep-linkable `?folder=new` / `?folder=edit:<id>`, Back-to-close). -->
+    <TDetailHost :state="folderDetail" :title="folderModalTitle" :width="460" :translate="t">
+      <template #default>
+        <NForm label-placement="left" label-width="100px">
+          <NFormItem :label="t('folderFields.name')" required>
+            <NInput v-model:value="folderForm.name" />
+          </NFormItem>
+          <NFormItem :label="t('folderFields.description')">
+            <NInput v-model:value="folderForm.description" type="textarea" :rows="2" />
+          </NFormItem>
+          <NFormItem :label="t('folderFields.sortOrder')">
+            <NInputNumber v-model:value="folderForm.sortOrder" :min="0" />
+          </NFormItem>
+        </NForm>
       </template>
-    </NModal>
-
-    <!-- Tags modal -->
-    <NModal v-model:show="tagsModal.show" :title="t('tags.title')" preset="card" :style="modalStyle">
-      <p class="text-13px text-muted mb-8px">{{ tagsModal.fileName }}</p>
-      <NDynamicTags v-model:value="tagsModal.tags" />
-      <template #footer>
-        <div class="flex justify-end gap-8px">
-          <NButton @click="tagsModal.show = false">{{ t('cancel') }}</NButton>
-          <NButton type="primary" :loading="tagsModal.saving" @click="saveTags">{{ t('save') }}</NButton>
-        </div>
-      </template>
-    </NModal>
-
-    <!-- Metadata modal -->
-    <NModal v-model:show="metadataModal.show" :title="t('metadata.title')" preset="card" :style="modalStyle">
-      <p class="text-13px text-muted mb-8px">{{ metadataModal.fileName }}</p>
-      <NSpin :show="metadataModal.loading">
-        <NEmpty v-if="!metadataModal.rows.length" :description="t('metadata.empty')" class="my-12px" />
-        <NSpace v-else vertical size="small">
-          <div v-for="(row, i) in metadataModal.rows" :key="i" class="flex items-center gap-8px">
-            <NInput v-model:value="row.key" :placeholder="t('metadata.key')" size="small" class="flex-1" />
-            <NInput v-model:value="row.value" :placeholder="t('metadata.value')" size="small" class="flex-1" />
-            <NButton size="small" quaternary @click="removeMetadataRow(i)">
-              <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
-            </NButton>
-          </div>
-        </NSpace>
-        <NButton size="small" dashed class="mt-8px" @click="addMetadataRow">
-          <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
-          {{ t('metadata.add') }}
+      <template #footer="{ close }">
+        <NButton @click="close">{{ t('cancel') }}</NButton>
+        <NButton type="primary" :disabled="!folderForm.name" :loading="folderSaving" @click="submitFolderModal">
+          {{ isFolderRename ? t('save') : t('create') }}
         </NButton>
-      </NSpin>
-      <template #footer>
-        <div class="flex justify-end gap-8px">
-          <NButton @click="metadataModal.show = false">{{ t('cancel') }}</NButton>
-          <NButton type="primary" :loading="metadataModal.saving" @click="saveMetadata">{{ t('save') }}</NButton>
-        </div>
       </template>
-    </NModal>
+    </TDetailHost>
 
-    <!-- File detail drawer (right) — opened by a file row's "View" action. -->
-    <NDrawer v-model:show="detailDrawer.show" :width="bp.isSm.value ? 320 : 420" placement="right">
-      <NDrawerContent :title="t('detail.title')" closable>
-        <template v-if="detailDrawer.file">
+    <!-- Tags overlay — useDetail(modal) + TDetailHost (deep-linkable `?tags=edit:<id>`). -->
+    <TDetailHost :state="tagsDetail" :title="t('tags.title')" :width="460" :translate="t">
+      <template #default>
+        <p class="text-13px text-muted mb-8px">{{ tagsFileName }}</p>
+        <NDynamicTags v-model:value="tagsWorking" />
+      </template>
+      <template #footer="{ close }">
+        <NButton @click="close">{{ t('cancel') }}</NButton>
+        <NButton type="primary" :loading="tagsSaving" @click="saveTags">{{ t('save') }}</NButton>
+      </template>
+    </TDetailHost>
+
+    <!-- Metadata overlay — useDetail(modal) + TDetailHost (deep-linkable `?meta=edit:<id>`). -->
+    <TDetailHost :state="metadataDetail" :title="t('metadata.title')" :width="460" :translate="t">
+      <template #default>
+        <p class="text-13px text-muted mb-8px">{{ metadataFileName }}</p>
+        <NSpin :show="metadataLoading">
+          <NEmpty v-if="!metadataRows.length" :description="t('metadata.empty')" class="my-12px" />
+          <NSpace v-else vertical size="small">
+            <div v-for="(row, i) in metadataRows" :key="i" class="flex items-center gap-8px">
+              <NInput v-model:value="row.key" :placeholder="t('metadata.key')" size="small" class="flex-1" />
+              <NInput v-model:value="row.value" :placeholder="t('metadata.value')" size="small" class="flex-1" />
+              <NButton size="small" quaternary @click="removeMetadataRow(i)">
+                <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
+              </NButton>
+            </div>
+          </NSpace>
+          <NButton size="small" dashed class="mt-8px" @click="addMetadataRow">
+            <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
+            {{ t('metadata.add') }}
+          </NButton>
+        </NSpin>
+      </template>
+      <template #footer="{ close }">
+        <NButton @click="close">{{ t('cancel') }}</NButton>
+        <NButton type="primary" :loading="metadataSaving" @click="saveMetadata">{{ t('save') }}</NButton>
+      </template>
+    </TDetailHost>
+
+    <!-- File detail drawer (right) — opened by a file row's "View" action.
+         Standalone useDetail(drawer) rendered by TDetailHost: deep-linkable
+         (`#detail:view:<id>`) + Back-to-close, no hand-rolled open-state. -->
+    <TDetailHost
+      :state="fileDetail"
+      :title="t('detail.title')"
+      :width="bp.isSm.value ? 320 : 420"
+      :translate="t"
+    >
+      <template #default>
+        <template v-if="viewedFile">
           <NDescriptions label-placement="left" :column="1" size="small" bordered>
             <NDescriptionsItem :label="t('detail.name')">
-              <span class="break-all">{{ detailDrawer.file.originalName }}</span>
+              <span class="break-all">{{ viewedFile.originalName }}</span>
             </NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.size')">{{ formatSize(detailDrawer.file.size) }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.type')">{{ detailDrawer.file.contentType }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.storage')">{{ detailDrawer.file.provider }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.size')">{{ formatFileSize(viewedFile.size) }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.type')">{{ viewedFile.contentType }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.storage')">{{ viewedFile.provider }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.uploader')">
-              {{ detailDrawer.file.creatorName || detailDrawer.file.creatorId || '—' }}
+              {{ viewedFile.creatorName || viewedFile.creatorId || '—' }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.createdAt')">
-              {{ detailDrawer.file.creationTime ? new Date(detailDrawer.file.creationTime).toLocaleString() : '—' }}
+              {{ viewedFile.creationTime ? new Date(viewedFile.creationTime).toLocaleString() : '—' }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.hash')">
-              <span class="break-all text-12px">{{ detailDrawer.file.md5Hash || '—' }}</span>
+              <span class="break-all text-12px">{{ viewedFile.md5Hash || '—' }}</span>
             </NDescriptionsItem>
           </NDescriptions>
 
@@ -320,15 +325,15 @@
 
           <div class="mt-16px">
             <p class="text-13px font-600 mb-6px">{{ t('detail.references') }}</p>
-            <NSpin :show="detailDrawer.loadingRefs" size="small">
+            <NSpin :show="loadingRefs" size="small">
               <NEmpty
-                v-if="!detailDrawer.references.length && !detailDrawer.loadingRefs"
+                v-if="!fileReferences.length && !loadingRefs"
                 :description="t('detail.noReferences')"
                 size="small"
                 class="my-8px"
               />
               <div v-else class="t-storage-file-page__refs">
-                <div v-for="ref in detailDrawer.references" :key="ref.id" class="t-storage-file-page__ref">
+                <div v-for="ref in fileReferences" :key="ref.id" class="t-storage-file-page__ref">
                   <div class="text-13px font-500">{{ ref.entityType }}</div>
                   <div class="text-12px text-muted">{{ t('detail.field') }}: {{ ref.fieldName }}</div>
                   <div class="text-12px text-muted break-all">{{ t('detail.entityId') }}: {{ ref.entityId }}</div>
@@ -337,14 +342,14 @@
             </NSpin>
           </div>
         </template>
-        <template #footer>
-          <NButton type="primary" :disabled="!detailDrawer.file" @click="detailDrawer.file && downloadFile(detailDrawer.file)">
-            <template #icon><TSvgIcon icon="mdi:download" :size="14" /></template>
-            {{ t('detail.download') }}
-          </NButton>
-        </template>
-      </NDrawerContent>
-    </NDrawer>
+      </template>
+      <template #footer>
+        <NButton type="primary" :disabled="!viewedFile" @click="viewedFile && downloadFile(viewedFile)">
+          <template #icon><TSvgIcon icon="mdi:download" :size="14" /></template>
+          {{ t('detail.download') }}
+        </NButton>
+      </template>
+    </TDetailHost>
   </TContentPage>
 </template>
 
@@ -354,17 +359,20 @@ import type { Component } from 'vue'
 import type { DataTableColumns, DropdownOption } from 'naive-ui'
 import {
   NButton, NButtonGroup, NInput, NSelect, NSpin, NPagination,
-  NModal, NForm, NFormItem, NInputNumber, NPopconfirm,
+  NForm, NFormItem, NInputNumber, NPopconfirm,
   NDropdown, NDynamicTags, NEmpty, NSpace,
-  NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NTag,
+  NDescriptions, NDescriptionsItem, NTag,
 } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { useDetail } from '../../headless/useDetail'
 import type { RowAction } from '../../headless/rowActions'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatFileSize } from '@tnzi/core'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
@@ -377,10 +385,6 @@ const bridge = createStorageBridge({ client: useAdminClient() })
 const t = makePageTranslator('storage.files')
 const message = useSafeMessage()
 const bp = useBreakpoint()
-
-const modalStyle = computed(() =>
-  bp.isSm.value ? { width: '100vw', maxWidth: '100vw' } : { width: 'min(460px, 95vw)' },
-)
 
 // ---- view mode (persisted) ----
 const VIEW_KEY = 'tnzi-admin:storage-view'
@@ -423,19 +427,13 @@ const moveTarget = ref<string | undefined>(undefined)
 
 const search = reactive({ originalName: '', contentType: '' })
 
-const folderModal = reactive({
-  show: false,
-  mode: 'create' as 'create' | 'rename',
-  parentId: null as string | null,
-  targetId: null as string | null,
-  form: { name: '', description: '' as string | undefined, sortOrder: 0 },
-})
-
-const tagsModal = reactive({ show: false, fileId: '', fileName: '', tags: [] as string[], saving: false })
-const metadataModal = reactive({
-  show: false, fileId: '', fileName: '',
-  rows: [] as Array<{ key: string; value: string }>, loading: false, saving: false,
-})
+/** Split the backend's comma-separated `tags` string into a clean tag list. */
+function splitTags(raw?: string | null): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+}
 
 const ctx = reactive({
   show: false, x: 0, y: 0,
@@ -446,19 +444,34 @@ const ctx = reactive({
 const preview = reactive({ show: false, file: null as FileRecordDto | null })
 
 /** Right-side detail drawer — opened from a file row's primary "View" action.
- *  Shows the file's metadata + where it is referenced (loaded async). */
-const detailDrawer = reactive({
-  show: false,
-  file: null as FileRecordDto | null,
-  references: [] as FileReferenceDto[],
-  loadingRefs: false,
+ *  Files isn't a `useCrudPage` page, so its read-only detail runs a standalone
+ *  `useDetail(mode:'drawer')` (rendered by `TDetailHost`): one engine, free
+ *  deep-link (`?detail=view:<id>`) + Back-to-close. Only the async references
+ *  list stays page-local; the `watch` loads it on open AND deep-link reload. */
+const fileDetail = useDetail<FileRecordDto>({
+  mode: 'drawer',
+  url: true,
+  source: { items: files },
 })
-const detailFileTags = computed<string[]>(() => {
-  const tags = (detailDrawer.file as { tags?: string[] } | null)?.tags
-  return Array.isArray(tags) ? tags : []
+const viewedFile = computed(() => fileDetail.data.value)
+const fileReferences = ref<FileReferenceDto[]>([])
+const loadingRefs = ref(false)
+// Backend serializes `tags` as a single comma-separated string — split it into
+// individual tags for the detail chips (was reading it as an array → always empty).
+const detailFileTags = computed<string[]>(() => splitTags(viewedFile.value?.tags))
+watch(viewedFile, (f) => {
+  if (!f) return
+  fileReferences.value = []
+  loadingRefs.value = true
+  bridge.references
+    .byFile(f.id)
+    .then((refs) => { fileReferences.value = refs })
+    .catch(() => { fileReferences.value = [] })
+    .finally(() => { loadingRefs.value = false })
 })
 
-// ---- derived ----
+// Flat id→folder lookup over the tree — defined here (before the folder overlay)
+// so the overlay's deep-link `source` can resolve a `?folder=edit:<id>` cold link.
 const flatFolders = computed(() => {
   const map = new Map<string, FileFolderDto>()
   const walk = (nodes: FileFolderDto[]) => {
@@ -471,6 +484,77 @@ const flatFolders = computed(() => {
   return map
 })
 
+/**
+ * Folder create / rename overlay — a `useDetail(modal)` (URL key `folder`) +
+ * `TDetailHost` instead of a hand-rolled `NModal` + `ref(false)`. `create` opens
+ * a blank form (parent from `openCreateFolder`, or root on a `?folder=new` deep
+ * link); `edit` binds a folder resolved from the loaded tree. The working form
+ * is seeded on (re)bind so in-session opens, deep links and refresh all agree.
+ */
+const folderDetail = useDetail<FileFolderDto>({
+  mode: 'modal',
+  url: 'folder',
+  source: { items: () => Array.from(flatFolders.value.values()) },
+})
+const folderForm = reactive({ name: '', description: undefined as string | undefined, sortOrder: 0 })
+const folderParentId = ref<string | null>(null)
+const folderTargetId = ref<string | null>(null)
+const isFolderRename = computed(() => folderDetail.action.value === 'edit')
+const folderModalTitle = computed(() => (isFolderRename.value ? t('renameFolder') : t('newFolder')))
+watch(
+  () => [folderDetail.visible.value, folderDetail.action.value, folderDetail.data.value] as const,
+  ([visible, action, folder]) => {
+    if (!visible) return
+    if (action === 'edit' && folder) {
+      folderTargetId.value = folder.id
+      folderParentId.value = folder.parentId ?? null
+      folderForm.name = folder.name
+      folderForm.description = folder.description ?? undefined
+      folderForm.sortOrder = folder.sortOrder
+    } else if (action === 'create') {
+      folderTargetId.value = null
+      folderForm.name = ''
+      folderForm.description = undefined
+      folderForm.sortOrder = 0
+    }
+  },
+)
+
+/** File-tags overlay (URL key `tags`) — working tag list seeded from the file's
+ *  comma-separated `tags` string on (re)bind. */
+const tagsDetail = useDetail<FileRecordDto>({ mode: 'modal', url: 'tags', source: { items: files } })
+const tagsWorking = ref<string[]>([])
+const tagsSaving = ref(false)
+const tagsFileName = computed(() => tagsDetail.data.value?.originalName ?? '')
+watch(() => tagsDetail.data.value, (file) => {
+  tagsWorking.value = file ? splitTags(file.tags) : []
+})
+
+/** File-metadata overlay (URL key `meta`) — rows lazy-loaded from the backend on
+ *  (re)bind (covers in-session open AND deep-link / refresh). */
+const metadataDetail = useDetail<FileRecordDto>({ mode: 'modal', url: 'meta', source: { items: files } })
+const metadataRows = ref<Array<{ key: string; value: string }>>([])
+const metadataLoading = ref(false)
+const metadataSaving = ref(false)
+const metadataFileName = computed(() => metadataDetail.data.value?.originalName ?? '')
+watch(() => metadataDetail.data.value, async (file) => {
+  if (!file) {
+    metadataRows.value = []
+    return
+  }
+  metadataRows.value = []
+  metadataLoading.value = true
+  try {
+    const map = await bridge.metadata.get(file.id)
+    metadataRows.value = Object.entries(map).map(([key, value]) => ({ key, value }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    metadataLoading.value = false
+  }
+})
+
+// ---- derived ----
 const currentFolder = computed(() =>
   currentFolderId.value ? flatFolders.value.get(currentFolderId.value) ?? null : null,
 )
@@ -531,13 +615,6 @@ const contentTypeOptions = [
   { label: 'Archive', value: 'application/zip' },
 ]
 
-function formatSize(bytes: number): string {
-  if (!bytes) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB']
-  const i = Math.min(u.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${u[i]}`
-}
-
 /** Name cell — icon (folder glyph or file-type glyph) + label. `min-w-0` on
  *  both the flex row and the label lets it truncate inside the table cell. The
  *  label is clickable (`onClick`): a file name previews, a folder name opens. */
@@ -582,6 +659,7 @@ function rowActionList(row: ExplorerRow): RowAction<ExplorerRow>[] {
     { key: 'preview', label: 'actions.preview', icon: 'mdi:image-outline', onClick: () => openPreview(file) },
     { key: 'tags', label: 'actions.tags', icon: 'mdi:tag-outline', onClick: () => openTagsModal(file) },
     { key: 'metadata', label: 'actions.metadata', icon: 'mdi:information-outline', onClick: () => void openMetadataModal(file) },
+    { key: 'verify', label: 'actions.verify', icon: 'mdi:shield-check-outline', onClick: () => void verifyFile(file) },
     { key: 'delete', label: 'actions.delete', icon: 'mdi:trash-can-outline', type: 'error', confirm: 'confirmDeleteFile', onClick: () => void deleteSingleFile(file) },
   ]
 }
@@ -602,7 +680,7 @@ const columns = computed<DataTableColumns<ExplorerRow>>(() => [
   },
   {
     key: 'size', title: t('columns.size'), width: 110,
-    render: (row) => (row.kind === 'folder' ? t('itemCount', { n: row.folder.fileCount ?? 0 }) : formatSize(row.file.size)),
+    render: (row) => (row.kind === 'folder' ? t('itemCount', { n: row.folder.fileCount ?? 0 }) : formatFileSize(row.file.size)),
   },
   {
     key: 'contentType', title: t('columns.contentType'), minWidth: 140, ellipsis: { tooltip: true },
@@ -790,7 +868,19 @@ function onPageSizeChange(next: number): void {
 
 // ---- file actions ----
 function downloadFile(row: FileRecordDto): void {
-  window.open(`/api/files/${row.id}/download`, '_blank')
+  // Deployment-prefix-aware URL via the bridge (resolveUrl) — no hardcoded /api.
+  window.open(bridge.files.downloadUrl(row.id), '_blank')
+}
+
+/** Verify a single file's integrity (Files → More → Verify). */
+async function verifyFile(row: FileRecordDto): Promise<void> {
+  try {
+    const res = await bridge.integrity.verifyOne(row.id)
+    if (res.status === 'Healthy') message.success(t('verify.healthy'))
+    else message.warning(t('verify.problem', { status: res.status }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
 }
 function openPreview(row: FileRecordDto): void {
   preview.file = row
@@ -798,15 +888,8 @@ function openPreview(row: FileRecordDto): void {
 }
 /** Open the right-side detail drawer and lazily load the file's references. */
 function openDetail(row: FileRecordDto): void {
-  detailDrawer.file = row
-  detailDrawer.references = []
-  detailDrawer.show = true
-  detailDrawer.loadingRefs = true
-  bridge.references
-    .byFile(row.id)
-    .then((refs) => { detailDrawer.references = refs })
-    .catch(() => { detailDrawer.references = [] })
-    .finally(() => { detailDrawer.loadingRefs = false })
+  // Open the `view` open-state; the `watch(viewedFile)` above loads references.
+  void fileDetail.open('view', row)
 }
 async function deleteSingleFile(row: FileRecordDto): Promise<void> {
   try {
@@ -819,62 +902,50 @@ async function deleteSingleFile(row: FileRecordDto): Promise<void> {
 }
 
 function openTagsModal(row: FileRecordDto): void {
-  tagsModal.fileId = row.id
-  tagsModal.fileName = row.originalName
-  const existing = (row as { tags?: string[] }).tags
-  tagsModal.tags = Array.isArray(existing) ? [...existing] : []
-  tagsModal.show = true
+  void tagsDetail.open('edit', row)
 }
 async function saveTags(): Promise<void> {
-  tagsModal.saving = true
+  const file = tagsDetail.data.value
+  if (!file) return
+  tagsSaving.value = true
   try {
-    await bridge.tags.set(tagsModal.fileId, tagsModal.tags)
+    await bridge.tags.set(file.id, tagsWorking.value)
     message.success(t('tags.saveSuccess'))
-    tagsModal.show = false
+    tagsDetail.close()
     await loadFiles()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
-    tagsModal.saving = false
+    tagsSaving.value = false
   }
 }
 
-async function openMetadataModal(row: FileRecordDto): Promise<void> {
-  metadataModal.fileId = row.id
-  metadataModal.fileName = row.originalName
-  metadataModal.rows = []
-  metadataModal.show = true
-  metadataModal.loading = true
-  try {
-    const map = await bridge.metadata.get(row.id)
-    metadataModal.rows = Object.entries(map).map(([key, value]) => ({ key, value }))
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    metadataModal.loading = false
-  }
+function openMetadataModal(row: FileRecordDto): void {
+  void metadataDetail.open('edit', row)
 }
 function addMetadataRow(): void {
-  metadataModal.rows = [...metadataModal.rows, { key: '', value: '' }]
+  metadataRows.value = [...metadataRows.value, { key: '', value: '' }]
 }
 function removeMetadataRow(index: number): void {
-  metadataModal.rows = metadataModal.rows.filter((_, i) => i !== index)
+  metadataRows.value = metadataRows.value.filter((_, i) => i !== index)
 }
 async function saveMetadata(): Promise<void> {
-  metadataModal.saving = true
+  const file = metadataDetail.data.value
+  if (!file) return
+  metadataSaving.value = true
   try {
     const map: Record<string, string> = {}
-    for (const r of metadataModal.rows) {
+    for (const r of metadataRows.value) {
       const key = r.key.trim()
       if (key) map[key] = r.value
     }
-    await bridge.metadata.set(metadataModal.fileId, map)
+    await bridge.metadata.set(file.id, map)
     message.success(t('metadata.saveSuccess'))
-    metadataModal.show = false
+    metadataDetail.close()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
-    metadataModal.saving = false
+    metadataSaving.value = false
   }
 }
 
@@ -1020,45 +1091,34 @@ function onListDrop(e: DragEvent): void {
 
 // ---- folder CRUD ----
 function openCreateFolder(parentId: string | null): void {
-  folderModal.mode = 'create'
-  folderModal.parentId = parentId
-  folderModal.targetId = null
-  folderModal.form = { name: '', description: undefined, sortOrder: 0 }
-  folderModal.show = true
+  folderParentId.value = parentId
+  void folderDetail.open('create', {} as FileFolderDto)
 }
 function openRenameFolder(folder: FileFolderDto): void {
-  folderModal.mode = 'rename'
-  folderModal.parentId = folder.parentId ?? null
-  folderModal.targetId = folder.id
-  folderModal.form = {
-    name: folder.name,
-    description: folder.description ?? undefined,
-    sortOrder: folder.sortOrder,
-  }
-  folderModal.show = true
+  void folderDetail.open('edit', folder)
 }
 async function submitFolderModal(): Promise<void> {
   folderSaving.value = true
   try {
-    if (folderModal.mode === 'create') {
+    if (!isFolderRename.value) {
       const created = await bridge.folders.create({
-        name: folderModal.form.name,
-        parentId: folderModal.parentId,
-        description: folderModal.form.description ?? null,
-        sortOrder: folderModal.form.sortOrder,
+        name: folderForm.name,
+        parentId: folderParentId.value,
+        description: folderForm.description ?? null,
+        sortOrder: folderForm.sortOrder,
       })
       message.success(t('createFolderSuccess'))
-      folderModal.show = false
+      folderDetail.close()
       await loadFolders()
       openFolder(created.id)
-    } else if (folderModal.targetId) {
-      await bridge.folders.update(folderModal.targetId, {
-        name: folderModal.form.name,
-        description: folderModal.form.description ?? null,
-        sortOrder: folderModal.form.sortOrder,
+    } else if (folderTargetId.value) {
+      await bridge.folders.update(folderTargetId.value, {
+        name: folderForm.name,
+        description: folderForm.description ?? null,
+        sortOrder: folderForm.sortOrder,
       })
       message.success(t('renameFolderSuccess'))
-      folderModal.show = false
+      folderDetail.close()
       await loadFolders()
     }
   } catch (e) {

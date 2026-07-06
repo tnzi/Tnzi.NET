@@ -4,9 +4,9 @@
  *
  * Replaces the old `window.open` preview with an in-page modal: images render
  * in an `NImage` lightbox (zoom/rotate toolbar), PDFs in an iframe, audio/video
- * in native players, and any other type falls back to a download prompt. URLs
- * use the same anonymous preview/download routes the chat detail drawer uses
- * (`/api/files/{id}/preview` · `/api/files/{id}/download`).
+ * in native players, and any other type falls back to a download prompt. The
+ * preview/download URLs are resolved by the parent (via the storage bridge) and
+ * passed in as functions so this component never hardcodes `/api/...`.
  */
 import { computed } from 'vue'
 import { NModal, NImage, NButton } from 'naive-ui'
@@ -18,12 +18,16 @@ const props = defineProps<{
   show: boolean
   file: FileRecordDto | null
   translate: (key: string, params?: Record<string, unknown>) => string
+  /** Resolve a file's inline preview URL (deployment-prefix aware). */
+  previewUrl: (id: string) => string
+  /** Resolve a file's direct download URL (deployment-prefix aware). */
+  downloadUrl: (id: string) => string
 }>()
 
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
 
-const previewSrc = computed(() => (props.file ? `/api/files/${props.file.id}/preview` : ''))
-const downloadSrc = computed(() => (props.file ? `/api/files/${props.file.id}/download` : ''))
+const previewSrc = computed(() => (props.file ? props.previewUrl(props.file.id) : ''))
+const downloadSrc = computed(() => (props.file ? props.downloadUrl(props.file.id) : ''))
 
 type Kind = 'image' | 'pdf' | 'video' | 'audio' | 'other'
 const kind = computed<Kind>(() => {

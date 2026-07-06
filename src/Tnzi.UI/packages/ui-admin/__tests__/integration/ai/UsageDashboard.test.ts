@@ -343,9 +343,9 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
   it('renders the page root', async () => {
     const wrapper = mount(UsageDashboard)
     await flushPromises()
-    // Phase 1 rewrite: title is now provided by the NCard filter slot
-    // (no dedicated h2). Assert the root container instead.
-    expect(wrapper.find('.t-usage-dashboard').exists()).toBe(true)
+    // The page now renders through the TTabsPage container; assert its
+    // fallthrough marker + the shared filter bar that drives every tab.
     expect(wrapper.find('[data-test="usage-dashboard"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="filter-bar"]').exists()).toBe(true)
   })
 })

@@ -6,3 +6,4 @@
  */
 export * from './naive-helpers'
 export * from './device-icon'
+export * from './avatar'

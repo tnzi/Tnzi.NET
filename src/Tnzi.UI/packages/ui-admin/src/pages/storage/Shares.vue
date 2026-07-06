@@ -61,8 +61,6 @@ const crud = useCrudPage<FileShareSummaryDto, string>({
   },
 })
 
-crud.refresh().catch(() => undefined)
-
 const rowActions: RowAction<FileShareSummaryDto>[] = [
   {
     key: 'revoke',

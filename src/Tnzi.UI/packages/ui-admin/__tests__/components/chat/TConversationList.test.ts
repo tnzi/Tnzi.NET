@@ -94,8 +94,7 @@ describe('TConversationList', () => {
   it('clicking an item emits select with the conversation id', async () => {
     const wrapper = mountList()
     const items = wrapper.findAllComponents(TConversationItem)
-    // items are sorted: system pinned first. conv-sys goes first.
-    // We need to find items and click a known one. Find by checking props.
+    // Find items and click a known one by checking props.
     const aliceItem = items.find((w) => (w.props('item') as ConversationListItemDto).id === 'conv-1')
     expect(aliceItem).toBeDefined()
     await aliceItem!.trigger('click')
@@ -121,12 +120,21 @@ describe('TConversationList', () => {
     expect(wrapper.emitted('new-chat')).toBeTruthy()
   })
 
-  it('System-type conversation is sorted to the top', () => {
+  it('System conversations follow the ordinary sort rules (no forced pin)', () => {
     const wrapper = mountList()
     const items = wrapper.findAllComponents(TConversationItem)
-    const firstItem = items[0].props('item') as ConversationListItemDto
-    expect(firstItem.type).toBe(ConversationType.System)
-    expect(firstItem.id).toBe('conv-sys')
+    // Fixture activity: Alice 09:00 > Team 08:00 > System 07:00 → System is LAST.
+    const ids = items.map((w) => (w.props('item') as ConversationListItemDto).id)
+    expect(ids).toEqual(['conv-1', 'conv-2', 'conv-sys'])
+  })
+
+  it('a sticky conversation outranks a more recent system conversation', () => {
+    const convs = makeConversations()
+    const team = convs.find((c) => c.id === 'conv-2')
+    if (team) team.isSticky = true
+    const wrapper = mountList(convs)
+    const items = wrapper.findAllComponents(TConversationItem)
+    expect((items[0].props('item') as ConversationListItemDto).id).toBe('conv-2')
   })
 
   it('shows empty state when no conversations match search', async () => {

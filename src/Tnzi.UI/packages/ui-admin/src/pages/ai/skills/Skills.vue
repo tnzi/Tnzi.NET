@@ -19,9 +19,10 @@
       :title="t('title')"
       :title-help="t('banner')"
       :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
-      :search-fields="searchFields"
       :search-placeholder="t('search.placeholder')"
       :form-modal-width="760"
+      :detail-width="680"
+      :detail-title="(d: SkillSummaryDto) => d.name"
       :translate="t"
     >
       <!-- KPI strip — getUsageStats; between the page header and the grid. -->
@@ -67,7 +68,7 @@
         </template>
 
         <template #card="{ item }">
-          <TEntityCard clickable @click="openDetail(item)">
+          <TEntityCard clickable @click="crud.openView(item)">
             <div class="flex items-center gap-8px mb-6px">
               <span class="ai-skills-card__icon">
                 <TSvgIcon icon="mdi:puzzle-outline" :size="18" />
@@ -165,6 +166,67 @@
             :columns="2"
           />
         </template>
+
+        <!-- Read-only detail — full SKILL.md content (lazy-loaded by slug via
+             `onView`). Same `view` open-state as the form, deep-linkable. -->
+        <template #detail>
+          <NSpin v-if="viewed" :show="detailLoading" size="small">
+            <div class="ai-skills-detail__meta">
+              <div>
+                <strong>{{ t('detail.slug') }}:</strong> <code>{{ viewed.slug }}</code>
+              </div>
+              <div>
+                <strong>{{ t('detail.scope') }}:</strong>
+                <NTag size="small" :type="scopeType(viewed.scope)" :bordered="false">
+                  {{ t(scopeKey(viewed.scope)) }}
+                </NTag>
+              </div>
+              <div>
+                <strong>{{ t('detail.status') }}:</strong>
+                <NTag
+                  size="small"
+                  :type="viewed.enabled ? 'success' : 'warning'"
+                  :bordered="false"
+                >
+                  {{ viewed.enabled ? t('badge.enabled') : t('badge.disabled') }}
+                </NTag>
+              </div>
+              <div v-if="viewed.isReadOnly && viewed.filePath">
+                <strong>{{ t('detail.filePath') }}:</strong> <code>{{ viewed.filePath }}</code>
+              </div>
+              <div v-if="(viewed.tags?.length ?? 0) > 0">
+                <strong>{{ t('detail.tags') }}:</strong>
+                <NTag
+                  v-for="tag in viewed.tags"
+                  :key="tag"
+                  size="small"
+                  type="info"
+                  :bordered="false"
+                  class="ml-4px"
+                >{{ tag }}</NTag>
+              </div>
+              <div v-if="viewed.description">
+                <strong>{{ t('detail.description') }}:</strong> {{ viewed.description }}
+              </div>
+            </div>
+
+            <div v-if="detailContent.whenToUse" class="ai-skills-detail__section">
+              <h3>{{ t('detail.whenToUse') }}</h3>
+              <pre class="ai-skills-detail__body">{{ detailContent.whenToUse }}</pre>
+            </div>
+
+            <div class="ai-skills-detail__section">
+              <h3>{{ t('detail.content') }}</h3>
+              <pre class="ai-skills-detail__body">{{ detailContent.content || t('detail.noContent') }}</pre>
+            </div>
+          </NSpin>
+        </template>
+
+        <template #detailFooter>
+          <NButton v-if="viewed && !viewed.isReadOnly" size="small" type="primary" @click="crud.openEdit(viewed)">
+            {{ t('actions.edit') }}
+          </NButton>
+        </template>
     </TCardPage>
 
     <!-- Hidden file input for Import (.json). -->
@@ -176,76 +238,18 @@
       @change="onFileSelected"
     />
 
-    <!-- Detail drawer — full SKILL.md content (lazy-loaded by slug). -->
-    <NDrawer v-model:show="detailVisible" :width="680" placement="right">
-      <NDrawerContent v-if="detailRow" :title="detailRow.name" closable>
-        <NSpin :show="detailLoading" size="small">
-          <div class="ai-skills-detail__meta">
-            <div>
-              <strong>{{ t('detail.slug') }}:</strong> <code>{{ detailRow.slug }}</code>
-            </div>
-            <div>
-              <strong>{{ t('detail.scope') }}:</strong>
-              <NTag size="small" :type="scopeType(detailRow.scope)" :bordered="false">
-                {{ t(scopeKey(detailRow.scope)) }}
-              </NTag>
-            </div>
-            <div>
-              <strong>{{ t('detail.status') }}:</strong>
-              <NTag
-                size="small"
-                :type="detailRow.enabled ? 'success' : 'warning'"
-                :bordered="false"
-              >
-                {{ detailRow.enabled ? t('badge.enabled') : t('badge.disabled') }}
-              </NTag>
-            </div>
-            <div v-if="detailRow.isReadOnly && detailRow.filePath">
-              <strong>{{ t('detail.filePath') }}:</strong> <code>{{ detailRow.filePath }}</code>
-            </div>
-            <div v-if="(detailRow.tags?.length ?? 0) > 0">
-              <strong>{{ t('detail.tags') }}:</strong>
-              <NTag
-                v-for="tag in detailRow.tags"
-                :key="tag"
-                size="small"
-                type="info"
-                :bordered="false"
-                class="ml-4px"
-              >{{ tag }}</NTag>
-            </div>
-            <div v-if="detailRow.description">
-              <strong>{{ t('detail.description') }}:</strong> {{ detailRow.description }}
-            </div>
-          </div>
-
-          <div v-if="detailContent.whenToUse" class="ai-skills-detail__section">
-            <h3>{{ t('detail.whenToUse') }}</h3>
-            <pre class="ai-skills-detail__body">{{ detailContent.whenToUse }}</pre>
-          </div>
-
-          <div class="ai-skills-detail__section">
-            <h3>{{ t('detail.content') }}</h3>
-            <pre class="ai-skills-detail__body">{{ detailContent.content || t('detail.noContent') }}</pre>
-          </div>
-        </NSpin>
-
-        <template #footer>
-          <NButton
-            v-if="detailRow && !detailRow.isReadOnly"
-            size="small"
-            type="primary"
-            @click="editFromDrawer"
-          >
-            {{ t('actions.edit') }}
-          </NButton>
-        </template>
-      </NDrawerContent>
-    </NDrawer>
-
-    <!-- Popular drawer — getPopular ranking (name + activation count). -->
-    <NDrawer v-model:show="popularVisible" :width="420" placement="right">
-      <NDrawerContent :title="t('popular.title')" closable>
+    <!-- Popular ranking drawer — a singleton (non-record) overlay driven by the
+         detail engine so it is deep-linkable (`?popular=view:ranking`),
+         refresh-survivable and Back-closeable. `:footer="false"` — it is a
+         read-only panel; the X closes it. -->
+    <TDetailHost
+      :state="popularDetail"
+      :title="t('popular.title')"
+      :width="420"
+      :footer="false"
+      :translate="t"
+    >
+      <template #default>
         <NSpin :show="popularLoading" size="small">
           <ol v-if="popularSkills.length" class="ai-skills-popular">
             <li
@@ -262,17 +266,15 @@
           </ol>
           <div v-else class="ai-skills-popular__empty">{{ t('popular.empty') }}</div>
         </NSpin>
-      </NDrawerContent>
-    </NDrawer>
+      </template>
+    </TDetailHost>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   NButton,
-  NDrawer,
-  NDrawerContent,
   NPopconfirm,
   NSelect,
   NSpin,
@@ -284,7 +286,9 @@ import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
 import TKpiCard from '../../../components/data/TKpiCard.vue'
+import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import { useDetail } from '../../../headless/useDetail'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
@@ -292,7 +296,6 @@ import { translatePageKey, interpolate } from '../../_shared/translate'
 import {
   skillColumns,
   skillFormSchema,
-  skillSearchFields as searchFields,
   describePreview,
   scopeLabelKey,
   scopeBadgeType,
@@ -362,10 +365,12 @@ const crud = useCrudPage<SkillSummaryDto>({
   createData: (data) => bridge.skills.create(data as CreateSkillDto),
   updateData: (id, data) => bridge.skills.update(String(id), data as UpdateSkillDto),
   deleteData: (ids) => bridge.skills.delete(ids.map(String)),
+  onView: (row) => void loadSkillContent(row),
 })
 
+const viewed = computed(() => crud.formModal.formData.value as SkillSummaryDto | null)
+
 void loadCategories()
-crud.refresh().catch(() => undefined)
 
 function onCategoryChange(value: string | null): void {
   categoryId.value = value
@@ -426,14 +431,13 @@ async function removeOne(item: SkillSummaryDto): Promise<void> {
 }
 
 // --- detail drawer (lazy-load full content by slug) ------------------------
-const detailRow = ref<SkillSummaryDto | null>(null)
-const detailVisible = ref(false)
+// The viewed record IS `crud.formModal.formData` (the `view` open-state); only
+// the lazily-fetched SKILL.md body is page-local. `onView` loads it on open AND
+// on a deep-link cold reload.
 const detailLoading = ref(false)
 const detailContent = ref<{ content: string; whenToUse: string }>({ content: '', whenToUse: '' })
 
-async function openDetail(row: SkillSummaryDto): Promise<void> {
-  detailRow.value = row
-  detailVisible.value = true
+async function loadSkillContent(row: SkillSummaryDto): Promise<void> {
   detailContent.value = { content: '', whenToUse: row.whenToUse ?? '' }
   detailLoading.value = true
   try {
@@ -449,19 +453,26 @@ async function openDetail(row: SkillSummaryDto): Promise<void> {
   }
 }
 
-function editFromDrawer(): void {
-  if (!detailRow.value) return
-  detailVisible.value = false
-  crud.openEdit(detailRow.value)
-}
-
 // --- popular drawer --------------------------------------------------------
-const popularVisible = ref(false)
+// A singleton (non-record) ranking overlay driven by the detail engine so it is
+// deep-linkable (`?popular=view:ranking`), refresh-survivable and Back-closeable
+// like every other overlay. The ranking list body is page-local, (re)loaded
+// whenever the drawer opens — covers an in-session open AND a cold-load deep
+// link (both flip `visible`).
+const popularDetail = useDetail<{ id: string }>({
+  mode: 'drawer',
+  url: 'popular',
+  loadData: async () => ({ id: 'ranking' }),
+})
 const popularLoading = ref(false)
 const popularSkills = ref<PopularSkillDto[]>([])
 
 async function openPopular(): Promise<void> {
-  popularVisible.value = true
+  await popularDetail.open('view', { id: 'ranking' })
+}
+
+watch(() => popularDetail.visible.value, async (open) => {
+  if (!open) return
   popularLoading.value = true
   try {
     popularSkills.value = await bridge.skills.getPopular(10)
@@ -470,7 +481,7 @@ async function openPopular(): Promise<void> {
   } finally {
     popularLoading.value = false
   }
-}
+})
 
 // --- export ----------------------------------------------------------------
 const exporting = ref(false)

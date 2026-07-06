@@ -289,10 +289,9 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       await fileApi.batchDelete(ids)
     },
 
-    downloadUrl: (id: string): string => {
-      // Use a relative path that matches the backend route /api/files/{id}/download
-      return `/api/files/${id}/download`
-    },
+    // Deployment-prefix-aware download URL (resolveUrl), symmetric with
+    // previewUrl — no hardcoded `/api` that breaks under a sub-app mount.
+    downloadUrl: (id: string): string => storageApi.getDownloadUrl(id),
 
     // Synchronous anonymous preview URL (no request) — used for avatar rendering.
     previewUrl: (id: string): string => storageApi.getPreviewUrl(id),

@@ -5,6 +5,7 @@ namespace Tnzi.Payment.Controllers.Admin;
 /// </summary>
 [Route("admin/invoices")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "payment.invoice.view")]
 public class DefaultInvoiceAdminController : ApiAdminControllerBase
 {
     private readonly IInvoiceService _invoiceService;

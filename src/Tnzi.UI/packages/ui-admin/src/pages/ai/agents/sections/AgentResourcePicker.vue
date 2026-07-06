@@ -44,7 +44,7 @@
       </div>
     </NSpin>
 
-    <NModal v-model:show="showAdd" preset="card" :title="addLabel" class="w-680px max-w-92vw">
+    <NModal v-model:show="showAdd" preset="card" size="small" :title="addLabel" class="w-680px max-w-92vw">
       <NInput v-model:value="search" clearable :placeholder="searchPlaceholder" class="mb-12px" />
       <div class="t-resource-picker__available">
         <div v-if="filteredAvailable.length === 0" class="t-resource-picker__empty">{{ allAssignedText }}</div>

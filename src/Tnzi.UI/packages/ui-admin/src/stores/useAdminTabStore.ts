@@ -31,14 +31,43 @@ interface RouteLike {
   }
 }
 
+function hasOwnKeys(o?: object | null): boolean {
+  return !!o && Object.keys(o).length > 0
+}
+
+/**
+ * Decide whether a route should get its OWN tab per instance (detail / deep-link
+ * pages) instead of reusing the route-name tab. A route is multi-instance when it
+ * carries dynamic params (e.g. `/agents/:id` — customer A and customer B are
+ * different records and must each own a tab) OR it explicitly opts in via
+ * `meta.multiTab` together with a query string (e.g. a report page split by
+ * `?type=`).
+ */
+export function isMultiInstanceRoute(route: {
+  params?: object | null
+  query?: object | null
+  meta?: Record<string, unknown> | null
+}): boolean {
+  return hasOwnKeys(route.params) || (route.meta?.multiTab === true && hasOwnKeys(route.query))
+}
+
+/**
+ * Stable per-instance id/key for a multi-instance route.
+ *  - **Param routes** (`/agents/:id`): key by `path` (the resolved pathname,
+ *    WITHOUT query) so a detail page that syncs volatile query state — e.g.
+ *    `?section=` deep-links — keeps ONE tab / ONE component instance instead of
+ *    spawning a new tab and remounting on every section switch.
+ *  - **multiTab + query routes** (reports `?type=`): key by `fullPath` since the
+ *    query string IS the differentiator between instances.
+ */
+export function multiInstanceKey(route: { path: string; fullPath: string; params?: object | null }): string {
+  return hasOwnKeys(route.params) ? route.path : route.fullPath
+}
+
 function routeToTab(route: RouteLike): AdminTab {
-  // For multiTab routes, the id includes query so different queries create different tabs
-  const baseId = route.name
-  const hasQuery = route.query && Object.keys(route.query).length > 0
-  const id =
-    route.meta?.multiTab && hasQuery
-      ? `${baseId}?${new URLSearchParams(route.query as Record<string, string>).toString()}`
-      : baseId
+  // Multi-instance routes get a per-record/per-query id; single-instance routes
+  // reuse the stable route name as the id.
+  const id = isMultiInstanceRoute(route) ? multiInstanceKey(route) : route.name
   return {
     id,
     title: route.meta?.title ?? route.name,
@@ -94,6 +123,13 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     const tab = routeToTab(route)
     const existing = findTab(tab.id)
     if (existing) {
+      // Refresh the stored location so the tab points at the LATEST url for this
+      // record (e.g. a detail page that moved its `?section=`), keeping clicks +
+      // reload-restore accurate. Title is left untouched so a dynamic title set
+      // via `useTabTitle` (the record name) isn't clobbered by the static one.
+      existing.fullPath = tab.fullPath
+      existing.query = tab.query
+      existing.params = tab.params
       activeTabId.value = tab.id
       return
     }
@@ -103,6 +139,29 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
 
   function setHomeTab(tab: AdminTab): void {
     homeTab.value = tab
+  }
+
+  /**
+   * Drop tabs whose route the current user is no longer allowed to open. Called
+   * by the framework right after `loadPermissions` with the route store's
+   * `deniedRouteNames`, so a persisted tab from a prior (higher-privilege)
+   * session doesn't survive into a lower-privilege sign-in and 403 on click.
+   *
+   * Matches a tab by its `id` (for single-instance routes the id IS the route
+   * name — which is what `deniedRouteNames` holds). Pinned tabs are pruned too
+   * (an unauthorized pin is still unauthorized). Re-points `activeTabId` to a
+   * surviving tab when the active one was removed.
+   */
+  function pruneTabs(deniedNames: Set<string>): void {
+    if (!deniedNames || deniedNames.size === 0) return
+    const before = tabs.value.length
+    tabs.value = tabs.value.filter((t) => !deniedNames.has(t.id))
+    if (tabs.value.length === before) return
+    fixedTabIds.value = fixedTabIds.value.filter((id) => !deniedNames.has(id))
+    if (!tabs.value.find((t) => t.id === activeTabId.value)) {
+      activeTabId.value =
+        tabs.value[tabs.value.length - 1]?.id ?? (homeTab.value?.id ?? '')
+    }
   }
 
   function removeTab(id: string): string | null {
@@ -185,6 +244,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     allTabs,
     addTab,
     setHomeTab,
+    pruneTabs,
     removeTab,
     removeLeftTabs,
     removeRightTabs,

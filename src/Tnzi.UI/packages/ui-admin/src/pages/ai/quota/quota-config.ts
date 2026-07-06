@@ -32,14 +32,21 @@ const WARNING_LEVEL = { None: 0, Warning: 1, Critical: 2 } as const
  */
 
 /** Render a 0-1 ratio as a percentage string (e.g. 0.05 → "5%"). */
-function formatPercent(ratio: unknown): string {
+export function formatPercent(ratio: unknown): string {
   const n = typeof ratio === 'number' ? ratio : Number(ratio)
   if (!Number.isFinite(n)) return '—'
   return `${Math.round(n * 1000) / 10}%`
 }
 
+/** Clamp a 0-1 ratio to a 0-100 integer for progress bars. */
+export function percentValue(ratio: unknown): number {
+  const n = typeof ratio === 'number' ? ratio : Number(ratio)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(100, Math.round(n * 1000) / 10))
+}
+
 /** Render a token count compactly (e.g. 2000000 → "2,000,000"). */
-function formatTokens(value: unknown): string {
+export function formatTokens(value: unknown): string {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return '—'
   return n.toLocaleString('en-US')
@@ -53,11 +60,48 @@ function formatTokens(value: unknown): string {
 const UNLIMITED_THRESHOLD = 1e15
 
 /** Render a daily/monthly limit; the unlimited sentinel shows a label. */
-function formatLimit(value: unknown): string {
+export function formatLimit(value: unknown): string {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return '—'
   if (n > UNLIMITED_THRESHOLD) return translatePageKey('ai.quota', 'unlimited')
   return formatTokens(n)
+}
+
+/**
+ * Badge mappings shared by the (removed) table column and the card list, so the
+ * warning-level / enabled chips read identically wherever a rule is surfaced.
+ * Keys must be absolute (`admin.modules.ai.quota.*` / `admin.shared.*`) because
+ * the admin TStatusBadge wrapper resolves labelKeys with an EMPTY page namespace.
+ */
+export const warningLevelBadgeMapping = {
+  [WARNING_LEVEL.None]: { type: 'success', labelKey: 'admin.modules.ai.quota.warningLevel.none' },
+  [WARNING_LEVEL.Warning]: { type: 'warning', labelKey: 'admin.modules.ai.quota.warningLevel.warning' },
+  [WARNING_LEVEL.Critical]: { type: 'error', labelKey: 'admin.modules.ai.quota.warningLevel.critical' },
+} as const
+
+export const enabledBadgeMapping = {
+  true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
+  false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
+} as const
+
+/**
+ * Normalise a UserQuotaDto warning level to its enum number (None fallback).
+ * The backend serialises the enum as the PascalCase member NAME
+ * (JsonStringEnumConverter: None / Warning / Critical); a numeric ordinal is
+ * still accepted for backward compatibility. Returning a number keeps the
+ * numeric-keyed `warningLevelBadgeMapping` lookup working.
+ */
+export function warningLevelValue(row: UserQuotaDto): number {
+  const raw = (row as unknown as { warningLevel?: number | string }).warningLevel
+  const map: Record<string, number> = {
+    '0': WARNING_LEVEL.None,
+    '1': WARNING_LEVEL.Warning,
+    '2': WARNING_LEVEL.Critical,
+    None: WARNING_LEVEL.None,
+    Warning: WARNING_LEVEL.Warning,
+    Critical: WARNING_LEVEL.Critical,
+  }
+  return map[String(raw ?? WARNING_LEVEL.None)] ?? WARNING_LEVEL.None
 }
 
 /** Render a GUID truncated to its first 8 chars (full value in `title`). */
@@ -90,14 +134,8 @@ export const quotaColumns: ColumnDef[] = [
     width: 130,
     render: (row) =>
       h(TStatusBadge, {
-        value: Number((row as unknown as UserQuotaDto).warningLevel ?? WARNING_LEVEL.None),
-        // The admin TStatusBadge wrapper resolves labelKeys with an EMPTY page
-        // namespace, so badge keys must be absolute (admin.modules.ai.quota.*).
-        mapping: {
-          [WARNING_LEVEL.None]: { type: 'success', labelKey: 'admin.modules.ai.quota.warningLevel.none' },
-          [WARNING_LEVEL.Warning]: { type: 'warning', labelKey: 'admin.modules.ai.quota.warningLevel.warning' },
-          [WARNING_LEVEL.Critical]: { type: 'error', labelKey: 'admin.modules.ai.quota.warningLevel.critical' },
-        },
+        value: warningLevelValue(row as unknown as UserQuotaDto),
+        mapping: warningLevelBadgeMapping,
       }),
   },
   {
@@ -107,10 +145,7 @@ export const quotaColumns: ColumnDef[] = [
     render: (row) =>
       h(TStatusBadge, {
         value: Boolean(row.isEnabled),
-        mapping: {
-          true: { type: 'success', labelKey: 'admin.shared.status.enabled' },
-          false: { type: 'warning', labelKey: 'admin.shared.status.disabled' },
-        },
+        mapping: enabledBadgeMapping,
       }),
   },
   {

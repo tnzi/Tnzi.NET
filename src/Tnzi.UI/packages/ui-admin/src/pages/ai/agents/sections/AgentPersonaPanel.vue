@@ -162,6 +162,7 @@
     <NModal
       v-model:show="modal.show"
       preset="card"
+      size="small"
       :title="modal.id ? t('detail.persona.editTitle') : t('detail.persona.newTitle')"
       class="w-560px max-w-96vw"
     >
@@ -202,7 +203,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NModal, NPopconfirm, NPopover, NSpin, NTag, useMessage } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TDetailSection from '../../../../components/detail/TDetailSection.vue'
-import { translatePageKey } from '../../../_shared/translate'
+import { makePageTranslator } from '../../../_shared/translate'
 import { createAiBridge } from '../../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../../plugin/client'
 import { useAdminAuthStore } from '../../../../stores/useAdminAuthStore'
@@ -226,7 +227,7 @@ const emit = defineEmits<{
   personasChanged: []
 }>()
 
-const t = (key: string) => translatePageKey('ai.agents', key)
+const t = makePageTranslator('ai.agents')
 const bridge = createAiBridge({ client: useAdminClient() })
 const authStore = useAdminAuthStore()
 

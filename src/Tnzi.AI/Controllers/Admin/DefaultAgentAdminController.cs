@@ -8,6 +8,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/agents")]
+[ApiAuthorize(PermissionName = "ai.agent.view")]
 public class DefaultAgentAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentService AgentService;

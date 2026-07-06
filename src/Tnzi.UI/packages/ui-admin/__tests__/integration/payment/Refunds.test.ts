@@ -14,9 +14,6 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
   createPaymentBridge: () => ({
     orders: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(async () => { throw new Error('backend gap') }),
-      update: vi.fn(async () => { throw new Error('backend gap') }),
-      delete: vi.fn(async () => { throw new Error('backend gap') }),
       statistics: vi.fn(async () => ({
         totalRevenue: 0, totalTransactions: 0, successfulTransactions: 0,
         failedTransactions: 0, totalRefunds: 0, refundCount: 0, refundRate: 0,
@@ -25,9 +22,7 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
     },
     subscriptions: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
+      cancelAtPeriodEnd: vi.fn(),
     },
     refunds: {
       fetch: vi.fn(async () => ({
@@ -35,22 +30,18 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
           {
             id: 'r1',
             refundNo: 'REF-001',
-            paymentId: 'p1',
-            paymentNo: 'PAY-001',
-            amount: 50,
+            tradeNo: 'TRADE-001',
+            refundAmount: 50,
+            currency: 'USD',
             reason: 'Customer request',
-            status: 0,
+            status: 'Pending',
             creationTime: '2026-01-02T00:00:00Z',
-            lastModificationTime: null,
           },
         ],
         totalCount: 1,
         pageIndex: 1,
         pageSize: 20,
       })),
-      create: vi.fn(async () => { throw new Error('backend gap') }),
-      update: vi.fn(async () => { throw new Error('backend gap') }),
-      delete: vi.fn(async () => { throw new Error('backend gap') }),
       approve: mockApproveFn,
       reject: mockRejectFn,
     },
@@ -98,20 +89,23 @@ describe('Refunds page (Phase 3.34)', () => {
 })
 
 describe('refund-config', () => {
-  it('exports columns with required keys', async () => {
-    const { refundColumns } = await import('../../../src/pages/payment/refund-config')
-    const keys = refundColumns.map((c) => c.key)
+  it('builds columns keyed on real RefundDto fields (tradeNo, not paymentNo)', async () => {
+    const { buildRefundColumns } = await import('../../../src/pages/payment/refund-config')
+    const keys = buildRefundColumns((k) => k).map((c) => c.key)
     expect(keys).toContain('refundNo')
-    expect(keys).toContain('paymentNo')
+    expect(keys).toContain('tradeNo')
     expect(keys).toContain('refundAmount')
     expect(keys).toContain('reason')
     expect(keys).toContain('status')
+    // the ghost payment reference field is gone
+    expect(keys).not.toContain('paymentNo')
   })
 
-  it('exports formSchema with required fields', async () => {
+  it('exports formSchema with real fields', async () => {
     const { refundFormSchema } = await import('../../../src/pages/payment/refund-config')
     const keys = refundFormSchema.map((f) => f.key)
     expect(keys).toContain('refundNo')
+    expect(keys).toContain('tradeNo')
     expect(keys).toContain('refundAmount')
     expect(keys).toContain('reason')
     expect(keys).toContain('status')

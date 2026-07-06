@@ -19,8 +19,8 @@ describe('useChatImApi', () => {
   })
   it('sendMessage posts to /conversations/{id}/messages', async () => {
     const c = mockClient(); const api = useChatImApi(c as never)
-    await api.sendMessage('cid', { contentType: 1, content: 'hi' } as never)
-    expect(c.post).toHaveBeenCalledWith('/conversations/cid/messages', { contentType: 1, content: 'hi' })
+    await api.sendMessage('cid', { contentType: 'Text', content: 'hi' } as never)
+    expect(c.post).toHaveBeenCalledWith('/conversations/cid/messages', { contentType: 'Text', content: 'hi' })
   })
   it('getMessages passes before+limit params', async () => {
     const c = mockClient(); const api = useChatImApi(c as never)
@@ -98,8 +98,8 @@ describe('useChatAdminApi', () => {
   })
   it('queryConversations posts to /admin/chat/conversations/query', async () => {
     const c = mockClient(); const api = useChatAdminApi(c as never)
-    await api.queryConversations({ pageIndex: 1, pageSize: 10, type: 2 } as never)
-    expect(c.post).toHaveBeenCalledWith('/admin/chat/conversations/query', { pageIndex: 1, pageSize: 10, type: 2 })
+    await api.queryConversations({ pageIndex: 1, pageSize: 10, type: 'Group' } as never)
+    expect(c.post).toHaveBeenCalledWith('/admin/chat/conversations/query', { pageIndex: 1, pageSize: 10, type: 'Group' })
   })
   it('getConversation hits GET /admin/chat/conversations/{id}', async () => {
     const c = mockClient(); const api = useChatAdminApi(c as never)

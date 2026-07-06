@@ -157,7 +157,7 @@ import { NAlert, NButton, NCard, NEmpty, NInput, NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../../plugin/client'
 import { createSandboxBridge, type SandboxStatusDto } from '../../../services/bridges/sandbox-bridge'
-import { interpolate, translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 
 type DenylistKey = 'deniedCommands' | 'deniedPatterns' | 'envBlacklist'
@@ -170,8 +170,7 @@ interface DenylistDef {
 }
 
 const bridge = createSandboxBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('ai.sandbox', key), params)
+const t = makePageTranslator('ai.sandbox')
 
 const loading = ref(false)
 const status = ref<SandboxStatusDto | null>(null)

@@ -6,6 +6,7 @@ namespace Tnzi.AI.Mcp.Controllers.Admin;
 [DefaultController]
 [Route("admin/ai/mcp/tool-analytics")]
 [ApiExplorerSettings(GroupName = "admin")]
+[ApiAuthorize(PermissionName = "ai.mcp.view")]
 public class DefaultMcpToolAnalyticsAdminController : ApiAdminControllerBase
 {
     private readonly IMcpToolAnalyticsService _analyticsService;

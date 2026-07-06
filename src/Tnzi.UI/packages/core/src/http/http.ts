@@ -5,6 +5,7 @@
 import type { ApiResult, HttpMethod, RequestOptions, UploadOptions } from '../types/api';
 import { createFailedApiResult, createFailedApiResultFromError } from '../errors/api-error';
 import { TimeoutError } from '../errors/network-error';
+import { useLogger } from '../adapters/logger';
 import { normalizeApiResult } from './response';
 import type { HttpResponseContext, HttpResponseMiddleware } from './middleware';
 
@@ -101,6 +102,8 @@ interface RequestConfig {
   timeout?: number;
   signal?: AbortSignal;
   withCredentials?: boolean;
+  /** Auth-flow request: return 401 as-is, no refresh-retry, no onUnauthorized. */
+  skipAuthRefresh?: boolean;
 }
 
 /** Default HTTP status codes that are safe to retry */
@@ -116,6 +119,8 @@ export class HttpClient {
   private unauthorizedHandled = false;
   /** Mutex: pending token refresh promise for deduplication */
   private _refreshPromise: Promise<string> | null = null;
+  /** Additional unauthorized subscribers (multicast alongside config.onUnauthorized) */
+  private readonly _unauthorizedListeners = new Set<() => void>();
   /** Map of inflight GET requests for deduplication */
   private _inflightGets = new Map<string, Promise<ApiResult<unknown>>>();
 
@@ -370,6 +375,7 @@ export class HttpClient {
       timeout: options?.timeout ?? this.config.timeout,
       signal: options?.signal,
       withCredentials: options?.withCredentials,
+      skipAuthRefresh: options?.skipAuthRefresh,
     };
 
     // Apply request interceptor
@@ -419,8 +425,11 @@ export class HttpClient {
 
       lastResult = await this.executeRequest<T>(config);
 
-      // Handle 401 with auto-refresh (only if not already a retry after refresh)
-      if (lastResult.code === 401 && !isRetryAfterRefresh) {
+      // Handle 401 with auto-refresh (only if not already a retry after
+      // refresh, and never for auth-flow requests themselves: the refresh
+      // and logout calls issued during a refresh cycle would otherwise
+      // re-enter the refresh mutex and deadlock until its timeout).
+      if (lastResult.code === 401 && !isRetryAfterRefresh && !config.skipAuthRefresh) {
         const refreshResult = await this.tryRefreshAndRetry<T>(config);
         if (refreshResult && refreshResult.code !== 401) {
           return refreshResult;
@@ -514,13 +523,40 @@ export class HttpClient {
   }
 
   /**
+   * Subscribe to session-expired notifications in ADDITION to the
+   * config-level `onUnauthorized` callback. Lets framework layers (e.g.
+   * `@tnzi/ui-admin`'s built-in login redirect) react to an unrecoverable
+   * 401 without displacing the consumer's own handler. Listeners share the
+   * same dedup guard as `onUnauthorized` (once per auth cycle) and fire
+   * after it. Returns an unsubscribe function.
+   */
+  addUnauthorizedListener(listener: () => void): () => void {
+    this._unauthorizedListeners.add(listener);
+    return () => this._unauthorizedListeners.delete(listener);
+  }
+
+  /**
    * Trigger the unauthorized handler (deduplicated — only fires once per auth cycle).
    */
   private notifyUnauthorized(): void {
-    if (!this.unauthorizedHandled) {
-      this.unauthorizedHandled = true;
-      const handler = this.config.onUnauthorized ?? this.config.onTokenExpired;
+    if (this.unauthorizedHandled) {
+      return;
+    }
+    this.unauthorizedHandled = true;
+    const handler = this.config.onUnauthorized ?? this.config.onTokenExpired;
+    // Isolate each callback so one throwing handler cannot silence the rest
+    // (the redirect listener must still run when the consumer handler throws).
+    try {
       handler?.();
+    } catch (error) {
+      useLogger().error('onUnauthorized handler threw:', error);
+    }
+    for (const listener of this._unauthorizedListeners) {
+      try {
+        listener();
+      } catch (error) {
+        useLogger().error('Unauthorized listener threw:', error);
+      }
     }
   }
 

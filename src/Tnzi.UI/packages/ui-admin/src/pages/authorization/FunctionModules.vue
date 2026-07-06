@@ -44,6 +44,7 @@
     v-model:show="cascadeModal.show"
     :title="t('cascade.title')"
     preset="card"
+    size="small"
     class="w-520px"
   >
     <NSpin :show="cascadeModal.loading">
@@ -122,7 +123,7 @@ import {
   type ModuleCascadePreview,
 } from '../../services/bridges/authorization-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FunctionModuleDto } from '@tnzi/core/services/authorization'
@@ -132,8 +133,7 @@ type Row = FunctionModuleRow
 
 const title = 'title'
 const bridge = createAuthorizationBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('authorization.functionModules', key), params)
+const t = makePageTranslator('authorization.functionModules')
 const message = useSafeMessage()
 
 // Build lookup for parentId → parent module (used by both parentName column
@@ -232,8 +232,6 @@ const crud = useCrudPage<Row>({
   },
 })
 
-crud.refresh().catch(() => undefined)
-
 const editingId = computed(() => (crud.formModal.formData.value as Row | null)?.id)
 
 const parentOptions = computed(() => {
@@ -285,6 +283,8 @@ const fieldRenderers = {
       disabled: ctx.readonly || locked.value,
       'onUpdate:value': (v: string) => ctx.onUpdate(v),
     }),
+  // Custom (not the shared selectRenderer): the parent picker must also lock on
+  // system-managed rows (`|| locked.value`), which the shared factory can't express.
   'fm-parent': (ctx: FieldRenderContext) =>
     h(NSelect, {
       value: (ctx.value as string | null) ?? null,

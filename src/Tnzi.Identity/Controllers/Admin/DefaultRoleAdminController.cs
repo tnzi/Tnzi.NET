@@ -6,6 +6,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/roles")]
+[ApiAuthorize(PermissionName = "role.view")]
 public class DefaultRoleAdminController : ApiAdminControllerBase
 {
     protected readonly IRoleService RoleService;

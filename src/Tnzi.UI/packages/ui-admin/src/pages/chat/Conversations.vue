@@ -7,10 +7,11 @@
   -->
   <!--
     `display: contents` keeps the flex height chain unbroken: this wrapper only
-    exists to host the detail NDrawer alongside TCrudPage, but a real box here
+    exists to host the BroadcastDialog alongside TCrudPage, but a real box here
     (block, flex-grow:0) collapses the table body to header height. `contents`
     makes TCrudPage a direct flex child of the content page, like single-root
-    CRUD pages. The NDrawer teleports to <body> so it is unaffected.
+    CRUD pages. The dialog teleports to <body> so it is unaffected. (The detail
+    view drawer is owned by TCrudPage now — its `#detail` slot.)
   -->
   <div class="t-conversations-host">
     <TCrudPage
@@ -20,6 +21,8 @@
       :title="title"
       :row-actions="rowActions"
       :translate="t"
+      :detail-width="640"
+      :detail-title="() => t('detail.title')"
     >
       <template #toolbarRight>
         <NButton size="small" @click="broadcastShow = true">
@@ -27,10 +30,10 @@
           {{ t('broadcast') }}
         </NButton>
       </template>
-    </TCrudPage>
 
-    <NDrawer v-model:show="detailShow" :width="640" placement="right">
-      <NDrawerContent :title="t('detail.title')" closable>
+      <!-- Read-only detail — metadata + member table + recallable message list
+           (loaded by `onView`). Rides the CRUD `view` open-state, deep-linkable. -->
+      <template #detail>
         <NSpin :show="detailLoading">
           <template v-if="detail">
             <NDescriptions :column="1" label-placement="left" size="small" bordered>
@@ -45,22 +48,13 @@
             </NDescriptions>
 
             <div class="t-section-title">{{ t('detail.memberList') }}</div>
-            <NTable size="small" :single-line="false">
-              <thead>
-                <tr>
-                  <th>{{ t('detail.memberName') }}</th>
-                  <th>{{ t('detail.role') }}</th>
-                  <th>{{ t('detail.unread') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="m in detail.members" :key="m.userId">
-                  <td>{{ m.name || m.userId }}</td>
-                  <td>{{ m.role === 1 ? t('detail.roleOwner') : t('detail.roleMember') }}</td>
-                  <td>{{ m.unreadCount }}</td>
-                </tr>
-              </tbody>
-            </NTable>
+            <TResponsiveTable
+              :columns="memberColumns"
+              :data="detail.members"
+              :row-key="(m: AdminConversationMemberDto) => m.userId"
+              :pagination="false"
+              size="small"
+            />
 
             <div class="t-section-title">{{ t('detail.messageList') }}</div>
             <NImageGroup>
@@ -106,8 +100,8 @@
             </NImageGroup>
           </template>
         </NSpin>
-      </NDrawerContent>
-    </NDrawer>
+      </template>
+    </TCrudPage>
 
     <BroadcastDialog v-model:show="broadcastShow" />
   </div>
@@ -115,29 +109,32 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NButton, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem, NEmpty, NImage, NImageGroup, NSpin, NTable } from 'naive-ui'
+import { NButton, NDescriptions, NDescriptionsItem, NEmpty, NImage, NImageGroup, NSpin } from 'naive-ui'
 import { formatDateTime, formatFileSize } from '@tnzi/core'
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
-import BroadcastDialog from './BroadcastDialog.vue'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import BroadcastDialog from './components/BroadcastDialog.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { deleteAction, type RowAction } from '../../headless/rowActions'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { conversationColumns, conversationSearchFields, typeKey } from './conversations-config'
+import { conversationColumns, conversationSearchFields, typeKey, buildMemberColumns } from './conversations-config'
 import {
   MessageContentType,
   type AdminConversationListItemDto,
   type AdminConversationDetailDto,
+  type AdminConversationMemberDto,
   type ChatMessageDto,
 } from '@tnzi/core/services/chat'
 
 const title = 'title'
-const t = (key: string) => translatePageKey('chat.conversations', key)
+const t = makePageTranslator('chat.conversations')
 const message = useSafeMessage()
 const bridge = createChatBridge({ client: useAdminClient() })
+const memberColumns = buildMemberColumns(t)
 
 const crud = useCrudPage<AdminConversationListItemDto, string>({
   pageId: 'chat.conversations',
@@ -145,16 +142,15 @@ const crud = useCrudPage<AdminConversationListItemDto, string>({
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.conversations.fetch(query),
   deleteData: (ids) => bridge.conversations.delete(ids),
+  onView: (row) => void loadConversation(row.id),
 })
-crud.refresh().catch(() => undefined)
 
 const rowActions: RowAction<AdminConversationListItemDto>[] = [
-  { key: 'view', label: 'detail.view', onClick: (row) => openDetail(row.id) },
+  { key: 'view', label: 'detail.view', onClick: (row) => crud.openView(row) },
   deleteAction(crud),
 ]
 
 const broadcastShow = ref(false)
-const detailShow = ref(false)
 const detailLoading = ref(false)
 const detail = ref<AdminConversationDetailDto | null>(null)
 const messages = ref<ChatMessageDto[]>([])
@@ -170,8 +166,9 @@ function downloadUrl(fileId: string): string {
   return `/api/files/${fileId}/download`
 }
 
-async function openDetail(id: string): Promise<void> {
-  detailShow.value = true
+// Loaded by `onView` when the CRUD `view` open-state opens (row click or a
+// deep-link cold reload) — the drawer chrome + open-state are the engine's.
+async function loadConversation(id: string): Promise<void> {
   detailLoading.value = true
   detail.value = null
   messages.value = []

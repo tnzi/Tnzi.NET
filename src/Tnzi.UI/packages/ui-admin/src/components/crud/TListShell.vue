@@ -26,20 +26,24 @@
           <!-- Desktop / tablet: inline keyword input + Advanced opens a right
                drawer. -->
           <div v-if="!bp.isSm.value" class="t-list-shell__search">
-            <NInput
-              v-model:value="simpleQuery"
-              size="small"
-              clearable
-              :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
-              class="t-list-shell__search-input"
-              @keydown.enter="onSimpleSearch"
-              @clear="onSimpleClear"
-            >
-              <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
-            </NInput>
-            <NButton size="small" type="primary" @click="onSimpleSearch">
-              {{ t('admin.crud.search') }}
-            </NButton>
+            <!-- showDefaultSearch=false 只隐藏关键词框(后端无自由文本查询的页面),
+                 searchFields 驱动的 Advanced 仍保留 -->
+            <template v-if="showDefaultSearch">
+              <NInput
+                v-model:value="simpleQuery"
+                size="small"
+                clearable
+                :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
+                class="t-list-shell__search-input"
+                @keydown.enter="onSimpleSearch"
+                @clear="onSimpleClear"
+              >
+                <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
+              </NInput>
+              <NButton size="small" type="primary" @click="onSimpleSearch">
+                {{ t('admin.crud.search') }}
+              </NButton>
+            </template>
             <NButton
               v-if="hasAdvanced"
               size="small"
@@ -57,6 +61,7 @@
                expands its form downward inside this white card. -->
           <div v-else class="t-list-shell__search t-list-shell__search--mobile">
             <NButton
+              v-if="showDefaultSearch"
               size="small"
               :type="mobilePanel === 'keyword' ? 'primary' : 'default'"
               :tertiary="mobilePanel !== 'keyword'"
@@ -268,11 +273,12 @@
     </NCard>
 
     <TFormModal
-      v-if="props.state.canCreate !== false || props.state.canUpdate !== false"
+      v-if="props.state.canCreate !== false || props.state.canUpdate !== false || !!$slots.detail"
       :state="formModalState"
       :title="modalTitle"
       :translate="props.translate"
       :width="formModalWidth"
+      :skip-view-mode="!!$slots.detail"
       @submit="props.state.submit"
     >
       <template #default="{ formData, mode: m }">
@@ -280,6 +286,28 @@
       </template>
       <template #footer><slot name="formFooter" /></template>
     </TFormModal>
+
+    <!-- Read-only VIEW drawer. Same `formModal` open-state as create/edit (so it
+         is deep-linkable + Back-closeable for free), but a different chrome:
+         `view` action → this right drawer with the page's `#detail` body;
+         create/edit → the modal above. Rendered only when the page supplies a
+         `#detail` slot — otherwise `view` stays in the form modal (back-compat). -->
+    <TDrawerShell
+      v-if="$slots.detail"
+      :show="props.state.formModal.visible.value && props.state.formModal.mode.value === 'view'"
+      :width="detailWidth"
+      :title="detailTitleText"
+      @update:show="(v: boolean) => { if (!v) props.state.formModal.close() }"
+    >
+      <slot
+        name="detail"
+        :data="castFormData(props.state.formModal.formData.value)"
+        :mode="props.state.formModal.mode.value"
+      />
+      <template v-if="$slots.detailFooter" #footer>
+        <slot name="detailFooter" :data="castFormData(props.state.formModal.formData.value)" />
+      </template>
+    </TDrawerShell>
   </div>
 </template>
 
@@ -288,6 +316,7 @@ import { computed, ref, useSlots, watch } from 'vue'
 import { NAlert, NButton, NCard, NInput, NPagination, NPopconfirm, NTooltip } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TFormModal from './TFormModal.vue'
+import TDrawerShell from '../overlay/TDrawerShell.vue'
 import TCrudSearchDrawer from './TCrudSearchDrawer.vue'
 import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
 import TPageHeader from '../layout/TPageHeader.vue'
@@ -321,6 +350,11 @@ export interface TListShellProps<T, TId extends string | number = string | numbe
   showBatch?: boolean
   showPagination?: boolean
   formModalWidth?: number
+  /** Width of the read-only view drawer (the `#detail` slot). Default 640.
+      Accepts a string (e.g. `'100vw'`) for responsive full-screen on phones. */
+  detailWidth?: number | string
+  /** Title for the view drawer, derived from the viewed record. */
+  detailTitle?: (data: T) => string
   titleHelp?: string
   titleHelpTitle?: string
   translate?: (key: string) => string
@@ -344,6 +378,8 @@ const props = withDefaults(defineProps<TListShellProps<T, TId>>(), {
   showBatch: true,
   showPagination: true,
   formModalWidth: 560,
+  detailWidth: 640,
+  detailTitle: undefined,
   titleHelp: undefined,
   titleHelpTitle: undefined,
   translate: undefined,
@@ -362,6 +398,8 @@ defineSlots<{
   error?: (props: { error: Error; retry: () => Promise<void>; dismiss: () => void }) => unknown
   form?: (props: { formData: Partial<T> | null; mode: FormModalMode | null }) => unknown
   formFooter?: () => unknown
+  detail?: (props: { data: Partial<T> | null; mode: FormModalMode | null }) => unknown
+  detailFooter?: (props: { data: Partial<T> | null }) => unknown
 }>()
 
 const bp = useBreakpoint()
@@ -432,6 +470,15 @@ const formModalState = computed(
 function castFormData(data: unknown): Partial<T> | null {
   return data as Partial<T> | null
 }
+
+// The view drawer renders only when the page supplies a `#detail` body — gated
+// in the template via the reactive `$slots.detail` (a `computed(() => slots.x)`
+// would NOT re-evaluate when a conditional slot appears, so use `$slots`
+// directly). Its title is derived from the viewed record via `detailTitle`.
+const detailTitleText = computed(() => {
+  const d = props.state.formModal.formData.value
+  return props.detailTitle && d ? props.detailTitle(d as T) : ''
+})
 
 function onRefresh(): void {
   void props.state.refresh()

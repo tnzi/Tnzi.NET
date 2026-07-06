@@ -21,22 +21,21 @@
 
 <script setup lang="ts">
 import { computed, h, ref, onMounted } from 'vue'
-import { NSelect } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
+import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import { menuFormSchema, type MenuRow } from './menu-config'
 
 const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('system.menus', key)
+const t = makePageTranslator('system.menus')
 
 const allMenus = ref<MenuRow[]>([])
 const menuById = computed(() => {
@@ -89,13 +88,13 @@ const parentOptions = computed(() => {
     }))
 })
 
-// MenuType enum: 0=Directory, 1=Menu, 2=Button.
+// MenuType member names (JsonStringEnumConverter wire shape).
 const typeOptions = [
-  { label: 'Directory', value: 0 },
-  { label: 'Menu', value: 1 },
-  { label: 'Button', value: 2 },
+  { label: 'Directory', value: 'Directory' },
+  { label: 'Menu', value: 'Menu' },
+  { label: 'Button', value: 'Button' },
 ]
-function typeLabel(v?: number): string {
+function typeLabel(v?: string): string {
   return typeOptions.find((o) => o.value === v)?.label ?? '—'
 }
 
@@ -130,8 +129,8 @@ const columns: ColumnDef<MenuRow>[] = [
     width: 110,
     render: (row) =>
       h(TStatusBadge, {
-        value: row.type ?? 0,
-        type: row.type === 0 ? 'info' : row.type === 1 ? 'success' : 'warning',
+        value: row.type ?? 'Directory',
+        type: row.type === 'Directory' ? 'info' : row.type === 'Menu' ? 'success' : 'warning',
         label: typeLabel(row.type),
       }),
   },
@@ -174,22 +173,11 @@ const crud = useCrudPage<MenuRow, string>({
 
 const rowActions: RowAction<MenuRow>[] = [editAction(crud), deleteAction(crud)]
 
-crud.refresh().catch(() => undefined)
-
 // Custom field renderer for the schema's `menu-parent` field: a filterable +
 // clearable parent picker built from the runtime menu tree (the static schema
 // `select` can't carry the dynamic, indented parent options).
 const fieldRenderers = {
-  'menu-parent': (ctx: FieldRenderContext) =>
-    h(NSelect, {
-      value: (ctx.value as string | null) ?? null,
-      options: parentOptions.value,
-      placeholder: t('form.parentIdPlaceholder'),
-      clearable: true,
-      filterable: true,
-      disabled: ctx.readonly,
-      'onUpdate:value': (v: string | null) => ctx.onUpdate(v ?? undefined),
-    }),
+  'menu-parent': selectRenderer(() => parentOptions.value, { placeholder: t('form.parentIdPlaceholder') }),
 }
 
 onMounted(() => {

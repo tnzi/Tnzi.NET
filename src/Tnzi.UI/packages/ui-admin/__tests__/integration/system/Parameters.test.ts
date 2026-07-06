@@ -11,8 +11,9 @@ vi.mock('../../../src/services/bridges/system-bridge', () => ({
     settings: {
       fetch: vi.fn(async () => ({
         items: [
-          { id: 'p1', key: 'app.maxUploadSize', value: '10', valueType: 1, group: 'app' },
-          { id: 'p2', key: 'app.enableSignup', value: 'true', valueType: 2, group: 'app' },
+          // valueType is the SettingValueType member name (JsonStringEnumConverter wire shape).
+          { id: 'p1', key: 'app.maxUploadSize', value: '10', valueType: 'Integer', group: 'app' },
+          { id: 'p2', key: 'app.enableSignup', value: 'true', valueType: 'Boolean', group: 'app' },
         ],
         totalCount: 2,
         pageIndex: 1,

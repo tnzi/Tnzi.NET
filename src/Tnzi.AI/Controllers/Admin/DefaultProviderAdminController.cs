@@ -16,6 +16,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </remarks>
 [DefaultController]
 [Route("admin/ai/providers")]
+[ApiAuthorize(PermissionName = "ai.provider.view")]
 public class DefaultProviderAdminController : ApiAdminControllerBase
 {
     protected readonly IChatClientFactory ClientFactory;

@@ -100,130 +100,134 @@
     </NCard>
 
     <!--
-      Compare-roles modal — three-column read-only diff.
-      Source role A is fixed to the currently-selected role; admin picks
-      role B from a select populated from the role catalogue. The compare
-      result comes from the backend (PermissionComparisonDto).
+      Compare-roles overlay — three-column read-only diff, driven by the shared
+      useDetail + TDetailHost renderer (modal mode) so it is deep-linkable via
+      `?compare=new` and Back-closeable. Role A is the currently-selected role;
+      role B is picked from the catalogue. The result comes from the backend
+      (PermissionComparisonDto: onlyInRole1 / onlyInRole2 / shared).
     -->
-    <NModal
-      v-model:show="compareModal.show"
+    <TDetailHost
+      :state="compareDetail"
       :title="t('compare.title')"
-      preset="card"
-      class="w-[min(1080px,96vw)]"
+      :width="1080"
+      :translate="t"
     >
-      <div class="t-role-func-page__compare-picker">
-        <div class="t-role-func-page__compare-pair">
-          <span class="t-role-func-page__compare-label">{{ t('compare.roleA') }}:</span>
-          <NTag :bordered="false">{{ selectedRole?.name ?? '—' }}</NTag>
+      <template #default>
+        <div class="t-role-func-page__compare-picker">
+          <div class="t-role-func-page__compare-pair">
+            <span class="t-role-func-page__compare-label">{{ t('compare.roleA') }}:</span>
+            <NTag :bordered="false">{{ selectedRole?.name ?? '—' }}</NTag>
+          </div>
+          <div class="t-role-func-page__compare-pair">
+            <span class="t-role-func-page__compare-label">{{ t('compare.roleB') }}:</span>
+            <NSelect
+              v-model:value="compare.targetRoleId"
+              :options="otherRoleOptions"
+              :placeholder="t('compare.pickRole')"
+              filterable
+              clearable
+              size="small"
+              class="w-280px"
+            />
+            <NButton
+              type="primary"
+              size="small"
+              :disabled="!compare.targetRoleId"
+              :loading="compare.loading"
+              @click="runCompare"
+            >
+              {{ t('compare.run') }}
+            </NButton>
+          </div>
         </div>
-        <div class="t-role-func-page__compare-pair">
-          <span class="t-role-func-page__compare-label">{{ t('compare.roleB') }}:</span>
-          <NSelect
-            v-model:value="compareModal.targetRoleId"
-            :options="otherRoleOptions"
-            :placeholder="t('compare.pickRole')"
-            filterable
-            clearable
-            size="small"
-            class="w-280px"
-          />
-          <NButton
-            type="primary"
-            size="small"
-            :disabled="!compareModal.targetRoleId"
-            :loading="compareModal.loading"
-            @click="runCompare"
-          >
-            {{ t('compare.run') }}
-          </NButton>
-        </div>
-      </div>
 
-      <NSpin :show="compareModal.loading">
-        <div v-if="compareModal.result" class="t-role-func-page__compare-grid">
-          <section
-            v-for="bucket in compareBuckets"
-            :key="bucket.id"
-            class="t-role-func-page__compare-bucket"
-          >
-            <header class="t-role-func-page__compare-bucket-header">
-              <h4 class="t-role-func-page__compare-bucket-title">{{ bucket.title }}</h4>
-              <NTag size="tiny" :bordered="false" :type="bucket.tone">
-                {{ bucket.rows.length }}
-              </NTag>
-            </header>
-            <div v-if="!bucket.rows.length" class="t-role-func-page__compare-empty">
-              {{ t('compare.empty') }}
-            </div>
-            <ul v-else class="t-role-func-page__compare-list">
-              <li v-for="row in bucket.rows" :key="row.functionId">
-                <div class="t-role-func-page__compare-fn-name">{{ row.functionName }}</div>
-                <code class="t-role-func-page__compare-fn-code">{{ row.functionCode }}</code>
-                <div v-if="row.moduleName" class="t-role-func-page__compare-fn-module">
-                  {{ row.moduleName }}
-                </div>
-              </li>
-            </ul>
-          </section>
-        </div>
-      </NSpin>
-
-      <template #footer>
-        <div class="flex justify-end">
-          <NButton @click="compareModal.show = false">{{ t('compare.close') }}</NButton>
-        </div>
+        <NSpin :show="compare.loading">
+          <div v-if="compare.result" class="t-role-func-page__compare-grid">
+            <section
+              v-for="bucket in compareBuckets"
+              :key="bucket.id"
+              class="t-role-func-page__compare-bucket"
+            >
+              <header class="t-role-func-page__compare-bucket-header">
+                <h4 class="t-role-func-page__compare-bucket-title">{{ bucket.title }}</h4>
+                <NTag size="tiny" :bordered="false" :type="bucket.tone">
+                  {{ bucket.rows.length }}
+                </NTag>
+              </header>
+              <div v-if="!bucket.rows.length" class="t-role-func-page__compare-empty">
+                {{ t('compare.empty') }}
+              </div>
+              <ul v-else class="t-role-func-page__compare-list">
+                <li v-for="row in bucket.rows" :key="row.id">
+                  <div class="t-role-func-page__compare-fn-name">{{ row.name }}</div>
+                  <code class="t-role-func-page__compare-fn-code">{{ row.code }}</code>
+                  <div v-if="row.moduleCode" class="t-role-func-page__compare-fn-module">
+                    {{ row.moduleCode }}
+                  </div>
+                </li>
+              </ul>
+            </section>
+          </div>
+        </NSpin>
       </template>
-    </NModal>
+
+      <template #footer="{ close }">
+        <NButton @click="close">{{ t('compare.close') }}</NButton>
+      </template>
+    </TDetailHost>
 
     <!--
-      Clone-from-role modal — picks a source role, calls the backend
-      clone endpoint, and refreshes the current role's assignment set.
-      Idempotent on the backend (Existing assignments are not duplicated).
+      Clone-from-role overlay — pick a source role, call the backend clone
+      endpoint, refresh the current role's assignment set. Deep-linkable via
+      `?clone=new`. Idempotent on the backend (existing assignments are kept).
     -->
-    <NModal
-      v-model:show="cloneModal.show"
+    <TDetailHost
+      :state="cloneDetail"
       :title="t('clone.title')"
-      preset="card"
-      class="w-480px"
+      :width="480"
+      :translate="t"
     >
-      <NForm label-placement="top" :show-feedback="false">
-        <NFormItem :label="t('clone.sourceRole')" required>
-          <NSelect
-            v-model:value="cloneModal.sourceRoleId"
-            :options="otherRoleOptions"
-            :placeholder="t('clone.pickSource')"
-            filterable
-            clearable
-          />
-        </NFormItem>
-        <p class="t-role-func-page__hint">{{ t('clone.hint') }}</p>
-      </NForm>
-      <template #footer>
-        <div class="flex justify-end gap-8px">
-          <NButton @click="cloneModal.show = false">{{ t('compare.close') }}</NButton>
-          <NButton
-            type="primary"
-            :loading="cloneModal.saving"
-            :disabled="!cloneModal.sourceRoleId"
-            @click="runClone"
-          >
-            {{ t('clone.confirm') }}
-          </NButton>
-        </div>
+      <template #default>
+        <NForm label-placement="top" :show-feedback="false">
+          <NFormItem :label="t('clone.sourceRole')" required>
+            <NSelect
+              v-model:value="clone.sourceRoleId"
+              :options="otherRoleOptions"
+              :placeholder="t('clone.pickSource')"
+              filterable
+              clearable
+            />
+          </NFormItem>
+          <p class="t-role-func-page__hint">{{ t('clone.hint') }}</p>
+        </NForm>
       </template>
-    </NModal>
+      <template #footer="{ close }">
+        <NButton @click="close">{{ t('compare.close') }}</NButton>
+        <NButton
+          type="primary"
+          :loading="clone.saving"
+          :disabled="!clone.sourceRoleId"
+          @click="runClone"
+        >
+          {{ t('clone.confirm') }}
+        </NButton>
+      </template>
+    </TDetailHost>
   </TContentPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, reactive, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useDialog } from 'naive-ui'
 import type { SelectOption, TreeOption } from 'naive-ui'
 import {
   NCard, NSpace, NButton, NInput, NSpin, NTag, NPopconfirm,
-  NModal, NForm, NFormItem, NSelect,
+  NForm, NFormItem, NSelect,
 } from 'naive-ui'
 import TPermissionTree from '../../components/forms/TPermissionTree.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { useDetail } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
@@ -234,8 +238,9 @@ import type {
   FunctionModuleDto,
   ModuleFunctionDto,
   PermissionComparisonDto,
-  PermissionDifferenceDto,
+  FunctionSummaryDto,
 } from '@tnzi/core/services/authorization'
+import { PermissionCategory } from '@tnzi/core/services/authorization'
 import type { RoleDto } from '@tnzi/core/services/identity'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
@@ -248,6 +253,34 @@ const idBridge = createIdentityBridge({ client })
 const t = makePageTranslator('authorization.roleFunctions')
 
 const message = useSafeMessage()
+
+// Framework confirm dialog for the unsaved-changes role switch. Guarded so a
+// bare test mount (no <n-dialog-provider>) falls back to the native confirm
+// instead of throwing at setup — the confirmation gate is never skipped.
+const dialog = (() => {
+  try {
+    return useDialog()
+  } catch {
+    return null
+  }
+})()
+
+function confirmSwitchDirty(): Promise<boolean> {
+  const content = t('confirmSwitchDirty')
+  if (!dialog) return Promise.resolve(window.confirm(content))
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: t('confirmSwitchTitle'),
+      content,
+      positiveText: t('admin.common.confirm'),
+      negativeText: t('admin.common.cancel'),
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+      onMaskClick: () => resolve(false),
+    })
+  })
+}
 
 const roles = ref<Role[]>([])
 const modules = ref<FunctionModuleDto[]>([])
@@ -321,11 +354,19 @@ const treeData = computed<TreeOption[]>(() => {
             key: f.id,
             label: f.name,
             suffix: () =>
-              h(
-                'code',
-                { class: 't-role-func-page__fn-code' },
-                f.code,
-              ),
+              h('span', { class: 't-role-func-page__fn-suffix' }, [
+                h('code', { class: 't-role-func-page__fn-code' }, f.code),
+                // Technical permissions (ops surfaces: diagnostics, MCP,
+                // sandbox, …) get a badge so operators granting business
+                // roles can spot them at a glance.
+                ...(f.category === PermissionCategory.Technical
+                  ? [h(
+                      NTag,
+                      { size: 'tiny', bordered: false, type: 'warning', class: 'ml-4px' },
+                      { default: () => t('technicalBadge') },
+                    )]
+                  : []),
+              ]),
             disabled: !f.isEnabled,
           })),
       ]
@@ -425,10 +466,9 @@ async function loadAssignedForRole(roleId: string): Promise<void> {
 
 async function selectRole(roleId: string): Promise<void> {
   if (isDirty.value) {
-    // Defer to the user: just keep their dirty state if they click another
-    // role — they'd lose work. Pop a confirm? For now we keep selection
-    // sticky on dirty state — explicit save/reset is required to switch.
-    const ok = confirm(t('confirmSwitchDirty'))
+    // Guard against losing unsaved edits when switching roles — a framework
+    // warning dialog replaces the native confirm().
+    const ok = await confirmSwitchDirty()
     if (!ok) return
   }
   selectedRoleId.value = roleId
@@ -487,97 +527,102 @@ const otherRoleOptions = computed<SelectOption[]>(() =>
     .map((r) => ({ value: r.id, label: r.name })),
 )
 
-const compareModal = reactive({
-  show: false,
+// Compare / Clone overlays run through the single useDetail + TDetailHost
+// renderer (modal mode). They are role-level operations (not per-record), so
+// each claims a static URL scope — `?compare=new` / `?clone=new` — which makes
+// opening deep-linkable and Back-closeable. The transient picker / result
+// state stays local to the page.
+const compareDetail = useDetail({ mode: 'modal', url: 'compare' })
+const compare = reactive({
   loading: false,
   targetRoleId: null as string | null,
   result: null as PermissionComparisonDto | null,
 })
 
 const compareBuckets = computed(() => {
-  const r = compareModal.result
+  const r = compare.result
   if (!r) return []
   const roleAName = selectedRole.value?.name ?? '—'
-  const roleBName = roles.value.find((x) => x.id === compareModal.targetRoleId)?.name ?? '—'
+  const roleBName = roles.value.find((x) => x.id === compare.targetRoleId)?.name ?? '—'
   return [
     {
-      id: 'onlyInA',
+      id: 'onlyIn1',
       title: t('compare.onlyInA', { role: roleAName }),
       tone: 'info' as const,
-      rows: r.onlyInRoleA ?? [],
+      rows: r.onlyInRole1 ?? [],
     },
     {
-      id: 'onlyInB',
+      id: 'onlyIn2',
       title: t('compare.onlyInB', { role: roleBName }),
       tone: 'warning' as const,
-      rows: r.onlyInRoleB ?? [],
+      rows: r.onlyInRole2 ?? [],
     },
     {
-      id: 'common',
+      id: 'shared',
       title: t('compare.common'),
       tone: 'success' as const,
-      rows: r.common ?? [],
+      rows: r.shared ?? [],
     },
   ] as Array<{
     id: string
     title: string
     tone: 'info' | 'warning' | 'success'
-    rows: PermissionDifferenceDto[]
+    rows: FunctionSummaryDto[]
   }>
 })
 
 function openCompareModal(): void {
-  compareModal.show = true
-  compareModal.targetRoleId = null
-  compareModal.result = null
+  compare.targetRoleId = null
+  compare.result = null
+  void compareDetail.open('create')
 }
 
 async function runCompare(): Promise<void> {
-  const target = compareModal.targetRoleId
+  const target = compare.targetRoleId
   if (!target || !selectedRoleId.value) return
-  compareModal.loading = true
+  compare.loading = true
   try {
-    compareModal.result = await authBridge.roleFunctions.compare(
+    compare.result = await authBridge.roleFunctions.compare(
       selectedRoleId.value,
       target,
     )
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
-    compareModal.result = null
+    compare.result = null
   } finally {
-    compareModal.loading = false
+    compare.loading = false
   }
 }
 
-const cloneModal = reactive({
-  show: false,
+const cloneDetail = useDetail({ mode: 'modal', url: 'clone' })
+const clone = reactive({
   saving: false,
   sourceRoleId: null as string | null,
 })
 
 function openCloneModal(): void {
-  cloneModal.show = true
-  cloneModal.sourceRoleId = null
+  clone.sourceRoleId = null
+  void cloneDetail.open('create')
 }
 
 async function runClone(): Promise<void> {
-  const source = cloneModal.sourceRoleId
+  const source = clone.sourceRoleId
   if (!source || !selectedRoleId.value) return
   if (source === selectedRoleId.value) {
     message.warning(t('clone.sameRoleError'))
     return
   }
-  cloneModal.saving = true
+  clone.saving = true
   try {
     const count = await authBridge.roleFunctions.clone(selectedRoleId.value, source)
     message.success(t('clone.success', { n: count }))
-    cloneModal.show = false
+    cloneDetail.close()
     // Refetch assignments so the tree reflects the merged permissions.
     await loadAssignedForRole(selectedRoleId.value)
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
-    cloneModal.saving = false
+    clone.saving = false
   }
 }
 
@@ -684,6 +729,10 @@ onMounted(async () => {
   text-align: center;
   padding: 24px 8px;
   font-size: 13px;
+}
+:deep(.t-role-func-page__fn-suffix) {
+  display: inline-flex;
+  align-items: center;
 }
 :deep(.t-role-func-page__fn-code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

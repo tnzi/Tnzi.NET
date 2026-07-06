@@ -4,10 +4,19 @@ import { useAdminTabStore } from '../stores/useAdminTabStore'
 import { usePermissionGuard } from '../headless/usePermissionGuard'
 
 export interface AuthGuardOptions {
+  /**
+   * Explicit redirect target for unauthenticated users. When omitted the
+   * guard redirects by route NAME (`{ name: 'login' }`) so the redirect
+   * lands on the login route wherever the route table put it: default
+   * `/login`, `${basePath}/login` under a custom basePath, or a consumer
+   * replacement registered under the same name. Never hardcode a path
+   * here just to follow a deployment prefix; names are prefix-agnostic.
+   */
   loginPath?: string
 }
 
 export interface PermissionGuardOptions {
+  /** Explicit redirect target; defaults to the named `forbidden` route. */
   forbiddenPath?: string
 }
 
@@ -16,14 +25,13 @@ export interface PermissionGuardOptions {
  * Routes may opt out by setting `meta.requiresAuth = false`.
  */
 export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard {
-  const loginPath = options.loginPath ?? '/login'
   return (to, _from, next) => {
     if (to.meta?.requiresAuth === false) {
       return next()
     }
     const auth = useAdminAuthStore()
     if (!auth.isLogin) {
-      return next(loginPath)
+      return next(options.loginPath ?? { name: 'login' })
     }
     next()
   }
@@ -36,7 +44,6 @@ export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard
 export function createPermissionGuard(
   options: PermissionGuardOptions = {},
 ): NavigationGuard {
-  const forbiddenPath = options.forbiddenPath ?? '/403'
   return (to, _from, next) => {
     const required = (to.meta?.permission ?? '') as string
     if (required) {
@@ -48,7 +55,7 @@ export function createPermissionGuard(
       if (auth.userInfo !== null) {
         const { can } = usePermissionGuard()
         if (!can(required)) {
-          return next(forbiddenPath)
+          return next(options.forbiddenPath ?? { name: 'forbidden' })
         }
       }
     }

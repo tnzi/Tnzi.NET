@@ -88,58 +88,11 @@ public class FunctionAuthCacheTests
         _cacheMock.Verify(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task CheckPermissionAsync_WithCachedPermissions_ReturnsTrue()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var permissionName = "read";
-        var permissions = new List<string> { "read", "write" };
-
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(permissions);
-
-        // Act
-        var result = await _cache.CheckPermissionAsync(userId, permissionName);
-
-        // Assert
-        result.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task CheckPermissionAsync_WithNoCachedPermissions_ReturnsFalse()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var permissionName = "read";
-
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IEnumerable<string>?)null);
-
-        // Act
-        var result = await _cache.CheckPermissionAsync(userId, permissionName);
-
-        // Assert
-        result.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task CheckPermissionAsync_WithPermissionNotInCache_ReturnsFalse()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var permissionName = "delete";
-        var permissions = new List<string> { "read", "write" };
-
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(permissions);
-
-        // Act
-        var result = await _cache.CheckPermissionAsync(userId, permissionName);
-
-        // Assert
-        result.ShouldBeFalse();
-    }
+    // NOTE: FunctionAuthCache.CheckPermissionAsync/CheckPermissionsAsync were
+    // removed — the per-user cache key holds EXPLICIT grants only, so any
+    // check built on it would return false negatives for business admins.
+    // Permission checks are tier-aware and live in FunctionAuthorizationService
+    // (covered by AdminTierIntegrationTests).
 
     [Fact]
     public async Task ClearAllAsync_CallsRemoveByPrefix()
@@ -182,60 +135,4 @@ public class FunctionAuthCacheTests
             Times.Never);
     }
     
-    [Fact]
-    public async Task CheckPermissionsAsync_WithCachedPermissions_ReturnsCorrectResults()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var permissionNames = new List<string> { "read", "write", "delete" };
-        var cachedPermissions = new List<string> { "read", "write" };
-
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedPermissions);
-
-        // Act
-        var result = await _cache.CheckPermissionsAsync(userId, permissionNames);
-
-        // Assert
-        result.ShouldNotBeNull();
-        result.Count.ShouldBe(3);
-        result["read"].ShouldBeTrue();
-        result["write"].ShouldBeTrue();
-        result["delete"].ShouldBeFalse();
-    }
-    
-    [Fact]
-    public async Task CheckPermissionsAsync_WithNoCachedPermissions_ReturnsAllFalse()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var permissionNames = new List<string> { "read", "write" };
-
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IEnumerable<string>?)null);
-
-        // Act
-        var result = await _cache.CheckPermissionsAsync(userId, permissionNames);
-
-        // Assert
-        result.ShouldNotBeNull();
-        result.Count.ShouldBe(2);
-        result["read"].ShouldBeFalse();
-        result["write"].ShouldBeFalse();
-    }
-    
-    [Fact]
-    public async Task CheckPermissionsAsync_WithEmptyList_ReturnsEmptyDictionary()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var permissionNames = new List<string>();
-
-        // Act
-        var result = await _cache.CheckPermissionsAsync(userId, permissionNames);
-
-        // Assert
-        result.ShouldNotBeNull();
-        result.Count.ShouldBe(0);
-    }
 }

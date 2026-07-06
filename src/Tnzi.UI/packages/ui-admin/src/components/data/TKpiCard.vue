@@ -34,6 +34,10 @@
         </div>
       </div>
     </div>
+    <!-- Full-width band below the value row — for a progress bar, a status
+         line or a mini-chart that a same-baseline `#extra` can't host. Keeps
+         "KPI + progress/trend" cards unified instead of hand-rolling NCard. -->
+    <div v-if="$slots.footer" class="t-stat-card__footer"><slot name="footer" /></div>
   </NCard>
 </template>
 
@@ -67,8 +71,10 @@ const props = withDefaults(defineProps<TKpiCardProps>(), {
 })
 
 defineSlots<{
-  /** Trailing content after the value (e.g. a status NTag). */
+  /** Trailing content after the value (e.g. a status NTag), same baseline. */
   extra?: () => unknown
+  /** Full-width band below the value (e.g. a progress bar / trend line). */
+  footer?: () => unknown
 }>()
 
 /**
@@ -156,5 +162,8 @@ const precision = computed<number>(() => {
   font-size: 12px;
   font-weight: 400;
   color: var(--tnzi-base-text-muted, #888);
+}
+.t-stat-card__footer {
+  margin-top: 10px;
 }
 </style>

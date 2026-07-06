@@ -466,23 +466,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         var nodes = allOrganizations.MapToList<OrganizationTreeNodeDto>();
-
-        var dic = nodes.ToDictionary(o => o.Id);
-        var roots = new List<OrganizationTreeNodeDto>();
-
-        foreach (var org in nodes)
-        {
-            if (org.ParentId.HasValue && dic.TryGetValue(org.ParentId.Value, out var parent))
-            {
-                parent.Children.Add(org);
-            }
-            else
-            {
-                roots.Add(org);
-            }
-        }
-
-        return roots;
+        return TreeHelper.ToTree(nodes, o => o.Id, o => o.ParentId, (p, c) => p.Children.Add(c)).ToList();
     }
 
 

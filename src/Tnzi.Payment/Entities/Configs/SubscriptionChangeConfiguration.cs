@@ -4,7 +4,7 @@ public class SubscriptionChangeConfiguration : EntityTypeConfigurationBase<Subsc
 {
     public override void Configure(EntityTypeBuilder<SubscriptionChange> builder)
     {
-        builder.Property(c => c.ProratedAmount).HasPrecision(18, 4);
+        builder.Property(c => c.ProratedAmount).HasMoneyPrecision();
 
         builder.HasOne(c => c.Subscription)
             .WithMany()

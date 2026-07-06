@@ -31,13 +31,18 @@ import { unwrapResult as unwrap } from '../_mappers'
 export type InvoiceDto = CoreInvoiceDto
 export type MarkInvoicePaidDto = CoreMarkInvoicePaidDto
 
-/** Page-facing query shape (table page: page + status + free-text search). */
+/**
+ * Page-facing query shape (table page: page + status filter).
+ *
+ * `status` / `type` are enum member-name strings (the backend serialises and
+ * binds enums by name via the global JsonStringEnumConverter); numbers are
+ * still accepted for backward-compat.
+ */
 export interface InvoiceQueryDto {
   pageIndex: number
   pageSize: number
-  status?: number | null
-  type?: number | null
-  searchText?: string | null
+  status?: string | number | null
+  type?: string | number | null
 }
 
 export interface InvoiceBridgeDeps {

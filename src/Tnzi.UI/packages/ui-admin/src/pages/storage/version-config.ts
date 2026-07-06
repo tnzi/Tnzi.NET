@@ -20,3 +20,11 @@ export const versionFormSchema: FormSchemaItem[] = [
   { key: 'md5Hash',      labelKey: 'form.md5Hash', label: 'MD5',         type: 'text' },
   { key: 'description',  labelKey: 'form.description', label: 'Note',        type: 'textarea' },
 ]
+
+// Advanced search — GetVersions filters by fileId (cross-file audit) and
+// currentOnly. The backend treats currentOnly=false/absent as "all versions"
+// and only filters when true, so a switch off = all, on = current-only.
+export const versionSearchFields: FormSchemaItem[] = [
+  { key: 'fileId',      labelKey: 'search.fileId', label: 'File ID', type: 'text' },
+  { key: 'currentOnly', labelKey: 'search.currentOnly', label: 'Current only', type: 'switch' },
+]

@@ -28,41 +28,32 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
         items: [
           {
             id: 'p1',
-            paymentNo: 'PAY-001',
             tradeNo: 'TRADE-001',
             businessOrderNo: 'ORD-001',
-            businessType: 1,
-            amount: 100,
-            currency: 'CNY',
-            status: 1,
-            userId: 'u1',
+            businessType: 'Order',
+            originalAmount: 100,
+            paidAmount: 100,
             discountAmount: 0,
-            finalAmount: 100,
-            refundAmount: 0,
+            currency: 'CNY',
+            status: 'Processing',
+            channelCode: 'stripe',
+            paymentMethod: 'CreditCard',
+            paidTime: null,
             creationTime: '2026-01-01T00:00:00Z',
-            lastModificationTime: null,
           },
         ],
         totalCount: 1,
         pageIndex: 1,
         pageSize: 20,
       })),
-      create: vi.fn(async () => { throw new Error('backend gap') }),
-      update: vi.fn(async () => { throw new Error('backend gap') }),
-      delete: vi.fn(async () => { throw new Error('backend gap') }),
       statistics: vi.fn(async () => mockStats),
     },
     subscriptions: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
+      cancelAtPeriodEnd: vi.fn(),
     },
     refunds: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
       approve: vi.fn(),
       reject: vi.fn(),
     },
@@ -122,22 +113,32 @@ describe('Orders page (Phase 3.32)', () => {
 })
 
 describe('order-config', () => {
-  it('exports columns with required keys', async () => {
-    const { orderColumns } = await import('../../../src/pages/payment/order-config')
-    const keys = orderColumns.map((c) => c.key)
-    expect(keys).toContain('paymentNo')
+  it('builds columns keyed on real PaymentDto fields', async () => {
+    const { buildOrderColumns } = await import('../../../src/pages/payment/order-config')
+    const keys = buildOrderColumns((k) => k).map((c) => c.key)
+    expect(keys).toContain('tradeNo')
     expect(keys).toContain('businessOrderNo')
-    expect(keys).toContain('userId')
-    expect(keys).toContain('amount')
+    expect(keys).toContain('paidAmount')
     expect(keys).toContain('status')
+    expect(keys).toContain('paymentMethod')
+    // ghost fields removed
+    expect(keys).not.toContain('paymentNo')
+    expect(keys).not.toContain('userId')
   })
 
-  it('exports formSchema with required fields', async () => {
+  it('exports a status filter option list keyed on enum member names', async () => {
+    const { orderStatusOptions } = await import('../../../src/pages/payment/order-config')
+    const values = orderStatusOptions.map((o) => o.value)
+    expect(values).toContain('Succeeded')
+    expect(values).toContain('Pending')
+  })
+
+  it('exports formSchema with real fields', async () => {
     const { orderFormSchema } = await import('../../../src/pages/payment/order-config')
     const keys = orderFormSchema.map((f) => f.key)
-    expect(keys).toContain('paymentNo')
-    expect(keys).toContain('userId')
-    expect(keys).toContain('amount')
+    expect(keys).toContain('tradeNo')
+    expect(keys).toContain('paidAmount')
     expect(keys).toContain('status')
+    expect(keys).toContain('paymentMethod')
   })
 })

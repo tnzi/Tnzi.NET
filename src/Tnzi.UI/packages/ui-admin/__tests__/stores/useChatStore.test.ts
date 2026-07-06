@@ -1,15 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { MessageContentType } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../src/stores/useChatStore'
+
+// Enum DTO fields are now PascalCase member-name strings; SignalR NewMessagePayload
+// keeps a numeric contentType (backend `(int)` cast), so applyIncomingMessage
+// payloads below intentionally stay numeric.
 
 function mockBridge() {
   return {
     listConversations: vi.fn(async () => [
-      { id: 'c1', type: 1, title: 'Alice', unreadCount: 2, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-02T00:00:00Z' },
-      { id: 'c2', type: 1, title: 'Bob', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-03T00:00:00Z' },
+      { id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 2, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-02T00:00:00Z' },
+      { id: 'c2', type: 'Direct', title: 'Bob', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-03T00:00:00Z' },
     ]),
-    getMessages: vi.fn(async () => ({ messages: [{ id: 'm1', conversationId: 'c1', contentType: 1, content: 'hi', sentAt: '2026-01-01T00:00:00Z' }], hasMore: false })),
-    sendMessage: vi.fn(async (id: string, data: { contentType: number; content: string }) => ({ id: 'm9', conversationId: id, contentType: data.contentType, content: data.content, sentAt: '2026-01-04T00:00:00Z' })),
+    getMessages: vi.fn(async () => ({ messages: [{ id: 'm1', conversationId: 'c1', contentType: MessageContentType.Text, content: 'hi', sentAt: '2026-01-01T00:00:00Z' }], hasMore: false })),
+    sendMessage: vi.fn(async (id: string, data: { contentType: MessageContentType; content: string }) => ({ id: 'm9', conversationId: id, contentType: data.contentType, content: data.content, sentAt: '2026-01-04T00:00:00Z' })),
     markRead: vi.fn(async () => {}),
     getUnreadCount: vi.fn(async () => 2),
   }
@@ -59,6 +64,26 @@ describe('useChatStore', () => {
     store.applyIncomingMessage({ conversationId: 'c1', messageId: 'mB', senderId: null, contentType: 4, preview: '[System] notice' }, 'me')
     expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(3)
   })
+
+  it('applyIncomingMessage bumps unread for the active conversation when the window is closed', async () => {
+    // Regression: activeId survives closing the chat window. A message for that
+    // conversation must still raise the badge while the window is not visible.
+    const store = useChatStore(); store.init(mockBridge() as never)
+    await store.fetchConversations()
+    await store.openConversation('c1') // activeId=c1, unread cleared to 0
+    expect(store.windowVisible).toBe(false) // window never marked visible
+    store.applyIncomingMessage({ conversationId: 'c1', messageId: 'mY', senderId: 'other', contentType: 1, preview: 'hey' }, 'me')
+    expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(1)
+  })
+
+  it('applyIncomingMessage does NOT bump unread for the active conversation while the window is visible', async () => {
+    const store = useChatStore(); store.init(mockBridge() as never)
+    await store.fetchConversations()
+    await store.openConversation('c1')
+    store.setWindowVisible(true)
+    store.applyIncomingMessage({ conversationId: 'c1', messageId: 'mZ', senderId: 'other', contentType: 1, preview: 'hey' }, 'me')
+    expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(0)
+  })
 })
 
 describe('useChatStore — new actions (U6)', () => {
@@ -67,7 +92,7 @@ describe('useChatStore — new actions (U6)', () => {
   function makeBridgeU6() {
     return {
       listConversations: vi.fn(async () => [
-        { id: 'c1', type: 1, title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
+        { id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
       ]),
       getMessages: vi.fn(async () => ({ messages: [], hasMore: false })),
       sendMessage: vi.fn(async (_id: string, data: { contentType: number; fileId?: string; fileName?: string; fileSize?: number }) => ({
@@ -82,9 +107,9 @@ describe('useChatStore — new actions (U6)', () => {
       markRead: vi.fn(async () => {}),
       getUnreadCount: vi.fn(async () => 0),
       searchContacts: vi.fn(async () => [{ userId: 'u1', name: 'Alice' }]),
-      getOrCreateDirect: vi.fn(async () => ({ id: 'c-direct', type: 1, title: 'Alice', memberCount: 2, members: [] })),
-      createGroup: vi.fn(async () => ({ id: 'c-group', type: 2, title: 'My Group', memberCount: 3, members: [] })),
-      getConversation: vi.fn(async () => ({ id: 'g1', type: 2, title: 'Group', memberCount: 2, members: [] })),
+      getOrCreateDirect: vi.fn(async () => ({ id: 'c-direct', type: 'Direct', title: 'Alice', memberCount: 2, members: [] })),
+      createGroup: vi.fn(async () => ({ id: 'c-group', type: 'Group', title: 'My Group', memberCount: 3, members: [] })),
+      getConversation: vi.fn(async () => ({ id: 'g1', type: 'Group', title: 'Group', memberCount: 2, members: [] })),
       addMembers: vi.fn(async () => {}),
       removeMember: vi.fn(async () => {}),
       renameGroup: vi.fn(async () => {}),
@@ -133,9 +158,9 @@ describe('useChatStore — new actions (U6)', () => {
     store.init(bridge as never)
     // Initialize conversation message list
     store.messagesByConv['c1'] = []
-    await store.sendMedia('c1', { contentType: 2, fileId: 'f1', fileName: 'photo.png', fileSize: 1024 })
+    await store.sendMedia('c1', { contentType: MessageContentType.Image, fileId: 'f1', fileName: 'photo.png', fileSize: 1024 })
     expect(bridge.sendMessage).toHaveBeenCalledWith('c1', {
-      contentType: 2,
+      contentType: MessageContentType.Image,
       fileId: 'f1',
       fileName: 'photo.png',
       fileSize: 1024,
@@ -211,9 +236,9 @@ describe('useChatStore — presence + sorting (U7)', () => {
   function makePresenceBridge() {
     return {
       listConversations: vi.fn(async () => [
-        { id: 'd1', type: 1, title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-01T00:00:00Z', peerUserId: 'u-alice', peerStatus: undefined, isSticky: false },
-        { id: 'd2', type: 1, title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-03T00:00:00Z', peerUserId: 'u-bob',   peerStatus: undefined, isSticky: false },
-        { id: 'd3', type: 1, title: 'Carol', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-02T00:00:00Z', peerUserId: 'u-carol', peerStatus: undefined, isSticky: true  },
+        { id: 'd1', type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-01T00:00:00Z', peerUserId: 'u-alice', peerStatus: undefined, isSticky: false },
+        { id: 'd2', type: 'Direct', title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-03T00:00:00Z', peerUserId: 'u-bob',   peerStatus: undefined, isSticky: false },
+        { id: 'd3', type: 'Direct', title: 'Carol', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-02T00:00:00Z', peerUserId: 'u-carol', peerStatus: undefined, isSticky: true  },
       ]),
       getMessages:  vi.fn(async () => ({ messages: [], hasMore: false })),
       sendMessage:  vi.fn(),
@@ -262,9 +287,9 @@ describe('useChatStore — presence + sorting (U7)', () => {
   it('sortedConversations sorts two sticky conversations by lastMessageAt desc', async () => {
     const bridge = {
       listConversations: vi.fn(async () => [
-        { id: 's1', type: 1, title: 'S1', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-05T00:00:00Z', isSticky: true },
-        { id: 's2', type: 1, title: 'S2', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-07T00:00:00Z', isSticky: true },
-        { id: 'n1', type: 1, title: 'N1', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-10T00:00:00Z', isSticky: false },
+        { id: 's1', type: 'Direct', title: 'S1', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-05T00:00:00Z', isSticky: true },
+        { id: 's2', type: 'Direct', title: 'S2', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-07T00:00:00Z', isSticky: true },
+        { id: 'n1', type: 'Direct', title: 'N1', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '2026-01-10T00:00:00Z', isSticky: false },
       ]),
       getMessages: vi.fn(async () => ({ messages: [], hasMore: false })),
       sendMessage: vi.fn(),

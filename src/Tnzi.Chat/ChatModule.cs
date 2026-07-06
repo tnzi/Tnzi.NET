@@ -6,10 +6,17 @@ public class ChatModule : TnziApplicationModule
 {
     public override string? TableNamePrefix => "Chat";
 
+    public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        context.Services.AddTnziOptions<ChatOptions, ChatOptionsValidator>(context.Configuration);
+        return Task.CompletedTask;
+    }
+
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var services = context.Services;
 
+        services.AddScoped<IChatConfigService, ChatConfigService>();
         services.AddScoped<IChatContactService, ChatContactService>();
         services.AddScoped<IPresenceService, PresenceService>();
         services.AddScoped<IConversationService, ConversationService>();

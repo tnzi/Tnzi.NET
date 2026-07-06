@@ -1,13 +1,11 @@
 <template>
-  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+  <TTabsPage :title="t('title')" :translate="t" :sections="sections">
     <template #actions>
       <NButton size="small" @click="loadAll">{{ t('refresh') }}</NButton>
     </template>
 
-    <NCard :bordered="false" class="t-entity-role-page__card">
-      <NTabs v-model:value="activeTab" type="line" animated>
-        <!-- Existing matrix mode — pick an entity, edit role×operation cells. -->
-        <NTabPane name="matrix" :tab="t('tabs.matrix')">
+    <!-- Matrix mode — pick an entity, edit role×operation cells. -->
+    <template #matrix>
           <div class="t-entity-role-page__toolbar">
             <NSpace align="center" :wrap="false">
               <span class="t-entity-role-page__toolbar-label">{{ t('selectEntity') }}</span>
@@ -70,16 +68,15 @@
               </div>
             </NSpin>
           </div>
-        </NTabPane>
+    </template>
 
-        <!--
-          Inspect-user tab — read-only view of a user's effective data
-          permissions. The admin pastes a userId (from the user
-          management page) + clicks "Look up". Useful for diagnosing
-          "why can / can't user X do operation Y?" without flipping
-          between the user, role, and entity-role pages.
-        -->
-        <NTabPane name="inspect" :tab="t('tabs.inspect')">
+    <!--
+      Inspect-user tab — read-only view of a user's effective data
+      permissions. The admin picks a user + clicks "Look up". Useful for
+      diagnosing "why can / can't user X do operation Y?" without flipping
+      between the user, role, and entity-role pages.
+    -->
+    <template #inspect>
           <p class="t-entity-role-page__hint">{{ t('inspect.hint') }}</p>
           <NSpace class="t-entity-role-page__inspect-toolbar" align="center">
             <TUserSelector
@@ -117,17 +114,14 @@
               :row-key="(r: EntityRoleDto) => r.id"
             />
           </NSpin>
-        </NTabPane>
-      </NTabs>
-    </NCard>
-  </TContentPage>
+    </template>
+  </TTabsPage>
 </template>
 
 <script setup lang="ts">
 import { computed, h, reactive, ref, onMounted, watch } from 'vue'
 import {
-  NCard, NSpace, NButton, NSelect, NTag, NCheckbox, NSpin,
-  NTabPane, NTabs,
+  NSpace, NButton, NSelect, NTag, NCheckbox, NSpin,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TUserSelector from '../../components/forms/TUserSelector.vue'
@@ -137,26 +131,32 @@ import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import type {
   EntityInfoDto,
   EntityRoleDto,
   DataAuthOperation,
 } from '@tnzi/core/services/authorization'
 import type { RoleDto } from '@tnzi/core/services/identity'
-import TContentPage from '../../components/layout/TContentPage.vue'
+import TTabsPage from '../../components/layout/TTabsPage.vue'
 
 interface Role { id: string; code: string; name: string }
 
 const client = useAdminClient()
 const authBridge = createAuthorizationBridge({ client })
 const idBridge = createIdentityBridge({ client })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('authorization.entityRoles', key), params)
+const t = makePageTranslator('authorization.entityRoles')
 
 const message = useSafeMessage()
 
 const operations: DataAuthOperation[] = ['Query', 'Update', 'Delete', 'All']
+
+// Primary tabs — TTabsPage owns `?section=` deep-linking + Back/Forward.
+// Both panes own their vertical scroll (matrix table + inspect list).
+const sections = computed(() => [
+  { name: 'matrix', label: t('tabs.matrix'), scroll: true },
+  { name: 'inspect', label: t('tabs.inspect'), scroll: true },
+])
 
 const entities = ref<EntityInfoDto[]>([])
 const roles = ref<Role[]>([])
@@ -294,7 +294,6 @@ watch(selectedEntityInfoId, () => {
 // the user holds. Result is a flat list rendered as a table grouped by
 // entity. `hasQueried` lets us show the "no results" placeholder only
 // after a lookup ran (not on initial render).
-const activeTab = ref<'matrix' | 'inspect'>('matrix')
 
 const inspect = reactive({
   userId: '',
@@ -410,10 +409,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.t-entity-role-page__card {
-  height: 100%;
-  overflow: auto;
-}
 .t-entity-role-page__toolbar {
   margin-bottom: 16px;
   padding-bottom: 16px;

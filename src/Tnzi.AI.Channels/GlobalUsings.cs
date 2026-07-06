@@ -41,3 +41,4 @@ global using Tnzi.AI.Channels.Adapters.Slack;
 global using Tnzi.AI.Channels.Adapters.Discord;
 global using Tnzi.AI.Channels.Adapters.Dingtalk;
 global using Tnzi.AI;
+global using Tnzi.Security.Authorization;

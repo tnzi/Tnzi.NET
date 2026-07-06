@@ -53,9 +53,11 @@
 </template>
 
 <script setup lang="ts" generic="T = any">
-import { computed, defineComponent, h, useSlots, type PropType, type VNodeChild } from 'vue'
+import { computed, defineComponent, h, useSlots, type Component, type PropType, type VNodeChild } from 'vue'
 import { NDataTable, NPagination, type DataTableColumns } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { estimateRowActionsWidth, type RowAction } from '../../headless/rowActions'
+import TRowActions from '../crud/TRowActions.vue'
 import TDataCardList, { type CardColumn } from './TDataCardList.vue'
 
 export interface TResponsivePagination {
@@ -85,6 +87,18 @@ export interface TResponsiveTableProps<T = unknown> {
    *  with horizontal scroll (use for dense dashboards / selection tables). */
   mobile?: 'cards' | 'scroll'
   emptyText?: string
+  /**
+   * Declarative row actions. When supplied, a right-fixed operation column is
+   * synthesised (rendering {@link TRowActions} with confirm/collapse/auto-width)
+   * and folded into the mobile card footer automatically — so pages stop
+   * hand-writing an `h(NButton)+NPopconfirm` action column. Pair with the
+   * `editAction`/`viewAction`/`deleteAction` factories.
+   */
+  rowActions?: RowAction<T>[]
+  /** Header text for the synthesised action column (already translated). */
+  rowActionsTitle?: string
+  /** Translator forwarded to {@link TRowActions} for its built-in labels. */
+  translate?: (key: string) => string
 }
 
 // $slots 的 Readonly 推断类型在声明产物（vite-plugin-dts）下无法用动态键
@@ -100,6 +114,7 @@ interface LooseColumn {
   title?: unknown
   width?: number
   minWidth?: number
+  fixed?: 'left' | 'right'
   render?: (row: Row, index: number) => VNodeChild
 }
 
@@ -110,6 +125,9 @@ const props = withDefaults(defineProps<TResponsiveTableProps<T>>(), {
   actionKeys: () => ['actions', 'action', 'operation', '__row_actions__'],
   mobile: 'cards',
   emptyText: 'No data',
+  rowActions: undefined,
+  rowActionsTitle: undefined,
+  translate: undefined,
 })
 
 // Pass-through extra attrs to NDataTable (size, bordered, flex-height, etc.).
@@ -123,14 +141,35 @@ const rows = computed<Row[]>(() => (props.data ?? []) as unknown as Row[])
 // Casts for the desktop NDataTable pass-through — the public props are typed
 // to the consumer's row type `T`; naive's NDataTable wants its own RowData.
 const ndtData = computed(() => props.data as unknown as Row[])
-const ndtColumns = computed(() => props.columns as unknown as DataTableColumns)
 const ndtRowKey = computed(
   () => props.rowKey as unknown as ((row: Row) => string | number) | undefined,
 )
 
-const looseColumns = computed<LooseColumn[]>(
-  () => (props.columns ?? []) as unknown as LooseColumn[],
-)
+// Column list, plus a synthesised right-fixed operation column when
+// `rowActions` is supplied. Everything downstream (desktop table, mobile card
+// footer, horizontal-scroll width) derives from this so the action column is
+// handled uniformly — its `__row_actions__` key is a member of the default
+// `actionKeys`, so `isActionCol` folds it into the card footer automatically.
+const looseColumns = computed<LooseColumn[]>(() => {
+  const base = (props.columns ?? []) as unknown as LooseColumn[]
+  const actions = props.rowActions
+  if (!actions || actions.length === 0) return base
+  const actionCol: LooseColumn = {
+    key: '__row_actions__',
+    title: props.rowActionsTitle,
+    width: estimateRowActionsWidth(actions),
+    fixed: 'right',
+    render: (row: Row) =>
+      h(TRowActions as unknown as Component, {
+        row,
+        actions,
+        translate: props.translate,
+      }),
+  }
+  return [...base, actionCol]
+})
+
+const ndtColumns = computed(() => looseColumns.value as unknown as DataTableColumns)
 
 const cardRowKey = computed<(row: Row) => string | number>(() => {
   const rk = props.rowKey as ((row: Row) => string | number) | undefined

@@ -49,6 +49,7 @@ import { exportRouteMenuSeed } from '../headless/menuSeed'
 import { defaultAdminRoutes } from '../router/routes'
 import { createAuthGuard, createPermissionGuard } from '../router/guards'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
+import { useAdminTabStore } from '../stores/useAdminTabStore'
 import {
   createTnziUiAdmin,
   type TnziUiAdminInstance,
@@ -57,6 +58,7 @@ import {
 import type { AdminLoginConfig } from './loginConfig'
 import type { AdminDashboardConfig } from './dashboardConfig'
 import type { AdminSettingsConfig } from './settingsConfig'
+import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deepLinkConfig'
 import {
   useAdminRouteStore,
   type AdminRouteRecord,
@@ -71,14 +73,14 @@ export interface DefineAdminAppOptions {
    * Role names whose holders are treated as super-admins by `loadPermissions`:
    * the shell sets `isSuperUser` (sidebar shows EVERYTHING, route guards bypass)
    * when the signed-in user holds any of these roles (case-insensitive). Mirror
-   * the backend's `Authorization:SuperAdminRoles` here.
+   * the backend's `Authorization:SuperAdminRoles` here — the TECHNICAL tier of
+   * the two-tier admin model (convention: a role named `SuperAdmin`).
    *
-   * Why it matters: a super-admin's backend permission list is only the codes
-   * that have actually been *defined* in the authorization system. Framework
-   * modules don't yet ship permission-code definitions, so without this bypass
-   * even a super-admin would see only the handful of codes an app defines.
-   * Listing the super-admin role(s) keeps the shell fully usable for admins
-   * regardless of permission-code coverage.
+   * The BUSINESS tier (backend `Authorization:BusinessAdminRoles`, convention:
+   * the `Admin` role) needs NO front-end configuration: the backend returns the
+   * Business-category permission subset for those users, so the sidebar and
+   * guards filter naturally and Technical surfaces (diagnostics, MCP, sandbox,
+   * system parameters, …) stay hidden. See docs/modules/authorization.md.
    */
   superAdminRoles?: string[]
 
@@ -101,10 +103,13 @@ export interface DefineAdminAppOptions {
    * `'/portal'`, ... to deploy under a different prefix, or `'/'` to deploy
    * at the domain root (no prefix).
    *
-   * Affects every top-level route in the preset table:
+   * Affects every top-level route in the preset table — login/403 included,
+   * so ALL routes share the single basePath prefix (since 0.2.71 this holds
+   * for the default `'/admin'` too; login/403 previously stayed at the
+   * domain root, which made auth redirects escape sub-path deployments):
    *   - `admin-root` (`/admin`) → `basePath`
    *   - `login` (`/login/:module(...)?`) → `${basePath}/login/:module(...)?`
-   *     (no leading `//` when `basePath === '/'`)
+   *     (no prefix when `basePath === '/'`)
    *   - `forbidden` (`/403`) → `${basePath}/403`
    *
    * Routes under `admin-root.children` use relative paths and are not
@@ -116,22 +121,65 @@ export interface DefineAdminAppOptions {
    *   - `'/'` is left as-is (domain-root deployment)
    *
    * Does **not** touch `createWebHistory()` / `createWebHashHistory()`
-   * base — that argument controls the browser URL the router observes and
-   * is the consumer's responsibility. `basePath` only rewrites the routes
-   * inside vue-router's table, so when an IIS sub-application (or nginx
-   * `location`) mounts the admin SPA under `/admin/` and serves
-   * `index.html` from that prefix, `createWebHistory()` (default `'/'`)
-   * keeps the browser URL and router-internal paths aligned.
+   * base — that argument controls the browser URL prefix and is the
+   * consumer's responsibility (see the recipes below). Framework-issued
+   * redirects (auth guard, session-expired, login module switches) resolve
+   * routes by NAME, so they follow whatever prefix combination you pick;
+   * never hardcode `'/login'`-style paths in consumer code either — use
+   * `{ name: 'login' }`.
+   *
+   * ## Deployment recipes
+   *
+   * **Sub-path deployment (IIS sub-application / nginx location), the
+   * recommended shape**: let Vite's `base` be the single source of truth
+   * for the deployment prefix and keep the route table prefix-free:
+   * ```ts
+   * // vite.config.ts        →  base: '/admin/'
+   * // index.html + assets served from https://host/admin/
+   * const router = createRouter({
+   *   history: createWebHistory(import.meta.env.BASE_URL), // '/admin/'
+   *   routes,
+   * })
+   * defineAdminApp({ client, basePath: '/' })
+   * // URLs: https://host/admin/dashboard, https://host/admin/login
+   * ```
+   * The IIS sub-application needs the standard SPA fallback (URL Rewrite →
+   * index.html) so deep links refresh correctly.
+   *
+   * **Lazy sub-path shape (also fully supported)**: keep the default
+   * `basePath: '/admin'` as the in-router prefix and serve the SPA from a
+   * sub-application with the SAME name, with `createWebHistory()` left at
+   * `'/'`: every URL (login/403 included) now stays inside `/admin/*`, so
+   * this shape is consistent too. Note the prefix is then written in two
+   * places (IIS app name and basePath) that must match.
+   *
+   * **Renaming the IIS sub-application later** (e.g. `admin` → `console`):
+   * under the recommended shape you change ONE line (Vite
+   * `base: '/console/'`) and rebuild; application code is untouched
+   * because framework redirects resolve by route name. Under the lazy
+   * shape you must change BOTH `basePath: '/console'` and the Vite `base`,
+   * then rebuild; a mismatch makes every URL miss the route table. A
+   * rebuild is always required: history-mode SPAs bake the absolute
+   * prefix into the bundle (deep-link refreshes serve index.html from
+   * arbitrary paths, so relative asset URLs would resolve wrongly). If a
+   * single build must serve arbitrary prefixes, use
+   * `createWebHashHistory()` (hash URLs, prefix-free) or have the server
+   * inject `<base href>`; usually not worth it for internal admins.
+   *
+   * **Domain-root deployment** (e.g. `admin.example.com`): the default
+   * options just work; URLs live under `/admin/*` with login at
+   * `/admin/login`.
    *
    * @example
    * ```ts
-   * // Default — same behaviour as today (basePath = '/admin')
+   * // Default — internal '/admin' prefix on every route
    * defineAdminApp({ client })
    *
    * // Custom base path
    * defineAdminApp({ client, basePath: '/console' })
    *
-   * // Deploy at domain root (no prefix)
+   * // Prefix-free route table (deployment prefix comes from the router
+   * // history base / Vite base instead)
    * defineAdminApp({ client, basePath: '/' })
    * ```
    */
@@ -275,7 +323,23 @@ export interface DefineAdminAppOptions {
      * When false, disables the chat launcher in the header. Default: true.
      */
     enabled?: boolean
+    /**
+     * Override the SignalR chat hub URL. Default '/hubs/chat'. Set e.g.
+     * '/api/hubs/chat' when the API is hosted under a sub-path.
+     */
+    hubUrl?: string
   }
+
+  /**
+   * App-wide deep-link switch for URL-synced UI state (`?detail=` overlay
+   * open-states, `?section=` active sections). `false` disables both channels
+   * everywhere — built-in pages included — so no UI state ever enters the URL;
+   * `{ detail?: boolean; section?: boolean }` disables one channel. Omitted /
+   * `true` keeps the default behaviour (CRUD overlays deep-link out of the
+   * box, everything else opt-in per page). A disabled channel overrides
+   * per-page options — it is a kill switch, not a default.
+   */
+  deepLink?: AdminDeepLinkConfig
 
   /** Replace the placeholder `/403` forbidden component. */
   forbiddenComponent?: Component
@@ -302,16 +366,49 @@ export interface DefineAdminAppOptions {
    * @example
    * ```ts
    * defineAdminApp({ client, auth: { enabled: true } })
-   * // custom paths:
-   * defineAdminApp({ client, auth: { enabled: true, loginPath: '/login', forbiddenPath: '/403' } })
+   * // custom targets (only when you replaced the built-in login/403 routes
+   * // with differently-named ones — by default redirects resolve by name):
+   * defineAdminApp({ client, auth: { enabled: true, loginPath: '/signin', forbiddenPath: '/no-access' } })
    * ```
    */
   auth?: {
     enabled?: boolean
-    /** Where the auth guard redirects unauthenticated users. Default `/login`. */
+    /**
+     * The **permission** navigation guard — redirects to the `forbidden` route
+     * when a route's `meta.permission` isn't held. Installed by DEFAULT (true),
+     * INDEPENDENTLY of `enabled` (which only gates the *authentication* guard),
+     * because it mirrors the always-on sidebar permission filter: a page hidden
+     * from the menu should also be unreachable by URL / deep-link / a persisted
+     * tab, instead of mounting into a broken "Failed to load data" (403) view.
+     *
+     * Fails OPEN while the permission list hasn't loaded (`userInfo === null`)
+     * and for super users, so consumers that never wire `loadPermissions` are
+     * unaffected; the backend `[ApiAuthorize]` stays the real enforcement. Set
+     * `false` only if you enforce route permissions with your own guard.
+     */
+    permissionGuard?: boolean
+    /**
+     * EXPLICIT auth-redirect target path. Leave unset (recommended): the
+     * guard and the session-expired handler then redirect by route NAME
+     * (`{ name: 'login' }`), which resolves to the login route wherever the
+     * table put it (any `basePath`, any router history base) and is
+     * therefore deployment-agnostic. Only set this when you replaced the
+     * built-in login route with a differently-named one.
+     */
     loginPath?: string
-    /** Where the permission guard redirects on missing permission. Default `/403`. */
+    /** Explicit 403 target path; defaults to the named `forbidden` route. */
     forbiddenPath?: string
+    /**
+     * Built-in session-expired handling (default **true** — independent of
+     * `enabled`). When the HttpClient reports an unrecoverable 401 (no
+     * refresh token, or the refresh itself failed), the framework clears
+     * `useAdminAuthStore` and redirects to the login route (by name, or
+     * `loginPath` when set) with a `?next=<current fullPath>` deep-link so
+     * the user lands back where they were after re-authenticating.
+     * Requires `install(app, pinia, router)` to receive the router. Set
+     * `false` when the app wires its own session-expired handler.
+     */
+    sessionExpiredRedirect?: boolean
   }
 }
 
@@ -440,6 +537,15 @@ function normalizeBasePath(basePath?: string | null): string {
  *                            (no leading `//` when `basePath === '/'`)
  *   `/403`                → `${basePath}/403`
  *
+ * This applies to the DEFAULT `/admin` basePath too (since 0.2.71): every
+ * route in the table, login and 403 included, lives under the single
+ * basePath prefix. Before that, login/403 stayed at the domain root under
+ * the default: 99% of URLs happened to work when the SPA was mounted as
+ * an IIS sub-application (the internal `/admin` prefix coincided with the
+ * deployment prefix), but any login/403 redirect escaped the
+ * sub-application (e.g. `https://host/login` instead of
+ * `https://host/admin/login`) and 404'd.
+ *
  * `admin-root.children` use relative paths and are not touched — they
  * inherit the new parent automatically when vue-router resolves the tree.
  *
@@ -459,9 +565,6 @@ function applyBasePath(
       return route
     })
   }
-  // Skip if the caller asked for the default — preserves identity so
-  // tests that compare against `defaultAdminRoutes` directly keep passing.
-  if (basePath === '/admin') return routes
   return routes.map((route) => {
     if (typeof route.path !== 'string') return route
     if (route.path === '/admin') {
@@ -713,27 +816,53 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
    * makes the login flow "框架自洽" — see `loadPermissions`.
    */
   function wrapLoginCallbacks(login?: AdminLoginConfig): AdminLoginConfig | undefined {
-    if (!login?.callbacks) return login
-    const cbs = login.callbacks
+    if (!login) return login
+
+    // Fix #2: clear the admin auth store on deliberate sign-out. The consumer's
+    // `user.onLogout` typically clears only the core AuthStateManager (a separate
+    // store); without this, `isSuperUser` / `userInfo` persisted by useAdminAuthStore
+    // survive into the next sign-in, letting a Business admin inherit a prior
+    // super-admin's "see everything" bypass. Only wrapped when the consumer actually
+    // supplies `onLogout`, so whether a logout affordance exists is unchanged.
+    let wrapped: AdminLoginConfig = login
+    const userCfg = login.user
+    const consumerOnLogout = userCfg?.onLogout
+    if (userCfg && consumerOnLogout) {
+      wrapped = {
+        ...login,
+        user: {
+          ...userCfg,
+          onLogout: async () => {
+            useAdminAuthStore().logout()
+            await consumerOnLogout()
+          },
+        },
+      }
+    }
+
+    const cbs = wrapped.callbacks
+    if (!cbs) return wrapped
     const after = async () => {
       await loadPermissions().catch(() => undefined)
     }
+    const pwd = cbs.pwdLogin
+    const code = cbs.codeLogin
     const callbacks: NonNullable<AdminLoginConfig['callbacks']> = {
       ...cbs,
-      pwdLogin: cbs.pwdLogin
+      pwdLogin: pwd
         ? async (payload, helpers) => {
-            await cbs.pwdLogin!(payload, helpers)
+            await pwd(payload, helpers)
             await after()
           }
         : undefined,
-      codeLogin: cbs.codeLogin
+      codeLogin: code
         ? async (payload, helpers) => {
-            await cbs.codeLogin!(payload, helpers)
+            await code(payload, helpers)
             await after()
           }
         : undefined,
     }
-    return { ...login, callbacks }
+    return { ...wrapped, callbacks }
   }
 
   function install(app: App, pinia?: Pinia, router?: Router): TnziUiAdminInstance {
@@ -747,28 +876,80 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       chat: options.chat,
     })
 
+    // App-wide deep-link switch — read by useDetail (and thus useCrudPage)
+    // via tryInjectDeepLinkConfig(). Provided unconditionally so per-page
+    // engines never need to guard against a missing key.
+    app.provide(ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig(options.deepLink))
+
     // Attach the soybean-style route progress bar if a router is provided.
     // Idempotent — safe if the consumer already called useRouteProgress.
     if (router) {
       useRouteProgress(router)
     }
 
-    // Opt-in route guards. Only installed when the consumer asks for them, so
-    // apps that wire their own `router.beforeEach` aren't double-guarded and
-    // the historical open-by-default behaviour is preserved for consumers who
-    // don't opt in. Defaults are basePath-aware so the redirect targets match
-    // the actual login/403 route paths.
-    if (router && options.auth?.enabled) {
-      // Mirror applyBasePath's prefixing: the login/403 routes are only
-      // prefixed for custom base paths — both '/' (domain root) AND the
-      // default '/admin' leave them at '/login' / '/403' (applyBasePath
-      // short-circuits '/admin'). Using `${basePath}/login` for the default
-      // would point the guard at the non-existent '/admin/login'.
-      const prefix = basePath === '/' || basePath === '/admin' ? '' : basePath
-      const loginPath = options.auth.loginPath ?? `${prefix}/login`
-      const forbiddenPath = options.auth.forbiddenPath ?? `${prefix}/403`
-      router.beforeEach(createAuthGuard({ loginPath }))
-      router.beforeEach(createPermissionGuard({ forbiddenPath }))
+    // All framework-issued auth redirects resolve the login/403 routes by
+    // NAME, never by a hardcoded path: names are stable across any basePath
+    // and any router history base, so the redirect always lands wherever
+    // the route table actually put the route (deployment-agnostic). An
+    // explicit `auth.loginPath` / `auth.forbiddenPath` still wins when the
+    // consumer replaced the built-in routes with differently-named ones.
+    const explicitLoginPath = options.auth?.loginPath
+    const explicitForbiddenPath = options.auth?.forbiddenPath
+
+    // Route guards. Two independent layers:
+    //
+    //  • AUTHENTICATION guard (opt-in via `auth.enabled`): redirects
+    //    unauthenticated users to login. Left opt-in so apps that wire their own
+    //    `router.beforeEach` for auth (e.g. Acme, which restores the session
+    //    itself) aren't double-guarded.
+    //
+    //  • PERMISSION guard (on by DEFAULT — opt out with `auth.permissionGuard:
+    //    false`): redirects to `forbidden` when a route's `meta.permission`
+    //    isn't held. This is the navigation-layer twin of the always-on sidebar
+    //    filter: without it a page hidden from the menu was still reachable by
+    //    URL / deep-link / a persisted tab and mounted into a broken 403 "Failed
+    //    to load data" view. Safe by construction — the guard fails OPEN while
+    //    `userInfo === null` and for super users, so consumers that never wire
+    //    permissions keep the historical open behaviour, and the backend
+    //    `[ApiAuthorize]` remains the real enforcement.
+    if (router) {
+      if (options.auth?.enabled) {
+        router.beforeEach(createAuthGuard({ loginPath: explicitLoginPath }))
+      }
+      if (options.auth?.permissionGuard !== false) {
+        router.beforeEach(createPermissionGuard({ forbiddenPath: explicitForbiddenPath }))
+      }
+    }
+
+    // Built-in session-expired handling (default ON, independent of the
+    // opt-in guards). The route guards above only fire on NAVIGATION; when
+    // the user idles on a page until both tokens die, every widget request
+    // just 401s in place and nothing redirects. Subscribing to the client's
+    // unauthorized signal (fired once per auth cycle, only after refresh is
+    // impossible or failed) closes that gap for every consumer without the
+    // hand-rolled `watch(isLoggedIn)` boilerplate each app used to need.
+    // The consumer's own `onUnauthorized` config keeps running first (it
+    // typically clears the core AuthStateManager); this listener clears the
+    // admin store (so persisted `isLogin` doesn't resurrect the session on
+    // reload) and redirects with a `next` deep-link back to the current page.
+    if (router && options.auth?.sessionExpiredRedirect !== false) {
+      // Optional call: tolerates HttpClient builds predating addUnauthorizedListener.
+      options.client.addUnauthorizedListener?.(() => {
+        useAdminAuthStore().logout()
+        const current = router.currentRoute.value
+        const onLogin =
+          current.name === 'login' ||
+          (explicitLoginPath !== undefined &&
+            (current.path === explicitLoginPath ||
+              current.path.startsWith(`${explicitLoginPath}/`)))
+        if (onLogin) return
+        const query = { next: current.fullPath }
+        void router.replace(
+          explicitLoginPath !== undefined
+            ? { path: explicitLoginPath, query }
+            : { name: 'login', query },
+        )
+      })
     }
 
     // Seed the route store so TAdminSidebar can render the menu. The store
@@ -860,7 +1041,27 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     const superRoleSet = new Set((options.superAdminRoles ?? []).map((r) => r.toLowerCase()))
     const isSuper =
       user.superUser === true || roles.some((r) => superRoleSet.has(r.toLowerCase()))
-    if (isSuper) authStore.setSuperUser(true)
+    // Write UNCONDITIONALLY (true OR false). A one-way `if (isSuper) setSuperUser(true)`
+    // let a previous super-admin session's `true` — persisted by the auth store — leak
+    // into the NEXT sign-in of a non-super user (e.g. a Business admin): `isSuperUser`
+    // stayed true, so `useAdminRouteStore.menus` kept bypassing the permission filter
+    // and showed every menu. Overwriting with the current user's real tier on every
+    // permission load closes that cross-session leak.
+    authStore.setSuperUser(isSuper)
+
+    // Drop any persisted tabs the freshly-resolved user can't open — the
+    // cross-session tab leak (a prior super-admin's Diagnostics / MCP / Sandbox
+    // tabs surviving into a Business admin sign-in and 403'ing on click), the
+    // sibling of the `isSuperUser` leak fixed by writing it unconditionally
+    // above. `deniedRouteNames` is empty for super users / before this load, so
+    // this is a no-op except for a real privilege downgrade. Best-effort: never
+    // let tab housekeeping break the identity load.
+    try {
+      const routeStore = useAdminRouteStore()
+      useAdminTabStore().pruneTabs(routeStore.deniedRouteNames)
+    } catch {
+      // ignore — tabs are cosmetic; the navigation guard still blocks access
+    }
     return permissions
   }
 

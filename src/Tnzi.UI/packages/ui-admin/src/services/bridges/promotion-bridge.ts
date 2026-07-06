@@ -3,22 +3,16 @@
  * (`useAdminCouponApi`, wrapping `/admin/promotions/*` exposed by
  * `Tnzi.Payment.Controllers.Admin.DefaultPromotionAdminController`).
  *
- * Delegates to the canonical `useAdminCouponApi` factory in
- * `@tnzi/core/services/payment` (getList / getById / create / update /
- * deactivate). This file keeps the bridge's original public surface
- * (`PromotionDto` / `CreatePromotionDto` / `UpdatePromotionDto` /
- * `PromotionQueryDto` re-exports + `createPromotionBridge`) so consuming
- * pages are unaffected.
+ * Shaped for the standard `useCrudPage` flow: `create` / `update` accept the
+ * page's `Partial<PromotionDto>` form model and project it onto the backend
+ * `CreatePromotionDto` / `UpdatePromotionDto` by WHITELIST — so the create path
+ * naturally drops `isActive` (not a create field) and the update path naturally
+ * drops `discountType` / `startTime` / `type` / `promotionCode` (immutable
+ * after creation, absent from `UpdatePromotionDto`).
  *
- * Backend notes (server-side filtering on `/admin/promotions` GET):
- *   • `PromotionQueryDto` exposes promotionCode/type/productType/activeOnly
- *     only — there is no free-text `searchText` filter (the page's search box
- *     is a no-op server-side). The page's `isActive` boolean is mapped to the
- *     backend's `activeOnly` flag (true → only active rows).
- *   • `UpdatePromotionDto` server-side has NO `discountType` / `startTime`
- *     fields, so the page-facing update payload (which carries them for form
- *     convenience) strips them before delegating — sending them would be
- *     silently ignored by the C# DTO.
+ * Backend note: `/admin/promotions` GET filters on
+ * promotionCode/type/productType/activeOnly only — no free-text search. The
+ * page's `isActive` boolean maps to the backend `activeOnly` flag.
  */
 import type { HttpClient } from '@tnzi/core/http'
 import {
@@ -32,30 +26,19 @@ import { unwrapResult as unwrap } from '../_mappers'
 // Re-export under the original bridge names consumed by pages.
 export type PromotionDto = CorePromotionDto
 export type CreatePromotionDto = CoreCreatePromotionDto
+export type UpdatePromotionDto = CoreUpdatePromotionDto
 
-// Re-export the enums as VALUES so the page can use them at runtime (switch
-// cases / form initializers) without importing @tnzi/core/services/* directly
-// — pages route through the bridge per the no-restricted-imports gate.
+// Re-export the enums as VALUES so the page can use them at runtime (form
+// initializers / select options) without importing @tnzi/core/services/*
+// directly — pages route through the bridge per the no-restricted-imports gate.
 export { DiscountType, PromotionType } from '@tnzi/core/services/payment'
 
-/**
- * Page-facing update payload. Superset of the backend `UpdatePromotionDto`:
- * the promotion edit form also carries `discountType` / `startTime` for UX
- * symmetry with the create form, but the backend update DTO has neither —
- * the bridge strips them before delegating.
- */
-export type UpdatePromotionDto = CoreUpdatePromotionDto & {
-  discountType?: number
-  startTime?: Date | string
-}
-
-/** Page-facing query shape (table page: page + active filter + free-text search). */
+/** Page-facing query shape (table page: page + active filter). */
 export interface PromotionQueryDto {
   pageIndex: number
   pageSize: number
-  type?: number | null
+  type?: string | number | null
   isActive?: boolean | null
-  searchText?: string | null
 }
 
 export interface PromotionBridgeDeps {
@@ -65,8 +48,8 @@ export interface PromotionBridgeDeps {
 export interface PromotionBridge {
   getList(query: PromotionQueryDto): Promise<{ items: PromotionDto[]; totalCount: number; pageIndex: number; pageSize: number }>
   getById(id: string): Promise<PromotionDto | null>
-  create(payload: CreatePromotionDto): Promise<PromotionDto | null>
-  update(id: string, payload: UpdatePromotionDto): Promise<void>
+  create(data: Partial<PromotionDto>): Promise<PromotionDto>
+  update(id: string, data: Partial<PromotionDto>): Promise<PromotionDto>
   deactivate(id: string): Promise<void>
 }
 
@@ -105,14 +88,48 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
     },
     getById: async (id: string) =>
       unwrap<PromotionDto | null>(await api.getById(id)),
-    create: async (payload: CreatePromotionDto) =>
-      unwrap<PromotionDto | null>(await api.create(payload)),
-    update: async (id: string, payload: UpdatePromotionDto) => {
-      // Strip fields the backend `UpdatePromotionDto` does not accept.
-      const { discountType: _discountType, startTime: _startTime, ...rest } = payload
-      void _discountType
-      void _startTime
-      await api.update(id, rest)
+    create: async (data: Partial<PromotionDto>) => {
+      // Whitelist onto CreatePromotionDto — drops isActive / id / usedCount /
+      // isValid that the create endpoint does not accept.
+      const body: CoreCreatePromotionDto = {
+        promotionCode: String(data.promotionCode ?? ''),
+        name: String(data.name ?? ''),
+        description: data.description ?? undefined,
+        type: data.type as CorePromotionDto['type'],
+        discountValue: Number(data.discountValue ?? 0),
+        discountType: data.discountType as CorePromotionDto['discountType'],
+        maxDiscountAmount: data.maxDiscountAmount ?? undefined,
+        minimumOrderAmount: data.minimumOrderAmount ?? undefined,
+        productType: data.productType ?? undefined,
+        applyScope: data.applyScope ?? undefined,
+        startTime: data.startTime ?? undefined,
+        endTime: data.endTime ?? undefined,
+        totalUsageLimit: data.totalUsageLimit ?? undefined,
+        perUserUsageLimit: data.perUserUsageLimit ?? undefined,
+        stackable: data.stackable ?? undefined,
+        priority: data.priority ?? undefined,
+        firstSubscriptionOnly: data.firstSubscriptionOnly ?? undefined,
+      }
+      return (unwrap<PromotionDto | null>(await api.create(body)) ?? ({} as PromotionDto))
+    },
+    update: async (id: string, data: Partial<PromotionDto>) => {
+      // Whitelist onto UpdatePromotionDto — drops discountType / startTime /
+      // type / promotionCode (immutable after creation) + read-only fields.
+      const body: CoreUpdatePromotionDto = {
+        name: data.name ?? undefined,
+        description: data.description ?? undefined,
+        discountValue: data.discountValue ?? undefined,
+        maxDiscountAmount: data.maxDiscountAmount ?? undefined,
+        minimumOrderAmount: data.minimumOrderAmount ?? undefined,
+        endTime: data.endTime ?? undefined,
+        totalUsageLimit: data.totalUsageLimit ?? undefined,
+        perUserUsageLimit: data.perUserUsageLimit ?? undefined,
+        stackable: data.stackable ?? undefined,
+        priority: data.priority ?? undefined,
+        isActive: data.isActive ?? undefined,
+      }
+      await api.update(id, body)
+      return { ...(data as PromotionDto), id }
     },
     deactivate: async (id: string) => {
       await api.deactivate(id)

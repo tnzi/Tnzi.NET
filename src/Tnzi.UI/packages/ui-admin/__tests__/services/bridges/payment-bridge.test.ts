@@ -43,13 +43,12 @@ function mockAdminRefundApi() {
         {
           id: 'r1',
           refundNo: 'REF-001',
-          paymentId: 'p1',
-          paymentNo: 'PAY-001',
-          amount: 50,
+          tradeNo: 'TRADE-001',
+          refundAmount: 50,
+          currency: 'USD',
           reason: 'Customer request',
-          status: 0,
+          status: 'Pending',
           creationTime: '2026-01-02T00:00:00Z',
-          lastModificationTime: null,
         },
       ],
       totalCount: 1,
@@ -169,25 +168,8 @@ describe('payment-bridge', () => {
     expect(stats.totalTransactions).toBe(50)
   })
 
-  it('orders.create is a backend-gap reject stub', async () => {
-    const bridge = createPaymentBridge({
-      adminPaymentApi: mockAdminPaymentApi() as never,
-      adminRefundApi: mockAdminRefundApi() as never,
-      adminSubscriptionApi: mockAdminSubscriptionApi() as never,
-      adminStatisticsApi: mockAdminStatisticsApi() as never,
-    })
-    await expect(bridge.orders.create({})).rejects.toThrow()
-  })
-
-  it('orders.update is a backend-gap reject stub', async () => {
-    const bridge = createPaymentBridge({
-      adminPaymentApi: mockAdminPaymentApi() as never,
-      adminRefundApi: mockAdminRefundApi() as never,
-      adminSubscriptionApi: mockAdminSubscriptionApi() as never,
-      adminStatisticsApi: mockAdminStatisticsApi() as never,
-    })
-    await expect(bridge.orders.update('id', {})).rejects.toThrow()
-  })
+  // orders/subscriptions/refunds are read-only ledgers — the contracts expose
+  // ONLY fetch + real lifecycle endpoints (no create/update/delete stubs).
 
   // ---- subscriptions sub-contract ----
 

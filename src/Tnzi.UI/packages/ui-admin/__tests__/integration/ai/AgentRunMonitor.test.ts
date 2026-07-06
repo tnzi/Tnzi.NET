@@ -3,40 +3,14 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Phase 5 Task 5.4 — AgentRunMonitor SSE streaming page test.
+ * AgentRunMonitor — run trace viewer test.
  *
- * Lessons applied:
- *   - 1: setActivePinia in beforeEach
- *   - 12: bridge mocked at the boundary
- *   - vue-router useRoute mocked at module level
- *
- * NEW lesson 16: stub global EventSource via vi.stubGlobal so the page can
- * open a stream without a real server. The mock captures URLs, exposes
- * onmessage/onerror handlers, and tracks close() invocations.
+ * The page no longer uses a (non-existent) SSE tail endpoint: it fetches the
+ * recorded traces through `bridge.agentRuns.getTraces(runId)` and, while the
+ * selected run is non-terminal, re-polls every 3s (stops on a terminal
+ * transition and on unmount). The bridge is mocked at the boundary; vue-router
+ * useRoute/useRouter are mocked at module level.
  */
-
-interface MockESInstance {
-  url: string
-  onmessage: ((e: MessageEvent) => void) | null
-  onerror: ((e: Event) => void) | null
-  close: ReturnType<typeof vi.fn>
-}
-
-const esInstances: MockESInstance[] = []
-
-class MockEventSource {
-  url: string
-  onmessage: ((e: MessageEvent) => void) | null = null
-  onerror: ((e: Event) => void) | null = null
-  close = vi.fn()
-  constructor(url: string) {
-    this.url = url
-    esInstances.push(this as unknown as MockESInstance)
-  }
-  addEventListener() {
-    /* noop */
-  }
-}
 
 const fetchRunsMock = vi.fn(async () => ({
   items: [
@@ -44,7 +18,7 @@ const fetchRunsMock = vi.fn(async () => ({
       id: 'run-aaa-111',
       agentId: 'agent-1',
       status: 'Running',
-      executionMode: 0,
+      executionMode: 'Single',
       inputSummary: 'hi',
       outputSummary: '',
       totalInputTokens: 0,
@@ -55,8 +29,8 @@ const fetchRunsMock = vi.fn(async () => ({
     {
       id: 'run-bbb-222',
       agentId: 'agent-1',
-      status: 'Succeeded',
-      executionMode: 0,
+      status: 'Completed',
+      executionMode: 'Single',
       inputSummary: 'yo',
       outputSummary: 'done',
       totalInputTokens: 5,
@@ -70,6 +44,18 @@ const fetchRunsMock = vi.fn(async () => ({
   pageSize: 30,
 }))
 
+const getTracesMock = vi.fn(async (runId: string) => [
+  {
+    id: 'trace-1',
+    runId,
+    nodeId: null,
+    eventType: 'tool_call',
+    eventData: 'web-search(q="weather")',
+    durationMs: 12,
+    creationTime: '2026-04-13T10:00:01Z',
+  },
+])
+
 const cancelMock = vi.fn(async () => undefined)
 
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
@@ -78,6 +64,7 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
     agentRuns: {
       fetch: fetchRunsMock,
       cancel: cancelMock,
+      getTraces: getTracesMock,
       tail: vi.fn(),
     },
   }),
@@ -94,17 +81,16 @@ const stubs = {
   TSvgIcon: { name: 'TSvgIcon', props: ['icon', 'size'], template: '<span />' },
 }
 
-describe('AgentRunMonitor page (Phase 5 Task 5.4 SSE streaming)', () => {
+describe('AgentRunMonitor page (trace viewer + polling)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    esInstances.length = 0
     fetchRunsMock.mockClear()
+    getTracesMock.mockClear()
     cancelMock.mockClear()
-    vi.stubGlobal('EventSource', MockEventSource)
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   it('mounts and fetches runs filtered by route agentId', async () => {
@@ -115,52 +101,71 @@ describe('AgentRunMonitor page (Phase 5 Task 5.4 SSE streaming)', () => {
     const queryArg = fetchRunsMock.mock.calls[0]?.[0] as { filters: { agentId: string } }
     expect(queryArg.filters.agentId).toBe('agent-1')
 
-    // Two list rows rendered
+    // Two list rows rendered with their (humanised) status labels.
     const rows = wrapper.findAll('.t-run-monitor__list-row')
     expect(rows).toHaveLength(2)
     expect(wrapper.text()).toContain('Running')
-    expect(wrapper.text()).toContain('Succeeded')
+    expect(wrapper.text()).toContain('Completed')
   })
 
-  it('selecting a row opens an EventSource at the conventional stream URL', async () => {
+  it('selecting a row fetches that run\'s traces and renders them', async () => {
     const wrapper = mount(AgentRunMonitor, { global: { stubs } })
     await flushPromises()
 
-    expect(esInstances).toHaveLength(0)
+    expect(getTracesMock).not.toHaveBeenCalled()
     await wrapper.find('[data-run-id="run-aaa-111"]').trigger('click')
     await flushPromises()
 
-    expect(esInstances).toHaveLength(1)
-    expect(esInstances[0]?.url).toContain('/api/admin/agent-runs/run-aaa-111/stream')
-  })
-
-  it('SSE message updates traceEvents and renders the trace row', async () => {
-    const wrapper = mount(AgentRunMonitor, { global: { stubs } })
-    await flushPromises()
-    await wrapper.find('[data-run-id="run-aaa-111"]').trigger('click')
-    await flushPromises()
-
-    const es = esInstances[0]!
-    es.onmessage?.(
-      new MessageEvent('message', {
-        data: JSON.stringify({ type: 'tool_call', content: 'web-search(q="weather")' }),
-      }),
-    )
-    await flushPromises()
-
+    expect(getTracesMock).toHaveBeenCalledWith('run-aaa-111')
     expect(wrapper.text()).toContain('tool_call')
     expect(wrapper.text()).toContain('web-search')
   })
 
-  it('unmount closes the EventSource', async () => {
+  it('polls traces every 3s while the selected run is non-terminal', async () => {
+    vi.useFakeTimers()
     const wrapper = mount(AgentRunMonitor, { global: { stubs } })
     await flushPromises()
     await wrapper.find('[data-run-id="run-aaa-111"]').trigger('click')
     await flushPromises()
 
-    const es = esInstances[0]!
-    expect(es.close).not.toHaveBeenCalled()
+    const initial = getTracesMock.mock.calls.length
+    expect(initial).toBeGreaterThan(0)
+
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getTracesMock.mock.calls.length).toBeGreaterThan(initial)
+
+    // Unmount halts the poll loop.
     wrapper.unmount()
-    expect(es.close).toHaveBeenCalled()
+    const afterUnmount = getTracesMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(getTracesMock.mock.calls.length).toBe(afterUnmount)
+  })
+
+  it('does not poll a terminal run', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(AgentRunMonitor, { global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-run-id="run-bbb-222"]').trigger('click')
+    await flushPromises()
+
+    const initial = getTracesMock.mock.calls.length
+    expect(initial).toBe(1)
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(getTracesMock.mock.calls.length).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('cancels the selected run and refreshes', async () => {
+    const wrapper = mount(AgentRunMonitor, { global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-run-id="run-aaa-111"]').trigger('click')
+    await flushPromises()
+
+    const cancelBtn = wrapper.find('.t-run-monitor__cancel')
+    expect(cancelBtn.exists()).toBe(true)
+    await cancelBtn.trigger('click')
+    await flushPromises()
+
+    expect(cancelMock).toHaveBeenCalledWith('run-aaa-111')
   })
 })

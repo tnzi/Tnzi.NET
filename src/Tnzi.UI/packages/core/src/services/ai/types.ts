@@ -10,108 +10,124 @@ import type { PagedQueryDto } from '../../types/pagination';
 
 // ============================================
 // Enums
+//
+// The backend registers a global JsonStringEnumConverter, so every enum-typed
+// field is serialized on the wire as its PascalCase member NAME (e.g. "Single",
+// "Completed", "AwaitingInput") rather than a number. These are declared as
+// string enums (member name === value) so `dto.field === EnumType.Member` and
+// direct string comparisons both match the payload. Inputs accept either the
+// name or the legacy number, so sending the string value back is always safe.
 // ============================================
 
 /** Agent execution mode */
 export enum AgentExecutionMode {
-  Single = 0,
-  Handoff = 1,
-  AgentAsTools = 2,
-  Router = 3,
+  Single = 'Single',
+  Handoff = 'Handoff',
+  AgentAsTools = 'AgentAsTools',
+  Router = 'Router',
 }
 
 /** Agent run status */
 export enum AgentRunStatus {
-  Pending = 0,
-  Running = 1,
-  AwaitingApproval = 2,
-  Completed = 3,
-  Failed = 4,
-  Cancelled = 5,
+  Pending = 'Pending',
+  Running = 'Running',
+  AwaitingApproval = 'AwaitingApproval',
+  Completed = 'Completed',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled',
+  RequiresClarification = 'RequiresClarification',
 }
 
 /** Agent run node status */
 export enum AgentRunNodeStatus {
-  Pending = 0,
-  Running = 1,
-  Completed = 2,
-  Failed = 3,
-  Skipped = 4,
-  AwaitingApproval = 5,
-  Approved = 6,
-  Rejected = 7,
+  Pending = 'Pending',
+  Running = 'Running',
+  Completed = 'Completed',
+  Failed = 'Failed',
+  Skipped = 'Skipped',
+  AwaitingApproval = 'AwaitingApproval',
+  Approved = 'Approved',
+  Rejected = 'Rejected',
 }
 
 /** Workflow execution mode */
 export enum WorkflowExecutionMode {
-  Sequential = 0,
-  Parallel = 1,
-  Dag = 2,
+  Sequential = 'Sequential',
+  Parallel = 'Parallel',
+  Dag = 'Dag',
 }
 
-/** Workflow execution status */
+/**
+ * Workflow execution status.
+ * Member order mirrors the backend enum
+ * (`Tnzi.AI.Workflow.WorkflowExecutionStatus`) exactly — the previous numeric
+ * declaration mis-mapped Paused/AwaitingApproval and omitted Cancelled /
+ * AwaitingInput.
+ */
 export enum WorkflowExecutionStatus {
-  Running = 0,
-  Completed = 1,
-  Failed = 2,
-  Paused = 3,
-  AwaitingApproval = 4,
+  Running = 'Running',
+  Completed = 'Completed',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled',
+  Paused = 'Paused',
+  AwaitingApproval = 'AwaitingApproval',
+  AwaitingInput = 'AwaitingInput',
 }
 
 /** Evaluation run status */
 export enum EvaluationRunStatus {
-  Running = 0,
-  Completed = 1,
-  Failed = 2,
+  Running = 'Running',
+  Completed = 'Completed',
+  Failed = 'Failed',
 }
 
 /** Usage analytics time granularity */
 export enum UsageGranularity {
-  Daily = 0,
-  Weekly = 1,
-  Monthly = 2,
+  Daily = 'Daily',
+  Weekly = 'Weekly',
+  Monthly = 'Monthly',
 }
 
 /** Quota warning level */
 export enum QuotaWarningLevel {
-  None = 0,
-  Warning = 1,
-  Critical = 2,
+  None = 'None',
+  Warning = 'Warning',
+  Critical = 'Critical',
 }
 
 /** Skill scope */
 export enum SkillScope {
-  System = 0,
-  Tenant = 1,
-  User = 2,
+  System = 'System',
+  Tenant = 'Tenant',
+  User = 'User',
 }
 
 /**
  * Shared-resource visibility scope (Provider / Persona).
  * System rows are shared across tenants; Tenant rows are tenant-private.
- * Mirrors the backend ResourceScope enum (serialized as numbers).
+ * Mirrors the backend ResourceScope enum (serialized as PascalCase names).
  */
 export enum ResourceScope {
-  System = 0,
-  Tenant = 1,
-  User = 2,
+  System = 'System',
+  Tenant = 'Tenant',
+  User = 'User',
 }
 
 /** Skill source */
 export enum SkillSource {
-  FileSystem = 0,
-  Database = 1,
-  Plugin = 2,
-  Managed = 3,
-  Project = 4,
+  FileSystem = 'FileSystem',
+  Database = 'Database',
+  Plugin = 'Plugin',
+  Managed = 'Managed',
+  Project = 'Project',
 }
 
 /** Reasoning effort */
 export enum ReasoningEffort {
-  None = 0,
-  Low = 1,
-  Medium = 2,
-  High = 3,
+  None = 'None',
+  Low = 'Low',
+  Medium = 'Medium',
+  High = 'High',
 }
 
 // ============================================
@@ -732,8 +748,11 @@ export interface UserQuotaQueryDto extends PagedQueryDto {
   isEnabled?: boolean | null;
 }
 
-/** Budget check status (USD cost budget). 0=WithinBudget / 1=WarningThreshold / 2=BudgetExceeded */
-export type BudgetStatus = 0 | 1 | 2;
+/**
+ * Budget check status (USD cost budget). Serialized as the PascalCase member
+ * name by the backend's global JsonStringEnumConverter.
+ */
+export type BudgetStatus = 'WithinBudget' | 'WarningThreshold' | 'BudgetExceeded';
 
 /** Per-agent USD spend breakdown inside a budget summary. */
 export interface AgentSpendDto {

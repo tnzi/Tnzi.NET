@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/ai/evaluations")]
+[ApiAuthorize(PermissionName = "ai.evaluation.view")]
 public class DefaultEvaluationAdminController : ApiAdminControllerBase
 {
     protected readonly IEvaluationService EvaluationService;

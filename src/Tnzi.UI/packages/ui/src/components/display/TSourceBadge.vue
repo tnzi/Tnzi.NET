@@ -33,9 +33,13 @@ import TSvgIcon from './TSvgIcon.vue'
  *
  * Consumers pass either the canonical English source key (`'database' |
  * 'filesystem' | 'embedded' | 'code' | 'workspace' | 'config'`) or the
- * raw backend enum (which we lower-case-normalise here). The `translate`
- * prop resolves `admin.shared.source.<key>` i18n; the fallback uses
- * a built-in English string so the badge keeps reading even on hosts
+ * raw backend enum. Since the backend registers `JsonStringEnumConverter`
+ * globally, source enums now serialise as their PascalCase MEMBER NAME
+ * (`"FileSystem"`, `"Database"`, `"Plugin"`, ...); the component lower-cases +
+ * strips separators so those match the canonical keys. A raw numeric ordinal is
+ * still accepted for backward compatibility (see {@link SKILL_SOURCE_NUMERIC}).
+ * The `translate` prop resolves `admin.shared.source.<key>` i18n; the fallback
+ * uses a built-in English string so the badge keeps reading even on hosts
  * without the i18n keys installed.
  */
 export type SourceKind =
@@ -65,10 +69,10 @@ interface Props {
 
 const props = defineProps<Props>()
 
-// SkillSource enum (Tnzi.AI/Skills/Models/SkillDefinition.cs) — backend
-// emits numeric values when JsonStringEnumConverter isn't installed. We map
-// each ordinal here so a raw `0..4` from the wire still produces the right
-// badge.
+// SkillSource enum (Tnzi.AI/Skills/Models/SkillDefinition.cs) — LEGACY numeric
+// compatibility. With JsonStringEnumConverter installed the wire now carries the
+// member NAME string (handled by the switch below); this ordinal map only kicks
+// in for a raw `0..4` from an older payload so the badge keeps rendering.
 const SKILL_SOURCE_NUMERIC: Record<number, SourceKind> = {
   0: 'filesystem',
   1: 'database',
@@ -78,12 +82,14 @@ const SKILL_SOURCE_NUMERIC: Record<number, SourceKind> = {
 }
 
 const normalized = computed<SourceKind>(() => {
-  // Numeric path — interpret as SkillSource enum ordinal first.
+  // Legacy numeric path — interpret as SkillSource enum ordinal.
   if (typeof props.value === 'number') {
     return SKILL_SOURCE_NUMERIC[props.value] ?? 'database'
   }
+  // Primary path: the PascalCase member name string (JsonStringEnumConverter),
+  // lower-cased + separator-stripped so "FileSystem" → "filesystem" etc.
   const raw = String(props.value ?? '').toLowerCase().replace(/[\s_-]/g, '')
-  // A bare numeric string (`"1"`) — same enum-ordinal interpretation.
+  // A bare numeric string (`"1"`) — legacy ordinal interpretation.
   if (/^\d+$/.test(raw)) {
     return SKILL_SOURCE_NUMERIC[Number(raw)] ?? 'database'
   }

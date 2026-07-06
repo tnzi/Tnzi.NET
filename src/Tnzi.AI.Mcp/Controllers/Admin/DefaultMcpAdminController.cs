@@ -10,6 +10,7 @@ namespace Tnzi.AI.Mcp.Controllers.Admin;
 [DefaultController]
 [Route("admin/mcp")]
 [ApiExplorerSettings(GroupName = "admin")]
+[ApiAuthorize(PermissionName = "ai.mcp.view")]
 public class DefaultMcpAdminController : ApiAdminControllerBase
 {
     private readonly IMcpServerHost _mcpServerHost;

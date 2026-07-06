@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/ai/personas")]
+[ApiAuthorize(PermissionName = "ai.persona.view")]
 public class DefaultAgentPersonaAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentPersonaService PersonaService;

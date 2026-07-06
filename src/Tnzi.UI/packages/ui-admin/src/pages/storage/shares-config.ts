@@ -1,5 +1,7 @@
 import { h } from 'vue'
 import { NTag } from 'naive-ui'
+import type { StatusType } from '@tnzi/ui'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import type { FileShareSummaryDto } from '@tnzi/core/services/storage'
@@ -8,6 +10,26 @@ import { formatDateTime } from '@tnzi/core'
 // Aligned to Tnzi.Storage.Dtos.FileShareSummaryDto. `allColumns` is typed as
 // the untyped `ColumnDef[]`, so the render row is cast to the DTO locally.
 const asShare = (row: Record<string, unknown>) => row as unknown as FileShareSummaryDto
+
+// Absolute i18n namespace — TStatusBadge's admin wrapper resolves `labelKey`
+// from the locale root, so mapping keys must be fully qualified.
+const SHARE_NS = 'admin.modules.storage.shares'
+
+// The share's effective state is derived (priority: disabled > expired >
+// exhausted > active) into a single token, then mapped to the status pill.
+const shareStatusMapping: Record<string, { type: StatusType; labelKey: string }> = {
+  disabled: { type: 'default', labelKey: `${SHARE_NS}.status.disabled` },
+  expired: { type: 'error', labelKey: `${SHARE_NS}.status.expired` },
+  exhausted: { type: 'error', labelKey: `${SHARE_NS}.status.exhausted` },
+  active: { type: 'success', labelKey: `${SHARE_NS}.status.active` },
+}
+
+function shareState(row: FileShareSummaryDto): 'disabled' | 'expired' | 'exhausted' | 'active' {
+  if (!row.isEnabled) return 'disabled'
+  if (row.isExpired) return 'expired'
+  if (row.isExhausted) return 'exhausted'
+  return 'active'
+}
 
 /** Share columns (translate fn injected by the page for status / password value labels). */
 export function buildShareColumns(t: (key: string) => string): ColumnDef[] {
@@ -37,13 +59,7 @@ export function buildShareColumns(t: (key: string) => string): ColumnDef[] {
     {
       key: 'status',
       title: 'columns.status',
-      render: (r) => {
-        const row = asShare(r)
-        if (!row.isEnabled) return h(NTag, { size: 'small', bordered: false }, { default: () => t('status.disabled') })
-        if (row.isExpired) return h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('status.expired') })
-        if (row.isExhausted) return h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('status.exhausted') })
-        return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('status.active') })
-      },
+      render: (r) => h(TStatusBadge, { value: shareState(asShare(r)), mapping: shareStatusMapping }),
     },
     {
       key: 'expiresAt',

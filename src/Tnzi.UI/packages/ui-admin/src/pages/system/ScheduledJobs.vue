@@ -4,20 +4,24 @@
        default. The Edit action is suppressed (no editAction) because Hangfire
        recurring jobs are registered in code via
        IBackgroundJobManager.CreateRecurring; the admin surface is
-       list / trigger / delete only. -->
+       list / trigger / view / delete only. -->
   <TCrudPage
     :state="crud"
     :all-columns="scheduledJobColumns"
     :title="title"
     :translate="t"
-    :form-modal-width="760"
+    :detail-width="760"
+    :detail-title="detailTitle"
     :row-actions="rowActions"
+    :row-actions-collapse="false"
   >
-    <template #form="{ formData, mode }">
+    <!-- View opens the read-only detail drawer so a failed job's
+         error / lastJobId / lastJobState are reachable (the table omits them). -->
+    <template #detail="{ data }">
       <TFormSchemaRenderer
         :schema="scheduledJobFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
+        :model="(data ?? {}) as Record<string, unknown>"
+        :readonly="true"
         :translate="t"
         :columns="2"
       />
@@ -28,19 +32,19 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { deleteAction, type RowAction } from '../../headless/rowActions'
+import { deleteAction, viewAction, type RowAction } from '../../headless/rowActions'
 import { createSystemBridge, type ScheduledJobDto } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { scheduledJobColumns, scheduledJobFormSchema } from './scheduled-job-config'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 
 const title = 'title'
 // Wired to Tnzi.Hangfire /admin/scheduled-jobs (2026-04-14). Client is
 // injected by createTnziUiAdmin({ client }) at app bootstrap.
 const bridge = createSystemBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('system.scheduledJobs', key)
+const t = makePageTranslator('system.scheduledJobs')
 const message = useSafeMessage()
 
 const crud = useCrudPage<ScheduledJobDto>({
@@ -57,8 +61,6 @@ const crud = useCrudPage<ScheduledJobDto>({
     }
   },
 })
-
-crud.refresh().catch(() => undefined)
 
 async function triggerJob(row: ScheduledJobDto): Promise<void> {
   if (!row.id) return
@@ -78,6 +80,9 @@ const rowActions: RowAction<ScheduledJobDto>[] = [
     disabled: (row) => row.removed === true,
     onClick: (row) => triggerJob(row),
   },
+  viewAction(crud),
   deleteAction(crud),
 ]
+
+const detailTitle = (row: ScheduledJobDto): string => row.id ?? ''
 </script>

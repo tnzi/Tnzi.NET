@@ -81,6 +81,7 @@ import { createAuthorizationBridge } from '../../services/bridges/authorization-
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
+import { PermissionCategory } from '@tnzi/core/services/authorization'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 
@@ -162,6 +163,27 @@ const columns = computed<DataTableColumns<PermissionRow>>(() => [
       h('code', { class: 't-permission-page__code' }, row.code ?? ''),
   },
   { key: 'description', title: t('columns.description'), minWidth: 200 },
+  {
+    key: 'category',
+    title: t('columns.category'),
+    width: 100,
+    align: 'center',
+    render: (row) =>
+      h(
+        NTag,
+        {
+          size: 'small',
+          bordered: false,
+          type: row.category === PermissionCategory.Technical ? 'warning' : 'default',
+        },
+        {
+          default: () =>
+            row.category === PermissionCategory.Technical
+              ? t('category.technical')
+              : t('category.business'),
+        },
+      ),
+  },
   {
     key: 'isEnabled',
     title: t('columns.isEnabled'),

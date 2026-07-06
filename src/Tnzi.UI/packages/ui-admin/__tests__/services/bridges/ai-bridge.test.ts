@@ -323,6 +323,18 @@ describe('ai-bridge', () => {
     expect(agentRunApi.cancel).toHaveBeenCalledWith('run-1')
   })
 
+  it('agentRuns.getTraces delegates to agentRunApi.getRunTraces', async () => {
+    const agentRunApi = mockAgentRunApi()
+    agentRunApi.getRunTraces.mockResolvedValueOnce([
+      { id: 't1', runId: 'run-1', eventType: 'tool_call', eventData: 'x', durationMs: 1, creationTime: 'now' },
+    ])
+    const bridge = createAiBridge({ agentRunApi: agentRunApi as never, client: {} as never })
+    const traces = await bridge.agentRuns.getTraces('run-1')
+    expect(agentRunApi.getRunTraces).toHaveBeenCalledWith('run-1')
+    expect(traces).toHaveLength(1)
+    expect(traces[0]?.eventType).toBe('tool_call')
+  })
+
   it('agentRuns.tail rejects (not implemented in core)', async () => {
     const bridge = makeBridge()
     await expect(bridge.agentRuns.tail('run-1')).rejects.toThrow(/not implemented/)

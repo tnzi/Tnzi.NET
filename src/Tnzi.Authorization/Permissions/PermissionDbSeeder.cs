@@ -40,15 +40,18 @@ public class PermissionDbSeeder
     private readonly IRepository<FunctionModule, Guid> _moduleRepository;
     private readonly IRepository<ModuleFunction, Guid> _functionRepository;
     private readonly ILogger<PermissionDbSeeder> _logger;
+    private readonly IOptions<Options.AuthorizationOptions>? _options;
 
     public PermissionDbSeeder(
         IRepository<FunctionModule, Guid> moduleRepository,
         IRepository<ModuleFunction, Guid> functionRepository,
-        ILogger<PermissionDbSeeder> logger)
+        ILogger<PermissionDbSeeder> logger,
+        IOptions<Options.AuthorizationOptions>? options = null)
     {
         _moduleRepository = Check.NotNull(moduleRepository);
         _functionRepository = Check.NotNull(functionRepository);
         _logger = Check.NotNull(logger);
+        _options = options;
     }
 
     /// <summary>
@@ -86,6 +89,31 @@ public class PermissionDbSeeder
         {
             _logger.LogDebug("No IPermissionDefinitionProvider declarations to seed.");
             return 0;
+        }
+
+        // Deployment-level category overrides win over provider declarations.
+        // Applied on the collapsed definition set so both the insert and the
+        // update paths below see the effective category.
+        var categoryOverrides = _options?.Value?.PermissionCategoryOverrides;
+        if (categoryOverrides is { Count: > 0 })
+        {
+            // context.Permissions is keyed case-sensitively; permission checks
+            // are case-insensitive everywhere else, so match overrides the same way.
+            var declaredByCode = context.Permissions.Values
+                .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var (code, category) in categoryOverrides)
+            {
+                if (declaredByCode.TryGetValue(code, out var declared))
+                {
+                    declared.Category = category;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Authorization.PermissionCategoryOverrides references code {Code} which no IPermissionDefinitionProvider declares; entry ignored.",
+                        code);
+                }
+            }
         }
 
         // Pass 1: upsert modules (groups), top-down so parents exist before
@@ -171,6 +199,9 @@ public class PermissionDbSeeder
                 if (existing.ModuleId != module.Id) { existing.ModuleId = module.Id; changed = true; }
                 if (existing.Name != perm.DisplayName) { existing.Name = perm.DisplayName; changed = true; }
                 if (existing.Description != perm.Description) { existing.Description = perm.Description; changed = true; }
+                // Category is a code-owned contract (like Name/Description),
+                // not an admin toggle — the provider declaration wins.
+                if (existing.Category != perm.Category) { existing.Category = perm.Category; changed = true; }
                 if (!existing.IsSystemManaged) { existing.IsSystemManaged = true; changed = true; }
                 if (changed)
                 {
@@ -187,6 +218,7 @@ public class PermissionDbSeeder
                     Description = perm.Description,
                     ModuleId = module.Id,
                     IsEnabled = perm.IsEnabled,
+                    Category = perm.Category,
                     IsSystemManaged = true,
                 };
                 await _functionRepository.InsertAsync(inserted, cancellationToken: cancellationToken);

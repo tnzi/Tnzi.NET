@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/skills")]
+[ApiAuthorize(PermissionName = "ai.skill.view")]
 public class DefaultSkillAdminController : ApiAdminControllerBase
 {
     protected readonly ISkillService SkillService;

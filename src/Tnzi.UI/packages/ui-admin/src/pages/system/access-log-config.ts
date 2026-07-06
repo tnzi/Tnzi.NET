@@ -50,7 +50,12 @@ export const accessLogColumns: ColumnDef<AccessLogRow>[] = [
         label: row.statusCode ? String(row.statusCode) : '—',
       }),
   },
-  { key: 'responseTime', title: 'columns.responseTime', width: 120 },
+  {
+    key: 'responseTime',
+    title: 'columns.responseTime',
+    width: 120,
+    render: (row) => (row.responseTime != null ? `${row.responseTime} ms` : '—'),
+  },
   { key: 'ipAddress', title: 'columns.ipAddress', minWidth: 120 },
   { key: 'userName', title: 'columns.userName', minWidth: 120 },
   {

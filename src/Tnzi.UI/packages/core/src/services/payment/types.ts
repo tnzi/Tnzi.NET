@@ -44,37 +44,29 @@ export {
 // ============================================
 
 /**
- * Payment record DTO
+ * Payment record DTO — mirrors Tnzi.Payment.Dtos.PaymentDto exactly.
+ *
+ * NOTE: the backend DTO keys the record on `tradeNo` (there is no `paymentNo`),
+ * carries no `userId` / `finalAmount` / `refundAmount` fields, and exposes the
+ * money as `originalAmount` / `paidAmount` / `discountAmount`.
  */
-export interface PaymentDto extends AuditedEntity<string> {
-  tradeNo?: string;
-  paymentNo: string;
+export interface PaymentDto {
+  id: string;
+  tradeNo: string;
   externalTradeNo?: string | null;
   businessOrderNo: string;
   businessType: BusinessType;
-  amount: number;
-  originalAmount?: number;
-  paidAmount?: number;
+  originalAmount: number;
+  paidAmount: number;
+  discountAmount: number;
   currency: string;
   status: PaymentStatus;
-  channelCode?: string | null;
-  channelName?: string | null;
-  channelTransactionId?: string | null;
-  paymentMethod?: PaymentMethod | null;
+  channelCode: string;
+  paymentMethod: PaymentMethod;
   description?: string | null;
   expireTime?: Date | string | null;
   paidTime?: Date | string | null;
-  closedTime?: Date | string | null;
-  userId: string;
-  userName?: string | null;
-  couponId?: string | null;
-  couponCode?: string | null;
-  discountAmount: number;
-  finalAmount: number;
-  refundAmount: number;
-  extraData?: string | null;
-  qrCodeUrl?: string | null;
-  h5Url?: string | null;
+  creationTime: Date | string;
 }
 
 /**
@@ -146,26 +138,26 @@ export interface PaymentQueryDto extends SortedPagedQueryDto {
 // ============================================
 
 /**
- * Refund DTO
+ * Refund DTO — mirrors Tnzi.Payment.Dtos.RefundDto exactly.
+ *
+ * NOTE: the backend keys the refund on `tradeNo` (the related payment's trade
+ * number, mapped from `Refund.Payment.TradeNo`). There is no `paymentId` /
+ * `paymentNo` / `amount` / `channelRefundId` / `refundedTime` / `operator*`
+ * field — the amount is `refundAmount`.
  */
-export interface RefundDto extends AuditedEntity<string> {
+export interface RefundDto {
+  id: string;
   refundNo: string;
-  tradeNo?: string;
-  paymentId: string;
-  paymentNo: string;
-  amount: number;
-  refundAmount?: number;
+  tradeNo: string;
+  refundAmount: number;
+  currency: string;
   reason: string;
   status: RefundStatus;
-  channelRefundId?: string | null;
   approverId?: string | null;
   approveTime?: Date | string | null;
   approveRemark?: string | null;
   completedTime?: Date | string | null;
-  currency?: string;
-  refundedTime?: Date | string | null;
-  operatorId?: string | null;
-  operatorName?: string | null;
+  creationTime: Date | string;
 }
 
 /**

@@ -6,31 +6,16 @@
     transform-origin="center"
     @update:show="emit('update:show', $event)"
   >
-    <div class="t-chat-window" :class="{ 't-chat-window--max': maximized }" :style="windowStyle">
-      <!-- Window title bar: a slim drag strip over the conversation pane (right
-           column only) holding the window controls. The conversation list owns
-           the full height of the left column, so its avatar/search row sits at
-           the very top with no empty strip above it. Keeping maximize/close here
-           means the pane's "..." info button reads as a content action. -->
-      <div class="t-chat-window__titlebar" @mousedown="onDragStart">
-        <div class="t-chat-window__winctl" @mousedown.stop>
-          <button
-            v-if="!isSm"
-            class="t-chat-window__winbtn"
-            :title="maximized ? t('window.restore') : t('window.maximize')"
-            @click="onToggleMaximize"
-          >
-            <Icon :icon="maximized ? 'mdi:window-restore' : 'mdi:window-maximize'" :width="15" />
-          </button>
-          <button
-            class="t-chat-window__winbtn t-chat-window__winbtn--close"
-            :title="t('close')"
-            @click="emit('update:show', false)"
-          >
-            <Icon icon="mdi:close" :width="16" />
-          </button>
-        </div>
-      </div>
+    <div
+      class="t-chat-window"
+      :class="{ 't-chat-window--max': maximized, 't-chat-window--dragging': dragging }"
+      :style="windowStyle"
+    >
+      <!-- No separate title strip anywhere: each column's 52px header hosts the
+           window controls - the pane via #winctl (desktop: maximize+close,
+           phone: close), the list via #actions (phone-only close, since the
+           pane is hidden there while browsing the list). Both views therefore
+           share one constant 52px top line with zero jump when switching. -->
 
       <!-- On phones the list and pane share one column and swap; the Transitions
            give an iOS-style push (pane slides in from the right over the list,
@@ -45,10 +30,26 @@
           :my-status="store.myStatus"
           :my-name="auth.userInfo?.displayName || auth.userInfo?.username"
           :my-avatar-file-id="auth.userInfo?.avatarId ?? undefined"
+          :presence="store.config.enablePresence"
           @select="onSelect"
           @new-chat="newChatShow = true"
           @set-status="(s) => store.setMyStatus(s)"
-        />
+          @set-sticky="(id, v) => store.setMemberSettings(id, { isSticky: v })"
+          @set-muted="(id, v) => store.setMemberSettings(id, { isMuted: v })"
+          @mark-read="(id) => store.markRead(id)"
+          @hide="(id) => store.hideConversation(id)"
+          @delete="(id) => store.deleteConversation(id)"
+        >
+          <template v-if="isSm" #actions>
+            <button
+              class="t-chat-window__winbtn t-chat-window__winbtn--close"
+              :title="t('close')"
+              @click="emit('update:show', false)"
+            >
+              <Icon icon="mdi:close" :width="16" />
+            </button>
+          </template>
+        </TConversationList>
       </Transition>
       <Transition name="t-chat-pane">
         <TConversationPane
@@ -64,6 +65,7 @@
           :upload-kind="uploadKind"
           :upload-name="uploadName"
           :info-show="infoShow"
+          :attachments="store.config.enableFileMessages"
           @send="(text) => store.activeId && store.sendText(store.activeId, text)"
           @pick-file="onPickFile"
           @drop-file="onDroppedFile"
@@ -72,7 +74,30 @@
           @panel-changed="() => store.fetchConversations()"
           @open-conversation="onOpenConversation"
           @back="onBack"
-        />
+          @drag-start="onDragStart"
+        >
+          <!-- Window controls, rendered at the far right of the pane header on
+               desktop (hidden on phones - the title strip has the close). -->
+          <template #winctl>
+            <div class="t-chat-window__winctl">
+              <button
+                v-if="!isSm"
+                class="t-chat-window__winbtn"
+                :title="maximized ? t('window.restore') : t('window.maximize')"
+                @click="onToggleMaximize"
+              >
+                <Icon :icon="maximized ? 'mdi:window-restore' : 'mdi:window-maximize'" :width="15" />
+              </button>
+              <button
+                class="t-chat-window__winbtn t-chat-window__winbtn--close"
+                :title="t('close')"
+                @click="emit('update:show', false)"
+              >
+                <Icon icon="mdi:close" :width="16" />
+              </button>
+            </div>
+          </template>
+        </TConversationPane>
       </Transition>
     </div>
   </NModal>
@@ -96,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NModal, useMessage } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { MessageContentType } from '@tnzi/core/services/chat'
@@ -145,12 +170,16 @@ const infoShow = ref(false)
 // Maximize the whole window to near-full-viewport and back to the 840×670 base.
 const maximized = ref(false)
 
-// ── Window dragging (by the conversation-pane title bar) ────────────────────
+// ── Window dragging (by the conversation-pane header, via drag-start) ───────
 // The window is centered by NModal; a translate offset moves it from there.
-// Disabled while maximized (it already fills the viewport).
+// Disabled while maximized (it already fills the viewport) and on phones (the
+// window is near-fullscreen there - dragging only pushes it off-screen).
 const dragOffset = ref({ x: 0, y: 0 })
+// While true the transform transition is suppressed so the window tracks the
+// cursor 1:1; when false (e.g. the resize recenter) transform changes animate.
+const dragging = ref(false)
 const windowStyle = computed(() =>
-  maximized.value ? {} : { transform: `translate(${dragOffset.value.x}px, ${dragOffset.value.y}px)` },
+  maximized.value || isSm.value ? {} : { transform: `translate(${dragOffset.value.x}px, ${dragOffset.value.y}px)` },
 )
 
 let dragStart = { x: 0, y: 0, offX: 0, offY: 0 }
@@ -158,17 +187,27 @@ function onDragMove(e: MouseEvent) {
   dragOffset.value = { x: dragStart.offX + (e.clientX - dragStart.x), y: dragStart.offY + (e.clientY - dragStart.y) }
 }
 function onDragEnd() {
+  dragging.value = false
   window.removeEventListener('mousemove', onDragMove)
   window.removeEventListener('mouseup', onDragEnd)
   document.body.style.userSelect = ''
 }
 function onDragStart(e: MouseEvent) {
-  if (maximized.value) return
+  if (maximized.value || isSm.value) return
   dragStart = { x: e.clientX, y: e.clientY, offX: dragOffset.value.x, offY: dragOffset.value.y }
+  dragging.value = true
   document.body.style.userSelect = 'none'
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragEnd)
 }
+
+// A viewport resize recenters the window: a stale drag offset that was fine at
+// the old size can leave the window half (or fully) off-screen at the new one,
+// with no way to grab it back - especially when crossing into the phone layout.
+function onViewportResize() {
+  if (dragOffset.value.x !== 0 || dragOffset.value.y !== 0) dragOffset.value = { x: 0, y: 0 }
+}
+onMounted(() => window.addEventListener('resize', onViewportResize))
 
 function onToggleMaximize() {
   maximized.value = !maximized.value
@@ -190,7 +229,10 @@ watch(
   },
 )
 
-onUnmounted(onDragEnd)
+onUnmounted(() => {
+  onDragEnd()
+  window.removeEventListener('resize', onViewportResize)
+})
 
 function onSelect(id: string) {
   // Switching conversations closes the info panel so it never shows stale detail.
@@ -243,6 +285,9 @@ function onPickFile() {
 // render as an inline preview bubble, everything else as a download chip).
 async function uploadAndSend(file: File) {
   if (!file || !store.activeId || !client) return
+  // Deployment gate — the entry points are hidden, but a stray drop can still
+  // land here; the server rejects media messages regardless.
+  if (!store.config.enableFileMessages) return
 
   // Reject an over-limit file up front with a clear message (previously the
   // upload just failed silently — no progress, no error).
@@ -326,11 +371,13 @@ function onDroppedFile(file: File) {
   /* 250px conversation list + 590px conversation pane = 840px base width.
      The pane is the flexible column so the list keeps its fixed footprint. */
   grid-template-columns: 250px minmax(0, 1fr);
-  /* Row 1 = window title bar (drag + window controls); row 2 = the panes.
-     Bounding row 2 to the window height keeps the right pane's flex layout
-     (header / scrolling messages / composer) constrained instead of the
-     content height pushing the composer out of the clipped box. */
-  grid-template-rows: 32px minmax(0, 1fr);
+  /* Single row on desktop: each column owns the full window height. The
+     pane's 52px header doubles as the drag strip and hosts the window
+     controls, aligning with the list's avatar/search row. Bounding the row
+     to the window height keeps the pane's flex layout (header / scrolling
+     messages / composer) constrained instead of the content height pushing
+     the composer out of the clipped box. */
+  grid-template-rows: minmax(0, 1fr);
   /* Responsive: shrink with the viewport instead of overflowing it. */
   width: min(840px, 94vw);
   height: min(670px, 90vh);
@@ -340,7 +387,14 @@ function onDroppedFile(file: File) {
   border-radius: var(--tnzi-admin-radius-lg, 12px);
   overflow: hidden;
   box-shadow: var(--tnzi-shadow-drawer, 0 12px 48px rgba(0, 0, 0, 0.22));
-  transition: width 0.18s ease, height 0.18s ease;
+  /* transform animates the recenter snap (viewport resize / restore); while
+     actively dragging the --dragging class suppresses it so the window stays
+     glued to the cursor. */
+  transition: width 0.18s ease, height 0.18s ease, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.t-chat-window--dragging {
+  transition: none;
 }
 
 /* Maximized: near-full-viewport (desktop only — phones are already full-screen). */
@@ -356,30 +410,17 @@ function onDroppedFile(file: File) {
   height: 100%;
 }
 
-/* The conversation list owns the full height of the left column (rows 1+2) so
-   its avatar/search row reaches the very top — no empty strip above it. */
 .t-chat-window__left {
   grid-column: 1;
-  grid-row: 1 / -1;
+  grid-row: 1;
 }
 
 .t-chat-window__right {
   grid-column: 2;
-  grid-row: 2;
-}
-
-/* ── Window title bar (over the conversation pane only) ──────────────────── */
-.t-chat-window__titlebar {
-  grid-column: 2;
   grid-row: 1;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 6px;
-  background: var(--chat-bg);
-  cursor: move;
 }
 
+/* ── Window controls ─────────────────────────────────────────────────────── */
 .t-chat-window__winctl {
   display: flex;
   align-items: center;
@@ -422,22 +463,10 @@ function onDroppedFile(file: File) {
     position: relative;
   }
 
-  /* Single column on phones: the title bar spans the top (it holds the close
-     button), with the list/pane stacked below it in row 2 (the desktop layout
-     puts the list in column 1 spanning both rows — override that here). */
-  .t-chat-window__titlebar {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .t-chat-window__left {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
+  .t-chat-window__left,
   .t-chat-window__right {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 1;
   }
 
   /* ── iOS-style push between list ↔ conversation pane ────────────────────── */
@@ -446,10 +475,7 @@ function onDroppedFile(file: File) {
   .t-chat-pane-enter-active,
   .t-chat-pane-leave-active {
     position: absolute;
-    top: 32px;            /* below the title bar */
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
     will-change: transform;
   }

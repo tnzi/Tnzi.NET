@@ -1,8 +1,8 @@
 <template>
-  <TDetailLayout
+  <TDetailHost
+    :state="detail"
     layout="side"
     :sections="sections"
-    v-model:active-section="activeSection"
     :back="'/admin/ai/agents'"
     :translate="t"
   >
@@ -216,11 +216,11 @@
               <div v-if="runsError" class="t-agent-detail__error">{{ runsError }}</div>
               <ul v-else-if="recentRuns.length" class="t-agent-detail__runs-list">
                 <li v-for="run in recentRuns" :key="run.id">
-                  <router-link :to="`/admin/ai/agents/${agent?.id}/runs/${run.id}`">
+                  <router-link :to="{ name: 'ai.agents.runs', params: { agentId: agent?.id, runId: run.id } }">
                     <code>{{ run.id.slice(0, 8) }}</code>
                   </router-link>
                   <NTag size="tiny" :type="runStatusType(run.status)" :bordered="false">
-                    {{ run.status }}
+                    {{ runStatusLabel(run.status) }}
                   </NTag>
                   <span class="t-agent-detail__runs-time">{{ formatTime(run.creationTime) }}</span>
                 </li>
@@ -409,6 +409,7 @@
         <NModal
           v-model:show="memoryModal.show"
           preset="card"
+          size="small"
           :title="memoryModal.id ? t('detail.memory.editTitle') : t('detail.memory.addTitle')"
           class="w-520px max-w-96vw"
         >
@@ -454,25 +455,26 @@
         </NModal>
       </div>
     </template>
-  </TDetailLayout>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
 import { computed, h, reactive, ref, watch, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   NSpin, NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NTag, NButton,
   NSpace, NList, NListItem, NSlider, NPopconfirm, NModal, NDynamicTags, NProgress, useMessage,
   type DataTableColumns,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import TDetailLayout from '../../../components/detail/TDetailLayout.vue'
+import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TDetailSection from '../../../components/detail/TDetailSection.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import AgentResourcePicker, { type ResourcePickerItem } from './sections/AgentResourcePicker.vue'
 import AgentPersonaPanel from './sections/AgentPersonaPanel.vue'
-import type { DetailSection } from '../../../headless/useDetail'
-import { translatePageKey } from '../../_shared/translate'
+import { useDetail, type DetailSection } from '../../../headless/useDetail'
+import { useTabTitle } from '../../../headless/useTabTitle'
+import { makePageTranslator } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import type {
@@ -482,9 +484,8 @@ import type {
 } from '@tnzi/core/services/ai'
 
 const route = useRoute()
-const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('ai.agents', key)
+const t = makePageTranslator('ai.agents')
 
 // ui-admin shells don't always wrap with NMessageProvider, so `useMessage()`
 // may throw — guard and fall back to the inline status panels each section
@@ -520,11 +521,20 @@ const sections: DetailSection[] = [
   { key: 'validation', label: t('detail.health.title'), icon: 'mdi:shield-check-outline', group: t('detail.groups.operations') },
 ]
 
-const activeSection = ref<string>((route.query.section as string) || 'basicInfo')
+// The single detail engine, page mode. The active section is two-way bound to
+// the `?section=` query key (deep-linkable + the browser Back/Forward buttons
+// step through sections) — no hand-wired router.replace, `push` history so Back
+// returns to the previously viewed section within this agent's tab.
+const detail = useDetail({
+  mode: 'page',
+  sectionUrl: true,
+  sections,
+  defaultSection: 'basicInfo',
+})
+const activeSection = detail.activeSection
 
 watch(activeSection, (k) => {
-  void router.replace({ query: { ...route.query, section: k } })
-  maybeLoadSection(k)
+  if (k) maybeLoadSection(k)
 })
 
 /**
@@ -533,7 +543,7 @@ watch(activeSection, (k) => {
  * check — neither should fire on the initial detail paint. The A/B section is a
  * pure config form (no read), so it has nothing to lazy-load.
  */
-function maybeLoadSection(k: string): void {
+function maybeLoadSection(k: string | null): void {
   const id = currentRouteId()
   if (!id) return
   // Persona panel reuses the agent's version history for its version pills, so
@@ -550,6 +560,9 @@ function maybeLoadSection(k: string): void {
 // ---- State ----------------------------------------------------------------
 
 const agent = ref<AgentDto | null>(null)
+// This detail route opens its own tab per agent id; surface the agent name as
+// the tab title so two open agent details are distinguishable (not both "Agent Detail").
+useTabTitle(() => agent.value?.name)
 const personas = ref<AgentPersonaDto[]>([])
 const recentRuns = ref<AgentRunDto[]>([])
 
@@ -1241,14 +1254,27 @@ async function reloadPersonas(): Promise<void> {
 }
 
 function runStatusType(status: unknown): 'success' | 'error' | 'warning' | 'info' | 'default' {
-  switch (status) {
+  switch (String(status)) {
     case 'Completed': return 'success'
     case 'Failed': return 'error'
     case 'Cancelled': return 'warning'
     case 'Running':
-    case 'Pending': return 'info'
+    case 'Pending':
+    case 'AwaitingApproval':
+    case 'RequiresClarification': return 'info'
     default: return 'default'
   }
+}
+
+/**
+ * i18n label for an AgentRunStatus member name. The backend serializes the enum
+ * as its PascalCase name; `t` humanises the key on a dictionary miss so the
+ * label reads (e.g. "Awaiting Approval") even before locale entries land.
+ */
+function runStatusLabel(status: unknown): string {
+  const s = String(status ?? '')
+  if (!s) return ''
+  return t(`runStatus.${s.charAt(0).toLowerCase()}${s.slice(1)}`)
 }
 
 function formatTime(v?: string | Date | null): string {

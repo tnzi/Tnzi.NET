@@ -4,7 +4,8 @@
     Top: KPI strip (online users, total connections, timestamp). Body: a
     grouped table of online users + their connections (expandable rows
     showing per-connection IP/UA/Hub/groups). One destructive action per
-    row (force disconnect) gated by NPopconfirm.
+    row (force disconnect) declared via TResponsiveTable `:row-actions`
+    (confirm gated).
   -->
   <TContentPage :title="t('title')" :translate="t" scroll="fill">
     <template #actions>
@@ -17,7 +18,7 @@
       </NButton>
     </template>
 
-    <TKpiRow class="t-signalr-page__kpis">
+    <TKpiRow cols="1 s:2 m:4" class="t-signalr-page__kpis">
       <TKpiCard :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? 0" icon="mdi:account-group" />
       <TKpiCard :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? 0" icon="mdi:lan-connect" />
       <TKpiCard :label="t('kpi.hubs')" :value="hubCount" icon="mdi:hub" />
@@ -46,6 +47,9 @@
         :row-key="(row: OnlineUserDto) => row.userId"
         :loading="loading"
         :pagination="{ pageSize: 15 }"
+        :row-actions="rowActions"
+        :row-actions-title="t('cols.actions')"
+        :translate="t"
         :bordered="false"
         size="small"
         :flex-height="true"
@@ -57,12 +61,12 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import { type RowAction } from '../../headless/rowActions'
 import {
   NButton,
   NCard,
   NDataTable,
   NInput,
-  NPopconfirm,
   NTag,
   NText,
 } from 'naive-ui'
@@ -77,12 +81,11 @@ import {
   type OnlineUserDto,
   type SignalRStatsDto,
 } from '../../services/bridges/signalr-bridge'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createSignalRBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('system.signalr', key), params)
+const t = makePageTranslator('system.signalr')
 
 const loading = ref(false)
 const stats = ref<SignalRStatsDto | null>(null)
@@ -203,30 +206,20 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
     width: 120,
     align: 'right',
   },
-  {
-    title: () => t('cols.actions'),
-    key: 'actions',
-    width: 140,
-    align: 'right',
-    render: (row) =>
-      h(
-        NPopconfirm,
-        { onPositiveClick: () => disconnect(row.userId) },
-        {
-          trigger: () =>
-            h(
-              NButton,
-              { size: 'tiny', type: 'warning', tertiary: true },
-              {
-                icon: () => h(TSvgIcon, { icon: 'mdi:close-circle-outline', size: 12 }),
-                default: () => t('actions.disconnect'),
-              },
-            ),
-          default: () => t('disconnectConfirm'),
-        },
-      ),
-  },
 ])
+
+// Declarative operation column — force-disconnect every connection for a user
+// (confirm gated) via the existing disconnect handler.
+const rowActions: RowAction<OnlineUserDto>[] = [
+  {
+    key: 'disconnect',
+    label: 'actions.disconnect',
+    icon: 'mdi:close-circle-outline',
+    type: 'warning',
+    confirm: 'disconnectConfirm',
+    onClick: (row) => void disconnect(row.userId),
+  },
+]
 
 async function refresh(): Promise<void> {
   loading.value = true

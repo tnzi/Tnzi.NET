@@ -25,7 +25,7 @@
  *   import { TSchemaForm, type FormSchemaItem } from '@tnzi/ui'
  */
 import { defineComponent, h, type PropType } from 'vue'
-import { NInput } from 'naive-ui'
+import { NInput, NSelect, type SelectOption } from 'naive-ui'
 import { TSchemaForm, type FormSchemaItem, type FieldRenderer } from '@tnzi/ui'
 import TIconPicker from '../../components/inputs/TIconPicker.vue'
 import TJsonEditor from '../../components/inputs/TJsonEditor.vue'
@@ -70,6 +70,60 @@ const adminFieldRenderers: Record<string, FieldRenderer> = {
           value: (ctx.value as string) ?? '',
           'onUpdate:value': (v: string) => ctx.onUpdate(v),
         }),
+}
+
+export interface SelectRendererOptions {
+  /** Already-translated placeholder text (the page owns t()). */
+  placeholder?: string
+  /** Multi-select (tags). Empty selection normalises to `[]`. */
+  multiple?: boolean
+  /** Client-side type-ahead filtering (default true). */
+  filterable?: boolean
+  /** Show the clear affordance (default true). */
+  clearable?: boolean
+}
+
+/**
+ * Shared field renderer for an `NSelect` bound to **dynamic/reactive options** —
+ * the case form-schema's declarative `type: 'select'` can't cover because its
+ * options are loaded async (parent lists, account trees, tax agencies, …).
+ *
+ * Replaces the near-identical `h(NSelect, { value, options, placeholder,
+ * filterable, clearable, disabled, onUpdate })` block that ~6 pages hand-wrote
+ * (Menus / Accounts / FunctionModules / Items / Payments / Taxes). The page
+ * keeps declaring the business part — WHICH options via a `() => options`
+ * getter (so it stays reactive) and the resolved placeholder — while the
+ * NSelect wiring (value coercion, clear/filter, readonly → disabled, update
+ * normalisation) is unified here.
+ *
+ * ```ts
+ * const fieldRenderers = {
+ *   'fm-parent': selectRenderer(() => parentOptions.value, { placeholder: t('form.parentIdPlaceholder') }),
+ *   'tags':      selectRenderer(() => tagOptions.value, { multiple: true }),
+ * }
+ * ```
+ */
+export function selectRenderer(
+  getOptions: () => SelectOption[],
+  opts: SelectRendererOptions = {},
+): FieldRenderer {
+  const { placeholder, multiple = false, filterable = true, clearable = true } = opts
+  return (ctx) =>
+    // Cast to a loose record — naive's `options` prop type (SelectMixedOption)
+    // over-constrains our plain `{ label, value }` list; mirrors _selector-factory.
+    h(NSelect, {
+      value: multiple
+        ? (Array.isArray(ctx.value) ? (ctx.value as Array<string | number>) : [])
+        : ((ctx.value as string | number | null) ?? null),
+      options: getOptions(),
+      multiple,
+      placeholder,
+      filterable,
+      clearable,
+      disabled: ctx.readonly,
+      'onUpdate:value': (v: unknown) =>
+        ctx.onUpdate(multiple ? (v ?? []) : (v ?? undefined)),
+    } as Record<string, unknown>)
 }
 
 const TFormSchemaRenderer = defineComponent({

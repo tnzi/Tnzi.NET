@@ -6,6 +6,7 @@ namespace Tnzi.Notification.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/notifications")]
+[ApiAuthorize(PermissionName = "notification.message.view")]
 public class DefaultNotificationAdminController : ApiAdminControllerBase
 {
     protected readonly INotificationService NotificationService;

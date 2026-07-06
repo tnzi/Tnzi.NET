@@ -6,6 +6,7 @@ namespace Tnzi.Localization.Controllers.Admin;
 /// </summary>
 [Route("admin/localization")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "system.localization.view")]
 public class DefaultLocalizationAdminController : ApiAdminControllerBase
 {
     protected readonly IMissingTranslationTracker MissingTranslationTracker;

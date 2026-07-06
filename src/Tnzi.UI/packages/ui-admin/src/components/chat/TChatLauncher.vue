@@ -1,7 +1,7 @@
 <template>
   <NBadge :value="unreadCount" :show="unreadCount > 0" :max="99" type="error" :offset="[-2, 2]">
     <button class="t-chat-launcher" type="button" :title="t('launcher.title')" @click="emit('open')">
-      <Icon icon="mdi:message-text-outline" :width="20" :height="20" />
+      <Icon icon="nimbus:chat-dots" :width="20" :height="20" />
     </button>
   </NBadge>
 </template>

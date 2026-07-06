@@ -6,18 +6,21 @@ public class GroupService : ApplicationService, IGroupService
     private readonly IRepository<ConversationMember, Guid> _memberRepository;
     private readonly IRepository<ChatMessage, Guid> _messageRepository;
     private readonly IConversationService _conversationService;
+    private readonly IOptionsSnapshot<ChatOptions> _options;
 
     public GroupService(
         IServiceProvider serviceProvider,
         IRepository<Conversation, Guid> conversationRepository,
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<ChatMessage, Guid> messageRepository,
-        IConversationService conversationService) : base(serviceProvider)
+        IConversationService conversationService,
+        IOptionsSnapshot<ChatOptions> options) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
         _messageRepository = Check.NotNull(messageRepository);
         _conversationService = Check.NotNull(conversationService);
+        _options = Check.NotNull(options);
     }
 
     // Sync — no await in body; using static avoids CS1998 warning.
@@ -39,9 +42,19 @@ public class GroupService : ApplicationService, IGroupService
     {
         Check.NotNull(input);
         Check.NotNullOrWhiteSpace(input.Title, nameof(input.Title));
+
+        // Deployment-level feature gate: the frontend hides the entry when disabled,
+        // but the write path must be enforced here regardless.
+        var opts = _options.Value;
+        if (!opts.EnableGroups)
+            return Fail<ConversationDto>("Group chat is disabled.", 403);
+
         var me = GetRequiredCurrentUser().Id!.Value;
 
         var memberIds = (input.MemberIds ?? new List<Guid>()).Where(id => id != Guid.Empty && id != me).Distinct().ToList();
+        if (opts.MaxGroupMembers > 0 && memberIds.Count + 1 > opts.MaxGroupMembers)
+            return Fail<ConversationDto>($"Group size exceeds the maximum of {opts.MaxGroupMembers} members.", 400);
+
         var now = DateTime.UtcNow;
 
         var conv = await ExecuteInUnitOfWorkAsync(async ct =>
@@ -88,6 +101,10 @@ public class GroupService : ApplicationService, IGroupService
 
     public async Task<Result> AddMembersAsync(Guid conversationId, IEnumerable<Guid> userIds)
     {
+        var opts = _options.Value;
+        if (!opts.EnableGroups)
+            return Fail("Group chat is disabled.", 403);
+
         var me = GetRequiredCurrentUser().Id!.Value;
         var conv = await _conversationRepository.FindAsync(conversationId);
         if (conv == null || conv.Type != ConversationType.Group) return Fail("Group not found.", 404);
@@ -101,6 +118,13 @@ public class GroupService : ApplicationService, IGroupService
             .Where(m => m.ConversationId == conversationId)
             .ToListAsync();
         var existingActive = existing.Where(m => m.RemovedAt == null).Select(m => m.UserId).ToHashSet();
+
+        // Enforce the member cap against the actual number of NEW members (already-active
+        // ids are skipped below and must not count toward the limit).
+        var newCount = toAdd.Count(id => !existingActive.Contains(id));
+        if (opts.MaxGroupMembers > 0 && conv.MemberCount + newCount > opts.MaxGroupMembers)
+            return Fail($"Group size exceeds the maximum of {opts.MaxGroupMembers} members.", 400);
+
         var now = DateTime.UtcNow;
         var added = new List<Guid>();
 

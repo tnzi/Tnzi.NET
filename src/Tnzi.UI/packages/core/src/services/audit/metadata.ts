@@ -3,12 +3,18 @@
  */
 
 /**
- * Audit result type
+ * Audit result type.
+ *
+ * Serialized as PascalCase member names by the backend's global
+ * `JsonStringEnumConverter` (C# `AuditResultType`: Success=1 / Failed=2 /
+ * Warning=3). The string-valued enum keeps the wire format and member names
+ * in one place — comparisons and filter option values use `AuditResultType.*`
+ * directly and match the response strings.
  */
 export enum AuditResultType {
-  Success = 1,
-  Failed = 2,
-  Warning = 3,
+  Success = 'Success',
+  Failed = 'Failed',
+  Warning = 'Warning',
 }
 
 /**

@@ -6,6 +6,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/user-details")]
+[ApiAuthorize(PermissionName = "user.view")]
 public class DefaultUserDetailAdminController : ApiAdminControllerBase
 {
     protected readonly IUserDetailService UserDetailService;

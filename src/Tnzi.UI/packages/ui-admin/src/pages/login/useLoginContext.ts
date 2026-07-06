@@ -246,9 +246,10 @@ export interface LoginContext {
   /** Translate function — falls back to `fallback ?? key` when missing. */
   translate: (key: string, fallback?: string) => string
   /**
-   * Switch to a sibling module. `pages/login/index.vue` is expected to wire
-   * this to `router.replace({ path: '/login/' + name })` so the URL stays
-   * canonical for refreshes / direct links.
+   * Switch to a sibling module. `pages/login/index.vue` wires this to
+   * `router.replace({ name: 'login', params: { module: name } })` so the URL
+   * stays canonical for refreshes / direct links and follows any basePath /
+   * deployment prefix (never a hardcoded '/login/...' path).
    */
   toggleLoginModule: (name: LoginModule) => void
   /** Consumer-supplied auth callbacks (see {@link LoginCallbacks}). */

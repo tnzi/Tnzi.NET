@@ -25,13 +25,13 @@
             :file-id="profile.avatarFileId"
             :seed="userId"
             :size="48"
-            :status="profile.status"
+            :status="presenceOn ? profile.status : null"
           />
           <div class="t-member-popover__identity">
             <div class="t-member-popover__name">
               {{ profile.name }}<span v-if="alias" class="t-member-popover__alias"> ({{ alias }})</span>
             </div>
-            <div class="t-member-popover__status-text" :class="`t-member-popover__status-text--${statusKind(profile.status)}`">
+            <div v-if="presenceOn" class="t-member-popover__status-text" :class="`t-member-popover__status-text--${statusKind(profile.status)}`">
               {{ statusLabel(profile.status) }}
             </div>
           </div>
@@ -53,8 +53,8 @@
           </div>
         </div>
 
-        <!-- Last seen (offline only) -->
-        <div v-if="isOffline(profile.status) && profile.lastSeenAt" class="t-member-popover__last-seen">
+        <!-- Last seen (offline only; hidden when presence is disabled) -->
+        <div v-if="presenceOn && isOffline(profile.status) && profile.lastSeenAt" class="t-member-popover__last-seen">
           {{ t('window.lastSeen') }}: {{ formatDateTime(profile.lastSeenAt) }}
         </div>
 
@@ -63,6 +63,22 @@
           <NButton size="small" type="primary" block @click="onSendMessage">
             {{ t('window.sendMessage') }}
           </NButton>
+          <!-- Owner-only: kick this member. Confirm bubble stacks ABOVE the
+               profile popover (z + 100) so it isn't swallowed underneath. -->
+          <NPopconfirm
+            v-if="removable"
+            :z-index="POPOVER_Z + 100"
+            placement="bottom"
+            :style="{ maxWidth: '240px' }"
+            @positive-click="onRemove"
+          >
+            <template #trigger>
+              <NButton size="small" type="error" ghost block>
+                {{ t('window.removeMember') }}
+              </NButton>
+            </template>
+            {{ t('window.removeMemberConfirm') }}
+          </NPopconfirm>
         </div>
       </template>
       <div v-else class="t-member-popover__error">—</div>
@@ -71,8 +87,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { NPopover, NButton, NSpin } from 'naive-ui'
+import { ref, computed, watch } from 'vue'
+import { NPopover, NPopconfirm, NButton, NSpin } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
 import type { ChatContactProfileDto } from '@tnzi/core/services/chat'
@@ -92,14 +108,20 @@ const props = defineProps<{
   name: string
   avatarFileId?: string | null
   alias?: string | null
+  /** Show the owner-only "remove from group" action for this member. */
+  removable?: boolean
 }>()
 
 const emit = defineEmits<{
   message: [userId: string]
+  remove: [userId: string]
 }>()
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+
+// Deployment presence toggle: no dot, no status line, no last-seen.
+const presenceOn = computed(() => store.config.enablePresence)
 
 const popoverVisible = ref(false)
 const loading = ref(false)
@@ -124,6 +146,11 @@ function onUpdateShow(show: boolean) {
 function onSendMessage() {
   popoverVisible.value = false
   emit('message', props.userId)
+}
+
+function onRemove() {
+  popoverVisible.value = false
+  emit('remove', props.userId)
 }
 
 function statusKind(status: UserPresenceStatus): string {
@@ -238,6 +265,9 @@ function isOffline(status: UserPresenceStatus): boolean {
 
 .t-member-popover__actions {
   padding-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .t-member-popover__error {

@@ -5,6 +5,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/agents/{agentId:guid}/memory")]
+[ApiAuthorize(PermissionName = "ai.agent.view")]
 public class DefaultAgentMemoryAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentMemoryService MemoryService;

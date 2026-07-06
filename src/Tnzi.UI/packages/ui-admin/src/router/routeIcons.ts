@@ -23,6 +23,7 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   notification: 'mdi:bell-outline',
   chat: 'mdi:message-text-outline',
   payment: 'mdi:credit-card-outline',
+  finance: 'mdi:scale-balance',
   ai: 'mdi:robot-outline',
   template: 'mdi:file-document-outline',
 
@@ -31,7 +32,6 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'identity.roles': 'mdi:account-key-outline',
   'identity.tenants': 'mdi:domain',
   'identity.loginLogs': 'mdi:login-variant',
-  'identity.gdpr': 'mdi:shield-account-outline',
   'identity.organizations': 'mdi:office-building-outline',
   'identity.sessions': 'mdi:account-clock-outline',
   'identity.loginSecurity': 'mdi:shield-account-outline',
@@ -84,6 +84,22 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'payment.statistics': 'mdi:chart-line',
   'payment.invoices': 'mdi:file-document-outline',
   'payment.promotions': 'mdi:ticket-percent-outline',
+
+  // ── Finance sub-routes ──────────────────────────────────────────
+  'finance.accounts': 'mdi:file-tree-outline',
+  'finance.journals': 'mdi:notebook-outline',
+  'finance.rates': 'mdi:swap-horizontal',
+  'finance.fiscalYears': 'mdi:calendar-lock',
+  'finance.customers': 'mdi:account-group-outline',
+  'finance.vendors': 'mdi:truck-outline',
+  'finance.items': 'mdi:tag-multiple-outline',
+  'finance.taxes': 'mdi:cash-multiple',
+  'finance.invoices': 'mdi:receipt-text-outline',
+  'finance.bills': 'mdi:invoice-text-outline',
+  'finance.expenses': 'mdi:cash-minus',
+  'finance.creditMemos': 'mdi:receipt-text-minus-outline',
+  'finance.payments': 'mdi:cash-check',
+  'finance.reports': 'mdi:chart-box-outline',
 
   // ── AI sub-routes ───────────────────────────────────────────────
   'ai.agents': 'mdi:robot-outline',

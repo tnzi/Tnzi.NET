@@ -15,12 +15,26 @@ import { computed } from 'vue'
 import TWorkbenchLayout from '../../components/pages/TWorkbenchLayout.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import { useAdminDashboardConfig } from '../../plugin/dashboardConfig'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { defaultWorkbenchWidgets } from '../../widgets/presets'
 import type { WidgetDef } from '../../widgets/types'
 
 const config = useAdminDashboardConfig()
+const authStore = useAdminAuthStore()
 
-const widgets = computed<WidgetDef[]>(() => config?.widgets ?? defaultWorkbenchWidgets())
+// Permission-aware widget deck — the same model as the sidebar filter, applied
+// to the dashboard so a business admin never sees (nor fires a doomed fetch
+// from) a widget whose data endpoint they can't reach. `WidgetDef.permission`
+// is the gate; super users and the pre-permission-load window see everything
+// (fail-open), otherwise a widget declaring a `permission` the user lacks is
+// dropped and never mounts. Widgets without a `permission` (business or mixed
+// tiles that themselves degrade gracefully) always render.
+const widgets = computed<WidgetDef[]>(() => {
+  const all = config?.widgets ?? defaultWorkbenchWidgets()
+  const bypass = authStore.isSuperUser || authStore.userInfo === null
+  if (bypass) return all
+  return all.filter((w) => !w.permission || authStore.hasPermission(w.permission))
+})
 const layout = computed(() => config?.layout ?? 'fixed')
 const persistKey = computed(() => config?.persistKey)
 const xGap = computed(() => config?.xGap ?? 16)

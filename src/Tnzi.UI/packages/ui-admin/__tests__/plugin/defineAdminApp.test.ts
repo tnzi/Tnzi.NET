@@ -4,10 +4,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { RouteRecordRaw, Router } from 'vue-router'
 import { defineAdminApp } from '../../src/plugin/defineAdminApp'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
+import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
+import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
 
 const dummyClient = {
   get: async () => ({ success: true, code: 200, data: null }),
   post: async () => ({ success: true, code: 200, data: null }),
+  addUnauthorizedListener: () => () => {},
 } as never
 
 function findAdminRoute(routes: RouteRecordRaw[]): RouteRecordRaw | undefined {
@@ -119,7 +122,8 @@ describe('defineAdminApp', () => {
       client: dummyClient,
       forbiddenComponent: customForbidden,
     })
-    const forbidden = routes.find((r) => r.path === '/403')
+    // Find by NAME — the returned table is basePath-prefixed ('/admin/403').
+    const forbidden = routes.find((r) => r.name === 'forbidden')
     expect(forbidden!.component).toBe(customForbidden)
   })
 
@@ -154,8 +158,11 @@ describe('defineAdminApp', () => {
     expect(() => instance.uninstall()).not.toThrow()
   })
 
-  it('installs auth + permission guards only when auth.enabled (open by default)', () => {
-    const beforeEachCount = (auth?: { enabled: boolean }): number => {
+  it('installs the permission guard by default; auth guard only when auth.enabled', () => {
+    const beforeEachCount = (auth?: {
+      enabled?: boolean
+      permissionGuard?: boolean
+    }): number => {
       const app = createApp({ render: () => h('div') })
       const pinia = createPinia()
       app.use(pinia)
@@ -165,11 +172,16 @@ describe('defineAdminApp', () => {
       return (router.beforeEach as ReturnType<typeof vi.fn>).mock.calls.length
     }
     // Delta-based so the assertion is robust to however many beforeEach hooks
-    // useRouteProgress installs: enabling auth adds exactly 2 (auth + permission).
-    expect(beforeEachCount({ enabled: true }) - beforeEachCount()).toBe(2)
+    // useRouteProgress installs.
+    // Permission guard is on by DEFAULT (mirrors the always-on sidebar filter),
+    // so opting it out drops exactly one beforeEach vs. the default.
+    expect(beforeEachCount() - beforeEachCount({ permissionGuard: false })).toBe(1)
+    // Enabling auth adds exactly one MORE beforeEach (the auth guard) on top of
+    // the always-present permission guard.
+    expect(beforeEachCount({ enabled: true }) - beforeEachCount()).toBe(1)
   })
 
-  it('auth guard redirects to the REAL login route under the default basePath (/login, not /admin/login)', () => {
+  it('auth guard redirects by route NAME (deployment-prefix agnostic)', () => {
     const app = createApp({ render: () => h('div') })
     const pinia = createPinia()
     app.use(pinia)
@@ -180,15 +192,139 @@ describe('defineAdminApp', () => {
       afterEach: vi.fn(),
       onError: vi.fn(),
     } as unknown as Router
-    // default basePath ('/admin') — applyBasePath leaves login at '/login'.
     defineAdminApp({ client: dummyClient, auth: { enabled: true } }).install(app, pinia, router)
-    // Fresh store = not logged in → the auth guard must redirect to the real
-    // route. Regression guard for the basePath default-prefix bug.
+    // Fresh store = not logged in → the auth guard must redirect via the
+    // NAMED login route, so the target resolves correctly under any
+    // basePath / router history base instead of a hardcoded '/login'.
     const redirects: unknown[] = []
     const to = { meta: {}, name: 'x', path: '/admin/x', fullPath: '/admin/x', query: {}, params: {} }
     for (const g of guards) g(to, {}, (arg?: unknown) => { if (arg) redirects.push(arg) })
-    expect(redirects).toContain('/login')
-    expect(redirects).not.toContain('/admin/login')
+    expect(redirects).toContainEqual({ name: 'login' })
+  })
+
+  it('loadPermissions prunes persisted tabs the signed-in user cannot open', async () => {
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    // A small route table so deniedRouteNames can resolve permissions (install()
+    // does this from the real preset; seed it directly here).
+    const routeStore = useAdminRouteStore()
+    routeStore.setAuthRoutes([
+      { name: 'identity.users', path: '/admin/identity/users', meta: { title: 'Users', permission: 'user.view' } },
+      { name: 'system.diagnostics', path: '/admin/system/diagnostics', meta: { title: 'Diag', permission: 'system.diagnostics.view' } },
+    ])
+    // A prior (higher-privilege) session left BOTH tabs open (persisted).
+    const tabStore = useAdminTabStore()
+    tabStore.addTab({ name: 'identity.users', path: '/admin/identity/users', fullPath: '/admin/identity/users', query: {}, params: {}, meta: { title: 'Users' } })
+    tabStore.addTab({ name: 'system.diagnostics', path: '/admin/system/diagnostics', fullPath: '/admin/system/diagnostics', query: {}, params: {}, meta: { title: 'Diag' } })
+    expect(tabStore.tabs.map((t) => t.id)).toEqual(['identity.users', 'system.diagnostics'])
+
+    // Business admin: granted user.view, LACKS system.diagnostics.view. Passing
+    // `permissions` skips the backend round-trip; `roles` without a super role
+    // keeps isSuperUser false so the deny set is enforced.
+    await loadPermissions({ id: 'u1', roles: ['Admin'], permissions: ['user.view'] })
+
+    // The unauthorized Diagnostics tab is dropped; the authorized one survives.
+    expect(tabStore.tabs.map((t) => t.id)).toEqual(['identity.users'])
+    expect(useAdminAuthStore().isSuperUser).toBe(false)
+  })
+
+  describe('session-expired redirect', () => {
+    interface SessionSetup {
+      trigger: (() => void) | undefined
+      replace: ReturnType<typeof vi.fn>
+      addListener: ReturnType<typeof vi.fn>
+    }
+
+    function setup(options?: {
+      auth?: { enabled?: boolean; loginPath?: string; sessionExpiredRedirect?: boolean }
+      currentRoute?: { name?: string; path: string; fullPath: string }
+      withRouter?: boolean
+    }): SessionSetup {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+
+      let trigger: (() => void) | undefined
+      const addListener = vi.fn((fn: () => void) => {
+        trigger = fn
+        return () => {}
+      })
+      const client = {
+        get: async () => ({ success: true, code: 200, data: null }),
+        post: async () => ({ success: true, code: 200, data: null }),
+        addUnauthorizedListener: addListener,
+      } as never
+
+      const replace = vi.fn()
+      const current = options?.currentRoute ?? {
+        name: 'identity.users',
+        path: '/admin/identity/users',
+        fullPath: '/admin/identity/users?page=2',
+      }
+      const router = {
+        beforeEach: vi.fn(),
+        afterEach: vi.fn(),
+        onError: vi.fn(),
+        replace,
+        currentRoute: { value: current },
+      } as unknown as Router
+
+      const { install } = defineAdminApp({
+        client,
+        ...(options?.auth ? { auth: options.auth } : {}),
+      })
+      install(app, pinia, options?.withRouter === false ? undefined : router)
+      return { trigger, replace, addListener }
+    }
+
+    it('subscribes to the client unauthorized signal by default (router provided)', () => {
+      const { addListener } = setup()
+      expect(addListener).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not subscribe when sessionExpiredRedirect is false', () => {
+      const { addListener } = setup({ auth: { sessionExpiredRedirect: false } })
+      expect(addListener).not.toHaveBeenCalled()
+    })
+
+    it('does not subscribe without a router', () => {
+      const { addListener } = setup({ withRouter: false })
+      expect(addListener).not.toHaveBeenCalled()
+    })
+
+    it('clears the admin auth store and redirects to /login with a next deep-link', () => {
+      const { trigger, replace } = setup()
+      const authStore = useAdminAuthStore()
+      authStore.setToken('stale-token')
+      authStore.setUserInfo({ id: '1', username: 'john', roles: [], permissions: [] })
+
+      trigger!()
+
+      expect(authStore.isLogin).toBe(false)
+      expect(authStore.userInfo).toBeNull()
+      // By NAME (not a hardcoded path) so the redirect follows any
+      // basePath / history-base deployment prefix.
+      expect(replace).toHaveBeenCalledWith({
+        name: 'login',
+        query: { next: '/admin/identity/users?page=2' },
+      })
+    })
+
+    it('does not redirect when already on the login route', () => {
+      const { trigger, replace } = setup({
+        currentRoute: { name: 'login', path: '/login/pwd-login', fullPath: '/login/pwd-login' },
+      })
+      trigger!()
+      expect(replace).not.toHaveBeenCalled()
+    })
+
+    it('honors a custom auth.loginPath', () => {
+      const { trigger, replace } = setup({ auth: { loginPath: '/signin' } })
+      trigger!()
+      expect(replace).toHaveBeenCalledWith(
+        expect.objectContaining({ path: '/signin' }),
+      )
+    })
   })
 
   it('hideRoutes marks the matching sub-menu meta.hideInMenu without touching others', () => {
@@ -365,17 +501,20 @@ describe('defineAdminApp', () => {
       return routes.find((r) => r.name === name)
     }
 
-    it('defaults to /admin so existing consumers keep working', () => {
+    it('defaults to /admin and prefixes EVERY route (login/403 included)', () => {
       const { routes } = defineAdminApp({ client: dummyClient })
       const adminRoot = findByName(routes, 'admin-root')
       const login = findByName(routes, 'login')
       const forbidden = findByName(routes, 'forbidden')
       expect(adminRoot?.path).toBe('/admin')
-      // Login keeps its path-param shape and is NOT prefixed under the default.
+      // Since 0.2.71 the default basePath prefixes login/403 too, so the
+      // whole app lives under ONE prefix. Under an IIS sub-application
+      // mounted at /admin, auth redirects previously escaped to the
+      // domain-root '/login' and 404'd.
       expect(login?.path).toBe(
-        '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
+        '/admin/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
       )
-      expect(forbidden?.path).toBe('/403')
+      expect(forbidden?.path).toBe('/admin/403')
     })
 
     it('basePath="/console" prefixes admin-root and login', () => {

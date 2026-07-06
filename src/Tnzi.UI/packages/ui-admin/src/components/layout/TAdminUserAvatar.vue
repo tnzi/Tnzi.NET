@@ -12,10 +12,10 @@
  * `useAdminLoginConfig().userMenu` so the common case (Acme et al.)
  * is one-config-line away.
  */
-import { computed, h, ref, watch } from 'vue'
+import { computed, h } from 'vue'
 import { NDropdown, NButton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, TAvatar } from '@tnzi/ui'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { translatePageKey } from '../../pages/_shared/translate'
 import TPresenceDot from '../chat/TPresenceDot.vue'
@@ -83,22 +83,6 @@ const currentPresenceLabel = computed(() => {
   return o ? t(o.labelKey, o.fallback) : ''
 })
 
-// Track image load failures so a broken/expired avatar URL degrades to the
-// name initial instead of a broken-image glyph. Reset whenever the URL
-// changes (a fresh upload should get a fresh chance to load).
-const imgFailed = ref(false)
-watch(
-  () => props.avatarUrl,
-  () => { imgFailed.value = false },
-)
-const showAvatarImage = computed(() => !!props.avatarUrl && !imgFailed.value)
-
-/** First letter of the display name, used as the image fallback. */
-const initial = computed(() => {
-  const name = (props.userName ?? '').trim()
-  return name ? name.slice(0, 1).toUpperCase() : ''
-})
-
 function t(key: string, fallback: string): string {
   if (props.translate) return props.translate(key, fallback)
   // Bundled-locale fallback so the user-avatar dropdown localises out of
@@ -140,7 +124,9 @@ const options = computed<DropdownOption[]>(() => {
 
 function handleSelect(key: string | number): void {
   if (typeof key === 'string' && key.startsWith('presence:')) {
-    const status = Number(key.slice('presence:'.length)) as UserPresenceStatus
+    // UserPresenceStatus is now a string enum (member name = value), so the
+    // dropdown key is `presence:Online` etc — slice off the prefix, don't Number() it.
+    const status = key.slice('presence:'.length) as UserPresenceStatus
     void props.onSetPresence?.(status)
     return
   }
@@ -178,18 +164,19 @@ function confirmLogout(): void {
     @select="handleSelect"
   >
     <button class="t-admin-user-avatar" type="button" :title="userName">
-      <span class="t-admin-user-avatar__pic">
-        <img
-          v-if="showAvatarImage"
-          :src="avatarUrl ?? ''"
-          :alt="userName"
-          class="t-admin-user-avatar__img"
-          @error="imgFailed = true"
-        />
-        <span v-else-if="initial" class="t-admin-user-avatar__initial" aria-hidden="true">{{ initial }}</span>
-        <TSvgIcon v-else :icon="avatarIcon" :size="22" class="t-admin-user-avatar__icon" />
-        <TPresenceDot v-if="presenceEnabled" :status="presence" :size="9" class="t-admin-user-avatar__dot" />
-      </span>
+      <TAvatar
+        class="t-admin-user-avatar__pic"
+        :src="avatarUrl"
+        :name="userName"
+        :icon="avatarIcon"
+        :size="24"
+        color="rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.12)"
+        text-color="var(--tnzi-primary)"
+      >
+        <template v-if="presenceEnabled" #badge>
+          <TPresenceDot :status="presence" :size="9" class="t-admin-user-avatar__dot" />
+        </template>
+      </TAvatar>
       <span class="t-admin-user-avatar__name">{{ userName }}</span>
     </button>
   </NDropdown>
@@ -214,44 +201,10 @@ function confirmLogout(): void {
 .t-admin-user-avatar:hover {
   background-color: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.06);
 }
-.t-admin-user-avatar__icon {
-  color: var(--tnzi-primary);
-}
-/* Avatar wrapper — anchors the presence status dot. */
-.t-admin-user-avatar__pic {
-  position: relative;
-  display: inline-flex;
-  flex-shrink: 0;
-}
+/* Presence dot rendered in TAvatar's #badge slot — border matches the header
+   surface so the dot reads as an overlay badge. */
 .t-admin-user-avatar__dot {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  /* Border matches the header surface so the dot reads as an overlay badge. */
   border-color: var(--tnzi-container-bg, #fff);
-}
-/* Real avatar picture — circular, cover-cropped, sized to match the icon. */
-.t-admin-user-avatar__img {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-/* Name-initial fallback when there's no picture (or it failed to load). */
-.t-admin-user-avatar__initial {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.12);
-  color: var(--tnzi-primary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  flex-shrink: 0;
 }
 .t-admin-user-avatar__name {
   max-width: 160px;

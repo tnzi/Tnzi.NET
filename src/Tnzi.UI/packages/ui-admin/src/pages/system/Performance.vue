@@ -9,7 +9,7 @@
     bottom of the visible card. Read-mostly; one destructive button
     (clear) gated by NPopconfirm.
     -->
-  <TContentPage :title="t('title')" :translate="t" scroll="fill">
+  <TTabsPage :title="t('title')" :translate="t" :sections="tabs" default-section="endpoints">
     <template #actions>
       <NSelect
         v-model:value="windowMinutes"
@@ -33,77 +33,62 @@
       </NPopconfirm>
     </template>
 
-    <div class="t-perf-page__kpis">
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.p50')" :value="formatMs(summary?.p50)" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.p95')" :value="formatMs(summary?.p95)" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.p99')" :value="formatMs(summary?.p99)" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.avg')" :value="formatMs(summary?.average)" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.samples')" :value="summary?.sampleCount ?? 0" />
-      </NCard>
-    </div>
+    <!-- Window-level percentile summary, shared across both tabs, so it sits
+         above the tab surface (visible on every tab) via the #kpis slot. -->
+    <template #kpis>
+      <TKpiRow cols="1 s:2 m:5">
+        <TKpiCard :label="t('kpi.p50')" :value="formatMs(summary?.p50)" />
+        <TKpiCard :label="t('kpi.p95')" :value="formatMs(summary?.p95)" />
+        <TKpiCard :label="t('kpi.p99')" :value="formatMs(summary?.p99)" />
+        <TKpiCard :label="t('kpi.avg')" :value="formatMs(summary?.average)" />
+        <TKpiCard :label="t('kpi.samples')" :value="summary?.sampleCount ?? 0" />
+      </TKpiRow>
+    </template>
 
-    <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
-      <NTabPane name="endpoints" :tab="t('sections.endpoints')">
-        <div class="t-table-tabs__pane">
-          <div class="t-table-tabs__toolbar">
-            <NText depth="3" class="text-12px">
-              {{ t('sections.endpointsHint', { minutes: windowMinutes }) }}
-            </NText>
-          </div>
-          <TResponsiveTable
-            :columns="endpointColumns"
-            :data="endpoints"
-            :loading="loading"
-            :pagination="{ pageSize: 15 }"
-            :bordered="false"
-            size="small"
-            :flex-height="true"
-          />
-        </div>
-      </NTabPane>
+    <template #endpoints>
+      <div class="t-table-tabs__toolbar">
+        <NText depth="3" class="text-12px">
+          {{ t('sections.endpointsHint', { minutes: windowMinutes }) }}
+        </NText>
+      </div>
+      <TResponsiveTable
+        :columns="endpointColumns"
+        :data="endpoints"
+        :loading="loading"
+        :pagination="{ pageSize: 15 }"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      />
+    </template>
 
-      <NTabPane name="slow" :tab="t('sections.slow')">
-        <div class="t-table-tabs__pane">
-          <div class="t-table-tabs__toolbar">
-            <NText depth="3" class="text-12px">
-              {{ t('sections.slowHint') }}
-            </NText>
-          </div>
-          <TResponsiveTable
-            :columns="slowColumns"
-            :data="slow"
-            :loading="loading"
-            :pagination="{ pageSize: 10 }"
-            :bordered="false"
-            size="small"
-            :flex-height="true"
-          />
-        </div>
-      </NTabPane>
-    </NTabs>
-  </TContentPage>
+    <template #slow>
+      <div class="t-table-tabs__toolbar">
+        <NText depth="3" class="text-12px">
+          {{ t('sections.slowHint') }}
+        </NText>
+      </div>
+      <TResponsiveTable
+        :columns="slowColumns"
+        :data="slow"
+        :loading="loading"
+        :pagination="{ pageSize: 10 }"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      />
+    </template>
+  </TTabsPage>
 </template>
 
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import { TKpiCard, TKpiRow } from '../../components/data'
 import {
   NButton,
-  NCard,
   NPopconfirm,
   NSelect,
-  NStatistic,
-  NTabs,
-  NTabPane,
   NTag,
   NText,
 } from 'naive-ui'
@@ -117,21 +102,26 @@ import {
   type PercentileResultDto,
   type SlowRequestRecordDto,
 } from '../../services/bridges/performance-bridge'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { methodTone } from '../_shared/http-method'
-import TContentPage from '../../components/layout/TContentPage.vue'
+import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 
 const bridge = createPerformanceBridge({ client: useAdminClient() })
 
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('system.performance', key), params)
+const t = makePageTranslator('system.performance')
 
 const loading = ref(false)
 const summary = ref<PercentileResultDto | null>(null)
 const endpoints = ref<EndpointStatsDto[]>([])
 const slow = ref<SlowRequestRecordDto[]>([])
 const windowMinutes = ref(60)
-const activeTab = ref<'endpoints' | 'slow'>('endpoints')
+// Primary tabs. TTabsPage owns the `?section=` deep-linking + Back/Forward.
+// Each pane is a single flex-height table (with a hint toolbar), so no pane
+// owns its own scroll.
+const tabs: TabSection[] = [
+  { name: 'endpoints', label: t('sections.endpoints') },
+  { name: 'slow', label: t('sections.slow') },
+]
 const windowOptions = [
   { value: 15, label: '15 min' },
   { value: 60, label: '1 h' },
@@ -295,23 +285,3 @@ onMounted(() => {
 })
 </script>
 
-<style scoped>
-/* Page-specific decorations only — layout flex shell + table-card flex
-   sizing comes from TContentPage (scroll="fill") + shared `.t-table-tabs`
-   utilities (styles/polish.css). */
-.t-perf-page__kpis {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-}
-@media (max-width: 1200px) {
-  .t-perf-page__kpis {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-@media (max-width: 640px) {
-  .t-perf-page__kpis {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-</style>

@@ -6,6 +6,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/ai/usage")]
+[ApiAuthorize(PermissionName = "ai.usage.view")]
 public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
 {
     protected readonly IUsageAnalyticsService AnalyticsService;

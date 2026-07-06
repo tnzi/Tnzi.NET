@@ -31,6 +31,7 @@ global using Tnzi.AI.Services.Interfaces;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
+global using Tnzi.Security.Authorization;
 global using Tnzi.Application;
 global using Tnzi.Data;
 global using Tnzi.Domain.Entities;

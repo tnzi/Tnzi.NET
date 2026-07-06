@@ -8,6 +8,7 @@ namespace Tnzi.Performance.Controllers;
 /// </summary>
 [Route("admin/performance")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "system.performance.view")]
 public class DefaultPerformanceAdminController : ApiAdminControllerBase
 {
     protected readonly IPerformanceCollector PerformanceCollector;

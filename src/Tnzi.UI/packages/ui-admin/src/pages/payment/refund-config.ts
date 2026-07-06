@@ -1,100 +1,119 @@
 import { h } from 'vue'
+import { formatCurrency } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import type { StatusType } from '@tnzi/ui'
 import { TRelativeTime } from '@tnzi/ui'
 
 /**
- * RefundDto.status is the RefundStatus enum:
- *   0=Pending / 1=Processing / 2=Approved / 3=Rejected /
- *   4=Refunding / 5=Succeeded / 6=Failed / 7=Cancelled.
- * Backend serialises as int — the previous string-keyed map never matched.
+ * Refunds page config — aligned with the real `RefundDto`
+ * (Tnzi.Payment.Dtos.RefundDto). The record keys the related payment on
+ * `tradeNo` (mapped from `Refund.Payment.TradeNo`); there is no `paymentNo` /
+ * `paymentId` / `amount` field — the money is `refundAmount`.
+ *
+ * `status` serialises as the RefundStatus member name (global
+ * JsonStringEnumConverter): Pending / Processing / Approved / Rejected /
+ * Refunding / Succeeded / Failed / Cancelled.
  */
 interface RefundRow {
   id?: string
   refundNo?: string
   tradeNo?: string
-  paymentId?: string
-  paymentNo?: string
   refundAmount?: number
   currency?: string
   reason?: string
-  status?: number
+  status?: string
+  approverId?: string | null
+  approveTime?: string | null
+  approveRemark?: string | null
+  completedTime?: string | null
   creationTime?: string
-  completedTime?: string
-  approverId?: string
-  approveTime?: string
 }
 
-const STATUS_MAP: Record<number, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label?: string; labelKey?: string }> = {
-  0: { type: 'warning', label: 'Pending Review' },
-  1: { type: 'info',    label: 'Processing' },
-  2: { type: 'info',    labelKey: 'admin.shared.status.approved' },
-  3: { type: 'error',   labelKey: 'admin.shared.status.rejected' },
-  4: { type: 'info',    label: 'Refunding' },
-  5: { type: 'success', label: 'Succeeded' },
-  6: { type: 'error',   labelKey: 'admin.shared.status.failed' },
-  7: { type: 'default', labelKey: 'admin.shared.status.cancelled' },
+const STATUS_TONE: Record<string, StatusType> = {
+  Pending: 'warning',
+  Processing: 'info',
+  Approved: 'info',
+  Rejected: 'error',
+  Refunding: 'info',
+  Succeeded: 'success',
+  Failed: 'error',
+  Cancelled: 'default',
+}
+// member name → i18n leaf key under `payment.refunds.status.*`
+const STATUS_KEY: Record<string, string> = {
+  Pending: 'pending',
+  Processing: 'processing',
+  Approved: 'approved',
+  Rejected: 'rejected',
+  Refunding: 'refunding',
+  Succeeded: 'succeeded',
+  Failed: 'failed',
+  Cancelled: 'cancelled',
 }
 
-function fmtMoney(amount?: number, currency?: string): string {
+function money(amount?: number, currency?: string): string {
   if (amount === null || amount === undefined) return '—'
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: currency ?? 'USD',
-    }).format(amount)
-  } catch {
-    return `${currency ?? ''} ${amount.toFixed(2)}`
-  }
+  return formatCurrency(Number(amount), String(currency || 'USD'))
 }
 
-export const refundColumns: ColumnDef<RefundRow>[] = [
-  { key: 'refundNo', title: 'columns.refundNo', minWidth: 150 },
-  { key: 'paymentNo', title: 'columns.paymentNo', minWidth: 150 },
-  {
-    key: 'refundAmount',
-    title: 'columns.refundAmount',
-    width: 140,
-    render: (row) =>
-      h(
-        'span',
-        { style: 'font-variant-numeric: tabular-nums; font-weight: 500' },
-        fmtMoney(row.refundAmount, row.currency),
-      ),
-  },
-  { key: 'reason', title: 'columns.reason', minWidth: 160 },
-  {
-    key: 'status',
-    title: 'columns.status',
-    width: 140,
-    render: (row) => {
-      const v = typeof row.status === 'number' ? row.status : Number(row.status)
-      const m = STATUS_MAP[v]
-      if (m) {
-        return h(TStatusBadge, { value: v, type: m.type, label: m.label, labelKey: m.labelKey })
-      }
-      return h(TStatusBadge, { value: v, type: 'default', label: String(row.status ?? '—') })
+/**
+ * Build the Refunds columns. A factory so the status label + currency render
+ * resolve through the page translator `t` (finance `buildXColumns(t)` idiom).
+ */
+export function buildRefundColumns(t: (key: string) => string): ColumnDef<RefundRow>[] {
+  return [
+    { key: 'refundNo', title: 'columns.refundNo', minWidth: 150 },
+    { key: 'tradeNo', title: 'columns.tradeNo', minWidth: 150 },
+    {
+      key: 'refundAmount',
+      title: 'columns.refundAmount',
+      width: 140,
+      align: 'right',
+      render: (row) =>
+        h(
+          'span',
+          { style: 'font-variant-numeric: tabular-nums; font-weight: 500' },
+          money(row.refundAmount, row.currency),
+        ),
     },
-  },
-  {
-    key: 'creationTime',
-    title: 'columns.creationTime',
-    width: 140,
-    render: (row) => h(TRelativeTime, { value: row.creationTime }),
-  },
-  {
-    key: 'completedTime',
-    title: 'columns.completedTime',
-    width: 150,
-    render: (row) => h(TRelativeTime, { value: row.completedTime }),
-  },
-]
+    { key: 'reason', title: 'columns.reason', minWidth: 160 },
+    {
+      key: 'status',
+      title: 'columns.status',
+      width: 140,
+      render: (row) => {
+        const v = String(row.status ?? '')
+        return h(TStatusBadge, {
+          value: v,
+          type: STATUS_TONE[v] ?? 'default',
+          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || '—',
+        })
+      },
+    },
+    {
+      key: 'creationTime',
+      title: 'columns.creationTime',
+      width: 140,
+      render: (row) => h(TRelativeTime, { value: row.creationTime }),
+    },
+    {
+      key: 'completedTime',
+      title: 'columns.completedTime',
+      width: 150,
+      render: (row) => h(TRelativeTime, { value: row.completedTime }),
+    },
+  ]
+}
 
+/** View-form schema (read-only quick preview), reachable via the row `view` action. */
 export const refundFormSchema: FormSchemaItem[] = [
-  { key: 'refundNo',     labelKey: 'form.refundNo', label: 'Refund No',    type: 'text' },
-  { key: 'paymentNo',    labelKey: 'form.paymentNo', label: 'Payment No',   type: 'text' },
-  { key: 'refundAmount', labelKey: 'form.refundAmount', label: 'Amount',       type: 'number', required: true },
-  { key: 'reason',       labelKey: 'form.reason', label: 'Reason',       type: 'textarea', required: true },
-  { key: 'status',       labelKey: 'form.status', label: 'Status',       type: 'text' },
+  { key: 'refundNo', labelKey: 'form.refundNo', label: 'Refund No', type: 'text' },
+  { key: 'tradeNo', labelKey: 'form.tradeNo', label: 'Trade No', type: 'text' },
+  { key: 'refundAmount', labelKey: 'form.refundAmount', label: 'Amount', type: 'number' },
+  { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text' },
+  { key: 'reason', labelKey: 'form.reason', label: 'Reason', type: 'textarea' },
+  { key: 'status', labelKey: 'form.status', label: 'Status', type: 'text' },
+  { key: 'approveRemark', labelKey: 'form.approveRemark', label: 'Approval Remark', type: 'textarea' },
 ]

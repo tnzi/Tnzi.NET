@@ -43,7 +43,7 @@ const mockGetList = vi.fn(async () => ({
       paidAmount: 0,
       dueAmount: 100,
       currency: 'USD',
-      status: 1, // Pending → send / mark-paid / cancel all available
+      status: 'Pending', // send / mark-paid / cancel all available
       invoiceDate: '2026-01-01',
       dueDate: '2026-02-01',
     },
@@ -128,7 +128,7 @@ interface InvoiceRow {
   paidAmount: number
   dueAmount: number
   currency: string
-  status: number
+  status: string
   invoiceDate: string
   dueDate: string
 }
@@ -140,7 +140,7 @@ const sampleRow: InvoiceRow = {
   paidAmount: 0,
   dueAmount: 100,
   currency: 'USD',
-  status: 1,
+  status: 'Pending',
   invoiceDate: '2026-01-01',
   dueDate: '2026-02-01',
 }
@@ -181,17 +181,16 @@ describe('Invoices page (TListShell + lifecycle modals)', () => {
     expect(wrapper.find('.n-modal-stub').exists()).toBe(false)
   })
 
-  it('openMarkPaid opens the modal and defaults paidAmount to the due amount', async () => {
+  it('mark-paid overlay opens and defaults paidAmount to the due amount', async () => {
     const wrapper = mount(Invoices, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openMarkPaid: (row: InvoiceRow) => void
-      markPaidVisible: boolean
+      markPaidDetail: { open: (a: string, r: InvoiceRow) => Promise<void>; visible: { value: boolean } }
       markPaidForm: { paidAmount: number }
     }
-    vm.openMarkPaid(sampleRow)
+    await vm.markPaidDetail.open('edit', sampleRow)
     await flushPromises()
-    expect(vm.markPaidVisible).toBe(true)
+    expect(vm.markPaidDetail.visible.value).toBe(true)
     expect(vm.markPaidForm.paidAmount).toBe(100)
   })
 
@@ -199,10 +198,11 @@ describe('Invoices page (TListShell + lifecycle modals)', () => {
     const wrapper = mount(Invoices, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openMarkPaid: (row: InvoiceRow) => void
+      markPaidDetail: { open: (a: string, r: InvoiceRow) => Promise<void> }
       confirmMarkPaid: () => Promise<void>
     }
-    vm.openMarkPaid(sampleRow)
+    await vm.markPaidDetail.open('edit', sampleRow)
+    await flushPromises()
     await vm.confirmMarkPaid()
     await flushPromises()
     expect(mockMarkAsPaid).toHaveBeenCalledTimes(1)
@@ -211,27 +211,27 @@ describe('Invoices page (TListShell + lifecycle modals)', () => {
     expect(mockGetList).toHaveBeenCalledTimes(2)
   })
 
-  it('openCancel opens the cancel modal', async () => {
+  it('cancel overlay opens', async () => {
     const wrapper = mount(Invoices, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openCancel: (row: InvoiceRow) => void
-      cancelVisible: boolean
+      cancelDetail: { open: (a: string, r: InvoiceRow) => Promise<void>; visible: { value: boolean } }
     }
-    vm.openCancel(sampleRow)
+    await vm.cancelDetail.open('edit', sampleRow)
     await flushPromises()
-    expect(vm.cancelVisible).toBe(true)
+    expect(vm.cancelDetail.visible.value).toBe(true)
   })
 
   it('confirmCancel calls bridge.cancel with the reason and refreshes', async () => {
     const wrapper = mount(Invoices, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openCancel: (row: InvoiceRow) => void
+      cancelDetail: { open: (a: string, r: InvoiceRow) => Promise<void> }
       cancelReason: string
       confirmCancel: () => Promise<void>
     }
-    vm.openCancel(sampleRow)
+    await vm.cancelDetail.open('edit', sampleRow)
+    await flushPromises()
     vm.cancelReason = 'duplicate'
     await vm.confirmCancel()
     await flushPromises()
@@ -256,15 +256,15 @@ describe('Invoices page (TListShell + lifecycle modals)', () => {
     const wrapper = mount(Invoices, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      statusFilter: number | null
+      statusFilter: string | null
       onStatusChange: () => void
     }
-    vm.statusFilter = 3
+    vm.statusFilter = 'Paid'
     vm.onStatusChange()
     await flushPromises()
     expect(mockGetList).toHaveBeenCalledTimes(2)
-    const secondCall = mockGetList.mock.calls[1][0] as unknown as { status: number | null }
-    expect(secondCall.status).toBe(3)
+    const secondCall = mockGetList.mock.calls[1][0] as unknown as { status: string | null }
+    expect(secondCall.status).toBe('Paid')
   })
 
   it('has no create button (read-only useCrudPage, no #primary slot)', async () => {

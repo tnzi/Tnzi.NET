@@ -42,6 +42,18 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     int TransactionDepth { get; }
 
     /// <summary>
+    /// 确保物理数据库事务已开启（幂等）
+    /// </summary>
+    /// <remarks>
+    /// 框架的物理事务是延迟开启的（首次 SaveChanges 才 BEGIN）。
+    /// 在事务内执行绕过变更跟踪的裸 SQL 操作（ExecuteUpdate/ExecuteDelete/Raw SQL）前
+    /// MUST 调用本方法，否则这些操作会在自动提交模式下执行，脱离事务保护
+    /// （行锁不持有到事务结束、回滚无法撤销）。未启用事务时为无操作。
+    /// </remarks>
+    Task EnsureTransactionStartedAsync(CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    /// <summary>
     /// 创建保存点
     /// </summary>
     Task CreateSavepointAsync(string name, CancellationToken cancellationToken = default)

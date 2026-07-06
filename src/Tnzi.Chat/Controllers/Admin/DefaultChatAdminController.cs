@@ -8,6 +8,7 @@ namespace Tnzi.Chat.Controllers.Admin;
 [DefaultController]
 [Route("admin/chat")]
 [ApiExplorerSettings(GroupName = "admin")]
+[ApiAuthorize(PermissionName = "chat.session.view")]
 public class DefaultChatAdminController : ApiAdminControllerBase
 {
     protected readonly IBroadcastService Broadcast;

@@ -53,6 +53,10 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         // Multi-tenancy OFF by default (BroadcastService guards the All path on this).
         services.AddSingleton<IOptions<MultiTenancyOptions>>(Microsoft.Extensions.Options.Options.Create(new MultiTenancyOptions()));
 
+        // Chat options (IOptionsSnapshot consumers). Tests override ConfigureChatOptions to
+        // exercise the enforcement paths (disabled groups, member cap, file-message toggle).
+        services.AddOptions<Tnzi.Chat.Options.ChatOptions>().Configure(o => ConfigureChatOptions(o));
+
         // Register real UnitOfWorkManager so ExecuteInUnitOfWorkAsync exercises the deferred-save path.
         // IEntityManager mock tells UnitOfWorkManager which DbContext types to discover.
         var entityManagerMock = new Mock<IEntityManager>();
@@ -77,6 +81,13 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         // (no SignalR in the integration suite), so it falls back to null and online
         // counts resolve to 0 / offline.
         services.AddScoped<IChatAdminService, ChatAdminService>();
+
+        services.AddScoped<IChatConfigService, ChatConfigService>();
+    }
+
+    /// <summary>Override in a test class to change ChatOptions (defaults = everything enabled).</summary>
+    protected virtual void ConfigureChatOptions(Tnzi.Chat.Options.ChatOptions options)
+    {
     }
 }
 

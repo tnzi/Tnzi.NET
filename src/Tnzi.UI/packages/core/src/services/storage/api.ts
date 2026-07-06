@@ -80,6 +80,13 @@ export function useStorageApi(client: HttpClient) {
     /** Get file preview (inline stream) */
     getPreviewUrl: (id: string) => client.resolveUrl(`${BASE}/${id}/preview`),
 
+    /**
+     * Resolve the direct download URL. Goes through `resolveUrl` so the path
+     * is deployment-prefix aware (sub-app / IIS virtual dir) instead of a
+     * hardcoded `/api/...` that breaks when the app is not mounted at the root.
+     */
+    getDownloadUrl: (id: string) => client.resolveUrl(`${BASE}/${id}/download`),
+
     /** Get thumbnail URL */
     getThumbnailUrl: (id: string) => client.resolveUrl(`${BASE}/${id}/thumbnail`),
 

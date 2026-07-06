@@ -22,4 +22,5 @@ global using Tnzi.Localization.Resources;
 global using Tnzi.Localization.Services;
 global using Tnzi.Modules;
 global using Tnzi.Options;
+global using Tnzi.Security.Authorization;
 global using Tnzi.Utilities;

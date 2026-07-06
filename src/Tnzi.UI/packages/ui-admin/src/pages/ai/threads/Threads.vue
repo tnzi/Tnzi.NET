@@ -7,6 +7,8 @@
       :title="title"
       :translate="t"
       :row-actions="rowActions"
+      :detail-width="720"
+      :detail-title="(d: AgentThreadDto) => d.title || t('detail.untitled')"
     >
       <!-- Edit form — title only; threads aren't created here, they come from chat. -->
       <template #form="{ formData, mode }">
@@ -20,11 +22,11 @@
           </NFormItem>
         </NForm>
       </template>
-    </TCrudPage>
 
-    <!-- Detail drawer — thread header + full message transcript. -->
-    <NDrawer v-model:show="detailVisible" :width="720" placement="right">
-      <NDrawerContent :title="drawerTitle" closable>
+      <!-- Read-only detail — thread header + full transcript (loaded by `onView`
+           via getDetail). The row's `view` open-state drives the drawer; the
+           heavier detail payload is page-local. -->
+      <template #detail>
         <NSpin :show="detailLoading">
           <template v-if="detail">
             <!-- Header meta strip -->
@@ -76,21 +78,21 @@
             {{ t('detail.loadError') }}
           </div>
         </NSpin>
+      </template>
 
-        <template #footer>
-          <div class="flex justify-end gap-8px">
-            <NButton size="small" @click="exportJson(detailId)">{{ t('actions.exportJson') }}</NButton>
-            <NButton size="small" @click="exportMd(detailId)">{{ t('actions.exportMd') }}</NButton>
-          </div>
-        </template>
-      </NDrawerContent>
-    </NDrawer>
+      <template #detailFooter>
+        <div class="flex justify-end gap-8px">
+          <NButton size="small" @click="exportJson(detailId)">{{ t('actions.exportJson') }}</NButton>
+          <NButton size="small" @click="exportMd(detailId)">{{ t('actions.exportMd') }}</NButton>
+        </div>
+      </template>
+    </TCrudPage>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NButton, NDrawer, NDrawerContent, NForm, NFormItem, NInput, NSpin, NTag } from 'naive-ui'
+import { NButton, NForm, NFormItem, NInput, NSpin, NTag } from 'naive-ui'
 import { formatDateTime } from '@tnzi/core'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
@@ -98,11 +100,11 @@ import { editAction, deleteAction, viewAction, type RowAction } from '../../../h
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useSafeMessage } from '../../_shared/safeMessage'
-import { translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import { threadColumns, threadSearchFields } from './thread-config'
 import type { AgentThreadDto, AgentThreadDetailDto } from '@tnzi/core/services/ai'
 
-const t = (key: string) => translatePageKey('ai.threads', key)
+const t = makePageTranslator('ai.threads')
 const title = 'title'
 
 const bridge = createAiBridge({ client: useAdminClient() })
@@ -118,8 +120,8 @@ const crud = useCrudPage<AgentThreadDto>({
   updateData: (id, data) =>
     bridge.threads.update(String(id), { title: (data as { title?: string }).title ?? '' }),
   deleteData: (ids) => bridge.threads.delete(ids.map(String)),
+  onView: (row) => void loadThreadDetail(row),
 })
-crud.refresh().catch(() => undefined)
 
 // --- edit form (title only) -------------------------------------------------
 function titleValue(formData: unknown): string {
@@ -132,19 +134,19 @@ function setTitle(formData: unknown, value: string): void {
 }
 
 // --- detail drawer ----------------------------------------------------------
+// `detailVisible` is gone — the drawer rides the CRUD `view` open-state (row
+// click → `crud.openView`, deep-linkable for free). Only the heavier
+// transcript payload (a different DTO loaded via getDetail) stays page-local;
+// `onView` loads it on open AND on a deep-link cold reload.
 const detail = ref<AgentThreadDetailDto | null>(null)
-const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detailError = ref(false)
 const detailId = ref('')
-const drawerTitle = ref('')
 
-async function openDetail(row: AgentThreadDto): Promise<void> {
+async function loadThreadDetail(row: AgentThreadDto): Promise<void> {
   detailId.value = String(row.id)
-  drawerTitle.value = row.title || t('detail.untitled')
   detail.value = null
   detailError.value = false
-  detailVisible.value = true
   detailLoading.value = true
   try {
     detail.value = await bridge.threads.getDetail(String(row.id))
@@ -209,7 +211,8 @@ function triggerDownload(url: string, filename: string, revoke: boolean): void {
 // View opens the detail drawer; Export JSON/MD download; Edit/Delete wire to
 // the CRUD state. maxInline=2 → [View][More▾] with the rest in the overflow.
 const rowActions: RowAction<AgentThreadDto>[] = [
-  viewAction(crud, { onClick: (row) => void openDetail(row) }),
+  // `viewAction(crud)` already binds onClick → crud.openView; no override needed.
+  viewAction(crud),
   { key: 'exportJson', label: 'actions.exportJson', onClick: (row) => void exportJson(String(row.id)) },
   { key: 'exportMd', label: 'actions.exportMd', onClick: (row) => exportMd(String(row.id)) },
   editAction(crud),
@@ -219,7 +222,7 @@ const rowActions: RowAction<AgentThreadDto>[] = [
 // Expose the bridge-driven handlers + drawer state to the integration test —
 // they're only referenced inside `rowActions`, so they wouldn't be auto-exposed
 // on `wrapper.vm` otherwise (the template-referenced `crud` already is).
-defineExpose({ crud, openDetail, exportJson, exportMd, detail, detailVisible })
+defineExpose({ crud, loadThreadDetail, exportJson, exportMd, detail })
 </script>
 
 <style scoped>

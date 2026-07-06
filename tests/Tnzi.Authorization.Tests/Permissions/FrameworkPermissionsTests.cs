@@ -29,8 +29,86 @@ public class FrameworkPermissionsTests
         // Locked counts — bump these deliberately when adding/removing codes so
         // an accidental drift (front-end route added without a backend code, or
         // vice versa) shows up as a failing test.
-        codes.Count.ShouldBe(68);
-        context.Groups.Count.ShouldBe(10);
+        codes.Count.ShouldBe(80);
+        context.Groups.Count.ShouldBe(12);
+    }
+
+    [Fact]
+    public void Define_declares_the_admin_gate_as_business()
+    {
+        var context = BuildContext();
+
+        // The ApiAdminControllerBase outer gate must exist in the catalogue
+        // (otherwise it is a ghost permission only super-admins can pass)
+        // and must be Business so business admins can enter the admin area.
+        context.Permissions.ContainsKey("Admin.Manage").ShouldBeTrue();
+        context.Permissions["Admin.Manage"].Category.ShouldBe(PermissionCategory.Business);
+    }
+
+    [Theory]
+    // Technical: system/ops surfaces business admins must not reach.
+    [InlineData("tenant.view", PermissionCategory.Technical)]
+    [InlineData("session.view", PermissionCategory.Technical)]
+    // Whole Authorization module is Technical — managing roles/permissions is a
+    // security concern, and every page needs the function-module catalogue
+    // (authorization.functionModule.view) to work, so the tier must be uniform.
+    [InlineData("authorization.view", PermissionCategory.Technical)]
+    [InlineData("authorization.functionModule.view", PermissionCategory.Technical)]
+    [InlineData("authorization.permission.view", PermissionCategory.Technical)]
+    [InlineData("authorization.roleFunction.view", PermissionCategory.Technical)]
+    [InlineData("authorization.entityRole.view", PermissionCategory.Technical)]
+    [InlineData("feature.view", PermissionCategory.Technical)]
+    [InlineData("system.parameter.view", PermissionCategory.Technical)]
+    [InlineData("system.accessLog.view", PermissionCategory.Technical)]
+    [InlineData("system.scheduledJob.view", PermissionCategory.Technical)]
+    [InlineData("system.diagnostics.view", PermissionCategory.Technical)]
+    [InlineData("system.health.view", PermissionCategory.Technical)]
+    [InlineData("system.localization.view", PermissionCategory.Technical)]
+    [InlineData("system.log.view", PermissionCategory.Technical)]
+    [InlineData("system.performance.view", PermissionCategory.Technical)]
+    [InlineData("system.signalr.view", PermissionCategory.Technical)]
+    [InlineData("storage.chunk.view", PermissionCategory.Technical)]
+    [InlineData("storage.version.view", PermissionCategory.Technical)]
+    [InlineData("ai.provider.view", PermissionCategory.Technical)]
+    [InlineData("ai.mcp.view", PermissionCategory.Technical)]
+    [InlineData("ai.quota.view", PermissionCategory.Technical)]
+    [InlineData("ai.channels.view", PermissionCategory.Technical)]
+    [InlineData("ai.sandbox.view", PermissionCategory.Technical)]
+    [InlineData("ai.permissions.view", PermissionCategory.Technical)]
+    [InlineData("ai.sql.execute", PermissionCategory.Technical)]
+    // Dictionaries share the /admin/settings endpoint (gated by
+    // system.parameter.view); the code stays registered but is Technical so a
+    // business admin never gets it implicitly.
+    [InlineData("system.dictionary.view", PermissionCategory.Technical)]
+    // Business spot checks: the surfaces a business admin runs daily.
+    [InlineData("user.view", PermissionCategory.Business)]
+    [InlineData("role.view", PermissionCategory.Business)]
+    [InlineData("dashboard.view", PermissionCategory.Business)]
+    [InlineData("system.menu.view", PermissionCategory.Business)]
+    [InlineData("storage.file.view", PermissionCategory.Business)]
+    [InlineData("audit.log.view", PermissionCategory.Business)]
+    [InlineData("finance.account.view", PermissionCategory.Business)]
+    [InlineData("payment.order.view", PermissionCategory.Business)]
+    [InlineData("ai.agent.view", PermissionCategory.Business)]
+    [InlineData("ai.usage.view", PermissionCategory.Business)]
+    public void Define_classifies_code_with_expected_category(string code, PermissionCategory expected)
+    {
+        var context = BuildContext();
+        context.Permissions[code].Category.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void Technical_code_count_is_locked()
+    {
+        var context = BuildContext();
+        var technical = context.Permissions.Values
+            .Where(p => p.Category == PermissionCategory.Technical)
+            .Select(p => p.Name)
+            .ToList();
+
+        // Deliberate-bump lock, same rationale as the total count: a code
+        // silently flipping category changes what business admins can reach.
+        technical.Count.ShouldBe(27);
     }
 
     [Theory]
@@ -48,6 +126,9 @@ public class FrameworkPermissionsTests
     [InlineData("notification.message.view")]
     [InlineData("chat.session.view")]
     [InlineData("payment.order.view")]
+    [InlineData("finance.account.view")]
+    [InlineData("finance.journal.view")]
+    [InlineData("finance.report.view")]
     [InlineData("template.layout.view")]
     [InlineData("ai.agent.view")]
     [InlineData("ai.thread.view")]

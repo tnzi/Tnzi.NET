@@ -6,6 +6,7 @@ namespace Tnzi.Authorization.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/data-auth")]
+[ApiAuthorize(PermissionName = "authorization.entityRole.view")]
 public class DefaultDataAuthAdminController : ApiAdminControllerBase
 {
     protected readonly IDataAuthService DataAuthService;

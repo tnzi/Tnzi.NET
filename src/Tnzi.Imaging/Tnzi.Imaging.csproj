@@ -9,6 +9,12 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!--
+      SixLabors 授权铁律：ImageSharp v4 / ImageSharp.Drawing v3 / Fonts v3 起引入构建期
+      license-key 强制校验（商业使用需向 sixlabors.com 购买授权，否则构建直接失败）。
+      本框架为 MIT 开源、被商业应用消费，不能强制所有下游购买授权，故锁定在最后一个
+      免授权版本（ImageSharp 3.1.x 线）。如需升级到 v4，须先获取 Six Labors 商业授权。
+    -->
     <PackageReference Include="SixLabors.Fonts" Version="2.1.3" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />

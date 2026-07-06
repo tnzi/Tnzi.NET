@@ -5,18 +5,20 @@ public class ChatContactService : ApplicationService, IChatContactService
     private readonly IRepository<User, Guid> _userRepository;
     private readonly IRepository<UserDetail, Guid> _userDetailRepository;
     private readonly IPresenceService _presence;
-    private const int SearchLimit = 20;
+    private readonly IOptionsSnapshot<ChatOptions> _options;
 
     public ChatContactService(
         IServiceProvider serviceProvider,
         IRepository<User, Guid> userRepository,
         IRepository<UserDetail, Guid> userDetailRepository,
-        IPresenceService presence)
+        IPresenceService presence,
+        IOptionsSnapshot<ChatOptions> options)
         : base(serviceProvider)
     {
         _userRepository = Check.NotNull(userRepository);
         _userDetailRepository = Check.NotNull(userDetailRepository);
         _presence = Check.NotNull(presence);
+        _options = Check.NotNull(options);
     }
 
     public async Task<Result<IReadOnlyList<ChatContactDto>>> SearchUsersAsync(string? keyword)
@@ -30,7 +32,7 @@ public class ChatContactService : ApplicationService, IChatContactService
             ? await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null)
             : await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && u.UserName.ToLower().Contains(kw));
 
-        var taken = users.Take(SearchLimit).ToList();
+        var taken = users.Take(Math.Max(1, _options.Value.ContactSearchLimit)).ToList();
         var detailByUserId = await LoadDetailsAsync(taken.Select(u => u.Id).ToList());
 
         var list = taken.Select(u => ToContactDto(u, detailByUserId)).ToList();

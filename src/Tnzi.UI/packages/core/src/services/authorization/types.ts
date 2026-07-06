@@ -40,6 +40,18 @@ export interface UpdateFunctionModuleDto {
 
 // ─── ModuleFunction (permission within a module) ──────────────────────────────
 
+/**
+ * Permission audience classification (mirrors backend `PermissionCategory`).
+ * Business permissions are implicitly granted to members of the backend's
+ * `Authorization:BusinessAdminRoles`; Technical permissions (diagnostics,
+ * MCP, sandbox, system parameters, …) require explicit grants or the
+ * super-admin bypass.
+ */
+export enum PermissionCategory {
+  Business = 'Business',
+  Technical = 'Technical',
+}
+
 export interface ModuleFunctionDto {
   id: string
   name: string
@@ -54,6 +66,11 @@ export interface ModuleFunctionDto {
    * (only IsEnabled is editable on system-managed rows).
    */
   isSystemManaged?: boolean
+  /**
+   * Business (default) or Technical. Admin UI shows a "technical" badge so
+   * operators granting permissions can tell ops surfaces from business ones.
+   */
+  category?: PermissionCategory
 }
 
 // ─── RoleFunction ─────────────────────────────────────────────────────────────
@@ -89,33 +106,34 @@ export interface RoleFunctionQueryDto {
 // ─── Role permission comparison / clone ──────────────────────────────────────
 
 /**
- * Per-function entry in `PermissionComparisonDto`. The flags mark which of
- * the two compared roles owns the permission. A row is `onlyInRoleA` when
- * `inRoleA && !inRoleB`, `onlyInRoleB` when the reverse, and `common` when
- * both are true. The view can derive that without an extra field.
+ * Minimal function info for comparison results (backend `FunctionSummaryDto`).
  */
-export interface PermissionDifferenceDto {
-  functionId: string
-  functionCode: string
-  functionName: string
-  moduleId: string
-  moduleName?: string | null
-  inRoleA: boolean
-  inRoleB: boolean
+export interface FunctionSummaryDto {
+  /** Function ID. */
+  id: string
+  /** Function code (permission name). */
+  code: string
+  /** Function display name. */
+  name: string
+  /** Module code the function belongs to. */
+  moduleCode?: string | null
 }
 
-/** Result of `GET /admin/role-functions/compare?roleId1=...&roleId2=...`. */
+/**
+ * Result of `GET /admin/role-functions/compare?roleId1=...&roleId2=...`
+ * (backend `PermissionComparisonDto`). The two role ids echo the request
+ * order; the three buckets carry the function summaries that are exclusive to
+ * role 1, exclusive to role 2, or shared by both.
+ */
 export interface PermissionComparisonDto {
-  roleAId: string
-  roleAName: string
-  roleBId: string
-  roleBName: string
-  /** Functions owned by A but not by B. */
-  onlyInRoleA: PermissionDifferenceDto[]
-  /** Functions owned by B but not by A. */
-  onlyInRoleB: PermissionDifferenceDto[]
+  roleId1: string
+  roleId2: string
+  /** Functions owned by role 1 but not role 2. */
+  onlyInRole1: FunctionSummaryDto[]
+  /** Functions owned by role 2 but not role 1. */
+  onlyInRole2: FunctionSummaryDto[]
   /** Functions present in both roles. */
-  common: PermissionDifferenceDto[]
+  shared: FunctionSummaryDto[]
 }
 
 /** Body of `POST /admin/role-functions/role/{roleId}/clone`. */

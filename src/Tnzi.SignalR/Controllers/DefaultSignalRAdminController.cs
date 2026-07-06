@@ -6,6 +6,7 @@ namespace Tnzi.SignalR.Controllers;
 /// </summary>
 [Route("admin/signalr")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "system.signalr.view")]
 public class DefaultSignalRAdminController : ApiAdminControllerBase
 {
     protected readonly IConnectionManager ConnectionManager;

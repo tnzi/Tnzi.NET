@@ -3,16 +3,27 @@
  * `TWidgetChatStats` — chat IM summary widget.
  *
  * The old announcement-style session API was removed in the Chat IM refactor
- * (feat/chat-im-refactor). The admin chat surface is now the broadcast form
- * at /admin/chat/broadcast. This widget shows a static quick-link.
+ * (feat/chat-im-refactor); the standalone broadcast page was later folded
+ * into the Conversations page (its toolbar opens the Broadcast dialog).
+ * This widget shows a static quick-link there. Navigate by route NAME so
+ * the link follows any `basePath` / history-base deployment prefix.
  */
 import { TSvgIcon } from '@tnzi/ui'
 import { useRouter } from 'vue-router'
+import { resolveBackendLabel } from '../../pages/_shared/translate'
 
 const router = useRouter()
 
+// `resolveBackendLabel` returns the dictionary hit when present and the English
+// fallback on a miss (it detects the miss by comparing against the humanised
+// last segment, unlike a bare `translatePageKey(...) || fallback` where the
+// humanised string is always truthy and the fallback is dead).
+function t(key: string, fallback: string): string {
+  return resolveBackendLabel(key, fallback)
+}
+
 function go(): void {
-  router.push('/admin/chat/broadcast')
+  router.push({ name: 'chat.conversations' }).catch(() => undefined)
 }
 </script>
 
@@ -23,8 +34,8 @@ function go(): void {
         <TSvgIcon icon="mdi:bullhorn-outline" :size="20" />
       </span>
       <div class="t-widget-chat__text">
-        <span class="t-widget-chat__label">Broadcast</span>
-        <span class="t-widget-chat__desc">Send a message to users</span>
+        <span class="t-widget-chat__label">{{ t('admin.widgets.chat.broadcast', 'Broadcast') }}</span>
+        <span class="t-widget-chat__desc">{{ t('admin.widgets.chat.broadcastDesc', 'Send a message to users') }}</span>
       </div>
     </div>
   </div>

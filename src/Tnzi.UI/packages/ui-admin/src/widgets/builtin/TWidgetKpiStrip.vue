@@ -20,6 +20,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import { maybeTranslate } from '../../pages/_shared/translate'
 import type { KpiCard } from '../../components/pages/TDashboardPage.vue'
 import { useAdminClient } from '../../plugin/client'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { createAiBridge } from '../../services/bridges/ai-bridge'
@@ -52,13 +53,28 @@ const kpiSpan = computed<string>(() => {
 // Bridges are constructed once outside the fetcher so re-fetches don't
 // re-instantiate API factories on every refresh tick.
 const client = useAdminClient()
+const authStore = useAdminAuthStore()
 const identityBridge = createIdentityBridge({ client })
 const systemBridge = createSystemBridge({ client })
 const aiBridge = createAiBridge({ client })
 const paymentBridge = createPaymentBridge({ client })
 
-function pickTotal(res: PromiseSettledResult<{ totalCount?: number }>): number {
-  return res.status === 'fulfilled' ? (res.value.totalCount ?? 0) : 0
+/**
+ * Fail-open + super-user bypass, same rule as the sidebar filter: don't hide a
+ * KPI before permissions load, and let super admins see all four.
+ */
+function canSee(permission: string): boolean {
+  return authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission(permission)
+}
+
+interface KpiSpec {
+  key: string
+  /** Permission gating this KPI's endpoint — dropped when the user lacks it. */
+  permission: string
+  title: string
+  icon: string
+  gradient: { start: string; end: string }
+  load: () => Promise<number>
 }
 
 useWidgetData(async () => {
@@ -75,42 +91,48 @@ useWidgetData(async () => {
     ...emptyQuery,
     filters: { startTime: thirtyDaysAgo.toISOString(), endTime: now.toISOString() },
   }
-  const [users, access, aiUsage, orders] = await Promise.allSettled([
-    identityBridge.users.fetch(emptyQuery),
-    systemBridge.accessLogs.fetch(emptyQuery),
-    aiBridge.usage.summary(aiUsageQuery),
-    paymentBridge.orders.fetch(emptyQuery),
-  ])
-  dynamicKpis.value = [
+
+  // Each KPI declares the permission its endpoint enforces. A business admin who
+  // lacks it (e.g. access-logs → system.accessLog.view is Technical) DROPS the
+  // tile entirely instead of rendering a misleading 0 from a swallowed 403.
+  const specs: KpiSpec[] = [
     {
-      key: 'users',
-      title: 'admin.modules.dashboard.kpi.users',
-      value: pickTotal(users),
-      icon: 'mdi:account-group',
+      key: 'users', permission: 'user.view',
+      title: 'admin.modules.dashboard.kpi.users', icon: 'mdi:account-group',
       gradient: { start: '#ec4786', end: '#b955a4' },
+      load: async () => (await identityBridge.users.fetch(emptyQuery)).totalCount ?? 0,
     },
     {
-      key: 'access-logs',
-      title: 'admin.modules.dashboard.kpi.accessLogs',
-      value: pickTotal(access),
-      icon: 'mdi:chart-areaspline',
+      key: 'access-logs', permission: 'system.accessLog.view',
+      title: 'admin.modules.dashboard.kpi.accessLogs', icon: 'mdi:chart-areaspline',
       gradient: { start: '#865ec0', end: '#5144b4' },
+      load: async () => (await systemBridge.accessLogs.fetch(emptyQuery)).totalCount ?? 0,
     },
     {
-      key: 'ai-requests',
-      title: 'admin.modules.dashboard.kpi.aiRequests',
-      value: aiUsage.status === 'fulfilled' ? (aiUsage.value.requestCount ?? 0) : 0,
-      icon: 'mdi:robot-outline',
+      key: 'ai-requests', permission: 'ai.usage.view',
+      title: 'admin.modules.dashboard.kpi.aiRequests', icon: 'mdi:robot-outline',
       gradient: { start: '#56cdf3', end: '#719de3' },
+      load: async () => (await aiBridge.usage.summary(aiUsageQuery)).requestCount ?? 0,
     },
     {
-      key: 'orders',
-      title: 'admin.modules.dashboard.kpi.orders',
-      value: pickTotal(orders),
-      icon: 'mdi:cart-arrow-down',
+      key: 'orders', permission: 'payment.order.view',
+      title: 'admin.modules.dashboard.kpi.orders', icon: 'mdi:cart-arrow-down',
       gradient: { start: '#fcbc25', end: '#f68057' },
+      load: async () => (await paymentBridge.orders.fetch(emptyQuery)).totalCount ?? 0,
     },
   ]
+  const visible = specs.filter((s) => canSee(s.permission))
+  const results = await Promise.allSettled(visible.map((s) => s.load()))
+  dynamicKpis.value = visible.map((s, i) => {
+    const r = results[i]
+    return {
+      key: s.key,
+      title: s.title,
+      value: r && r.status === 'fulfilled' ? r.value : 0,
+      icon: s.icon,
+      gradient: s.gradient,
+    }
+  })
 })
 </script>
 

@@ -6,6 +6,7 @@ namespace Tnzi.Feature.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/feature-values")]
+[ApiAuthorize(PermissionName = "feature.view")]
 public class DefaultFeatureValueAdminController : ApiAdminControllerBase
 {
     protected readonly IFeatureService FeatureService;

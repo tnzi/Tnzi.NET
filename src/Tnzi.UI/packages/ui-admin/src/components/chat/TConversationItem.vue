@@ -7,16 +7,25 @@
     @click="emit('select')"
     @keydown.enter="emit('select')"
     @keydown.space.prevent="emit('select')"
+    @contextmenu.prevent="emit('context-menu', $event)"
   >
-    <!-- Avatar with unread badge -->
+    <!-- Avatar with unread badge. Groups render a WeChat-style composite of the
+         earliest-joined member avatars when the backend supplies them; an
+         explicit group avatar (avatarFileId) still wins. -->
     <NBadge :value="item.unreadCount" :show="item.unreadCount > 0" :max="99" class="t-conv-item__badge">
+      <TGroupAvatar
+        v-if="item.type === ConversationType.Group && !item.avatarFileId && item.memberAvatars?.length"
+        :members="item.memberAvatars"
+        :size="38"
+      />
       <TChatAvatar
+        v-else
         :name="item.title"
         :file-id="item.avatarFileId"
         :seed="item.id"
         :size="38"
         :system="item.type === ConversationType.System"
-        :status="item.type === ConversationType.Direct ? item.peerStatus : null"
+        :status="presence !== false && item.type === ConversationType.Direct ? item.peerStatus : null"
       />
     </NBadge>
 
@@ -44,13 +53,20 @@ import { ConversationType } from '@tnzi/core/services/chat'
 import { formatChatTime } from './time'
 import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
+import TGroupAvatar from './TGroupAvatar.vue'
 
 const props = defineProps<{
   item: ConversationListItemDto
   active: boolean
+  /** Deployment presence toggle — false hides the peer status dot. */
+  presence?: boolean
 }>()
 
-const emit = defineEmits<{ select: [] }>()
+const emit = defineEmits<{
+  select: []
+  /** Right-click — the list opens the quick-action context menu at the cursor. */
+  'context-menu': [e: MouseEvent]
+}>()
 
 const timeLabel = computed(() => formatChatTime(props.item.lastMessageAt, translatePageKey('chat', 'window.yesterday')))
 </script>

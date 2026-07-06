@@ -8,6 +8,8 @@ public class SubscriptionPlanConfiguration : EntityTypeConfigurationBase<Subscri
         builder.Property(p => p.PlanName).HasMaxLength(128).IsRequired();
         builder.Property(p => p.Description).HasMaxLength(500);
         builder.Property(p => p.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
+        builder.Property(p => p.Price).HasMoneyPrecision();
+        builder.Property(p => p.TrialDiscount).HasMoneyPrecision();
 
         builder.HasMany(p => p.Subscriptions)
             .WithOne(s => s.Plan)

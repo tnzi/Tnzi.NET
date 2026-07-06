@@ -26,7 +26,6 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
@@ -34,7 +33,7 @@ import { createTemplateBridge } from '../../services/bridges/template-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { layoutColumns, layoutFormSchema } from './layout-config'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import type { LayoutInfoDto } from '@tnzi/core/services/template'
 
 const bridge = createTemplateBridge({ client: useAdminClient() })
@@ -61,10 +60,5 @@ const rowActions: RowAction<LayoutInfoDto>[] = [
   deleteAction(crud, { show: (row) => !row.isReadOnly }),
 ]
 
-
-onMounted(() => {
-  crud.refresh().catch(() => undefined)
-})
-
-const t = (key: string) => translatePageKey('template.layouts', key)
+const t = makePageTranslator('template.layouts')
 </script>

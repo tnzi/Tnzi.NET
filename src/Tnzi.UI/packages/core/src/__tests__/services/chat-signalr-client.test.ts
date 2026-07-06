@@ -33,7 +33,7 @@ describe('createChatSignalRClient', () => {
     c.on('Chat.PresenceChanged', h)
     expect(onSpy).toHaveBeenCalledWith('Chat.PresenceChanged', h)
     // Simulate the connection firing the event
-    const payload = { userId: 'u1', status: 1, lastSeenAt: '2026-06-20T00:00:00Z' }
+    const payload = { userId: 'u1', status: 'Online', lastSeenAt: '2026-06-20T00:00:00Z' }
     const registeredHandler = onSpy.mock.calls.find(([evt]) => evt === 'Chat.PresenceChanged')?.[1]
     registeredHandler?.(payload)
     expect(h).toHaveBeenCalledWith(payload)

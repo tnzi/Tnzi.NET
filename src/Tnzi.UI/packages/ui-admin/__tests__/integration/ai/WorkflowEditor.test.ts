@@ -66,11 +66,13 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   }),
   // 0.2.72+ (B4): the bridge now re-exports `WorkflowExecutionMode`
   // so pages can consume the enum value without reaching into
-  // `@tnzi/core/services/ai`. The mock must mirror that re-export.
+  // `@tnzi/core/services/ai`. The mock must mirror that re-export —
+  // string enums (member name === value) matching the backend
+  // JsonStringEnumConverter PascalCase serialization.
   WorkflowExecutionMode: {
-    Sequential: 0,
-    Parallel: 1,
-    Dag: 2,
+    Sequential: 'Sequential',
+    Parallel: 'Parallel',
+    Dag: 'Dag',
   },
 }))
 

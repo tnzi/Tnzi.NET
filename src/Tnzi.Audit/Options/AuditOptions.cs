@@ -23,8 +23,13 @@ public class AuditOptions
     /// <summary>批量处理大小</summary>
     public int BatchSize { get; set; } = 100;
 
-    /// <summary>排除的请求路径前缀</summary>
-    public string[] ExcludedPaths { get; set; } = ["/swagger", "/health", "/scalar"];
+    /// <summary>
+    /// 排除的请求路径前缀。
+    /// "/hubs" 必须排除：SignalR WebSocket/SSE 经 access_token 查询参数携带 JWT，
+    /// 而审计记录的 Url 字段存 Path + QueryString，不排除会把完整令牌持久化进审计表；
+    /// 且 WS 长连接在断开时才入队，产生耗时数小时的无意义"操作"记录。
+    /// </summary>
+    public string[] ExcludedPaths { get; set; } = ["/swagger", "/health", "/scalar", "/hubs"];
 
     /// <summary>Channel 容量 (0 = 无限)</summary>
     public int ChannelCapacity { get; set; } = 10000;

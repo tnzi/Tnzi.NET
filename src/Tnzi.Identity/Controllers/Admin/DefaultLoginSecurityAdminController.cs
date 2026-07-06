@@ -6,6 +6,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/login-security")]
+[ApiAuthorize(PermissionName = "identity.loginSecurity.view")]
 public class DefaultLoginSecurityAdminController : ApiAdminControllerBase
 {
     protected readonly ILoginSecurityService LoginSecurityService;

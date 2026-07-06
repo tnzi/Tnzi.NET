@@ -145,7 +145,7 @@ const stubs = {
   Alert: { name: 'Alert', template: '<div class="n-alert"><slot /></div>' },
 }
 
-describe('Promotions page (TListShell + custom NModal)', () => {
+describe('Promotions page (standard useCrudPage + TCrudPage)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mockGetList.mockClear()
@@ -166,66 +166,53 @@ describe('Promotions page (TListShell + custom NModal)', () => {
     expect(mockGetList).toHaveBeenCalledTimes(1)
   })
 
-  it('renders TListShell root element', async () => {
+  it('renders the TCrudPage / TListShell shell', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
+    expect(wrapper.find('.t-crud-page').exists()).toBe(true)
     expect(wrapper.find('.t-list-shell').exists()).toBe(true)
   })
 
   it('renders table via TTableRenderer after fetch', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
-    // TTableRenderer wraps NDataTable — the stub renders .n-data-table-stub
     const table = wrapper.find('.n-data-table-stub')
     expect(table.exists()).toBe(true)
     expect(table.attributes('data-rows')).toBe('1')
   })
 
-  it('modal is closed initially', async () => {
+  it('create form modal is closed initially', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
     expect(wrapper.find('.n-modal-stub').exists()).toBe(false)
   })
 
-  it('openCreate opens the modal', async () => {
-    const wrapper = mount(Promotions, { global: { stubs } })
-    await flushPromises()
-    const vm = wrapper.vm as unknown as { openCreate: () => void; modalVisible: boolean }
-    vm.openCreate()
-    await flushPromises()
-    expect(vm.modalVisible).toBe(true)
-  })
-
-  it('openEdit opens the modal with editMode = true', async () => {
+  it('openCreate opens the create form with seeded enum defaults', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openEdit: (row: Record<string, unknown>) => void
-      editMode: boolean
-      modalVisible: boolean
-      form: Record<string, unknown>
+      openCreate: () => void
+      crud: { formModal: { visible: { value: boolean }; mode: { value: string }; formData: { value: Record<string, unknown> } } }
     }
-    vm.openEdit({
-      id: 'promo-1',
-      promotionCode: 'SAVE10',
-      name: 'Save 10%',
-      description: null,
-      type: 1,
-      discountValue: 10,
-      discountType: 1,
-      maxDiscountAmount: null,
-      minimumOrderAmount: null,
-      totalUsageLimit: 100,
-      usedCount: 5,
-      startTime: '2026-01-01T00:00:00Z',
-      endTime: null,
-      isActive: true,
-      isValid: true,
-    })
+    vm.openCreate()
     await flushPromises()
-    expect(vm.editMode).toBe(true)
-    expect(vm.modalVisible).toBe(true)
-    expect(vm.form.promotionCode).toBe('SAVE10')
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('create')
+    // Required enum fields are pre-seeded so the create form opens valid.
+    expect(vm.crud.formModal.formData.value.type).toBeDefined()
+    expect(vm.crud.formModal.formData.value.discountType).toBeDefined()
+  })
+
+  it('editAction opens the form in edit mode bound to the row', async () => {
+    const wrapper = mount(Promotions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      crud: { openEdit: (row: Record<string, unknown>) => void; formModal: { mode: { value: string }; formData: { value: Record<string, unknown> } } }
+    }
+    vm.crud.openEdit({ id: 'promo-1', promotionCode: 'SAVE10', name: 'Save 10%', type: 1, discountType: 1, discountValue: 10, isActive: true, isValid: true })
+    await flushPromises()
+    expect(vm.crud.formModal.mode.value).toBe('edit')
+    expect(vm.crud.formModal.formData.value.promotionCode).toBe('SAVE10')
   })
 
   it('deactivate calls bridge.deactivate and then refreshes', async () => {
@@ -235,7 +222,6 @@ describe('Promotions page (TListShell + custom NModal)', () => {
     await vm.deactivate('promo-1')
     await flushPromises()
     expect(mockDeactivate).toHaveBeenCalledWith('promo-1')
-    // getList called once on mount + once after deactivate
     expect(mockGetList).toHaveBeenCalledTimes(2)
   })
 
@@ -245,9 +231,7 @@ describe('Promotions page (TListShell + custom NModal)', () => {
     const vm = wrapper.vm as unknown as { onActiveFilterChange: (v: string | null) => void }
     vm.onActiveFilterChange('active')
     await flushPromises()
-    // second call after filter change
     expect(mockGetList).toHaveBeenCalledTimes(2)
-    // The second call should carry isActive=true in its query
     const secondCall = mockGetList.mock.calls[1][0] as { isActive: boolean | null }
     expect(secondCall.isActive).toBe(true)
   })
@@ -272,53 +256,29 @@ describe('Promotions page (TListShell + custom NModal)', () => {
     expect(secondCall.isActive).toBe(null)
   })
 
-  it('submitForm (create) calls bridge.create and refreshes', async () => {
+  it('submitting a create calls bridge.create and refreshes', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
       openCreate: () => void
-      submitForm: () => Promise<void>
-      form: {
-        promotionCode: string
-        name: string
-        discountValue: number
-      }
+      crud: { formModal: { formData: { value: Record<string, unknown> } }; submit: () => Promise<unknown> }
     }
     vm.openCreate()
-    vm.form.promotionCode = 'NEW20'
-    vm.form.name = 'New Promo'
-    vm.form.discountValue = 20
-    await vm.submitForm()
+    await flushPromises()
+    vm.crud.formModal.formData.value.promotionCode = 'NEW20'
+    vm.crud.formModal.formData.value.name = 'New Promo'
+    vm.crud.formModal.formData.value.discountValue = 20
+    await vm.crud.submit()
     await flushPromises()
     expect(mockCreate).toHaveBeenCalledTimes(1)
-    // getList called once on mount + once after create
     expect(mockGetList).toHaveBeenCalledTimes(2)
   })
 
-  it('custom modal is preserved (modalVisible toggled by openCreate/openEdit)', async () => {
+  it('no default create button (custom #primary slot with seeded defaults)', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
-    const vm = wrapper.vm as unknown as {
-      openCreate: () => void
-      modalVisible: boolean
-      editMode: boolean
-    }
-    // TListShell shell exists
-    expect(wrapper.find('.t-list-shell').exists()).toBe(true)
-    // Modal starts closed
-    expect(vm.modalVisible).toBe(false)
-    // openCreate sets modalVisible = true (modal is sibling to TListShell)
-    vm.openCreate()
-    await flushPromises()
-    expect(vm.modalVisible).toBe(true)
-    expect(vm.editMode).toBe(false)
-  })
-
-  it('no built-in create button from TListShell (custom #primary slot used)', async () => {
-    const wrapper = mount(Promotions, { global: { stubs } })
-    await flushPromises()
-    // The page overrides #primary with its own button, so .t-list-shell__create
-    // (the default button rendered by TListShell) should NOT appear.
+    // The page overrides #primary with its own button (class t-list-shell__action),
+    // so TCrudPage's default create button (t-list-shell__create) is suppressed.
     expect(wrapper.find('.t-list-shell__create').exists()).toBe(false)
   })
 })

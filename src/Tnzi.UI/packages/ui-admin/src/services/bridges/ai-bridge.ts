@@ -69,6 +69,7 @@ import {
   type AgentListQueryDto,
   type AgentRunDto,
   type AgentRunQueryDto,
+  type AgentRunTraceDto,
   type AgentThreadDto,
   type CreateAgentThreadDto,
   type ThreadListQueryDto,
@@ -259,6 +260,8 @@ export interface AiBridge {
   }
   agentRuns: Pick<BridgeCrudContract<AgentRunDto>, 'fetch'> & {
     cancel(id: string): Promise<void>
+    /** All trace events recorded for a run (drives the run monitor's trace panel via polling). */
+    getTraces(id: string): Promise<AgentRunTraceDto[]>
     tail(id: string): Promise<ReadableStream<Uint8Array>>
   }
   workflows: BridgeCrudContract<
@@ -537,6 +540,10 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       ),
     cancel: async (id: string) => {
       await agentRunApi.cancel(id)
+    },
+    getTraces: async (id: string) => {
+      const items = unwrap<AgentRunTraceDto[] | undefined>(await agentRunApi.getRunTraces(id))
+      return Array.isArray(items) ? items : []
     },
     tail: notImplemented('agentRuns.tail') as () => Promise<ReadableStream<Uint8Array>>,
   }

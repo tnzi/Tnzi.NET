@@ -16,6 +16,7 @@
 import { ref, computed } from 'vue'
 import { NCheckbox, NSpin } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { formatFileSize } from '@tnzi/core'
 import TEmpty from '../../../components/data/TEmpty.vue'
 import { fileGlyph, isImageType, FOLDER_GLYPH } from '../file-icons'
 import type { FileFolderDto, FileRecordDto } from '@tnzi/core/services/storage'
@@ -26,6 +27,12 @@ const props = defineProps<{
   selectedFileIds: string[]
   loading?: boolean
   translate: (key: string, params?: Record<string, unknown>) => string
+  /**
+   * Resolve a file's inline preview URL (deployment-prefix aware). Supplied by
+   * the parent (from the storage bridge) so the component never hardcodes
+   * `/api/...`. Omitted → no image thumbnails (glyph fallback only).
+   */
+  previewUrl?: (id: string) => string
 }>()
 
 const emit = defineEmits<{
@@ -48,7 +55,7 @@ const isEmpty = computed(() => !props.folders.length && !props.files.length)
 
 function thumbUrl(file: FileRecordDto): string | null {
   if (file.thumbnailUrl) return file.thumbnailUrl
-  if (isImageType(file.contentType)) return `/api/files/${file.id}/preview`
+  if (isImageType(file.contentType) && props.previewUrl) return props.previewUrl(file.id)
   return null
 }
 
@@ -57,13 +64,6 @@ function toggleFile(file: FileRecordDto): void {
   if (set.has(file.id)) set.delete(file.id)
   else set.add(file.id)
   emit('update:selectedFileIds', [...set])
-}
-
-function formatSize(bytes: number): string {
-  if (!bytes) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB']
-  const i = Math.min(u.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${u[i]}`
 }
 
 // ---- drag source ----
@@ -192,7 +192,7 @@ function onRootDrop(e: DragEvent): void {
           />
         </span>
         <span class="t-file-tile__name">{{ file.originalName }}</span>
-        <span class="t-file-tile__meta">{{ formatSize(file.size) }}</span>
+        <span class="t-file-tile__meta">{{ formatFileSize(file.size) }}</span>
       </div>
 
       <div v-if="isEmpty && !loading" class="t-file-explorer__empty">

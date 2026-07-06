@@ -45,6 +45,7 @@ function mockStorageApi() {
     uploadMany: vi.fn(async () => []),
     download: vi.fn(async () => undefined),
     getPreviewUrl: vi.fn(() => '/preview/f1'),
+    getDownloadUrl: vi.fn((id: string) => `/files/${id}/download`),
     getThumbnailUrl: vi.fn(() => '/thumb/f1'),
     getUrl: vi.fn(async () => '/url/f1'),
     getPresignedUrl: vi.fn(async () => 'https://example.com/presigned'),
@@ -103,15 +104,19 @@ describe('storage-bridge', () => {
     expect(fileApi.batchDelete).toHaveBeenCalledWith(['f1', 'f2'])
   })
 
-  it('files.downloadUrl returns a non-empty string', () => {
+  it('files.downloadUrl delegates to storageApi.getDownloadUrl (deployment-prefix aware)', () => {
     const fileApi = mockFileApi()
+    const storageApi = mockStorageApi()
     const bridge = createStorageBridge({
       fileApi: fileApi as never,
-      storageApi: mockStorageApi() as never,
+      storageApi: storageApi as never,
     })
     const url = bridge.files.downloadUrl('abc')
+    expect(storageApi.getDownloadUrl).toHaveBeenCalledWith('abc')
     expect(typeof url).toBe('string')
     expect(url.length).toBeGreaterThan(0)
+    // No hardcoded /api prefix — the URL is resolved by the HttpClient.
+    expect(url).not.toContain('/api/files')
   })
 
   it('files.initUpload / uploadChunk / completeUpload delegate to storageApi', async () => {

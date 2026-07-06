@@ -206,6 +206,13 @@ export {
   type AdminSettingsSection,
 } from './settingsConfig'
 export {
+  ADMIN_DEEP_LINK_KEY,
+  resolveDeepLinkConfig,
+  tryInjectDeepLinkConfig,
+  type AdminDeepLinkConfig,
+  type ResolvedDeepLinkConfig,
+} from './deepLinkConfig'
+export {
   ADMIN_CHAT_CONFIG_KEY,
   provideAdminChatConfig,
   useAdminChatConfig,

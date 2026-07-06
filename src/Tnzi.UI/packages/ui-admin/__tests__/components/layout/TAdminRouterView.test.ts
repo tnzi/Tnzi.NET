@@ -3,11 +3,24 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h } from 'vue'
+import { useRoute } from 'vue-router'
 import TAdminRouterView from '../../../src/components/layout/TAdminRouterView.vue'
 import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
 
 let mountCounter = 0
 let activateCounter = 0
+let detailMountCounter = 0
+
+// Detail page rendering its route id — same route name across A/B, only params
+// differ. Counts mounts so the test can prove A and B get SEPARATE instances.
+const DetailPage = defineComponent({
+  name: 'DetailPage',
+  setup() {
+    detailMountCounter += 1
+    const route = useRoute()
+    return () => h('div', { class: 'page-detail' }, String(route.params.id))
+  },
+})
 
 const PageA = defineComponent({
   name: 'PageA',
@@ -38,6 +51,7 @@ function makeRouter(): Router {
       { path: '/b', name: 'PageB', component: PageB, meta: { keepAlive: true } },
       { path: '/nokeep', name: 'NoKeep', component: PageB, meta: { keepAlive: false } },
       { path: '/anon', component: PageNoName },
+      { path: '/detail/:id', name: 'detail', component: DetailPage },
     ],
   })
 }
@@ -57,6 +71,25 @@ describe('TAdminRouterView', () => {
   beforeEach(() => {
     mountCounter = 0
     activateCounter = 0
+    detailMountCounter = 0
+  })
+
+  it('mounts a SEPARATE instance per record for param-based detail routes', async () => {
+    const router = makeRouter()
+    await router.push('/detail/A')
+    await router.isReady()
+    const wrapper = await mountWithRouter(router)
+    await flushPromises()
+    expect(wrapper.find('.page-detail').text()).toBe('A')
+    expect(detailMountCounter).toBe(1)
+
+    await router.push('/detail/B')
+    await flushPromises()
+    // The key is the fullPath, so B is a fresh instance (not A reused) and the
+    // page shows B's id, not A's stale data.
+    expect(wrapper.find('.page-detail').text()).toBe('B')
+    expect(detailMountCounter).toBe(2)
+    wrapper.unmount()
   })
 
   it('renders the current route component', async () => {

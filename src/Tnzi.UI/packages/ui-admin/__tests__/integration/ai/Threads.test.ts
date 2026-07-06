@@ -147,19 +147,24 @@ describe('Threads page (TCrudPage table + message drawer)', () => {
     expect(wrapper.text()).toContain('Threads')
   })
 
-  it('openDetail opens the drawer and loads the thread messages', async () => {
+  it('opening the view state loads the thread transcript via onView', async () => {
     const wrapper = mount(Threads, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openDetail: (row: { id: string; title: string }) => Promise<void>
-      detailVisible: boolean
+      crud: {
+        openView: (row: { id: string; title: string }) => void
+        formModal: { visible: { value: boolean }; mode: { value: string | null } }
+      }
       detail: { id: string; messages: unknown[] } | null
     }
-    await vm.openDetail({ id: 't1', title: 'Onboarding chat' })
+    // The read-only detail now rides the CRUD `view` open-state; `onView` lazy-
+    // loads the heavier transcript payload (getDetail) on open.
+    vm.crud.openView({ id: 't1', title: 'Onboarding chat' })
     await flushPromises()
     expect(getDetail).toHaveBeenCalledTimes(1)
     expect(getDetail).toHaveBeenCalledWith('t1')
-    expect(vm.detailVisible).toBe(true)
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
     expect(vm.detail?.id).toBe('t1')
     expect(vm.detail?.messages).toHaveLength(2)
   })

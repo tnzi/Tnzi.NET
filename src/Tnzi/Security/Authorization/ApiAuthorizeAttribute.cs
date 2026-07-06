@@ -8,7 +8,16 @@ namespace Tnzi.Security.Authorization;
 /// 1. 仅需登录：[ApiAuthorize] - 任意已登录用户可访问
 /// 2. 需登录且指定权限：[ApiAuthorize(PermissionName = "Admin.User.Manage")] - 需登录并拥有该权限
 /// </summary>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
+/// <remarks>
+/// <b>叠加语义（AllowMultiple = true）</b>：同一端点上收集到的多个
+/// <see cref="ApiAuthorizeAttribute"/>（基类 + 派生类 + 方法级）是 <b>AND</b>
+/// 关系——每个声明的权限都必须通过。框架据此实现两层 admin 门：
+/// <c>ApiAdminControllerBase</c> 声明外层 <c>Admin.Manage</c>，各模块
+/// <c>Default*AdminController</c> 再声明本模块权限码（如
+/// <c>finance.account.view</c>），派生类特性不会替换基类特性。
+/// <c>[AllowAnonymous]</c> 仍然豁免全部检查。
+/// </remarks>
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
 public class ApiAuthorizeAttribute : AuthorizeAttribute
 {
     private const string PermissionPolicyPrefix = "Permission:";

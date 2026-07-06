@@ -5,6 +5,7 @@ namespace Tnzi.Payment.Controllers.Admin;
 /// </summary>
 [Route("admin/refunds")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "payment.refund.view")]
 public class DefaultRefundAdminController : ApiAdminControllerBase
 {
     private readonly IRefundService _refundService;

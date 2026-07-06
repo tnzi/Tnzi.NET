@@ -6,6 +6,7 @@ namespace Tnzi.Audit.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/audit-operations")]
+[ApiAuthorize(PermissionName = "audit.operation.view")]
 public class DefaultAuditOperationAdminController : ApiAdminControllerBase
 {
     protected readonly IAuditOperationService AuditOperationService;

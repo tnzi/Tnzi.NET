@@ -9,6 +9,7 @@ public class ConversationService : ApplicationService, IConversationService
     private readonly IRepository<ChatMessage, Guid> _messageRepository;
     private readonly IChatContactService _contactService;
     private readonly IPresenceService _presence;
+    private readonly IOptionsSnapshot<ChatOptions> _options;
 
     public ConversationService(
         IServiceProvider serviceProvider,
@@ -16,13 +17,15 @@ public class ConversationService : ApplicationService, IConversationService
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<ChatMessage, Guid> messageRepository,
         IChatContactService contactService,
-        IPresenceService presence) : base(serviceProvider)
+        IPresenceService presence,
+        IOptionsSnapshot<ChatOptions> options) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
         _messageRepository = Check.NotNull(messageRepository);
         _contactService = Check.NotNull(contactService);
         _presence = Check.NotNull(presence);
+        _options = Check.NotNull(options);
     }
 
     internal static string DirectKeyFor(Guid a, Guid b) =>
@@ -42,7 +45,18 @@ public class ConversationService : ApplicationService, IConversationService
 
         var existing = await _conversationRepository.FirstOrDefaultAsync(c => c.DirectKey == key);
         if (existing != null)
+        {
+            // Re-initiating a chat re-surfaces a conversation I previously hid/deleted
+            // (my list entry only; the ClearedAt watermark still hides old history).
+            var mine = await _memberRepository.AsQueryable(withTracking: true)
+                .FirstOrDefaultAsync(m => m.ConversationId == existing.Id && m.UserId == me && m.RemovedAt == null && m.IsHidden);
+            if (mine != null)
+            {
+                mine.IsHidden = false;
+                await _memberRepository.UpdateAsync(mine);
+            }
             return Ok(await MapConversationAsync(existing));
+        }
 
         try
         {
@@ -83,9 +97,15 @@ public class ConversationService : ApplicationService, IConversationService
 
         if (input.ContentType == MessageContentType.Text && string.IsNullOrWhiteSpace(input.Content))
             return Fail<ChatMessageDto>("Message content is required.", 400);
-        if ((input.ContentType == MessageContentType.Image || input.ContentType == MessageContentType.File)
-            && string.IsNullOrWhiteSpace(input.FileId))
-            return Fail<ChatMessageDto>("File reference is required for media messages.", 400);
+        if (input.ContentType == MessageContentType.Image || input.ContentType == MessageContentType.File)
+        {
+            // Deployment-level feature gate; the frontend hides the attachment entry
+            // when disabled, but the write path must be enforced here regardless.
+            if (!_options.Value.EnableFileMessages)
+                return Fail<ChatMessageDto>("File and image messages are disabled.", 403);
+            if (string.IsNullOrWhiteSpace(input.FileId))
+                return Fail<ChatMessageDto>("File reference is required for media messages.", 400);
+        }
 
         var now = DateTime.UtcNow;
         var preview = ChatPreview.Build(input.ContentType, input.Content);
@@ -117,9 +137,26 @@ public class ConversationService : ApplicationService, IConversationService
             var others = await _memberRepository.AsQueryable(withTracking: true)
                 .Where(m => m.ConversationId == conversationId && m.UserId != me && m.RemovedAt == null)
                 .ToListAsync(ct);
-            foreach (var o in others) o.UnreadCount += 1;
+            foreach (var o in others)
+            {
+                o.UnreadCount += 1;
+                // A new message re-surfaces a hidden conversation in the recipient's list.
+                o.IsHidden = false;
+            }
             if (others.Count > 0) await _memberRepository.UpdateManyAsync(others, ct);
             otherMemberIds.AddRange(others.Select(o => o.UserId));
+
+            // Sending into a conversation I previously hid re-surfaces it for me too.
+            if (member.IsHidden)
+            {
+                var mine = await _memberRepository.AsQueryable(withTracking: true)
+                    .FirstOrDefaultAsync(m => m.ConversationId == conversationId && m.UserId == me && m.RemovedAt == null, ct);
+                if (mine != null)
+                {
+                    mine.IsHidden = false;
+                    await _memberRepository.UpdateAsync(mine, ct);
+                }
+            }
 
             return (ChatMessage?)msg;
         });
@@ -200,10 +237,20 @@ public class ConversationService : ApplicationService, IConversationService
         return Ok(new MessageThreadDto { Messages = dtos, HasMore = hasMore });
     }
 
+    /// <summary>成员展示顺序：群主恒第一，其余按入群顺序（CreationTime，再按 Id 定序）。</summary>
+    private static List<ConversationMember> OrderMembers(IEnumerable<ConversationMember> members, Guid? ownerId)
+        => members
+            .OrderByDescending(m => ownerId.HasValue && m.UserId == ownerId.Value)
+            .ThenBy(m => m.CreationTime)
+            .ThenBy(m => m.Id)
+            .ToList();
+
     internal async Task<ConversationDto> MapConversationAsync(Conversation conv)
     {
         var me = CurrentUser?.Id;
-        var members = await _memberRepository.ToListAsync(m => m.ConversationId == conv.Id && m.RemovedAt == null);
+        var members = OrderMembers(
+            await _memberRepository.ToListAsync(m => m.ConversationId == conv.Id && m.RemovedAt == null),
+            conv.OwnerId);
         var ids = members.Select(m => m.UserId).ToList();
         var profiles = await _contactService.ResolveProfilesAsync(ids);
         var presenceMap = (await _presence.ResolveEffectiveAsync(ids)).ToDictionary(p => p.UserId);
@@ -246,7 +293,9 @@ public class ConversationService : ApplicationService, IConversationService
     {
         var me = GetRequiredCurrentUser().Id!.Value;
 
-        var members = await _memberRepository.ToListAsync(m => m.UserId == me && m.RemovedAt == null);
+        // Hidden conversations are excluded; any incoming message flips IsHidden
+        // back to false server-side, so they re-surface automatically.
+        var members = await _memberRepository.ToListAsync(m => m.UserId == me && m.RemovedAt == null && !m.IsHidden);
         if (members.Count == 0)
             return Ok<IReadOnlyList<ConversationListItemDto>>(new List<ConversationListItemDto>());
 
@@ -269,7 +318,25 @@ public class ConversationService : ApplicationService, IConversationService
             if (otherIdsByConv.TryGetValue(conv.Id, out var ids) && ids.Count > 0)
                 directOtherById[conv.Id] = ids[0];
         }
-        var profiles = await _contactService.ResolveProfilesAsync(directOtherById.Values.Distinct().ToList());
+
+        // Group composite avatars: owner always first, then the earliest joined members
+        // (join order). Computed from the already-loaded member batch — no extra query.
+        var avatarTake = Math.Clamp(_options.Value.GroupAvatarMemberCount, 1, 9);
+        var ownerByConv = conversations
+            .Where(c => c.Type == ConversationType.Group)
+            .ToDictionary(c => c.Id, c => c.OwnerId);
+        var groupAvatarIdsByConv = allMembers
+            .Where(m => ownerByConv.ContainsKey(m.ConversationId))
+            .GroupBy(m => m.ConversationId)
+            .ToDictionary(
+                g => g.Key,
+                g => OrderMembers(g, ownerByConv.GetValueOrDefault(g.Key))
+                    .Take(avatarTake).Select(m => m.UserId).ToList());
+
+        var profileIds = directOtherById.Values
+            .Concat(groupAvatarIdsByConv.Values.SelectMany(ids => ids))
+            .Distinct().ToList();
+        var profiles = await _contactService.ResolveProfilesAsync(profileIds);
 
         var items = new List<ConversationListItemDto>();
         foreach (var member in members)
@@ -293,6 +360,14 @@ public class ConversationService : ApplicationService, IConversationService
                 avatar = profiles.TryGetValue(otherId, out var p2) ? p2.AvatarFileId : null;
             }
 
+            List<ChatContactDto>? memberAvatars = null;
+            if (conv.Type == ConversationType.Group && groupAvatarIdsByConv.TryGetValue(conv.Id, out var avatarIds))
+            {
+                memberAvatars = avatarIds.Select(uid => profiles.TryGetValue(uid, out var mp)
+                    ? mp
+                    : new ChatContactDto { UserId = uid }).ToList();
+            }
+
             items.Add(new ConversationListItemDto
             {
                 Id = conv.Id,
@@ -307,6 +382,7 @@ public class ConversationService : ApplicationService, IConversationService
                 IsSticky = member.IsSticky,
                 Remark = member.Remark,
                 PeerUserId = conv.Type == ConversationType.Direct && directOtherById.TryGetValue(conv.Id, out var pid) ? pid : null,
+                MemberAvatars = memberAvatars,
             });
         }
 
@@ -340,7 +416,9 @@ public class ConversationService : ApplicationService, IConversationService
     public async Task<Result<int>> GetTotalUnreadAsync()
     {
         var me = GetRequiredCurrentUser().Id!.Value;
-        var members = await _memberRepository.ToListAsync(m => m.UserId == me && m.RemovedAt == null);
+        // Hidden conversations don't contribute to the badge (they aren't in the
+        // list, so a phantom count would be unactionable).
+        var members = await _memberRepository.ToListAsync(m => m.UserId == me && m.RemovedAt == null && !m.IsHidden);
         return Ok(members.Sum(m => m.UnreadCount));
     }
 
@@ -403,9 +481,31 @@ public class ConversationService : ApplicationService, IConversationService
 
         if (settings.IsMuted.HasValue) member.IsMuted = settings.IsMuted.Value;
         if (settings.IsSticky.HasValue) member.IsSticky = settings.IsSticky.Value;
+        if (settings.IsHidden.HasValue) member.IsHidden = settings.IsHidden.Value;
         if (settings.Remark != null) member.Remark = settings.Remark.Length == 0 ? null : settings.Remark;
         if (settings.Alias != null) member.Alias = settings.Alias.Length == 0 ? null : settings.Alias;
 
+        await _memberRepository.UpdateAsync(member);
+        return Ok();
+    }
+
+    public async Task<Result> DeleteForMeAsync(Guid conversationId)
+    {
+        var me = GetRequiredCurrentUser().Id!.Value;
+        var member = await _memberRepository.AsQueryable(withTracking: true)
+            .FirstOrDefaultAsync(m => m.ConversationId == conversationId && m.UserId == me && m.RemovedAt == null);
+        if (member == null) return Fail("You are not a member of this conversation.", 403);
+
+        // Per-user delete: wipe MY view of the history (ClearedAt watermark) and
+        // drop the conversation from MY list. Other members keep everything. A
+        // future message re-surfaces the conversation (IsHidden flips back) with
+        // an empty history - the WeChat "delete chat" semantic. Shared rows are
+        // never hard-deleted: groups/direct peers own the same data.
+        var now = DateTime.UtcNow;
+        member.IsHidden = true;
+        member.ClearedAt = now;
+        member.LastReadAt = now;
+        member.UnreadCount = 0;
         await _memberRepository.UpdateAsync(member);
         return Ok();
     }

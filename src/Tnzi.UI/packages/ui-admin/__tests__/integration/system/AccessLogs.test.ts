@@ -38,6 +38,9 @@ const stubs = {
   Switch: { template: '<button />' },
   Select: { template: '<select />' },
   DatePicker: { template: '<input type="date" />' },
+  // The read-only View action renders its detail in a drawer (closed on mount).
+  Drawer: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+  DrawerContent: { template: '<div><slot /></div>' },
   VueDraggable: { template: '<div><slot /></div>' },
 }
 

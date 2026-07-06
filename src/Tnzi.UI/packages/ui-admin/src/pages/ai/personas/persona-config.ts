@@ -36,13 +36,26 @@ export const personaFormSchema: FormSchemaItem[] = [
     type: 'select',
     placeholder: 'Inferred from session when omitted (tenant -> Tenant, host -> System)',
     options: [
-      { label: 'System (shared)', value: 0 },
-      { label: 'Tenant (private)', value: 1 },
+      { label: 'System (shared)', value: 'System' },
+      { label: 'Tenant (private)', value: 'Tenant' },
     ],
   },
 ]
 
-/** Keyword search over name / slug / description. */
-export const personaSearchFields: FormSchemaItem[] = [
-  { key: 'keyword', labelKey: 'search.keyword', label: 'Keyword', type: 'text' },
-]
+/**
+ * Normalise a persona/provider `scope` to its canonical ResourceScope member
+ * name. The backend serialises the enum as the PascalCase member name
+ * (JsonStringEnumConverter); a numeric ordinal is still accepted for backward
+ * compatibility. Tenant is the safe default (private, not the shared System row).
+ */
+export function resourceScopeName(scope: unknown): 'System' | 'Tenant' | 'User' {
+  const map: Record<string, 'System' | 'Tenant' | 'User'> = {
+    '0': 'System',
+    '1': 'Tenant',
+    '2': 'User',
+    System: 'System',
+    Tenant: 'Tenant',
+    User: 'User',
+  }
+  return map[String(scope)] ?? 'Tenant'
+}

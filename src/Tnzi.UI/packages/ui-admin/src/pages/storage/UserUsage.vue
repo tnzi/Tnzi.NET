@@ -74,12 +74,12 @@ import TContentPage from '../../components/layout/TContentPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { buildUsageColumns } from './userusage-config'
 import type { UserStorageUsageDto } from '@tnzi/core/services/storage'
 
-const t = (key: string) => translatePageKey('storage.userUsage', key)
+const t = makePageTranslator('storage.userUsage')
 const message = useSafeMessage()
 const bridge = createStorageBridge({ client: useAdminClient() })
 
@@ -92,6 +92,10 @@ const lookupLoading = ref(false)
 const pinnedUser = ref<UserStorageUsageDto | null>(null)
 
 const usageColumns = buildUsageColumns(t)
+
+// User IDs are GUIDs — reject malformed input client-side so we never fire a
+// request the backend would reject (or that would silently return an empty row).
+const GUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
 async function loadTopUsers(): Promise<void> {
   loading.value = true
@@ -108,6 +112,10 @@ async function loadTopUsers(): Promise<void> {
 async function lookupUser(): Promise<void> {
   const id = userIdQuery.value.trim()
   if (!id) return
+  if (!GUID_RE.test(id)) {
+    message.warning(t('search.invalidUserId'))
+    return
+  }
   lookupLoading.value = true
   try {
     pinnedUser.value = await bridge.userUsage.forUser(id)

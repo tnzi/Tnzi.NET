@@ -6,6 +6,7 @@ namespace Tnzi.Identity.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/organizations")]
+[ApiAuthorize(PermissionName = "organization.view")]
 public class DefaultOrganizationAdminController : ApiAdminControllerBase
 {
     protected readonly IOrganizationService OrganizationService;

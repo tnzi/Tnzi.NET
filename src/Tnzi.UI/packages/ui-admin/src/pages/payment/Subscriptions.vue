@@ -1,108 +1,84 @@
 <template>
   <!--
-    Subscriptions — Phase 3.33
-    Admin view of payment subscriptions.
-    Row action "Cancel at period end" calls bridge.subscriptions.update(id, { cancelAtPeriodEnd: true })
-    with a confirmation dialog.
+    Subscriptions — admin view of payment subscriptions. Read-only: there is NO
+    admin subscription update endpoint (subscriptions are initiated by users), so
+    the page offers a read-only View plus a single lifecycle action,
+    "Cancel at period end" (POST /admin/subscriptions/{id}/cancel, immediate=false),
+    wired declaratively with an inline confirmation.
   -->
   <TCrudPage
     :state="crud"
-    :all-columns="paymentSubscriptionColumns"
+    :all-columns="columns"
+    :show-default-search="false"
     :title="t('title')"
     :translate="t"
+    :row-actions="rowActions"
   >
-    <template #form="{ formData, mode }">
+    <!-- Read-only quick preview (right drawer) — reached via the row View
+         action. A #detail slot (not #form) is required so the view surface
+         mounts on this create/update-free page. -->
+    <template #detail="{ data }">
       <TFormSchemaRenderer
         :schema="paymentSubscriptionFormSchema"
-        :model="(formData ?? {}) as Record<string, unknown>"
-        :readonly="mode === 'view'"
+        :model="(data ?? {}) as Record<string, unknown>"
+        readonly
         :translate="t"
+        :columns="2"
       />
     </template>
-
-    <template #rowActions="{ row }">
-      <TRowActions :row="(row as SubscriptionRow)" :actions="rowActions" :translate="t">
-        <template #prepend>
-          <Button size="small" type="warning" ghost @click="cancelAtPeriodEnd(row as SubscriptionRow)">{{ t('cancelAtPeriodEnd') }}</Button>
-        </template>
-      </TRowActions>
-    </template>
   </TCrudPage>
-
-  <!-- Confirmation dialog for cancel at period end -->
-  <Modal
-    v-if="confirmVisible"
-    :show="confirmVisible"
-    :title="t('confirmCancelTitle')"
-    @update:show="(v: boolean) => { if (!v) confirmVisible = false }"
-  >
-    <p>{{ t('confirmCancelPrompt') }}</p>
-    <div class="flex justify-end gap-8px mt-16px">
-      <Button @click="confirmVisible = false">{{ t('admin.common.no') }}</Button>
-      <Button type="error" @click="confirmCancelAtPeriodEnd">{{ t('confirmCancelConfirm') }}</Button>
-    </div>
-  </Modal>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { NButton as Button, NModal as Modal } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
-import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { editAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { paymentSubscriptionColumns, paymentSubscriptionFormSchema } from './subscription-config'
-import { translatePageKey } from '../_shared/translate'
+import { buildSubscriptionColumns, paymentSubscriptionFormSchema } from './subscription-config'
+import { makePageTranslator } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safeMessage'
 import type { SubscriptionDto } from '@tnzi/core/services/payment'
 
-type SubscriptionRow = SubscriptionDto & { id: string }
+const t = makePageTranslator('payment.subscriptions')
+const message = useSafeMessage()
 
-// Wired to /admin/subscriptions via Plan C 2026-04-14.
 const bridge = createPaymentBridge({ client: useAdminClient() })
+
+const columns = buildSubscriptionColumns(t)
 
 const crud = useCrudPage<SubscriptionDto, string>({
   pageId: 'payment.subscriptions',
-  columns: paymentSubscriptionColumns,
+  columns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.subscriptions.fetch(query),
-  // Subscriptions are initiated by users and never hard-deleted (use cancel);
-  // admins may only edit billing metadata.
-  updateData: (id, data) => bridge.subscriptions.update(id, data),
+  // Read-only: no admin create/update/delete endpoint for subscriptions.
 })
 
+// A subscription can only be cancelled while it is still live.
+const TERMINAL = new Set(['Cancelled', 'Expired'])
 
-// "Cancel at period end" is rendered by the page in the #prepend slot; Edit
-// stays (subscriptions are editable), Delete is suppressed (use cancel).
-const rowActions: RowAction<SubscriptionDto>[] = [editAction(crud)]
-
-// Cancel at period end confirmation
-const confirmVisible = ref(false)
-const pendingCancelId = ref<string | null>(null)
-
-function cancelAtPeriodEnd(row: SubscriptionRow): void {
-  pendingCancelId.value = row.id
-  confirmVisible.value = true
-}
-
-async function confirmCancelAtPeriodEnd(): Promise<void> {
-  const id = pendingCancelId.value
-  confirmVisible.value = false
-  pendingCancelId.value = null
-  if (!id) return
+async function cancelAtPeriodEnd(id: string): Promise<void> {
   try {
     await bridge.subscriptions.cancelAtPeriodEnd(id)
+    message.success(t('toast.cancelled'))
     await crud.refresh()
-  } catch {
-    // Error handling deferred to error boundary / toast in full integration
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
   }
 }
 
-onMounted(() => {
-  crud.refresh().catch(() => undefined)
-})
-
-const t = (key: string) => translatePageKey('payment.subscriptions', key)
+const rowActions: RowAction<SubscriptionDto>[] = [
+  viewAction(crud),
+  {
+    key: 'cancelAtPeriodEnd',
+    label: 'cancelAtPeriodEnd',
+    type: 'warning',
+    icon: 'mdi:calendar-remove-outline',
+    show: (row) => !TERMINAL.has(String(row.status ?? '')),
+    confirm: 'confirmCancelPrompt',
+    onClick: (row) => void cancelAtPeriodEnd(row.id),
+  },
+]
 </script>

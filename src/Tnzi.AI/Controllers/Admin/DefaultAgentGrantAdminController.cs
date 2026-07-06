@@ -10,6 +10,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/agents/grants")]
+[ApiAuthorize(PermissionName = "ai.agent.view")]
 public class DefaultAgentGrantAdminController : ApiAdminControllerBase
 {
     protected readonly IAgentGrantService GrantService;

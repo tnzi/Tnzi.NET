@@ -107,19 +107,23 @@ describe('Personas page (TCardPage card grid)', () => {
     expect(wrapper.text()).toContain('Personas')
   })
 
-  it('openDetail opens the drawer and loads agents using the persona', async () => {
+  it('opening the view state shows the detail drawer and loads agents using the persona', async () => {
     const wrapper = mount(Personas, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      openDetail: (row: { id: string; name: string }) => Promise<void>
-      detailVisible: boolean
-      detail: { id: string } | null
+      crud: {
+        openView: (row: { id: string; name: string }) => void
+        formModal: { visible: { value: boolean }; mode: { value: string | null }; formData: { value: { id: string } | null } }
+      }
       relatedAgents: Array<{ id: string }>
     }
-    await vm.openDetail({ id: 'p1', name: 'Friendly Helper' })
+    // The detail now rides the CRUD `view` open-state; `onView` lazy-loads the
+    // related agents.
+    vm.crud.openView({ id: 'p1', name: 'Friendly Helper' })
     await flushPromises()
-    expect(vm.detailVisible).toBe(true)
-    expect(vm.detail?.id).toBe('p1')
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
+    expect(vm.crud.formModal.formData.value?.id).toBe('p1')
     expect(agentFetch).toHaveBeenCalledTimes(1)
     expect(vm.relatedAgents.map((a) => a.id)).toEqual(['a1'])
   })

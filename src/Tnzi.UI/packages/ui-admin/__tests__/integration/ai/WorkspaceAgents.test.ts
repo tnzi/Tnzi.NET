@@ -148,22 +148,30 @@ describe('WorkspaceAgents page (TCardPage card grid)', () => {
     expect(wrapper.text()).not.toContain('Planner')
   })
 
-  it('View button opens the detail drawer for the correct agent', async () => {
+  it('opening the view state shows the detail drawer for the correct agent', async () => {
     const wrapper = mount(WorkspaceAgents, { global: { stubs } })
     await flushPromises()
 
     const vm = wrapper.vm as unknown as {
-      openDetail: (row: { agentId: string; name: string }) => void
-      detailVisible: boolean
-      detail: { agentId: string; name: string } | null
+      crud: {
+        openView: (row: { agentId: string; name: string }) => void
+        formModal: {
+          visible: { value: boolean }
+          mode: { value: string | null }
+          formData: { value: { agentId: string; name: string } | null }
+        }
+      }
     }
-    expect(vm.detailVisible).toBe(false)
+    // The read-only detail rides the CRUD `view` open-state (card click →
+    // `crud.openView`), deep-linkable for free.
+    expect(vm.crud.formModal.visible.value).toBe(false)
 
-    vm.openDetail({ agentId: 'agent-global-1', name: 'Planner' })
+    vm.crud.openView({ agentId: 'agent-global-1', name: 'Planner' })
     await flushPromises()
 
-    expect(vm.detailVisible).toBe(true)
-    expect(vm.detail?.agentId).toBe('agent-global-1')
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
+    expect(vm.crud.formModal.formData.value?.agentId).toBe('agent-global-1')
   })
 
   it('no create/edit/delete controls are rendered (read-only page)', async () => {

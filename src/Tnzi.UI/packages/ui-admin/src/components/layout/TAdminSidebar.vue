@@ -102,12 +102,12 @@ const appStore = useAdminAppStore()
 // `useRoute()` throws when no router has been installed (e.g. unit tests
 // that mount this component in isolation). Detect via `getCurrentInstance()`
 // and gracefully fall back to a static "no active route" value.
-function safeUseRoute(): { name: unknown } | null {
+function safeUseRoute(): RouteLocationNormalizedLoaded | null {
   const instance = getCurrentInstance()
   const hasRouter = !!instance?.appContext.config.globalProperties.$router
   if (!hasRouter) return null
   try {
-    return useRoute() as unknown as RouteLocationNormalizedLoaded
+    return useRoute()
   } catch {
     return null
   }
@@ -135,6 +135,11 @@ function goSettings(): void {
 
 const activeMenuKey = computed<string>(() => {
   if (props.activeMenuKeyOverride) return props.activeMenuKeyOverride
+  // Hidden detail/sub routes (e.g. `ai.agents.detail`) point back to their list
+  // page via `meta.activeMenu` so the parent sidebar entry stays highlighted and
+  // its group expanded while a detail page is open.
+  const active = route?.meta?.activeMenu
+  if (typeof active === 'string' && active) return active
   const name = route?.name
   return typeof name === 'string' ? name : ''
 })

@@ -5,14 +5,16 @@
     :layout="layout"
     :sections="sections"
     :title="resolvedTitle"
-    :back="true"
+    :icon="icon"
+    :back="back"
+    :content-max-width="contentMaxWidth"
     :active-section="state.activeSection.value"
     :translate="translate"
     @update:active-section="state.setSection"
   >
     <template v-if="$slots.title" #title><slot name="title" :data="state.data.value" /></template>
-    <template #actions><slot name="actions" :data="state.data.value" :action="state.action.value" /></template>
-    <template #footer><slot name="footer" :submit="state.submit" :close="state.close" /></template>
+    <template v-if="$slots.actions" #actions><slot name="actions" :data="state.data.value" :action="state.action.value" /></template>
+    <template v-if="$slots.footer" #footer><slot name="footer" :submit="state.submit" :close="state.close" /></template>
     <template #default="{ section }">
       <slot :data="state.data.value" :action="state.action.value" :section="section" />
     </template>
@@ -21,43 +23,11 @@
   <!-- drawer/modal: the overlay owns the title + close + footer actions; the in-layout header is suppressed. #title/#actions header slots apply to page mode. -->
 
   <!-- drawer mode -->
-  <NDrawer
+  <TDrawerShell
     v-else-if="state.mode.value === 'drawer'"
     :show="state.visible.value"
     :width="width"
-    placement="right"
-    @update:show="(v: boolean) => { if (!v) state.close() }"
-  >
-    <NDrawerContent :title="resolvedTitle" closable>
-      <TDetailLayout
-        :layout="layout"
-        :sections="sections"
-        :active-section="state.activeSection.value"
-        :translate="translate"
-        :show-header="false"
-        @update:active-section="state.setSection"
-      >
-        <template #default="{ section }">
-          <slot :data="state.data.value" :action="state.action.value" :section="section" />
-        </template>
-      </TDetailLayout>
-      <template #footer>
-        <slot name="footer" :submit="state.submit" :close="state.close">
-          <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
-          <NButton v-if="state.action.value !== 'view'" type="primary" @click="state.submit">{{ t('admin.common.confirm') }}</NButton>
-        </slot>
-      </template>
-    </NDrawerContent>
-  </NDrawer>
-
-  <!-- modal mode (default) -->
-  <NModal
-    v-else
-    :show="state.visible.value"
-    preset="card"
     :title="resolvedTitle"
-    :style="{ width: `min(${width}px, 95vw)` }"
-    :mask-closable="false"
     @update:show="(v: boolean) => { if (!v) state.close() }"
   >
     <TDetailLayout
@@ -72,7 +42,35 @@
         <slot :data="state.data.value" :action="state.action.value" :section="section" />
       </template>
     </TDetailLayout>
-    <template #footer>
+    <template v-if="footer" #footer>
+      <slot name="footer" :submit="state.submit" :close="state.close">
+        <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
+        <NButton v-if="state.action.value !== 'view'" type="primary" @click="state.submit">{{ t('admin.common.confirm') }}</NButton>
+      </slot>
+    </template>
+  </TDrawerShell>
+
+  <!-- modal mode (default) -->
+  <TModalShell
+    v-else
+    :show="state.visible.value"
+    :title="resolvedTitle"
+    :width="width"
+    @update:show="(v: boolean) => { if (!v) state.close() }"
+  >
+    <TDetailLayout
+      :layout="layout"
+      :sections="sections"
+      :active-section="state.activeSection.value"
+      :translate="translate"
+      :show-header="false"
+      @update:active-section="state.setSection"
+    >
+      <template #default="{ section }">
+        <slot :data="state.data.value" :action="state.action.value" :section="section" />
+      </template>
+    </TDetailLayout>
+    <template v-if="footer" #footer>
       <slot name="footer" :submit="state.submit" :close="state.close">
         <div class="t-detail-host__footer">
           <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
@@ -80,12 +78,14 @@
         </div>
       </slot>
     </template>
-  </NModal>
+  </TModalShell>
 </template>
 
 <script setup lang="ts" generic="T">
 import { computed } from 'vue'
-import { NModal, NDrawer, NDrawerContent, NButton } from 'naive-ui'
+import { NButton } from 'naive-ui'
+import TModalShell from '../overlay/TModalShell.vue'
+import TDrawerShell from '../overlay/TDrawerShell.vue'
 import TDetailLayout from './TDetailLayout.vue'
 import type { UseDetailReturn, DetailSection, DetailLayout } from '../../headless/useDetail'
 
@@ -96,6 +96,23 @@ export interface TDetailHostProps<T> {
   layout?: DetailLayout
   sections?: DetailSection[]
   translate?: (key: string) => string
+  /**
+   * Render the modal/drawer footer (Cancel/Confirm or the `#footer` slot). Set
+   * `false` for a footer-less management panel (e.g. a documents drawer) whose
+   * own controls live in the body and whose close affordance is the X button.
+   * (Page mode renders the footer only when a `#footer` slot is supplied.)
+   */
+  footer?: boolean
+  /** Page-mode header icon (forwarded to the in-layout `TPageHeader`). */
+  icon?: string
+  /**
+   * Page-mode back affordance: `true` → `router.back()`, a string → push that
+   * path, `false` → no back button (a top-level page reached from the menu, not
+   * drilled into by id). Default `true`. Ignored in modal/drawer mode.
+   */
+  back?: boolean | string
+  /** Page-mode content max-width (forwarded to `TDetailLayout`). */
+  contentMaxWidth?: number | string
 }
 
 const props = withDefaults(defineProps<TDetailHostProps<T>>(), {
@@ -104,6 +121,10 @@ const props = withDefaults(defineProps<TDetailHostProps<T>>(), {
   layout: 'plain',
   sections: () => [],
   translate: undefined,
+  footer: true,
+  icon: undefined,
+  back: true,
+  contentMaxWidth: undefined,
 })
 
 defineSlots<{

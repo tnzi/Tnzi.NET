@@ -36,20 +36,15 @@
       </NPopconfirm>
     </template>
 
-    <div class="t-i18n-page__kpis">
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.totalKeys')" :value="summary?.totalMissingKeys ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.totalAccess')" :value="summary?.totalAccessCount ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <NStatistic :label="t('kpi.cultures')" :value="summary?.affectedCultureCount ?? 0" />
-      </NCard>
-      <NCard size="small" :bordered="false">
-        <div class="t-i18n-page__breakdown">
-          <div class="t-i18n-page__breakdown-label">{{ t('kpi.breakdown') }}</div>
-          <div v-if="summary?.cultureBreakdown?.length" class="t-i18n-page__chips">
+    <!-- The per-culture breakdown chips live in the Cultures card footer (the
+         chip count equals affectedCultureCount, so a separate card duplicated
+         the stat) — one unified TKpiCard visual instead of a bare NCard. -->
+    <TKpiRow cols="1 s:3">
+      <TKpiCard :label="t('kpi.totalKeys')" :value="summary?.totalMissingKeys ?? 0" />
+      <TKpiCard :label="t('kpi.totalAccess')" :value="summary?.totalAccessCount ?? 0" />
+      <TKpiCard :label="t('kpi.cultures')" :value="summary?.affectedCultureCount ?? 0">
+        <template v-if="summary?.cultureBreakdown?.length" #footer>
+          <div class="t-i18n-page__chips">
             <NTag
               v-for="row in summary.cultureBreakdown"
               :key="row.culture"
@@ -62,10 +57,9 @@
               {{ row.culture }} · {{ row.missingKeyCount }}
             </NTag>
           </div>
-          <div v-else class="t-i18n-page__empty">{{ t('empty.summary') }}</div>
-        </div>
-      </NCard>
-    </div>
+        </template>
+      </TKpiCard>
+    </TKpiRow>
 
     <NCard :title="t('sections.keys')" size="small" :bordered="false" class="t-table-card">
       <template #header-extra>
@@ -95,13 +89,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import { TKpiCard, TKpiRow } from '../../components/data'
 import {
   NButton,
   NCard,
   NInput,
   NPopconfirm,
   NSelect,
-  NStatistic,
   NTag,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -113,12 +107,11 @@ import {
   type MissingTranslationDto,
   type MissingTranslationSummaryDto,
 } from '../../services/bridges/localization-bridge'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createLocalizationBridge({ client: useAdminClient() })
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('system.localization', key), params)
+const t = makePageTranslator('system.localization')
 
 const loading = ref(false)
 const summary = ref<MissingTranslationSummaryDto | null>(null)
@@ -222,30 +215,9 @@ onMounted(() => { void refresh() })
 
 <style scoped>
 /* Layout shell from TContentPage (scroll="fill") + shared `.t-table-card` utilities. */
-.t-i18n-page__kpis {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-@media (max-width: 900px) {
-  .t-i18n-page__kpis { grid-template-columns: repeat(2, 1fr); }
-}
-.t-i18n-page__breakdown {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.t-i18n-page__breakdown-label {
-  font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
-}
 .t-i18n-page__chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-.t-i18n-page__empty {
-  font-size: 12px;
-  color: var(--tnzi-base-text-muted, #888);
 }
 </style>

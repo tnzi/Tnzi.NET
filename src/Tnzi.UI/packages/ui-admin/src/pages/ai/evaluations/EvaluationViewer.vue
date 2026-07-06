@@ -18,9 +18,9 @@
     <template #default>
       <p class="t-eval-page__note">{{ t('note') }}</p>
 
-      <div class="t-eval-page__layout">
+      <TMasterDetailLayout :master-width="320">
         <!-- Left: runs list (selectable for diff) -->
-        <aside class="t-eval-page__list">
+        <template #master>
           <div class="t-eval-page__list-header">
             <span>{{ t('list.heading') }}</span>
             <span class="t-eval-page__hint">{{ t('list.diffHint') }}</span>
@@ -43,7 +43,7 @@
               >
                 <div class="t-eval-page__run-row">
                   <NTag size="small" :type="statusTypeFor(run.status)" :bordered="false">
-                    {{ run.status }}
+                    {{ statusLabel(run.status) }}
                   </NTag>
                   <span class="t-eval-page__score" :data-pass="passRatio(run) >= 0.5">
                     {{ (passRatio(run) * 100).toFixed(0) }}%
@@ -57,10 +57,10 @@
               </li>
             </ul>
           </NSpin>
-        </aside>
+        </template>
 
         <!-- Right: detail / diff -->
-        <section class="t-eval-page__detail">
+        <template #detail>
           <div v-if="!leftId && !rightId" class="t-eval-page__placeholder">
             {{ t('selectPrompt') }}
           </div>
@@ -94,8 +94,8 @@
               <pre v-if="rightDetail?.resultsJson" class="t-eval-page__results">{{ formatJson(rightDetail.resultsJson) }}</pre>
             </div>
           </div>
-        </section>
-      </div>
+        </template>
+      </TMasterDetailLayout>
 
       <!-- New run modal — uses TFormModal so width auto-adapts on
            narrow viewports (Phase 1 responsive). -->
@@ -260,7 +260,7 @@
               >
                 <div class="t-eval-page__result-row">
                   <NTag size="small" :type="statusTypeFor(r.status)" :bordered="false">
-                    {{ r.status }}
+                    {{ statusLabel(r.status) }}
                   </NTag>
                   <code>{{ agentLabel(r.agentId) }}</code>
                   <span class="t-eval-page__score" :data-pass="passRatio(r) >= 0.5">
@@ -268,7 +268,7 @@
                   </span>
                 </div>
                 <div class="t-eval-page__result-meta">
-                  {{ interp('batch.resultMeta', {
+                  {{ t('batch.resultMeta', {
                     passed: r.passedCount,
                     total: r.caseCount,
                     score: r.averageScore.toFixed(2),
@@ -347,7 +347,7 @@
                   <div class="t-eval-page__trend-row">
                     <span class="t-eval-page__trend-date">{{ formatTime(p.date) }}</span>
                     <span class="t-eval-page__trend-vals">
-                      {{ interp('trend.point', {
+                      {{ t('trend.point', {
                         score: (p.score * 100).toFixed(0),
                         pass: (p.passRate * 100).toFixed(0),
                       }) }}
@@ -423,7 +423,7 @@
                   :class="{ 'is-winner': comparison.winner === comparison.versionA.versionNumber }"
                 >
                   <header class="t-eval-page__compare-head">
-                    {{ interp('compare.versionLabel', { v: comparison.versionA.versionNumber }) }}
+                    {{ t('compare.versionLabel', { v: comparison.versionA.versionNumber }) }}
                     <NTag
                       v-if="comparison.winner === comparison.versionA.versionNumber"
                       size="small"
@@ -445,7 +445,7 @@
                   :class="{ 'is-winner': comparison.winner === comparison.versionB.versionNumber }"
                 >
                   <header class="t-eval-page__compare-head">
-                    {{ interp('compare.versionLabel', { v: comparison.versionB.versionNumber }) }}
+                    {{ t('compare.versionLabel', { v: comparison.versionB.versionNumber }) }}
                     <NTag
                       v-if="comparison.winner === comparison.versionB.versionNumber"
                       size="small"
@@ -464,7 +464,7 @@
                 </div>
               </div>
               <div class="t-eval-page__delta" :data-positive="comparison.scoreDelta >= 0">
-                {{ interp('compare.delta', { delta: signedDelta(comparison.scoreDelta) }) }}
+                {{ t('compare.delta', { delta: signedDelta(comparison.scoreDelta) }) }}
               </div>
             </template>
           </NSpin>
@@ -486,11 +486,12 @@ import { useSafeMessage } from '../../_shared/safeMessage'
 import { useFormModal, type UseFormModalReturn } from '../../../headless/useFormModal'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import TContentPage from '../../../components/layout/TContentPage.vue'
+import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
 import TFormModal from '../../../components/crud/TFormModal.vue'
 import TChartPanel from '../../../components/display/TChartPanel.vue'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import { translatePageKey, interpolate } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import type {
   AgentDto,
   CreateEvaluationRunDto,
@@ -523,9 +524,7 @@ interface CaseRow {
 }
 
 const bridge = createAiBridge({ client: useAdminClient() })
-const t = (key: string) => translatePageKey('ai.evaluations', key)
-const interp = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('ai.evaluations', key), params)
+const t = makePageTranslator('ai.evaluations')
 
 const message = useSafeMessage()
 const { isSm } = useBreakpoint()
@@ -625,7 +624,7 @@ const batchFormValid = computed<boolean>(() => {
 
 const batchSummary = computed<string>(() => {
   if (!batchResults.value.length) return ''
-  return interp('batch.summary', { count: batchResults.value.length })
+  return t('batch.summary', { count: batchResults.value.length })
 })
 
 async function runBatchEval(): Promise<void> {
@@ -760,14 +759,19 @@ function passRatio(r: EvaluationRunDto): number {
 }
 
 function statusTypeFor(status: unknown): 'success' | 'error' | 'warning' | 'info' | 'default' {
-  switch (status) {
+  switch (String(status)) {
     case 'Completed': return 'success'
     case 'Failed': return 'error'
-    case 'Cancelled': return 'warning'
-    case 'Running':
-    case 'Pending': return 'info'
+    case 'Running': return 'info'
     default: return 'default'
   }
+}
+
+/** i18n label for an EvaluationRunStatus member (humanised fallback on miss). */
+function statusLabel(status: unknown): string {
+  const s = String(status ?? '')
+  if (!s) return ''
+  return t(`status.${s.charAt(0).toLowerCase()}${s.slice(1)}`)
 }
 
 function shortId(id: string): string {
@@ -917,31 +921,8 @@ defineExpose({
   font-size: 12px;
   color: var(--tnzi-base-text-muted);
 }
-.t-eval-page__layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 16px;
-  min-height: 520px;
-}
-.t-eval-page__list {
-  border-right: 1px solid var(--tnzi-border);
-  padding-right: 16px;
-}
-/* Phone: stack the evaluation list above the detail. */
-@media (max-width: 767px) {
-  .t-eval-page__layout {
-    grid-template-columns: 1fr;
-    min-height: 0;
-  }
-  .t-eval-page__list {
-    border-right: none;
-    padding-right: 0;
-    border-bottom: 1px solid var(--tnzi-border);
-    padding-bottom: 12px;
-    max-height: 36vh;
-    overflow: auto;
-  }
-}
+/* Master/detail split, responsive stacking and pane fill-height come from
+   <TMasterDetailLayout>. Only page-specific content styling stays here. */
 .t-eval-page__list-header {
   display: flex;
   justify-content: space-between;
@@ -1028,7 +1009,6 @@ defineExpose({
   border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 4px);
   padding: 12px;
-  min-height: 480px;
   display: flex;
   flex-direction: column;
 }

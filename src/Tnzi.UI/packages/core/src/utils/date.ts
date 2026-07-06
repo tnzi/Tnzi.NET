@@ -51,17 +51,23 @@ export function formatDateTime(
 /**
  * Locale-aware date-only formatter (`toLocaleDateString`). Same null/fallback
  * semantics as {@link formatDateTime}.
+ *
+ * `utc: true` renders the UTC calendar date instead of the local one. Use it
+ * for date-only fields the backend stores as UTC midnight (posting dates,
+ * rate dates, period start/end): without it, any viewer west of UTC sees the
+ * previous day. Leave it off for real timestamps (creation/modification
+ * times), where the local calendar date is the correct rendering.
  */
 export function formatDateOnly(
   value: string | number | Date | null | undefined,
-  options?: { fallback?: string },
+  options?: { fallback?: string; utc?: boolean },
 ): string {
   if (value === null || value === undefined || value === '') return options?.fallback ?? '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
     return typeof value === 'string' ? value : (options?.fallback ?? '');
   }
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(undefined, options?.utc ? { timeZone: 'UTC' } : undefined);
 }
 
 /**

@@ -27,6 +27,13 @@ public class FunctionAuthCache
     private const string SuperAdminCatalogueKey = "Permissions:SuperAdminCatalogue";
 
     /// <summary>
+    /// BusinessAdmin 业务目录缓存键（单例 key，跨所有 business-admin 共享）：
+    /// 所有启用且 Category=Business 的 ModuleFunction.Code。与超管目录同样的
+    /// 生命周期语义（随功能启禁用/分类变化失效）。
+    /// </summary>
+    private const string BusinessAdminCatalogueKey = "Permissions:BusinessAdminCatalogue";
+
+    /// <summary>
     /// 初始化一个<see cref="FunctionAuthCache"/>类型的新实例
     /// </summary>
     /// <param name="cache">缓存服务</param>
@@ -81,43 +88,14 @@ public class FunctionAuthCache
         await Task.WhenAll(tasks);
     }
 
-    /// <summary>
-    /// 检查用户是否有指定权限（带缓存）
-    /// </summary>
-    /// <param name="userId">用户ID</param>
-    /// <param name="permissionName">权限名称</param>
-    /// <returns>是否有权限</returns>
-    public async Task<bool> CheckPermissionAsync(Guid userId, string permissionName)
-    {
-        // 先从缓存获取用户的权限列表
-        var userPermissions = await GetUserPermissionNamesAsync(userId);
-        if (userPermissions != null)
-        {
-            return userPermissions.Contains(permissionName);
-        }
-
-        // 缓存未命中，返回false表示需要从数据库查询
-        return false;
-    }
-
-    /// <summary>
-    /// 批量检查用户是否有指定权限（带缓存）
-    /// </summary>
-    /// <param name="userId">用户ID</param>
-    /// <param name="permissionNames">权限名称集合</param>
-    /// <returns>权限检查结果字典</returns>
-    public async Task<Dictionary<string, bool>> CheckPermissionsAsync(Guid userId, IEnumerable<string> permissionNames)
-    {
-        var userPermissions = await GetUserPermissionNamesAsync(userId);
-        var userPermissionSet = userPermissions != null 
-            ? new HashSet<string>(userPermissions) 
-            : new HashSet<string>();
-        
-        return permissionNames.ToDictionary(
-            p => p,
-            p => userPermissionSet.Contains(p)
-        );
-    }
+    // NOTE: this cache intentionally exposes NO permission-check helpers.
+    // The per-user key stores EXPLICIT grants only — tier-unaware. Any check
+    // built directly on it would return false negatives for business admins
+    // (their implicit Business-catalogue grants live in a separate shared
+    // key). All permission checks must go through the tier-aware
+    // FunctionAuthorizationService. (Former CheckPermissionAsync/
+    // CheckPermissionsAsync helpers were removed for exactly this reason —
+    // zero consumers, misleading semantics.)
 
     /// <summary>
     /// 清除所有功能权限缓存
@@ -127,9 +105,10 @@ public class FunctionAuthCache
     public async Task ClearAllAsync()
     {
         await _cache.RemoveByPrefixAsync(UserFunctionsCachePrefix);
-        // SuperAdmin catalogue lives outside the UserFunctions prefix so the
-        // bulk-prefix remove can't catch it — clear explicitly.
+        // The admin-tier catalogues live outside the UserFunctions prefix so
+        // the bulk-prefix remove can't catch them — clear explicitly.
         await _cache.RemoveAsync(SuperAdminCatalogueKey);
+        await _cache.RemoveAsync(BusinessAdminCatalogueKey);
     }
 
     /// <summary>
@@ -158,5 +137,30 @@ public class FunctionAuthCache
     /// </summary>
     public Task InvalidateSuperAdminCatalogueAsync()
         => _cache.RemoveAsync(SuperAdminCatalogueKey);
+
+    /// <summary>
+    /// Get the cached business-admin catalogue (enabled ModuleFunction codes
+    /// whose <c>Category</c> is Business). <c>null</c> on cache miss.
+    /// </summary>
+    public Task<IReadOnlyList<string>?> GetBusinessAdminCatalogueAsync()
+        => _cache.GetAsync<IReadOnlyList<string>>(BusinessAdminCatalogueKey);
+
+    /// <summary>
+    /// Store the business-admin catalogue with the same 1-hour TTL as the
+    /// super-admin catalogue.
+    /// </summary>
+    public Task SetBusinessAdminCatalogueAsync(IReadOnlyList<string> codes)
+        => _cache.SetAsync(BusinessAdminCatalogueKey, codes, SuperAdminCatalogueExpiration);
+
+    /// <summary>
+    /// Invalidate both admin-tier catalogues. Any change that affects the
+    /// super-admin catalogue (function/module enable state) can also affect
+    /// the business subset, plus category edits — so they invalidate together.
+    /// </summary>
+    public async Task InvalidateAdminCataloguesAsync()
+    {
+        await _cache.RemoveAsync(SuperAdminCatalogueKey);
+        await _cache.RemoveAsync(BusinessAdminCatalogueKey);
+    }
 }
 

@@ -26,7 +26,7 @@ import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { tenantColumns, tenantFormSchema, tenantSearchFields } from './tenant-config'
-import { translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import type { TenantDto } from '@tnzi/core/services/identity'
 
 const title = 'title'
@@ -44,8 +44,5 @@ const crud = useCrudPage<TenantDto, string>({
 
 const rowActions: RowAction<TenantDto>[] = [editAction(crud), deleteAction(crud)]
 
-
-crud.refresh().catch(() => undefined)
-
-const t = (key: string) => translatePageKey('identity.tenants', key)
+const t = makePageTranslator('identity.tenants')
 </script>

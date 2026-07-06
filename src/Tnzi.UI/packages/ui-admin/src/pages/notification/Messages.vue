@@ -66,13 +66,13 @@ import { NButton, NPopconfirm } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { deleteAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { notificationMessageColumns, notificationMessageFormSchema } from './message-config'
-import { translatePageKey } from '../_shared/translate'
-import type { NotificationInfo } from '@tnzi/core/services/notification'
+import { makePageTranslator } from '../_shared/translate'
+import { NotificationStatus, type NotificationInfo } from '@tnzi/core/services/notification'
 
 const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
@@ -86,20 +86,18 @@ const crud = useCrudPage<NotificationInfo>({
   deleteData: (ids) => bridge.messages.delete(ids.map(String)),
 })
 
-
-crud.refresh().catch(() => undefined)
-
 // Resend (failed rows only) is rendered by the page in the #prepend slot.
-// Edit is suppressed (messages are immutable after sending); Delete stays.
-const rowActions: RowAction<NotificationInfo>[] = [deleteAction(crud)]
+// Edit is suppressed (messages are immutable after sending); View opens the
+// read-only form (full content / failure reason), Delete stays.
+const rowActions: RowAction<NotificationInfo>[] = [viewAction(crud), deleteAction(crud)]
 
 // ---- Resend action ----
 const resendingIds = ref<Set<string>>(new Set())
 const batchResending = ref(false)
 
 function isFailed(row: NotificationInfo): boolean {
-  // NotificationInfo.status is a NotificationStatus enum; 3 = Failed
-  return (row.status as unknown) === 'failed' || row.status === 3
+  // NotificationInfo.status is a NotificationStatus enum (string member name).
+  return row.status === NotificationStatus.Failed
 }
 
 async function resendMessage(row: NotificationInfo): Promise<void> {
@@ -137,5 +135,5 @@ async function batchResend(ids: Array<string | number>): Promise<void> {
   }
 }
 
-const t = (key: string) => translatePageKey('notification.messages', key)
+const t = makePageTranslator('notification.messages')
 </script>

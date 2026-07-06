@@ -25,7 +25,7 @@ describe('useChatRealtime', () => {
 
   it('incoming Chat.NewMessage is applied to the store + fires onNewMessage', async () => {
     const store = useChatStore()
-    store.conversations = [{ id: 'c1', type: 1, title: 'A', unreadCount: 0, isMuted: false, memberCount: 2 } as never]
+    store.conversations = [{ id: 'c1', type: 'Direct', title: 'A', unreadCount: 0, isMuted: false, memberCount: 2 } as never]
     const onNew = vi.fn()
     const rt = useChatRealtime({ client: {} as never, store, hubUrl: '/hubs/chat', getToken: () => 't', getUserId: () => 'me', onNewMessage: onNew })
     await rt.start()
@@ -36,7 +36,7 @@ describe('useChatRealtime', () => {
 
   it('system/broadcast Chat.NewMessage (senderId=null) bumps unread + fires onNewMessage', async () => {
     const store = useChatStore()
-    store.conversations = [{ id: 'sys', type: 3, title: 'System', unreadCount: 0, isMuted: false, memberCount: 1 } as never]
+    store.conversations = [{ id: 'sys', type: 'System', title: 'System', unreadCount: 0, isMuted: false, memberCount: 1 } as never]
     const onNew = vi.fn()
     const rt = useChatRealtime({ client: {} as never, store, hubUrl: '/hubs/chat', getToken: () => 't', getUserId: () => 'me', onNewMessage: onNew })
     await rt.start()

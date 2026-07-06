@@ -165,13 +165,13 @@ describe('Quotas page (budget dashboard + quota CRUD)', () => {
     getBudgetSummary.mockClear()
   })
 
-  it('mounts, fetches quotas on mount, and displays rows', async () => {
+  it('mounts, fetches quotas on mount, and renders one card per rule', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    const tables = wrapper.findAll('.n-data-table-stub')
-    // The quota rules table is the one bound with the 2 quota rows.
-    const quotaTable = tables.find((tw) => tw.attributes('data-rows') === '2')
-    expect(quotaTable).toBeTruthy()
+    // Quota rules are now a card list (TCardPage) — one entity card per rule.
+    const cards = wrapper.findAll('.t-entity-card')
+    expect(cards).toHaveLength(2)
+    expect(wrapper.text()).toContain('user-001'.slice(0, 8))
   })
 
   it('renders the budget dashboard KPI cards from getBudgetSummary', async () => {
@@ -185,19 +185,25 @@ describe('Quotas page (budget dashboard + quota CRUD)', () => {
     expect(text).toContain('42.5%')
     // The usage KPI card renders a progress bar reflecting the 42.5% spend,
     // coloured `warning` because the budget status is WarningThreshold (1).
-    const progress = wrapper.find('.n-progress-stub')
-    expect(progress.exists()).toBe(true)
-    expect(progress.attributes('data-status')).toBe('warning')
-    // Two data-tables render: the per-agent breakdown (2 agents) + the quota
-    // rules table (2 rows) — both via the DataTable stub with data-rows="2".
+    // Multiple progress bars now render (the budget usage KPI + per-card usage
+    // bars in the rules list). The budget usage KPI bar is coloured `warning`
+    // because the budget status is WarningThreshold (1) — assert it is present.
+    const progresses = wrapper.findAll('.n-progress-stub')
+    expect(progresses.length).toBeGreaterThan(0)
+    expect(progresses.some((p) => p.attributes('data-status') === 'warning')).toBe(true)
+    // Only ONE data-table renders now: the per-agent budget breakdown (2 agents).
+    // The quota rules moved from a table to a card list, so there is no longer a
+    // second data-table for the rules.
     const tables = wrapper.findAll('.n-data-table-stub')
-    expect(tables.length).toBe(2)
+    expect(tables.length).toBe(1)
+    expect(tables[0]?.attributes('data-rows')).toBe('2')
   })
 
   it('create button opens form modal in create mode', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    await wrapper.find('.t-crud-page__create').trigger('click')
+    // TCardPage's create button carries the shell class (not the TCrudPage one).
+    await wrapper.find('.t-list-shell__create').trigger('click')
     await flushPromises()
     expect(wrapper.find('form').exists()).toBe(true)
   })

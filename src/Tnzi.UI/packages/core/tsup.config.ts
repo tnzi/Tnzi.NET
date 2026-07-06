@@ -36,6 +36,7 @@ export default defineConfig({
         "services/authorization/index": "src/services/authorization/index.ts",
         "services/identity/index": "src/services/identity/index.ts",
         "services/payment/index": "src/services/payment/index.ts",
+        "services/finance/index": "src/services/finance/index.ts",
         "services/chat/index": "src/services/chat/index.ts",
         "services/notification/index": "src/services/notification/index.ts",
         "services/storage/index": "src/services/storage/index.ts",

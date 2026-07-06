@@ -17,17 +17,19 @@
         callers, first/last used) + recent error breakdown. A Cleanup popconfirm
         prunes old usage records.
   -->
-  <TContentPage
+  <TTabsPage
     :title="t('title')"
     icon="mdi:transit-connection-variant"
     :help="t('banner')"
     :translate="t"
-    scroll="fill"
+    :sections="sections"
+    default-section="servers"
+    v-model:section="activeTab"
   >
     <!-- Keyword search lives in the single page-header bar (C2). It only
          applies to the External Servers tab, so it hides on the others. -->
-    <template #actions>
-      <div v-if="activeTab === 'servers'" class="t-mcp__search">
+    <template #actions="{ active }">
+      <div v-if="active === 'servers'" class="t-mcp__search">
         <NInput
           v-model:value="serverSearch"
           size="small"
@@ -45,11 +47,8 @@
       </div>
     </template>
 
-    <template #default>
-      <NTabs v-model:value="activeTab" type="line" animated class="t-table-tabs">
-        <!-- ─── Tab 1: External Servers ─────────────────────────────── -->
-        <NTabPane name="servers" :tab="t('tabs.servers')">
-          <div class="t-mcp__pane">
+    <!-- ─── Tab 1: External Servers ─────────────────────────────── -->
+    <template #servers>
             <!-- show-header=false suppresses the shell's own header bar:
                  without it the shell falls back to the route meta title and
                  renders a SECOND "MCP" bar. The page title + keyword search
@@ -134,13 +133,23 @@
                 </p>
               </template>
             </TCardPage>
-          </div>
-        </NTabPane>
+    </template>
 
-        <!-- ─── Tab 2: This Server ──────────────────────────────────── -->
-        <NTabPane name="status" :tab="t('tabs.status')">
-          <div class="t-mcp__pane t-mcp__pane--scroll">
+    <!-- ─── Tab 2: This Server (scroll: mixed variable-height content) ─── -->
+    <template #status>
             <NSpin :show="statusLoading">
+              <!-- Tnzi.AI.Mcp not loaded (getStatus → null): friendly notice
+                   instead of a silently empty status surface. -->
+              <NAlert
+                v-if="showModuleNotLoaded"
+                :title="t('status.notLoadedTitle')"
+                type="info"
+                :closable="false"
+              >
+                {{ t('status.notLoadedBody') }}
+              </NAlert>
+
+              <template v-else>
               <NAlert
                 v-if="status && !status.enabled"
                 :title="t('status.disabledTitle')"
@@ -151,28 +160,14 @@
                 {{ t('status.disabledBody') }}
               </NAlert>
 
-              <div class="t-mcp__kpis">
-                <NCard size="small" :bordered="false">
-                  <NStatistic :label="t('status.state')">
-                    <template #default>
-                      <NTag :type="status?.enabled ? 'success' : 'default'" size="small" :bordered="false">
-                        {{ status?.enabled ? t('status.enabled') : t('status.disabled') }}
-                      </NTag>
-                    </template>
-                  </NStatistic>
-                </NCard>
-                <NCard size="small" :bordered="false">
-                  <NStatistic :label="t('status.totalTools')" :value="status?.totalToolCount ?? 0" />
-                </NCard>
-                <NCard size="small" :bordered="false">
-                  <NStatistic :label="t('status.customTools')" :value="status?.customToolCount ?? 0" />
-                </NCard>
-                <NCard size="small" :bordered="false">
-                  <NStatistic :label="t('status.exposedAgents')" :value="status?.exposedAgentCount ?? 0" />
-                </NCard>
-              </div>
+              <TKpiRow cols="1 s:2 m:4">
+                <TKpiCard :label="t('status.state')" :value="status?.enabled ? t('status.enabled') : t('status.disabled')" :tone="status?.enabled ? 'success' : 'default'" />
+                <TKpiCard :label="t('status.totalTools')" :value="status?.totalToolCount ?? 0" />
+                <TKpiCard :label="t('status.customTools')" :value="status?.customToolCount ?? 0" />
+                <TKpiCard :label="t('status.exposedAgents')" :value="status?.exposedAgentCount ?? 0" />
+              </TKpiRow>
 
-              <NCard size="small" :title="t('status.detailsTitle')" :bordered="false" class="mt-12px">
+              <NCard size="small" :title="t('status.detailsTitle')" :bordered="false" class="mt-12px t-tab-card">
                 <NDescriptions :column="2" label-placement="left" size="small">
                   <NDescriptionsItem :label="t('status.endpoint')">
                     <code class="font-mono">{{ status?.endpoint || '—' }}</code>
@@ -194,7 +189,7 @@
               </NCard>
 
               <!-- Exposed Agents management -->
-              <NCard size="small" :title="t('expose.title')" :bordered="false" class="mt-12px">
+              <NCard size="small" :title="t('expose.title')" :bordered="false" class="mt-12px t-tab-card">
                 <template #header-extra>
                   <div class="flex items-center gap-6px">
                     <NSelect
@@ -245,7 +240,7 @@
               </NCard>
 
               <!-- Registered tools -->
-              <NCard size="small" :title="t('tools.title')" :bordered="false" class="mt-12px">
+              <NCard size="small" :title="t('tools.title')" :bordered="false" class="mt-12px t-tab-card">
                 <div v-if="tools.length" class="flex flex-col gap-4px">
                   <div v-for="tool in tools" :key="tool.name" class="t-mcp__tool-row">
                     <code class="font-mono t-mcp__tool-name">{{ tool.name }}</code>
@@ -254,13 +249,23 @@
                 </div>
                 <div v-else class="t-mcp__empty">{{ t('tools.none') }}</div>
               </NCard>
+              </template>
             </NSpin>
-          </div>
-        </NTabPane>
+    </template>
 
-        <!-- ─── Tab 3: Tool Analytics ───────────────────────────────── -->
-        <NTabPane name="analytics" :tab="t('tabs.analytics')">
-          <div class="t-mcp__pane">
+    <!-- ─── Tab 3: Tool Analytics ───────────────────────────────── -->
+    <template #analytics>
+            <!-- Tnzi.AI.Mcp not loaded (getStatus → null): friendly notice
+                 instead of an empty analytics table. -->
+            <NAlert
+              v-if="showModuleNotLoaded"
+              :title="t('status.notLoadedTitle')"
+              type="info"
+              :closable="false"
+            >
+              {{ t('status.notLoadedBody') }}
+            </NAlert>
+            <template v-else>
             <div class="t-mcp__analytics-bar">
               <span class="t-mcp__analytics-hint">{{ t('analytics.hint') }}</span>
               <NPopconfirm @positive-click="onCleanup">
@@ -273,26 +278,25 @@
                 {{ t('analytics.cleanupConfirm', { days: retentionDays }) }}
               </NPopconfirm>
             </div>
-            <div class="t-table-tabs__pane">
-              <TResponsiveTable
-                :columns="analyticsColumns"
-                :data="popularTools"
-                :loading="analyticsLoading"
-                :pagination="{ pageSize: 20 }"
-                :bordered="false"
-                size="small"
-                :flex-height="true"
-                :row-props="analyticsRowProps"
-              />
-            </div>
-          </div>
-        </NTabPane>
-      </NTabs>
+            <TResponsiveTable
+              :columns="analyticsColumns"
+              :data="popularTools"
+              :loading="analyticsLoading"
+              :pagination="{ pageSize: 20 }"
+              :bordered="false"
+              size="small"
+              :flex-height="true"
+              :row-props="analyticsRowProps"
+            />
+            </template>
+    </template>
 
-      <!-- Per-tool analytics detail drawer -->
-      <NDrawer v-model:show="detailVisible" :width="560" placement="right">
-        <NDrawerContent v-if="detailTool" :title="detailTool" closable>
-          <NSpin :show="detailLoading">
+    <!-- Tab-independent overlay: per-tool analytics detail drawer, driven by the
+         single detail engine (deep-linkable `?tool=view:<name>`). -->
+    <template #overlays>
+      <TDetailHost :state="toolDetail" :title="detailTool ?? ''" :width="560" :footer="false" :translate="t">
+        <template #default>
+          <NSpin v-if="detailTool" :show="detailLoading">
             <div v-if="toolStats" class="t-mcp__stats">
               <NDescriptions :column="2" label-placement="top" size="small">
                 <NDescriptionsItem :label="t('analytics.totalCalls')">
@@ -335,43 +339,41 @@
               <div v-else class="t-mcp__empty">{{ t('analytics.noErrors') }}</div>
             </div>
           </NSpin>
-        </NDrawerContent>
-      </NDrawer>
+        </template>
+      </TDetailHost>
     </template>
-  </TContentPage>
+  </TTabsPage>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
   NCard,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NInput,
   NPopconfirm,
   NSelect,
   NSpin,
-  NStatistic,
-  NTabPane,
-  NTabs,
   NTag,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { TKpiCard, TKpiRow } from '../../../components/data'
 import { formatDateTime } from '@tnzi/core'
-import TContentPage from '../../../components/layout/TContentPage.vue'
+import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage.vue'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
+import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import { useDetail } from '../../../headless/useDetail'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import { translatePageKey } from '../../_shared/translate'
+import { makePageTranslator } from '../../_shared/translate'
 import {
   mcpServerFormSchema,
   mcpServerColumns,
@@ -389,25 +391,18 @@ import type {
   AgentDto,
 } from '@tnzi/core/services/ai'
 
-/**
- * Local mustache-style `{key}` interpolation — kept page-local per spec so we
- * never assume an external `interpolate` export exists. Missing params resolve
- * to '' rather than leaking the `{token}`.
- */
-function interp(str: string, params?: Record<string, unknown>): string {
-  if (!params) return str
-  return str.replace(/\{(\w+)\}/g, (_, k: string) => {
-    const v = params[k]
-    return v == null ? '' : String(v)
-  })
-}
-
-const t = (key: string, params?: Record<string, unknown>) =>
-  interp(translatePageKey('ai.mcp', key), params)
+const t = makePageTranslator('ai.mcp')
 
 const bridge = createAiBridge({ client: useAdminClient() })
 
-const activeTab = ref<'servers' | 'status' | 'analytics'>('servers')
+// Primary tabs. TTabsPage owns the `?section=` deep-linking + Back/Forward; the
+// `status` pane holds mixed variable-height content so it owns its own scroll.
+const sections: TabSection[] = [
+  { name: 'servers', label: t('tabs.servers') },
+  { name: 'status', label: t('tabs.status'), scroll: true },
+  { name: 'analytics', label: t('tabs.analytics') },
+]
+const activeTab = ref('servers')
 
 // ─── Tab 1: External servers CRUD ──────────────────────────────────────
 const serverCrud = useCrudPage<McpServerRegistrationDto>({
@@ -420,7 +415,6 @@ const serverCrud = useCrudPage<McpServerRegistrationDto>({
     bridge.mcpServers.update(String(id), toUpdateMcpServerDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.mcpServers.delete(ids.map(String)),
 })
-serverCrud.refresh().catch(() => undefined)
 
 // Header keyword search for the External Servers tab. The TCardPage header
 // bar is suppressed (single title bar on TContentPage), so the keyword search
@@ -467,6 +461,11 @@ async function removeServer(item: McpServerRegistrationDto): Promise<void> {
 // ─── Tab 2: This server status + exposed agents + tools ────────────────
 const statusLoading = ref(false)
 const status = ref<McpServerStatusDto | null>(null)
+// Tnzi.AI.Mcp not loaded → getStatus() returns null (the bridge swallows the
+// 404). Once the status fetch has settled with a null, the self-hosted MCP
+// server + its tool analytics are unavailable, so both tabs show a friendly
+// "module not enabled" notice instead of a silently empty surface.
+const showModuleNotLoaded = computed(() => !statusLoading.value && status.value === null)
 const tools = ref<McpToolInfoDto[]>([])
 const exposedAgentIds = ref<string[]>([])
 const allAgents = ref<AgentDto[]>([])
@@ -615,23 +614,37 @@ async function onCleanup(): Promise<void> {
   }
 }
 
-// Per-tool detail drawer
-const detailVisible = ref(false)
-const detailTool = ref<string | null>(null)
+// Per-tool analytics drawer — a record detail (the tool) driven by the single
+// detail engine so it is deep-linkable (`?tool=view:<toolName>`),
+// refresh-survivable and Back-closeable. `source` hydrates a cold-load deep
+// link from the loaded popularity ranking; `getId` keys on the tool name.
+// `:footer="false"` — a read-only panel; the X closes it.
+const toolDetail = useDetail<McpToolPopularityDto>({
+  mode: 'drawer',
+  url: 'tool',
+  getId: (row) => row.toolName,
+  source: { items: popularTools, loading: analyticsLoading },
+})
+const detailTool = computed(() => toolDetail.data.value?.toolName ?? null)
 const detailLoading = ref(false)
 const toolStats = ref<McpToolStatsDto | null>(null)
 const toolErrors = ref<McpToolErrorDto[]>([])
 
 async function openToolDetail(toolName: string): Promise<void> {
-  detailTool.value = toolName
-  detailVisible.value = true
+  await toolDetail.open('view', toolName)
+}
+
+// Load per-tool stats + errors whenever the drawer (re)binds to a tool — covers
+// an in-session open AND a `?tool=view:<name>` cold-load deep link / refresh.
+watch(() => toolDetail.data.value, async (row) => {
+  if (!row) return
   detailLoading.value = true
   toolStats.value = null
   toolErrors.value = []
   try {
     const [stats, errors] = await Promise.all([
-      bridge.mcpToolAnalytics.getToolStats(toolName),
-      bridge.mcpToolAnalytics.getToolErrors(toolName, 10),
+      bridge.mcpToolAnalytics.getToolStats(row.toolName),
+      bridge.mcpToolAnalytics.getToolErrors(row.toolName, 10),
     ])
     toolStats.value = stats
     toolErrors.value = errors
@@ -641,7 +654,7 @@ async function openToolDetail(toolName: string): Promise<void> {
   } finally {
     detailLoading.value = false
   }
-}
+})
 
 onMounted(() => {
   void loadStatusTab()
@@ -680,30 +693,10 @@ defineExpose({
   .t-mcp__search { flex-wrap: wrap; }
   .t-mcp__search-input { width: 100%; }
 }
-.t-mcp__pane {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-}
-.t-mcp__pane--scroll {
-  overflow-y: auto;
-}
 .t-mcp__form-hint {
   margin: 8px 0 0;
   font-size: 12px;
   color: var(--tnzi-base-text-muted, #888);
-}
-.t-mcp__kpis {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-@media (max-width: 900px) {
-  .t-mcp__kpis { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 480px) {
-  .t-mcp__kpis { grid-template-columns: 1fr; }
 }
 .t-mcp__empty {
   font-size: 13px;

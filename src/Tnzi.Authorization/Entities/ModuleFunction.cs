@@ -26,8 +26,11 @@ public class ModuleFunction : FullAuditedEntity<Guid>
     public Guid ModuleId { get; set; }
 
     /// <summary>
-    /// 获取或设置 所属模块
+    /// 获取或设置 所属模块。
+    /// [JsonIgnore]:模块树端点返回带 Functions 的实体,EF fix-up 会填充本
+    /// 反向导航,不忽略则序列化陷入 Functions↔FunctionModule 循环直接 500。
     /// </summary>
+    [JsonIgnore]
     public virtual FunctionModule FunctionModule { get; set; } = null!;
 
     /// <summary>
@@ -39,6 +42,13 @@ public class ModuleFunction : FullAuditedEntity<Guid>
     /// 获取或设置 排序号
     /// </summary>
     public int Order { get; set; }
+
+    /// <summary>
+    /// 获取或设置 权限分类。Business（默认）= 业务管理员经
+    /// <c>Authorization:BusinessAdminRoles</c> 隐式可达；Technical = 技术/
+    /// 运维面，仅显式授权或超级管理员可达。既有数据迁移后为 Business。
+    /// </summary>
+    public PermissionCategory Category { get; set; } = PermissionCategory.Business;
 
     /// <summary>
     /// True when this row was seeded from an

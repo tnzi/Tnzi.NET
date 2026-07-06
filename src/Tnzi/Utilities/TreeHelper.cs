@@ -75,6 +75,51 @@ public static class TreeHelper
     }
 
     /// <summary>
+    /// 平面数据转树形数据（可空父键版，适配 <c>TKey? ParentId</c> + 已初始化 Children 集合的常见 DTO 形态）。
+    /// ParentId 为 null 或指向数据集中不存在的节点（悬空引用）时一律视为根节点，保证节点不丢失。
+    /// 输出保持输入顺序（根列表与各父节点的子列表均按 flatData 的枚举顺序）。
+    /// </summary>
+    /// <typeparam name="T">节点类型</typeparam>
+    /// <typeparam name="TKey">键类型（值类型）</typeparam>
+    /// <param name="flatData">平面数据</param>
+    /// <param name="getId">获取节点ID的委托</param>
+    /// <param name="getParentId">获取可空父节点ID的委托</param>
+    /// <param name="addChild">把子节点挂到父节点的委托（如 <c>(p, c) =&gt; p.Children.Add(c)</c>）</param>
+    /// <returns>树形数据列表</returns>
+    public static IList<T> ToTree<T, TKey>(
+        IEnumerable<T> flatData,
+        Func<T, TKey> getId,
+        Func<T, TKey?> getParentId,
+        Action<T, T> addChild)
+        where TKey : struct, IEquatable<TKey>
+    {
+        if (flatData == null || getId == null || getParentId == null || addChild == null)
+            return new List<T>();
+
+        var dataList = flatData.ToList();
+        if (dataList.Count == 0)
+            return new List<T>();
+
+        var nodeDict = dataList.ToDictionary(x => getId(x), x => x);
+
+        var rootNodes = new List<T>();
+        foreach (var item in dataList)
+        {
+            var parentId = getParentId(item);
+            if (parentId.HasValue && nodeDict.TryGetValue(parentId.Value, out var parent))
+            {
+                addChild(parent, item);
+            }
+            else
+            {
+                rootNodes.Add(item);
+            }
+        }
+
+        return rootNodes;
+    }
+
+    /// <summary>
     /// 平面数据转树形数据（支持引用类型Key）
     /// </summary>
     public static IList<T> ToTree<T, TKey>(

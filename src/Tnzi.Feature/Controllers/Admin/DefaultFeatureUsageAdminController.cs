@@ -7,6 +7,7 @@ namespace Tnzi.Feature.Controllers.Admin;
 [DefaultController]
 [Route("admin/feature/usage")]
 [ApiExplorerSettings(GroupName = "feature-admin")]
+[ApiAuthorize(PermissionName = "feature.view")]
 public class DefaultFeatureUsageAdminController : ApiAdminControllerBase
 {
     protected readonly IFeatureUsageService FeatureUsageService;

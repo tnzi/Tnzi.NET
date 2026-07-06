@@ -87,7 +87,8 @@ interface Props {
   /**
    * Called by modules (via `useLoginContext().toggleLoginModule`) to switch
    * the active module. Page-level consumers wire this to
-   * `router.replace({ path: '/login/' + name })`.
+   * `router.replace({ name: 'login', params: { module: name } })` (by NAME,
+   * so it follows any basePath / deployment prefix).
    */
   onToggleModule?: (name: LoginModule) => void
   /** CSS transition `name` for the `<Transition>` wrapper. Default `'fade-slide'`. */

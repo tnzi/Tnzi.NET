@@ -12,6 +12,8 @@ public class CouponUsageConfiguration : EntityTypeConfigurationBase<CouponUsage,
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
+        builder.Property(c => c.DiscountAmount).HasMoneyPrecision();
+
         if (multiTenancyEnabled)
         {
             builder.HasIndex(c => c.TenantId);

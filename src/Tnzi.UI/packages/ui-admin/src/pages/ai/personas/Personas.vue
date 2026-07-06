@@ -6,13 +6,14 @@
       :title="t('title')"
       :title-help="t('banner')"
       :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
-      :search-fields="searchFields"
       :search-placeholder="t('search.placeholder')"
       :form-modal-width="720"
+      :detail-width="640"
+      :detail-title="(d: AgentPersonaDto) => d.name"
       :translate="t"
     >
       <template #card="{ item }">
-        <TEntityCard clickable @click="openDetail(item)">
+        <TEntityCard clickable @click="crud.openView(item)">
           <div class="flex items-center gap-8px mb-6px">
             <span class="ai-persona-card__icon">
               <TSvgIcon icon="mdi:drama-masks" :size="18" />
@@ -47,59 +48,62 @@
           :translate="t"
         />
       </template>
-    </TCardPage>
 
-    <!-- Detail drawer — full soul/system-prompt body + agents using this persona. -->
-    <NDrawer v-model:show="detailVisible" :width="640" placement="right">
-      <NDrawerContent v-if="detail" :title="detail.name" closable>
-        <div class="ai-persona-detail__meta">
-          <div>
-            <strong>{{ t('detail.slug') }}:</strong> <code>{{ detail.slug }}</code>
-          </div>
-          <div>
-            <strong>{{ t('detail.type') }}:</strong>
-            <NTag size="small" :type="isSystemScope(detail) ? 'warning' : 'info'" :bordered="false">
-              {{ isSystemScope(detail) ? t('badge.system') : t('badge.custom') }}
-            </NTag>
-          </div>
-          <div v-if="detail.description">
-            <strong>{{ t('detail.description') }}:</strong> {{ detail.description }}
-          </div>
-          <div v-if="detail.lastModificationTime">
-            <strong>{{ t('detail.lastModified') }}:</strong> {{ formatDateTime(detail.lastModificationTime) }}
-          </div>
-        </div>
-
-        <div class="ai-persona-detail__section">
-          <h3>{{ t('detail.usedBy') }}</h3>
-          <NSpin :show="relatedLoading" size="small">
-            <div v-if="relatedAgents.length" class="flex flex-wrap gap-6px">
-              <NTag v-for="a in relatedAgents" :key="a.id" size="small" :bordered="false">
-                {{ a.name }}
+      <!-- Read-only detail — full soul/system-prompt body + agents using this
+           persona. Same `view` open-state as the form modal (so it is
+           deep-linkable + Back-closeable for free); the engine renders it as a
+           right drawer because this `#detail` slot exists. -->
+      <template #detail>
+        <template v-if="viewed">
+          <div class="ai-persona-detail__meta">
+            <div>
+              <strong>{{ t('detail.slug') }}:</strong> <code>{{ viewed.slug }}</code>
+            </div>
+            <div>
+              <strong>{{ t('detail.type') }}:</strong>
+              <NTag size="small" :type="isSystemScope(viewed) ? 'warning' : 'info'" :bordered="false">
+                {{ isSystemScope(viewed) ? t('badge.system') : t('badge.custom') }}
               </NTag>
             </div>
-            <div v-else class="ai-persona-detail__empty">{{ t('detail.noAgents') }}</div>
-          </NSpin>
-        </div>
+            <div v-if="viewed.description">
+              <strong>{{ t('detail.description') }}:</strong> {{ viewed.description }}
+            </div>
+            <div v-if="viewed.lastModificationTime">
+              <strong>{{ t('detail.lastModified') }}:</strong> {{ formatDateTime(viewed.lastModificationTime) }}
+            </div>
+          </div>
 
-        <div class="ai-persona-detail__section">
-          <h3>{{ t('detail.content') }}</h3>
-          <pre class="ai-persona-detail__body">{{ detail.content || t('detail.noContent') }}</pre>
-        </div>
+          <div class="ai-persona-detail__section">
+            <h3>{{ t('detail.usedBy') }}</h3>
+            <NSpin :show="relatedLoading" size="small">
+              <div v-if="relatedAgents.length" class="flex flex-wrap gap-6px">
+                <NTag v-for="a in relatedAgents" :key="a.id" size="small" :bordered="false">
+                  {{ a.name }}
+                </NTag>
+              </div>
+              <div v-else class="ai-persona-detail__empty">{{ t('detail.noAgents') }}</div>
+            </NSpin>
+          </div>
 
-        <template #footer>
-          <NButton size="small" type="primary" :disabled="isLocked(detail)" @click="editFromDrawer">
-            {{ t('actions.edit') }}
-          </NButton>
+          <div class="ai-persona-detail__section">
+            <h3>{{ t('detail.content') }}</h3>
+            <pre class="ai-persona-detail__body">{{ viewed.content || t('detail.noContent') }}</pre>
+          </div>
         </template>
-      </NDrawerContent>
-    </NDrawer>
+      </template>
+
+      <template #detailFooter>
+        <NButton v-if="viewed" size="small" type="primary" :disabled="isLocked(viewed)" @click="crud.openEdit(viewed)">
+          {{ t('actions.edit') }}
+        </NButton>
+      </template>
+    </TCardPage>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NButton, NCard, NDrawer, NDrawerContent, NPopconfirm, NSpin, NTag } from 'naive-ui'
+import { computed, ref } from 'vue'
+import { NButton, NPopconfirm, NSpin, NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime } from '@tnzi/core'
 import TCardPage from '../../../components/crud/TCardPage.vue'
@@ -108,9 +112,8 @@ import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
-import { translatePageKey } from '../../_shared/translate'
-import { personaFormSchema, personaSearchFields as searchFields } from './persona-config'
-import { ResourceScope } from '@tnzi/core/enums'
+import { makePageTranslator } from '../../_shared/translate'
+import { personaFormSchema, resourceScopeName } from './persona-config'
 import type {
   AgentDto,
   AgentPersonaDto,
@@ -119,13 +122,15 @@ import type {
 } from '@tnzi/core/services/ai'
 import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
 
-const t = (key: string) => translatePageKey('ai.personas', key)
+const t = makePageTranslator('ai.personas')
 
 const bridge = createAiBridge({ client: useAdminClient() })
 const authStore = useAdminAuthStore()
 
 function isSystemScope(p: AgentPersonaDto | null | undefined): boolean {
-  return !!p && p.scope === ResourceScope.System
+  // `scope` arrives as the PascalCase member name (JsonStringEnumConverter) or,
+  // for legacy payloads, the numeric ordinal — normalise both.
+  return !!p && resourceScopeName(p.scope) === 'System'
 }
 
 // Mirrors the backend write guard (AgentPersonaService Update/Delete): system personas are
@@ -135,6 +140,13 @@ function isLocked(p: AgentPersonaDto | null | undefined): boolean {
   return isSystemScope(p) && !!authStore.currentTenantId
 }
 
+// --- detail drawer + related agents ----------------------------------------
+// The viewed record IS the CRUD `view` open-state — no second ref. Opening it
+// (card click → `crud.openView`) deep-links to `#detail:view:<id>` for free;
+// `onView` lazy-loads the related agents (also on a deep-link cold reload).
+const relatedAgents = ref<AgentDto[]>([])
+const relatedLoading = ref(false)
+
 const crud = useCrudPage<AgentPersonaDto>({
   pageId: 'ai.personas',
   columns: [],
@@ -143,8 +155,10 @@ const crud = useCrudPage<AgentPersonaDto>({
   createData: (data) => bridge.personas.create(data as CreateAgentPersonaDto),
   updateData: (id, data) => bridge.personas.update(String(id), data as UpdateAgentPersonaDto),
   deleteData: (ids) => bridge.personas.delete(ids.map(String)),
+  onView: (row) => void loadRelatedAgents(row),
 })
-crud.refresh().catch(() => undefined)
+
+const viewed = computed(() => crud.formModal.formData.value as AgentPersonaDto | null)
 
 function contentPreview(content: string | null | undefined): string {
   const text = (content ?? '').replace(/\s+/g, ' ').trim()
@@ -155,15 +169,7 @@ async function removeOne(item: AgentPersonaDto): Promise<void> {
   await crud.handleDelete([item.id])
 }
 
-// --- detail drawer + related agents ----------------------------------------
-const detail = ref<AgentPersonaDto | null>(null)
-const detailVisible = ref(false)
-const relatedAgents = ref<AgentDto[]>([])
-const relatedLoading = ref(false)
-
-async function openDetail(row: AgentPersonaDto): Promise<void> {
-  detail.value = row
-  detailVisible.value = true
+async function loadRelatedAgents(row: AgentPersonaDto): Promise<void> {
   relatedAgents.value = []
   relatedLoading.value = true
   try {
@@ -175,12 +181,6 @@ async function openDetail(row: AgentPersonaDto): Promise<void> {
   } finally {
     relatedLoading.value = false
   }
-}
-
-function editFromDrawer(): void {
-  if (!detail.value) return
-  detailVisible.value = false
-  crud.openEdit(detail.value)
 }
 </script>
 

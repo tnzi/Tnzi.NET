@@ -125,25 +125,32 @@ export function useAuthApi(client: HttpClient) {
     getConfig: () =>
       client.get<AuthConfigDto>(`${AUTH_BASE}/config`),
 
+    // Auth-flow endpoints are marked `skipAuthRefresh`: a 401 from them means
+    // "bad credentials" or "session already dead", so triggering the client's
+    // token-refresh-and-retry (or the onUnauthorized session-expired handler)
+    // would be wrong. For refresh/logout it is also what prevents the calls
+    // issued DURING a refresh cycle from re-entering the refresh mutex and
+    // stalling every queued request until the refresh timeout.
+
     /** Login (returns JWT token string) */
     login: (data: LoginDto) =>
-      client.post<string>(`${AUTH_BASE}/login`, data),
+      client.post<string>(`${AUTH_BASE}/login`, data, { skipAuthRefresh: true }),
 
     /** Login with refresh token */
     loginWithRefreshToken: (data: LoginDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/login-with-refresh-token`, data),
+      client.post<TokenResultDto>(`${AUTH_BASE}/login-with-refresh-token`, data, { skipAuthRefresh: true }),
 
     /** Refresh token */
     refreshToken: (data: RefreshTokenDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/refresh-token`, data),
+      client.post<TokenResultDto>(`${AUTH_BASE}/refresh-token`, data, { skipAuthRefresh: true }),
 
     /** Register (returns token result) */
     register: (data: RegisterDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/register`, data),
+      client.post<TokenResultDto>(`${AUTH_BASE}/register`, data, { skipAuthRefresh: true }),
 
     /** Logout (requires authentication) */
     logout: () =>
-      client.post<string>(`${AUTH_BASE}/logout`),
+      client.post<string>(`${AUTH_BASE}/logout`, undefined, { skipAuthRefresh: true }),
 
     /** Forgot password (sends reset email) */
     forgotPassword: (data: ForgotPasswordDto) =>
@@ -191,7 +198,7 @@ export function useAuthApi(client: HttpClient) {
 
     /** Code login */
     codeLogin: (data: CodeLoginDto) =>
-      client.post<CodeLoginResultDto>(`${AUTH_BASE}/code-login`, data),
+      client.post<CodeLoginResultDto>(`${AUTH_BASE}/code-login`, data, { skipAuthRefresh: true }),
 
     // -- Password Recovery by Code --
 
@@ -211,7 +218,7 @@ export function useAuthApi(client: HttpClient) {
 
     /** Verify 2FA and login */
     verifyTwoFactor: (data: VerifyTwoFactorDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data),
+      client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data, { skipAuthRefresh: true }),
   };
 }
 

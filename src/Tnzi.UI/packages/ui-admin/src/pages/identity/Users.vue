@@ -20,90 +20,86 @@
     </template>
   </TCrudPage>
 
-  <NModal v-model:show="resetPwdModal.show" :title="t('actions.resetPassword')" preset="card" class="w-480px">
-    <NForm>
-      <NFormItem :label="t('actions.newPassword')" required>
-        <NInput
-          v-model:value="resetPwdModal.password"
-          type="password"
-          show-password-on="click"
-          :placeholder="t('actions.resetPasswordHint')"
-        />
-      </NFormItem>
-    </NForm>
-    <template #footer>
-      <div class="flex justify-end gap-8px">
-        <NButton @click="resetPwdModal.show = false">{{ t('admin.crud.cancel') }}</NButton>
-        <NButton type="primary" :disabled="!resetPwdModal.password" @click="submitResetPassword">
-          {{ t('admin.crud.confirm') }}
-        </NButton>
-      </div>
+  <!--
+    Reset-password overlay — a custom secondary surface (distinct from the CRUD
+    add/edit/view modal). Driven by `useDetail` so it is deep-linkable
+    (`#reset-pwd:edit:<id>`), refresh-survivable and Back-closeable for free, and
+    rendered by the single `TDetailHost` renderer like every other detail.
+  -->
+  <TDetailHost :state="resetPwdDetail" :title="t('actions.resetPassword')" :width="480" :translate="t">
+    <template #default>
+      <NForm>
+        <NFormItem :label="t('actions.newPassword')" required>
+          <NInput
+            v-model:value="resetPwdValue"
+            type="password"
+            show-password-on="click"
+            :placeholder="t('actions.resetPasswordHint')"
+          />
+        </NFormItem>
+      </NForm>
     </template>
-  </NModal>
+    <template #footer="{ close }">
+      <NButton @click="close">{{ t('admin.crud.cancel') }}</NButton>
+      <NButton type="primary" :loading="resetPwdSaving" :disabled="!resetPwdValue" @click="submitResetPassword">
+        {{ t('admin.crud.confirm') }}
+      </NButton>
+    </template>
+  </TDetailHost>
 
   <!--
-    Manage-roles modal — shown when the row More menu selects "Manage Roles".
-    Pre-checks the roles already on the user (matched by name from
-    `UserListItemDto.roles[]` since the list DTO carries role NAMES, not
-    IDs — the modal owns the name→id resolution against the all-roles list).
-    Submission diffs against the original set and calls assign/remove in
-    parallel via `bridge.users.setRoles`.
+    Manage-roles overlay (Users → More → Manage Roles). Pre-checks the roles
+    already on the user (matched by name from `UserListItemDto.roles[]`, which
+    carries role NAMES not IDs — the overlay owns the name→id resolution against
+    the all-roles list). Submission diffs against the original set and calls
+    assign/remove in parallel via `bridge.users.setRoles`. Deep-linked as
+    `#roles:edit:<id>`; cold-load hydration resolves the user from the loaded
+    list (`crud.items`).
   -->
-  <NModal v-model:show="rolesModal.show" :title="rolesModalTitle" preset="card" class="w-560px">
-    <NSpin :show="rolesModal.loading">
-      <p class="t-users-page__hint">{{ t('actions.manageRolesHint') }}</p>
-      <div v-if="!rolesModal.loading && !availableRoles.length" class="t-users-page__empty">
-        {{ t('actions.noRolesAvailable') }}
-      </div>
-      <NCheckboxGroup
-        v-else
-        v-model:value="rolesModal.selectedIds"
-        class="t-users-page__role-group"
-      >
-        <NCheckbox
-          v-for="role in availableRoles"
-          :key="role.id"
-          :value="role.id"
-          :label="role.name"
-        />
-      </NCheckboxGroup>
-    </NSpin>
-    <template #footer>
-      <div class="flex justify-end gap-8px">
-        <NButton @click="rolesModal.show = false">{{ t('admin.crud.cancel') }}</NButton>
-        <NButton
-          type="primary"
-          :loading="rolesModal.saving"
-          :disabled="rolesModal.loading || !rolesModal.userId"
-          @click="submitRoles"
-        >
-          {{ t('admin.crud.confirm') }}
-        </NButton>
-      </div>
+  <TDetailHost :state="rolesDetail" :title="rolesTitle" :width="560" :translate="t">
+    <template #default>
+      <NSpin :show="rolesLoading">
+        <p class="t-users-page__hint">{{ t('actions.manageRolesHint') }}</p>
+        <div v-if="!rolesLoading && !availableRoles.length" class="t-users-page__empty">
+          {{ t('actions.noRolesAvailable') }}
+        </div>
+        <NCheckboxGroup v-else v-model:value="selectedRoleIds" class="t-users-page__role-group">
+          <NCheckbox
+            v-for="role in availableRoles"
+            :key="role.id"
+            :value="role.id"
+            :label="role.name"
+          />
+        </NCheckboxGroup>
+      </NSpin>
     </template>
-  </NModal>
+    <template #footer="{ close }">
+      <NButton @click="close">{{ t('admin.crud.cancel') }}</NButton>
+      <NButton
+        type="primary"
+        :loading="rolesSaving"
+        :disabled="rolesLoading || !rolesUser"
+        @click="submitRoles"
+      >
+        {{ t('admin.crud.confirm') }}
+      </NButton>
+    </template>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { useDetail } from '../../headless/useDetail'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
-import { interpolate, translatePageKey } from '../_shared/translate'
+import { makePageTranslator } from '../_shared/translate'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { userColumns, userSearchFields, userFormSchema } from './user-config'
-import { computed, reactive, ref, shallowRef } from 'vue'
-import {
-  NForm,
-  NFormItem,
-  NInput,
-  NButton,
-  NModal,
-  NSpin,
-  NCheckbox,
-  NCheckboxGroup,
-} from 'naive-ui'
+import { computed, ref, shallowRef, watch } from 'vue'
+import { NForm, NFormItem, NInput, NButton, NSpin, NCheckbox, NCheckboxGroup } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safeMessage'
 import type { RoleDto } from '@tnzi/core/services/identity'
 
@@ -141,12 +137,13 @@ const crud = useCrudPage<UserListItem>({
 
 const rowKey = (row: unknown) => (row as UserListItem).id
 
-crud.refresh().catch(() => undefined)
-
-const t = (key: string, params?: Record<string, unknown>) =>
-  interpolate(translatePageKey('identity.users', key), params)
+const t = makePageTranslator('identity.users')
 
 const message = useSafeMessage()
+
+// Custom secondary overlays resolve deep-linked users straight from the
+// surrounding CRUD list via `source: crud` — a `?roles=edit:<id>` deep link
+// hydrates from the loaded page, waiting for the first fetch automatically.
 
 async function withRefresh(action: () => Promise<void>, successKey: string): Promise<void> {
   try {
@@ -163,6 +160,104 @@ const handleDisable = (id: string) => withRefresh(() => bridge.users.disable(id)
 const handleLock = (id: string) => withRefresh(() => bridge.users.lock(id), 'actions.lockSuccess')
 const handleUnlock = (id: string) => withRefresh(() => bridge.users.unlock(id), 'actions.unlockSuccess')
 
+// ─── Reset-password overlay ───────────────────────────────────────────────
+const resetPwdDetail = useDetail<UserListItem>({
+  mode: 'modal',
+  url: 'reset-pwd',
+  source: crud,
+})
+const resetPwdValue = ref('')
+const resetPwdSaving = ref(false)
+// Reset the field whenever the overlay (re)binds to a user — covers in-session
+// open AND a deep-link / refresh that reopens it.
+watch(() => resetPwdDetail.data.value, (user) => {
+  if (user) resetPwdValue.value = ''
+})
+
+async function submitResetPassword(): Promise<void> {
+  const user = resetPwdDetail.data.value
+  if (!user || !resetPwdValue.value) return
+  resetPwdSaving.value = true
+  try {
+    await bridge.users.resetPassword(user.id, resetPwdValue.value)
+    message.success(t('actions.resetPasswordSuccess'))
+    resetPwdDetail.close()
+    await crud.refresh()
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  } finally {
+    resetPwdSaving.value = false
+  }
+}
+
+// ─── Manage-roles overlay ─────────────────────────────────────────────────
+const rolesDetail = useDetail<UserListItem>({
+  mode: 'modal',
+  url: 'roles',
+  source: crud,
+})
+const rolesUser = computed(() => rolesDetail.data.value)
+const rolesTitle = computed(() =>
+  t('actions.manageRolesTitle', { user: rolesUser.value?.userName || '—' }),
+)
+
+// `availableRoles` is the full role catalogue, loaded the first time a role
+// overlay opens and reused thereafter (roles are global + change rarely).
+const availableRoles = shallowRef<RoleDto[]>([])
+const rolesLoaded = ref(false)
+const rolesLoading = ref(false)
+const rolesSaving = ref(false)
+const selectedRoleIds = ref<string[]>([])
+const originalRoleIds = ref<string[]>([])
+
+async function ensureRolesLoaded(): Promise<void> {
+  if (rolesLoaded.value) return
+  availableRoles.value = await bridge.roles.getAll()
+  rolesLoaded.value = true
+}
+
+// Load the catalogue + preselect the user's current roles whenever the overlay
+// binds to a user (in-session open OR a `#roles:edit:<id>` deep link).
+watch(() => rolesDetail.data.value, async (user) => {
+  if (!user) return
+  rolesLoading.value = true
+  selectedRoleIds.value = []
+  originalRoleIds.value = []
+  try {
+    await ensureRolesLoaded()
+    // `user.roles` carries role NAMES (per UserListItemDto). Map them to ids via
+    // the freshly-loaded role catalogue. Names are case-sensitive matched —
+    // backend stores the canonical name on the user-role join.
+    const userRoleNames = new Set(user.roles ?? [])
+    const matched = availableRoles.value
+      .filter((r) => userRoleNames.has(r.name))
+      .map((r) => r.id)
+    selectedRoleIds.value = matched
+    originalRoleIds.value = [...matched]
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+    rolesDetail.close()
+  } finally {
+    rolesLoading.value = false
+  }
+})
+
+async function submitRoles(): Promise<void> {
+  const user = rolesDetail.data.value
+  if (!user) return
+  rolesSaving.value = true
+  try {
+    await bridge.users.setRoles(user.id, selectedRoleIds.value, originalRoleIds.value)
+    message.success(t('actions.manageRolesSuccess'))
+    rolesDetail.close()
+    await crud.refresh()
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  } finally {
+    rolesSaving.value = false
+  }
+}
+
 /**
  * Declarative operation actions. `editAction`/`deleteAction` wire to the CRUD
  * state; the per-row state toggles (enable/disable, lock/unlock) use `show`
@@ -175,98 +270,14 @@ const handleUnlock = (id: string) => withRefresh(() => bridge.users.unlock(id), 
  */
 const rowActions: RowAction<UserListItem>[] = [
   editAction(crud),
-  { key: 'manageRoles', label: 'actions.manageRoles', onClick: (row) => void openRolesModal(row) },
+  { key: 'manageRoles', label: 'actions.manageRoles', onClick: (row) => void rolesDetail.open('edit', row) },
   { key: 'enable', label: 'actions.enable', show: (row) => row.isLockedOut === true, confirm: 'actions.confirmEnable', onClick: (row) => void handleEnable(row.id) },
   { key: 'disable', label: 'actions.disable', show: (row) => row.isLockedOut !== true, confirm: 'actions.confirmDisable', onClick: (row) => void handleDisable(row.id) },
   { key: 'unlock', label: 'actions.unlock', show: (row) => row.isLockedOut === true, onClick: (row) => void handleUnlock(row.id) },
   { key: 'lock', label: 'actions.lock', show: (row) => row.isLockedOut !== true, onClick: (row) => void handleLock(row.id) },
-  { key: 'resetPassword', label: 'actions.resetPassword', onClick: (row) => openResetPassword(row.id) },
+  { key: 'resetPassword', label: 'actions.resetPassword', onClick: (row) => void resetPwdDetail.open('edit', row) },
   deleteAction(crud),
 ]
-
-const resetPwdModal = reactive({ show: false, userId: '', password: '' })
-function openResetPassword(id: string): void {
-  resetPwdModal.userId = id
-  resetPwdModal.password = ''
-  resetPwdModal.show = true
-}
-async function submitResetPassword(): Promise<void> {
-  const { userId, password } = resetPwdModal
-  if (!userId || !password) return
-  await withRefresh(() => bridge.users.resetPassword(userId, password), 'actions.resetPasswordSuccess')
-  resetPwdModal.show = false
-}
-
-// ─── Manage Roles modal ───────────────────────────────────────────────────
-// State for the role-assignment surface. `selectedIds` lives in modal scope
-// so cancel doesn't mutate anything; `originalIds` holds the pre-edit set
-// for diffing on submit. `availableRoles` is the full role catalogue,
-// loaded the first time the modal opens and reused thereafter.
-const availableRoles = shallowRef<RoleDto[]>([])
-const rolesLoaded = ref(false)
-const rolesModal = reactive({
-  show: false,
-  loading: false,
-  saving: false,
-  userId: '',
-  userName: '',
-  selectedIds: [] as string[],
-  originalIds: [] as string[],
-})
-const rolesModalTitle = computed(() =>
-  t('actions.manageRolesTitle', { user: rolesModal.userName || '—' }),
-)
-
-async function ensureRolesLoaded(): Promise<void> {
-  if (rolesLoaded.value) return
-  // Cache the role catalogue across modal opens — roles are global +
-  // change rarely. Roles page edits will trigger a fresh page
-  // load before they'd matter here, so the cache is safe.
-  availableRoles.value = await bridge.roles.getAll()
-  rolesLoaded.value = true
-}
-
-async function openRolesModal(row: UserListItem): Promise<void> {
-  rolesModal.userId = row.id
-  rolesModal.userName = row.userName
-  rolesModal.selectedIds = []
-  rolesModal.originalIds = []
-  rolesModal.show = true
-  rolesModal.loading = true
-  try {
-    await ensureRolesLoaded()
-    // `row.roles` carries role NAMES (per UserListItemDto). Map them to
-    // ids via the freshly-loaded role catalogue. Names are case-sensitive
-    // matched — backend stores the canonical name on the user-role join.
-    const userRoleNames = new Set(row.roles ?? [])
-    const matched = availableRoles.value
-      .filter((r) => userRoleNames.has(r.name))
-      .map((r) => r.id)
-    rolesModal.selectedIds = matched
-    rolesModal.originalIds = [...matched]
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
-    rolesModal.show = false
-  } finally {
-    rolesModal.loading = false
-  }
-}
-
-async function submitRoles(): Promise<void> {
-  const { userId, selectedIds, originalIds } = rolesModal
-  if (!userId) return
-  rolesModal.saving = true
-  try {
-    await bridge.users.setRoles(userId, selectedIds, originalIds)
-    message.success(t('actions.manageRolesSuccess'))
-    rolesModal.show = false
-    await crud.refresh()
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
-  } finally {
-    rolesModal.saving = false
-  }
-}
 </script>
 
 <style scoped>

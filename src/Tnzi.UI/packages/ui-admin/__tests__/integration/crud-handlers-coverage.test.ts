@@ -75,6 +75,55 @@ vi.mock('../../src/services/bridges/ai-bridge', () => ({
 vi.mock('../../src/services/bridges/payment-bridge', () => ({
   createPaymentBridge: () => ({ orders: mkCrud(), refunds: mkCrud(), subscriptions: mkCrud(), invoices: mkCrud() }),
 }))
+vi.mock('../../src/services/bridges/finance-bridge', () => ({
+  // P2 页面从桥接 re-export 的枚举（vi.mock 全量替换模块，须补齐）。全局
+  // JsonStringEnumConverter 下枚举线值为 PascalCase 成员名；account-config /
+  // journal-entry-config 在模块加载期用这些值建 label map，故须齐备。
+  ItemType: { Service: 'Service', Product: 'Product' },
+  FinanceDocumentStatus: { Draft: 'Draft', Posted: 'Posted', PartiallyPaid: 'PartiallyPaid', Paid: 'Paid', Voided: 'Voided' },
+  PaymentDirection: { Inbound: 'Inbound', Outbound: 'Outbound' },
+  FinancePartyType: { Customer: 'Customer', Vendor: 'Vendor' },
+  SettlementDocType: { Invoice: 'Invoice', Bill: 'Bill', PaymentEntry: 'PaymentEntry', CreditMemo: 'CreditMemo' },
+  AccountRootType: { Asset: 'Asset', Liability: 'Liability', Equity: 'Equity', Income: 'Income', Expense: 'Expense' },
+  AccountSystemRole: { AccountsReceivable: 'AccountsReceivable', AccountsPayable: 'AccountsPayable', TaxPayable: 'TaxPayable', TaxReceivable: 'TaxReceivable', RetainedEarnings: 'RetainedEarnings', ExchangeGainLoss: 'ExchangeGainLoss', RoundingDifference: 'RoundingDifference', UndepositedFunds: 'UndepositedFunds', OpeningBalance: 'OpeningBalance' },
+  CashFlowActivity: { Operating: 'Operating', Investing: 'Investing', Financing: 'Financing' },
+  JournalEntryStatus: { Draft: 'Draft', Posted: 'Posted', Reversed: 'Reversed' },
+  createFinanceBridge: () => ({
+    customers: mkCrud(),
+    vendors: mkCrud(),
+    items: mkCrud(),
+    taxes: {
+      agencies: vi.fn(async () => []), rates: vi.fn(async () => []), codes: vi.fn(async () => []),
+      createAgency: vi.fn(), updateAgency: vi.fn(), deleteAgency: vi.fn(),
+      createRate: vi.fn(), updateRate: vi.fn(), deleteRate: vi.fn(),
+      createCode: vi.fn(), updateCode: vi.fn(), deleteCode: vi.fn(),
+    },
+    accounts: { ...mkCrud(), tree: vi.fn(async () => []), seedDefault: vi.fn(async () => 26) },
+    journals: {
+      ...mkCrud(),
+      getById: vi.fn(async () => null),
+      createDraft: vi.fn(async () => ({ id: 'j1' })),
+      updateDraft: vi.fn(async () => ({ id: 'j1' })),
+      deleteDraft: vi.fn(async () => undefined),
+      post: vi.fn(async () => ({ id: 'j1' })),
+      reverse: vi.fn(async () => ({ id: 'j2' })),
+    },
+    rates: { ...mkCrud(), upsert: vi.fn(async () => ({ id: 'r1' })), refresh: vi.fn(async () => 0) },
+    fiscalYears: {
+      list: vi.fn(async () => []),
+      create: vi.fn(async () => ({ id: 'f1' })),
+      close: vi.fn(async () => undefined),
+      reopen: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    },
+    reports: {
+      trialBalance: vi.fn(),
+      balanceSheet: vi.fn(),
+      profitAndLoss: vi.fn(),
+      generalLedger: vi.fn(),
+    },
+  }),
+}))
 vi.mock('../../src/services/bridges/chat-bridge', () => ({
   createChatBridge: () => ({
     broadcast: vi.fn(async () => 1),
@@ -102,13 +151,13 @@ vi.mock('../../src/services/bridges/template-bridge', () => ({
 vi.mock('../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
     users: mkCrud(), roles: mkCrud(), tenants: mkCrud(), loginLogs: mkCrud(),
-    gdprRequests: mkCrud(), sessions: mkCrud(),
+    sessions: mkCrud(),
   }),
 }))
 vi.mock('../../src/services/bridges/audit-bridge', () => ({
   createAuditBridge: () => ({ logs: mkCrud(), operations: mkCrud() }),
-  // 0.2.72+ (B4) re-export mirror — see audit-bridge.ts.
-  AuditResultType: { Success: 1, Failed: 2, Warning: 3 },
+  // re-export mirror — see audit-bridge.ts (PascalCase string enum).
+  AuditResultType: { Success: 'Success', Failed: 'Failed', Warning: 'Warning' },
 }))
 vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
@@ -164,6 +213,12 @@ import Quotas from '../../src/pages/ai/quota/Quotas.vue'
 import Orders from '../../src/pages/payment/Orders.vue'
 import Refunds from '../../src/pages/payment/Refunds.vue'
 import PaymentSubscriptions from '../../src/pages/payment/Subscriptions.vue'
+import FinanceAccounts from '../../src/pages/finance/Accounts.vue'
+import FinanceExchangeRates from '../../src/pages/finance/ExchangeRates.vue'
+import FinanceFiscalYears from '../../src/pages/finance/FiscalYears.vue'
+import FinanceCustomers from '../../src/pages/finance/Customers.vue'
+import FinanceVendors from '../../src/pages/finance/Vendors.vue'
+import FinanceItems from '../../src/pages/finance/Items.vue'
 import NotificationTemplates from '../../src/pages/notification/Templates.vue'
 import NotificationMessages from '../../src/pages/notification/Messages.vue'
 import NotificationSubscriptions from '../../src/pages/notification/Subscriptions.vue'
@@ -173,7 +228,6 @@ import Users from '../../src/pages/identity/Users.vue'
 import Roles from '../../src/pages/identity/Roles.vue'
 import Tenants from '../../src/pages/identity/Tenants.vue'
 import LoginLogs from '../../src/pages/identity/LoginLogs.vue'
-import GdprRequests from '../../src/pages/identity/GdprRequests.vue'
 import Logs from '../../src/pages/audit/Logs.vue'
 import Operations from '../../src/pages/audit/Operations.vue'
 import AccessLogs from '../../src/pages/system/AccessLogs.vue'
@@ -290,12 +344,16 @@ const PAGES: Array<[string, any]> = [
   ['Providers', Providers], ['Quotas', Quotas],
   // Payment / Chat / Notification / Template
   ['Orders', Orders], ['Refunds', Refunds], ['PaymentSubscriptions', PaymentSubscriptions],
+  ['FinanceAccounts', FinanceAccounts], ['FinanceExchangeRates', FinanceExchangeRates],
+  ['FinanceFiscalYears', FinanceFiscalYears],
+  ['FinanceCustomers', FinanceCustomers], ['FinanceVendors', FinanceVendors],
+  ['FinanceItems', FinanceItems],
   ['NotificationTemplates', NotificationTemplates], ['NotificationMessages', NotificationMessages],
   ['NotificationSubscriptions', NotificationSubscriptions],
   ['Layouts', Layouts], ['Templates', Templates],
   // Identity / Audit / System / Authorization / Storage
   ['Users', Users], ['Roles', Roles],
-  ['Tenants', Tenants], ['LoginLogs', LoginLogs], ['GdprRequests', GdprRequests],
+  ['Tenants', Tenants], ['LoginLogs', LoginLogs],
   ['Logs', Logs], ['Operations', Operations],
   ['AccessLogs', AccessLogs], ['Dictionaries', Dictionaries],
   ['Parameters', Parameters], ['Menus', Menus],

@@ -1,12 +1,12 @@
 <template>
-  <TDetailLayout
+  <TDetailHost
+    :state="detail"
     layout="side"
     :sections="sections"
-    :active-section="activeSection"
     :title="t('admin.modules.system.settings.title')"
     icon="mdi:cog-outline"
+    :back="false"
     :translate="t"
-    @update:active-section="(k: string) => (activeSection = k)"
   >
     <template #default="{ section }">
       <NSpin v-if="loading" class="t-settings-page__spin" />
@@ -29,19 +29,19 @@
         </div>
       </template>
     </template>
-  </TDetailLayout>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, type Component } from 'vue'
 import { NSpin } from 'naive-ui'
 import type { SettingsCenterGroupDto } from '@tnzi/core/services/system'
-import TDetailLayout from '../detail/TDetailLayout.vue'
+import TDetailHost from '../detail/TDetailHost.vue'
 import TSettingsGroupPanel from './TSettingsGroupPanel.vue'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminSettingsConfig, type AdminSettingsSection } from '../../plugin/settingsConfig'
-import type { DetailSection } from '../../headless/useDetail'
+import { useDetail, type DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../../pages/_shared/safeMessage'
 import { resolveBackendLabel, translatePageKey } from '../../pages/_shared/translate'
 
@@ -57,7 +57,6 @@ const t = (key: string) => translatePageKey('', key)
 
 const groups = ref<SettingsCenterGroupDto[]>([])
 const loading = ref(true)
-const activeSection = ref<string | null>(null)
 
 const saveGroup = (groupKey: string, changed: Record<string, string | null>) =>
   bridge.settingsCenter.saveGroup(groupKey, changed)
@@ -94,6 +93,18 @@ const sections = computed<DetailSection[]>(() => [
     group: 'admin.modules.system.settings.advancedGroup',
   },
 ])
+
+// The single detail engine, page mode: the active section is two-way bound to
+// the `?section=` query key (deep-linkable + Back/Forward step through panels).
+// Definitions load async; the default defers to the first SCHEMA group (not the
+// always-present Advanced placeholder) and re-resolves the moment groups arrive.
+// No record / no back — a top-level settings page reached from the menu.
+const detail = useDetail({
+  mode: 'page',
+  sectionUrl: true,
+  sections,
+  defaultSection: () => visibleGroups.value[0]?.key,
+})
 
 function activeSchemaGroup(section: string | null): SettingsCenterGroupDto | undefined {
   return section ? visibleGroups.value.find((g) => g.key === section) : undefined
@@ -135,9 +146,8 @@ async function load(): Promise<void> {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
     loading.value = false
-    if (!activeSection.value) {
-      activeSection.value = sections.value[0]?.key ?? null
-    }
+    // No manual seed needed: `useSectionRoute` re-resolves the default the moment
+    // the (async) `sections` list changes, picking the first schema group.
   }
 }
 

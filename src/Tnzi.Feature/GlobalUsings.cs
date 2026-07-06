@@ -38,5 +38,6 @@ global using Tnzi.Modules;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Results;
+global using Tnzi.Security.Authorization;
 global using Tnzi.Services;
 global using Tnzi.Utilities;

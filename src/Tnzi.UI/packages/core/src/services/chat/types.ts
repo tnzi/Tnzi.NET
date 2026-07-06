@@ -9,9 +9,13 @@ import type { SortedPagedQueryDto } from '../../types/pagination';
 // IM (Instant Messaging) Types — /conversations/*
 // ============================================
 
-export enum ConversationType { Direct = 1, Group = 2, System = 3 }
-export enum MemberRole { Owner = 1, Member = 2 }
-export enum MessageContentType { Text = 1, Image = 2, File = 3, System = 4 }
+// String enums (member name = value): the backend registers a global
+// JsonStringEnumConverter (including SignalR's AddJsonProtocol), so every enum
+// field on a response DTO / realtime payload serializes as its PascalCase
+// member name; inbound params accept both the string and the legacy number.
+export enum ConversationType { Direct = 'Direct', Group = 'Group', System = 'System' }
+export enum MemberRole { Owner = 'Owner', Member = 'Member' }
+export enum MessageContentType { Text = 'Text', Image = 'Image', File = 'File', System = 'System' }
 
 export interface ConversationListItemDto {
   id: string; type: ConversationType; title: string; avatarFileId?: string | null;
@@ -19,6 +23,8 @@ export interface ConversationListItemDto {
   unreadCount: number; isMuted: boolean; memberCount: number;
   peerUserId?: string | null; peerStatus?: UserPresenceStatus | null;
   isSticky: boolean; remark?: string | null;
+  /** Group composite avatar: earliest N joined members (Group only; null otherwise). */
+  memberAvatars?: ChatContactDto[] | null;
 }
 export interface ConversationMemberDto {
   userId: string; name: string; avatarFileId?: string | null; role: MemberRole;
@@ -47,11 +53,21 @@ export interface RenameGroupDto { title: string; }
 export interface BroadcastDto { content: string; roleIds?: string[]; userIds?: string[]; all?: boolean; }
 export interface ChatContactDto { userId: string; name: string; avatarFileId?: string | null; }
 
-export enum UserPresenceStatus { Online = 1, Away = 2, Busy = 3, Invisible = 4, Offline = 5 }
+/** Deployment-level chat feature configuration. Backend: ChatClientConfigDto (GET /chat/config) */
+export interface ChatClientConfigDto {
+  enableGroups: boolean;
+  maxGroupMembers: number;
+  groupAvatarMemberCount: number;
+  enablePresence: boolean;
+  enableMessageSound: boolean;
+  enableFileMessages: boolean;
+}
+
+export enum UserPresenceStatus { Online = 'Online', Away = 'Away', Busy = 'Busy', Invisible = 'Invisible', Offline = 'Offline' }
 export interface UserPresenceDto { userId: string; status: UserPresenceStatus; lastSeenAt?: string | null }
 export interface SetPresenceDto { status: UserPresenceStatus }
 export interface ChatContactProfileDto { userId: string; name: string; avatarFileId?: string | null; status: UserPresenceStatus; lastSeenAt?: string | null; email?: string | null; phone?: string | null; bio?: string | null }
-export interface ConversationMemberSettingsDto { isMuted?: boolean; isSticky?: boolean; remark?: string | null; alias?: string | null }
+export interface ConversationMemberSettingsDto { isMuted?: boolean; isSticky?: boolean; isHidden?: boolean; remark?: string | null; alias?: string | null }
 export interface UpdateNoticeDto { notice?: string | null }
 export interface SearchMessagesParams { keyword: string; before?: string; limit?: number }
 
@@ -148,7 +164,7 @@ export interface PresenceOverviewDto {
 }
 
 /** Broadcast target type. Backend: BroadcastTargetType */
-export enum BroadcastTargetType { All = 1, Roles = 2, Users = 3 }
+export enum BroadcastTargetType { All = 'All', Roles = 'Roles', Users = 'Users' }
 
 /** Broadcast history entry. Backend: BroadcastLogDto */
 export interface BroadcastLogDto {

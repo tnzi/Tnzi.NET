@@ -17,6 +17,7 @@ namespace Tnzi.Notification.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/notification-templates")]
+[ApiAuthorize(PermissionName = "notification.template.view")]
 public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
 {
     /// <summary>

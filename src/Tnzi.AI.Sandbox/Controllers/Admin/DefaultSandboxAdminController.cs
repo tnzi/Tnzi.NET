@@ -9,6 +9,7 @@ namespace Tnzi.AI.Sandbox.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/sandbox")]
+[ApiAuthorize(PermissionName = "ai.sandbox.view")]
 public class DefaultSandboxAdminController : ApiAdminControllerBase
 {
     private readonly ISandboxProvider _provider;

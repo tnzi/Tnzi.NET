@@ -17,7 +17,8 @@
     and the property form mutates draft.steps in place so the round-trip
     matches what the backend executors expect.
   -->
-  <TDetailLayout
+  <TDetailHost
+    :state="detail"
     layout="plain"
     :title="workflow?.name || t('editor.untitled')"
     :back="'/admin/ai/workflows'"
@@ -391,7 +392,7 @@
     </div>
 
         <!-- Run modal -->
-        <NModal v-model:show="runModal.show" :title="t('actions.run')" preset="card" class="max-w-560px">
+        <NModal v-model:show="runModal.show" :title="t('actions.run')" preset="card" size="small" class="max-w-560px">
           <NForm label-placement="left" label-width="100px">
             <NFormItem :label="t('run.input')" required>
               <NInput v-model:value="runModal.input" type="textarea" :rows="6" :placeholder="t('run.inputPlaceholder')" />
@@ -413,7 +414,7 @@
         </NModal>
 
         <!-- Validate result modal -->
-        <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" class="max-w-520px">
+        <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" size="small" class="max-w-520px">
           <NAlert
             v-if="validateModal.result"
             :type="validateModal.result.isValid ? 'success' : 'error'"
@@ -435,7 +436,7 @@
         </NModal>
       </div>
     </template>
-  </TDetailLayout>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
@@ -457,12 +458,14 @@ import {
   NTab,
   NTabs,
   NTag,
-  useMessage,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import TDetailLayout from '../../../components/detail/TDetailLayout.vue'
+import TDetailHost from '../../../components/detail/TDetailHost.vue'
+import { useDetail } from '../../../headless/useDetail'
+import { useTabTitle } from '../../../headless/useTabTitle'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import { useSafeMessage } from '../../_shared/safeMessage'
 import { translatePageKey, interpolate } from '../../_shared/translate'
 import {
   workflowNodeTypes,
@@ -530,10 +533,13 @@ interface FlowEdgeChange {
 }
 
 // Lazy-load the heavy vue-flow canvas wrapper from @tnzi/ui-ai. The fallback
-// keeps the toolbar usable even while the chunk streams in.
+// keeps the toolbar usable even while the chunk streams in. `translatePageKey`
+// is resolved at render time (module-level stub can't see setup's `t`), so the
+// label follows the active locale via the `ai.workflows.editor.canvasLoading` key.
 const LoadingStub = {
   name: 'LoadingStub',
-  render: () => h('div', { class: 't-wf-editor__placeholder' }, 'Loading canvas…'),
+  render: () =>
+    h('div', { class: 't-wf-editor__placeholder' }, translatePageKey('ai.workflows', 'editor.canvasLoading')),
 }
 
 const WorkflowCanvas = defineAsyncComponent({
@@ -546,7 +552,9 @@ const WorkflowCanvas = defineAsyncComponent({
 const route = useRoute()
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
-const message = useMessage()
+// Guarded message — ui-admin shells don't always wrap with NMessageProvider
+// (and unit tests mount bare), so `useSafeMessage` no-ops without a provider.
+const message = useSafeMessage()
 
 const t = (key: string, params?: Record<string, unknown>) =>
   interpolate(translatePageKey('ai.workflows', key), params)
@@ -561,8 +569,15 @@ const workflowId = computed<string | undefined>(() => {
 // --- View mode --------------------------------------------------------------
 const viewMode = ref<'visual' | 'json'>('visual')
 
+// The single detail engine, page mode — this editor is a sectionless detail
+// page, so `useDetail` only supplies `TDetailHost` its page-mode state (no
+// sections, no overlay hash). The workflow record is held in `workflow` below.
+const detail = useDetail({ mode: 'page' })
+
 // --- Load workflow ----------------------------------------------------------
 const workflow = ref<WorkflowDefinitionDto | null>(null)
+// One editor tab per workflow id; show the workflow name as the tab title.
+useTabTitle(() => workflow.value?.name)
 const loading = ref(false)
 const loadError = ref('')
 const saving = ref(false)

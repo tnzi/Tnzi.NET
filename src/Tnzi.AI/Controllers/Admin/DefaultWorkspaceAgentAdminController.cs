@@ -8,6 +8,7 @@ namespace Tnzi.AI.Controllers.Admin;
 /// </summary>
 [Route("admin/ai/workspace")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "ai.agent.view")]
 public class DefaultWorkspaceAgentAdminController : ApiAdminControllerBase
 {
     protected readonly IWorkspaceAgentAdminService Service;

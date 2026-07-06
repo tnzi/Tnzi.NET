@@ -17,6 +17,7 @@ namespace Tnzi.AspNetCore.Controllers;
 /// </summary>
 [Route("admin/logs")]
 [DefaultController]
+[ApiAuthorize(PermissionName = "system.log.view")]
 public class DefaultLogFileAdminController : ApiAdminControllerBase
 {
     protected readonly ILogFileService LogFileService;

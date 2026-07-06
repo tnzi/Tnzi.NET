@@ -20,7 +20,6 @@
       :title="t('title')"
       :title-help="t('banner')"
       :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
-      :search-fields="searchFields"
       :search-placeholder="t('search.placeholder')"
       :form-modal-width="760"
       :translate="t"
@@ -43,7 +42,7 @@
               {{ t('source.configuration') }}
             </NTag>
             <NTag
-              v-if="item.scope === ResourceScope.System"
+              v-if="isSystemProviderScope(item.scope)"
               size="small"
               type="warning"
               :bordered="false"
@@ -144,13 +143,12 @@ import { useCrudPage } from '../../../headless/useCrudPage'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
-import { ResourceScope } from '@tnzi/core/enums'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
 import {
   providerFormSchema,
   providerIcon,
-  providerSearchFields as searchFields,
+  isSystemProviderScope,
 } from './provider-config'
 import type {
   ProviderDto,
@@ -166,7 +164,9 @@ const authStore = useAdminAuthStore()
 // Mirrors the backend write guard (ProviderService): system providers are locked only for
 // tenant-scoped sessions; without tenant context (host admin / MT off) they remain editable.
 function isLocked(item: ProviderDto): boolean {
-  return item.scope === ResourceScope.System && !!authStore.currentTenantId
+  // `scope` arrives as the PascalCase member name (JsonStringEnumConverter) or,
+  // for legacy payloads, the numeric ordinal — normalise both.
+  return isSystemProviderScope(item.scope) && !!authStore.currentTenantId
 }
 
 // Configuration-sourced entries (appsettings AI:Providers, synthetic stable id)
@@ -227,7 +227,6 @@ const crud = useCrudPage<ProviderDto>({
     bridge.providers.update(String(id), toUpdateDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.providers.delete(ids.map(String)),
 })
-crud.refresh().catch(() => undefined)
 
 // --- per-card connection-test state -----------------------------------------
 type TestStatus = 'idle' | 'testing' | 'ok' | 'error'

@@ -17,6 +17,7 @@ namespace Tnzi.Storage.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/storage/audit")]
+[ApiAuthorize(PermissionName = "storage.file.view")]
 public class DefaultStorageAuditAdminController : ApiAdminControllerBase
 {
     protected readonly IRepository<FileChunk, Guid> ChunkRepository;

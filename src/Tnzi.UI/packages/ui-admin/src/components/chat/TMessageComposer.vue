@@ -63,8 +63,15 @@
         </NPopover>
 
         <!-- Single attachment button — one file picker; the message kind (image
-             vs file) is derived from the chosen file's MIME type downstream. -->
-        <button class="t-composer__tool" :disabled="disabled" :title="t('window.attachment')" @click="emit('pick-file')">
+             vs file) is derived from the chosen file's MIME type downstream.
+             Hidden entirely when the deployment disables file messages. -->
+        <button
+          v-if="attachments !== false"
+          class="t-composer__tool"
+          :disabled="disabled"
+          :title="t('window.attachment')"
+          @click="emit('pick-file')"
+        >
           <Icon icon="mdi:folder-outline" :width="21" />
         </button>
       </div>
@@ -90,6 +97,9 @@ const props = defineProps<{
   uploadProgress?: number
   uploadKind?: 'image' | 'file'
   uploadName?: string
+  /** Deployment file-message toggle — false hides the attachment button and
+   *  ignores drag-and-drop (the server rejects media messages regardless). */
+  attachments?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -116,7 +126,7 @@ const frequent = ref<string[]>([])
 const dragging = ref(false)
 let dragDepth = 0
 function onDragEnter() {
-  if (props.disabled) return
+  if (props.disabled || props.attachments === false) return
   dragDepth++
   dragging.value = true
 }
@@ -130,7 +140,7 @@ function onDragLeave() {
 function onDrop(e: DragEvent) {
   dragDepth = 0
   dragging.value = false
-  if (props.disabled) return
+  if (props.disabled || props.attachments === false) return
   const file = e.dataTransfer?.files?.[0]
   if (file) emit('drop-file', file)
 }
