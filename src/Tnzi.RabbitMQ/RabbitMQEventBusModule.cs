@@ -122,9 +122,11 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
             return new RabbitMQEventBus(connection, logger, provider, rabbitOptions, exchangeName);
         });
 
-        // 注册 IEventBus 和 IIntegrationEventBus 接口，指向同一实例（与 Kafka 模块一致）
-        services.RemoveAll<IEventBus>();
-        services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
+        // 注册 IDistributedEventBus 和 IIntegrationEventBus 接口,指向同一实例（与 Kafka 模块一致）
+        // 重要:不再 RemoveAll<IEventBus>() 替换本地事件总线 —— IEventBus 永远是本地总线,
+        // 进程内领域事件(审计/缓存失效/通知等 handler)在任何配置下都正常派发;
+        // 跨进程投递显式注入 IDistributedEventBus,集成事件经 ApplicationService.PublishEventAsync 自动路由
+        services.AddSingleton<IDistributedEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
         services.AddSingleton<IIntegrationEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
 
         return Task.CompletedTask;

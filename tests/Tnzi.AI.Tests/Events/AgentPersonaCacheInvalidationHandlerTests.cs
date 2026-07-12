@@ -48,7 +48,7 @@ public class AgentPersonaCacheInvalidationHandlerTests
         var middleware = new ContextInjectionMiddleware(
             new CompositeContextProviderFactory(
                 contributors: [],
-                options: Microsoft.Extensions.Options.Options.Create(new AIOptions()),
+                options: new StaticOptionsMonitor<AIOptions>(new AIOptions()),
                 tokenEstimator: new HeuristicTokenEstimator(),
                 loggerFactory: NullLoggerFactory.Instance,
                 logger: NullLogger<CompositeContextProviderFactory>.Instance),
@@ -96,7 +96,7 @@ public class AgentPersonaCacheInvalidationHandlerTests
         var middleware = new ContextInjectionMiddleware(
             new CompositeContextProviderFactory(
                 contributors: [],
-                options: Microsoft.Extensions.Options.Options.Create(new AIOptions()),
+                options: new StaticOptionsMonitor<AIOptions>(new AIOptions()),
                 tokenEstimator: new HeuristicTokenEstimator(),
                 loggerFactory: NullLoggerFactory.Instance,
                 logger: NullLogger<CompositeContextProviderFactory>.Instance),
@@ -139,7 +139,7 @@ public class AgentPersonaCacheInvalidationHandlerTests
         var middleware = new ContextInjectionMiddleware(
             new CompositeContextProviderFactory(
                 contributors: [],
-                options: Microsoft.Extensions.Options.Options.Create(new AIOptions()),
+                options: new StaticOptionsMonitor<AIOptions>(new AIOptions()),
                 tokenEstimator: new HeuristicTokenEstimator(),
                 loggerFactory: NullLoggerFactory.Instance,
                 logger: NullLogger<CompositeContextProviderFactory>.Instance),

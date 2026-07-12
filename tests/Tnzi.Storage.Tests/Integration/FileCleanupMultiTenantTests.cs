@@ -95,7 +95,7 @@ public class FileCleanupMultiTenantTests : IDisposable
             new EFCoreRepository<MtStorageDbContext, FileChunk, Guid>(_db, serviceProvider: sp),
             _storage,
             _currentTenant,
-            MsOptions.Create(_options),
+            new StaticOptionsMonitor<StorageOptions>(_options),
             sp,
             MsOptions.Create(new MultiTenancyOptions { Enabled = true }));
     }

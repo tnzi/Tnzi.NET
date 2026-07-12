@@ -24,7 +24,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     private readonly IRepository<FileChunk, Guid> _chunkRepository;
     private readonly IFileStorage _storage;
     private readonly ICurrentTenant _currentTenant;
-    private readonly StorageOptions _options;
+    private readonly IOptionsMonitor<StorageOptions> _options;
     private readonly bool _multiTenancyEnabled;
     private readonly IOrphanReferenceValidator? _orphanReferenceValidator;
 
@@ -38,7 +38,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
         IRepository<FileChunk, Guid> chunkRepository,
         IFileStorage storage,
         ICurrentTenant currentTenant,
-        IOptions<StorageOptions> options,
+        IOptionsMonitor<StorageOptions> options,
         IServiceProvider serviceProvider,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         IOrphanReferenceValidator? orphanReferenceValidator = null)
@@ -50,7 +50,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
         _chunkRepository = Check.NotNull(chunkRepository);
         _storage = Check.NotNull(storage);
         _currentTenant = Check.NotNull(currentTenant);
-        _options = Check.NotNull(options).Value;
+        _options = Check.NotNull(options);
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _orphanReferenceValidator = orphanReferenceValidator;
     }
@@ -71,14 +71,14 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
             LogInformation("Cleaned temporary files: {Count}", result.TemporaryFilesDeleted);
 
             // 2. 清理孤岛文件
-            if (_options.Cleanup.EnableOrphanFileCleanup)
+            if (_options.CurrentValue.Cleanup.EnableOrphanFileCleanup)
             {
                 result.OrphanFilesDeleted = await CleanupOrphanFilesAsync(cancellationToken);
                 LogInformation("Cleaned orphan files: {Count}", result.OrphanFilesDeleted);
             }
 
             // 3. 清理无效引用（实体已删除但引用仍在）
-            if (_options.Cleanup.EnableOrphanReferenceCleanup)
+            if (_options.CurrentValue.Cleanup.EnableOrphanReferenceCleanup)
             {
                 result.OrphanReferencesDeleted = await CleanupOrphanReferencesAsync(cancellationToken);
                 LogInformation("Cleaned orphan references: {Count}", result.OrphanReferencesDeleted);
@@ -105,9 +105,9 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     /// </summary>
     public async Task<int> CleanupTemporaryFilesAsync(CancellationToken cancellationToken = default)
     {
-        var retention = TimeSpan.FromHours(_options.Cleanup.TemporaryFileRetentionHours);
+        var retention = TimeSpan.FromHours(_options.CurrentValue.Cleanup.TemporaryFileRetentionHours);
         var cutoffTime = DateTime.UtcNow.Subtract(retention);
-        var maxFiles = _options.Cleanup.MaxFilesPerRun;
+        var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
 
         return await ForEachTenantAsync(
             // 跨租户取出待清理候选的 distinct TenantId（仅多租户启用时调用）
@@ -155,9 +155,9 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     /// </summary>
     public async Task<int> CleanupOrphanFilesAsync(CancellationToken cancellationToken = default)
     {
-        var retention = TimeSpan.FromHours(_options.Cleanup.OrphanFileRetentionHours);
+        var retention = TimeSpan.FromHours(_options.CurrentValue.Cleanup.OrphanFileRetentionHours);
         var cutoffTime = DateTime.UtcNow.Subtract(retention);
-        var maxFiles = _options.Cleanup.MaxFilesPerRun;
+        var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
 
         return await ForEachTenantAsync(
             () => _fileRepository.AsQueryable()
@@ -205,9 +205,9 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
             return 0;
         }
 
-        var retention = TimeSpan.FromHours(_options.Cleanup.OrphanFileRetentionHours);
+        var retention = TimeSpan.FromHours(_options.CurrentValue.Cleanup.OrphanFileRetentionHours);
         var cutoffTime = DateTime.UtcNow.Subtract(retention);
-        var maxFiles = _options.Cleanup.MaxFilesPerRun;
+        var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
 
         return await ForEachTenantAsync(
             () => _referenceRepository.AsQueryable()
@@ -266,7 +266,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     public async Task<int> CleanupExpiredUploadSessionsAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        var maxFiles = _options.Cleanup.MaxFilesPerRun;
+        var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
 
         return await ForEachTenantAsync(
             () => _sessionRepository.AsQueryable()

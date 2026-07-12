@@ -57,3 +57,4 @@ global using Tnzi.Template.Services;
 global using Tnzi.Utilities;
 global using YamlDotNet.Serialization;
 global using YamlDotNet.Serialization.NamingConventions;
+global using Tnzi.Template.Permissions;

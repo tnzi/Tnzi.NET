@@ -6,7 +6,7 @@ namespace Tnzi.AI.Infrastructure.ContextProviders.Contributors;
 /// </summary>
 internal sealed class SkillContributor : IContextProviderContributor
 {
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ISkillRegistry? _skillRegistry;
     private readonly ISkillTemplateEngine? _skillTemplateEngine;
@@ -16,7 +16,7 @@ internal sealed class SkillContributor : IContextProviderContributor
     public int Order => ContextProviderOrders.Skills;
 
     public SkillContributor(
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILoggerFactory loggerFactory,
         ISkillRegistry? skillRegistry = null,
         ISkillTemplateEngine? skillTemplateEngine = null,
@@ -33,12 +33,12 @@ internal sealed class SkillContributor : IContextProviderContributor
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
     {
-        if (!_options.Value.ContextProviders.Skills.Enabled) return null;
+        if (!_options.CurrentValue.ContextProviders.Skills.Enabled) return null;
         if (_skillRegistry == null || _skillTemplateEngine == null || _skillLoadTracker == null) return null;
 
         try
         {
-            var skillsOptions = _options.Value.ContextProviders.Skills;
+            var skillsOptions = _options.CurrentValue.ContextProviders.Skills;
             var logger = _loggerFactory.CreateLogger<SkillContextProvider>();
             return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillConstraintEnforcer, _skillLoadTracker, context.AgentName, context.SkillSlugs);
         }

@@ -51,6 +51,7 @@ public class DefaultNotificationPreferenceAdminController : ApiAdminControllerBa
     /// otherwise a new row is inserted.
     /// </summary>
     [HttpPut("user/{userId:guid}")]
+    [ApiAuthorize(PermissionName = "notification.subscription.update")]
     public virtual async Task<ApiResult<NotificationPreferenceDto>> SetPreference(
         Guid userId,
         [FromBody] SetNotificationPreferenceDto input)
@@ -63,6 +64,7 @@ public class DefaultNotificationPreferenceAdminController : ApiAdminControllerBa
     /// Delete a notification preference row by id.
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "notification.subscription.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await PreferenceService.DeletePreferenceAsync(id);
@@ -75,6 +77,7 @@ public class DefaultNotificationPreferenceAdminController : ApiAdminControllerBa
     /// until new preferences are set.
     /// </summary>
     [HttpPost("user/{userId:guid}/reset")]
+    [ApiAuthorize(PermissionName = "notification.subscription.update")]
     public virtual async Task<ApiResult> ResetToDefault(Guid userId)
     {
         var result = await PreferenceService.ResetToDefaultAsync(userId);

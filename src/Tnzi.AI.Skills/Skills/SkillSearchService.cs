@@ -12,7 +12,9 @@ public class SkillSearchService : ISkillSearchService
     private readonly IEmbeddingService? _embeddingService;
     private readonly ILogger<SkillSearchService> _logger;
     private readonly IMemoryCache? _embeddingCache;
-    private readonly TimeSpan _cacheTtl;
+    private readonly IOptionsMonitor<AIOptions>? _options;
+
+    private TimeSpan CacheTtl => _options?.CurrentValue.ContextProviders.Skills.CacheTtl ?? TimeSpan.FromMinutes(15);
 
     // 字段权重
     private const double NameWeight = 3.0;
@@ -30,12 +32,12 @@ public class SkillSearchService : ISkillSearchService
         ILogger<SkillSearchService> logger,
         IEmbeddingService? embeddingService = null,
         IMemoryCache? embeddingCache = null,
-        IOptions<AIOptions>? options = null)
+        IOptionsMonitor<AIOptions>? options = null)
     {
         _logger = Check.NotNull(logger);
         _embeddingService = embeddingService;
         _embeddingCache = embeddingCache;
-        _cacheTtl = options?.Value.ContextProviders.Skills.CacheTtl ?? TimeSpan.FromMinutes(15);
+        _options = options;
     }
 
     /// <inheritdoc/>
@@ -230,7 +232,7 @@ public class SkillSearchService : ISkillSearchService
             if (_embeddingCache != null)
             {
                 var cacheKey = EmbeddingCachePrefix + candidates[idx].Slug;
-                _embeddingCache.Set(cacheKey, generated[j], _cacheTtl);
+                _embeddingCache.Set(cacheKey, generated[j], CacheTtl);
             }
         }
 

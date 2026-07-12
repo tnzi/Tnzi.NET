@@ -1,0 +1,3 @@
+#nullable enable
+static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!

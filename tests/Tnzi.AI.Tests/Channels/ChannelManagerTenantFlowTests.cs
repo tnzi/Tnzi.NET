@@ -54,7 +54,7 @@ public sealed class ChannelManagerTenantFlowTests : IDisposable
                 Channel = "telegram", PeerId = "u1", AgentId = AgentB,
                 Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true, TenantId = _tenantB
             });
-        seed.SaveChanges();
+        seed.SaveChangesAsync().GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -173,7 +173,7 @@ public sealed class ChannelManagerTenantFlowTests : IDisposable
         // 真实 Gateway + 真实 Binder（空配置规则 → 只走数据库规则的租户分区路径）
         services.AddSingleton<IGateway>(sp =>
         {
-            var gatewayOptions = MsOptions.Create(new GatewayOptions { DefaultAgentId = DefaultAgent });
+            var gatewayOptions = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgent });
             var binder = new DefaultSessionBinder([], gatewayOptions, sp.GetRequiredService<IServiceScopeFactory>());
             return new DefaultGateway(binder, sp.GetRequiredService<IServiceScopeFactory>(),
                 gatewayOptions, NullLogger<DefaultGateway>.Instance);

@@ -99,6 +99,8 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'finance.expenses': 'mdi:cash-minus',
   'finance.creditMemos': 'mdi:receipt-text-minus-outline',
   'finance.payments': 'mdi:cash-check',
+  'finance.transfers': 'mdi:bank-transfer',
+  'finance.reconciliations': 'mdi:scale-balance',
   'finance.reports': 'mdi:chart-box-outline',
 
   // ── AI sub-routes ───────────────────────────────────────────────

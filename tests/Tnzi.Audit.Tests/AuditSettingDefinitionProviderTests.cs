@@ -33,37 +33,36 @@ public class AuditSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void Group_HasOneField()
+    public void Group_HasExpectedFields()
     {
-        Assert.Single(_group.Fields);
+        // 记录粒度组：RetentionDays + 4 个 Capture 小节字段（EnableEntityAudit / EnableResponseResult
+        // 已作为"假热配"移除——EF 拦截器 / AuditMiddleware 均未消费）。
+        Assert.Equal(5, _group.Fields.Count);
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableOperationAudit");
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:RetentionDays");
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableRequestParameters");
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableRequestBodyCapture");
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:MaxRequestBodySize");
     }
 
     [Fact]
-    public void Field_HasCorrectKey()
+    public void RetentionDaysField_HasCorrectType()
     {
-        var field = _group.Fields[0];
-        Assert.Equal("Audit:RetentionDays", field.Key);
-    }
-
-    [Fact]
-    public void Field_HasCorrectType()
-    {
-        var field = _group.Fields[0];
+        var field = _group.Fields.First(f => f.Key == "Audit:RetentionDays");
         Assert.Equal(SettingFieldType.Int, field.Type);
     }
 
     [Fact]
-    public void DefaultValueAccessor_ReturnsExpectedDefault()
+    public void RetentionDaysField_ReturnsExpectedDefault()
     {
-        var field = _group.Fields[0];
+        var field = _group.Fields.First(f => f.Key == "Audit:RetentionDays");
         Assert.NotNull(field.DefaultValueAccessor);
         Assert.Equal("90", field.DefaultValueAccessor!());
     }
 
     [Fact]
-    public void Field_HasI18nKey()
+    public void Fields_HaveI18nKeys()
     {
-        var field = _group.Fields[0];
-        Assert.NotNull(field.I18nKey);
+        Assert.All(_group.Fields, f => Assert.NotNull(f.I18nKey));
     }
 }

@@ -24,6 +24,7 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
     /// 创建促销
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "payment.promotion.create")]
     public virtual async Task<ApiResult<PromotionDto>> Create([FromBody] CreatePromotionDto request)
     {
         var result = await _promotionService.CreateAsync(request);
@@ -64,6 +65,7 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
     /// 更新促销
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "payment.promotion.update")]
     public virtual async Task<ApiResult> Update(Guid id, [FromBody] UpdatePromotionDto request)
     {
         var result = await _promotionService.UpdateAsync(id, request);
@@ -74,6 +76,7 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
     /// 停用促销
     /// </summary>
     [HttpPost("{id:guid}/deactivate")]
+    [ApiAuthorize(PermissionName = "payment.promotion.update")]
     public virtual async Task<ApiResult> Deactivate(Guid id)
     {
         var result = await _promotionService.DeactivateAsync(id);
@@ -84,6 +87,7 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
     /// 同步到Stripe
     /// </summary>
     [HttpPost("{id:guid}/sync-stripe")]
+    [ApiAuthorize(PermissionName = "payment.promotion.update")]
     public virtual async Task<ApiResult> SyncToStripe(Guid id)
     {
         var result = await _promotionService.SyncToStripeAsync(id);
@@ -94,6 +98,7 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
     /// 创建兑换码
     /// </summary>
     [HttpPost("redemption-codes")]
+    [ApiAuthorize(PermissionName = "payment.promotion.create")]
     public virtual async Task<ApiResult<string>> CreateRedemptionCode([FromBody] CreateRedemptionCodeDto request)
     {
         var result = await _couponService.CreateRedemptionCodeAsync(request.PromotionId, request.Quantity);

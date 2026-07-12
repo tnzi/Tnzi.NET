@@ -40,6 +40,7 @@ const bridge = createTemplateBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<LayoutInfoDto, string>({
   pageId: 'template.layouts',
+  permission: 'template.layout',
   columns: layoutColumns,
   rowKey: (r) => {
     const id = String(r.id ?? '')

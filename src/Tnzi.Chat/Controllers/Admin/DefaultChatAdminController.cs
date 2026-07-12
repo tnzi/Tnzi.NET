@@ -22,6 +22,7 @@ public class DefaultChatAdminController : ApiAdminControllerBase
 
     /// <summary>Broadcast a system notification to roles and/or users.</summary>
     [HttpPost("broadcast")]
+    [ApiAuthorize(PermissionName = "chat.session.create")]
     public virtual async Task<ApiResult<int>> SendBroadcast([FromBody] BroadcastDto input)
         => (await Broadcast.BroadcastAsync(input)).ToApiResult();
 
@@ -57,11 +58,13 @@ public class DefaultChatAdminController : ApiAdminControllerBase
 
     /// <summary>Delete (dissolve) a conversation.</summary>
     [HttpDelete("conversations/{id}")]
+    [ApiAuthorize(PermissionName = "chat.session.delete")]
     public virtual async Task<ApiResult> DeleteConversation(Guid id)
         => (await ChatAdmin.DeleteConversationAsync(id)).ToApiResult();
 
     /// <summary>Force-recall any message (admin override).</summary>
     [HttpDelete("messages/{messageId}")]
+    [ApiAuthorize(PermissionName = "chat.session.delete")]
     public virtual async Task<ApiResult> DeleteMessage(Guid messageId)
         => (await ChatAdmin.DeleteMessageAsync(messageId)).ToApiResult();
 

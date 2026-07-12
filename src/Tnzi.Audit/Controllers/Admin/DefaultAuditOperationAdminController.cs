@@ -103,6 +103,7 @@ public class DefaultAuditOperationAdminController : ApiAdminControllerBase
     /// <param name="days">保留天数；缺省时使用配置中心的 Audit:RetentionDays（热读）</param>
     /// <returns>删除的记录数</returns>
     [HttpDelete("expired")]
+    [ApiAuthorize(PermissionName = "audit.operation.delete")]
     public virtual async Task<ApiResult<int>> DeleteExpired([FromQuery] int? days = null)
     {
         var result = await AuditOperationService.DeleteExpiredOperationsAsync(days);

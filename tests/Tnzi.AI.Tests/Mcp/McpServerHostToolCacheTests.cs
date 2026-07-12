@@ -24,10 +24,10 @@ public class McpServerHostToolCacheTests
 
     private McpServerHost CreateHost() => new(
         _serviceProvider,
-        MsOptions.Create(new McpServerOptions { Enabled = true, RequireAuthentication = false }),
+        new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions { Enabled = true, RequireAuthentication = false }),
         NullLogger<McpServerHost>.Instance,
         new McpServerSecurityMiddleware(
-            MsOptions.Create(new McpServerOptions()),
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions()),
             NullLogger<McpServerSecurityMiddleware>.Instance,
             new ServiceCollection().BuildServiceProvider()),
         httpContextAccessor: null);

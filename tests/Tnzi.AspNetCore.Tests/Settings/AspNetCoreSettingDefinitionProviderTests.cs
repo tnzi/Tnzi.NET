@@ -13,7 +13,7 @@ public class AspNetCoreSettingDefinitionProviderTests
     private static IReadOnlyList<SettingDefinitionGroup> BuildGroups()
     {
         var rawGroups = new List<SettingDefinitionGroup>();
-        foreach (var t in new[] { typeof(RequestTrackingOptions), typeof(ExceptionHandlingOptions), typeof(SecurityHeadersOptions), typeof(RateLimitOptions) })
+        foreach (var t in new[] { typeof(RequestTrackingOptions), typeof(ExceptionHandlingOptions), typeof(SecurityHeadersOptions), typeof(RateLimitOptions), typeof(ApiVersionOptions) })
         {
             var g = RuntimeSettingMetadataExtractor.Extract(t);
             if (g != null) rawGroups.Add(g);
@@ -22,10 +22,10 @@ public class AspNetCoreSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void GetGroups_ReturnsThreeGroups()
+    public void GetGroups_ReturnsFourGroups()
     {
         var groups = BuildGroups();
-        Assert.Equal(3, groups.Count);
+        Assert.Equal(4, groups.Count);
     }
 
     [Fact]
@@ -71,6 +71,55 @@ public class AspNetCoreSettingDefinitionProviderTests
         Assert.Equal(720, group.Order);
         Assert.Equal("mdi:speedometer", group.Icon);
         Assert.Equal("admin.modules.system.settings.groups.webRatelimit", group.I18nKey);
+    }
+
+    [Fact]
+    public void ApiVersionGroup_HasCorrectMetadata()
+    {
+        var group = GetGroup("web-apiversion");
+        Assert.Equal("Web", group.ModuleName);
+        Assert.Equal(705, group.Order);
+        Assert.Equal("mdi:tag-multiple-outline", group.Icon);
+        Assert.Equal("admin.modules.system.settings.groups.webApiVersion", group.I18nKey);
+    }
+
+    [Fact]
+    public void ApiVersionGroup_ExposesOnlyReportVersion()
+    {
+        // Only ReportVersion is hot-settable; readers/header names are client protocol contracts (KEEP-STATIC).
+        var group = GetGroup("web-apiversion");
+        Assert.All(group.Fields, f => Assert.StartsWith("AspNetCore:ApiVersion:", f.Key));
+        Assert.Contains(group.Fields, f => f.Key == "AspNetCore:ApiVersion:ReportVersion");
+        Assert.DoesNotContain(group.Fields, f => f.Key == "AspNetCore:ApiVersion:HeaderName");
+        Assert.DoesNotContain(group.Fields, f => f.Key == "AspNetCore:ApiVersion:ReaderType");
+    }
+
+    [Fact]
+    public void ObservabilityGroup_ExposesRequestTrackingLogLevelAsSelect()
+    {
+        var field = GetField("web-observability", "AspNetCore:RequestTracking:LogLevel");
+        Assert.Equal(SettingFieldType.Select, field.Type);
+        // Enum candidates auto-derived from LogLevel.
+        Assert.NotNull(field.Options);
+        Assert.Contains("Information", field.Options!);
+        Assert.Contains("Warning", field.Options!);
+    }
+
+    [Fact]
+    public void ObservabilityGroup_ExposesExceptionIncludeContextData()
+    {
+        var field = GetField("web-observability", "AspNetCore:ExceptionHandling:IncludeContextData");
+        Assert.Equal(SettingFieldType.Boolean, field.Type);
+    }
+
+    [Fact]
+    public void SecurityHeadersGroup_ExposesHstsAndPermissionsPolicyFields()
+    {
+        var group = GetGroup("web-security-headers");
+        Assert.Contains(group.Fields, f => f.Key == "AspNetCore:SecurityHeaders:HstsIncludeSubDomains");
+        Assert.Contains(group.Fields, f => f.Key == "AspNetCore:SecurityHeaders:HstsPreload");
+        var permissionsPolicy = GetField("web-security-headers", "AspNetCore:SecurityHeaders:PermissionsPolicy");
+        Assert.Equal(SettingFieldType.Text, permissionsPolicy.Type);
     }
 
     [Fact]

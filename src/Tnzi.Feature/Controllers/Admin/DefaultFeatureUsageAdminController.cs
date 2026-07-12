@@ -75,6 +75,7 @@ public class DefaultFeatureUsageAdminController : ApiAdminControllerBase
     /// </summary>
     /// <param name="retentionDays">Number of days to retain records (default: 90)</param>
     [HttpDelete("cleanup")]
+    [ApiAuthorize(PermissionName = "feature.delete")]
     public virtual async Task<ApiResult<int>> Cleanup([FromQuery] int retentionDays = 90)
     {
         var result = await FeatureUsageService.CleanupOldRecordsAsync(retentionDays);

@@ -87,7 +87,7 @@ public class AgentResourceGrantWiringTests : IDisposable
 
         _resolver = new AgentResolver(
             _agentFactory.Object,
-            Microsoft.Extensions.Options.Options.Create(new AIOptions()),
+            new StaticOptionsMonitor<AIOptions>(new AIOptions()),
             agentRepo,
             _toolRegistry.Object,
             _templateEngine.Object,

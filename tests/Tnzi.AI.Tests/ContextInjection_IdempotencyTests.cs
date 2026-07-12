@@ -13,7 +13,7 @@ public class ContextInjection_IdempotencyTests
     {
         ContextInjectionMiddleware.ClearAllCachesForTesting();
 
-        var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         _providerFactory = new CompositeContextProviderFactory(
             contributors: [],
             options: aiOptions,

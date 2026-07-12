@@ -25,7 +25,7 @@
       :detail-title="() => t('detail.title')"
     >
       <template #toolbarRight>
-        <NButton size="small" @click="broadcastShow = true">
+        <NButton v-if="can('chat.session.create')" size="small" @click="broadcastShow = true">
           <template #icon><TSvgIcon icon="mdi:bullhorn-outline" :size="16" /></template>
           {{ t('broadcast') }}
         </NButton>
@@ -68,7 +68,7 @@
                   <div class="t-msg-head">
                     <span class="t-msg-sender">{{ senderLabel(msg) }}</span>
                     <span class="t-msg-time">{{ formatDateTime(msg.sentAt) }}</span>
-                    <NButton text size="tiny" type="error" class="t-msg-recall" @click="recall(msg.id)">
+                    <NButton v-if="can('chat.session.delete')" text size="tiny" type="error" class="t-msg-recall" @click="recall(msg.id)">
                       {{ t('detail.recall') }}
                     </NButton>
                   </div>
@@ -116,6 +116,7 @@ import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import BroadcastDialog from './components/BroadcastDialog.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { deleteAction, type RowAction } from '../../headless/rowActions'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -134,10 +135,12 @@ const title = 'title'
 const t = makePageTranslator('chat.conversations')
 const message = useSafeMessage()
 const bridge = createChatBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 const memberColumns = buildMemberColumns(t)
 
 const crud = useCrudPage<AdminConversationListItemDto, string>({
   pageId: 'chat.conversations',
+  permission: 'chat.session',
   columns: conversationColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.conversations.fetch(query),

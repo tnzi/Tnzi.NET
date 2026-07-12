@@ -44,10 +44,9 @@ public class RoleRenamedSuperAdminWatcherHandler : IEventHandler<RoleUpdatedEven
         // No-op when the update wasn't a rename.
         if (string.IsNullOrEmpty(@event.PreviousName)) return Task.CompletedTask;
 
-        // Both admin-tier lists are configured by role NAME, so both share the
-        // same rename-desync failure mode — watch them together.
+        // The super-admin list is configured by role NAME, hence the
+        // rename-desync failure mode this handler watches for.
         WatchList(@event, _options.Value.SuperAdminRoles, "Authorization.SuperAdminRoles", "super-admin bypass");
-        WatchList(@event, _options.Value.BusinessAdminRoles, "Authorization.BusinessAdminRoles", "business-admin tier");
 
         return Task.CompletedTask;
     }

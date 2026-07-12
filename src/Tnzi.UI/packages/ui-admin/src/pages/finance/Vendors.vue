@@ -42,6 +42,7 @@ function toPayload(d: Record<string, unknown>): UpdateVendorDto {
 
 const crud = useCrudPage<VendorRow>({
   pageId: 'finance.vendors',
+  permission: 'finance.vendor',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.vendors.fetch(q),

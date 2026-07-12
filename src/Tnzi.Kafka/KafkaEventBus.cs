@@ -2,11 +2,12 @@
 namespace Tnzi.Kafka;
 
 /// <summary>
-/// Kafka事件总线实现
-/// 同时实现IEventBus和IIntegrationEventBus接口
+/// Kafka事件总线实现(分布式)
+/// 实现 IDistributedEventBus 与 IIntegrationEventBus,PublishAsync 完成仅代表投递成功,
+/// 不执行本进程内处理器;不替换 IEventBus(本地总线始终可用)
 /// 实现IAsyncDisposable以支持消费者任务的优雅关闭
 /// </summary>
-public class KafkaEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
+public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
 {
     private readonly IProducer<string, string> _producer;
     private readonly ILogger<KafkaEventBus> _logger;

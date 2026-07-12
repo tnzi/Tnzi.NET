@@ -150,6 +150,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import {
   createNotificationBridge,
@@ -166,6 +167,7 @@ type TemplateRow = Record<string, unknown>
 const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
 const message = useMessage()
+const { can } = usePermissionGuard()
 
 /**
  * Templates sub-contract — /admin/notification-templates, backend pins
@@ -174,6 +176,7 @@ const message = useMessage()
  */
 const crud = useCrudPage<TemplateRow>({
   pageId: 'notification.templates',
+  permission: 'notification.template',
   columns: notificationTemplateColumns,
   rowKey: (r) => {
     const id = String(r.id ?? '')
@@ -193,7 +196,7 @@ const crud = useCrudPage<TemplateRow>({
 const rowActions: RowAction<TemplateRow>[] = [
   editAction(crud, { show: (row) => !row.isReadOnly }),
   { key: 'preview', label: 'actions.preview', onClick: (row) => void openPreview(row) },
-  { key: 'sendTest', label: 'actions.sendTest', onClick: (row) => openSendTest(row) },
+  { key: 'sendTest', label: 'actions.sendTest', show: () => can('notification.template.update'), onClick: (row) => openSendTest(row) },
   deleteAction(crud, { show: (row) => !row.isReadOnly }),
 ]
 

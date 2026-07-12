@@ -84,78 +84,85 @@ public class ModuleLoader
         visiting.Add(moduleType);
         path.Add(moduleType);
 
-        // 使用缓存的工厂创建实例
-        var factory = _moduleFactories.GetOrAdd(moduleType, BuildModuleFactory);
-        var module = factory();
-        
-        var descriptor = new ModuleDescriptor(moduleType, module);
-        modulesDict[moduleType] = descriptor;
-        modulesList.Add(descriptor);
-
-        // 处理必选依赖
-        var dependsOnAttributes = moduleType.GetCustomAttributes<DependsOnAttribute>();
-        var missingDependencies = new List<Type>();
-
-        foreach (var attribute in dependsOnAttributes)
+        // try/finally 确保无论正常返回还是异常向上传播，都会把当前模块从递归路径
+        // （visiting/path）中移除。否则缺失依赖异常抛出后模块会残留在 visiting 中，
+        // 使随后经由另一条路径抵达同一模块时被误判为循环依赖。
+        try
         {
-            foreach (var dependedModuleType in attribute.DependedModuleTypes)
+            // 使用缓存的工厂创建实例
+            var factory = _moduleFactories.GetOrAdd(moduleType, BuildModuleFactory);
+            var module = factory();
+
+            var descriptor = new ModuleDescriptor(moduleType, module);
+            modulesDict[moduleType] = descriptor;
+            modulesList.Add(descriptor);
+
+            // 处理必选依赖
+            var dependsOnAttributes = moduleType.GetCustomAttributes<DependsOnAttribute>();
+            var missingDependencies = new List<Type>();
+
+            foreach (var attribute in dependsOnAttributes)
             {
-                // 检查依赖模块类型是否有效
-                if (dependedModuleType == null)
+                foreach (var dependedModuleType in attribute.DependedModuleTypes)
                 {
-                    missingDependencies.Add(typeof(object));
-                    continue;
-                }
+                    // 检查依赖模块类型是否有效
+                    if (dependedModuleType == null)
+                    {
+                        missingDependencies.Add(typeof(object));
+                        continue;
+                    }
 
-                if (!typeof(ITnziModule).IsAssignableFrom(dependedModuleType))
-                {
-                    missingDependencies.Add(dependedModuleType);
-                    continue;
-                }
+                    if (!typeof(ITnziModule).IsAssignableFrom(dependedModuleType))
+                    {
+                        missingDependencies.Add(dependedModuleType);
+                        continue;
+                    }
 
-                // 尝试加载依赖模块
-                try
-                {
-                    Fill(services, modulesDict, modulesList, dependedModuleType, visiting, path);
-                }
-                catch (TypeLoadException)
-                {
-                    // 依赖模块类型无法加载，记录为缺失依赖
-                    missingDependencies.Add(dependedModuleType);
-                    continue;
-                }
-                catch (ModuleMissingDependencyException)
-                {
-                    // 依赖模块本身有缺失依赖，继续处理，最终会在当前模块检查时抛出
-                    // 这里不记录为缺失，因为问题在依赖模块本身
-                    continue;
-                }
+                    // 尝试加载依赖模块。
+                    // 注意：不再捕获 ModuleMissingDependencyException —— 子模块自身缺失依赖时
+                    // 让异常直接向上传播（fail-fast）。旧实现吞掉该异常并声称"最终会在当前模块
+                    // 检查时抛出"，但子模块此时已进入 modulesDict，下面的 TryGetValue 会命中，
+                    // 当前模块的 missingDependencies 保持为空，从而静默加载了残缺的模块图。
+                    try
+                    {
+                        Fill(services, modulesDict, modulesList, dependedModuleType, visiting, path);
+                    }
+                    catch (TypeLoadException)
+                    {
+                        // 依赖模块类型无法加载（程序集缺失等），记录为缺失依赖
+                        missingDependencies.Add(dependedModuleType);
+                        continue;
+                    }
 
-                // O(1) 查找依赖模块
-                if (modulesDict.TryGetValue(dependedModuleType, out var dependedDescriptor))
-                {
-                    descriptor.AddDependency(dependedDescriptor);
-                }
-                else
-                {
-                    // 依赖模块加载失败，记录为缺失依赖
-                    missingDependencies.Add(dependedModuleType);
+                    // O(1) 查找依赖模块
+                    if (modulesDict.TryGetValue(dependedModuleType, out var dependedDescriptor))
+                    {
+                        descriptor.AddDependency(dependedDescriptor);
+                    }
+                    else
+                    {
+                        // 依赖模块加载失败，记录为缺失依赖
+                        missingDependencies.Add(dependedModuleType);
+                    }
                 }
             }
-        }
 
-        // 如果存在缺失依赖，抛出异常
-        if (missingDependencies.Count > 0)
+            // 如果存在缺失依赖，抛出异常（错误信息携带从启动模块到当前模块的完整依赖链）
+            if (missingDependencies.Count > 0)
+            {
+                var missingNames = string.Join(", ", missingDependencies.Select(t => t.Name));
+                var chain = string.Join(" -> ", path.Select(t => t.Name));
+                throw new ModuleMissingDependencyException(
+                    moduleType,
+                    $"Module {moduleType.Name} has missing dependencies: {missingNames}. Dependency chain: {chain}",
+                    missingDependencies);
+            }
+        }
+        finally
         {
-            var missingNames = string.Join(", ", missingDependencies.Select(t => t.Name));
-            throw new ModuleMissingDependencyException(
-                moduleType,
-                $"Module {moduleType.Name} has missing dependencies: {missingNames}",
-                missingDependencies);
+            visiting.Remove(moduleType);
+            path.RemoveAt(path.Count - 1);
         }
-
-        visiting.Remove(moduleType);
-        path.RemoveAt(path.Count - 1);
     }
 
     /// <summary>

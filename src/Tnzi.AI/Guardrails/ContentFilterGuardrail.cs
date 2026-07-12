@@ -8,26 +8,24 @@ namespace Tnzi.AI.Guardrails;
 /// </remarks>
 public class ContentFilterGuardrail : IOutputGuardrail, IGuardrailProvider
 {
-    private readonly bool _enabled;
-    private readonly List<string> _blockedKeywords;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public string Name => nameof(ContentFilterGuardrail);
 
-    public ContentFilterGuardrail(IOptions<AIOptions> options)
+    public ContentFilterGuardrail(IOptionsMonitor<AIOptions> options)
     {
-        var guardrails = Check.NotNull(options).Value.Guardrails;
-        _enabled = guardrails.EnableContentFilter;
-        _blockedKeywords = guardrails.BlockedOutputKeywords;
+        _options = Check.NotNull(options);
     }
 
     public Task<GuardrailResult> ValidateAsync(string output, CancellationToken ct = default)
     {
-        if (!_enabled || _blockedKeywords.Count == 0)
+        var guardrails = _options.CurrentValue.Guardrails;
+        if (!guardrails.EnableContentFilter || guardrails.BlockedOutputKeywords.Count == 0)
         {
             return Task.FromResult(GuardrailResult.Allowed());
         }
 
-        foreach (var keyword in _blockedKeywords)
+        foreach (var keyword in guardrails.BlockedOutputKeywords)
         {
             if (output.Contains(keyword, StringComparison.OrdinalIgnoreCase))
             {

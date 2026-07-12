@@ -17,33 +17,52 @@ public class SandboxModuleOptions
 /// single AI thread may consume through <c>SandboxTools.BashAsync</c> within
 /// a rolling time window.
 /// </summary>
+[ConfigSection("AI:Sandbox:ThreadQuota")]
+[RuntimeSettingGroup(Key = "ai-sandbox", Module = "AI", DisplayName = "Sandbox",
+    I18nKey = "admin.modules.system.settings.groups.aiSandbox",
+    Icon = "mdi:cube-outline", Order = 157)]
 public class ThreadQuotaOptions
 {
     /// <summary>Master switch — when false the quota service short-circuits to Allow.</summary>
+    [RuntimeSetting(Label = "Thread Quota Enabled", I18n = "admin.modules.system.settings.fields.sandboxQuotaEnabled",
+        Type = SettingFieldType.Boolean, Subsection = "Thread Quota",
+        Description = "Master switch for per-thread sandbox resource limits. When off, every bash invocation is allowed and no accounting is recorded.")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Maximum number of <c>bash</c> invocations per thread within the window.
     /// Set to <c>0</c> to disable the count cap (other caps still apply).
     /// </summary>
+    [RuntimeSetting(Label = "Max Command Count", I18n = "admin.modules.system.settings.fields.sandboxQuotaMaxCommandCount",
+        Type = SettingFieldType.Int, Min = 0, Subsection = "Thread Quota",
+        Description = "Maximum bash invocations per thread within the rolling window (hard cap). 0 disables the count cap; other caps still apply.")]
     public int MaxCommandCount { get; set; } = 200;
 
     /// <summary>
     /// Maximum cumulative <c>bash</c> wall-clock duration per thread (milliseconds).
     /// Defaults to 10 minutes. Set to <c>0</c> to disable.
     /// </summary>
+    [RuntimeSetting(Label = "Max Total Duration (ms)", I18n = "admin.modules.system.settings.fields.sandboxQuotaMaxTotalDurationMs",
+        Type = SettingFieldType.Int, Min = 0, Subsection = "Thread Quota",
+        Description = "Maximum cumulative bash wall-clock duration per thread in milliseconds (soft cap). 0 disables it. Default 600000 (10 minutes).")]
     public long MaxTotalDurationMs { get; set; } = 600_000;
 
     /// <summary>
     /// Maximum combined stdout + stderr bytes a thread may emit. Defaults to
     /// 50 MB. Set to <c>0</c> to disable.
     /// </summary>
+    [RuntimeSetting(Label = "Max Total Output (bytes)", I18n = "admin.modules.system.settings.fields.sandboxQuotaMaxTotalOutputBytes",
+        Type = SettingFieldType.Int, Min = 0, Subsection = "Thread Quota",
+        Description = "Maximum combined stdout + stderr bytes a thread may emit (soft cap). 0 disables it. Default 52428800 (50 MB).")]
     public long MaxTotalOutputBytes { get; set; } = 50L * 1024 * 1024;
 
     /// <summary>
     /// Rolling window length. Counters silently expire after this duration of
     /// inactivity and reset on the next command. Default 24 hours.
     /// </summary>
+    [RuntimeSetting(Label = "Window Duration", I18n = "admin.modules.system.settings.fields.sandboxQuotaWindowDuration",
+        Type = SettingFieldType.Duration, Subsection = "Thread Quota",
+        Description = "Rolling window length (e.g. 1.00:00:00 for 24h). Counters expire after this duration of inactivity and reset on the next command.")]
     public TimeSpan WindowDuration { get; set; } = TimeSpan.FromHours(24);
 }
 

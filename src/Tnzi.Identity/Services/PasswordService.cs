@@ -15,7 +15,7 @@ public class PasswordService : ApplicationService, IPasswordService
 
     public PasswordService(
         UserManager<User> userManager,
-        IOptions<IdentityOptions> identityOptions,
+        IOptionsSnapshot<IdentityOptions> identityOptions,
         IServiceProvider serviceProvider,
         IEventBus? eventBus = null,
         IConfiguration? configuration = null,
@@ -24,6 +24,7 @@ public class PasswordService : ApplicationService, IPasswordService
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
+        // Scoped 服务：IOptionsSnapshot 每请求重算，Recovery 开关随请求热更新。
         _identityOptions = Check.NotNull(identityOptions).Value;
         _eventBus = eventBus;
         _configuration = configuration;

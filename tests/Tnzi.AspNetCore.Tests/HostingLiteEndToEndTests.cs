@@ -33,8 +33,11 @@ public class HostingLiteEndToEndTests
             requiredDocuments:
             [
                 ("system", ["/api/localization/cultures"]),
+                // SystemModule（lite 依赖）的用户侧 DefaultAppearanceController 贡献 user 组：
+                // 任何已登录用户读取全局管理端主题。auth 组仍需 Identity，故 lite 无 auth。
+                ("user", ["/api/appearance/admin-theme"]),
             ],
-            forbiddenDocuments: ["auth", "user"],
+            forbiddenDocuments: ["auth"],
             forbiddenPathsInDocuments: []);
     }
 

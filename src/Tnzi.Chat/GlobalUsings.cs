@@ -39,3 +39,4 @@ global using Tnzi.SignalR.Events;
 global using Tnzi.SignalR.Hubs;
 global using Tnzi.SignalR.Services;
 global using Tnzi.Utilities;
+global using Tnzi.Chat.Permissions;

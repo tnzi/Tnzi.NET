@@ -4,9 +4,14 @@ namespace Tnzi.Redis;
 /// <summary>
 /// Redis缓存服务实现
 /// </summary>
+/// <remarks>
+/// 所有读写方法统一使用裸 <see cref="IDatabase"/> 的 String 表示（值序列化为 JSON），单键/批量/标签方法互通。
+/// 错误语义分两类：读路径（Get/Exists/GetMany 等）fail-open，失败记 LogError 并返回默认值/空集合；
+/// 计数器写路径（Increment/Decrement）fail-closed，失败记 LogError 后抛 <see cref="CacheWriteException"/>，
+/// 避免配额/限流等消费者把故障误读为"计数清零"。
+/// </remarks>
 public class RedisCacheService : ICache, IPatternCache
 {
-    private readonly IDistributedCache _distributedCache;
     private readonly IConnectionMultiplexer _connectionMultiplexer;
     private readonly ILogger<RedisCacheService> _logger;
     private readonly string? _instanceName;
@@ -15,24 +20,26 @@ public class RedisCacheService : ICache, IPatternCache
     /// <summary>
     /// 初始化一个<see cref="RedisCacheService"/>类型的新实例
     /// </summary>
-    /// <param name="distributedCache">分布式缓存</param>
     /// <param name="connectionMultiplexer">Redis连接</param>
     /// <param name="logger">日志记录器</param>
-    /// <param name="instanceName">实例名称（用于键前缀）</param>
+    /// <param name="instanceName">实例名称（用于键前缀，隔离多应用共享的同一 Redis 实例）</param>
     /// <param name="cacheSyncService">缓存同步服务（可选）</param>
     public RedisCacheService(
-        IDistributedCache distributedCache,
         IConnectionMultiplexer connectionMultiplexer,
         ILogger<RedisCacheService> logger,
         string? instanceName = null,
         ICacheSyncService? cacheSyncService = null)
     {
-        _distributedCache = Check.NotNull(distributedCache);
         _connectionMultiplexer = Check.NotNull(connectionMultiplexer);
         _logger = Check.NotNull(logger);
         _instanceName = instanceName;
         _cacheSyncService = cacheSyncService;
     }
+
+    /// <summary>
+    /// 获取当前 Redis 数据库句柄
+    /// </summary>
+    private IDatabase GetDatabase() => _connectionMultiplexer.GetDatabase();
 
     /// <summary>
     /// 获取缓存键（添加实例名称前缀）
@@ -43,6 +50,24 @@ public class RedisCacheService : ICache, IPatternCache
             return key;
         return $"{_instanceName}:{key}";
     }
+
+    /// <summary>
+    /// 获取标签索引键（同样带实例名称前缀，避免多应用共享 Redis 时标签互相污染）
+    /// </summary>
+    private string GetTagKey(string tag) => GetCacheKey($"tag:{tag}");
+
+    /// <summary>
+    /// 规范化过期时间：仅当为正值时才设置过期，否则视为永不过期
+    /// </summary>
+    private static TimeSpan? NormalizeExpiration(TimeSpan? expiration)
+        => expiration.HasValue && expiration.Value > TimeSpan.Zero ? expiration : null;
+
+    /// <summary>
+    /// 统一的字符串写入入口（裸 IDatabase，String 表示）。
+    /// 显式指定 <see cref="When"/> 重载，确保所有写路径绑定同一方法签名。
+    /// </summary>
+    private Task<bool> WriteStringAsync(IDatabase database, string cacheKey, string json, TimeSpan? expiration, When when = When.Always)
+        => database.StringSetAsync(cacheKey, json, NormalizeExpiration(expiration), when);
 
     /// <summary>
     /// 获取缓存值
@@ -57,11 +82,11 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var value = _distributedCache.GetString(cacheKey);
-            if (string.IsNullOrEmpty(value))
+            var value = GetDatabase().StringGet(cacheKey);
+            if (value.IsNullOrEmpty)
                 return default;
 
-            return JsonSerializer.Deserialize<T>(value, TnziJsonDefaults.Options);
+            return JsonSerializer.Deserialize<T>(value.ToString(), TnziJsonDefaults.Options);
         }
         catch (Exception ex)
         {
@@ -84,11 +109,11 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var value = await _distributedCache.GetStringAsync(cacheKey, cancellationToken);
-            if (string.IsNullOrEmpty(value))
+            var value = await GetDatabase().StringGetAsync(cacheKey);
+            if (value.IsNullOrEmpty)
                 return default;
 
-            return JsonSerializer.Deserialize<T>(value, TnziJsonDefaults.Options);
+            return JsonSerializer.Deserialize<T>(value.ToString(), TnziJsonDefaults.Options);
         }
         catch (Exception ex)
         {
@@ -112,14 +137,11 @@ public class RedisCacheService : ICache, IPatternCache
         {
             var cacheKey = GetCacheKey(key);
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
-            var options = new DistributedCacheEntryOptions();
+            var expiry = expirationSeconds.HasValue && expirationSeconds.Value > 0
+                ? TimeSpan.FromSeconds(expirationSeconds.Value)
+                : (TimeSpan?)null;
 
-            if (expirationSeconds.HasValue && expirationSeconds.Value > 0)
-            {
-                options.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(expirationSeconds.Value);
-            }
-
-            _distributedCache.SetString(cacheKey, json, options);
+            GetDatabase().StringSet(cacheKey, json, expiry, When.Always);
         }
         catch (Exception ex)
         {
@@ -143,14 +165,8 @@ public class RedisCacheService : ICache, IPatternCache
         {
             var cacheKey = GetCacheKey(key);
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
-            var options = new DistributedCacheEntryOptions();
 
-            if (expiration.HasValue)
-            {
-                options.AbsoluteExpirationRelativeToNow = expiration;
-            }
-
-            await _distributedCache.SetStringAsync(cacheKey, json, options, cancellationToken);
+            await WriteStringAsync(GetDatabase(), cacheKey, json, expiration);
 
             // 发布缓存更新通知（如果启用了缓存同步）
             // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
@@ -187,7 +203,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            _distributedCache.Remove(cacheKey);
+            GetDatabase().KeyDelete(cacheKey);
         }
         catch (Exception ex)
         {
@@ -208,7 +224,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            await _distributedCache.RemoveAsync(cacheKey, cancellationToken);
+            await GetDatabase().KeyDeleteAsync(cacheKey);
 
             // 发布缓存删除通知（如果启用了缓存同步）
             // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
@@ -246,8 +262,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
-            return database.KeyExists(cacheKey);
+            return GetDatabase().KeyExists(cacheKey);
         }
         catch (Exception ex)
         {
@@ -270,8 +285,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
-            return await database.KeyExistsAsync(cacheKey);
+            return await GetDatabase().KeyExistsAsync(cacheKey);
         }
         catch (Exception ex)
         {
@@ -293,8 +307,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
-            database.KeyExpire(cacheKey, TimeSpan.FromSeconds(expirationSeconds));
+            GetDatabase().KeyExpire(cacheKey, TimeSpan.FromSeconds(expirationSeconds));
         }
         catch (Exception ex)
         {
@@ -316,8 +329,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
-            await database.KeyExpireAsync(cacheKey, TimeSpan.FromSeconds(expirationSeconds));
+            await GetDatabase().KeyExpireAsync(cacheKey, TimeSpan.FromSeconds(expirationSeconds));
         }
         catch (Exception ex)
         {
@@ -401,7 +413,7 @@ public class RedisCacheService : ICache, IPatternCache
                 ? pattern
                 : $"{_instanceName}:{pattern}";
 
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             var keys = CollectKeys(cachePattern);
 
             if (keys.Length == 0)
@@ -433,7 +445,7 @@ public class RedisCacheService : ICache, IPatternCache
                 ? pattern
                 : $"{_instanceName}:{pattern}";
 
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             var keys = await CollectKeysAsync(cachePattern);
 
             if (keys.Length > 0)
@@ -479,7 +491,7 @@ public class RedisCacheService : ICache, IPatternCache
     {
         try
         {
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
 
             var pattern = string.IsNullOrEmpty(_instanceName)
                 ? "*"
@@ -505,7 +517,7 @@ public class RedisCacheService : ICache, IPatternCache
     {
         try
         {
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
 
             var pattern = string.IsNullOrEmpty(_instanceName)
                 ? "*"
@@ -530,6 +542,7 @@ public class RedisCacheService : ICache, IPatternCache
     /// <param name="increment">递增量</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>递增后的值</returns>
+    /// <exception cref="CacheWriteException">递增失败时抛出（fail-closed，语义见类型 remarks）。</exception>
     public async Task<long> IncrementAsync(string key, long increment = 1, CancellationToken cancellationToken = default)
     {
         return await IncrementAsync(key, increment, default(TimeSpan), cancellationToken);
@@ -543,14 +556,15 @@ public class RedisCacheService : ICache, IPatternCache
     /// <param name="expiration">过期时间</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>递增后的值</returns>
+    /// <exception cref="CacheWriteException">递增失败时抛出（fail-closed，语义见类型 remarks）。</exception>
     public async Task<long> IncrementAsync(string key, long increment, TimeSpan expiration, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrEmpty(key);
 
+        var cacheKey = GetCacheKey(key);
         try
         {
-            var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             var result = await database.StringIncrementAsync(cacheKey, increment);
 
             // 如果指定了过期时间，设置过期时间
@@ -563,8 +577,9 @@ public class RedisCacheService : ICache, IPatternCache
         }
         catch (Exception ex)
         {
+            // 计数器失败必须对调用方可见：记录后抛出，绝不静默返回 0
             _logger.LogError(ex, "Error incrementing cache value for key: {Key}", key);
-            return 0;
+            throw new CacheWriteException($"Failed to increment counter for cache key '{key}'.", key, ex);
         }
     }
 
@@ -575,20 +590,22 @@ public class RedisCacheService : ICache, IPatternCache
     /// <param name="decrement">递减量</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>递减后的值</returns>
+    /// <exception cref="CacheWriteException">递减失败时抛出（fail-closed，语义见类型 remarks）。</exception>
     public async Task<long> DecrementAsync(string key, long decrement = 1, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrEmpty(key);
 
+        var cacheKey = GetCacheKey(key);
         try
         {
-            var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             return await database.StringDecrementAsync(cacheKey, decrement);
         }
         catch (Exception ex)
         {
+            // 计数器失败必须对调用方可见：记录后抛出，绝不静默返回 0
             _logger.LogError(ex, "Error decrementing cache value for key: {Key}", key);
-            return 0;
+            throw new CacheWriteException($"Failed to decrement counter for cache key '{key}'.", key, ex);
         }
     }
 
@@ -608,19 +625,10 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
 
             // 使用 Redis SET NX 原子操作，只在键不存在时设置
-            bool success;
-            if (expiration.HasValue && expiration.Value.TotalSeconds > 0)
-            {
-                success = await database.StringSetAsync(cacheKey, json, expiration.Value, When.NotExists);
-            }
-            else
-            {
-                success = await database.StringSetAsync(cacheKey, json, when: When.NotExists);
-            }
+            var success = await WriteStringAsync(GetDatabase(), cacheKey, json, expiration, When.NotExists);
 
             // 如果设置成功且启用了缓存同步，发布通知
             // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
@@ -662,7 +670,7 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cachePrefix = GetCacheKey(prefix);
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             var keys = await CollectKeysAsync($"{cachePrefix}*");
 
             if (keys.Length > 0)
@@ -686,7 +694,7 @@ public class RedisCacheService : ICache, IPatternCache
     public async Task<Dictionary<string, T?>> GetManyAsync<T>(IEnumerable<string> keys, CancellationToken cancellationToken = default)
     {
         var result = new Dictionary<string, T?>();
-        var database = _connectionMultiplexer.GetDatabase();
+        var database = GetDatabase();
 
         var keysList = keys.Where(k => !string.IsNullOrEmpty(k)).Select(GetCacheKey).ToList();
         if (keysList.Count == 0)
@@ -733,7 +741,7 @@ public class RedisCacheService : ICache, IPatternCache
     /// </summary>
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="items">键值对集合</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间，null 表示不过期</param>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetManyAsync<T>(IEnumerable<KeyValuePair<string, T>> items, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
@@ -751,9 +759,10 @@ public class RedisCacheService : ICache, IPatternCache
 
         try
         {
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             var batch = database.CreateBatch();
             var tasks = new List<Task>();
+            var expiry = NormalizeExpiration(expiration);
 
             foreach (var item in itemsList)
             {
@@ -764,15 +773,7 @@ public class RedisCacheService : ICache, IPatternCache
 
                 var cacheKey = GetCacheKey(item.Key);
                 var json = JsonSerializer.Serialize(item.Value, TnziJsonDefaults.Options);
-
-                if (expiration.HasValue && expiration.Value.TotalSeconds > 0)
-                {
-                    tasks.Add(batch.StringSetAsync(cacheKey, json, expiration.Value));
-                }
-                else
-                {
-                    tasks.Add(batch.StringSetAsync(cacheKey, json));
-                }
+                tasks.Add(batch.StringSetAsync(cacheKey, json, expiry, When.Always));
             }
 
             batch.Execute();
@@ -828,7 +829,7 @@ public class RedisCacheService : ICache, IPatternCache
 
         try
         {
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
             var redisKeys = keyList.Where(k => !string.IsNullOrEmpty(k)).Select(GetCacheKey).Select(k => (RedisKey)k).ToArray();
 
             if (redisKeys.Length > 0)
@@ -873,7 +874,7 @@ public class RedisCacheService : ICache, IPatternCache
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
     /// <param name="tags">标签列表</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间，null 表示不过期</param>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetWithTagsAsync<T>(string key, T value, IEnumerable<string> tags, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
@@ -882,32 +883,25 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var cacheKey = GetCacheKey(key);
-            var database = _connectionMultiplexer.GetDatabase();
+            var database = GetDatabase();
 
             // 序列化值
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
-            var expirationSeconds = expiration?.TotalSeconds ?? 0;
+            var expiry = NormalizeExpiration(expiration);
 
-            // 设置缓存值
-            if (expirationSeconds > 0)
-            {
-                await database.StringSetAsync(cacheKey, json, TimeSpan.FromSeconds(expirationSeconds));
-            }
-            else
-            {
-                await database.StringSetAsync(cacheKey, json);
-            }
+            // 设置缓存值（与所有其它写路径一致，走裸 IDatabase string）
+            await WriteStringAsync(database, cacheKey, json, expiry);
 
-            // 为每个标签创建索引
+            // 为每个标签创建索引（标签键带实例前缀，避免多应用共享 Redis 时互相污染）
             foreach (var tag in tags)
             {
-                var tagKey = $"tag:{tag}";
+                var tagKey = GetTagKey(tag);
                 await database.SetAddAsync(tagKey, cacheKey);
 
-                // 如果设置了过期时间，标签索引也需要设置过期时间（稍长一些）
-                if (expirationSeconds > 0)
+                // 如果设置了过期时间，标签索引也需要设置过期时间（比缓存值长 1 小时，避免索引先于成员失效）
+                if (expiry.HasValue)
                 {
-                    await database.KeyExpireAsync(tagKey, TimeSpan.FromSeconds(expirationSeconds + 3600)); // 标签索引过期时间比缓存值长1小时
+                    await database.KeyExpireAsync(tagKey, expiry.Value + TimeSpan.FromHours(1));
                 }
             }
 
@@ -948,10 +942,10 @@ public class RedisCacheService : ICache, IPatternCache
 
         try
         {
-            var database = _connectionMultiplexer.GetDatabase();
-            var tagKey = $"tag:{tag}";
+            var database = GetDatabase();
+            var tagKey = GetTagKey(tag);
 
-            // 获取该标签下的所有缓存键
+            // 获取该标签下的所有缓存键（成员本身已是带前缀的完整键）
             var keys = await database.SetMembersAsync(tagKey);
 
             // 删除所有缓存键

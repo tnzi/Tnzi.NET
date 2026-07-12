@@ -44,9 +44,8 @@ public class ModuleFunction : FullAuditedEntity<Guid>
     public int Order { get; set; }
 
     /// <summary>
-    /// 获取或设置 权限分类。Business（默认）= 业务管理员经
-    /// <c>Authorization:BusinessAdminRoles</c> 隐式可达；Technical = 技术/
-    /// 运维面，仅显式授权或超级管理员可达。既有数据迁移后为 Business。
+    /// 获取或设置 权限分类。纯展示元数据：Technical = 技术/运维面，
+    /// 分配界面渲染警示徽标；不驱动任何隐式授权。既有数据迁移后为 Business。
     /// </summary>
     public PermissionCategory Category { get; set; } = PermissionCategory.Business;
 

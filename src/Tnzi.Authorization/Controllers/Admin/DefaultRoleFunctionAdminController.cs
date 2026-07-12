@@ -63,6 +63,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// <param name="request">分配请求</param>
     /// <returns>操作结果</returns>
     [HttpPost("role/{roleId:guid}/assign")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult> AssignFunctionsToRole(Guid roleId, [FromBody] AssignFunctionsRequest request)
     {
         var result = await RoleFunctionService.AssignFunctionsToRoleAsync(roleId, request.FunctionIds);
@@ -76,6 +77,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// <param name="request">移除请求</param>
     /// <returns>操作结果</returns>
     [HttpPost("role/{roleId:guid}/remove")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult> RemoveFunctionsFromRole(Guid roleId, [FromBody] RemoveFunctionsRequest request)
     {
         var result = await RoleFunctionService.RemoveFunctionsFromRoleAsync(roleId, request.FunctionIds);
@@ -89,6 +91,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// <param name="request">设置请求</param>
     /// <returns>操作结果</returns>
     [HttpPut("role/{roleId:guid}/set")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult> SetRoleFunctions(Guid roleId, [FromBody] SetRoleFunctionsRequest request)
     {
         var result = await RoleFunctionService.SetRoleFunctionsAsync(roleId, request.FunctionIds);
@@ -126,6 +129,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// <param name="request">批量分配请求</param>
     /// <returns>操作结果</returns>
     [HttpPost("batch/assign")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult> BatchAssignFunctions([FromBody] BatchAssignFunctionsRequest request)
     {
         var result = await RoleFunctionService.BatchAssignFunctionsAsync(request.RoleIds, request.FunctionIds);
@@ -138,6 +142,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// <param name="roleId">角色ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("role/{roleId:guid}/clear")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult> ClearRoleFunctions(Guid roleId)
     {
         var result = await RoleFunctionService.ClearRoleFunctionsAsync(roleId);
@@ -158,6 +163,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// Clone permissions from source role to target role
     /// </summary>
     [HttpPost("role/{roleId:guid}/clone")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult<int>> CloneRolePermissions(Guid roleId, [FromBody] CloneRolePermissionsRequest request)
     {
         var result = await RoleFunctionService.CloneRoleFunctionsAsync(request.SourceRoleId, roleId);
@@ -178,10 +184,21 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// Import permissions to a role from exported data
     /// </summary>
     [HttpPost("role/{roleId:guid}/import")]
+    [ApiAuthorize(PermissionName = "authorization.roleFunction.assign")]
     public virtual async Task<ApiResult<PermissionImportResultDto>> ImportRolePermissions(Guid roleId, [FromBody] RolePermissionExportDto importData)
     {
         var result = await RoleFunctionService.ImportRolePermissionsAsync(roleId, importData);
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// Role names configured as super administrators
+    /// (<c>Authorization:SuperAdminRoles</c>). Read endpoint behind the
+    /// class-level <c>authorization.roleFunction.view</c> gate - the
+    /// assignment UI uses it to render those roles read-only (their members
+    /// bypass every check, so explicit rows are meaningless).
+    /// </summary>
+    [HttpGet("super-admin-roles")]
+    public virtual ApiResult<IReadOnlyList<string>> GetSuperAdminRoles()
+        => Result.Success<IReadOnlyList<string>>(RoleFunctionService.GetSuperAdminRoleNames()).ToApiResult();
 }

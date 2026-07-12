@@ -9,19 +9,21 @@ public partial class MemoryTools : IAIToolProvider
     private readonly IMemoryStore _memoryStore;
     private readonly ICurrentUser? _currentUser;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
-    private readonly MemoryOptions _memoryOptions;
+    private readonly IOptionsMonitor<AIOptions> _aiOptions;
     private readonly ILogger<MemoryTools> _logger;
+
+    private MemoryOptions CurrentMemoryOptions => _aiOptions.CurrentValue.ContextProviders.Memory;
 
     public MemoryTools(
         IMemoryStore memoryStore,
         ILogger<MemoryTools> logger,
-        IOptions<AIOptions> aiOptions,
+        IOptionsMonitor<AIOptions> aiOptions,
         ICurrentUser? currentUser = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _logger = Check.NotNull(logger);
-        _memoryOptions = Check.NotNull(aiOptions).Value.ContextProviders.Memory;
+        _aiOptions = Check.NotNull(aiOptions);
         _currentUser = currentUser;
         _executionContextAccessor = executionContextAccessor;
     }
@@ -47,12 +49,12 @@ public partial class MemoryTools : IAIToolProvider
             return new { status = "error", message = "Content cannot be empty" };
 
         // PII protection
-        if (_memoryOptions.EnablePiiProtection && ContainsPiiPattern(content))
+        if (CurrentMemoryOptions.EnablePiiProtection && ContainsPiiPattern(content))
             return new { status = "rejected", message = "Cannot save content that appears to contain personal information (SIN, phone, email, bank account)" };
 
         // Category validation (only when ValidCategories is configured)
-        if (category != null && _memoryOptions.ValidCategories.Count > 0 && !_memoryOptions.ValidCategories.Contains(category))
-            return new { status = "error", message = $"Invalid category '{category}'. Valid categories: {string.Join(", ", _memoryOptions.ValidCategories)}" };
+        if (category != null && CurrentMemoryOptions.ValidCategories.Count > 0 && !CurrentMemoryOptions.ValidCategories.Contains(category))
+            return new { status = "error", message = $"Invalid category '{category}'. Valid categories: {string.Join(", ", CurrentMemoryOptions.ValidCategories)}" };
 
         try
         {
@@ -107,8 +109,8 @@ public partial class MemoryTools : IAIToolProvider
 
             // 2. Project snapshot search (shared per project, read-only)
             var projectSnapshotScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
-                _memoryOptions.EnableProjectSnapshot,
-                _memoryOptions.ProjectSnapshotScopePrefix,
+                CurrentMemoryOptions.EnableProjectSnapshot,
+                CurrentMemoryOptions.ProjectSnapshotScopePrefix,
                 _executionContextAccessor?.CurrentRequest?.Metadata);
             var shouldSearchProject = !string.IsNullOrWhiteSpace(projectSnapshotScope)
                 && !string.Equals(projectSnapshotScope, localScopeKey, StringComparison.OrdinalIgnoreCase);
@@ -120,7 +122,7 @@ public partial class MemoryTools : IAIToolProvider
                 : Task.FromResult<IReadOnlyList<MemorySearchResult>>([]);
 
             // 3. Shared-scope search (if configured)
-            var sharedScope = _memoryOptions.SharedScope;
+            var sharedScope = CurrentMemoryOptions.SharedScope;
             var shouldSearchShared = !string.IsNullOrEmpty(sharedScope)
                 && !string.Equals(sharedScope, localScopeKey, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(sharedScope, projectSnapshotScope, StringComparison.OrdinalIgnoreCase);
@@ -200,7 +202,7 @@ public partial class MemoryTools : IAIToolProvider
         if (string.IsNullOrWhiteSpace(newContent))
             return new { status = "error", message = "New content cannot be empty" };
 
-        if (_memoryOptions.EnablePiiProtection && ContainsPiiPattern(newContent))
+        if (CurrentMemoryOptions.EnablePiiProtection && ContainsPiiPattern(newContent))
             return new { status = "rejected", message = "Cannot save content that appears to contain personal information" };
 
         try
@@ -246,9 +248,9 @@ public partial class MemoryTools : IAIToolProvider
     private MemoryScope BuildScope()
     {
         return MemoryScopeResolver.BuildLocalScope(
-            _memoryOptions.DefaultScope,
-            _memoryOptions.EnableUserIsolation,
-            _memoryOptions.EnableAgentIsolation,
+            CurrentMemoryOptions.DefaultScope,
+            CurrentMemoryOptions.EnableUserIsolation,
+            CurrentMemoryOptions.EnableAgentIsolation,
             _currentUser?.Id,
             _executionContextAccessor?.CurrentRequest?.AgentId);
     }

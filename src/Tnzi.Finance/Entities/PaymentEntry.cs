@@ -52,6 +52,12 @@ public class PaymentEntry : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
     /// </summary>
     public Guid? DepositToAccountId { get; set; }
 
+    /// <summary>
+    /// 结算方式（自由字符串，推荐取值见 <see cref="Metadata.PaymentMethods"/>；
+    /// 对账与报表维度，支票打印等能力按此识别票据类单据）
+    /// </summary>
+    public string? PaymentMethod { get; set; }
+
     /// <summary>外部参考号（支票号/交易号）</summary>
     public string? Reference { get; set; }
 

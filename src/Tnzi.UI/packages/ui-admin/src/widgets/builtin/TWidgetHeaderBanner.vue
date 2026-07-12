@@ -10,6 +10,7 @@
  */
 import { computed } from 'vue'
 import THeaderBanner from '../../components/dashboard/THeaderBanner.vue'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useAdminLoginConfig } from '../../plugin/loginConfig'
 import { translatePageKey } from '../../pages/_shared/translate'
 
@@ -32,9 +33,19 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const loginConfig = useAdminLoginConfig()
+const authStore = useAdminAuthStore()
 
+// Prefer the signed-in user's short (first-name) label so the greeting reads
+// "Good morning, John" with zero config. Falls back to username, then the
+// consumer's static login config, then a generic fallback.
 const resolvedUserName = computed(
-  () => props.userName ?? loginConfig.user?.userName ?? translatePageKey('', 'admin.banner.userFallback') ?? 'there',
+  () =>
+    props.userName ??
+    authStore.userInfo?.shortName ??
+    authStore.userInfo?.username ??
+    loginConfig.user?.userName ??
+    translatePageKey('', 'admin.banner.userFallback') ??
+    'there',
 )
 
 function bannerTranslate(key: string): string {

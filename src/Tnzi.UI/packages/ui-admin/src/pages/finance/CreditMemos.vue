@@ -9,7 +9,7 @@
     :detail-title="detailTitle"
   >
     <template #primary>
-      <NButton type="primary" tertiary size="small" @click="openCreate">
+      <NButton v-if="can('finance.document.create')" type="primary" tertiary size="small" @click="openCreate">
         <template #icon>
           <TSvgIcon icon="mdi:plus" :size="16" />
         </template>
@@ -69,6 +69,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge, FinanceDocumentStatus, type CreditMemoDto, type CreateCreditMemoDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -84,12 +85,14 @@ const t = makePageTranslator('finance.creditMemos')
 // Shared document namespace for the read-only line-table headers + memo label.
 const td = makePageTranslator('finance.docs')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'customerName', { showApplied: true, showDueDate: false })
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.creditMemos',
+  permission: 'finance.document',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.creditMemos.fetch(q),
@@ -219,10 +222,10 @@ const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.
 
 const rowActions: RowAction<FinanceDocRow>[] = [
   viewAction(crud),
-  { key: 'edit', type: 'primary', show: isDraft, onClick: openEdit },
-  { key: 'post', label: 'actions.post', type: 'primary', show: isDraft, confirm: 'confirmPost', onClick: (row) => void run(() => bridge.creditMemos.post(String(row.id ?? '')), 'postSuccess') },
-  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.creditMemos.voidDoc(String(row.id ?? '')), 'voidSuccess') },
-  { key: 'delete', label: 'actions.delete', type: 'error', show: isDraft, confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.creditMemos.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
+  { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
+  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.creditMemos.post(String(row.id ?? '')), 'postSuccess') },
+  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.creditMemos.voidDoc(String(row.id ?? '')), 'voidSuccess') },
+  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.document.delete') && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.creditMemos.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]
 </script>
 

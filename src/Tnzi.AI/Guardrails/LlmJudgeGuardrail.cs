@@ -23,13 +23,15 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
     private const string GuardrailName = nameof(LlmJudgeGuardrail);
 
     private readonly IChatClientFactory _chatClientFactory;
-    private readonly LlmJudgeOptions _judgeOptions;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<LlmJudgeGuardrail> _logger;
 
-    public LlmJudgeGuardrail(IChatClientFactory chatClientFactory, IOptions<AIOptions> options, ILogger<LlmJudgeGuardrail> logger)
+    private LlmJudgeOptions JudgeOptions => _options.CurrentValue.Guardrails.LlmJudge;
+
+    public LlmJudgeGuardrail(IChatClientFactory chatClientFactory, IOptionsMonitor<AIOptions> options, ILogger<LlmJudgeGuardrail> logger)
     {
         _chatClientFactory = Check.NotNull(chatClientFactory);
-        _judgeOptions = Check.NotNull(options).Value.Guardrails.LlmJudge;
+        _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
     }
 
@@ -38,12 +40,12 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
     /// </summary>
     async Task<GuardrailResult> IInputGuardrail.ValidateAsync(string input, CancellationToken ct)
     {
-        if (!_judgeOptions.Enabled)
+        if (!JudgeOptions.Enabled)
         {
             return GuardrailResult.Allowed();
         }
 
-        var systemPrompt = _judgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
+        var systemPrompt = JudgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
         return await JudgeAsync(input, systemPrompt, ct);
     }
 
@@ -52,12 +54,12 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
     /// </summary>
     async Task<GuardrailResult> IOutputGuardrail.ValidateAsync(string output, CancellationToken ct)
     {
-        if (!_judgeOptions.Enabled)
+        if (!JudgeOptions.Enabled)
         {
             return GuardrailResult.Allowed();
         }
 
-        var systemPrompt = _judgeOptions.OutputJudgePrompt ?? DefaultOutputJudgePrompt;
+        var systemPrompt = JudgeOptions.OutputJudgePrompt ?? DefaultOutputJudgePrompt;
         return await JudgeAsync(output, systemPrompt, ct);
     }
 
@@ -68,10 +70,10 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
     {
         try
         {
-            var chatClient = _chatClientFactory.GetChatClient(_judgeOptions.Provider, _judgeOptions.Model);
+            var chatClient = _chatClientFactory.GetChatClient(JudgeOptions.Provider, JudgeOptions.Model);
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(_judgeOptions.TimeoutSeconds));
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(JudgeOptions.TimeoutSeconds));
 
             var messages = new List<ChatMessage>
             {
@@ -87,7 +89,7 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // 超时（非外部取消）— fail-open
-            _logger.LogWarning("LLM-as-Judge timed out after {TimeoutSeconds}s, allowing content through (fail-open)", _judgeOptions.TimeoutSeconds);
+            _logger.LogWarning("LLM-as-Judge timed out after {TimeoutSeconds}s, allowing content through (fail-open)", JudgeOptions.TimeoutSeconds);
             return GuardrailResult.Allowed();
         }
         catch (OperationCanceledException)
@@ -108,15 +110,15 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
     /// </summary>
     async Task<GuardrailDecision> IGuardrailProvider.EvaluateAsync(GuardrailRequest request, CancellationToken ct)
     {
-        if (!_judgeOptions.Enabled || request.Content == null)
+        if (!JudgeOptions.Enabled || request.Content == null)
         {
             return GuardrailDecision.Allow();
         }
 
         // 工具级评估（request.ToolName != null）用工具专用提示，否则按输入评估处理
         var systemPrompt = request.ToolName != null
-            ? _judgeOptions.ToolJudgePrompt ?? DefaultToolJudgePrompt
-            : _judgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
+            ? JudgeOptions.ToolJudgePrompt ?? DefaultToolJudgePrompt
+            : JudgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
         var result = await JudgeAsync(request.Content, systemPrompt, ct);
 
         return result.IsAllowed

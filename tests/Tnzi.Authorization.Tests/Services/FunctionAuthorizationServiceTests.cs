@@ -21,18 +21,16 @@ public class FunctionAuthorizationServiceTests
         // Arrange
         var moduleRepositoryMock = new Mock<IRepository<FunctionModule, Guid>>();
         var moduleFunctionRepositoryMock = new Mock<IRepository<ModuleFunction, Guid>>();
-        var moduleUserRepositoryMock = new Mock<IRepository<ModuleUser, Guid>>();
-        var moduleRoleRepositoryMock = new Mock<IRepository<ModuleRole, Guid>>();
         var roleFunctionRepositoryMock = new Mock<IRepository<RoleFunction, Guid>>();
+        var userFunctionRepositoryMock = new Mock<IRepository<UserFunction, Guid>>();
         var userRoleServiceMock = new Mock<IUserRoleService>();
 
         // Act
         var service = new FunctionAuthorizationService(
             moduleRepositoryMock.Object,
             moduleFunctionRepositoryMock.Object,
-            moduleUserRepositoryMock.Object,
-            moduleRoleRepositoryMock.Object,
             roleFunctionRepositoryMock.Object,
+            userFunctionRepositoryMock.Object,
             _serviceProviderMock.Object,
             userRoleServiceMock.Object
         );
@@ -47,17 +45,15 @@ public class FunctionAuthorizationServiceTests
         // Arrange
         var moduleRepositoryMock = new Mock<IRepository<FunctionModule, Guid>>();
         var moduleFunctionRepositoryMock = new Mock<IRepository<ModuleFunction, Guid>>();
-        var moduleUserRepositoryMock = new Mock<IRepository<ModuleUser, Guid>>();
-        var moduleRoleRepositoryMock = new Mock<IRepository<ModuleRole, Guid>>();
         var roleFunctionRepositoryMock = new Mock<IRepository<RoleFunction, Guid>>();
+        var userFunctionRepositoryMock = new Mock<IRepository<UserFunction, Guid>>();
 
         // Act - IUserRoleService 是可选的
         var service = new FunctionAuthorizationService(
             moduleRepositoryMock.Object,
             moduleFunctionRepositoryMock.Object,
-            moduleUserRepositoryMock.Object,
-            moduleRoleRepositoryMock.Object,
             roleFunctionRepositoryMock.Object,
+            userFunctionRepositoryMock.Object,
             _serviceProviderMock.Object,
             null
         );
@@ -173,17 +169,14 @@ public class FunctionAuthorizationServiceTests
     private FunctionAuthorizationService CreateService(
         Mock<IRepository<FunctionModule, Guid>>? moduleRepository = null,
         Mock<IRepository<ModuleFunction, Guid>>? moduleFunctionRepository = null,
-        Mock<IRepository<ModuleUser, Guid>>? moduleUserRepository = null,
-        Mock<IRepository<ModuleRole, Guid>>? moduleRoleRepository = null,
         Mock<IRepository<RoleFunction, Guid>>? roleFunctionRepository = null,
         IUserRoleService? userRoleService = null)
     {
         return new FunctionAuthorizationService(
             moduleRepository?.Object ?? new Mock<IRepository<FunctionModule, Guid>>().Object,
             moduleFunctionRepository?.Object ?? new Mock<IRepository<ModuleFunction, Guid>>().Object,
-            moduleUserRepository?.Object ?? new Mock<IRepository<ModuleUser, Guid>>().Object,
-            moduleRoleRepository?.Object ?? new Mock<IRepository<ModuleRole, Guid>>().Object,
             roleFunctionRepository?.Object ?? new Mock<IRepository<RoleFunction, Guid>>().Object,
+            new Mock<IRepository<UserFunction, Guid>>().Object,
             _serviceProviderMock.Object,
             userRoleService
         );

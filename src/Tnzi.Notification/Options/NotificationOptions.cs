@@ -5,7 +5,7 @@ namespace Tnzi.Notification.Options;
 /// 配置路径：Notification
 /// </summary>
 [ConfigSection("Notification")]
-[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "Notification",
+[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "General",
     Icon = "mdi:bell-cog-outline", Order = 400, I18nKey = "admin.modules.system.settings.groups.notificationGeneral")]
 public class NotificationOptions
 {
@@ -42,7 +42,8 @@ public class NotificationOptions
     public int SendTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
-    /// 获取或设置 SMS 最大内容长度
+    /// 获取或设置 SMS 最大内容长度。
+    /// KEEP-STATIC：当前无运行时消费者（发送路径未接线截断/校验），暴露会造成"假热配"。
     /// </summary>
     public int SmsMaxContentLength { get; set; } = 1600;
 
@@ -73,7 +74,7 @@ public class QueueOptions
 /// 重试配置选项
 /// </summary>
 [ConfigSection("Notification:Retry")]
-[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "Notification",
+[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "General",
     Icon = "mdi:bell-cog-outline", Order = 400, I18nKey = "admin.modules.system.settings.groups.notificationGeneral")]
 public class RetryOptions
 {

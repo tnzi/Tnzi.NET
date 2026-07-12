@@ -6,6 +6,13 @@ export interface AdminUserInfo {
   id: string
   username: string
   displayName?: string
+  /**
+   * Short, first-name-only form for personal greetings, the header status bar
+   * and the chat "me" label — never the surname (`Hi, John`, not `Hi, John
+   * Doe`). Precedence: nickname → firstName → username. Formal / accountability
+   * surfaces (e.g. the watermark) keep using {@link displayName} (full name).
+   */
+  shortName?: string
   email?: string
   avatar?: string
   /** Local-upload avatar file id (Identity UserDetail.AvatarId). Drives the

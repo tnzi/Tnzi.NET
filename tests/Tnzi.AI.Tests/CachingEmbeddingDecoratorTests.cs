@@ -11,14 +11,14 @@ public class CachingEmbeddingDecoratorTests
     private readonly Mock<IEmbeddingService> _innerMock;
     private readonly Mock<ICache> _cacheMock;
     private readonly Mock<ILogger<CachingEmbeddingDecorator>> _loggerMock;
-    private readonly IOptions<AIRagOptions> _options;
+    private readonly StaticOptionsMonitor<AIRagOptions> _options;
 
     public CachingEmbeddingDecoratorTests()
     {
         _innerMock = new Mock<IEmbeddingService>();
         _cacheMock = new Mock<ICache>();
         _loggerMock = new Mock<ILogger<CachingEmbeddingDecorator>>();
-        _options = Microsoft.Extensions.Options.Options.Create(new AIRagOptions
+        _options = new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions
         {
             EmbeddingCache = new EmbeddingCacheOptions
             {
@@ -82,7 +82,7 @@ public class CachingEmbeddingDecoratorTests
     [Fact]
     public async Task GenerateEmbedding_CacheDisabled_BypassesCache()
     {
-        var disabledOptions = Microsoft.Extensions.Options.Options.Create(new AIRagOptions
+        var disabledOptions = new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions
         {
             EmbeddingCache = new EmbeddingCacheOptions { Enabled = false }
         });

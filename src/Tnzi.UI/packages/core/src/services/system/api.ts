@@ -23,6 +23,8 @@ import type {
   AccessLogTrendDto,
   TopEndpointDto,
   SettingsCenterGroupDto,
+  AdminGlobalThemeDto,
+  SaveAdminGlobalThemeDto,
 } from './types';
 import { type AccessLogTrendInterval, type TopEndpointSortBy } from './types';
 
@@ -154,6 +156,41 @@ export function useAdminSettingsCenterApi(client: HttpClient) {
     /** Remove all overrides of one group (restore defaults) */
     resetGroup: (groupKey: string) =>
       client.delete<SettingsCenterGroupDto>(`${ADMIN_SETTINGS_CENTER_BASE}/groups/${groupKey}/overrides`),
+  };
+}
+
+const APPEARANCE_BASE = '/appearance';
+const ADMIN_APPEARANCE_BASE = '/admin/appearance';
+
+/**
+ * Appearance API (any signed-in user) - read the global admin theme
+ * snapshot the shell applies at boot.
+ */
+export function useAppearanceApi(client: HttpClient) {
+  return {
+    /** Global admin theme snapshot (theme = null when unset) */
+    getAdminTheme: () =>
+      client.get<AdminGlobalThemeDto>(`${APPEARANCE_BASE}/admin-theme`),
+  };
+}
+
+/**
+ * Admin Appearance API - maintain the global admin theme snapshot
+ * (super-admin by default; delegable via system.appearance.*).
+ */
+export function useAdminAppearanceApi(client: HttpClient) {
+  return {
+    /** Global admin theme snapshot */
+    getTheme: () =>
+      client.get<AdminGlobalThemeDto>(`${ADMIN_APPEARANCE_BASE}/theme`),
+
+    /** Save the snapshot (whole-document replace, applies to every user) */
+    saveTheme: (data: SaveAdminGlobalThemeDto) =>
+      client.put<AdminGlobalThemeDto>(`${ADMIN_APPEARANCE_BASE}/theme`, data),
+
+    /** Clear the global theme (all clients fall back to local defaults) */
+    resetTheme: () =>
+      client.delete<void>(`${ADMIN_APPEARANCE_BASE}/theme`),
   };
 }
 

@@ -170,7 +170,10 @@ public class HttpContextScopedContext : Tnzi.ScopedContext.ScopedContext
         base.SetItem(key, value);
     }
 
-    public new T? GetItem<T>(string key)
+    // override（不是 new）：基类 GetItem&lt;T&gt; 是 virtual，用 new 会在经 IScopedContext
+    // 接口或基类引用调用时被静态派发回基类实现，从而绕过 HttpContext.Items（与同类
+    // SetItem 的 override 不对称）。改为 override 后接口调用也走本实现。
+    public override T? GetItem<T>(string key) where T : default
     {
         var httpContext = HttpContext;
         if (httpContext?.Items.TryGetValue(key, out var value) == true)

@@ -58,10 +58,11 @@ public class IdentitySettingDefinitionProviderTests
         var security = _groups.Single(g => g.Key == "identity-security");
 
         security.DisplayName.ShouldBe("Account Security");
-        security.Order.ShouldBe(200);
+        security.Order.ShouldBe(210);
         security.Icon.ShouldBe("mdi:shield-account-outline");
-        // PasswordPolicy 5 字段与 MaxFailedLoginAttempts/LockoutDurationMinutes 已移除（双轨冻结，见 provider 注释）
-        security.Fields.Count.ShouldBe(1);
+        // MaxFailedLoginAttempts/LockoutDurationMinutes 仍双轨冻结（见 AccountSecurityOptions 注释）。
+        // 暴露：EnableLockout + SessionTimeoutMinutes + EnableAbnormalLoginDetection + 5 风险等级 + 2 阈值 = 10。
+        security.Fields.Count.ShouldBe(10);
     }
 
     [Fact]
@@ -70,9 +71,11 @@ public class IdentitySettingDefinitionProviderTests
         var registration = _groups.Single(g => g.Key == "identity-registration");
 
         registration.DisplayName.ShouldBe("Registration & Sign-in");
-        registration.Order.ShouldBe(210);
+        registration.Order.ShouldBe(200);
         registration.Icon.ShouldBe("mdi:account-plus-outline");
-        registration.Fields.Count.ShouldBe(7);
+        // SignIn: UseEmailAsUserName + Allow{UserName,Email,Sms}Login = 4；
+        // Registration: EnableQuickRegister{Email,Sms} + DefaultUserNameFromEmail + RequireConfirmed{Email,Phone} + SetPasswordTokenExpirationMinutes = 6 → 合计 10。
+        registration.Fields.Count.ShouldBe(10);
     }
 
     [Fact]

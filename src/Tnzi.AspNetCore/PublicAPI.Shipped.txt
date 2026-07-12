@@ -1,0 +1,838 @@
+#nullable enable
+Tnzi.AspNetCore.AspNetCoreModule
+Tnzi.AspNetCore.AspNetCoreModule.AspNetCoreModule() -> void
+Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController
+Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.DefaultDiagnosticsAdminController(Tnzi.AspNetCore.Services.IExceptionStatisticsService! exceptionStatisticsService) -> void
+Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController
+Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.Interfaces.ILogFileService! logFileService) -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.IssueType.get -> string!
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.IssueType.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.Message.get -> string!
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.Message.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.MissingDependencies.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.MissingDependencies.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.Module.get -> string!
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.Module.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto.ModuleHealthIssueDto() -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.IsHealthy.get -> bool
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.IsHealthy.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.IssueCount.get -> int
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.IssueCount.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.Issues.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Controllers.ModuleHealthIssueDto!>!
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.Issues.set -> void
+Tnzi.AspNetCore.Controllers.ModuleHealthReportDto.ModuleHealthReportDto() -> void
+Tnzi.AspNetCore.Cors.DefaultCorsInitializer
+Tnzi.AspNetCore.Cors.DefaultCorsInitializer.AddCors(Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Tnzi.AspNetCore.Cors.DefaultCorsInitializer.DefaultCorsInitializer() -> void
+Tnzi.AspNetCore.Cors.DefaultCorsInitializer.SetConfiguration(Microsoft.Extensions.Configuration.IConfiguration! configuration) -> void
+Tnzi.AspNetCore.Cors.DefaultCorsInitializer.UseCors(Microsoft.AspNetCore.Builder.IApplicationBuilder! app) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
+Tnzi.AspNetCore.Cors.ICorsInitializer
+Tnzi.AspNetCore.Cors.ICorsInitializer.AddCors(Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Tnzi.AspNetCore.Cors.ICorsInitializer.UseCors(Microsoft.AspNetCore.Builder.IApplicationBuilder! app) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.AdminEntityEntryDto() -> void
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.ControllerType.get -> string!
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.ControllerType.set -> void
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.HasFullCrud.get -> bool
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.HasFullCrud.set -> void
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.IsDefault.get -> bool
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.IsDefault.set -> void
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.Methods.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.Methods.set -> void
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.Name.get -> string!
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.Name.set -> void
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.Route.get -> string!
+Tnzi.AspNetCore.Dtos.AdminEntityEntryDto.Route.set -> void
+Tnzi.AspNetCore.Dtos.AdminManifestDto
+Tnzi.AspNetCore.Dtos.AdminManifestDto.AdminManifestDto() -> void
+Tnzi.AspNetCore.Dtos.AdminManifestDto.Modules.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminModuleEntryDto!>!
+Tnzi.AspNetCore.Dtos.AdminManifestDto.Modules.set -> void
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.AdminModuleEntryDto() -> void
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.Assembly.get -> string!
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.Assembly.set -> void
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.Entities.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminEntityEntryDto!>!
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.Entities.set -> void
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.FullName.get -> string!
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.FullName.set -> void
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.IsEnabled.get -> bool
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.IsEnabled.set -> void
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.Name.get -> string!
+Tnzi.AspNetCore.Dtos.AdminModuleEntryDto.Name.set -> void
+Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto
+Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto.ControllerDiagnosticsResultDto() -> void
+Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto.Controllers.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ControllerInfoDto!>!
+Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto.Controllers.set -> void
+Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto.TotalCount.get -> int
+Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto.TotalCount.set -> void
+Tnzi.AspNetCore.Dtos.ControllerInfoDto
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.ControllerInfoDto() -> void
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.IsDefault.get -> bool
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.IsDefault.set -> void
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Methods.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Methods.set -> void
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Module.get -> string!
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Module.set -> void
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Route.get -> string!
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Route.set -> void
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Type.get -> string!
+Tnzi.AspNetCore.Dtos.ControllerInfoDto.Type.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.ErrorCode.get -> string?
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.ErrorCode.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.ExceptionEntryDto() -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.ExceptionType.get -> string!
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.ExceptionType.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.Message.get -> string?
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.Message.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.RequestId.get -> string?
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.RequestId.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.StatusCode.get -> int?
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.StatusCode.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.Timestamp.get -> System.DateTime
+Tnzi.AspNetCore.Dtos.ExceptionEntryDto.Timestamp.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ByErrorCode.get -> System.Collections.Generic.Dictionary<string!, int>!
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ByErrorCode.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ByStatusCode.get -> System.Collections.Generic.Dictionary<int, int>!
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ByStatusCode.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ByType.get -> System.Collections.Generic.Dictionary<string!, int>!
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ByType.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.ExceptionSummaryDto() -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.RecentExceptions.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ExceptionEntryDto!>!
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.RecentExceptions.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.Since.get -> System.DateTime
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.Since.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.TopExceptions.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto!>!
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.TopExceptions.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.TotalCount.get -> int
+Tnzi.AspNetCore.Dtos.ExceptionSummaryDto.TotalCount.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto
+Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto.Count.get -> int
+Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto.Count.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto.ExceptionType.get -> string!
+Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto.ExceptionType.set -> void
+Tnzi.AspNetCore.Dtos.ExceptionTypeCountDto.ExceptionTypeCountDto() -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.Assembly.get -> string!
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.Assembly.set -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.DependencyCount.get -> int
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.DependencyCount.set -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.InitializationState.get -> string!
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.InitializationState.set -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.IsEnabled.get -> bool
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.IsEnabled.set -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.Manifest.get -> Tnzi.AspNetCore.Dtos.ModuleManifestDto!
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.Manifest.set -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.ModuleDiagnosticsDto() -> void
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.Type.get -> string!
+Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto.Type.set -> void
+Tnzi.AspNetCore.Dtos.ModuleManifestDto
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.BackgroundTasks.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.BackgroundTasks.set -> void
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.Controllers.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.Controllers.set -> void
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.Events.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.Events.set -> void
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.ModuleManifestDto() -> void
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.Options.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.Options.set -> void
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.ServiceCount.get -> int
+Tnzi.AspNetCore.Dtos.ModuleManifestDto.ServiceCount.set -> void
+Tnzi.AspNetCore.Extensions.ResultExtensions
+Tnzi.AspNetCore.Extensions.ServiceConfigurationContextExtensions
+Tnzi.AspNetCore.Extensions.WebApplicationExtensions
+Tnzi.AspNetCore.Http.ClientHttpCrypto
+Tnzi.AspNetCore.Http.ClientHttpCrypto.ClientHttpCrypto(System.IServiceProvider! provider) -> void
+Tnzi.AspNetCore.Http.ClientHttpCryptoHandler
+Tnzi.AspNetCore.Http.ClientHttpCryptoHandler.ClientHttpCryptoHandler(Tnzi.AspNetCore.Http.IClientHttpCrypto! clientHttpCrypto) -> void
+Tnzi.AspNetCore.Http.HostHttpCrypto
+Tnzi.AspNetCore.Http.HostHttpCrypto.DecryptRequest(Microsoft.AspNetCore.Http.HttpRequest! request) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Http.HttpRequest!>!
+Tnzi.AspNetCore.Http.HostHttpCrypto.EncryptResponse(Microsoft.AspNetCore.Http.HttpResponse! response) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Http.HttpResponse!>!
+Tnzi.AspNetCore.Http.HostHttpCrypto.HostHttpCrypto(Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! aspNetCoreOptions, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Http.HostHttpCrypto!>! logger) -> void
+Tnzi.AspNetCore.Http.HostHttpCryptoMiddleware
+Tnzi.AspNetCore.Http.HostHttpCryptoMiddleware.HostHttpCryptoMiddleware(Tnzi.AspNetCore.Http.IHostHttpCrypto! hostHttpCrypto) -> void
+Tnzi.AspNetCore.Http.HostHttpCryptoMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context, Microsoft.AspNetCore.Http.RequestDelegate! next) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Http.HttpContextExtensions
+Tnzi.AspNetCore.Http.HttpExtensions
+Tnzi.AspNetCore.Http.HttpRequestMessageExtensions
+Tnzi.AspNetCore.Http.HttpResponseMessageExtensions
+Tnzi.AspNetCore.Http.IClientHttpCrypto
+Tnzi.AspNetCore.Http.IClientHttpCrypto.DecryptResponse(System.Net.Http.HttpResponseMessage! response) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
+Tnzi.AspNetCore.Http.IClientHttpCrypto.EncryptRequest(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<System.Net.Http.HttpRequestMessage!>!
+Tnzi.AspNetCore.Http.IHostHttpCrypto
+Tnzi.AspNetCore.Http.IHostHttpCrypto.DecryptRequest(Microsoft.AspNetCore.Http.HttpRequest! request) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Http.HttpRequest!>!
+Tnzi.AspNetCore.Http.IHostHttpCrypto.EncryptResponse(Microsoft.AspNetCore.Http.HttpResponse! response) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Http.HttpResponse!>!
+Tnzi.AspNetCore.Http.RequestClientType
+Tnzi.AspNetCore.Http.RequestClientType.Browser = 3 -> Tnzi.AspNetCore.Http.RequestClientType
+Tnzi.AspNetCore.Http.RequestClientType.Desktop = 2 -> Tnzi.AspNetCore.Http.RequestClientType
+Tnzi.AspNetCore.Http.RequestClientType.Mobile = 1 -> Tnzi.AspNetCore.Http.RequestClientType
+Tnzi.AspNetCore.Http.RequestClientType.Unknown = 0 -> Tnzi.AspNetCore.Http.RequestClientType
+Tnzi.AspNetCore.Middleware.ExceptionHandlingMiddleware
+Tnzi.AspNetCore.Middleware.ExceptionHandlingMiddleware.ExceptionHandlingMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.ExceptionHandlingMiddleware!>! logger, Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, System.IServiceProvider! serviceProvider, Tnzi.AspNetCore.Middleware.IExceptionStatistics? exceptionStats = null) -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ContextData.get -> object?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ContextData.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ErrorCode.get -> string?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ErrorCode.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ErrorDetail.get -> string?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ErrorDetail.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ErrorDetails.get -> object?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ErrorDetails.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ExceptionHandlingResult() -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.IsRetryable.get -> bool?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.IsRetryable.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.Message.get -> string?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.Message.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ShouldContinueHandling.get -> bool
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.ShouldContinueHandling.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.StatusCode.get -> int?
+Tnzi.AspNetCore.Middleware.ExceptionHandlingResult.StatusCode.set -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord
+Tnzi.AspNetCore.Middleware.ExceptionRecord.Deconstruct(out string! ExceptionType, out string? Message, out int? StatusCode, out string? ErrorCode, out string? RequestId, out System.DateTime Timestamp) -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.ErrorCode.get -> string?
+Tnzi.AspNetCore.Middleware.ExceptionRecord.ErrorCode.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.ExceptionRecord(Tnzi.AspNetCore.Middleware.ExceptionRecord! original) -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.ExceptionRecord(string! ExceptionType, string? Message, int? StatusCode, string? ErrorCode, string? RequestId, System.DateTime Timestamp) -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.ExceptionType.get -> string!
+Tnzi.AspNetCore.Middleware.ExceptionRecord.ExceptionType.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.Message.get -> string?
+Tnzi.AspNetCore.Middleware.ExceptionRecord.Message.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.RequestId.get -> string?
+Tnzi.AspNetCore.Middleware.ExceptionRecord.RequestId.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.StatusCode.get -> int?
+Tnzi.AspNetCore.Middleware.ExceptionRecord.StatusCode.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionRecord.Timestamp.get -> System.DateTime
+Tnzi.AspNetCore.Middleware.ExceptionRecord.Timestamp.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionStatistics
+Tnzi.AspNetCore.Middleware.ExceptionStatistics.Clear() -> void
+Tnzi.AspNetCore.Middleware.ExceptionStatistics.ExceptionStatistics(int maxHistorySize = 100) -> void
+Tnzi.AspNetCore.Middleware.ExceptionStatistics.GetRecentExceptions(int count) -> System.Collections.Generic.List<Tnzi.AspNetCore.Middleware.ExceptionRecord!>!
+Tnzi.AspNetCore.Middleware.ExceptionStatistics.GetStats(System.TimeSpan timeWindow) -> Tnzi.AspNetCore.Middleware.ExceptionStats!
+Tnzi.AspNetCore.Middleware.ExceptionStatistics.RecordException(System.Exception! exception, string? requestId) -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats
+Tnzi.AspNetCore.Middleware.ExceptionStats.ByErrorCode.get -> System.Collections.Generic.Dictionary<string!, int>!
+Tnzi.AspNetCore.Middleware.ExceptionStats.ByErrorCode.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats.ByStatusCode.get -> System.Collections.Generic.Dictionary<int, int>!
+Tnzi.AspNetCore.Middleware.ExceptionStats.ByStatusCode.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats.ByType.get -> System.Collections.Generic.Dictionary<string!, int>!
+Tnzi.AspNetCore.Middleware.ExceptionStats.ByType.init -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats.Deconstruct(out int TotalCount, out System.Collections.Generic.Dictionary<string!, int>! ByType, out System.Collections.Generic.Dictionary<int, int>! ByStatusCode, out System.Collections.Generic.Dictionary<string!, int>! ByErrorCode) -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats.ExceptionStats(Tnzi.AspNetCore.Middleware.ExceptionStats! original) -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats.ExceptionStats(int TotalCount, System.Collections.Generic.Dictionary<string!, int>! ByType, System.Collections.Generic.Dictionary<int, int>! ByStatusCode, System.Collections.Generic.Dictionary<string!, int>! ByErrorCode) -> void
+Tnzi.AspNetCore.Middleware.ExceptionStats.TotalCount.get -> int
+Tnzi.AspNetCore.Middleware.ExceptionStats.TotalCount.init -> void
+Tnzi.AspNetCore.Middleware.Handlers.BusinessExceptionHandler
+Tnzi.AspNetCore.Middleware.Handlers.BusinessExceptionHandler.BusinessExceptionHandler(Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.Handlers.BusinessExceptionHandler!>! logger) -> void
+Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler
+Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.DefaultExceptionHandler(Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler!>! logger) -> void
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.CurrentOptions.get -> Tnzi.AspNetCore.Options.ExceptionHandlingOptions!
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.ExceptionHandlerBase(Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, Microsoft.Extensions.Logging.ILogger! logger) -> void
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.GetErrorCode(System.Exception! exception) -> string?
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.GetHttpStatusCode(System.Exception! exception) -> int
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.GetLocalizedMessage(Microsoft.AspNetCore.Http.HttpContext! context, string? errorCode, string! defaultMessage) -> string?
+Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.IsDevelopment.get -> bool
+Tnzi.AspNetCore.Middleware.Handlers.InfrastructureExceptionHandler
+Tnzi.AspNetCore.Middleware.Handlers.InfrastructureExceptionHandler.InfrastructureExceptionHandler(Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.Handlers.InfrastructureExceptionHandler!>! logger) -> void
+Tnzi.AspNetCore.Middleware.Handlers.ValidationExceptionHandler
+Tnzi.AspNetCore.Middleware.Handlers.ValidationExceptionHandler.ValidationExceptionHandler(Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.Handlers.ValidationExceptionHandler!>! logger) -> void
+Tnzi.AspNetCore.Middleware.IExceptionHandler<T>
+Tnzi.AspNetCore.Middleware.IExceptionHandler<T>.HandleAsync(T! exception, Microsoft.AspNetCore.Http.HttpContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult?>!
+Tnzi.AspNetCore.Middleware.IExceptionStatistics
+Tnzi.AspNetCore.Middleware.IExceptionStatistics.Clear() -> void
+Tnzi.AspNetCore.Middleware.IExceptionStatistics.GetRecentExceptions(int count) -> System.Collections.Generic.List<Tnzi.AspNetCore.Middleware.ExceptionRecord!>!
+Tnzi.AspNetCore.Middleware.IExceptionStatistics.GetStats(System.TimeSpan timeWindow) -> Tnzi.AspNetCore.Middleware.ExceptionStats!
+Tnzi.AspNetCore.Middleware.IExceptionStatistics.RecordException(System.Exception! exception, string? requestId) -> void
+Tnzi.AspNetCore.Middleware.RateLimitingMiddleware
+Tnzi.AspNetCore.Middleware.RateLimitingMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context, Tnzi.AspNetCore.Security.IRateLimitService! rateLimitService) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.RateLimitingMiddleware.RateLimitingMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! optionsMonitor, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.RateLimitingMiddleware!>! logger) -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry
+Tnzi.AspNetCore.Middleware.RequestLogEntry.DurationMs.get -> double
+Tnzi.AspNetCore.Middleware.RequestLogEntry.DurationMs.set -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.IpAddress.get -> string?
+Tnzi.AspNetCore.Middleware.RequestLogEntry.IpAddress.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.IsSlow.get -> bool
+Tnzi.AspNetCore.Middleware.RequestLogEntry.IsSlow.set -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.Method.get -> string!
+Tnzi.AspNetCore.Middleware.RequestLogEntry.Method.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.Path.get -> string!
+Tnzi.AspNetCore.Middleware.RequestLogEntry.Path.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.QueryString.get -> string?
+Tnzi.AspNetCore.Middleware.RequestLogEntry.QueryString.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.RequestBody.get -> string?
+Tnzi.AspNetCore.Middleware.RequestLogEntry.RequestBody.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.RequestId.get -> string!
+Tnzi.AspNetCore.Middleware.RequestLogEntry.RequestId.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.RequestLogEntry() -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.ResponseBody.get -> string?
+Tnzi.AspNetCore.Middleware.RequestLogEntry.ResponseBody.set -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.StatusCode.get -> int
+Tnzi.AspNetCore.Middleware.RequestLogEntry.StatusCode.set -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.Timestamp.get -> System.DateTime
+Tnzi.AspNetCore.Middleware.RequestLogEntry.Timestamp.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.ToJson() -> string!
+Tnzi.AspNetCore.Middleware.RequestLogEntry.UserAgent.get -> string?
+Tnzi.AspNetCore.Middleware.RequestLogEntry.UserAgent.init -> void
+Tnzi.AspNetCore.Middleware.RequestLogEntry.UserId.get -> string?
+Tnzi.AspNetCore.Middleware.RequestLogEntry.UserId.set -> void
+Tnzi.AspNetCore.Middleware.RequestTrackingMiddleware
+Tnzi.AspNetCore.Middleware.RequestTrackingMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.RequestTrackingMiddleware.RequestTrackingMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.RequestTrackingMiddleware!>! logger, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! aspNetCoreOptions, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.RequestTrackingOptions!>! trackingOptions) -> void
+Tnzi.AspNetCore.Middleware.RequestValidationMiddleware
+Tnzi.AspNetCore.Middleware.RequestValidationMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.RequestValidationMiddleware.RequestValidationMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Tnzi.AspNetCore.Security.IRequestValidator! validator, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.RequestValidationMiddleware!>! logger) -> void
+Tnzi.AspNetCore.Middleware.SPANotFoundMiddleware
+Tnzi.AspNetCore.Middleware.SPANotFoundMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.SPANotFoundMiddleware.SPANotFoundMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options) -> void
+Tnzi.AspNetCore.Middleware.SecurityHeadersMiddleware
+Tnzi.AspNetCore.Middleware.SecurityHeadersMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.SecurityHeadersMiddleware.SecurityHeadersMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options) -> void
+Tnzi.AspNetCore.Middleware.TenantResolverMiddleware
+Tnzi.AspNetCore.Middleware.TenantResolverMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! httpContext, Tnzi.MultiTenancy.ICurrentTenant! currentTenant) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.TenantResolverMiddleware.TenantResolverMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.TenantResolverOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.TenantResolverMiddleware!>! logger, Tnzi.MultiTenancy.ITenantChecker? tenantChecker = null) -> void
+Tnzi.AspNetCore.ModelBinders.StringTrimModelBinder
+Tnzi.AspNetCore.ModelBinders.StringTrimModelBinder.BindModelAsync(Microsoft.AspNetCore.Mvc.ModelBinding.ModelBindingContext! bindingContext) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.ModelBinders.StringTrimModelBinder.StringTrimModelBinder() -> void
+Tnzi.AspNetCore.ModelBinders.StringTrimModelBinderProvider
+Tnzi.AspNetCore.ModelBinders.StringTrimModelBinderProvider.GetBinder(Microsoft.AspNetCore.Mvc.ModelBinding.ModelBinderProviderContext! context) -> Microsoft.AspNetCore.Mvc.ModelBinding.IModelBinder?
+Tnzi.AspNetCore.ModelBinders.StringTrimModelBinderProvider.StringTrimModelBinderProvider() -> void
+Tnzi.AspNetCore.Models.ApiResult
+Tnzi.AspNetCore.Models.ApiResult<T>
+Tnzi.AspNetCore.Models.ApiResult<T>.ApiResult(bool succeeded, T? data = default(T?), string? message = null, int code = 200, string? errorCode = null, object? errorDetails = null) -> void
+Tnzi.AspNetCore.Models.ApiResult<T>.Code.get -> int
+Tnzi.AspNetCore.Models.ApiResult<T>.Success.get -> bool
+Tnzi.AspNetCore.Models.ApiResultExtensions
+Tnzi.AspNetCore.Models.IApiResult
+Tnzi.AspNetCore.Models.IApiResult.Code.get -> int
+Tnzi.AspNetCore.Models.IApiResult.Success.get -> bool
+Tnzi.AspNetCore.Mvc.ApiAdminControllerBase
+Tnzi.AspNetCore.Mvc.ApiAdminControllerBase.ApiAdminControllerBase(System.IServiceProvider? serviceProvider = null) -> void
+Tnzi.AspNetCore.Mvc.ApiControllerBase
+Tnzi.AspNetCore.Mvc.ApiControllerBase.ApiControllerBase() -> void
+Tnzi.AspNetCore.Mvc.ApiControllerBase.ApiControllerBase(System.IServiceProvider? serviceProvider = null) -> void
+Tnzi.AspNetCore.Mvc.ApiControllerBase.BadRequest(string! message = "Bad Request", object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.BadRequest<T>(string! message = "Bad Request", object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.CurrentUser.get -> Tnzi.Security.Claims.ICurrentUser?
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Error(string! message, int code = 500, string? errorCode = null, object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Error<T>(string! message, int code = 500, string? errorCode = null, object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Forbidden(string! message = "Forbidden") -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Forbidden<T>(string! message = "Forbidden") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.GetRequiredCurrentUser() -> Tnzi.Security.Claims.ICurrentUser!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.GetRequiredService<T>() -> T
+Tnzi.AspNetCore.Mvc.ApiControllerBase.IsServiceAvailable<T>() -> bool
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Logger.get -> Microsoft.Extensions.Logging.ILogger!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.NotFound(string! message = "Resource not found") -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.NotFound<T>(string! message = "Resource not found") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Ok(string! message = "Success") -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Ok<T>(T data, string! message = "Success") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Services.get -> System.IServiceProvider!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Unauthorized(string! message = "Unauthorized") -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Unauthorized<T>(string! message = "Unauthorized") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.ValidationError(string? message = null) -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.ValidationError<T>(string? message = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.Conventions.ApiControllerRouteProvider
+Tnzi.AspNetCore.Mvc.Conventions.ApiControllerRouteProvider.ApiControllerRouteProvider(Tnzi.AspNetCore.Options.AspNetCoreOptions! options) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ApiControllerRouteProvider.OnProvidersExecuted(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ApiControllerRouteProvider.OnProvidersExecuting(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ApiControllerRouteProvider.Order.get -> int
+Tnzi.AspNetCore.Mvc.Conventions.ConditionalControllerProvider
+Tnzi.AspNetCore.Mvc.Conventions.ConditionalControllerProvider.ConditionalControllerProvider(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics? diagnostics = null) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ConditionalControllerProvider.OnProvidersExecuted(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ConditionalControllerProvider.OnProvidersExecuting(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ConditionalControllerProvider.Order.get -> int
+Tnzi.AspNetCore.Mvc.Conventions.ConfigurationControllerFilterProvider
+Tnzi.AspNetCore.Mvc.Conventions.ConfigurationControllerFilterProvider.ConfigurationControllerFilterProvider(Tnzi.AspNetCore.Options.ControllerFilterOptions! options) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ConfigurationControllerFilterProvider.OnProvidersExecuted(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ConfigurationControllerFilterProvider.OnProvidersExecuting(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ConfigurationControllerFilterProvider.Order.get -> int
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerEnabledMarker
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerEnabledMarker.DefaultControllerEnabledMarker() -> void
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerFilterProvider
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerFilterProvider.DefaultControllerFilterProvider(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics? diagnostics = null) -> void
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerFilterProvider.OnProvidersExecuted(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerFilterProvider.OnProvidersExecuting(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.DefaultControllerFilterProvider.Order.get -> int
+Tnzi.AspNetCore.Mvc.Conventions.ModuleControllerReplacementProvider
+Tnzi.AspNetCore.Mvc.Conventions.ModuleControllerReplacementProvider.ModuleControllerReplacementProvider(Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics? diagnostics = null) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ModuleControllerReplacementProvider.OnProvidersExecuted(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ModuleControllerReplacementProvider.OnProvidersExecuting(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModelProviderContext! context) -> void
+Tnzi.AspNetCore.Mvc.Conventions.ModuleControllerReplacementProvider.Order.get -> int
+Tnzi.AspNetCore.Mvc.DefaultControllerAttribute
+Tnzi.AspNetCore.Mvc.DefaultControllerAttribute.DefaultControllerAttribute() -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics.ControllerActivationDiagnostics() -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics.FlushToLogger(Microsoft.Extensions.Logging.ILogger! logger) -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics.GetRecords() -> System.Collections.Generic.IReadOnlyList<Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord!>!
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics.RecordActivation(string! controllerType, string? module, string? route, bool isDefault) -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics.RecordReplacement(string! defaultController, string! userController, string! route) -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationDiagnostics.RecordSuppression(string! controllerType, string! detail, Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason reason) -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.ControllerActivationRecord() -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.ControllerType.get -> string!
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.ControllerType.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.IsActive.get -> bool
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.IsActive.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.IsDefault.get -> bool
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.IsDefault.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.Module.get -> string?
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.Module.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.ReplacedBy.get -> string?
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.ReplacedBy.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.Route.get -> string?
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.Route.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.SuppressionDetail.get -> string?
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.SuppressionDetail.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.SuppressionReason.get -> Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason
+Tnzi.AspNetCore.Mvc.Diagnostics.ControllerActivationRecord.SuppressionReason.init -> void
+Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason
+Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason.MarkerAbsent = 1 -> Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason
+Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason.MissingDependency = 2 -> Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason
+Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason.None = 0 -> Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason
+Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason.ReplacedByUser = 3 -> Tnzi.AspNetCore.Mvc.Diagnostics.SuppressionReason
+Tnzi.AspNetCore.Mvc.Filters.AjaxOnlyAttribute
+Tnzi.AspNetCore.Mvc.Filters.AjaxOnlyAttribute.AjaxOnlyAttribute() -> void
+Tnzi.AspNetCore.Mvc.Filters.AjaxOnlyFilter
+Tnzi.AspNetCore.Mvc.Filters.AjaxOnlyFilter.AjaxOnlyFilter() -> void
+Tnzi.AspNetCore.Mvc.Filters.AjaxOnlyFilter.OnActionExecutionAsync(Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext! context, Microsoft.AspNetCore.Mvc.Filters.ActionExecutionDelegate! next) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Mvc.Filters.ApiResultWrapperFilter
+Tnzi.AspNetCore.Mvc.Filters.ApiResultWrapperFilter.ApiResultWrapperFilter(Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options) -> void
+Tnzi.AspNetCore.Mvc.Filters.ApiResultWrapperFilter.OnResultExecuted(Microsoft.AspNetCore.Mvc.Filters.ResultExecutedContext! context) -> void
+Tnzi.AspNetCore.Mvc.Filters.ApiResultWrapperFilter.OnResultExecuting(Microsoft.AspNetCore.Mvc.Filters.ResultExecutingContext! context) -> void
+Tnzi.AspNetCore.Mvc.Filters.ApiResultWrapperFilter.Order.get -> int
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationAttribute
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationAttribute.Ignore.get -> bool
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationAttribute.Ignore.set -> void
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationAttribute.ModelStateValidationAttribute() -> void
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationFilter
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationFilter.ModelStateValidationFilter() -> void
+Tnzi.AspNetCore.Mvc.Filters.ModelStateValidationFilter.OnActionExecutionAsync(Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext! context, Microsoft.AspNetCore.Mvc.Filters.ActionExecutionDelegate! next) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkAttribute
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkAttribute.IsDisabled.get -> bool
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkAttribute.IsDisabled.set -> void
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkAttribute.UnitOfWorkAttribute() -> void
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkFilter
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkFilter.OnActionExecutionAsync(Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext! context, Microsoft.AspNetCore.Mvc.Filters.ActionExecutionDelegate! next) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkFilter.UnitOfWorkFilter(System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Mvc.Filters.UnitOfWorkFilter!>! logger, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>? aspNetCoreOptions = null) -> void
+Tnzi.AspNetCore.Mvc.MvcExtensions
+Tnzi.AspNetCore.Options.AspNetCoreOptions
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ApiPathPrefix.get -> string!
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ApiPathPrefix.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ApiVersion.get -> Tnzi.AspNetCore.Versioning.ApiVersionOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ApiVersion.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.AspNetCoreOptions() -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.AutoWrapApiResult.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.AutoWrapApiResult.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ControllerFilter.get -> Tnzi.AspNetCore.Options.ControllerFilterOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ControllerFilter.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.Cors.get -> Tnzi.AspNetCore.Options.CorsOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.Cors.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableAutoRouteConvention.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableAutoRouteConvention.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableForwardedHeaders.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableForwardedHeaders.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableGlobalModelValidation.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableGlobalModelValidation.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableGlobalUnitOfWork.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableGlobalUnitOfWork.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableResponseCompression.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableResponseCompression.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableSPANotFoundHandler.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableSPANotFoundHandler.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ExceptionHandling.get -> Tnzi.AspNetCore.Options.ExceptionHandlingOptions!
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ExceptionHandling.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.HttpEncrypt.get -> Tnzi.AspNetCore.Options.HttpEncryptOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.HttpEncrypt.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.PathBase.get -> string?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.PathBase.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RateLimit.get -> Tnzi.AspNetCore.Options.RateLimitOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RateLimit.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RequestTracking.get -> Tnzi.AspNetCore.Options.RequestTrackingOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RequestTracking.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RequestValidation.get -> Tnzi.AspNetCore.Options.RequestValidationOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RequestValidation.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RouteNamingStyle.get -> Tnzi.AspNetCore.Options.RouteNamingStyle
+Tnzi.AspNetCore.Options.AspNetCoreOptions.RouteNamingStyle.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.SecurityHeaders.get -> Tnzi.AspNetCore.Options.SecurityHeadersOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.SecurityHeaders.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.UsePluralRoutes.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.UsePluralRoutes.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptionsValidator
+Tnzi.AspNetCore.Options.AspNetCoreOptionsValidator.AspNetCoreOptionsValidator() -> void
+Tnzi.AspNetCore.Options.ControllerFilterOptions
+Tnzi.AspNetCore.Options.ControllerFilterOptions.ControllerFilterOptions() -> void
+Tnzi.AspNetCore.Options.ControllerFilterOptions.ControllerPredicate.get -> System.Func<System.Type!, bool>?
+Tnzi.AspNetCore.Options.ControllerFilterOptions.ControllerPredicate.set -> void
+Tnzi.AspNetCore.Options.ControllerFilterOptions.DisabledAssemblies.get -> string![]?
+Tnzi.AspNetCore.Options.ControllerFilterOptions.DisabledAssemblies.set -> void
+Tnzi.AspNetCore.Options.ControllerFilterOptions.DisabledControllers.get -> string![]?
+Tnzi.AspNetCore.Options.ControllerFilterOptions.DisabledControllers.set -> void
+Tnzi.AspNetCore.Options.CorsOptions
+Tnzi.AspNetCore.Options.CorsOptions.AllowAnyHeader.get -> bool
+Tnzi.AspNetCore.Options.CorsOptions.AllowAnyHeader.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.AllowAnyMethod.get -> bool
+Tnzi.AspNetCore.Options.CorsOptions.AllowAnyMethod.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.AllowAnyOrigin.get -> bool
+Tnzi.AspNetCore.Options.CorsOptions.AllowAnyOrigin.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.AllowCredentials.get -> bool
+Tnzi.AspNetCore.Options.CorsOptions.AllowCredentials.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.CorsOptions() -> void
+Tnzi.AspNetCore.Options.CorsOptions.DisallowCredentials.get -> bool
+Tnzi.AspNetCore.Options.CorsOptions.DisallowCredentials.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.Enabled.get -> bool
+Tnzi.AspNetCore.Options.CorsOptions.Enabled.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.PolicyName.get -> string!
+Tnzi.AspNetCore.Options.CorsOptions.PolicyName.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.WithHeaders.get -> string![]?
+Tnzi.AspNetCore.Options.CorsOptions.WithHeaders.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.WithMethods.get -> string![]?
+Tnzi.AspNetCore.Options.CorsOptions.WithMethods.set -> void
+Tnzi.AspNetCore.Options.CorsOptions.WithOrigins.get -> string![]?
+Tnzi.AspNetCore.Options.CorsOptions.WithOrigins.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.CustomHandlers.get -> System.Collections.Generic.Dictionary<System.Type!, System.Type!>!
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.CustomHandlers.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.EnableMetrics.get -> bool
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.EnableMetrics.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.ExceptionHandlingOptions() -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.ExceptionHistorySize.get -> int
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.ExceptionHistorySize.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.IncludeContextData.get -> bool
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.IncludeContextData.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.IncludeRequestId.get -> bool
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.IncludeRequestId.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.IncludeRetryInfo.get -> bool
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.IncludeRetryInfo.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.LogRequestBody.get -> bool
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.LogRequestBody.set -> void
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.ShowDetailsInDevelopment.get -> bool
+Tnzi.AspNetCore.Options.ExceptionHandlingOptions.ShowDetailsInDevelopment.set -> void
+Tnzi.AspNetCore.Options.HttpEncryptOptions
+Tnzi.AspNetCore.Options.HttpEncryptOptions.Enabled.get -> bool
+Tnzi.AspNetCore.Options.HttpEncryptOptions.Enabled.set -> void
+Tnzi.AspNetCore.Options.HttpEncryptOptions.HostPrivateKey.get -> string?
+Tnzi.AspNetCore.Options.HttpEncryptOptions.HostPrivateKey.set -> void
+Tnzi.AspNetCore.Options.HttpEncryptOptions.HostPublicKey.get -> string?
+Tnzi.AspNetCore.Options.HttpEncryptOptions.HostPublicKey.set -> void
+Tnzi.AspNetCore.Options.HttpEncryptOptions.HttpEncryptOptions() -> void
+Tnzi.AspNetCore.Options.RateLimitAlgorithm
+Tnzi.AspNetCore.Options.RateLimitAlgorithm.FixedWindow = 0 -> Tnzi.AspNetCore.Options.RateLimitAlgorithm
+Tnzi.AspNetCore.Options.RateLimitAlgorithm.LeakyBucket = 3 -> Tnzi.AspNetCore.Options.RateLimitAlgorithm
+Tnzi.AspNetCore.Options.RateLimitAlgorithm.SlidingWindow = 1 -> Tnzi.AspNetCore.Options.RateLimitAlgorithm
+Tnzi.AspNetCore.Options.RateLimitAlgorithm.TokenBucket = 2 -> Tnzi.AspNetCore.Options.RateLimitAlgorithm
+Tnzi.AspNetCore.Options.RateLimitOptions
+Tnzi.AspNetCore.Options.RateLimitOptions.AllowOnFailure.get -> bool
+Tnzi.AspNetCore.Options.RateLimitOptions.AllowOnFailure.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.ByIp.get -> Tnzi.AspNetCore.Options.RateLimitRule?
+Tnzi.AspNetCore.Options.RateLimitOptions.ByIp.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.ByPath.get -> System.Collections.Generic.Dictionary<string!, Tnzi.AspNetCore.Options.RateLimitRule!>?
+Tnzi.AspNetCore.Options.RateLimitOptions.ByPath.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.ByUser.get -> Tnzi.AspNetCore.Options.RateLimitRule?
+Tnzi.AspNetCore.Options.RateLimitOptions.ByUser.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.DefaultLimit.get -> int
+Tnzi.AspNetCore.Options.RateLimitOptions.DefaultLimit.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.DefaultWindowSeconds.get -> int
+Tnzi.AspNetCore.Options.RateLimitOptions.DefaultWindowSeconds.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.Enabled.get -> bool
+Tnzi.AspNetCore.Options.RateLimitOptions.Enabled.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.ExcludePaths.get -> string![]?
+Tnzi.AspNetCore.Options.RateLimitOptions.ExcludePaths.set -> void
+Tnzi.AspNetCore.Options.RateLimitOptions.RateLimitOptions() -> void
+Tnzi.AspNetCore.Options.RateLimitRule
+Tnzi.AspNetCore.Options.RateLimitRule.Algorithm.get -> Tnzi.AspNetCore.Options.RateLimitAlgorithm
+Tnzi.AspNetCore.Options.RateLimitRule.Algorithm.set -> void
+Tnzi.AspNetCore.Options.RateLimitRule.Limit.get -> int
+Tnzi.AspNetCore.Options.RateLimitRule.Limit.set -> void
+Tnzi.AspNetCore.Options.RateLimitRule.RateLimitRule() -> void
+Tnzi.AspNetCore.Options.RateLimitRule.Whitelist.get -> string![]?
+Tnzi.AspNetCore.Options.RateLimitRule.Whitelist.set -> void
+Tnzi.AspNetCore.Options.RateLimitRule.WindowSeconds.get -> int
+Tnzi.AspNetCore.Options.RateLimitRule.WindowSeconds.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions
+Tnzi.AspNetCore.Options.RequestTrackingOptions.EnableRequestLogging.get -> bool
+Tnzi.AspNetCore.Options.RequestTrackingOptions.EnableRequestLogging.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.ExcludePaths.get -> System.Collections.Generic.List<string!>?
+Tnzi.AspNetCore.Options.RequestTrackingOptions.ExcludePaths.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.IncludePaths.get -> System.Collections.Generic.List<string!>?
+Tnzi.AspNetCore.Options.RequestTrackingOptions.IncludePaths.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogLevel.get -> Microsoft.Extensions.Logging.LogLevel
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogLevel.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogRequestBody.get -> bool
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogRequestBody.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogResponseBody.get -> bool
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogResponseBody.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogResponseTime.get -> bool
+Tnzi.AspNetCore.Options.RequestTrackingOptions.LogResponseTime.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.MaxRequestBodyLength.get -> int
+Tnzi.AspNetCore.Options.RequestTrackingOptions.MaxRequestBodyLength.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.MaxResponseBodyLength.get -> int
+Tnzi.AspNetCore.Options.RequestTrackingOptions.MaxResponseBodyLength.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.RequestTrackingOptions() -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.SlowRequestThresholdMs.get -> int?
+Tnzi.AspNetCore.Options.RequestTrackingOptions.SlowRequestThresholdMs.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions
+Tnzi.AspNetCore.Options.RequestValidationOptions.Enabled.get -> bool
+Tnzi.AspNetCore.Options.RequestValidationOptions.Enabled.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.ExcludePaths.get -> string![]?
+Tnzi.AspNetCore.Options.RequestValidationOptions.ExcludePaths.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.IncludePaths.get -> string![]?
+Tnzi.AspNetCore.Options.RequestValidationOptions.IncludePaths.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.NonceExpirationSeconds.get -> int
+Tnzi.AspNetCore.Options.RequestValidationOptions.NonceExpirationSeconds.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.RequestValidationOptions() -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.RequireNonce.get -> bool
+Tnzi.AspNetCore.Options.RequestValidationOptions.RequireNonce.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.RequireSignature.get -> bool
+Tnzi.AspNetCore.Options.RequestValidationOptions.RequireSignature.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.SignatureSecretKey.get -> string?
+Tnzi.AspNetCore.Options.RequestValidationOptions.SignatureSecretKey.set -> void
+Tnzi.AspNetCore.Options.RequestValidationOptions.TimestampWindowSeconds.get -> int
+Tnzi.AspNetCore.Options.RequestValidationOptions.TimestampWindowSeconds.set -> void
+Tnzi.AspNetCore.Options.RouteNamingStyle
+Tnzi.AspNetCore.Options.RouteNamingStyle.CamelCase = 1 -> Tnzi.AspNetCore.Options.RouteNamingStyle
+Tnzi.AspNetCore.Options.RouteNamingStyle.KebabCase = 0 -> Tnzi.AspNetCore.Options.RouteNamingStyle
+Tnzi.AspNetCore.Options.RouteNamingStyle.PascalCase = 2 -> Tnzi.AspNetCore.Options.RouteNamingStyle
+Tnzi.AspNetCore.Options.SecurityHeadersOptions
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.ContentSecurityPolicy.get -> string!
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.ContentSecurityPolicy.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.EnableSecurityHeaders.get -> bool
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.EnableSecurityHeaders.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsEnabled.get -> bool
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsEnabled.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsIncludeSubDomains.get -> bool
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsIncludeSubDomains.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsMaxAge.get -> int
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsMaxAge.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsPreload.get -> bool
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.HstsPreload.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.PermissionsPolicy.get -> string?
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.PermissionsPolicy.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.ReferrerPolicy.get -> string!
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.ReferrerPolicy.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.SecurityHeadersOptions() -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.XContentTypeOptions.get -> string?
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.XContentTypeOptions.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.XFrameOptions.get -> string!
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.XFrameOptions.set -> void
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.XXssProtection.get -> string?
+Tnzi.AspNetCore.Options.SecurityHeadersOptions.XXssProtection.set -> void
+Tnzi.AspNetCore.Options.TenantResolutionSource
+Tnzi.AspNetCore.Options.TenantResolutionSource.Claims = 3 -> Tnzi.AspNetCore.Options.TenantResolutionSource
+Tnzi.AspNetCore.Options.TenantResolutionSource.Cookie = 2 -> Tnzi.AspNetCore.Options.TenantResolutionSource
+Tnzi.AspNetCore.Options.TenantResolutionSource.Header = 0 -> Tnzi.AspNetCore.Options.TenantResolutionSource
+Tnzi.AspNetCore.Options.TenantResolutionSource.QueryString = 1 -> Tnzi.AspNetCore.Options.TenantResolutionSource
+Tnzi.AspNetCore.Options.TenantResolverOptions
+Tnzi.AspNetCore.Options.TenantResolverOptions.ClaimType.get -> string!
+Tnzi.AspNetCore.Options.TenantResolverOptions.ClaimType.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.CookieName.get -> string!
+Tnzi.AspNetCore.Options.TenantResolverOptions.CookieName.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.DefaultTenantId.get -> System.Guid?
+Tnzi.AspNetCore.Options.TenantResolverOptions.DefaultTenantId.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.Enabled.get -> bool
+Tnzi.AspNetCore.Options.TenantResolverOptions.Enabled.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.HeaderName.get -> string!
+Tnzi.AspNetCore.Options.TenantResolverOptions.HeaderName.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.QueryStringKey.get -> string!
+Tnzi.AspNetCore.Options.TenantResolverOptions.QueryStringKey.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.ResolutionOrder.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Options.TenantResolutionSource>!
+Tnzi.AspNetCore.Options.TenantResolverOptions.ResolutionOrder.set -> void
+Tnzi.AspNetCore.Options.TenantResolverOptions.TenantResolverOptions() -> void
+Tnzi.AspNetCore.Routing.NonRoutePrefixAttribute
+Tnzi.AspNetCore.Routing.NonRoutePrefixAttribute.NonRoutePrefixAttribute() -> void
+Tnzi.AspNetCore.Routing.RoutePrefixConvention
+Tnzi.AspNetCore.Routing.RoutePrefixConvention.Apply(Microsoft.AspNetCore.Mvc.ApplicationModels.ApplicationModel! application) -> void
+Tnzi.AspNetCore.Routing.RoutePrefixConvention.RoutePrefixConvention(string! routePrefix) -> void
+Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext
+Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.HttpContextScopedContext(Microsoft.AspNetCore.Http.IHttpContextAccessor! httpContextAccessor) -> void
+Tnzi.AspNetCore.Security.HttpContextCurrentUser
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.FindClaim(string! claimType) -> string?
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.FindClaims(string! claimType) -> string![]!
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.HttpContextCurrentUser(Microsoft.AspNetCore.Http.IHttpContextAccessor! httpContextAccessor) -> void
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.Id.get -> System.Guid?
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.IsAuthenticated.get -> bool
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.IsInRole(string! roleName) -> bool
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.Roles.get -> string![]!
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.TenantId.get -> System.Guid?
+Tnzi.AspNetCore.Security.HttpContextCurrentUser.UserName.get -> string?
+Tnzi.AspNetCore.Security.IRateLimitService
+Tnzi.AspNetCore.Security.IRateLimitService.IncrementAndGetAsync(string! key, int windowSeconds, Tnzi.AspNetCore.Options.RateLimitAlgorithm algorithm = Tnzi.AspNetCore.Options.RateLimitAlgorithm.FixedWindow) -> System.Threading.Tasks.Task<long>!
+Tnzi.AspNetCore.Security.IRequestValidator
+Tnzi.AspNetCore.Security.IRequestValidator.ValidateAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task<string?>!
+Tnzi.AspNetCore.Security.RateLimitService
+Tnzi.AspNetCore.Security.RateLimitService.IncrementAndGetAsync(string! key, int windowSeconds, Tnzi.AspNetCore.Options.RateLimitAlgorithm algorithm = Tnzi.AspNetCore.Options.RateLimitAlgorithm.FixedWindow) -> System.Threading.Tasks.Task<long>!
+Tnzi.AspNetCore.Security.RateLimitService.RateLimitService(Tnzi.Caching.ICache! cache, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Security.RateLimitService!>? logger = null) -> void
+Tnzi.AspNetCore.Security.RequestValidator
+Tnzi.AspNetCore.Security.RequestValidator.RequestValidator(Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! aspNetCoreOptions, Tnzi.Caching.ICache! cache, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Security.RequestValidator!>! logger) -> void
+Tnzi.AspNetCore.Security.RequestValidator.ValidateAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task<string?>!
+Tnzi.AspNetCore.Services.ExceptionStatisticsService
+Tnzi.AspNetCore.Services.ExceptionStatisticsService.Clear() -> Tnzi.Results.Result!
+Tnzi.AspNetCore.Services.ExceptionStatisticsService.ExceptionStatisticsService(Tnzi.AspNetCore.Middleware.IExceptionStatistics! exceptionStatistics) -> void
+Tnzi.AspNetCore.Services.ExceptionStatisticsService.GetRecentExceptions(int count = 20) -> Tnzi.Results.Result<System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ExceptionEntryDto!>!>!
+Tnzi.AspNetCore.Services.ExceptionStatisticsService.GetSummary(int minutes = 60) -> Tnzi.Results.Result<Tnzi.AspNetCore.Dtos.ExceptionSummaryDto!>!
+Tnzi.AspNetCore.Services.IExceptionStatisticsService
+Tnzi.AspNetCore.Services.IExceptionStatisticsService.Clear() -> Tnzi.Results.Result!
+Tnzi.AspNetCore.Services.IExceptionStatisticsService.GetRecentExceptions(int count = 20) -> Tnzi.Results.Result<System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ExceptionEntryDto!>!>!
+Tnzi.AspNetCore.Services.IExceptionStatisticsService.GetSummary(int minutes = 60) -> Tnzi.Results.Result<Tnzi.AspNetCore.Dtos.ExceptionSummaryDto!>!
+Tnzi.AspNetCore.Versioning.ApiVersionAttribute
+Tnzi.AspNetCore.Versioning.ApiVersionAttribute.ApiVersionAttribute(string! version) -> void
+Tnzi.AspNetCore.Versioning.ApiVersionAttribute.NoCheck.get -> bool
+Tnzi.AspNetCore.Versioning.ApiVersionAttribute.NoCheck.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionAttribute.Version.get -> string!
+Tnzi.AspNetCore.Versioning.ApiVersionMiddleware
+Tnzi.AspNetCore.Versioning.ApiVersionMiddleware.ApiVersionMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options) -> void
+Tnzi.AspNetCore.Versioning.ApiVersionMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Versioning.ApiVersionOptions
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.ApiVersionOptions() -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.DefaultVersion.get -> string!
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.DefaultVersion.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.Enabled.get -> bool
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.Enabled.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.HeaderName.get -> string!
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.HeaderName.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.QueryStringName.get -> string!
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.QueryStringName.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.ReaderType.get -> Tnzi.AspNetCore.Versioning.ApiVersionReaderType
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.ReaderType.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.ReportVersion.get -> bool
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.ReportVersion.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.UrlParameterName.get -> string!
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.UrlParameterName.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.VersionHeaderName.get -> string!
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.VersionHeaderName.set -> void
+Tnzi.AspNetCore.Versioning.ApiVersionReaderType
+Tnzi.AspNetCore.Versioning.ApiVersionReaderType.Header = 1 -> Tnzi.AspNetCore.Versioning.ApiVersionReaderType
+Tnzi.AspNetCore.Versioning.ApiVersionReaderType.QueryString = 0 -> Tnzi.AspNetCore.Versioning.ApiVersionReaderType
+Tnzi.AspNetCore.Versioning.ApiVersionReaderType.UrlPath = 2 -> Tnzi.AspNetCore.Versioning.ApiVersionReaderType
+Tnzi.TnziApp
+abstract Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.CanHandle(System.Exception! exception) -> bool
+abstract Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.HandleAsync(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult!>!
+override Tnzi.AspNetCore.AspNetCoreModule.ConfigureServicesAsync(Tnzi.Modules.ServiceConfigurationContext! context) -> System.Threading.Tasks.Task!
+override Tnzi.AspNetCore.AspNetCoreModule.LoadOrder.get -> int
+override Tnzi.AspNetCore.AspNetCoreModule.OnApplicationInitializationAsync(Tnzi.Modules.ApplicationInitializationContext! context) -> System.Threading.Tasks.Task!
+override Tnzi.AspNetCore.AspNetCoreModule.PreConfigureServicesAsync(Tnzi.Modules.ServiceConfigurationContext! context) -> System.Threading.Tasks.Task!
+override Tnzi.AspNetCore.Http.ClientHttpCryptoHandler.SendAsync(System.Net.Http.HttpRequestMessage! request, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
+override Tnzi.AspNetCore.Middleware.ExceptionRecord.Equals(object? obj) -> bool
+override Tnzi.AspNetCore.Middleware.ExceptionRecord.GetHashCode() -> int
+override Tnzi.AspNetCore.Middleware.ExceptionRecord.ToString() -> string!
+override Tnzi.AspNetCore.Middleware.ExceptionStats.Equals(object? obj) -> bool
+override Tnzi.AspNetCore.Middleware.ExceptionStats.GetHashCode() -> int
+override Tnzi.AspNetCore.Middleware.ExceptionStats.ToString() -> string!
+override Tnzi.AspNetCore.Middleware.Handlers.BusinessExceptionHandler.CanHandle(System.Exception! exception) -> bool
+override Tnzi.AspNetCore.Middleware.Handlers.BusinessExceptionHandler.HandleAsync(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult!>!
+override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.CanHandle(System.Exception! exception) -> bool
+override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.HandleAsync(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult!>!
+override Tnzi.AspNetCore.Middleware.Handlers.InfrastructureExceptionHandler.CanHandle(System.Exception! exception) -> bool
+override Tnzi.AspNetCore.Middleware.Handlers.InfrastructureExceptionHandler.HandleAsync(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult!>!
+override Tnzi.AspNetCore.Middleware.Handlers.ValidationExceptionHandler.CanHandle(System.Exception! exception) -> bool
+override Tnzi.AspNetCore.Middleware.Handlers.ValidationExceptionHandler.HandleAsync(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult!>!
+override Tnzi.AspNetCore.Middleware.Handlers.ValidationExceptionHandler.Priority.get -> int
+override Tnzi.AspNetCore.Options.AspNetCoreOptionsValidator.ValidateOptions(Tnzi.AspNetCore.Options.AspNetCoreOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.AuditOperation.get -> Tnzi.ScopedContext.AuditOperationInfo?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.AuditOperation.set -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.ClientIpAddress.get -> string?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.ClientIpAddress.set -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.CurrentUserId.get -> string?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.CurrentUserId.set -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.CurrentUserName.get -> string?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.CurrentUserName.set -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.CurrentUserRoles.get -> System.Collections.Generic.IReadOnlyList<string!>!
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.CurrentUserRoles.set -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.GetItem<T>(string! key) -> T?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.SetItem<T>(string! key, T value) -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.TraceId.get -> string?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.TraceId.set -> void
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.UserAgent.get -> string?
+override Tnzi.AspNetCore.ScopedContext.HttpContextScopedContext.UserAgent.set -> void
+readonly Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.ExceptionStatisticsService -> Tnzi.AspNetCore.Services.IExceptionStatisticsService!
+readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.Interfaces.ILogFileService!
+readonly Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.Environment -> Microsoft.AspNetCore.Hosting.IWebHostEnvironment!
+readonly Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.Logger -> Microsoft.Extensions.Logging.ILogger!
+readonly Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.Options -> Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>!
+readonly Tnzi.AspNetCore.Mvc.ApiControllerBase.ServiceProvider -> System.IServiceProvider?
+static Tnzi.AspNetCore.Extensions.ResultExtensions.ToApiResult(this Tnzi.Results.Result! result) -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Extensions.ResultExtensions.ToApiResult<T>(this Tnzi.Results.Result! result) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Extensions.ResultExtensions.ToApiResult<T>(this Tnzi.Results.Result<T>! result) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Extensions.ServiceConfigurationContextExtensions.AddControllerAssembly<TModule>(this Tnzi.Modules.ServiceConfigurationContext! context) -> Tnzi.Modules.ServiceConfigurationContext!
+static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.UseTnziAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!
+static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.UseTnziWithDefaultsAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetAcceptLanguage(this Microsoft.AspNetCore.Http.HttpRequest! request) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetClientIp(this Microsoft.AspNetCore.Http.HttpContext! context) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetClientIp(this Microsoft.AspNetCore.Http.HttpRequest! request) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetClientType(this Microsoft.AspNetCore.Http.HttpRequest! request) -> Tnzi.AspNetCore.Http.RequestClientType
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetIdentity(this Microsoft.AspNetCore.Http.HttpContext! context) -> System.Security.Claims.ClaimsIdentity?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetRequestId(this Microsoft.AspNetCore.Http.HttpContext! context) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetUserAgent(this Microsoft.AspNetCore.Http.HttpContext! context) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetUserAgent(this Microsoft.AspNetCore.Http.HttpRequest! request) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.IsAjaxRequest(this Microsoft.AspNetCore.Http.HttpRequest! request) -> bool
+static Tnzi.AspNetCore.Http.HttpContextExtensions.IsApiRequest(this Microsoft.AspNetCore.Http.HttpContext! context, string? prefix = null) -> bool
+static Tnzi.AspNetCore.Http.HttpContextExtensions.IsJsonContextType(this Microsoft.AspNetCore.Http.HttpRequest! request) -> bool
+static Tnzi.AspNetCore.Http.HttpContextExtensions.Params(this Microsoft.AspNetCore.Http.HttpRequest! request, string! key) -> string?
+static Tnzi.AspNetCore.Http.HttpExtensions.GetOrDefault(this Microsoft.AspNetCore.Http.IHeaderDictionary! headers, string! key) -> string?
+static Tnzi.AspNetCore.Http.HttpExtensions.IsSuccessStatusCode(this Microsoft.AspNetCore.Http.HttpResponse! response) -> bool
+static Tnzi.AspNetCore.Http.HttpExtensions.ReadAsStringAsync(this Microsoft.AspNetCore.Http.HttpRequest! request) -> System.Threading.Tasks.Task<string!>!
+static Tnzi.AspNetCore.Http.HttpExtensions.ReadAsStringAsync(this Microsoft.AspNetCore.Http.HttpResponse! response) -> System.Threading.Tasks.Task<string!>!
+static Tnzi.AspNetCore.Http.HttpExtensions.WriteBodyAsync(this Microsoft.AspNetCore.Http.HttpRequest! request, string! data) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Http.HttpRequest!>!
+static Tnzi.AspNetCore.Http.HttpExtensions.WriteBodyAsync(this Microsoft.AspNetCore.Http.HttpResponse! response, string! data) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Http.HttpResponse!>!
+static Tnzi.AspNetCore.Http.HttpRequestMessageExtensions.CreateNew(this System.Net.Http.HttpRequestMessage! request, string! data) -> System.Net.Http.HttpRequestMessage!
+static Tnzi.AspNetCore.Http.HttpResponseMessageExtensions.CreateNew(this System.Net.Http.HttpResponseMessage! response, string! data) -> System.Net.Http.HttpResponseMessage!
+static Tnzi.AspNetCore.Middleware.ExceptionRecord.operator !=(Tnzi.AspNetCore.Middleware.ExceptionRecord? left, Tnzi.AspNetCore.Middleware.ExceptionRecord? right) -> bool
+static Tnzi.AspNetCore.Middleware.ExceptionRecord.operator ==(Tnzi.AspNetCore.Middleware.ExceptionRecord? left, Tnzi.AspNetCore.Middleware.ExceptionRecord? right) -> bool
+static Tnzi.AspNetCore.Middleware.ExceptionStats.operator !=(Tnzi.AspNetCore.Middleware.ExceptionStats? left, Tnzi.AspNetCore.Middleware.ExceptionStats? right) -> bool
+static Tnzi.AspNetCore.Middleware.ExceptionStats.operator ==(Tnzi.AspNetCore.Middleware.ExceptionStats? left, Tnzi.AspNetCore.Middleware.ExceptionStats? right) -> bool
+static Tnzi.AspNetCore.Models.ApiResult.Error(string! message, int code = 500, string? errorCode = null, object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResult.FromResult(Tnzi.Results.Result! result) -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResult.Ok(string! message = "Success") -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResult<T>.Error(string! message, int code = 500, string? errorCode = null, object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResult<T>.FromResult(Tnzi.Results.Result<T>! result) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResult<T>.Ok(T data, string! message = "Success") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.BadRequest(string! message = "Bad Request", object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.BadRequest<T>(string! message = "Bad Request", object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.Forbidden(string! message = "Forbidden") -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.Forbidden<T>(string! message = "Forbidden") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.InternalError(string! message = "Internal server error") -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.InternalError<T>(string! message = "Internal server error") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.NotFound(string! message = "Resource not found") -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.NotFound<T>(string! message = "Resource not found") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.Unauthorized(string! message = "Unauthorized") -> Tnzi.AspNetCore.Models.ApiResult!
+static Tnzi.AspNetCore.Models.ApiResultExtensions.Unauthorized<T>(string! message = "Unauthorized") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+static Tnzi.AspNetCore.Mvc.MvcExtensions.Errors(this Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateDictionary! modelState) -> System.Collections.Generic.List<string!>!
+static Tnzi.AspNetCore.Mvc.MvcExtensions.FirstError(this Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateDictionary! modelState) -> string?
+static Tnzi.AspNetCore.Mvc.MvcExtensions.GetActionName(this Microsoft.AspNetCore.Mvc.ActionContext! context) -> string?
+static Tnzi.AspNetCore.Mvc.MvcExtensions.GetAreaName(this Microsoft.AspNetCore.Mvc.ActionContext! context) -> string?
+static Tnzi.AspNetCore.Mvc.MvcExtensions.GetControllerName(this Microsoft.AspNetCore.Mvc.ActionContext! context) -> string?
+static Tnzi.AspNetCore.Mvc.MvcExtensions.GetMd5Hash(this Microsoft.AspNetCore.Http.IFormFile! file) -> string!
+static Tnzi.AspNetCore.Mvc.MvcExtensions.GetValidationErrors(this Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateDictionary! modelState) -> System.Collections.Generic.Dictionary<string!, System.Collections.Generic.List<string!>!>!
+static Tnzi.AspNetCore.Mvc.MvcExtensions.IsController(this System.Reflection.TypeInfo! typeInfo, bool isAbstract = false) -> bool
+static Tnzi.AspNetCore.Mvc.MvcExtensions.IsController(this System.Type! type, bool isAbstract = false) -> bool
+static Tnzi.AspNetCore.Versioning.ApiVersionAttribute.Current.get -> Tnzi.AspNetCore.Versioning.ApiVersionAttribute!
+static Tnzi.TnziApp.CreateAsync<TStartupModule>(Microsoft.AspNetCore.Builder.WebApplicationBuilder! builder, System.Action<Tnzi.TnziOptions!>? configureOptions = null, System.Func<Microsoft.AspNetCore.Builder.WebApplication!, System.Threading.Tasks.Task!>? configureApp = null) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication!>!
+static Tnzi.TnziApp.CreateAsync<TStartupModule>(string![]! args) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication!>!
+static Tnzi.TnziApp.CreateAsync<TStartupModule>(string![]! args, System.Action<Microsoft.AspNetCore.Builder.WebApplicationBuilder!>? configureBuilder = null, System.Func<Microsoft.AspNetCore.Builder.WebApplication!, System.Threading.Tasks.Task!>? configureApp = null) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication!>!
+static Tnzi.TnziApp.CreateAsync<TStartupModule>(string![]! args, System.Action<Tnzi.TnziOptions!>? configureOptions = null, System.Action<Microsoft.AspNetCore.Builder.WebApplicationBuilder!>? configureBuilder = null, System.Func<Microsoft.AspNetCore.Builder.WebApplication!, System.Threading.Tasks.Task!>? configureApp = null) -> System.Threading.Tasks.Task<Microsoft.AspNetCore.Builder.WebApplication!>!
+static Tnzi.TnziApp.RunAsync<TStartupModule>(string![]! args) -> System.Threading.Tasks.Task!
+static Tnzi.TnziApp.RunAsync<TStartupModule>(string![]! args, System.Action<Tnzi.TnziOptions!>? configureOptions = null, System.Action<Microsoft.AspNetCore.Builder.WebApplicationBuilder!>? configureBuilder = null, System.Func<Microsoft.AspNetCore.Builder.WebApplication!, System.Threading.Tasks.Task!>? configureApp = null) -> System.Threading.Tasks.Task!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.ClearExceptions() -> Tnzi.AspNetCore.Models.ApiResult!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetAdminManifest(Tnzi.ITnziApplication! tnziApp, Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider! actionProvider) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminManifestDto!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetControllers(Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider! actionProvider) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.ControllerDiagnosticsResultDto!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetExceptionSummary(int minutes = 60) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.ExceptionSummaryDto!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetModuleHealth(Tnzi.ITnziApplication! tnziApp, Tnzi.Modules.ModuleHealthChecker! healthChecker) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Controllers.ModuleHealthReportDto!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetModules(Tnzi.ITnziApplication! tnziApp) -> Tnzi.AspNetCore.Models.ApiResult<System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto!>!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetRecentExceptions(int count = 20) -> Tnzi.AspNetCore.Models.ApiResult<System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.ExceptionEntryDto!>!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.GetFiles(string! level, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<System.Collections.Generic.List<Tnzi.Logging.Dtos.LogFileInfoDto!>!>!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.GetLevels(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<System.Collections.Generic.List<Tnzi.Logging.Dtos.LogLevelInfoDto!>!>!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.Search(string! keyword, string? level = null, System.DateTime? fromUtc = null, System.DateTime? toUtc = null, int maxResults = 200, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Logging.Dtos.LogSearchResultDto!>!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.Tail(string! level, string! file, int lines = 500, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Logging.Dtos.LogTailResultDto!>!>!
+virtual Tnzi.AspNetCore.Http.ClientHttpCrypto.DecryptResponse(System.Net.Http.HttpResponseMessage! response) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
+virtual Tnzi.AspNetCore.Http.ClientHttpCrypto.EncryptRequest(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<System.Net.Http.HttpRequestMessage!>!
+virtual Tnzi.AspNetCore.Middleware.ExceptionRecord.<Clone>$() -> Tnzi.AspNetCore.Middleware.ExceptionRecord!
+virtual Tnzi.AspNetCore.Middleware.ExceptionRecord.EqualityContract.get -> System.Type!
+virtual Tnzi.AspNetCore.Middleware.ExceptionRecord.Equals(Tnzi.AspNetCore.Middleware.ExceptionRecord? other) -> bool
+virtual Tnzi.AspNetCore.Middleware.ExceptionRecord.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Tnzi.AspNetCore.Middleware.ExceptionStats.<Clone>$() -> Tnzi.AspNetCore.Middleware.ExceptionStats!
+virtual Tnzi.AspNetCore.Middleware.ExceptionStats.EqualityContract.get -> System.Type!
+virtual Tnzi.AspNetCore.Middleware.ExceptionStats.Equals(Tnzi.AspNetCore.Middleware.ExceptionStats? other) -> bool
+virtual Tnzi.AspNetCore.Middleware.ExceptionStats.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Tnzi.AspNetCore.Middleware.Handlers.ExceptionHandlerBase.Priority.get -> int

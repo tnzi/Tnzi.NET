@@ -20,6 +20,19 @@ public class RedisOptionsValidator : OptionsValidatorBase<RedisOptions>
         {
             errors.Add("Redis.Connection cannot be null.");
         }
+
+        // 验证分布式锁选项
+        if (options.Lock != null)
+        {
+            if (options.Lock.DefaultExpirySeconds <= 0)
+            {
+                errors.Add("Redis.Lock.DefaultExpirySeconds must be greater than 0.");
+            }
+        }
+        else
+        {
+            errors.Add("Redis.Lock cannot be null.");
+        }
     }
 
     /// <summary>

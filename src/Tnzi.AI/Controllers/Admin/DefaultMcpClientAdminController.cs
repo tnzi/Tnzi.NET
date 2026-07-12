@@ -47,6 +47,7 @@ public class DefaultMcpClientAdminController : ApiAdminControllerBase
     /// 创建外部 MCP Server 注册
     /// </summary>
     [HttpPost("servers")]
+    [ApiAuthorize(PermissionName = "ai.mcp.create")]
     public virtual async Task<ApiResult<McpServerRegistrationDto>> Create([FromBody] CreateMcpServerRegistrationDto dto)
     {
         var result = await _registryService.CreateAsync(dto, HttpContext.RequestAborted);
@@ -57,6 +58,7 @@ public class DefaultMcpClientAdminController : ApiAdminControllerBase
     /// 更新外部 MCP Server 注册
     /// </summary>
     [HttpPut("servers/{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.mcp.update")]
     public virtual async Task<ApiResult<McpServerRegistrationDto>> Update(Guid id, [FromBody] UpdateMcpServerRegistrationDto dto)
     {
         var result = await _registryService.UpdateAsync(id, dto, HttpContext.RequestAborted);
@@ -67,6 +69,7 @@ public class DefaultMcpClientAdminController : ApiAdminControllerBase
     /// 软删除外部 MCP Server 注册
     /// </summary>
     [HttpDelete("servers/{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.mcp.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _registryService.DeleteAsync(id, HttpContext.RequestAborted);
@@ -77,6 +80,7 @@ public class DefaultMcpClientAdminController : ApiAdminControllerBase
     /// 测试外部 MCP Server 连接（轻量探针：校验 IsEnabled + URI 合法 + 凭证可解密）
     /// </summary>
     [HttpPost("servers/{id:guid}/test")]
+    [ApiAuthorize(PermissionName = "ai.mcp.execute")]
     public virtual async Task<ApiResult<McpServerTestResultDto>> TestConnection(Guid id)
     {
         var result = await _registryService.TestConnectionAsync(id, HttpContext.RequestAborted);

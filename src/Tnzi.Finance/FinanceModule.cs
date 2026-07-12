@@ -32,6 +32,11 @@ public class FinanceModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, FinancePermissions>();
+
         // 基建服务
         context.Services.AddScoped<IDocumentNumberService, DocumentNumberService>();
         context.Services.AddScoped<IExchangeRateService, ExchangeRateService>();
@@ -53,12 +58,18 @@ public class FinanceModule : TnziApplicationModule
 
         // 业务单据（P2b：五类单据 + 过账投影）
         context.Services.AddScoped<FinanceDocumentHelper>();
+        // 过账前钩子链：消费应用注册 IFinancePostingGuard 实现即可在过账/作废/冲销前否决（如审批门）
+        context.Services.AddScoped<PostingGuardRunner>();
         context.Services.AddScoped<IInvoiceService, InvoiceService>();
         context.Services.AddScoped<IBillService, BillService>();
         context.Services.AddScoped<IExpenseService, ExpenseService>();
         context.Services.AddScoped<ICreditMemoService, CreditMemoService>();
         context.Services.AddScoped<IPaymentEntryService, PaymentEntryService>();
         context.Services.AddScoped<ISettlementService, SettlementService>();
+
+        // P3a 银行域
+        context.Services.AddScoped<ITransferService, TransferService>();
+        context.Services.AddScoped<IReconciliationService, ReconciliationService>();
 
         // 报表
         context.Services.AddScoped<IFinancialReportService, FinancialReportService>();

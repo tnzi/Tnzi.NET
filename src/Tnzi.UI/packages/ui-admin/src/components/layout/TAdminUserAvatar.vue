@@ -50,6 +50,8 @@ interface Props {
   presence?: UserPresenceStatus | null
   /** Called when the user picks a new presence status from the dropdown. */
   onSetPresence?: (status: UserPresenceStatus) => void | Promise<void>
+  /** Deployment toggle — false drops "Invisible" from the status submenu. */
+  allowInvisible?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -63,6 +65,7 @@ const props = withDefaults(defineProps<Props>(), {
   onSignIn: undefined,
   presence: null,
   onSetPresence: undefined,
+  allowInvisible: true,
 })
 
 const dialog = useDialog()
@@ -77,6 +80,13 @@ const PRESENCE_OPTIONS: { key: UserPresenceStatus; labelKey: string; fallback: s
   { key: UserPresenceStatus.Busy, labelKey: 'admin.user.presence.busy', fallback: 'Busy' },
   { key: UserPresenceStatus.Invisible, labelKey: 'admin.user.presence.invisible', fallback: 'Invisible' },
 ]
+
+// Drop "Invisible" when the deployment disables it (matches TPresencePicker).
+const presenceOptions = computed(() =>
+  props.allowInvisible
+    ? PRESENCE_OPTIONS
+    : PRESENCE_OPTIONS.filter((o) => o.key !== UserPresenceStatus.Invisible),
+)
 
 const currentPresenceLabel = computed(() => {
   const o = PRESENCE_OPTIONS.find((x) => x.key === props.presence)
@@ -100,7 +110,7 @@ const options = computed<DropdownOption[]>(() => {
       key: 'status',
       label: `${t('admin.user.status', 'Status')} · ${currentPresenceLabel.value}`,
       icon: () => h(TPresenceDot, { status: props.presence, size: 10 }),
-      children: PRESENCE_OPTIONS.map((o) => ({
+      children: presenceOptions.value.map((o) => ({
         key: `presence:${o.key}`,
         label: o.key === props.presence ? `${t(o.labelKey, o.fallback)} ✓` : t(o.labelKey, o.fallback),
         icon: () => h(TPresenceDot, { status: o.key, size: 10 }),
@@ -145,6 +155,12 @@ function confirmLogout(): void {
     content: t('admin.user.logoutConfirm', 'Are you sure you want to log out?'),
     positiveText: t('admin.common.confirm', 'Confirm'),
     negativeText: t('admin.common.cancel', 'Cancel'),
+    // Force the confirm button onto the theme's PRIMARY colour. A naive
+    // `dialog.info` otherwise colours its positive button with the `info`
+    // semantic (a fixed blue, `palettes.info` — independent of `primaryColor`),
+    // so the button stayed blue no matter what primary the admin themed. The
+    // info icon stays as the neutral question indicator.
+    positiveButtonProps: { type: 'primary' },
     onPositiveClick: () => {
       void props.onLogout?.()
     },

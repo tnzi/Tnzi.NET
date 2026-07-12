@@ -105,7 +105,7 @@
               </NForm>
               <template #savebar>
                 <NButton size="small" :disabled="!isDirty" @click="resetEdits">{{ t('detail.reset') }}</NButton>
-                <NButton size="small" type="primary" :loading="saving" :disabled="!isDirty" @click="handleSave">{{ t('detail.save') }}</NButton>
+                <NButton v-if="can('ai.agent.update')" size="small" type="primary" :loading="saving" :disabled="!isDirty" @click="handleSave">{{ t('detail.save') }}</NButton>
               </template>
             </TDetailSection>
 
@@ -257,7 +257,7 @@
                         >
                           {{ expandedVersion === v.id ? t('detail.versions.hideConfig') : t('detail.versions.viewConfig') }}
                         </NButton>
-                        <NPopconfirm @positive-click="() => handleRollback(v.version)">
+                        <NPopconfirm v-if="can('ai.agent.update')" @positive-click="() => handleRollback(v.version)">
                           <template #trigger>
                             <NButton
                               size="small"
@@ -309,6 +309,7 @@
               </NForm>
               <NSpace size="small">
                 <NButton
+                  v-if="can('ai.agent.update')"
                   size="small"
                   type="primary"
                   :loading="abStarting"
@@ -317,7 +318,7 @@
                 >
                   {{ t('detail.abtest.start') }}
                 </NButton>
-                <NPopconfirm @positive-click="handleStopAbTest">
+                <NPopconfirm v-if="can('ai.agent.update')" @positive-click="handleStopAbTest">
                   <template #trigger>
                     <NButton size="small" :loading="abStopping">
                       {{ t('detail.abtest.stop') }}
@@ -382,7 +383,7 @@
               body-fill
             >
               <template #actions>
-                <NButton size="small" type="primary" @click="openMemoryCreate">
+                <NButton v-if="can('ai.agent.update')" size="small" type="primary" @click="openMemoryCreate">
                   <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
                   {{ t('detail.memory.add') }}
                 </NButton>
@@ -474,6 +475,7 @@ import AgentResourcePicker, { type ResourcePickerItem } from './sections/AgentRe
 import AgentPersonaPanel from './sections/AgentPersonaPanel.vue'
 import { useDetail, type DetailSection } from '../../../headless/useDetail'
 import { useTabTitle } from '../../../headless/useTabTitle'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { makePageTranslator } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -486,6 +488,7 @@ import type {
 const route = useRoute()
 const bridge = createAiBridge({ client: useAdminClient() })
 const t = makePageTranslator('ai.agents')
+const { can } = usePermissionGuard()
 
 // ui-admin shells don't always wrap with NMessageProvider, so `useMessage()`
 // may throw — guard and fall back to the inline status panels each section
@@ -675,6 +678,7 @@ const modelSelectOptions = computed(() => modelList.value.map((m) => ({ label: m
 // updated in place on each assign/remove) joined against the loaded catalogs.
 
 async function persistResource(patch: UpdateAgentDto, okMsg: string): Promise<void> {
+  if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id) return
   try {
@@ -1004,17 +1008,19 @@ const memoryColumns = computed<DataTableColumns<AgentMemoryDto>>(() => [
     title: t('detail.memory.actions'),
     width: 130,
     render: (row) =>
-      h('div', { class: 'flex items-center gap-6px' }, [
-        h(NButton, { size: 'tiny', tertiary: true, onClick: () => openMemoryEdit(row) }, { default: () => t('detail.memory.edit') }),
-        h(
-          NPopconfirm,
-          { onPositiveClick: () => removeMemory(row) },
-          {
-            trigger: () => h(NButton, { size: 'tiny', type: 'error', ghost: true }, { default: () => t('detail.memory.delete') }),
-            default: () => t('detail.memory.deleteConfirm'),
-          },
-        ),
-      ]),
+      can('ai.agent.update')
+        ? h('div', { class: 'flex items-center gap-6px' }, [
+            h(NButton, { size: 'tiny', tertiary: true, onClick: () => openMemoryEdit(row) }, { default: () => t('detail.memory.edit') }),
+            h(
+              NPopconfirm,
+              { onPositiveClick: () => removeMemory(row) },
+              {
+                trigger: () => h(NButton, { size: 'tiny', type: 'error', ghost: true }, { default: () => t('detail.memory.delete') }),
+                default: () => t('detail.memory.deleteConfirm'),
+              },
+            ),
+          ])
+        : null,
   },
 ])
 
@@ -1048,6 +1054,7 @@ function openMemoryEdit(row: AgentMemoryDto): void {
 }
 
 async function saveMemory(): Promise<void> {
+  if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id || !memoryModal.content.trim()) return
   memorySaving.value = true
@@ -1075,6 +1082,7 @@ async function saveMemory(): Promise<void> {
 }
 
 async function removeMemory(row: AgentMemoryDto): Promise<void> {
+  if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id) return
   try {
@@ -1121,6 +1129,7 @@ function formatSnapshot(snapshot: string | null | undefined): string {
 }
 
 async function handleRollback(version: number): Promise<void> {
+  if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id) return
   rollingBackTo.value = version
@@ -1141,6 +1150,7 @@ async function handleRollback(version: number): Promise<void> {
 // ---- A/B test -------------------------------------------------------------
 
 async function handleStartAbTest(): Promise<void> {
+  if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id || !abTestValid.value) return
   abStarting.value = true
@@ -1165,6 +1175,7 @@ async function handleStartAbTest(): Promise<void> {
 }
 
 async function handleStopAbTest(): Promise<void> {
+  if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id) return
   abStopping.value = true
@@ -1205,6 +1216,7 @@ function resetEdits(): void {
 }
 
 async function handleSave(): Promise<void> {
+  if (!can('ai.agent.update')) return
   if (!agent.value || !isDirty.value) return
   saving.value = true
   saveStatus.value = null

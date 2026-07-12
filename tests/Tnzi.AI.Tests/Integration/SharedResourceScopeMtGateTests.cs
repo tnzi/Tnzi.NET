@@ -167,7 +167,7 @@ public class SharedResourceScopeMtGateTests : IDisposable
             new Agent { Name = "system-agent", Provider = "system-provider", TenantId = null },
             new Agent { Name = "tenant-b-agent", Provider = "tenant-b-provider", TenantId = _tenantB });
 
-        ctx.SaveChanges();
+        ctx.SaveChangesAsync().GetAwaiter().GetResult();
     }
 
     /// <summary>

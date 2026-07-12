@@ -36,6 +36,7 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     /// 创建子 Agent 类型定义
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.agent.create")]
     public virtual async Task<ApiResult<SubAgentTypeDto>> Create([FromBody] SubAgentTypeInputDto input, CancellationToken ct = default)
     {
         Check.NotNull(input);
@@ -51,6 +52,7 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     /// 更新子 Agent 类型定义
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<SubAgentTypeDto>> Update(Guid id, [FromBody] SubAgentTypeInputDto input, CancellationToken ct = default)
     {
         Check.NotNull(input);
@@ -80,6 +82,7 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     /// 删除子 Agent 类型定义
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.agent.delete")]
     public virtual async Task<ApiResult> Delete(Guid id, CancellationToken ct = default)
     {
         var entity = await Repository.GetAsync(id, ct);

@@ -28,14 +28,44 @@ import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
+import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import { menuFormSchema, type MenuRow } from './menu-config'
 
 const title = 'title'
-const bridge = createSystemBridge({ client: useAdminClient() })
+const client = useAdminClient()
+const bridge = createSystemBridge({ client })
+const authBridge = createAuthorizationBridge({ client })
 const t = makePageTranslator('system.menus')
+
+// Permission catalogue for the `menu-permission` select - the old free-text
+// input accepted codes the backend had never heard of (no referential
+// integrity). Loaded best-effort: on failure the select still allows typing
+// via `tag` so the page never blocks on the catalogue.
+const permissionOptions = ref<Array<{ label: string; value: string }>>([])
+
+async function loadPermissionCatalogue(): Promise<void> {
+  try {
+    const mods = await authBridge.functionModules.getAll()
+    const lists = await Promise.all(
+      mods.map(async (m) => {
+        try {
+          return await authBridge.permissions.getByModule(m.id)
+        } catch {
+          return []
+        }
+      }),
+    )
+    permissionOptions.value = lists
+      .flat()
+      .map((f) => ({ label: `${f.name} (${f.code})`, value: f.code }))
+      .sort((a, b) => a.value.localeCompare(b.value))
+  } catch {
+    permissionOptions.value = []
+  }
+}
 
 const allMenus = ref<MenuRow[]>([])
 const menuById = computed(() => {
@@ -101,6 +131,15 @@ function typeLabel(v?: string): string {
 const columns: ColumnDef<MenuRow>[] = [
   { key: 'name', title: 'columns.name', minWidth: 150 },
   {
+    key: 'menuKey',
+    title: 'columns.menuKey',
+    minWidth: 150,
+    render: (row) =>
+      row.menuKey
+        ? h('code', { class: 'text-12px' }, row.menuKey)
+        : h('span', { class: 'text-muted' }, '—'),
+  },
+  {
     key: 'icon',
     title: 'columns.icon',
     width: 80,
@@ -152,6 +191,7 @@ const columns: ColumnDef<MenuRow>[] = [
 
 const crud = useCrudPage<MenuRow, string>({
   pageId: 'system.menus',
+  permission: 'system.menu',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (query) => bridge.menus.fetch(query) as never,
@@ -173,14 +213,23 @@ const crud = useCrudPage<MenuRow, string>({
 
 const rowActions: RowAction<MenuRow>[] = [editAction(crud), deleteAction(crud)]
 
-// Custom field renderer for the schema's `menu-parent` field: a filterable +
-// clearable parent picker built from the runtime menu tree (the static schema
-// `select` can't carry the dynamic, indented parent options).
+// Custom field renderers: `menu-parent` = filterable parent picker from the
+// runtime menu tree; `menu-permission` = filterable select over the backend
+// permission catalogue (referential integrity for the merge overlay).
 const fieldRenderers = {
   'menu-parent': selectRenderer(() => parentOptions.value, { placeholder: t('form.parentIdPlaceholder') }),
+  // `tag` keeps the field editable when the catalogue endpoint is not
+  // readable by the current operator (it sits behind the Technical
+  // authorization.functionModule.view code, while this page is Business).
+  'menu-permission': selectRenderer(() => permissionOptions.value, {
+    placeholder: t('form.permissionPlaceholder'),
+    clearable: true,
+    tag: true,
+  }),
 }
 
 onMounted(() => {
   void loadAllMenus()
+  void loadPermissionCatalogue()
 })
 </script>

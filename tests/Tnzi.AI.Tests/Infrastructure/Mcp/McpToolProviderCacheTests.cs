@@ -162,7 +162,7 @@ public class McpToolProviderCacheTests
         using var evaluator = new ConfiguredToolPermissionEvaluator(monitor);
 
         var provider = new McpToolProvider(
-            _options.Object,
+            new StaticOptionsMonitor<AIOptions>(_options.Object.Value),
             new OptionsBackedMcpServerCatalog(_options.Object),
             _clientFactory.Object,
             _loggerFactory.Object,
@@ -202,7 +202,7 @@ public class McpToolProviderCacheTests
             Mcp = new McpOptions { Enabled = true, ToolCacheSeconds = 300, Servers = [] }
         };
         _options.Setup(x => x.Value).Returns(aiOptions);
-        return new McpToolProvider(_options.Object, new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _loggerFactory.Object, _logger.Object);
+        return new McpToolProvider(new StaticOptionsMonitor<AIOptions>(_options.Object.Value), new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _loggerFactory.Object, _logger.Object);
     }
 
     private (McpToolProvider provider, Mock<IMcpClientAdapter> adapter1, Mock<IMcpClientAdapter> adapter2) SetupTwoServers()
@@ -226,7 +226,7 @@ public class McpToolProviderCacheTests
                 It.Is<McpServerConfig>(s => s.Name == "server2"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mockAdapter2.Object);
 
-        var provider = new McpToolProvider(_options.Object, new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _loggerFactory.Object, _logger.Object);
+        var provider = new McpToolProvider(new StaticOptionsMonitor<AIOptions>(_options.Object.Value), new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _loggerFactory.Object, _logger.Object);
         return (provider, mockAdapter1, mockAdapter2);
     }
 

@@ -50,7 +50,7 @@ public class ToolResolverTests
     {
         toolRegistry ??= CreateEmptyRegistry();
         mcpToolProvider ??= CreateEmptyMcpProvider();
-        openApiToolGenerator ??= CreateOpenApiGenerator(Microsoft.Extensions.Options.Options.Create(new AIOptions()));
+        openApiToolGenerator ??= CreateOpenApiGenerator(new StaticOptionsMonitor<AIOptions>(new AIOptions()));
         options ??= CreateOptionsMonitor();
         serviceProvider ??= Mock.Of<IServiceProvider>();
 
@@ -87,7 +87,7 @@ public class ToolResolverTests
         return mock.Object;
     }
 
-    private static OpenApiToolGenerator CreateOpenApiGenerator(IOptions<AIOptions> options)
+    private static OpenApiToolGenerator CreateOpenApiGenerator(IOptionsMonitor<AIOptions> options)
     {
         var httpClientFactory = new Mock<IHttpClientFactory>();
         var logger = new Mock<ILogger<OpenApiToolGenerator>>().Object;
@@ -505,7 +505,7 @@ public class ToolResolverTests
 
         var generatorMock = new Mock<OpenApiToolGenerator>(
             Mock.Of<IHttpClientFactory>(),
-            Microsoft.Extensions.Options.Options.Create(new AIOptions
+            new StaticOptionsMonitor<AIOptions>(new AIOptions
             {
                 OpenApiTools = new OpenApiToolsOptions { Enabled = true }
             }),
@@ -544,7 +544,7 @@ public class ToolResolverTests
 
         var generatorMock = new Mock<OpenApiToolGenerator>(
             Mock.Of<IHttpClientFactory>(),
-            Microsoft.Extensions.Options.Options.Create(new AIOptions
+            new StaticOptionsMonitor<AIOptions>(new AIOptions
             {
                 OpenApiTools = new OpenApiToolsOptions { Enabled = true }
             }),
@@ -576,7 +576,7 @@ public class ToolResolverTests
         var callCount = 0;
         var generatorMock = new Mock<OpenApiToolGenerator>(
             Mock.Of<IHttpClientFactory>(),
-            Microsoft.Extensions.Options.Options.Create(new AIOptions
+            new StaticOptionsMonitor<AIOptions>(new AIOptions
             {
                 OpenApiTools = new OpenApiToolsOptions { Enabled = true }
             }),

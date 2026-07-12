@@ -118,7 +118,7 @@ public class OpenApiToolGeneratorTests
 
         return new OpenApiToolGenerator(
             sp.GetRequiredService<IHttpClientFactory>(),
-            sp.GetRequiredService<IOptions<AIOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<AIOptions>>(),
             Mock.Of<ILogger<OpenApiToolGenerator>>());
     }
 
@@ -420,7 +420,7 @@ public class OpenApiToolGeneratorTests
 
         var generator = new OpenApiToolGenerator(
             sp.GetRequiredService<IHttpClientFactory>(),
-            sp.GetRequiredService<IOptions<AIOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<AIOptions>>(),
             Mock.Of<ILogger<OpenApiToolGenerator>>());
 
         var tools = await generator.GenerateToolsAsync();
@@ -440,7 +440,7 @@ public class OpenApiToolGeneratorTests
 
         var generator = new OpenApiToolGenerator(
             sp.GetRequiredService<IHttpClientFactory>(),
-            sp.GetRequiredService<IOptions<AIOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<AIOptions>>(),
             Mock.Of<ILogger<OpenApiToolGenerator>>());
 
         var tools = await generator.GenerateToolsAsync();
@@ -458,7 +458,7 @@ public class OpenApiToolGeneratorTests
 
         var generator = new OpenApiToolGenerator(
             sp.GetRequiredService<IHttpClientFactory>(),
-            sp.GetRequiredService<IOptions<AIOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<AIOptions>>(),
             Mock.Of<ILogger<OpenApiToolGenerator>>());
 
         var tools = await generator.GenerateToolsAsync();

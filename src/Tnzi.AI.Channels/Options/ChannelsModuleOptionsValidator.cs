@@ -19,9 +19,6 @@ public class ChannelsModuleOptionsValidator : OptionsValidatorBase<ChannelsModul
         if (options.MaxConcurrency < 1 || options.MaxConcurrency > 100)
             errors.Add("MaxConcurrency must be between 1 and 100");
 
-        if (options.StreamingThrottleMs < 100)
-            errors.Add("StreamingThrottleMs must be at least 100ms");
-
         // FileChannelThreadStore keys mappings by channel:chatId(:topicId) with no TenantId
         // component, so under multi-tenancy every tenant would share the same JSON file and
         // cross-contaminate thread mappings. Require the Database store (its unique index gains

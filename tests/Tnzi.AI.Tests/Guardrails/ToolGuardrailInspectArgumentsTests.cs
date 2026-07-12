@@ -11,12 +11,12 @@ public class ToolGuardrailInspectArgumentsTests
     // Helpers
     // -----------------------------------------------------------------------
 
-    private static IOptions<AIOptions> CreateOptions(bool enabled = true, bool inspectToolArgs = false)
+    private static IOptionsMonitor<AIOptions> CreateOptions(bool enabled = true, bool inspectToolArgs = false)
     {
         var opts = new AIOptions();
         opts.Guardrails.Enabled = enabled;
         opts.Guardrails.InspectToolArguments = inspectToolArgs;
-        return Microsoft.Extensions.Options.Options.Create(opts);
+        return new StaticOptionsMonitor<AIOptions>(opts);
     }
 
     private static ToolExecutionContext CreateToolContext(string toolName = "write_file",
@@ -31,7 +31,7 @@ public class ToolGuardrailInspectArgumentsTests
 
     private static ToolGuardrailMiddleware CreateMiddleware(
         IEnumerable<IGuardrailProvider> providers,
-        IOptions<AIOptions> options)
+        IOptionsMonitor<AIOptions> options)
         => new(providers, options, NullLogger<ToolGuardrailMiddleware>.Instance);
 
     // -----------------------------------------------------------------------

@@ -31,8 +31,17 @@ public sealed class SettingFieldDefinition
     public double? Min { get; init; }
     public double? Max { get; init; }
 
+    /// <summary>String/Text 值的正则约束（.NET 语法，整值匹配）。前后端同源校验。</summary>
+    public string? Pattern { get; init; }
+
     /// <summary>Select 类型的候选值。</summary>
     public IReadOnlyList<string>? Options { get; init; }
+
+    /// <summary>
+    /// 组内二级分节标签（纯展示层）。前端把同一 Subsection 的字段聚合成可折叠小节；
+    /// null 的字段渲染在小节之前的默认区。不参与存储/校验/热链路。
+    /// </summary>
+    public string? Subsection { get; init; }
 
     /// <summary>编译期默认值访问器（如 () => new BudgetOptions().CacheTtlSeconds.ToString()）。
     /// 仅当 appsettings 未配置该键时作为 defaultValue 兜底。</summary>

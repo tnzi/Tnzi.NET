@@ -54,6 +54,7 @@ public class DefaultLocalizationAdminController : ApiAdminControllerBase
     /// Clear all tracked missing translations
     /// </summary>
     [HttpDelete("missing")]
+    [ApiAuthorize(PermissionName = "system.localization.delete")]
     public virtual async Task<ApiResult> ClearMissing()
     {
         await MissingTranslationTracker.ClearAsync();

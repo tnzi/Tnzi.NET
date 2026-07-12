@@ -51,6 +51,7 @@ public class DefaultSessionAdminController : ApiAdminControllerBase
     /// <param name="sessionId">会话ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{sessionId}/revoke")]
+    [ApiAuthorize(PermissionName = "session.delete")]
     public virtual async Task<ApiResult> RevokeSession(Guid sessionId)
     {
         var result = await SessionService.RevokeSessionAsync(sessionId);
@@ -64,6 +65,7 @@ public class DefaultSessionAdminController : ApiAdminControllerBase
     /// <param name="excludeSessionId">排除的会话ID（可选）</param>
     /// <returns>操作结果</returns>
     [HttpPost("user/{userId}/revoke-all")]
+    [ApiAuthorize(PermissionName = "session.delete")]
     public virtual async Task<ApiResult> RevokeAllSessions(Guid userId, [FromBody] Guid? excludeSessionId = null)
     {
         var result = await SessionService.RevokeAllSessionsAsync(userId, excludeSessionId);
@@ -76,6 +78,7 @@ public class DefaultSessionAdminController : ApiAdminControllerBase
     /// <param name="sessionId">会话ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{sessionId}/update-activity")]
+    [ApiAuthorize(PermissionName = "session.update")]
     public virtual async Task<ApiResult> UpdateActivityTime(Guid sessionId)
     {
         var result = await SessionService.UpdateActivityTimeAsync(sessionId);
@@ -88,6 +91,7 @@ public class DefaultSessionAdminController : ApiAdminControllerBase
     /// <param name="inactiveMinutes">不活跃时间阈值（分钟，默认30分钟）</param>
     /// <returns>清理的会话数量</returns>
     [HttpPost("clean-expired")]
+    [ApiAuthorize(PermissionName = "session.delete")]
     public virtual async Task<ApiResult<int>> CleanExpired([FromQuery] int inactiveMinutes = 30)
     {
         var result = await SessionService.CleanExpiredSessionsAsync(TimeSpan.FromMinutes(inactiveMinutes));

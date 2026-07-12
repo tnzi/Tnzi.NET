@@ -65,6 +65,12 @@ public class ChatMessageDto
     public string? FileId { get; set; }
     public string? FileName { get; set; }
     public long? FileSize { get; set; }
+    /// <summary>富系统通知的可选标题（普通消息为 null）。</summary>
+    public string? Title { get; set; }
+    /// <summary>富系统通知的可选点击跳转链接（普通消息为 null）。</summary>
+    public string? LinkUrl { get; set; }
+    /// <summary>富系统通知的可选分类标签（普通消息为 null）。</summary>
+    public string? Category { get; set; }
     public DateTime SentAt { get; set; }
 }
 
@@ -126,6 +132,28 @@ public class BroadcastDto
 
     /// <summary>When true, deliver to every user (system-wide notification); RoleIds/UserIds are ignored.</summary>
     public bool All { get; set; }
+}
+
+/// <summary>
+/// 富系统通知载荷，供业务模块经 <c>IBroadcastService.NotifyUsersAsync</c>/<c>NotifyRoleAsync</c> 编程发送。
+/// 仅 <see cref="Content"/> 必填；其余可选，用于渲染标题、点击跳转与分类，并为审计记录来源。
+/// </summary>
+public class ChatNotification
+{
+    /// <summary>通知正文（必填）。</summary>
+    public string Content { get; set; } = null!;
+
+    /// <summary>可选标题（渲染为通知卡片标题栏）。</summary>
+    public string? Title { get; set; }
+
+    /// <summary>可选点击跳转链接（call-to-action，如订单详情页 URL）。</summary>
+    public string? LinkUrl { get; set; }
+
+    /// <summary>可选分类标签（如 "order" / "billing"）。</summary>
+    public string? Category { get; set; }
+
+    /// <summary>可选来源标识，写入广播审计日志（如 "OrderModule" / "order.shipped"）。</summary>
+    public string? Source { get; set; }
 }
 
 public class ChatContactDto
@@ -199,8 +227,23 @@ public class ChatClientConfigDto
     /// <summary>是否启用在线状态展示。</summary>
     public bool EnablePresence { get; set; }
 
-    /// <summary>新消息提示音默认开关。</summary>
+    /// <summary>是否允许用户设置"隐身"状态（关闭后前端隐藏隐身选项）。</summary>
+    public bool AllowInvisible { get; set; }
+
+    /// <summary>消息提示音总开关。</summary>
     public bool EnableMessageSound { get; set; }
+
+    /// <summary>通知音效（窗口关闭/非当前会话收到消息时播放）。</summary>
+    public ChatSoundEffect NotificationSound { get; set; }
+
+    /// <summary>会话内音效（当前会话收发消息时播放）。</summary>
+    public ChatSoundEffect MessageSound { get; set; }
+
+    /// <summary>新消息且窗口关闭时启动器图标的提醒动效。</summary>
+    public ChatNewMessageEffect NewMessageEffect { get; set; }
+
+    /// <summary>新消息且标签页未聚焦时是否闪烁标签页标题。</summary>
+    public bool FlashTitleOnMessage { get; set; }
 
     /// <summary>是否允许发送图片/文件消息。</summary>
     public bool EnableFileMessages { get; set; }

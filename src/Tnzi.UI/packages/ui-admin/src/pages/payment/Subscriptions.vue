@@ -32,6 +32,7 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -43,6 +44,7 @@ import type { SubscriptionDto } from '@tnzi/core/services/payment'
 
 const t = makePageTranslator('payment.subscriptions')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const bridge = createPaymentBridge({ client: useAdminClient() })
 
@@ -76,7 +78,7 @@ const rowActions: RowAction<SubscriptionDto>[] = [
     label: 'cancelAtPeriodEnd',
     type: 'warning',
     icon: 'mdi:calendar-remove-outline',
-    show: (row) => !TERMINAL.has(String(row.status ?? '')),
+    show: (row) => can('payment.subscription.update') && !TERMINAL.has(String(row.status ?? '')),
     confirm: 'confirmCancelPrompt',
     onClick: (row) => void cancelAtPeriodEnd(row.id),
   },

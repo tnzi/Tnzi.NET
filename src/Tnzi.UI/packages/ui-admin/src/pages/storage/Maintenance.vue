@@ -16,7 +16,7 @@
         <template #icon><TSvgIcon icon="mdi:refresh" :size="16" /></template>
         {{ t('actions.refresh') }}
       </NButton>
-      <NPopconfirm @positive-click="runCleanup">
+      <NPopconfirm v-if="can('storage.file.delete')" @positive-click="runCleanup">
         <template #trigger>
           <NButton size="small" type="error" ghost :loading="cleaning">
             <template #icon><TSvgIcon icon="mdi:broom" :size="16" /></template>
@@ -57,6 +57,7 @@ import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { buildTemporaryColumns } from './maintenance-config'
@@ -66,6 +67,7 @@ import type { FileRecordDto } from '@tnzi/core/services/storage'
 const t = makePageTranslator('storage.maintenance')
 const message = useSafeMessage()
 const bridge = createStorageBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 const olderThanHours = ref(24)
 const loading = ref(false)
@@ -91,6 +93,7 @@ async function loadTemporary(): Promise<void> {
 }
 
 async function runCleanup(): Promise<void> {
+  if (!can('storage.file.delete')) return
   cleaning.value = true
   try {
     const count = await bridge.cleanup.trigger(olderThanHours.value ?? undefined)

@@ -17,8 +17,61 @@ public class ChatConfigServiceTests : Integration.IntegrationTestBase
         r.Data.MaxGroupMembers.ShouldBe(200);
         r.Data.GroupAvatarMemberCount.ShouldBe(9);
         r.Data.EnablePresence.ShouldBeTrue();
+        r.Data.AllowInvisible.ShouldBeTrue();
         r.Data.EnableMessageSound.ShouldBeTrue();
+        r.Data.NotificationSound.ShouldBe(ChatSoundEffect.Chime);
+        r.Data.MessageSound.ShouldBe(ChatSoundEffect.Pop);
+        r.Data.NewMessageEffect.ShouldBe(ChatNewMessageEffect.Shake);
+        r.Data.FlashTitleOnMessage.ShouldBeTrue();
         r.Data.EnableFileMessages.ShouldBeTrue();
+    }
+}
+
+/// <summary>AllowInvisible=false 时客户端配置如实投影（前端据此隐藏隐身选项）。</summary>
+public class ChatInvisibleDisabledConfigTests : Integration.IntegrationTestBase
+{
+    private IChatConfigService Config => ServiceProvider.GetRequiredService<IChatConfigService>();
+
+    protected override void ConfigureChatOptions(ChatOptions options) => options.AllowInvisible = false;
+
+    [Fact]
+    public void GetClientConfig_Should_Report_Invisible_Disabled()
+    {
+        var r = Config.GetClientConfig();
+        r.Succeeded.ShouldBeTrue(r.Message);
+        r.Data!.AllowInvisible.ShouldBeFalse();
+    }
+}
+
+/// <summary>音效选择如实投影到客户端配置（前端据此选择 WebAudio 合成预设）。</summary>
+public class ChatSoundConfigTests : Integration.IntegrationTestBase
+{
+    private IChatConfigService Config => ServiceProvider.GetRequiredService<IChatConfigService>();
+
+    protected override void ConfigureChatOptions(ChatOptions options)
+    {
+        options.NotificationSound = ChatSoundEffect.Bell;
+        options.MessageSound = ChatSoundEffect.None;
+        options.NewMessageEffect = ChatNewMessageEffect.Pulse;
+        options.FlashTitleOnMessage = false;
+    }
+
+    [Fact]
+    public void GetClientConfig_Should_Project_Selected_Sounds()
+    {
+        var r = Config.GetClientConfig();
+        r.Succeeded.ShouldBeTrue(r.Message);
+        r.Data!.NotificationSound.ShouldBe(ChatSoundEffect.Bell);
+        r.Data.MessageSound.ShouldBe(ChatSoundEffect.None);
+    }
+
+    [Fact]
+    public void GetClientConfig_Should_Project_Attention_Effects()
+    {
+        var r = Config.GetClientConfig();
+        r.Succeeded.ShouldBeTrue(r.Message);
+        r.Data!.NewMessageEffect.ShouldBe(ChatNewMessageEffect.Pulse);
+        r.Data.FlashTitleOnMessage.ShouldBeFalse();
     }
 }
 

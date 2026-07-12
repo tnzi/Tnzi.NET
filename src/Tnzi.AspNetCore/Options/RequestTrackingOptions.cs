@@ -7,7 +7,7 @@ namespace Tnzi.AspNetCore.Options;
 [ConfigSection("AspNetCore:RequestTracking")]
 [RuntimeSettingGroup(Key = "web-observability", Module = "Web", DisplayName = "Request Observability",
     I18nKey = "admin.modules.system.settings.groups.webObservability",
-    Icon = "mdi:chart-timeline-variant", Order = 700)]
+    Icon = "mdi:chart-timeline-variant", Order = 700, PermissionGroup = "system")]
 public class RequestTrackingOptions
 {
     /// <summary>
@@ -20,6 +20,9 @@ public class RequestTrackingOptions
     /// <summary>
     /// 日志级别（Debug, Information, Warning, Error）
     /// </summary>
+    [RuntimeSetting(Label = "Request Log Level", I18n = "admin.modules.system.settings.fields.requestTrackingLogLevel",
+        Type = SettingFieldType.Select,
+        Description = "Log level used when writing request tracking entries. Slow requests are automatically escalated to Warning.")]
     public LogLevel LogLevel { get; set; } = LogLevel.Information;
 
     /// <summary>

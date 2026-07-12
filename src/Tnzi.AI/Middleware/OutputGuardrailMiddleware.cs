@@ -8,7 +8,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
 {
     private readonly GuardrailRunner _guardrailRunner;
     private readonly IEnumerable<IOutputGuardrail> _outputGuardrails;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IEventBus? _eventBus;
     private readonly ILogger<OutputGuardrailMiddleware> _logger;
 
@@ -17,7 +17,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     public OutputGuardrailMiddleware(
         GuardrailRunner guardrailRunner,
         IEnumerable<IOutputGuardrail> outputGuardrails,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILogger<OutputGuardrailMiddleware> logger,
         IEventBus? eventBus = null)
     {
@@ -33,7 +33,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
         var result = await next(context, cancellationToken);
 
         // Guardrails 未启用时跳过检查
-        if (!_options.Value.Guardrails.Enabled)
+        if (!_options.CurrentValue.Guardrails.Enabled)
         {
             return result;
         }
@@ -90,7 +90,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var guardrailOptions = _options.Value.Guardrails;
+        var guardrailOptions = _options.CurrentValue.Guardrails;
         var hasOutputGuardrails = _outputGuardrails.Any();
 
         // 无需缓冲的情况：Guardrails 未启用、无输出 guardrail 注册、或缓冲大小为 0
@@ -142,7 +142,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                 pendingChunks.Clear();
 
                 // 保留尾部重叠区域用于跨窗口检测（如关键词跨越窗口边界）
-                var overlapSize = _options.Value.Guardrails.StreamingOverlapSize;
+                var overlapSize = _options.CurrentValue.Guardrails.StreamingOverlapSize;
                 if (buffer.Length > overlapSize)
                 {
                     var overlap = buffer.ToString(buffer.Length - overlapSize, overlapSize);

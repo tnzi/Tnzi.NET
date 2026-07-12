@@ -9,7 +9,7 @@
     :detail-title="detailTitle"
   >
     <template #primary>
-      <NButton type="primary" tertiary size="small" @click="openCreate">
+      <NButton v-if="can('finance.document.create')" type="primary" tertiary size="small" @click="openCreate">
         <template #icon>
           <TSvgIcon icon="mdi:plus" :size="16" />
         </template>
@@ -25,6 +25,7 @@
           <NDescriptionsItem :label="t('columns.docDate')">{{ formatDateOnly(viewed.docDate, { utc: true }) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.party')">{{ viewed.vendorName ?? '—' }}</NDescriptionsItem>
           <NDescriptionsItem :label="td('editor.paidFrom')">{{ viewed.paidFromAccountName ?? '—' }}</NDescriptionsItem>
+          <NDescriptionsItem :label="td('editor.paymentMethod')">{{ methodLabel(viewed.paymentMethod) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.currency')">{{ viewed.currency }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.total')">{{ fmtAmount(viewed.total) }}</NDescriptionsItem>
           <NDescriptionsItem :label="td('editor.memo')" :span="2">{{ viewed.memo ?? '—' }}</NDescriptionsItem>
@@ -70,8 +71,9 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
-import { createFinanceBridge, FinanceDocumentStatus, type ExpenseDto, type CreateExpenseDto } from '../../services/bridges/finance-bridge'
+import { createFinanceBridge, FinanceDocumentStatus, PAYMENT_METHODS, type ExpenseDto, type CreateExpenseDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
@@ -85,12 +87,14 @@ const t = makePageTranslator('finance.expenses')
 // Shared document namespace for the read-only line-table headers + memo/paid-from labels.
 const td = makePageTranslator('finance.docs')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'vendorName', { showApplied: false, showDueDate: false })
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.expenses',
+  permission: 'finance.document',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.expenses.fetch(q),
@@ -105,6 +109,12 @@ const detailTitle = (d: FinanceDocRow) => d.number ?? t('detail.draftTitle')
 function statusLabel(status?: FinanceDocumentStatus): string {
   const meta = DOC_STATUS_META[status ?? '']
   return meta ? t(meta.label) : String(status ?? '')
+}
+
+function methodLabel(method?: string | null): string {
+  if (!method) return '—'
+  const known = PAYMENT_METHODS.find((m) => m === method)
+  return known ? td(`method.${known.charAt(0).toLowerCase()}${known.slice(1)}`) : method
 }
 
 // ── Read-only detail ────────────────────────────────────────────
@@ -139,6 +149,7 @@ const editingEntry = computed<EditableDocument | null>(() => {
     id: d.id,
     partyId: d.vendorId,
     paidFromAccountId: d.paidFromAccountId,
+    paymentMethod: d.paymentMethod,
     docDate: d.docDate,
     dueDate: null,
     currency: d.currency,
@@ -175,6 +186,7 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
   const data: CreateExpenseDto = {
     vendorId: payload.partyId,
     paidFromAccountId: payload.paidFromAccountId!,
+    paymentMethod: payload.paymentMethod,
     docDate: payload.docDate,
     currency: payload.currency,
     memo: payload.memo,
@@ -217,10 +229,10 @@ const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.
 
 const rowActions: RowAction<FinanceDocRow>[] = [
   viewAction(crud),
-  { key: 'edit', type: 'primary', show: isDraft, onClick: openEdit },
-  { key: 'post', label: 'actions.post', type: 'primary', show: isDraft, confirm: 'confirmPost', onClick: (row) => void run(() => bridge.expenses.post(String(row.id ?? '')), 'postSuccess') },
-  { key: 'void', label: 'actions.void', type: 'warning', show: isVoidable, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.expenses.voidDoc(String(row.id ?? '')), 'voidSuccess') },
-  { key: 'delete', label: 'actions.delete', type: 'error', show: isDraft, confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.expenses.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
+  { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
+  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.expenses.post(String(row.id ?? '')), 'postSuccess') },
+  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isVoidable(row), confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.expenses.voidDoc(String(row.id ?? '')), 'voidSuccess') },
+  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.document.delete') && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.expenses.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]
 </script>
 

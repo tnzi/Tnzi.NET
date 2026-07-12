@@ -17,10 +17,10 @@ describe('TnziUiAdminResolver', () => {
     expect((res as { from: string }).from).toContain('TCrudPage')
   })
 
-  it('resolves TPermissionTree to forms path', () => {
-    const res = resolver.resolve('TPermissionTree')
+  it('resolves TPermissionMatrix to forms path', () => {
+    const res = resolver.resolve('TPermissionMatrix')
     expect(res).toBeTruthy()
-    expect((res as { from: string }).from).toContain('TPermissionTree')
+    expect((res as { from: string }).from).toContain('TPermissionMatrix')
   })
 
   it('returns undefined for unknown names', () => {

@@ -57,16 +57,22 @@ public class ContextProvidersOptions
 /// <summary>
 /// 记忆存储配置选项
 /// </summary>
+[ConfigSection("AI:ContextProviders:Memory")]
+[RuntimeSettingGroup(Key = "ai-memory", Module = "AI", DisplayName = "Memory",
+    I18nKey = "admin.modules.system.settings.groups.aiMemory", Icon = "mdi:brain", Order = 150)]
 public class MemoryOptions
 {
     /// <summary>
     /// 是否启用记忆上下文提供器
     /// </summary>
+    [RuntimeSetting(Label = "Memory Enabled", I18n = "admin.modules.system.settings.fields.memoryEnabled",
+        Type = SettingFieldType.Boolean)]
     public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// 默认记忆 scope（用于用户级记忆）
     /// </summary>
+    [RuntimeSetting(Label = "Default Scope", I18n = "admin.modules.system.settings.fields.memoryDefaultScope")]
     public string DefaultScope { get; set; } = "default";
 
     /// <summary>
@@ -86,6 +92,9 @@ public class MemoryOptions
     /// 启用后，不同用户的记忆互不可见，这是多用户应用的安全默认值。
     /// 设为 false 时所有用户共享同一 scope（仅适用于单用户或全局知识库场景）。
     /// </remarks>
+    [RuntimeSetting(Label = "User Isolation", I18n = "admin.modules.system.settings.fields.memoryEnableUserIsolation",
+        Type = SettingFieldType.Boolean,
+        Description = "Isolate memory per user (secure multi-user default)")]
     public bool EnableUserIsolation { get; set; } = true;
 
     /// <summary>
@@ -95,6 +104,9 @@ public class MemoryOptions
     /// 启用后，同一用户下的不同 Agent 会拥有独立的本地记忆覆盖层。
     /// 默认关闭以保持现有 scope 键兼容。
     /// </remarks>
+    [RuntimeSetting(Label = "Agent Isolation", I18n = "admin.modules.system.settings.fields.memoryEnableAgentIsolation",
+        Type = SettingFieldType.Boolean,
+        Description = "Give each agent its own local memory overlay")]
     public bool EnableAgentIsolation { get; set; }
 
     /// <summary>
@@ -121,6 +133,9 @@ public class MemoryOptions
     /// 启用后，每次对话结束时会调用 LLM 从对话中提炼持久记忆条目。
     /// 默认关闭以避免额外的 LLM 调用成本。
     /// </remarks>
+    [RuntimeSetting(Label = "Auto Persist", I18n = "admin.modules.system.settings.fields.memoryAutoPersist",
+        Type = SettingFieldType.Boolean, Subsection = "Auto-Persist",
+        Description = "Extract and persist memory from each conversation via an LLM call")]
     public bool AutoPersist { get; set; }
 
     /// <summary>
@@ -131,16 +146,23 @@ public class MemoryOptions
     /// <summary>
     /// 自动沉淀的最大 token 数
     /// </summary>
+    [RuntimeSetting(Label = "Auto Persist Max Tokens", I18n = "admin.modules.system.settings.fields.memoryAutoPersistMaxTokens",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Auto-Persist")]
     public int AutoPersistMaxTokens { get; set; } = 500;
 
     /// <summary>
     /// 沉淀时是否自动合并去重（仅在 AutoPersist=true 时生效）
     /// </summary>
+    [RuntimeSetting(Label = "Auto Consolidate", I18n = "admin.modules.system.settings.fields.memoryAutoConsolidate",
+        Type = SettingFieldType.Boolean, Subsection = "Auto-Persist",
+        Description = "Merge and de-duplicate memory during auto-persist")]
     public bool AutoConsolidate { get; set; } = true;
 
     /// <summary>
     /// 当记忆条目数超过此阈值时触发合并
     /// </summary>
+    [RuntimeSetting(Label = "Consolidate Threshold", I18n = "admin.modules.system.settings.fields.memoryConsolidateThreshold",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Auto-Persist")]
     public int ConsolidateThreshold { get; set; } = 30;
 
     /// <summary>
@@ -152,6 +174,9 @@ public class MemoryOptions
     /// <summary>
     /// 条目过期时间（null=不过期）
     /// </summary>
+    [RuntimeSetting(Label = "Entry Expiration", I18n = "admin.modules.system.settings.fields.memoryEntryExpiration",
+        Type = SettingFieldType.Duration, Subsection = "Retrieval",
+        Description = "Memory entry lifetime as a TimeSpan (empty = never expire)")]
     public TimeSpan? EntryExpiration { get; set; }
 
     /// <summary>
@@ -200,6 +225,9 @@ public class MemoryOptions
     /// <summary>
     /// 是否启用 PII 防护（save_memory 时检测个人信息模式）
     /// </summary>
+    [RuntimeSetting(Label = "PII Protection", I18n = "admin.modules.system.settings.fields.memoryEnablePiiProtection",
+        Type = SettingFieldType.Boolean,
+        Description = "Detect personal-information patterns when saving memory")]
     public bool EnablePiiProtection { get; set; } = true;
 
     /// <summary>
@@ -210,6 +238,8 @@ public class MemoryOptions
     /// <summary>
     /// 检索式注入时返回的 top-K 最相关记忆条目数。默认 8。
     /// </summary>
+    [RuntimeSetting(Label = "Retrieval Top-K", I18n = "admin.modules.system.settings.fields.memoryRetrievalTopK",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Retrieval")]
     public int RetrievalTopK { get; set; } = 8;
 
     /// <summary>
@@ -224,16 +254,22 @@ public class MemoryOptions
     /// 部分 Provider（如 DeepSeek）不支持 Embedding API，需要显式指定支持 Embedding 的 Provider。
     /// 推荐使用 OpenAI 的 text-embedding-3-small 或其他支持 Embedding 的模型。
     /// </remarks>
+    [RuntimeSetting(Label = "Embedding Provider", I18n = "admin.modules.system.settings.fields.memoryEmbeddingProvider",
+        Subsection = "Embedding", Description = "Provider used for memory embeddings (empty = default provider)")]
     public string? EmbeddingProvider { get; set; }
 
     /// <summary>
     /// 记忆嵌入向量使用的模型（null=使用 Provider 的 DefaultModel）
     /// </summary>
+    [RuntimeSetting(Label = "Embedding Model", I18n = "admin.modules.system.settings.fields.memoryEmbeddingModel",
+        Subsection = "Embedding")]
     public string? EmbeddingModel { get; set; }
 
     /// <summary>
     /// 最大记忆事实数（超过时按置信度降序裁剪）
     /// </summary>
+    [RuntimeSetting(Label = "Max Facts", I18n = "admin.modules.system.settings.fields.memoryMaxFacts",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Retrieval")]
     public int MaxFacts { get; set; } = 100;
 
     /// <summary>
@@ -248,11 +284,16 @@ public class MemoryOptions
 /// <remarks>
 /// 配置聊天历史记忆上下文提供器
 /// </remarks>
+[ConfigSection("AI:ContextProviders:ChatHistoryMemory")]
+[RuntimeSettingGroup(Key = "ai-memory", Module = "AI", DisplayName = "Memory",
+    I18nKey = "admin.modules.system.settings.groups.aiMemory", Icon = "mdi:brain", Order = 150)]
 public class ChatHistoryMemoryOptions
 {
     /// <summary>
     /// 是否启用
     /// </summary>
+    [RuntimeSetting(Label = "Chat History Memory Enabled", I18n = "admin.modules.system.settings.fields.chatHistoryMemoryEnabled",
+        Type = SettingFieldType.Boolean, Subsection = "Chat History Memory")]
     public bool Enabled { get; set; } = false;
 
     /// <summary>
@@ -287,11 +328,16 @@ public class ChatHistoryMemoryOptions
 /// <remarks>
 /// 配置 RAG 文本搜索上下文提供器
 /// </remarks>
+[ConfigSection("AI:ContextProviders:TextSearch")]
+[RuntimeSettingGroup(Key = "ai-memory", Module = "AI", DisplayName = "Memory",
+    I18nKey = "admin.modules.system.settings.groups.aiMemory", Icon = "mdi:brain", Order = 150)]
 public class TextSearchOptions
 {
     /// <summary>
     /// 是否启用
     /// </summary>
+    [RuntimeSetting(Label = "Text Search (RAG) Enabled", I18n = "admin.modules.system.settings.fields.textSearchEnabled",
+        Type = SettingFieldType.Boolean, Subsection = "Text Search (RAG)")]
     public bool Enabled { get; set; } = false;
 
     /// <summary>

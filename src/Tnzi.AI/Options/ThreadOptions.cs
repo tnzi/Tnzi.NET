@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// Thread 行为配置，绑定 AI:Thread 配置节
 /// </summary>
 [ConfigSection("AI:Thread")]
-[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "AI General",
+[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "General",
     I18nKey = "admin.modules.system.settings.groups.aiGeneral", Icon = "mdi:robot-outline", Order = 100)]
 public class ThreadOptions
 {

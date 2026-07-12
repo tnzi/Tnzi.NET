@@ -23,6 +23,9 @@ public class Expense : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
     /// <summary>付款科目（银行/现金/信用卡叶子科目）</summary>
     public Guid PaidFromAccountId { get; set; }
 
+    /// <summary>结算方式（自由字符串，推荐取值见 <see cref="Metadata.PaymentMethods"/>）</summary>
+    public string? PaymentMethod { get; set; }
+
     /// <summary>单据日期</summary>
     public DateTime DocDate { get; set; }
 

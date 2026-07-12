@@ -8,6 +8,7 @@ import {
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
 import type { UseFormModalReturn } from './useFormModal'
 import { useDetail, type DetailMode } from './useDetail'
+import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 
 /**
  * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
@@ -47,6 +48,16 @@ export interface CrudPageQuery {
  * surface.
  */
 export type CrudPageResult<T> = PagedList<T>
+
+/**
+ * Per-action permission codes gating the page's write affordances. An omitted
+ * action stays ungated (visible whenever its data callback exists).
+ */
+export interface CrudActionPermissions {
+  create?: string
+  update?: string
+  delete?: string
+}
 
 /**
  * Operation tag passed to `onError` so a single handler can disambiguate
@@ -132,6 +143,28 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    * initial fetch, then call `refresh()` themselves.
    */
   autoLoad?: boolean
+  /**
+   * Operation-level permission gating for the page's write affordances -
+   * the UI half of the backend's per-endpoint enforcement. A string is the
+   * code prefix and derives the three write codes (`'user'` →
+   * `user.create` / `user.update` / `user.delete`); an object names them
+   * explicitly (omit an action to leave it ungated).
+   *
+   * `canCreate` / `canUpdate` / `canDelete` then require BOTH the data
+   * callback AND the permission, so the Create button / edit / delete row
+   * actions / batch delete disappear for users who hold only the page's
+   * `.view` code. Evaluation is reactive against the admin auth store and
+   * mirrors the sidebar's fail-open semantics (no store / no user loaded /
+   * super admin → allowed); the backend `[ApiAuthorize]` stays the real wall.
+   *
+   * UPSERT surfaces: when a write callback maps to a backend endpoint whose
+   * action code differs from the derived one (e.g. a "create" form that hits
+   * an upsert endpoint enforced as `.update`), use the OBJECT form and map
+   * that action to the real backend code - a derived code the catalogue
+   * never declares is grantable to no one, hiding the button for every
+   * non-super user (see Quotas / ExchangeRates / Subscriptions).
+   */
+  permission?: string | CrudActionPermissions
 }
 
 export interface UseCrudPageReturn<T, TId = string | number> {
@@ -150,12 +183,14 @@ export interface UseCrudPageReturn<T, TId = string | number> {
    * forcing callers to pass `rowKey` twice.
    */
   rowKey: (row: T) => TId
-  // Static — derived from options at construction time; do not change after useCrudPage() returns.
-  /** Whether a `createData` callback was supplied. Drives create-affordance visibility. */
+  // Reactive getters - `callback supplied && action permission held` (see the
+  // `permission` option). Without a `permission` config they degrade to the
+  // legacy static "callback supplied" booleans.
+  /** Whether the create affordance should show (callback && permission). */
   canCreate: boolean
-  /** Whether an `updateData` callback was supplied. */
+  /** Whether edit affordances should show (callback && permission). */
   canUpdate: boolean
-  /** Whether a `deleteData` callback was supplied. */
+  /** Whether delete affordances should show (callback && permission). */
   canDelete: boolean
   refresh: () => Promise<void>
   setPage: (pageIndex: number) => void
@@ -202,6 +237,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
+}
+
+/** Expand a string prefix into the three write-action codes. */
+function normalizeCrudPermission(
+  permission?: string | CrudActionPermissions,
+): CrudActionPermissions {
+  if (!permission) return {}
+  if (typeof permission === 'string') {
+    return {
+      create: `${permission}.create`,
+      update: `${permission}.update`,
+      delete: `${permission}.delete`,
+    }
+  }
+  return permission
+}
+
+/**
+ * Reactive action-permission check mirroring the sidebar's fail-open
+ * semantics: no code declared / no active store (bare test mounts) / user
+ * not loaded yet / super admin → allowed. The backend `[ApiAuthorize]`
+ * remains the real enforcement layer.
+ */
+function canAction(code: string | undefined): boolean {
+  if (!code) return true
+  try {
+    const auth = useAdminAuthStore()
+    if (auth.isSuperUser || auth.userInfo === null) return true
+    return auth.hasPermission(code)
+  } catch {
+    return true
+  }
 }
 
 export function useCrudPage<T, TId = string | number>(
@@ -432,6 +499,15 @@ export function useCrudPage<T, TId = string | number>(
     void refresh().catch(() => undefined)
   }
 
+  // Write-affordance visibility = data callback && action permission. Plain
+  // getters over computeds so `crud.canCreate` stays a boolean for consumers
+  // (templates read it inside render effects → fully reactive) while the
+  // check re-evaluates when permissions load or change.
+  const actionPerms = normalizeCrudPermission(options.permission)
+  const canCreateRef = computed(() => !!options.createData && canAction(actionPerms.create))
+  const canUpdateRef = computed(() => !!options.updateData && canAction(actionPerms.update))
+  const canDeleteRef = computed(() => !!options.deleteData && canAction(actionPerms.delete))
+
   return {
     query,
     items,
@@ -443,9 +519,15 @@ export function useCrudPage<T, TId = string | number>(
     batchActions,
     formModal,
     rowKey: options.rowKey,
-    canCreate: !!options.createData,
-    canUpdate: !!options.updateData,
-    canDelete: !!options.deleteData,
+    get canCreate() {
+      return canCreateRef.value
+    },
+    get canUpdate() {
+      return canUpdateRef.value
+    },
+    get canDelete() {
+      return canDeleteRef.value
+    },
     refresh,
     setPage,
     setPageSize,

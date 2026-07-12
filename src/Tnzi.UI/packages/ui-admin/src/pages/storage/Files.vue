@@ -9,11 +9,11 @@
           <template #icon><TSvgIcon icon="mdi:format-list-bulleted" :size="14" /></template>
         </NButton>
       </NButtonGroup>
-      <NButton size="small" tertiary @click="openCreateFolder(currentFolderId)">
+      <NButton v-if="can('storage.file.create')" size="small" tertiary @click="openCreateFolder(currentFolderId)">
         <template #icon><TSvgIcon icon="mdi:folder-plus-outline" :size="14" /></template>
         {{ t('newFolder') }}
       </NButton>
-      <NButton size="small" type="primary" :loading="uploading" @click="triggerUpload">
+      <NButton v-if="can('storage.file.create')" size="small" type="primary" :loading="uploading" @click="triggerUpload">
         <template #icon><TSvgIcon icon="mdi:upload" :size="14" /></template>
         {{ t('upload') }}
       </NButton>
@@ -86,11 +86,12 @@
             size="small"
             class="t-storage-file-page__folder-actions"
           >
-            <NButton size="small" tertiary @click="openRenameFolder(currentFolder)">
+            <NButton v-if="can('storage.file.update')" size="small" tertiary @click="openRenameFolder(currentFolder)">
               <template #icon><TSvgIcon icon="mdi:pencil-outline" :size="14" /></template>
               {{ t('renameFolder') }}
             </NButton>
             <NPopconfirm
+              v-if="can('storage.file.delete')"
               :disabled="!canDeleteFolder(currentFolder)"
               @positive-click="deleteFolder(currentFolder)"
             >
@@ -113,25 +114,27 @@
 
         <div v-if="selectedIds.length" class="t-storage-file-page__batch">
           <span>{{ t('selected', { n: selectedIds.length }) }}</span>
-          <NSelect
-            v-model:value="moveTarget"
-            :options="moveTargetOptions"
-            :placeholder="t('moveToPlaceholder')"
-            size="small"
-            clearable
-            filterable
-            class="w-260px max-w-full"
-          />
-          <NButton
-            size="small"
-            type="primary"
-            :disabled="moveTarget === undefined"
-            :loading="moving"
-            @click="batchMoveFiles"
-          >
-            {{ t('moveButton') }}
-          </NButton>
-          <NPopconfirm @positive-click="batchDeleteFiles">
+          <template v-if="can('storage.file.update')">
+            <NSelect
+              v-model:value="moveTarget"
+              :options="moveTargetOptions"
+              :placeholder="t('moveToPlaceholder')"
+              size="small"
+              clearable
+              filterable
+              class="w-260px max-w-full"
+            />
+            <NButton
+              size="small"
+              type="primary"
+              :disabled="moveTarget === undefined"
+              :loading="moving"
+              @click="batchMoveFiles"
+            >
+              {{ t('moveButton') }}
+            </NButton>
+          </template>
+          <NPopconfirm v-if="can('storage.file.delete')" @positive-click="batchDeleteFiles">
             <template #trigger>
               <NButton size="small" type="error" ghost :loading="deleting">
                 {{ t('batchDelete') }}
@@ -370,6 +373,7 @@ import TContentPage from '../../components/layout/TContentPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import type { RowAction } from '../../headless/rowActions'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatFileSize } from '@tnzi/core'
@@ -385,6 +389,7 @@ const bridge = createStorageBridge({ client: useAdminClient() })
 const t = makePageTranslator('storage.files')
 const message = useSafeMessage()
 const bp = useBreakpoint()
+const { can } = usePermissionGuard()
 
 // ---- view mode (persisted) ----
 const VIEW_KEY = 'tnzi-admin:storage-view'
@@ -644,10 +649,11 @@ function rowActionList(row: ExplorerRow): RowAction<ExplorerRow>[] {
     const folder = row.folder
     return [
       { key: 'open', label: 'open', icon: 'mdi:folder-open-outline', type: 'primary', onClick: () => openFolder(folder.id) },
-      { key: 'newSub', label: 'newSubFolder', icon: 'mdi:folder-plus-outline', onClick: () => openCreateFolder(folder.id) },
-      { key: 'rename', label: 'renameFolder', icon: 'mdi:pencil-outline', onClick: () => openRenameFolder(folder) },
+      { key: 'newSub', label: 'newSubFolder', icon: 'mdi:folder-plus-outline', show: () => can('storage.file.create'), onClick: () => openCreateFolder(folder.id) },
+      { key: 'rename', label: 'renameFolder', icon: 'mdi:pencil-outline', show: () => can('storage.file.update'), onClick: () => openRenameFolder(folder) },
       {
         key: 'delete', label: 'deleteFolder', icon: 'mdi:trash-can-outline', type: 'error',
+        show: () => can('storage.file.delete'),
         confirm: 'confirmDeleteFolder', disabled: () => !canDeleteFolder(folder), onClick: () => void deleteFolder(folder),
       },
     ]
@@ -657,10 +663,10 @@ function rowActionList(row: ExplorerRow): RowAction<ExplorerRow>[] {
     { key: 'view', label: 'actions.view', icon: 'mdi:eye-outline', type: 'primary', onClick: () => openDetail(file) },
     { key: 'download', label: 'actions.download', icon: 'mdi:download', onClick: () => downloadFile(file) },
     { key: 'preview', label: 'actions.preview', icon: 'mdi:image-outline', onClick: () => openPreview(file) },
-    { key: 'tags', label: 'actions.tags', icon: 'mdi:tag-outline', onClick: () => openTagsModal(file) },
-    { key: 'metadata', label: 'actions.metadata', icon: 'mdi:information-outline', onClick: () => void openMetadataModal(file) },
+    { key: 'tags', label: 'actions.tags', icon: 'mdi:tag-outline', show: () => can('storage.file.update'), onClick: () => openTagsModal(file) },
+    { key: 'metadata', label: 'actions.metadata', icon: 'mdi:information-outline', show: () => can('storage.file.update'), onClick: () => void openMetadataModal(file) },
     { key: 'verify', label: 'actions.verify', icon: 'mdi:shield-check-outline', onClick: () => void verifyFile(file) },
-    { key: 'delete', label: 'actions.delete', icon: 'mdi:trash-can-outline', type: 'error', confirm: 'confirmDeleteFile', onClick: () => void deleteSingleFile(file) },
+    { key: 'delete', label: 'actions.delete', icon: 'mdi:trash-can-outline', type: 'error', show: () => can('storage.file.delete'), confirm: 'confirmDeleteFile', onClick: () => void deleteSingleFile(file) },
   ]
 }
 
@@ -734,24 +740,29 @@ function onUpdateChecked(keys: Array<string | number>): void {
 
 // ---- context menu ----
 const ctxOptions = computed<DropdownOption[]>(() => {
+  const opts: DropdownOption[] = []
   if (ctx.type === 'folder') {
-    return [
-      { key: 'open', label: t('open') },
-      { key: 'newSub', label: t('newSubFolder') },
-      { key: 'rename', label: t('renameFolder') },
-      { type: 'divider', key: 'd1' },
-      { key: 'delete', label: t('deleteFolder'), disabled: !canDeleteFolder(ctx.folder) },
-    ]
+    opts.push({ key: 'open', label: t('open') })
+    if (can('storage.file.create')) opts.push({ key: 'newSub', label: t('newSubFolder') })
+    if (can('storage.file.update')) opts.push({ key: 'rename', label: t('renameFolder') })
+    if (can('storage.file.delete')) {
+      opts.push({ type: 'divider', key: 'd1' })
+      opts.push({ key: 'delete', label: t('deleteFolder'), disabled: !canDeleteFolder(ctx.folder) })
+    }
+    return opts
   }
-  return [
-    { key: 'preview', label: t('actions.preview') },
-    { key: 'download', label: t('actions.download') },
-    { type: 'divider', key: 'd1' },
-    { key: 'tags', label: t('actions.tags') },
-    { key: 'metadata', label: t('actions.metadata') },
-    { type: 'divider', key: 'd2' },
-    { key: 'delete', label: t('actions.delete') },
-  ]
+  opts.push({ key: 'preview', label: t('actions.preview') })
+  opts.push({ key: 'download', label: t('actions.download') })
+  if (can('storage.file.update')) {
+    opts.push({ type: 'divider', key: 'd1' })
+    opts.push({ key: 'tags', label: t('actions.tags') })
+    opts.push({ key: 'metadata', label: t('actions.metadata') })
+  }
+  if (can('storage.file.delete')) {
+    opts.push({ type: 'divider', key: 'd2' })
+    opts.push({ key: 'delete', label: t('actions.delete') })
+  }
+  return opts
 })
 
 function onContextFile(payload: { file: FileRecordDto; x: number; y: number }): void {
@@ -980,6 +991,7 @@ async function batchDeleteFiles(): Promise<void> {
 
 // ---- drag move ----
 async function onMoveFile(payload: { fileId: string; folderId: string }): Promise<void> {
+  if (!can('storage.file.update')) return
   try {
     await bridge.files.moveTo([payload.fileId], payload.folderId)
     message.success(t('moveSuccess'))
@@ -998,6 +1010,7 @@ function isDescendantOf(folderId: string, candidateId: string): boolean {
   return false
 }
 async function onMoveFolder(payload: { folderId: string; newParentId: string }): Promise<void> {
+  if (!can('storage.file.update')) return
   if (payload.folderId === payload.newParentId || isDescendantOf(payload.folderId, payload.newParentId)) {
     message.warning(t('invalidMove'))
     return
@@ -1067,6 +1080,7 @@ function onFileInputChange(e: Event): void {
   input.value = ''
 }
 function onUploadDrop(payload: { files: File[]; folderId: string | null }): void {
+  if (!can('storage.file.create')) return
   void uploadFiles(payload.files, payload.folderId ?? currentFolderId.value)
 }
 
@@ -1082,6 +1096,7 @@ function onListDragLeave(e: DragEvent): void {
 }
 function onListDrop(e: DragEvent): void {
   listDropActive.value = false
+  if (!can('storage.file.create')) return
   const osFiles = e.dataTransfer?.files
   if (osFiles && osFiles.length) {
     e.preventDefault()

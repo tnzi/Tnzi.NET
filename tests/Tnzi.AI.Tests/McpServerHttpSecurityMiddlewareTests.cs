@@ -15,7 +15,7 @@ public class McpServerHttpSecurityMiddlewareTests
         using var serviceProvider = services.BuildServiceProvider();
 
         var security = new McpServerSecurityMiddleware(
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 RequireAuthentication = true,
@@ -33,7 +33,7 @@ public class McpServerHttpSecurityMiddlewareTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 RequireAuthentication = true,
@@ -57,7 +57,7 @@ public class McpServerHttpSecurityMiddlewareTests
         using var serviceProvider = services.BuildServiceProvider();
 
         var security = new McpServerSecurityMiddleware(
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 RequireAuthentication = true,
@@ -75,7 +75,7 @@ public class McpServerHttpSecurityMiddlewareTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 RequireAuthentication = true,
@@ -104,7 +104,7 @@ public class McpServerHttpSecurityMiddlewareTests
         // AllowApiKeyInQuery is off by default (secure). This test exercises
         // the opt-in transitional compatibility path, so it must be explicitly enabled.
         var security = new McpServerSecurityMiddleware(
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 RequireAuthentication = true,
@@ -124,7 +124,7 @@ public class McpServerHttpSecurityMiddlewareTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 RequireAuthentication = true,

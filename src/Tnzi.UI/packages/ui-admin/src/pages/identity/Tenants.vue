@@ -34,6 +34,7 @@ const bridge = createIdentityBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<TenantDto, string>({
   pageId: 'identity.tenants',
+  permission: 'tenant',
   columns: tenantColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.tenants.fetch(query),

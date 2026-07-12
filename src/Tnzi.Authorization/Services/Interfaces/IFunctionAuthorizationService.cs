@@ -49,4 +49,12 @@ public interface IFunctionAuthorizationService : Tnzi.Security.Authorization.IFu
     /// </summary>
     /// <returns>Authorization statistics</returns>
     Task<Result<AuthorizationStatisticsDto>> GetStatisticsAsync();
+
+    /// <summary>
+    /// Resolve the user's access profile: effective permission codes plus the
+    /// backend-authoritative super-admin flag (single self-service payload for
+    /// the admin front-end).
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    Task<Result<AccessProfileDto>> GetAccessProfileAsync(Guid userId);
 }

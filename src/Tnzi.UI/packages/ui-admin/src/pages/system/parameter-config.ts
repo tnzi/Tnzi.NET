@@ -8,6 +8,7 @@
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
+import { renderSettingValue } from './setting-value-cell'
 
 interface ParameterRow {
   id?: string
@@ -25,7 +26,7 @@ function valueTypeLabel(v?: string): string {
 
 export const parameterColumns: ColumnDef<ParameterRow>[] = [
   { key: 'key', title: 'columns.key', minWidth: 160 },
-  { key: 'value', title: 'columns.value', minWidth: 180 },
+  { key: 'value', title: 'columns.value', minWidth: 180, render: (row) => renderSettingValue(row.value) },
   {
     key: 'valueType',
     title: 'columns.valueType',

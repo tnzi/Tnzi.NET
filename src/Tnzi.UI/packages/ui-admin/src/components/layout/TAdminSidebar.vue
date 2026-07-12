@@ -8,6 +8,7 @@ import {
   type AdminMenuItem,
 } from '../../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import { translatePageKey } from '../../pages/_shared/translate'
@@ -69,7 +70,9 @@ interface Props {
   /**
    * Render the built-in settings entry in the sidebar footer (gear icon →
    * `router.push({ name: 'settings' })`). Only shows when the `settings`
-   * route exists; a consumer-provided `footer` slot fully replaces it.
+   * route exists AND its `meta.permission` is held (fail-open before
+   * permissions load / for super users, mirroring the menu filter); a
+   * consumer-provided `footer` slot fully replaces it.
    */
   showSettingsEntry?: boolean
 }
@@ -121,7 +124,35 @@ function safeUseRouter(): Router | null {
 }
 const router = safeUseRouter()
 
-const hasSettingsRoute = computed(() => !!router?.hasRoute('settings'))
+// The built-in gear must obey the settings ROUTE's reachability with the same
+// fail-open semantics as the menu filter - otherwise a user the matrix locked
+// out of Settings still sees an entry that only bounces to /403. The bundled
+// route uses `meta.anySettingsPermission` (the config center spans many modules
+// with no single code) → `canAnySettings()`; older/custom routes with a plain
+// `meta.permission`/`meta.permissions` still work. It must ALSO obey module
+// availability (the route carries `moduleGate: 'system'`): on a host without the
+// System module the settings route lands in `unavailableRouteNames`, and the
+// gear hides for everyone (no super-user bypass — the module guard bounces the
+// navigation to /403 regardless).
+const { can, canAny, canAnySettings } = usePermissionGuard()
+const hasSettingsRoute = computed(() => {
+  if (!router?.hasRoute('settings')) return false
+  if (routeStore.unavailableRouteNames.has('settings')) return false
+  // Partial router mocks (tests) may lack resolve() - same guard as goSettings.
+  if (typeof router.resolve !== 'function') return true
+  const meta = (router.resolve({ name: 'settings' }).meta ?? {}) as {
+    permission?: unknown
+    permissions?: unknown
+    anySettingsPermission?: unknown
+  }
+  if (meta.anySettingsPermission === true) return canAnySettings()
+  if (typeof meta.permission === 'string' && meta.permission) return can(meta.permission)
+  if (Array.isArray(meta.permissions)) {
+    const plural = meta.permissions.filter((p): p is string => typeof p === 'string' && p !== '')
+    if (plural.length > 0) return canAny(plural)
+  }
+  return true
+})
 const isSettingsActive = computed(() => route?.name === 'settings')
 const settingsLabel = computed(() => resolveLabel('admin.common.settings'))
 

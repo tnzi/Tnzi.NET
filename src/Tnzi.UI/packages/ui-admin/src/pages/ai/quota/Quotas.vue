@@ -55,7 +55,7 @@
         :translate="t"
       >
         <template #card="{ item }">
-          <TEntityCard clickable @click="crud.openEdit(item)">
+          <TEntityCard clickable @click="openEditIfAllowed(item)">
             <div class="flex items-center justify-between gap-8px mb-8px">
               <code class="ai-quota-card__uid" :title="item.userId">{{ shortId(item.userId) }}</code>
               <div class="flex items-center gap-4px flex-shrink-0">
@@ -104,7 +104,7 @@
 
             <template #actions>
               <span class="ai-quota-card__modified mr-auto">{{ formatModified(item) }}</span>
-              <NButton size="small" ghost @click="crud.openEdit(item)">{{ t('actions.edit') }}</NButton>
+              <NButton v-if="crud.canUpdate" size="small" ghost @click="crud.openEdit(item)">{{ t('actions.edit') }}</NButton>
             </template>
           </TEntityCard>
         </template>
@@ -214,6 +214,10 @@ const tabs: TabSection[] = [
 
 const crud = useCrudPage<UserQuotaDto>({
   pageId: 'ai.quota',
+  // Quotas are per-user UPSERTS on the backend (SetQuota) - the catalogue
+  // declares only ai.quota.view/.update, so the UI "create" gates on the
+  // update code too (a derived ai.quota.create would exist for no one).
+  permission: { create: 'ai.quota.update', update: 'ai.quota.update' },
   columns: quotaColumns,
   rowKey: (q) => q.id,
   fetchData: (query) => bridge.quota.fetch(query),
@@ -224,6 +228,13 @@ const crud = useCrudPage<UserQuotaDto>({
 })
 
 // --- card helpers -----------------------------------------------------------
+/** Whole-card click opens the edit modal - but only when the user actually
+ *  holds the update permission (the Edit button is `v-if`-hidden otherwise, so
+ *  the card click must gate on the same signal to stay consistent). */
+function openEditIfAllowed(item: UserQuotaDto): void {
+  if (crud.canUpdate) crud.openEdit(item)
+}
+
 /** GUID truncated to its first 8 chars for the card header (full in `title`). */
 function shortId(value: string | null | undefined): string {
   const full = value ?? ''

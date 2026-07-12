@@ -13,23 +13,13 @@ public class PostgreSqlConfigurator : DatabaseProviderConfiguratorBase
 
     protected override string ExtensionMethodName => "UseNpgsql";
 
-    protected override void InvokeExtensionMethod(MethodInfo method, DbContextOptionsBuilder builder, string connectionString)
-    {
-        var parameters = method.GetParameters();
-
-        if (parameters.Length == 3 &&
-            parameters[2].ParameterType.IsGenericType &&
-            parameters[2].ParameterType.GetGenericTypeDefinition() == typeof(Action<>))
-        {
-            var npgsqlOptionsType = parameters[2].ParameterType.GetGenericArguments()[0];
-            var vectorAction = TryBuildUseVectorAction(npgsqlOptionsType);
-            method.Invoke(null, new object?[] { builder, connectionString, vectorAction });
-        }
-        else
-        {
-            base.InvokeExtensionMethod(method, builder, connectionString);
-        }
-    }
+    /// <summary>
+    /// 贡献 pgvector 的 <c>UseVector()</c> 作为额外配置；基类会把它与重试/超时选项合成到
+    /// <c>Action&lt;NpgsqlDbContextOptionsBuilder&gt;</c> 一并传入 UseNpgsql。
+    /// pgvector 未加载时返回 null（等价于旧的传 null 行为）。
+    /// </summary>
+    protected override Delegate? BuildExtraOptionsAction(Type optionsBuilderType)
+        => TryBuildUseVectorAction(optionsBuilderType);
 
     /// <summary>
     /// Tries to build an Action&lt;NpgsqlDbContextOptionsBuilder&gt; that calls UseVector().

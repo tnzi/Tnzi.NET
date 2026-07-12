@@ -34,6 +34,11 @@ public class SignalRModule : TnziFrameworkModule
     /// <param name="context">服务配置上下文</param>
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, SignalRPermissions>();
+
         var services = context.Services;
         var configuration = context.Configuration;
 

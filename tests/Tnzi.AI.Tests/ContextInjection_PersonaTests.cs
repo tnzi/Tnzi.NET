@@ -21,7 +21,7 @@ public class ContextInjection_PersonaTests
         // stampede assertions are not polluted by sibling tests in this assembly.
         ContextInjectionMiddleware.ClearAllCachesForTesting();
 
-        var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         _providerFactory = new CompositeContextProviderFactory(
             contributors: [],
             options: aiOptions,

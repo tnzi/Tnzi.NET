@@ -43,6 +43,7 @@ public class JournalLineDto
     public string? PartyType { get; set; }
     public string? PartyId { get; set; }
     public string? Dimensions { get; set; }
+    public Guid? TaxRateId { get; set; }
 }
 
 /// <summary>
@@ -157,4 +158,10 @@ public class LedgerPostingLine
     public string? PartyType { get; set; }
     public string? PartyId { get; set; }
     public string? Dimensions { get; set; }
+
+    /// <summary>
+    /// 税率ID（可选的结构化税务维度；写入后 TaxSummary 报表按其聚合。
+    /// 透传语义同 PartyType/PartyId，框架不校验其存在性）
+    /// </summary>
+    public Guid? TaxRateId { get; set; }
 }

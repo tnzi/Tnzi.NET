@@ -26,7 +26,7 @@ public class SkillServiceTests : IDisposable
         _mockRegistry = new Mock<ISkillRegistry>();
         _mockTemplateEngine = new Mock<ISkillTemplateEngine>();
 
-        var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions
+        var aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
             ContextProviders = new ContextProvidersOptions
             {

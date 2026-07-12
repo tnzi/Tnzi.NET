@@ -10,21 +10,23 @@ public class PerformanceMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<PerformanceMiddleware> _logger;
     private readonly IPerformanceCollector _performanceCollector;
-    private readonly PerformanceOptions _options;
+    private readonly IOptionsMonitor<PerformanceOptions> _options;
 
     /// <summary>
-    /// 初始化性能分析中间件
+    /// 初始化性能分析中间件。
+    /// 中间件为单例，Options 必须经 <see cref="IOptionsMonitor{T}"/> 消费，
+    /// 每次请求读 <see cref="IOptionsMonitor{T}.CurrentValue"/> 以支持配置中心热更新。
     /// </summary>
     public PerformanceMiddleware(
         RequestDelegate next,
         ILogger<PerformanceMiddleware> logger,
         IPerformanceCollector performanceCollector,
-        IOptions<PerformanceOptions> options)
+        IOptionsMonitor<PerformanceOptions> options)
     {
         _next = Check.NotNull(next);
         _logger = Check.NotNull(logger);
         _performanceCollector = Check.NotNull(performanceCollector);
-        _options = Check.NotNull(options).Value;
+        _options = Check.NotNull(options);
     }
 
     /// <summary>
@@ -32,15 +34,18 @@ public class PerformanceMiddleware
     /// </summary>
     public async Task InvokeAsync(HttpContext context)
     {
+        // 每请求读取最新配置快照（支持热更新）
+        var options = _options.CurrentValue;
+
         // 检查是否启用
-        if (!_options.Enabled)
+        if (!options.Enabled)
         {
             await _next(context);
             return;
         }
 
         // 检查路径是否需要记录
-        if (!ShouldRecord(context))
+        if (!ShouldRecord(context, options))
         {
             await _next(context);
             return;
@@ -52,7 +57,7 @@ public class PerformanceMiddleware
 
         // 记录请求大小
         long? requestSize = null;
-        if (_options.RecordRequestSize && context.Request.ContentLength.HasValue)
+        if (options.RecordRequestSize && context.Request.ContentLength.HasValue)
         {
             requestSize = context.Request.ContentLength.Value;
         }
@@ -61,7 +66,7 @@ public class PerformanceMiddleware
         long? responseSize = null;
         CountingStream? countingStream = null;
 
-        if (_options.RecordResponseSize)
+        if (options.RecordResponseSize)
         {
             countingStream = new CountingStream(context.Response.Body);
             context.Response.Body = countingStream;
@@ -102,7 +107,7 @@ public class PerformanceMiddleware
             _performanceCollector.Record(metrics);
 
             // 如果是慢请求，记录警告日志
-            if (_options.SlowRequestThresholdMs.HasValue && duration > _options.SlowRequestThresholdMs)
+            if (options.SlowRequestThresholdMs.HasValue && duration > options.SlowRequestThresholdMs)
             {
                 _logger.LogWarning(
                     "Slow request detected - Path: {Path}, Method: {Method}, Duration: {Duration}ms, StatusCode: {StatusCode}, RequestId: {RequestId}",
@@ -129,14 +134,14 @@ public class PerformanceMiddleware
     /// <summary>
     /// 检查是否应该记录该路径的性能数据
     /// </summary>
-    private bool ShouldRecord(HttpContext context)
+    private static bool ShouldRecord(HttpContext context, PerformanceOptions options)
     {
         var path = context.Request.Path.Value ?? string.Empty;
 
         // 检查排除列表
-        if (_options.ExcludePaths != null && _options.ExcludePaths.Length > 0)
+        if (options.ExcludePaths != null && options.ExcludePaths.Length > 0)
         {
-            if (_options.ExcludePaths.Any(excludePath =>
+            if (options.ExcludePaths.Any(excludePath =>
                 path.StartsWith(excludePath, StringComparison.OrdinalIgnoreCase)))
             {
                 return false;
@@ -144,9 +149,9 @@ public class PerformanceMiddleware
         }
 
         // 检查包含列表
-        if (_options.IncludePaths != null && _options.IncludePaths.Length > 0)
+        if (options.IncludePaths != null && options.IncludePaths.Length > 0)
         {
-            return _options.IncludePaths.Any(includePath =>
+            return options.IncludePaths.Any(includePath =>
                 path.StartsWith(includePath, StringComparison.OrdinalIgnoreCase));
         }
 

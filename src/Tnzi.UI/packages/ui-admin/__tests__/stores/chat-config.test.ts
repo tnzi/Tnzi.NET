@@ -54,6 +54,7 @@ describe('useChatStore deployment config', () => {
         maxGroupMembers: 50,
         groupAvatarMemberCount: 4,
         enablePresence: false,
+        allowInvisible: false,
         enableMessageSound: false,
         enableFileMessages: false,
       }),
@@ -65,6 +66,7 @@ describe('useChatStore deployment config', () => {
     expect(store.config.maxGroupMembers).toBe(50)
     expect(store.config.groupAvatarMemberCount).toBe(4)
     expect(store.config.enablePresence).toBe(false)
+    expect(store.config.allowInvisible).toBe(false)
     expect(store.config.enableMessageSound).toBe(false)
     expect(store.config.enableFileMessages).toBe(false)
   })

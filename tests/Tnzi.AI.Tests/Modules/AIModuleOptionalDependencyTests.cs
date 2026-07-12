@@ -176,7 +176,7 @@ public class AIModuleOptionalDependencyTests
         aiOptions.ContextProviders.Enabled = true;
 
         var builder = new AgentExecutorOptionsBuilder(
-            Microsoft.Extensions.Options.Options.Create(aiOptions),
+            new StaticOptionsMonitor<AIOptions>(aiOptions),
             LoggerFactory.Create(_ => { }),
             Mock.Of<IChatClientFactory>(),
             [],

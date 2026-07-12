@@ -62,6 +62,7 @@ public class DefaultScheduledJobAdminController : ApiAdminControllerBase
     /// waiting for its next cron fire.
     /// </summary>
     [HttpPost("{id}/trigger")]
+    [ApiAuthorize(PermissionName = "system.scheduledJob.execute")]
     public virtual ApiResult Trigger(string id)
     {
         if (string.IsNullOrWhiteSpace(id))
@@ -76,6 +77,7 @@ public class DefaultScheduledJobAdminController : ApiAdminControllerBase
     /// cycles will not fire it; existing in-flight invocations complete.
     /// </summary>
     [HttpDelete("{id}")]
+    [ApiAuthorize(PermissionName = "system.scheduledJob.delete")]
     public virtual ApiResult Delete(string id)
     {
         if (string.IsNullOrWhiteSpace(id))

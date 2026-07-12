@@ -49,6 +49,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="input">组织信息</param>
     /// <returns>创建的组织</returns>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "organization.create")]
     public virtual async Task<ApiResult<OrganizationDto>> Create([FromBody] CreateOrganizationDto input)
     {
         var result = await OrganizationService.CreateAsync(input);
@@ -62,6 +63,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="input">组织信息</param>
     /// <returns>更新后的组织</returns>
     [HttpPut("{id}")]
+    [ApiAuthorize(PermissionName = "organization.update")]
     public virtual async Task<ApiResult<OrganizationDto>> Update(Guid id, [FromBody] UpdateOrganizationDto input)
     {
         var result = await OrganizationService.UpdateAsync(id, input);
@@ -74,6 +76,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="id">组织ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("{id}")]
+    [ApiAuthorize(PermissionName = "organization.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await OrganizationService.DeleteAsync(id);
@@ -87,6 +90,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="input">新父组织信息</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/move")]
+    [ApiAuthorize(PermissionName = "organization.update")]
     public virtual async Task<ApiResult> Move(Guid id, [FromBody] MoveOrganizationDto input)
     {
         var result = await OrganizationService.MoveAsync(id, input.NewParentId);
@@ -123,6 +127,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="inputs">组织信息列表</param>
     /// <returns>创建的组织列表</returns>
     [HttpPost("batch/create")]
+    [ApiAuthorize(PermissionName = "organization.create")]
     public virtual async Task<ApiResult<IEnumerable<OrganizationDto>>> CreateMany([FromBody] IEnumerable<CreateOrganizationDto> inputs)
     {
         var result = await OrganizationService.CreateManyAsync(inputs);
@@ -135,6 +140,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="inputs">组织更新信息列表</param>
     /// <returns>更新后的组织列表</returns>
     [HttpPut("batch/update")]
+    [ApiAuthorize(PermissionName = "organization.update")]
     public virtual async Task<ApiResult<IEnumerable<OrganizationDto>>> UpdateMany([FromBody] IEnumerable<UpdateOrganizationBatchDto> inputs)
     {
         var updateList = inputs.Select(x => (x.Id, x.Dto));
@@ -148,6 +154,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="ids">组织ID列表</param>
     /// <returns>操作结果</returns>
     [HttpDelete("batch/delete")]
+    [ApiAuthorize(PermissionName = "organization.delete")]
     public virtual async Task<ApiResult> DeleteMany([FromBody] IEnumerable<Guid> ids)
     {
         var result = await OrganizationService.DeleteManyAsync(ids);
@@ -186,6 +193,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="input">排序值</param>
     /// <returns>操作结果</returns>
     [HttpPut("{id}/sort-order")]
+    [ApiAuthorize(PermissionName = "organization.update")]
     public virtual async Task<ApiResult> UpdateSortOrder(Guid id, [FromBody] UpdateSortOrderDto input)
     {
         var result = await OrganizationService.UpdateSortOrderAsync(id, input.SortOrder);
@@ -198,6 +206,7 @@ public class DefaultOrganizationAdminController : ApiAdminControllerBase
     /// <param name="inputs">排序更新列表</param>
     /// <returns>操作结果</returns>
     [HttpPut("batch/sort-order")]
+    [ApiAuthorize(PermissionName = "organization.update")]
     public virtual async Task<ApiResult> BatchUpdateSortOrder([FromBody] IEnumerable<BatchSortOrderItemDto> inputs)
     {
         var updates = inputs.Select(x => (x.Id, x.SortOrder));

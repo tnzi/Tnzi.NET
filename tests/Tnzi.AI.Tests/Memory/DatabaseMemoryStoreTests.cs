@@ -559,10 +559,10 @@ public class DatabaseMemoryStoreTests
 
     private static DatabaseMemoryStore CreateStore(Mock<IRepository<MemoryEntry, Guid>> mockRepo, MemoryOptions? memoryOptions = null)
     {
-        IOptions<AIOptions>? aiOptions = null;
+        IOptionsMonitor<AIOptions>? aiOptions = null;
         if (memoryOptions != null)
         {
-            aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions
+            aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions
             {
                 ContextProviders = new ContextProvidersOptions { Memory = memoryOptions }
             });

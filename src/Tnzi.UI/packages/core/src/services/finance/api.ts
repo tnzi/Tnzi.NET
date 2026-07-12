@@ -61,7 +61,19 @@ import type {
   PaymentApplicationDto,
   ApplySettlementDto,
   OpenDocumentDto,
+  BatchPaymentDto,
+  BatchPaymentResultDto,
   AgingReportDto,
+  TaxSummaryReportDto,
+  CashFlowReportDto,
+  TransferDto,
+  CreateTransferDto,
+  TransferQueryDto,
+  ReconciliationDto,
+  CreateReconciliationDto,
+  ReconciliationQueryDto,
+  ReconciliationWorksheetDto,
+  SetReconciliationLinesDto,
 } from './types';
 import type { SettlementDocType, FinancePartyType } from './metadata';
 
@@ -221,6 +233,46 @@ export function useAdminFinanceReportApi(client: HttpClient) {
     /** AP aging as of a date */
     getApAging: (asOf: string) =>
       client.get<AgingReportDto>(`${ADMIN_REPORT_BASE}/ap-aging`, { params: { asOf } }),
+
+    /** Tax filing summary for a date range (output/input/net per agency and rate) */
+    getTaxSummary: (from: string, to: string) =>
+      client.get<TaxSummaryReportDto>(`${ADMIN_REPORT_BASE}/tax-summary`, { params: { from, to } }),
+
+    /** Indirect-method cash flow statement (with identity check row) */
+    getCashFlow: (from: string, to: string) =>
+      client.get<CashFlowReportDto>(`${ADMIN_REPORT_BASE}/cash-flow`, { params: { from, to } }),
+
+    /** Trial balance CSV export (UTF-8 BOM blob) */
+    exportTrialBalanceCsv: (from: string, to: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/trial-balance/export`, { params: { from, to } }),
+
+    /** Balance sheet CSV export */
+    exportBalanceSheetCsv: (asOf: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/balance-sheet/export`, { params: { asOf } }),
+
+    /** Profit and loss CSV export */
+    exportProfitAndLossCsv: (from: string, to: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/profit-and-loss/export`, { params: { from, to } }),
+
+    /** General ledger CSV export (full period with running balance; 400 when over the row cap) */
+    exportGeneralLedgerCsv: (accountId: string, from: string, to: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/general-ledger/${accountId}/export`, { params: { from, to } }),
+
+    /** AR aging CSV export */
+    exportArAgingCsv: (asOf: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/ar-aging/export`, { params: { asOf } }),
+
+    /** AP aging CSV export */
+    exportApAgingCsv: (asOf: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/ap-aging/export`, { params: { asOf } }),
+
+    /** Tax summary CSV export */
+    exportTaxSummaryCsv: (from: string, to: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/tax-summary/export`, { params: { from, to } }),
+
+    /** Cash flow statement CSV export */
+    exportCashFlowCsv: (from: string, to: string) =>
+      client.download(`${ADMIN_REPORT_BASE}/cash-flow/export`, { params: { from, to } }),
   };
 }
 
@@ -234,6 +286,8 @@ const ADMIN_EXPENSE_BASE = '/admin/finance/expenses';
 const ADMIN_CREDIT_MEMO_BASE = '/admin/finance/credit-memos';
 const ADMIN_PAYMENT_BASE = '/admin/finance/payments';
 const ADMIN_SETTLEMENT_BASE = '/admin/finance/settlements';
+const ADMIN_TRANSFER_BASE = '/admin/finance/transfers';
+const ADMIN_RECONCILIATION_BASE = '/admin/finance/reconciliations';
 
 /**
  * Admin Customer API
@@ -348,5 +402,36 @@ export function useAdminFinanceSettlementApi(client: HttpClient) {
       client.post<PaymentApplicationDto[]>(`${ADMIN_SETTLEMENT_BASE}/apply`, data),
     unapply: (applicationId: string) =>
       client.delete<void>(`${ADMIN_SETTLEMENT_BASE}/applications/${applicationId}`),
+    /** Batch settlement (Pay Bills / Receive Payments); atomic: any failure rolls back the whole batch. */
+    pay: (data: BatchPaymentDto) =>
+      client.post<BatchPaymentResultDto>(`${ADMIN_SETTLEMENT_BASE}/pay`, data),
+  };
+}
+
+/** Admin Transfer API (funds transfer document workflow) */
+export function useAdminFinanceTransferApi(client: HttpClient) {
+  return documentApi<TransferDto, CreateTransferDto, TransferQueryDto>(client, ADMIN_TRANSFER_BASE);
+}
+
+/** Admin Bank Reconciliation API */
+export function useAdminFinanceReconciliationApi(client: HttpClient) {
+  return {
+    getList: (params?: ReconciliationQueryDto) =>
+      client.get<PagedList<ReconciliationDto>>(ADMIN_RECONCILIATION_BASE, { params }),
+    get: (id: string) => client.get<ReconciliationDto>(`${ADMIN_RECONCILIATION_BASE}/${id}`),
+    create: (data: CreateReconciliationDto) =>
+      client.post<ReconciliationDto>(ADMIN_RECONCILIATION_BASE, data),
+    update: (id: string, data: CreateReconciliationDto) =>
+      client.put<ReconciliationDto>(`${ADMIN_RECONCILIATION_BASE}/${id}`, data),
+    delete: (id: string) => client.delete<void>(`${ADMIN_RECONCILIATION_BASE}/${id}`),
+    /** Worksheet: selected + candidate lines with the live difference */
+    getWorksheet: (id: string) =>
+      client.get<ReconciliationWorksheetDto>(`${ADMIN_RECONCILIATION_BASE}/${id}/worksheet`),
+    /** Full replacement of the cleared-line selection (draft only) */
+    setLines: (id: string, data: SetReconciliationLinesDto) =>
+      client.put<ReconciliationWorksheetDto>(`${ADMIN_RECONCILIATION_BASE}/${id}/lines`, data),
+    /** Lock the reconciliation (difference must be 0) */
+    complete: (id: string) =>
+      client.post<ReconciliationDto>(`${ADMIN_RECONCILIATION_BASE}/${id}/complete`),
   };
 }

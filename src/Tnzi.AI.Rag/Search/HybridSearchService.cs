@@ -33,7 +33,7 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         IEmbeddingService embeddingService,
         IReranker reranker,
         IRepository<KnowledgeDocument, Guid> docRepository,
-        IOptions<AIRagOptions> ragOptions) : base(serviceProvider)
+        IOptionsSnapshot<AIRagOptions> ragOptions) : base(serviceProvider)
     {
         _vectorStore = Check.NotNull(vectorStore);
         _keywordSearchProvider = Check.NotNull(keywordSearchProvider);

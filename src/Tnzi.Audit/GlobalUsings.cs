@@ -50,3 +50,4 @@ global using Tnzi.Security.Claims;
 global using Tnzi.Services;
 global using Tnzi.Utilities;
 global using Tnzi.Settings;
+global using Tnzi.Audit.Permissions;

@@ -19,17 +19,19 @@ public class StorageModule : TnziApplicationModule
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 注册配置选项
-        context.Services.Configure<StorageOptions>(context.Configuration.GetSection("Storage"));
-
-        // 注册配置验证器
-        context.Services.AddSingleton<IValidateOptions<StorageOptions>, StorageOptionsValidator>();
+        // 注册配置选项（统一入口：section 由 [ConfigSection("Storage")] 解析 + Bind + 验证器）
+        context.Services.AddTnziOptions<StorageOptions, StorageOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, StoragePermissions>();
+
         var services = context.Services;
 
         // 请求体大小上限：放开到配置的 MaxFileSize，让"最大文件"真正生效。

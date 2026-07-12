@@ -60,6 +60,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 启动后台 AgentRun
     /// </summary>
     [HttpPost("spawn")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult<AgentRunControlStateDto>> Spawn([FromBody] SpawnAgentRunInput input)
     {
         var result = await RuntimeControlService.SpawnAsync(input);
@@ -120,6 +121,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 取消运行
     /// </summary>
     [HttpPost("{runId:guid}/cancel")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult> Cancel(Guid runId)
     {
         var result = await RunService.CancelAsync(runId);
@@ -140,6 +142,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 恢复运行（失败重试 / 澄清输入）
     /// </summary>
     [HttpPost("{runId:guid}/resume")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult<AgentResponseDto>> Resume(Guid runId, [FromBody] ResumeRunInput? input)
     {
         var result = await RunService.ResumeAsync(runId, input);
@@ -150,6 +153,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 发送额外输入并恢复运行
     /// </summary>
     [HttpPost("{runId:guid}/send-input")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult<AgentRunControlStateDto>> SendInput(Guid runId, [FromBody] SendAgentRunInput input)
     {
         var result = await RuntimeControlService.SendInputAsync(runId, input);
@@ -160,6 +164,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 审批通过（HITL）
     /// </summary>
     [HttpPost("{runId:guid}/approve")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult> Approve(Guid runId, [FromBody] ApproveRunDto? input)
     {
         var result = await RunService.ApproveAsync(runId, input?.Comment);
@@ -170,6 +175,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 审批拒绝（HITL）
     /// </summary>
     [HttpPost("{runId:guid}/reject")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult> Reject(Guid runId, [FromBody] RejectRunDto? input)
     {
         var result = await RunService.RejectAsync(runId, input?.Comment);
@@ -180,6 +186,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     /// 重试失败节点
     /// </summary>
     [HttpPost("{runId:guid}/nodes/{nodeId:guid}/retry")]
+    [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult> RetryNode(Guid runId, Guid nodeId)
     {
         var result = await RunService.RetryNodeAsync(runId, nodeId);

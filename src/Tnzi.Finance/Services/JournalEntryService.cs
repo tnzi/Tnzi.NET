@@ -9,6 +9,7 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
     private readonly IRepository<JournalLine, Guid> _lineRepository;
     private readonly IRepository<Account, Guid> _accountRepository;
     private readonly LedgerPostingEngine _engine;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public JournalEntryService(
@@ -17,13 +18,15 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         IRepository<JournalLine, Guid> lineRepository,
         IRepository<Account, Guid> accountRepository,
         LedgerPostingEngine engine,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _entryRepository = Check.NotNull(entryRepository);
         _lineRepository = Check.NotNull(lineRepository);
         _accountRepository = Check.NotNull(accountRepository);
         _engine = Check.NotNull(engine);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -165,6 +168,10 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         if (entry.Status != JournalEntryStatus.Draft)
             return Fail<JournalEntryDto>("Only draft entries can be posted.", 409);
 
+        var guardResult = await _guards.CheckAsync(nameof(JournalEntry), entry.Id.ToString(), FinancePostingOperation.Post, entry, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<JournalEntryDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
+
         Result postResult;
         try
         {
@@ -216,6 +223,10 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
             return Fail<JournalEntryDto>("Draft entries cannot be reversed. Delete the draft instead.", 409);
         if (original.Status == JournalEntryStatus.Reversed || original.ReversedByEntryId.HasValue)
             return Fail<JournalEntryDto>("The entry has already been reversed.", 409);
+
+        var guardResult = await _guards.CheckAsync(nameof(JournalEntry), original.Id.ToString(), FinancePostingOperation.Reverse, original, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<JournalEntryDto>(guardResult.Message ?? "Reversal was rejected.", guardResult.Code ?? 403);
 
         var reversalDate = (input.PostingDate ?? original.PostingDate).ToUtcDate();
         JournalEntry? reversal = null;

@@ -24,6 +24,8 @@ import {
   useAdminFinanceCreditMemoApi,
   useAdminFinancePaymentApi,
   useAdminFinanceSettlementApi,
+  useAdminFinanceTransferApi,
+  useAdminFinanceReconciliationApi,
   type AccountDto as CoreAccountDto,
   type AccountTreeDto as CoreAccountTreeDto,
   type CreateAccountDto as CoreCreateAccountDto,
@@ -74,8 +76,19 @@ import {
   type PaymentApplicationDto as CorePaymentApplicationDto,
   type ApplySettlementDto as CoreApplySettlementDto,
   type OpenDocumentDto as CoreOpenDocumentDto,
+  type BatchPaymentDto as CoreBatchPaymentDto,
+  type BatchPaymentResultDto as CoreBatchPaymentResultDto,
   type AgingReportDto as CoreAgingReportDto,
   type AgingRowDto as CoreAgingRowDto,
+  type TaxSummaryReportDto as CoreTaxSummaryReportDto,
+  type TaxSummaryRowDto as CoreTaxSummaryRowDto,
+  type CashFlowReportDto as CoreCashFlowReportDto,
+  type TransferDto as CoreTransferDto,
+  type CreateTransferDto as CoreCreateTransferDto,
+  type ReconciliationDto as CoreReconciliationDto,
+  type CreateReconciliationDto as CoreCreateReconciliationDto,
+  type ReconciliationWorksheetDto as CoreReconciliationWorksheetDto,
+  type ReconciliationCandidateLineDto as CoreReconciliationCandidateLineDto,
 } from '@tnzi/core/services/finance'
 import type { PagedList } from '@tnzi/core'
 import type { FinancePartyType, SettlementDocType } from '@tnzi/core/services/finance'
@@ -132,8 +145,19 @@ export type ExpenseLineDto = CoreExpenseLineDto
 export type PaymentApplicationDto = CorePaymentApplicationDto
 export type ApplySettlementDto = CoreApplySettlementDto
 export type OpenDocumentDto = CoreOpenDocumentDto
+export type BatchPaymentDto = CoreBatchPaymentDto
+export type BatchPaymentResultDto = CoreBatchPaymentResultDto
 export type AgingReportDto = CoreAgingReportDto
 export type AgingRowDto = CoreAgingRowDto
+export type TaxSummaryReportDto = CoreTaxSummaryReportDto
+export type TaxSummaryRowDto = CoreTaxSummaryRowDto
+export type CashFlowReportDto = CoreCashFlowReportDto
+export type TransferDto = CoreTransferDto
+export type CreateTransferDto = CoreCreateTransferDto
+export type ReconciliationDto = CoreReconciliationDto
+export type CreateReconciliationDto = CoreCreateReconciliationDto
+export type ReconciliationWorksheetDto = CoreReconciliationWorksheetDto
+export type ReconciliationCandidateLineDto = CoreReconciliationCandidateLineDto
 
 export {
   AccountRootType,
@@ -145,6 +169,8 @@ export {
   FinancePartyType,
   SettlementDocType,
   ItemType,
+  ReconciliationStatus,
+  PAYMENT_METHODS,
 } from '@tnzi/core/services/finance'
 
 /** Page-facing paged query (CrudPageQuery-compatible subset). */
@@ -199,6 +225,16 @@ export interface FinanceBridge {
     generalLedger(accountId: string, from: string, to: string, pageIndex?: number, pageSize?: number): Promise<GeneralLedgerReportDto>
     arAging(asOf: string): Promise<AgingReportDto>
     apAging(asOf: string): Promise<AgingReportDto>
+    taxSummary(from: string, to: string): Promise<TaxSummaryReportDto>
+    cashFlow(from: string, to: string): Promise<CashFlowReportDto>
+    exportTrialBalanceCsv(from: string, to: string): Promise<Blob>
+    exportBalanceSheetCsv(asOf: string): Promise<Blob>
+    exportProfitAndLossCsv(from: string, to: string): Promise<Blob>
+    exportGeneralLedgerCsv(accountId: string, from: string, to: string): Promise<Blob>
+    exportArAgingCsv(asOf: string): Promise<Blob>
+    exportApAgingCsv(asOf: string): Promise<Blob>
+    exportTaxSummaryCsv(from: string, to: string): Promise<Blob>
+    exportCashFlowCsv(from: string, to: string): Promise<Blob>
   }
   customers: {
     fetch(query: FinancePagedQuery): Promise<FinancePagedResult<CustomerDto>>
@@ -237,11 +273,24 @@ export interface FinanceBridge {
   expenses: FinanceDocSection<ExpenseDto, CoreCreateExpenseDto>
   creditMemos: FinanceDocSection<CreditMemoDto, CoreCreateCreditMemoDto>
   payments: FinanceDocSection<PaymentEntryDto, CoreCreatePaymentEntryDto>
+  transfers: FinanceDocSection<TransferDto, CoreCreateTransferDto>
+  reconciliations: {
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<ReconciliationDto>>
+    getById(id: string): Promise<ReconciliationDto | null>
+    create(data: CoreCreateReconciliationDto): Promise<ReconciliationDto>
+    update(id: string, data: CoreCreateReconciliationDto): Promise<ReconciliationDto>
+    delete(id: string): Promise<void>
+    worksheet(id: string): Promise<ReconciliationWorksheetDto>
+    setLines(id: string, journalLineIds: string[]): Promise<ReconciliationWorksheetDto>
+    complete(id: string): Promise<ReconciliationDto>
+  }
   settlements: {
     applications(docType: SettlementDocType, docId: string): Promise<PaymentApplicationDto[]>
     openDocuments(partyType: FinancePartyType, partyId: string): Promise<OpenDocumentDto[]>
     apply(data: CoreApplySettlementDto): Promise<PaymentApplicationDto[]>
     unapply(applicationId: string): Promise<void>
+    /** Batch settlement (Pay Bills / Receive Payments); atomic on the backend. */
+    pay(data: CoreBatchPaymentDto): Promise<BatchPaymentResultDto>
   }
 }
 
@@ -286,6 +335,8 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       expenses: section as never,
       creditMemos: section as never,
       payments: section as never,
+      transfers: section as never,
+      reconciliations: section as never,
       settlements: section as never,
     }
   }
@@ -469,6 +520,24 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         unwrap<GeneralLedgerReportDto>(await reportApi.getGeneralLedger(accountId, from, to, pageIndex, pageSize)),
       arAging: async (asOf) => unwrap<AgingReportDto>(await reportApi.getArAging(asOf)),
       apAging: async (asOf) => unwrap<AgingReportDto>(await reportApi.getApAging(asOf)),
+      taxSummary: async (from, to) =>
+        unwrap<TaxSummaryReportDto>(await reportApi.getTaxSummary(from, to)),
+      cashFlow: async (from, to) =>
+        unwrap<CashFlowReportDto>(await reportApi.getCashFlow(from, to)),
+      exportTrialBalanceCsv: async (from, to) =>
+        unwrap<Blob>(await reportApi.exportTrialBalanceCsv(from, to)),
+      exportBalanceSheetCsv: async (asOf) =>
+        unwrap<Blob>(await reportApi.exportBalanceSheetCsv(asOf)),
+      exportProfitAndLossCsv: async (from, to) =>
+        unwrap<Blob>(await reportApi.exportProfitAndLossCsv(from, to)),
+      exportGeneralLedgerCsv: async (accountId, from, to) =>
+        unwrap<Blob>(await reportApi.exportGeneralLedgerCsv(accountId, from, to)),
+      exportArAgingCsv: async (asOf) => unwrap<Blob>(await reportApi.exportArAgingCsv(asOf)),
+      exportApAgingCsv: async (asOf) => unwrap<Blob>(await reportApi.exportApAgingCsv(asOf)),
+      exportTaxSummaryCsv: async (from, to) =>
+        unwrap<Blob>(await reportApi.exportTaxSummaryCsv(from, to)),
+      exportCashFlowCsv: async (from, to) =>
+        unwrap<Blob>(await reportApi.exportCashFlowCsv(from, to)),
     },
 
     customers: crudSection<CustomerDto, CoreCreateCustomerDto, CoreUpdateCustomerDto>(customerApi),
@@ -501,6 +570,34 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     expenses: docSection<ExpenseDto, CoreCreateExpenseDto>(useAdminFinanceExpenseApi(client)),
     creditMemos: docSection<CreditMemoDto, CoreCreateCreditMemoDto>(useAdminFinanceCreditMemoApi(client)),
     payments: docSection<PaymentEntryDto, CoreCreatePaymentEntryDto>(paymentApi),
+    transfers: docSection<TransferDto, CoreCreateTransferDto>(useAdminFinanceTransferApi(client)),
+
+    reconciliations: (() => {
+      const api = useAdminFinanceReconciliationApi(client)
+      return {
+        fetch: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<ReconciliationDto>>(
+            (await api.getList({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              ...filters,
+            } as never)) as never,
+          )
+          return toPaged(result, query)
+        },
+        getById: async (id: string) => unwrap<ReconciliationDto | null>(await api.get(id)),
+        create: async (data: CoreCreateReconciliationDto) => unwrap<ReconciliationDto>(await api.create(data)),
+        update: async (id: string, data: CoreCreateReconciliationDto) => unwrap<ReconciliationDto>(await api.update(id, data)),
+        delete: async (id: string) => {
+          unwrap<void>(await api.delete(id))
+        },
+        worksheet: async (id: string) => unwrap<ReconciliationWorksheetDto>(await api.getWorksheet(id)),
+        setLines: async (id: string, journalLineIds: string[]) =>
+          unwrap<ReconciliationWorksheetDto>(await api.setLines(id, { journalLineIds })),
+        complete: async (id: string) => unwrap<ReconciliationDto>(await api.complete(id)),
+      }
+    })(),
 
     settlements: {
       applications: async (docType, docId) =>
@@ -511,6 +608,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       unapply: async (applicationId) => {
         unwrap<void>(await settlementApi.unapply(applicationId))
       },
+      pay: async (data) => unwrap<BatchPaymentResultDto>(await settlementApi.pay(data)),
     },
   }
 }

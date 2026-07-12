@@ -6,7 +6,7 @@ namespace Tnzi.AI.Infrastructure.Memory;
 public partial class LlmEntityExtractor
 {
     private readonly IChatClientFactory _chatClientFactory;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<LlmEntityExtractor> _logger;
 
     private const string SystemPrompt =
@@ -23,7 +23,7 @@ public partial class LlmEntityExtractor
 
     public LlmEntityExtractor(
         IChatClientFactory chatClientFactory,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILogger<LlmEntityExtractor> logger)
     {
         _chatClientFactory = Check.NotNull(chatClientFactory);
@@ -49,7 +49,7 @@ public partial class LlmEntityExtractor
         try
         {
             // 优先使用参数，其次使用 EntityMemory 配置，最后使用默认提供商
-            var entityMemoryOptions = _options.Value.ContextProviders.EntityMemory;
+            var entityMemoryOptions = _options.CurrentValue.ContextProviders.EntityMemory;
             var provider = providerName ?? entityMemoryOptions.ExtractionProvider;
             var model = modelId ?? entityMemoryOptions.ExtractionModel;
 

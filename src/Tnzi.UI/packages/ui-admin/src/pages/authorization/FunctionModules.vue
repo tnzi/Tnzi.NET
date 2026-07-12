@@ -90,6 +90,7 @@
       <div class="flex justify-end gap-8px">
         <NButton @click="cascadeModal.show = false">{{ t('cascade.cancel') }}</NButton>
         <NButton
+          v-if="crud.canUpdate"
           type="error"
           :loading="cascadeModal.submitting"
           :disabled="!cascadeModal.preview || cascadeModal.loading"
@@ -213,6 +214,7 @@ const columns: ColumnDef<Row>[] = [
 
 const crud = useCrudPage<Row>({
   pageId: 'authorization.functionModules',
+  permission: 'authorization.functionModule',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (query) => bridge.functionModules.fetch(query),
@@ -317,7 +319,7 @@ const rowActions: RowAction<Row>[] = [
   {
     key: 'enable',
     label: 'actions.enable',
-    show: (row) => !row.isEnabled,
+    show: (row) => crud.canUpdate && !row.isEnabled,
     onClick: (row) => {
       if (!row.id) return
       void withRefresh(() => bridge.functionModules.enable(row.id!), 'actions.enableSuccess')
@@ -326,7 +328,7 @@ const rowActions: RowAction<Row>[] = [
   {
     key: 'disable',
     label: 'actions.disable',
-    show: (row) => !!row.isEnabled,
+    show: (row) => crud.canUpdate && !!row.isEnabled,
     onClick: (row) => {
       if (!row.id) return
       void openCascadeModal(row.id)

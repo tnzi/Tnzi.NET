@@ -4,8 +4,10 @@ namespace Tnzi.EFCore;
 /// <summary>
 /// 工作单元管理器实现
 /// 用于管理多个 DbContext 的工作单元，支持统一的事务协调
+/// 同时实现 IAmbientUnitOfWorkScope：事务启用期间把自身发布到 AmbientUnitOfWork(AsyncLocal),
+/// 供事件总线等基础设施感知活跃事务并把副作用延迟到提交后
 /// </summary>
-public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposable
+public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, IDisposable, IAsyncDisposable
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<UnitOfWorkManager>? _logger;
@@ -159,6 +161,13 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
         // 最终提交阶段：减少事务深度到 0
         Interlocked.Decrement(ref _transactionDepth);
 
+        // 清除环境事务作用域：事务已进入提交阶段,后续(含 post-commit 队列内)的事件发布
+        // 不应再被判定为"事务中"而重新入队,否则会形成自引用死循环。
+        // AsyncLocal 边界说明：本方法是 async,此处 Set(null) 只影响本方法内部执行流
+        // (post-commit 队列恰在其中);调用者流会残留一个 IsTransactionActive=false 的引用,
+        // 消费方(如 LocalEventBus)判定的是 IsTransactionActive 而非 null,语义等价于已清除
+        AmbientUnitOfWork.Set(null);
+
         // 使用 fail-fast 策略提交所有已创建的 UnitOfWork
         // 如果任何一个提交失败，立即停止并回滚所有尚未提交的 UnitOfWork
         var committedDbContexts = new List<Type>();
@@ -238,7 +247,10 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
         // 重置事务深度（回滚所有嵌套事务）
         Interlocked.Exchange(ref _transactionDepth, 0);
 
-        // 清空 post-commit 队列（事务回滚，丢弃所有待执行操作）
+        // 清除环境事务作用域(事务已结束)
+        AmbientUnitOfWork.Set(null);
+
+        // 清空 post-commit 队列（事务回滚，丢弃所有待执行操作,包括事务感知发布延迟的事件）
         var postCommitQueue = _serviceProvider.GetService<IPostCommitActionQueue>();
         postCommitQueue?.Clear();
 
@@ -401,7 +413,14 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
 
     public void EnableTransaction()
     {
-        Interlocked.Increment(ref _transactionDepth);
+        var depth = Interlocked.Increment(ref _transactionDepth);
+
+        // 首层进入事务时,把自身发布为环境事务作用域(AsyncLocal 随执行流传播),
+        // 使事件总线等基础设施能检测到活跃事务并延迟副作用到提交后
+        if (depth == 1)
+        {
+            AmbientUnitOfWork.Set(this);
+        }
 
         // 为所有已获取的 UnitOfWork 启用事务
         foreach (var unitOfWork in _unitOfWorks.Values)
@@ -413,6 +432,30 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
     public bool IsEnabledTransaction => Volatile.Read(ref _transactionDepth) > 0;
 
     public int TransactionDepth => Volatile.Read(ref _transactionDepth);
+
+    #region IAmbientUnitOfWorkScope
+
+    /// <inheritdoc />
+    bool IAmbientUnitOfWorkScope.IsTransactionActive => IsEnabledTransaction;
+
+    /// <inheritdoc />
+    void IAmbientUnitOfWorkScope.EnqueuePostCommit(Func<CancellationToken, Task> action)
+    {
+        Check.NotNull(action);
+
+        var queue = _serviceProvider.GetService<IPostCommitActionQueue>();
+        if (queue == null)
+        {
+            // 队列不可用(极端配置)时不能静默丢弃,记录后立即触发,保持事件不丢失
+            _logger?.LogWarning("IPostCommitActionQueue is not registered; post-commit action executes immediately instead of after commit");
+            _ = Task.Run(() => action(CancellationToken.None));
+            return;
+        }
+
+        queue.Enqueue(action);
+    }
+
+    #endregion
 
     #region IDisposable / IAsyncDisposable
 
@@ -447,6 +490,11 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
             }
             _unitOfWorks.Clear();
             Interlocked.Exchange(ref _transactionDepth, 0);
+            // 防御性清除环境事务作用域,避免自身引用在异常路径下泄漏到后续执行流
+            if (ReferenceEquals(AmbientUnitOfWork.Current, this))
+            {
+                AmbientUnitOfWork.Set(null);
+            }
         }
 
         _disposed = true;
@@ -491,6 +539,11 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IDisposable, IAsyncDisposab
         }
         _unitOfWorks.Clear();
         Interlocked.Exchange(ref _transactionDepth, 0);
+        // 防御性清除环境事务作用域,避免自身引用在异常路径下泄漏到后续执行流
+        if (ReferenceEquals(AmbientUnitOfWork.Current, this))
+        {
+            AmbientUnitOfWork.Set(null);
+        }
         _disposed = true;
     }
 

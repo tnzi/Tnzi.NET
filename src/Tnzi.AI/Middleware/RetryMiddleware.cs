@@ -14,26 +14,28 @@ namespace Tnzi.AI.Middleware;
 /// </remarks>
 public class RetryMiddleware : IAiMiddleware
 {
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<RetryMiddleware> _logger;
     private readonly ResiliencePipeline _pipeline;
     private readonly ResiliencePipeline _backgroundPipeline;
 
     public int Order => AiMiddlewareOrders.Retry;
 
-    public RetryMiddleware(IOptions<AIOptions> options, ILogger<RetryMiddleware> logger)
+    public RetryMiddleware(IOptionsMonitor<AIOptions> options, ILogger<RetryMiddleware> logger)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
 
-        var retryOptions = options.Value.Retry;
+        // Polly pipeline (含带状态的熔断器) 在构造期按当前配置构建一次并复用——
+        // 熔断器状态跨请求累积，逐请求重建会丢失状态，故此处不做热更新（见转换报告）。
+        var retryOptions = options.CurrentValue.Retry;
         _pipeline = BuildPipeline(retryOptions, excludeRateLimitRetry: false);
         _backgroundPipeline = BuildPipeline(retryOptions, excludeRateLimitRetry: retryOptions.AbortBackgroundOn429);
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (!_options.Value.Retry.Enabled)
+        if (!_options.CurrentValue.Retry.Enabled)
             return await next(context, cancellationToken);
 
 
@@ -43,7 +45,7 @@ public class RetryMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!_options.Value.Retry.Enabled)
+        if (!_options.CurrentValue.Retry.Enabled)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;
@@ -73,7 +75,7 @@ public class RetryMiddleware : IAiMiddleware
     private async Task<(AgentStreamChunk? FirstChunk, IAsyncEnumerable<AgentStreamChunk>? RemainingStream)> ConnectWithRetryAsync(
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, CancellationToken cancellationToken)
     {
-        var retryOptions = _options.Value.Retry;
+        var retryOptions = _options.CurrentValue.Retry;
         var maxRetries = retryOptions.MaxRetries;
         var attempt = 0;
         var delay = retryOptions.InitialDelay;
@@ -243,7 +245,7 @@ public class RetryMiddleware : IAiMiddleware
     /// </summary>
     private bool ShouldAbortBackground(AiMiddlewareContext context, Exception ex)
     {
-        return _options.Value.Retry.AbortBackgroundOn429
+        return _options.CurrentValue.Retry.AbortBackgroundOn429
                && IsBackgroundTask(context)
                && ex is HttpRequestException httpEx
                && (int?)httpEx.StatusCode == 429;

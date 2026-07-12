@@ -11,10 +11,12 @@ public class SettingService : ApplicationService, ISettingService
     private readonly IOptionsMonitor<ApplicationOptions> _applicationOptions;
     private readonly ICache _cache;
     private readonly IEnumerable<ISettingProvider> _settingProviders;
+    private readonly IEnumerable<ISettingDefinitionProvider> _definitionProviders;
     private readonly ISettingEncryptor? _settingEncryptor;
     private readonly SettingEncryptionOptions _encryptionOptions;
     private readonly ITnziApplication? _tnziApplication;
     private readonly IHostEnvironment? _hostEnvironment;
+    private readonly IDistributedEventBus? _distributedEventBus;
 
     /// <summary>
     /// 缓存条目，用于区分"不存在"和"值为null"
@@ -28,9 +30,11 @@ public class SettingService : ApplicationService, ISettingService
         IOptions<SettingEncryptionOptions> encryptionOptions,
         ICache cache,
         IEnumerable<ISettingProvider> settingProviders,
+        IEnumerable<ISettingDefinitionProvider> definitionProviders,
         ISettingEncryptor? settingEncryptor = null,
         ITnziApplication? tnziApplication = null,
-        IHostEnvironment? hostEnvironment = null)
+        IHostEnvironment? hostEnvironment = null,
+        IDistributedEventBus? distributedEventBus = null)
         : base(serviceProvider)
     {
         _settingRepository = Check.NotNull(settingRepository);
@@ -38,9 +42,11 @@ public class SettingService : ApplicationService, ISettingService
         _encryptionOptions = Check.NotNull(encryptionOptions).Value;
         _cache = Check.NotNull(cache);
         _settingProviders = Check.NotNull(settingProviders);
+        _definitionProviders = Check.NotNull(definitionProviders);
         _settingEncryptor = settingEncryptor;
         _tnziApplication = tnziApplication;
         _hostEnvironment = hostEnvironment;
+        _distributedEventBus = distributedEventBus;
     }
 
     /// <inheritdoc />
@@ -225,6 +231,12 @@ public class SettingService : ApplicationService, ISettingService
     {
         Check.NotNull(input);
 
+        // 后门收口：命中配置中心（RuntimeSetting）管理的 Global 键必须走 settings-center
+        // 端点 — 原始 CRUD 无 schema 校验，Global 行会经 SettingConfigurationProvider 流入
+        // IConfiguration，非法值将在下次重绑定强类型 Options 时抛异常。
+        if (IsManagedBySettingsCenter(input.Key, input.Scope))
+            return Fail<SettingDto>($"Setting key '{input.Key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
+
         // 检查键是否已存在（按 Key + Scope + ScopeId 唯一约束）
         var exists = await _settingRepository
             .AsQueryable()
@@ -255,6 +267,10 @@ public class SettingService : ApplicationService, ISettingService
 
         if (setting.IsSystem)
             return Fail<SettingDto>("Cannot update system setting", 403, ErrorCodes.SYSTEM_ERROR);
+
+        // 后门收口：与 CreateSettingAsync 相同 — 受管键的值必须经配置中心的 schema 校验写入
+        if (IsManagedBySettingsCenter(setting.Key, setting.Scope))
+            return Fail<SettingDto>($"Setting key '{setting.Key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
 
         input.MapTo(setting);
         await _settingRepository.UpdateAsync(setting);
@@ -560,28 +576,65 @@ public class SettingService : ApplicationService, ISettingService
     }
 
     /// <summary>
+    /// 判断键是否由配置中心（[RuntimeSetting] schema）管理。仅 Global 作用域受管 —
+    /// 配置中心只写 Global，Tenant/User 行不进 IConfiguration，无污染风险。
+    /// </summary>
+    private bool IsManagedBySettingsCenter(string key, SettingScope scope)
+    {
+        if (scope != SettingScope.Global || string.IsNullOrWhiteSpace(key))
+            return false;
+
+        return _definitionProviders
+            .SelectMany(p => p.GetGroups())
+            .SelectMany(g => g.Fields)
+            .Any(f => string.Equals(f.Key, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// Publish a SettingChangedEvent. EventBus is optional (apps without EventBusModule loaded),
     /// failures are swallowed so config writes never block on event delivery.
     /// </summary>
     private async Task PublishSettingChangedAsync(string key, SettingScope scope, string? scopeId, string? newValue, bool isRemoval)
     {
-        if (EventBus == null)
-            return;
-
-        try
+        if (EventBus != null)
         {
-            await EventBus.PublishAsync(new SettingChangedEvent
+            try
             {
-                Key = key,
-                Scope = scope,
-                ScopeId = scopeId,
-                NewValue = newValue,
-                IsRemoval = isRemoval
-            });
+                await EventBus.PublishAsync(new SettingChangedEvent
+                {
+                    Key = key,
+                    Scope = scope,
+                    ScopeId = scopeId,
+                    NewValue = newValue,
+                    IsRemoval = isRemoval
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to publish SettingChangedEvent for key {Key}", key);
+            }
         }
-        catch (Exception ex)
+
+        // 多实例一致性：分布式总线可用时把 Global 变更广播给其他实例（仅 key，不带值 —
+        // 收端直查数据库 reload，broker 上不落配置值/机密）。本地链已处理本实例，
+        // 收端用 OriginInstanceId 跳过回环投递。
+        if (_distributedEventBus != null && scope == SettingScope.Global)
         {
-            Logger.LogWarning(ex, "Failed to publish SettingChangedEvent for key {Key}", key);
+            try
+            {
+                await _distributedEventBus.PublishAsync(new SettingChangedIntegrationEvent
+                {
+                    Key = key,
+                    Scope = scope,
+                    ScopeId = scopeId,
+                    IsRemoval = isRemoval,
+                    OriginInstanceId = SettingChangedIntegrationEvent.LocalInstanceId
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to publish SettingChangedIntegrationEvent for key {Key}", key);
+            }
         }
     }
 }

@@ -1,0 +1,732 @@
+#nullable enable
+Tnzi.Data.IdGenerators.DefaultEntityIdGenerator
+Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
+Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+Tnzi.Data.IdGenerators.IEntityIdGenerator
+Tnzi.Data.IdGenerators.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+Tnzi.EFCore.Caching.QueryableCacheExtensions
+Tnzi.EFCore.Dapper.DapperBulkOperations
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.BulkDeleteAsync<TBulk>(System.Collections.Generic.IEnumerable<object!>! keys, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.BulkInsertAsync<TBulk>(System.Collections.Generic.IEnumerable<TBulk!>! entities, string? tableName = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.BulkUpdateAsync<TBulk>(System.Collections.Generic.IEnumerable<TBulk!>! entities, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.DapperExecutor(System.IServiceProvider! serviceProvider, Tnzi.EFCore.IEntityManager! entityManager, Microsoft.Extensions.Configuration.IConfiguration? configuration = null) -> void
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.ExecuteAsync(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.ExecuteScalarAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.ExecuteStoredProcedureAsync<TResult>(string! procedureName, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<TResult>!>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.QueryAsync<TResult>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<TResult>!>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.QueryFirstOrDefaultAsync<TResult>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult?>!
+Tnzi.EFCore.Dapper.DapperExecutor<TEntity, TKey>.QuerySingleOrDefaultAsync<TResult>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult?>!
+Tnzi.EFCore.Dapper.DapperExecutorFactory
+Tnzi.EFCore.Dapper.DapperExecutorFactory.Create<TEntity, TKey>() -> Tnzi.EFCore.Dapper.IDapperExecutor<TEntity!, TKey>!
+Tnzi.EFCore.Dapper.DapperExecutorFactory.DapperExecutorFactory(System.IServiceProvider! serviceProvider, Tnzi.EFCore.IEntityManager! entityManager, Microsoft.Extensions.Configuration.IConfiguration? configuration = null) -> void
+Tnzi.EFCore.Dapper.DapperExecutorRegistrationExtensions
+Tnzi.EFCore.Dapper.DapperExtensions
+Tnzi.EFCore.Dapper.DapperService
+Tnzi.EFCore.Dapper.DapperService.BulkDeleteAsync<T>(System.Collections.Generic.IEnumerable<object!>! keys, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperService.BulkInsertAsync<T>(System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperService.BulkUpdateAsync<T>(System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Dapper.DapperService!>? logger = null) -> void
+Tnzi.EFCore.Dapper.DapperService.ExecuteAsync(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.DapperService.ExecuteScalarAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.DapperService.ExecuteStoredProcedureAsync<T>(string! procedureName, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<T>!>!
+Tnzi.EFCore.Dapper.DapperService.QueryAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<T>!>!
+Tnzi.EFCore.Dapper.DapperService.QueryFirstOrDefaultAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.DapperService.QuerySingleOrDefaultAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.BulkDeleteAsync<TBulk>(System.Collections.Generic.IEnumerable<object!>! keys, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.BulkInsertAsync<TBulk>(System.Collections.Generic.IEnumerable<TBulk!>! entities, string? tableName = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.BulkUpdateAsync<TBulk>(System.Collections.Generic.IEnumerable<TBulk!>! entities, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.ExecuteAsync(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.ExecuteScalarAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.ExecuteStoredProcedureAsync<TResult>(string! procedureName, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<TResult>!>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.QueryAsync<TResult>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<TResult>!>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.QueryFirstOrDefaultAsync<TResult>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult?>!
+Tnzi.EFCore.Dapper.IDapperExecutor<TEntity, TKey>.QuerySingleOrDefaultAsync<TResult>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult?>!
+Tnzi.EFCore.Dapper.IDapperService
+Tnzi.EFCore.Dapper.IDapperService.BulkDeleteAsync<T>(System.Collections.Generic.IEnumerable<object!>! keys, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperService.BulkInsertAsync<T>(System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperService.BulkUpdateAsync<T>(System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperService.ExecuteAsync(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Dapper.IDapperService.ExecuteScalarAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.IDapperService.ExecuteStoredProcedureAsync<T>(string! procedureName, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<T>!>!
+Tnzi.EFCore.Dapper.IDapperService.QueryAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<T>!>!
+Tnzi.EFCore.Dapper.IDapperService.QueryFirstOrDefaultAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.IDapperService.QuerySingleOrDefaultAsync<T>(string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Tnzi.EFCore.Dapper.Internal.ColumnMapping
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.ColumnMapping() -> void
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.ColumnMapping(string! ColumnName, string! PropertyName) -> void
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.ColumnName.get -> string!
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.ColumnName.set -> void
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.Deconstruct(out string! ColumnName, out string! PropertyName) -> void
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.Equals(Tnzi.EFCore.Dapper.Internal.ColumnMapping other) -> bool
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.PropertyName.get -> string!
+Tnzi.EFCore.Dapper.Internal.ColumnMapping.PropertyName.set -> void
+Tnzi.EFCore.Dapper.Internal.DapperEntityHelper
+Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper
+Tnzi.EFCore.Dapper.Providers.DapperDatabaseProviderFactory
+Tnzi.EFCore.Dapper.Providers.DapperDatabaseProviderFactory.DapperDatabaseProviderFactory() -> void
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.ApplyPaging(string! sql, int offset, int limit) -> string!
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.ApplyReturningId(string! sql, string! keyColumn) -> string!
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.CreateConnection(string! connectionString) -> System.Data.IDbConnection!
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.DatabaseType.get -> string!
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.EscapeIdentifier(string! identifier) -> string!
+Tnzi.EFCore.Dapper.Providers.MySqlProvider
+Tnzi.EFCore.Dapper.Providers.MySqlProvider.ApplyPaging(string! sql, int offset, int limit) -> string!
+Tnzi.EFCore.Dapper.Providers.MySqlProvider.ApplyReturningId(string! sql, string! keyColumn) -> string!
+Tnzi.EFCore.Dapper.Providers.MySqlProvider.CreateConnection(string! connectionString) -> System.Data.IDbConnection!
+Tnzi.EFCore.Dapper.Providers.MySqlProvider.DatabaseType.get -> string!
+Tnzi.EFCore.Dapper.Providers.MySqlProvider.EscapeIdentifier(string! identifier) -> string!
+Tnzi.EFCore.Dapper.Providers.MySqlProvider.MySqlProvider() -> void
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider.ApplyPaging(string! sql, int offset, int limit) -> string!
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider.ApplyReturningId(string! sql, string! keyColumn) -> string!
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider.CreateConnection(string! connectionString) -> System.Data.IDbConnection!
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider.DatabaseType.get -> string!
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider.EscapeIdentifier(string! identifier) -> string!
+Tnzi.EFCore.Dapper.Providers.PostgreSQLProvider.PostgreSQLProvider() -> void
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.ApplyPaging(string! sql, int offset, int limit) -> string!
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.ApplyReturningId(string! sql, string! keyColumn) -> string!
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.CreateConnection(string! connectionString) -> System.Data.IDbConnection!
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.DatabaseType.get -> string!
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.EscapeIdentifier(string! identifier) -> string!
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.SqlServerProvider() -> void
+Tnzi.EFCore.Data.DataFilterManager
+Tnzi.EFCore.Data.DataFilterManager.DataFilterManager(Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Data.DataFilterManager!>? logger = null) -> void
+Tnzi.EFCore.Data.DataFilterManager.Disable<TFilter>() -> System.IDisposable!
+Tnzi.EFCore.Data.DataFilterManager.Enable<TFilter>() -> System.IDisposable!
+Tnzi.EFCore.Data.DataFilterManager.IsEnabled<TFilter>() -> bool
+Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.DatabaseProvider.MySql = 2 -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.DatabaseProvider.PostgreSQL = 1 -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.DatabaseProvider.SqlServer = 0 -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.DatabaseProvider.Sqlite = 3 -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.DesignTimeCurrentUser
+Tnzi.EFCore.DesignTimeCurrentUser.DesignTimeCurrentUser() -> void
+Tnzi.EFCore.DesignTimeCurrentUser.Id.get -> System.Guid?
+Tnzi.EFCore.DesignTimeCurrentUser.IsAuthenticated.get -> bool
+Tnzi.EFCore.DesignTimeCurrentUser.IsInRole(string! roleName) -> bool
+Tnzi.EFCore.DesignTimeCurrentUser.Roles.get -> string![]!
+Tnzi.EFCore.DesignTimeCurrentUser.TenantId.get -> System.Guid?
+Tnzi.EFCore.DesignTimeCurrentUser.UserName.get -> string?
+Tnzi.EFCore.DesignTimeDbContextFactoryBase<TDbContext>
+Tnzi.EFCore.DesignTimeDbContextFactoryBase<TDbContext>.CreateDbContext(string![]! args) -> TDbContext!
+Tnzi.EFCore.DesignTimeDbContextFactoryBase<TDbContext>.DesignTimeDbContextFactoryBase() -> void
+Tnzi.EFCore.EFCoreDbInitializer<TDbContext>
+Tnzi.EFCore.EFCoreDbInitializer<TDbContext>.EFCoreDbInitializer(TDbContext! dbContext, System.IServiceProvider! serviceProvider, System.Collections.Generic.IEnumerable<Tnzi.Data.IDataSeeder!>! seeders, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.EFCoreDbInitializer<TDbContext!>!>! logger) -> void
+Tnzi.EFCore.EFCoreDbInitializer<TDbContext>.MigrateAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreDbInitializer<TDbContext>.SeedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreModule
+Tnzi.EFCore.EFCoreModule.EFCoreModule() -> void
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.EFCoreRepository(TDbContext! dbContext, Microsoft.Extensions.Options.IOptions<Tnzi.EFCore.Options.EFCoreOptions!>? options = null, System.IServiceProvider? serviceProvider = null, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.EFCoreRepository<TDbContext!, TEntity!>!>? logger = null) -> void
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.DbContext.get -> TDbContext!
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.DbSet.get -> Microsoft.EntityFrameworkCore.DbSet<TEntity!>!
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.EFCoreRepository(TDbContext! dbContext, Microsoft.Extensions.Options.IOptions<Tnzi.EFCore.Options.EFCoreOptions!>? options = null, System.IServiceProvider? serviceProvider = null, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.EFCoreRepository<TDbContext!, TEntity!>!>? logger = null) -> void
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ElementType.get -> System.Type!
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.Expression.get -> System.Linq.Expressions.Expression!
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetEnumerator() -> System.Collections.Generic.IEnumerator<TEntity!>!
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.Provider.get -> System.Linq.IQueryProvider!
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.BeginTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.CommitTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.Dispose() -> void
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.EFCoreUnitOfWork(TDbContext! dbContext, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.EFCoreUnitOfWork<TDbContext!>!>? logger = null, System.IServiceProvider? serviceProvider = null) -> void
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.EnableTransaction() -> void
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.EnsureTransactionStartedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.IsEnabledTransaction.get -> bool
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.RollbackTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.SaveChangesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.TransactionDepth.get -> int
+Tnzi.EFCore.EntityConfigurationContext
+Tnzi.EFCore.EntityManager
+Tnzi.EFCore.EntityManager.EntityManager(System.IServiceProvider! serviceProvider) -> void
+Tnzi.EFCore.EntityManager.GetAllDbContextTypes() -> System.Type![]!
+Tnzi.EFCore.EntityManager.GetAllEntityTypes() -> System.Type![]!
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.EntityType.get -> System.Type!
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.EntityTypeConfigurationBase() -> void
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.GetDatabaseProviderOrDefault() -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.GetDbContext() -> Microsoft.EntityFrameworkCore.DbContext?
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.GetModelBuilder() -> Microsoft.EntityFrameworkCore.ModelBuilder?
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.RegisterTo(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.RegisterTo(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext? dbContext) -> void
+Tnzi.EFCore.Exceptions.DatabaseException
+Tnzi.EFCore.Exceptions.DatabaseException.ConnectionString.get -> string?
+Tnzi.EFCore.Exceptions.DatabaseException.DatabaseException(string! message, string? connectionString = null, bool isRetryable = false, System.Exception? innerException = null) -> void
+Tnzi.EFCore.Exceptions.DbConcurrencyException
+Tnzi.EFCore.Exceptions.DbConcurrencyException.DbConcurrencyException(string! message, System.Exception? innerException = null) -> void
+Tnzi.EFCore.Exceptions.DbConnectionException
+Tnzi.EFCore.Exceptions.DbConnectionException.DbConnectionException(string! message, string? connectionString = null, System.Exception? innerException = null) -> void
+Tnzi.EFCore.Exceptions.DbMigrationException
+Tnzi.EFCore.Exceptions.DbMigrationException.DbMigrationException(string! message, string? migrationName = null, System.Exception? innerException = null) -> void
+Tnzi.EFCore.Exceptions.DbMigrationException.MigrationName.get -> string?
+Tnzi.EFCore.Exceptions.DbQueryException
+Tnzi.EFCore.Exceptions.DbQueryException.DbQueryException(string! message, string? query = null, System.Exception? innerException = null) -> void
+Tnzi.EFCore.Exceptions.DbQueryException.Query.get -> string?
+Tnzi.EFCore.Extensions.BatchOperationExtensions
+Tnzi.EFCore.Extensions.DbUpdateExceptionExtensions
+Tnzi.EFCore.Extensions.PagedListExtensions
+Tnzi.EFCore.Extensions.RepositorySpecificationExtensions
+Tnzi.EFCore.Extensions.UnitOfWorkExtensions
+Tnzi.EFCore.FileTracking.FileReferenceChangeTracker
+Tnzi.EFCore.FileTracking.FileReferenceChangeTracker.Clear() -> void
+Tnzi.EFCore.FileTracking.FileReferenceChangeTracker.CollectChanges(Microsoft.EntityFrameworkCore.ChangeTracking.ChangeTracker! changeTracker) -> void
+Tnzi.EFCore.FileTracking.FileReferenceChangeTracker.FileReferenceChangeTracker() -> void
+Tnzi.EFCore.FileTracking.FileReferenceChangeTracker.GetChanges() -> System.Collections.Generic.IReadOnlyList<Tnzi.Storage.FileReferenceChange!>!
+Tnzi.EFCore.FileTracking.FileReferenceChangeTracker.HasChanges.get -> bool
+Tnzi.EFCore.IEntityBatchConfiguration
+Tnzi.EFCore.IEntityBatchConfiguration.Configure(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType! mutableEntityType) -> void
+Tnzi.EFCore.IEntityManager
+Tnzi.EFCore.IEntityManager.GetAllDbContextTypes() -> System.Type![]!
+Tnzi.EFCore.IEntityManager.GetAllEntityTypes() -> System.Type![]!
+Tnzi.EFCore.IEntityManager.GetDbContextTypeForEntity(System.Type! entityType) -> System.Type!
+Tnzi.EFCore.IEntityManager.GetEntityRegisters(System.Type! dbContextType) -> Tnzi.EFCore.IEntityRegister![]!
+Tnzi.EFCore.IEntityManager.Initialize() -> void
+Tnzi.EFCore.IEntityRegister
+Tnzi.EFCore.IEntityRegister.DbContextType.get -> System.Type?
+Tnzi.EFCore.IEntityRegister.EntityType.get -> System.Type!
+Tnzi.EFCore.IEntityRegister.RegisterTo(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+Tnzi.EFCore.IEntityRegister.RegisterTo(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext? dbContext) -> void
+Tnzi.EFCore.IndexFilterFactory
+Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor
+Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.SlowQueryLoggingInterceptor(Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor!>! logger, Microsoft.Extensions.Options.IOptions<Tnzi.EFCore.Options.EFCoreOptions!>! options) -> void
+Tnzi.EFCore.Internal.AssemblyScanner
+Tnzi.EFCore.Internal.DatabaseProviderDetector
+Tnzi.EFCore.Internal.IMultiTenancySwitchProvider
+Tnzi.EFCore.Internal.IMultiTenancySwitchProvider.IsMultiTenancyEnabled.get -> bool
+Tnzi.EFCore.Internal.MultiTenancyModelCacheKeyFactory
+Tnzi.EFCore.Internal.MultiTenancyModelCacheKeyFactory.Create(Microsoft.EntityFrameworkCore.DbContext! context, bool designTime) -> object!
+Tnzi.EFCore.Internal.MultiTenancyModelCacheKeyFactory.MultiTenancyModelCacheKeyFactory() -> void
+Tnzi.EFCore.Internal.TnziDbContextHelper
+Tnzi.EFCore.Internal.TypeHelper
+Tnzi.EFCore.Options.ConnectionPoolOptions
+Tnzi.EFCore.Options.ConnectionPoolOptions.CommandTimeout.get -> int?
+Tnzi.EFCore.Options.ConnectionPoolOptions.CommandTimeout.set -> void
+Tnzi.EFCore.Options.ConnectionPoolOptions.ConnectionIdleTimeout.get -> int?
+Tnzi.EFCore.Options.ConnectionPoolOptions.ConnectionIdleTimeout.set -> void
+Tnzi.EFCore.Options.ConnectionPoolOptions.ConnectionPoolOptions() -> void
+Tnzi.EFCore.Options.ConnectionPoolOptions.ConnectionTimeout.get -> int?
+Tnzi.EFCore.Options.ConnectionPoolOptions.ConnectionTimeout.set -> void
+Tnzi.EFCore.Options.ConnectionPoolOptions.HasConfiguration.get -> bool
+Tnzi.EFCore.Options.ConnectionPoolOptions.MaxPoolSize.get -> int?
+Tnzi.EFCore.Options.ConnectionPoolOptions.MaxPoolSize.set -> void
+Tnzi.EFCore.Options.ConnectionPoolOptions.MinPoolSize.get -> int?
+Tnzi.EFCore.Options.ConnectionPoolOptions.MinPoolSize.set -> void
+Tnzi.EFCore.Options.ConnectionPoolOptions.Pooling.get -> bool
+Tnzi.EFCore.Options.ConnectionPoolOptions.Pooling.set -> void
+Tnzi.EFCore.Options.ConnectionStringBuilder
+Tnzi.EFCore.Options.DataAuthOptions
+Tnzi.EFCore.Options.DataAuthOptions.AutoApplyDataAuth.get -> bool
+Tnzi.EFCore.Options.DataAuthOptions.AutoApplyDataAuth.set -> void
+Tnzi.EFCore.Options.DataAuthOptions.DataAuthOptions() -> void
+Tnzi.EFCore.Options.DatabaseOptions
+Tnzi.EFCore.Options.DatabaseOptions.AutoDiscoverDbContexts.get -> bool
+Tnzi.EFCore.Options.DatabaseOptions.AutoDiscoverDbContexts.set -> void
+Tnzi.EFCore.Options.DatabaseOptions.AutoRegisterDataSeeders.get -> bool
+Tnzi.EFCore.Options.DatabaseOptions.AutoRegisterDataSeeders.set -> void
+Tnzi.EFCore.Options.DatabaseOptions.DatabaseOptions() -> void
+Tnzi.EFCore.Options.DatabaseOptions.DbContexts.get -> System.Collections.Generic.List<Tnzi.EFCore.Options.DbContextConfiguration!>!
+Tnzi.EFCore.Options.DatabaseOptions.DbContexts.set -> void
+Tnzi.EFCore.Options.DatabaseOptions.PrimaryDbContext.get -> string?
+Tnzi.EFCore.Options.DatabaseOptions.PrimaryDbContext.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration
+Tnzi.EFCore.Options.DbContextConfiguration.BuildProviderConfigureOptions() -> Tnzi.EFCore.Providers.DbProviderConfigureOptions!
+Tnzi.EFCore.Options.DbContextConfiguration.CommandTimeout.get -> int?
+Tnzi.EFCore.Options.DbContextConfiguration.CommandTimeout.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.ConnectionPool.get -> Tnzi.EFCore.Options.ConnectionPoolOptions?
+Tnzi.EFCore.Options.DbContextConfiguration.ConnectionPool.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.ConnectionString.get -> string!
+Tnzi.EFCore.Options.DbContextConfiguration.ConnectionString.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.DbContextConfiguration() -> void
+Tnzi.EFCore.Options.DbContextConfiguration.DbContextType.get -> string!
+Tnzi.EFCore.Options.DbContextConfiguration.DbContextType.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.EnableRetryOnFailure.get -> bool
+Tnzi.EFCore.Options.DbContextConfiguration.EnableRetryOnFailure.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.GetEffectiveConnectionString(Microsoft.Extensions.Configuration.IConfiguration? configuration = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> string!
+Tnzi.EFCore.Options.DbContextConfiguration.MaxRetryCount.get -> int?
+Tnzi.EFCore.Options.DbContextConfiguration.MaxRetryCount.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.Name.get -> string!
+Tnzi.EFCore.Options.DbContextConfiguration.Name.set -> void
+Tnzi.EFCore.Options.DbContextConfiguration.Provider.get -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.Options.DbContextConfiguration.Provider.set -> void
+Tnzi.EFCore.Options.EFCoreOptions
+Tnzi.EFCore.Options.EFCoreOptions.AutoSaveChanges.get -> bool
+Tnzi.EFCore.Options.EFCoreOptions.AutoSaveChanges.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.BatchSize.get -> int
+Tnzi.EFCore.Options.EFCoreOptions.BatchSize.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.BatchSizes.get -> System.Collections.Generic.Dictionary<string!, int>!
+Tnzi.EFCore.Options.EFCoreOptions.BatchSizes.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.EFCoreOptions() -> void
+Tnzi.EFCore.Options.EFCoreOptions.EnableSlowQueryLogging.get -> bool
+Tnzi.EFCore.Options.EFCoreOptions.EnableSlowQueryLogging.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.EnableTransactionDetection.get -> bool
+Tnzi.EFCore.Options.EFCoreOptions.EnableTransactionDetection.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.LogAutoSaveDecisions.get -> bool
+Tnzi.EFCore.Options.EFCoreOptions.LogAutoSaveDecisions.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.LogQueryParameters.get -> bool
+Tnzi.EFCore.Options.EFCoreOptions.LogQueryParameters.set -> void
+Tnzi.EFCore.Options.EFCoreOptions.SlowQueryThresholdMs.get -> int
+Tnzi.EFCore.Options.EFCoreOptions.SlowQueryThresholdMs.set -> void
+Tnzi.EFCore.Options.EFCoreOptionsValidator
+Tnzi.EFCore.Options.EFCoreOptionsValidator.EFCoreOptionsValidator() -> void
+Tnzi.EFCore.Outbox.Configs.OutboxMessageConfiguration
+Tnzi.EFCore.Outbox.Configs.OutboxMessageConfiguration.OutboxMessageConfiguration() -> void
+Tnzi.EFCore.Outbox.EfCoreEventStore
+Tnzi.EFCore.Outbox.EfCoreEventStore.DeleteExpiredEventsAsync(int days = 90, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.Outbox.EfCoreEventStore.EfCoreEventStore(System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Outbox.EfCoreEventStore!>! logger, System.TimeProvider? timeProvider = null) -> void
+Tnzi.EFCore.Outbox.EfCoreEventStore.GetEventAsync(System.Guid eventId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.EventBus.StoredEvent?>!
+Tnzi.EFCore.Outbox.EfCoreEventStore.GetEventsAsync(Tnzi.EventBus.EventQueryDto! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<Tnzi.EventBus.StoredEvent!>!>!
+Tnzi.EFCore.Outbox.EfCoreEventStore.GetUnprocessedEventsAsync(int count = 100, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Tnzi.EventBus.StoredEvent!>!>!
+Tnzi.EFCore.Outbox.EfCoreEventStore.MarkAsFailedAsync(System.Guid eventId, string! error, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.Outbox.EfCoreEventStore.MarkAsProcessedAsync(System.Guid eventId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.Outbox.EfCoreEventStore.SaveEventAsync(Tnzi.EventBus.IEvent! event, string! eventType, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.Outbox.OutboxMessage
+Tnzi.EFCore.Outbox.OutboxMessage.EventData.get -> string!
+Tnzi.EFCore.Outbox.OutboxMessage.EventData.set -> void
+Tnzi.EFCore.Outbox.OutboxMessage.EventTime.get -> System.DateTime
+Tnzi.EFCore.Outbox.OutboxMessage.EventTime.set -> void
+Tnzi.EFCore.Outbox.OutboxMessage.EventType.get -> string!
+Tnzi.EFCore.Outbox.OutboxMessage.EventType.set -> void
+Tnzi.EFCore.Outbox.OutboxMessage.FailureCount.get -> int
+Tnzi.EFCore.Outbox.OutboxMessage.FailureCount.set -> void
+Tnzi.EFCore.Outbox.OutboxMessage.IsProcessed.get -> bool
+Tnzi.EFCore.Outbox.OutboxMessage.IsProcessed.set -> void
+Tnzi.EFCore.Outbox.OutboxMessage.LastError.get -> string?
+Tnzi.EFCore.Outbox.OutboxMessage.LastError.set -> void
+Tnzi.EFCore.Outbox.OutboxMessage.OutboxMessage() -> void
+Tnzi.EFCore.Outbox.OutboxMessage.ProcessedTime.get -> System.DateTime?
+Tnzi.EFCore.Outbox.OutboxMessage.ProcessedTime.set -> void
+Tnzi.EFCore.Outbox.OutboxOptions
+Tnzi.EFCore.Outbox.OutboxOptions.BatchSize.get -> int
+Tnzi.EFCore.Outbox.OutboxOptions.BatchSize.set -> void
+Tnzi.EFCore.Outbox.OutboxOptions.Enabled.get -> bool
+Tnzi.EFCore.Outbox.OutboxOptions.Enabled.set -> void
+Tnzi.EFCore.Outbox.OutboxOptions.MaxRetryCount.get -> int
+Tnzi.EFCore.Outbox.OutboxOptions.MaxRetryCount.set -> void
+Tnzi.EFCore.Outbox.OutboxOptions.OutboxOptions() -> void
+Tnzi.EFCore.Outbox.OutboxOptions.PollingIntervalSeconds.get -> int
+Tnzi.EFCore.Outbox.OutboxOptions.PollingIntervalSeconds.set -> void
+Tnzi.EFCore.Outbox.OutboxOptions.RetentionDays.get -> int
+Tnzi.EFCore.Outbox.OutboxOptions.RetentionDays.set -> void
+Tnzi.EFCore.Outbox.OutboxOptionsValidator
+Tnzi.EFCore.Outbox.OutboxOptionsValidator.OutboxOptionsValidator() -> void
+Tnzi.EFCore.Outbox.OutboxRelayBackgroundService
+Tnzi.EFCore.Outbox.OutboxRelayBackgroundService.OutboxRelayBackgroundService(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Microsoft.Extensions.Options.IOptions<Tnzi.EFCore.Outbox.OutboxOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Outbox.OutboxRelayBackgroundService!>! logger) -> void
+Tnzi.EFCore.PropertyBuilderExtensions
+Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase
+Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.DatabaseProviderConfiguratorBase() -> void
+Tnzi.EFCore.Providers.DatabaseProviderFactory
+Tnzi.EFCore.Providers.DbProviderConfigureOptions
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.CommandTimeout.get -> int?
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.CommandTimeout.init -> void
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.ConflictsWithUnitOfWorkTransaction.get -> bool
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.DbProviderConfigureOptions() -> void
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.EnableRetryOnFailure.get -> bool
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.EnableRetryOnFailure.init -> void
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.HasAny.get -> bool
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.MaxRetryCount.get -> int?
+Tnzi.EFCore.Providers.DbProviderConfigureOptions.MaxRetryCount.init -> void
+Tnzi.EFCore.Providers.IDatabaseProviderConfigurator
+Tnzi.EFCore.Providers.IDatabaseProviderConfigurator.Configure(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! builder, string! connectionString, Tnzi.EFCore.Providers.DbProviderConfigureOptions? options = null) -> void
+Tnzi.EFCore.Providers.IDatabaseProviderConfigurator.Provider.get -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.Providers.MySqlConfigurator
+Tnzi.EFCore.Providers.MySqlConfigurator.MySqlConfigurator() -> void
+Tnzi.EFCore.Providers.PostgreSqlConfigurator
+Tnzi.EFCore.Providers.PostgreSqlConfigurator.PostgreSqlConfigurator() -> void
+Tnzi.EFCore.Providers.SqlServerConfigurator
+Tnzi.EFCore.Providers.SqlServerConfigurator.SqlServerConfigurator() -> void
+Tnzi.EFCore.Providers.SqliteConfigurator
+Tnzi.EFCore.Providers.SqliteConfigurator.SqliteConfigurator() -> void
+Tnzi.EFCore.QueryPerformanceMonitor
+Tnzi.EFCore.QueryPerformanceMonitor.Clear() -> void
+Tnzi.EFCore.QueryPerformanceMonitor.Dispose() -> void
+Tnzi.EFCore.QueryPerformanceMonitor.GetSlowQueries(int count = 10) -> System.Collections.Generic.List<Tnzi.EFCore.SlowQueryRecord!>!
+Tnzi.EFCore.QueryPerformanceMonitor.GetStatistics(System.TimeSpan timeWindow) -> Tnzi.EFCore.SlowQueryStatistics!
+Tnzi.EFCore.QueryPerformanceMonitor.QueryPerformanceMonitor(Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.QueryPerformanceMonitor!>? logger = null, System.TimeSpan? slowQueryThreshold = null, int maxSlowQueries = 100) -> void
+Tnzi.EFCore.QueryPerformanceMonitor.RecordQuery(string! sql, object? parameters, System.TimeSpan executionTime, int? rowCount = null) -> void
+Tnzi.EFCore.Services.DataSeederManager
+Tnzi.EFCore.Services.DataSeederManager.DataSeederManager() -> void
+Tnzi.EFCore.Services.DataSeederManager.DiscoverSeederTypes() -> System.Collections.Generic.IReadOnlyList<System.Type!>!
+Tnzi.EFCore.Services.DataSeederManager.DiscoverSeederTypes(Microsoft.Extensions.Logging.ILogger? logger) -> System.Collections.Generic.IReadOnlyList<System.Type!>!
+Tnzi.EFCore.Services.DataSeederManager.RegisterSeeders(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.DbContextDiscoveryItem
+Tnzi.EFCore.Services.DbContextDiscoveryItem.Configuration.get -> Tnzi.EFCore.Options.DbContextConfiguration!
+Tnzi.EFCore.Services.DbContextDiscoveryItem.Configuration.init -> void
+Tnzi.EFCore.Services.DbContextDiscoveryItem.DbContextDiscoveryItem() -> void
+Tnzi.EFCore.Services.DbContextDiscoveryItem.DbContextType.get -> System.Type!
+Tnzi.EFCore.Services.DbContextDiscoveryItem.DbContextType.init -> void
+Tnzi.EFCore.Services.DbContextDiscoveryResult
+Tnzi.EFCore.Services.DbContextDiscoveryResult.Configurations.get -> System.Collections.Generic.List<Tnzi.EFCore.Services.DbContextDiscoveryItem!>!
+Tnzi.EFCore.Services.DbContextDiscoveryResult.Configurations.init -> void
+Tnzi.EFCore.Services.DbContextDiscoveryResult.DbContextDiscoveryResult() -> void
+Tnzi.EFCore.Services.DbContextDiscoveryResult.HasInvalidConfigurations.get -> bool
+Tnzi.EFCore.Services.DbContextDiscoveryResult.PrimaryConfiguration.get -> Tnzi.EFCore.Services.DbContextDiscoveryItem?
+Tnzi.EFCore.Services.DbContextDiscoveryResult.PrimaryConfiguration.init -> void
+Tnzi.EFCore.Services.DbContextDiscoveryResult.SecondaryConfigurations.get -> System.Collections.Generic.IEnumerable<Tnzi.EFCore.Services.DbContextDiscoveryItem!>!
+Tnzi.EFCore.Services.DbContextDiscoveryResult.Success.get -> bool
+Tnzi.EFCore.Services.DbContextDiscoveryResult.ValidationErrors.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Tnzi.EFCore.Services.DbContextDiscoveryResult.ValidationErrors.init -> void
+Tnzi.EFCore.Services.DbContextDiscoveryService
+Tnzi.EFCore.Services.DbContextDiscoveryService.DbContextDiscoveryService() -> void
+Tnzi.EFCore.Services.DbContextDiscoveryService.DiscoverDbContexts(Tnzi.EFCore.Options.DatabaseOptions! options, Microsoft.Extensions.Logging.ILogger? logger = null) -> Tnzi.EFCore.Services.DbContextDiscoveryResult!
+Tnzi.EFCore.Services.DbContextRegistrar
+Tnzi.EFCore.Services.DbContextRegistrar.DbContextRegistrar() -> void
+Tnzi.EFCore.Services.DbContextRegistrar.RegisterDbContext(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.EFCore.Services.DbContextDiscoveryItem! item, bool isPrimary, Microsoft.Extensions.Configuration.IConfiguration? configuration = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.DbContextRegistrar.RegisterDbContexts(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.EFCore.Services.DbContextDiscoveryResult! result, Microsoft.Extensions.Configuration.IConfiguration? configuration = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.EfCoreDbMigrator
+Tnzi.EFCore.Services.EfCoreDbMigrator.EfCoreDbMigrator(System.IServiceProvider! serviceProvider, Tnzi.EFCore.IEntityManager! entityManager, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Services.EfCoreDbMigrator!>! logger) -> void
+Tnzi.EFCore.Services.EfCoreDbMigrator.GetAppliedMigrationsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string!>!>!
+Tnzi.EFCore.Services.EfCoreDbMigrator.GetPendingMigrationsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string!>!>!
+Tnzi.EFCore.Services.EfCoreDbMigrator.HasPendingMigrationsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Tnzi.EFCore.Services.EfCoreDbMigrator.MigrateAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.Services.IDataSeederManager
+Tnzi.EFCore.Services.IDataSeederManager.DiscoverSeederTypes() -> System.Collections.Generic.IReadOnlyList<System.Type!>!
+Tnzi.EFCore.Services.IDataSeederManager.RegisterSeeders(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.IDbContextDiscoveryService
+Tnzi.EFCore.Services.IDbContextDiscoveryService.DiscoverDbContexts(Tnzi.EFCore.Options.DatabaseOptions! options, Microsoft.Extensions.Logging.ILogger? logger = null) -> Tnzi.EFCore.Services.DbContextDiscoveryResult!
+Tnzi.EFCore.Services.IDbContextRegistrar
+Tnzi.EFCore.Services.IDbContextRegistrar.RegisterDbContext(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.EFCore.Services.DbContextDiscoveryItem! item, bool isPrimary, Microsoft.Extensions.Configuration.IConfiguration? configuration = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.IDbContextRegistrar.RegisterDbContexts(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.EFCore.Services.DbContextDiscoveryResult! result, Microsoft.Extensions.Configuration.IConfiguration? configuration = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.IRepositoryRegistrar
+Tnzi.EFCore.Services.IRepositoryRegistrar.RegisterRepositoriesFromDbContext(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Type! dbContextType, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.IRepositoryRegistrar.RegisterRepositoriesFromEntityRegisters(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Type! dbContextType, bool isPrimary = false, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.IRepositoryRegistrar.RegisterRepository(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Type! entityType, System.Type! dbContextType, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.RepositoryRegistrar
+Tnzi.EFCore.Services.RepositoryRegistrar.RegisterRepositoriesFromDbContext(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Type! dbContextType, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.RepositoryRegistrar.RegisterRepositoriesFromEntityRegisters(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Type! dbContextType, bool isPrimary = false, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.RepositoryRegistrar.RegisterRepository(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Type! entityType, System.Type! dbContextType, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Tnzi.EFCore.Services.RepositoryRegistrar.RepositoryRegistrar() -> void
+Tnzi.EFCore.SlowQueryRecord
+Tnzi.EFCore.SlowQueryRecord.ExecutionTime.get -> System.TimeSpan
+Tnzi.EFCore.SlowQueryRecord.ExecutionTime.set -> void
+Tnzi.EFCore.SlowQueryRecord.Parameters.get -> object?
+Tnzi.EFCore.SlowQueryRecord.Parameters.set -> void
+Tnzi.EFCore.SlowQueryRecord.RowCount.get -> int?
+Tnzi.EFCore.SlowQueryRecord.RowCount.set -> void
+Tnzi.EFCore.SlowQueryRecord.SlowQueryRecord() -> void
+Tnzi.EFCore.SlowQueryRecord.Sql.get -> string!
+Tnzi.EFCore.SlowQueryRecord.Sql.set -> void
+Tnzi.EFCore.SlowQueryRecord.Timestamp.get -> System.DateTime
+Tnzi.EFCore.SlowQueryRecord.Timestamp.set -> void
+Tnzi.EFCore.SlowQueryStatistics
+Tnzi.EFCore.SlowQueryStatistics.AverageExecutionTime.get -> System.TimeSpan
+Tnzi.EFCore.SlowQueryStatistics.AverageExecutionTime.init -> void
+Tnzi.EFCore.SlowQueryStatistics.Deconstruct(out int TotalCount, out System.TimeSpan AverageExecutionTime, out System.TimeSpan MaxExecutionTime, out System.TimeSpan MinExecutionTime) -> void
+Tnzi.EFCore.SlowQueryStatistics.MaxExecutionTime.get -> System.TimeSpan
+Tnzi.EFCore.SlowQueryStatistics.MaxExecutionTime.init -> void
+Tnzi.EFCore.SlowQueryStatistics.MinExecutionTime.get -> System.TimeSpan
+Tnzi.EFCore.SlowQueryStatistics.MinExecutionTime.init -> void
+Tnzi.EFCore.SlowQueryStatistics.SlowQueryStatistics(Tnzi.EFCore.SlowQueryStatistics! original) -> void
+Tnzi.EFCore.SlowQueryStatistics.SlowQueryStatistics(int TotalCount, System.TimeSpan AverageExecutionTime, System.TimeSpan MaxExecutionTime, System.TimeSpan MinExecutionTime) -> void
+Tnzi.EFCore.SlowQueryStatistics.TotalCount.get -> int
+Tnzi.EFCore.SlowQueryStatistics.TotalCount.init -> void
+Tnzi.EFCore.Sql.ISqlFunctions
+Tnzi.EFCore.Sql.ISqlFunctions.CurrentLocalDate.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.CurrentLocalTime.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.CurrentTimestamp.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.CurrentUtcDate.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.CurrentUtcTime.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.False.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.NewGuid.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.NewSequentialGuid.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.Provider.get -> Tnzi.EFCore.DatabaseProvider
+Tnzi.EFCore.Sql.ISqlFunctions.Random.get -> string!
+Tnzi.EFCore.Sql.ISqlFunctions.True.get -> string!
+Tnzi.EFCore.Sql.SqlFunctionFactory
+Tnzi.EFCore.TableNamePrefixConfiguration
+Tnzi.EFCore.TableNamePrefixConfiguration.Configure(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType! mutableEntityType) -> void
+Tnzi.EFCore.TableNamePrefixConfiguration.TableNamePrefixConfiguration(Tnzi.Extensions.IModuleContainer? moduleContainer = null) -> void
+Tnzi.EFCore.TnziDbContext<TDbContext>
+Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureCombinedFilter<T>(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureMultiTenantFilter<T>(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureSoftDeleteFilter<T>(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+Tnzi.EFCore.TnziDbContext<TDbContext>.CurrentTenant.get -> Tnzi.MultiTenancy.ICurrentTenant?
+Tnzi.EFCore.TnziDbContext<TDbContext>.CurrentUser.get -> Tnzi.Security.Claims.ICurrentUser!
+Tnzi.EFCore.TnziDbContext<TDbContext>.DataFilterManager.get -> Tnzi.Data.IDataFilterManager?
+Tnzi.EFCore.TnziDbContext<TDbContext>.IsMultiTenancyEnabled.get -> bool
+Tnzi.EFCore.TnziDbContext<TDbContext>.TimeProvider.get -> System.TimeProvider?
+Tnzi.EFCore.TnziDbContext<TDbContext>.TnziDbContext(Microsoft.EntityFrameworkCore.DbContextOptions<TDbContext!>! options, Tnzi.Security.Claims.ICurrentUser! currentUser, Tnzi.MultiTenancy.ICurrentTenant? currentTenant = null, Tnzi.Data.IDataFilterManager? dataFilterManager = null, System.TimeProvider? timeProvider = null, Microsoft.Extensions.Options.IOptions<Tnzi.MultiTenancy.MultiTenancyOptions!>? multiTenancyOptions = null) -> void
+Tnzi.EFCore.TnziEFCoreExtensions
+Tnzi.EFCore.UnitOfWorkManager
+Tnzi.EFCore.UnitOfWorkManager.BeginTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.UnitOfWorkManager.CommitTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.UnitOfWorkManager.Dispose() -> void
+Tnzi.EFCore.UnitOfWorkManager.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Tnzi.EFCore.UnitOfWorkManager.EnableTransaction() -> void
+Tnzi.EFCore.UnitOfWorkManager.GetUnitOfWork(System.Type! dbContextType) -> Tnzi.Data.IUnitOfWork?
+Tnzi.EFCore.UnitOfWorkManager.GetUnitOfWork<T>() -> Tnzi.Data.IUnitOfWork?
+Tnzi.EFCore.UnitOfWorkManager.IsEnabledTransaction.get -> bool
+Tnzi.EFCore.UnitOfWorkManager.RollbackTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.UnitOfWorkManager.SaveChangesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.UnitOfWorkManager.TransactionDepth.get -> int
+Tnzi.EFCore.UnitOfWorkManager.UnitOfWorkManager(System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.UnitOfWorkManager!>? logger = null) -> void
+abstract Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity!>! builder) -> void
+abstract Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.AssemblyName.get -> string!
+abstract Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.ExtensionMethodName.get -> string!
+abstract Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.Provider.get -> Tnzi.EFCore.DatabaseProvider
+override Tnzi.EFCore.Dapper.Internal.ColumnMapping.GetHashCode() -> int
+override Tnzi.EFCore.EFCoreModule.ConfigureServicesAsync(Tnzi.Modules.ServiceConfigurationContext! context) -> System.Threading.Tasks.Task!
+override Tnzi.EFCore.EFCoreModule.LoadOrder.get -> int
+override Tnzi.EFCore.EFCoreModule.OnApplicationInitializationAsync(Tnzi.Modules.ApplicationInitializationContext! context) -> System.Threading.Tasks.Task!
+override Tnzi.EFCore.EFCoreModule.PreConfigureServicesAsync(Tnzi.Modules.ServiceConfigurationContext! context) -> System.Threading.Tasks.Task!
+override Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.DeleteManyAsync(System.Collections.Generic.IEnumerable<TEntity!>! entities, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+override Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.NonQueryExecuted(System.Data.Common.DbCommand! command, Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData! eventData, int result) -> int
+override Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.NonQueryExecutedAsync(System.Data.Common.DbCommand! command, Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData! eventData, int result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<int>
+override Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.ReaderExecuted(System.Data.Common.DbCommand! command, Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData! eventData, System.Data.Common.DbDataReader! result) -> System.Data.Common.DbDataReader!
+override Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.ReaderExecutedAsync(System.Data.Common.DbCommand! command, Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData! eventData, System.Data.Common.DbDataReader! result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Data.Common.DbDataReader!>
+override Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.ScalarExecuted(System.Data.Common.DbCommand! command, Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData! eventData, object? result) -> object?
+override Tnzi.EFCore.Interceptors.SlowQueryLoggingInterceptor.ScalarExecutedAsync(System.Data.Common.DbCommand! command, Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData! eventData, object? result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<object?>
+override Tnzi.EFCore.Options.EFCoreOptionsValidator.ValidateOptions(Tnzi.EFCore.Options.EFCoreOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+override Tnzi.EFCore.Outbox.Configs.OutboxMessageConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.Outbox.OutboxMessage!>! builder) -> void
+override Tnzi.EFCore.Outbox.Configs.OutboxMessageConfiguration.DbContextType.get -> System.Type?
+override Tnzi.EFCore.Outbox.OutboxOptionsValidator.ValidateOptions(Tnzi.EFCore.Outbox.OutboxOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+override Tnzi.EFCore.Outbox.OutboxRelayBackgroundService.ExecuteAsync(System.Threading.CancellationToken stoppingToken) -> System.Threading.Tasks.Task!
+override Tnzi.EFCore.Providers.MySqlConfigurator.AssemblyName.get -> string!
+override Tnzi.EFCore.Providers.MySqlConfigurator.ExtensionMethodName.get -> string!
+override Tnzi.EFCore.Providers.MySqlConfigurator.FindExtensionMethod(System.Reflection.Assembly! assembly, string! methodName) -> System.Reflection.MethodInfo?
+override Tnzi.EFCore.Providers.MySqlConfigurator.InvokeExtensionMethod(System.Reflection.MethodInfo! method, Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! builder, string! connectionString, Tnzi.EFCore.Providers.DbProviderConfigureOptions? options) -> void
+override Tnzi.EFCore.Providers.MySqlConfigurator.Provider.get -> Tnzi.EFCore.DatabaseProvider
+override Tnzi.EFCore.Providers.PostgreSqlConfigurator.AssemblyName.get -> string!
+override Tnzi.EFCore.Providers.PostgreSqlConfigurator.BuildExtraOptionsAction(System.Type! optionsBuilderType) -> System.Delegate?
+override Tnzi.EFCore.Providers.PostgreSqlConfigurator.ExtensionMethodName.get -> string!
+override Tnzi.EFCore.Providers.PostgreSqlConfigurator.Provider.get -> Tnzi.EFCore.DatabaseProvider
+override Tnzi.EFCore.Providers.SqlServerConfigurator.AssemblyName.get -> string!
+override Tnzi.EFCore.Providers.SqlServerConfigurator.ExtensionMethodName.get -> string!
+override Tnzi.EFCore.Providers.SqlServerConfigurator.Provider.get -> Tnzi.EFCore.DatabaseProvider
+override Tnzi.EFCore.Providers.SqliteConfigurator.AssemblyName.get -> string!
+override Tnzi.EFCore.Providers.SqliteConfigurator.ExtensionMethodName.get -> string!
+override Tnzi.EFCore.Providers.SqliteConfigurator.Provider.get -> Tnzi.EFCore.DatabaseProvider
+override Tnzi.EFCore.SlowQueryStatistics.Equals(object? obj) -> bool
+override Tnzi.EFCore.SlowQueryStatistics.GetHashCode() -> int
+override Tnzi.EFCore.SlowQueryStatistics.ToString() -> string!
+override Tnzi.EFCore.TnziDbContext<TDbContext>.OnModelCreating(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+override Tnzi.EFCore.TnziDbContext<TDbContext>.SaveChanges() -> int
+override Tnzi.EFCore.TnziDbContext<TDbContext>.SaveChanges(bool acceptAllChangesOnSuccess) -> int
+override Tnzi.EFCore.TnziDbContext<TDbContext>.SaveChangesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedArrayAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T[]!>!
+static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedFirstOrDefaultAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
+static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedPagedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Data.PagedQuery! query, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<T>!>!
+static Tnzi.EFCore.Dapper.DapperBulkOperations.BulkInsertAsync<T>(System.Data.IDbConnection! connection, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! provider, Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, System.Data.IDbTransaction? transaction = null, int batchSize = 1000, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperExecutorRegistrationExtensions.RegisterDapperExecutor<TEntity, TKey>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.EFCore.Dapper.DapperExtensions.BulkDeleteAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IEnumerable<object!>! keys, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperExtensions.BulkInsertAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperExtensions.BulkUpdateAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, string? keyColumn = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperExtensions.ExecuteAsync(this Microsoft.EntityFrameworkCore.DbContext! dbContext, string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperExtensions.ExecuteScalarAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+static Tnzi.EFCore.Dapper.DapperExtensions.ExecuteStoredProcedureAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, string! procedureName, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<T>!>!
+static Tnzi.EFCore.Dapper.DapperExtensions.GetDapper(this Microsoft.EntityFrameworkCore.DbContext! dbContext) -> Tnzi.EFCore.Dapper.IDapperService!
+static Tnzi.EFCore.Dapper.DapperExtensions.QueryAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<T>!>!
+static Tnzi.EFCore.Dapper.DapperExtensions.QueryFirstOrDefaultAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+static Tnzi.EFCore.Dapper.DapperExtensions.QuerySingleOrDefaultAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! dbContext, string! sql, object? param = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+static Tnzi.EFCore.Dapper.Internal.ColumnMapping.operator !=(Tnzi.EFCore.Dapper.Internal.ColumnMapping left, Tnzi.EFCore.Dapper.Internal.ColumnMapping right) -> bool
+static Tnzi.EFCore.Dapper.Internal.ColumnMapping.operator ==(Tnzi.EFCore.Dapper.Internal.ColumnMapping left, Tnzi.EFCore.Dapper.Internal.ColumnMapping right) -> bool
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetColumnMappings(System.Type! entityType, Microsoft.EntityFrameworkCore.DbContext! dbContext, bool excludeKey = true) -> System.Collections.Generic.List<Tnzi.EFCore.Dapper.Internal.ColumnMapping>!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetColumnMappings<TEntity>(Microsoft.EntityFrameworkCore.DbContext! dbContext, bool excludeKey = true) -> System.Collections.Generic.List<Tnzi.EFCore.Dapper.Internal.ColumnMapping>!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetKeyColumnName(System.Type! entityType, Microsoft.EntityFrameworkCore.DbContext! dbContext) -> string!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetKeyColumnName<TEntity>(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> string!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetKeyMapping(System.Type! entityType, Microsoft.EntityFrameworkCore.DbContext! dbContext) -> Tnzi.EFCore.Dapper.Internal.ColumnMapping
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetPropertyNames(System.Type! entityType, Microsoft.EntityFrameworkCore.DbContext! dbContext, bool excludeKey = true) -> System.Collections.Generic.List<string!>!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetPropertyNames<TEntity>(Microsoft.EntityFrameworkCore.DbContext! dbContext, bool excludeKey = true) -> System.Collections.Generic.List<string!>!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetSchema(System.Type! entityType, Microsoft.EntityFrameworkCore.DbContext! dbContext) -> string?
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetSchema<TEntity>(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> string?
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetTableName(System.Type! entityType, Microsoft.EntityFrameworkCore.DbContext! dbContext) -> string!
+static Tnzi.EFCore.Dapper.Internal.DapperEntityHelper.GetTableName<TEntity>(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> string!
+static Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper.EscapeQualifiedIdentifier(string! qualifiedIdentifier, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! provider) -> string!
+static Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper.IsValidIdentifier(string? identifier) -> bool
+static Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper.IsValidQualifiedIdentifier(string? qualifiedIdentifier) -> bool
+static Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper.SanitizeIdentifier(string! identifier) -> string!
+static Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper.ThrowIfInvalidIdentifier(string? identifier, string! paramName = "identifier") -> void
+static Tnzi.EFCore.Dapper.Internal.SqlIdentifierHelper.ThrowIfInvalidQualifiedIdentifier(string? qualifiedIdentifier, string! paramName = "identifier") -> void
+static Tnzi.EFCore.Dapper.Providers.DapperDatabaseProviderFactory.Create(Tnzi.EFCore.DatabaseProvider provider) -> Tnzi.EFCore.Dapper.Providers.IDatabaseProvider!
+static Tnzi.EFCore.Dapper.Providers.DapperDatabaseProviderFactory.CreateFromConnectionString(string? connectionString) -> Tnzi.EFCore.Dapper.Providers.IDatabaseProvider!
+static Tnzi.EFCore.Dapper.Providers.DapperDatabaseProviderFactory.CreateFromDbContext(Microsoft.EntityFrameworkCore.DbContext! dbContext, Microsoft.Extensions.Configuration.IConfiguration? configuration = null) -> Tnzi.EFCore.Dapper.Providers.IDatabaseProvider!
+static Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.IsValidId(TKey id) -> bool
+static Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.ThrowIfInvalidId(TKey id, string! paramName = "id") -> void
+static Tnzi.EFCore.EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault() -> Tnzi.EFCore.DatabaseProvider
+static Tnzi.EFCore.EntityConfigurationContext.GetDatabaseProviderFromDbContext(Microsoft.EntityFrameworkCore.DbContext? dbContext) -> Tnzi.EFCore.DatabaseProvider?
+static Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.GetDatabaseProvider(Microsoft.EntityFrameworkCore.DbContext? dbContext) -> Tnzi.EFCore.DatabaseProvider?
+static Tnzi.EFCore.Extensions.BatchOperationExtensions.BatchDeleteAsync<T>(this Microsoft.EntityFrameworkCore.DbSet<T!>! dbSet, System.Linq.Expressions.Expression<System.Func<T!, bool>!>! predicate, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Extensions.BatchOperationExtensions.BatchDeleteAsync<T>(this System.Linq.IQueryable<T!>! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Extensions.BatchOperationExtensions.BatchSoftDeleteAsync<T>(this Microsoft.EntityFrameworkCore.DbSet<T!>! dbSet, System.Linq.Expressions.Expression<System.Func<T!, bool>!>! predicate, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Extensions.BatchOperationExtensions.BatchSoftDeleteAsync<T>(this System.Linq.IQueryable<T!>! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Extensions.DbUpdateExceptionExtensions.IsUniqueConstraintViolation(this Microsoft.EntityFrameworkCore.DbUpdateException! exception) -> bool
+static Tnzi.EFCore.Extensions.PagedListExtensions.CreateAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Data.PagedQueryDto! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<T>!>!
+static Tnzi.EFCore.Extensions.PagedListExtensions.CreateAsync<T>(this System.Linq.IQueryable<T>! source, int pageIndex, int pageSize, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<T>!>!
+static Tnzi.EFCore.Extensions.RepositorySpecificationExtensions.AnyAsync<TEntity>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!>! repository, Tnzi.Domain.Specifications.ISpecification<TEntity!>! specification, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Tnzi.EFCore.Extensions.RepositorySpecificationExtensions.CountAsync<TEntity>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!>! repository, Tnzi.Domain.Specifications.ISpecification<TEntity!>! specification, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Extensions.RepositorySpecificationExtensions.FirstOrDefaultAsync<TEntity>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!>! repository, Tnzi.Domain.Specifications.ISpecification<TEntity!>! specification, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity?>!
+static Tnzi.EFCore.Extensions.RepositorySpecificationExtensions.GetListAsync<TEntity>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!>! repository, Tnzi.Domain.Specifications.ISpecification<TEntity!>! specification, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<TEntity!>!>!
+static Tnzi.EFCore.Extensions.RepositorySpecificationExtensions.GetPagedListAsync<TEntity>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!>! repository, Tnzi.Domain.Specifications.ISpecification<TEntity!>! specification, Tnzi.Data.PagedQuery! pagedQuery, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<TEntity!>!>!
+static Tnzi.EFCore.Extensions.RepositorySpecificationExtensions.SingleOrDefaultAsync<TEntity>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!>! repository, Tnzi.Domain.Specifications.ISpecification<TEntity!>! specification, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity?>!
+static Tnzi.EFCore.Extensions.UnitOfWorkExtensions.ExecuteInTransactionAsync(this Tnzi.Data.IUnitOfWork! unitOfWork, System.Func<System.Threading.Tasks.Task!>! operation, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static Tnzi.EFCore.Extensions.UnitOfWorkExtensions.ExecuteInTransactionAsync(this Tnzi.Data.IUnitOfWorkManager! unitOfWorkManager, System.Func<System.Threading.Tasks.Task!>! operation, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static Tnzi.EFCore.Extensions.UnitOfWorkExtensions.ExecuteInTransactionAsync<T>(this Tnzi.Data.IUnitOfWork! unitOfWork, System.Func<System.Threading.Tasks.Task<T>!>! operation, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static Tnzi.EFCore.Extensions.UnitOfWorkExtensions.ExecuteInTransactionAsync<T>(this Tnzi.Data.IUnitOfWorkManager! unitOfWorkManager, System.Func<System.Threading.Tasks.Task<T>!>! operation, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static Tnzi.EFCore.Extensions.UnitOfWorkExtensions.GetUnitOfWork(this System.IServiceProvider! provider, bool enableTransaction = false) -> Tnzi.Data.IUnitOfWork?
+static Tnzi.EFCore.IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse() -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse(string! codeColumn, string! isDeletedColumn) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse(string! codeColumn, string! isDeletedColumn, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNotNull(string! columnName) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNotNull(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNotNullAndIsDeletedFalse(string! columnName) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNotNullAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNotNullAndIsDeletedFalse(string! columnName, string! isDeletedColumn, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetIsDeletedFalse() -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetIsDeletedFalse(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetIsDeletedFalse(string! isDeletedColumn) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetIsDeletedFalse(string! isDeletedColumn, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetSupportedProviders() -> System.Collections.Generic.IReadOnlyCollection<Tnzi.EFCore.DatabaseProvider>!
+static Tnzi.EFCore.IndexFilterFactory.IsSupported(Tnzi.EFCore.DatabaseProvider provider) -> bool
+static Tnzi.EFCore.IndexFilterFactory.QuoteIdentifier(string! identifier, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Internal.AssemblyScanner.FindTypesImplementing<TInterface>(System.Collections.Generic.IEnumerable<System.Reflection.Assembly!>? assemblies = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> System.Type![]!
+static Tnzi.EFCore.Internal.AssemblyScanner.GetAllLoadedAssemblies() -> System.Collections.Generic.IEnumerable<System.Reflection.Assembly!>!
+static Tnzi.EFCore.Internal.AssemblyScanner.GetApplicationAssemblies() -> System.Collections.Generic.IEnumerable<System.Reflection.Assembly!>!
+static Tnzi.EFCore.Internal.AssemblyScanner.GetTypesSafely(System.Reflection.Assembly! assembly, Microsoft.Extensions.Logging.ILogger? logger = null) -> System.Type![]!
+static Tnzi.EFCore.Internal.AssemblyScanner.IsSystemOrThirdPartyAssembly(string! assemblyName) -> bool
+static Tnzi.EFCore.Internal.AssemblyScanner.LoadAllAssembliesFromProjectBinDirectory(string! directory, Microsoft.Extensions.Logging.ILogger? logger = null) -> int
+static Tnzi.EFCore.Internal.AssemblyScanner.LoadAssemblyReferences(System.Reflection.Assembly! rootAssembly, Microsoft.Extensions.Logging.ILogger? logger = null) -> int
+static Tnzi.EFCore.Internal.AssemblyScanner.LoadEntryAssemblyReferences(Microsoft.Extensions.Logging.ILogger? logger = null) -> int
+static Tnzi.EFCore.Internal.DatabaseProviderDetector.DetectFromConnectionString(string! connectionString, Microsoft.Extensions.Logging.ILogger? logger = null) -> Tnzi.EFCore.DatabaseProvider
+static Tnzi.EFCore.Internal.DatabaseProviderDetector.TryDetectFromConnectionString(string! connectionString, out Tnzi.EFCore.DatabaseProvider provider, out string? errorMessage, Microsoft.Extensions.Logging.ILogger? logger = null) -> bool
+static Tnzi.EFCore.Internal.TnziDbContextHelper.ApplyAuditProperties(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.Security.Claims.ICurrentUser! currentUser, Tnzi.MultiTenancy.ICurrentTenant? currentTenant, System.TimeProvider? timeProvider = null, bool multiTenancyEnabled = false) -> void
+static Tnzi.EFCore.Internal.TnziDbContextHelper.OnModelCreating(Microsoft.EntityFrameworkCore.DbContext! dbContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, System.Action<Microsoft.EntityFrameworkCore.ModelBuilder!>? additionalConfigurations = null) -> void
+static Tnzi.EFCore.Internal.TnziDbContextHelper.SaveChangesAsync(Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<int>!>! baseSaveAsync, Tnzi.Security.Claims.ICurrentUser! currentUser, Tnzi.MultiTenancy.ICurrentTenant? currentTenant, System.Threading.CancellationToken cancellationToken, System.TimeProvider? timeProvider = null, bool multiTenancyEnabled = false) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Internal.TypeHelper.GetFirstGenericArgument(System.Type! type, System.Type! interfaceTypeDefinition) -> System.Type?
+static Tnzi.EFCore.Internal.TypeHelper.GetPrimaryKeyType(System.Type! entityType) -> System.Type?
+static Tnzi.EFCore.Internal.TypeHelper.HasFileFields(System.Type! type) -> bool
+static Tnzi.EFCore.Internal.TypeHelper.IsEntityType(System.Type! type) -> bool
+static Tnzi.EFCore.Internal.TypeHelper.IsGenericType(System.Type! type, System.Type! genericTypeDefinition) -> bool
+static Tnzi.EFCore.Options.ConnectionStringBuilder.ApplyPoolingOptions(string! baseConnectionString, Tnzi.EFCore.Options.ConnectionPoolOptions? poolOptions, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentLocalDate<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentLocalDate<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentLocalTime<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentLocalTime<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentTimestamp<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentTimestamp<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentUtcDate<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentUtcDate<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentUtcTime<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultCurrentUtcTime<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultFalse<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultFalse<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultNewGuid<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultNewGuid<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultNewSequentialGuid<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultRandom<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultRandom<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultTrue<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasDefaultTrue<TProperty>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>! builder, Tnzi.EFCore.DatabaseProvider provider) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<TProperty>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasExchangeRatePrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasExchangeRatePrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasMoneyPrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasMoneyPrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasQuantityPrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasQuantityPrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasRatePrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal>!
+static Tnzi.EFCore.PropertyBuilderExtensions.HasRatePrecision(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<decimal?>!
+static Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.BuildProviderOptionsAction(System.Type! optionsBuilderType, Tnzi.EFCore.Providers.DbProviderConfigureOptions? options, System.Delegate? extraAction) -> object?
+static Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.FindAssembly(string! assemblyName) -> System.Reflection.Assembly?
+static Tnzi.EFCore.Providers.DatabaseProviderFactory.Configure(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! builder, string! connectionString, Tnzi.EFCore.DatabaseProvider provider, Tnzi.EFCore.Providers.DbProviderConfigureOptions? options = null) -> void
+static Tnzi.EFCore.Providers.DatabaseProviderFactory.GetSupportedProviders() -> System.Collections.Generic.IReadOnlyCollection<Tnzi.EFCore.DatabaseProvider>!
+static Tnzi.EFCore.Providers.DatabaseProviderFactory.IsSupported(Tnzi.EFCore.DatabaseProvider provider) -> bool
+static Tnzi.EFCore.Providers.DatabaseProviderFactory.RegisterConfigurator(Tnzi.EFCore.DatabaseProvider provider, Tnzi.EFCore.Providers.IDatabaseProviderConfigurator! configurator) -> void
+static Tnzi.EFCore.Providers.DbProviderConfigureOptions.None.get -> Tnzi.EFCore.Providers.DbProviderConfigureOptions!
+static Tnzi.EFCore.SlowQueryStatistics.operator !=(Tnzi.EFCore.SlowQueryStatistics? left, Tnzi.EFCore.SlowQueryStatistics? right) -> bool
+static Tnzi.EFCore.SlowQueryStatistics.operator ==(Tnzi.EFCore.SlowQueryStatistics? left, Tnzi.EFCore.SlowQueryStatistics? right) -> bool
+static Tnzi.EFCore.Sql.SqlFunctionFactory.CurrentLocalDate(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.CurrentLocalTime(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.CurrentTimestamp(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.CurrentUtcDate(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.CurrentUtcTime(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.False(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.GetFunctions(Tnzi.EFCore.DatabaseProvider provider) -> Tnzi.EFCore.Sql.ISqlFunctions!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.GetSupportedProviders() -> System.Collections.Generic.IReadOnlyCollection<Tnzi.EFCore.DatabaseProvider>!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.IsSupported(Tnzi.EFCore.DatabaseProvider provider) -> bool
+static Tnzi.EFCore.Sql.SqlFunctionFactory.NewGuid(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.NewSequentialGuid(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.Random(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Sql.SqlFunctionFactory.True(Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.TableNamePrefixConfiguration.DesignTimeModuleContainer.get -> Tnzi.Extensions.IModuleContainer?
+static Tnzi.EFCore.TableNamePrefixConfiguration.DesignTimeModuleContainer.set -> void
+static Tnzi.EFCore.TnziEFCoreExtensions.AddTnziDbContext<TDbContext>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Microsoft.EntityFrameworkCore.DbContextOptionsBuilder!>? optionsAction = null, bool isPrimary = false) -> void
+virtual Tnzi.EFCore.DesignTimeDbContextFactoryBase<TDbContext>.CreateDbContextInstance(Microsoft.EntityFrameworkCore.DbContextOptions<TDbContext!>! options, Tnzi.Security.Claims.ICurrentUser! currentUser) -> TDbContext!
+virtual Tnzi.EFCore.DesignTimeDbContextFactoryBase<TDbContext>.FindConfigurationPath() -> string?
+virtual Tnzi.EFCore.DesignTimeDbContextFactoryBase<TDbContext>.OnBeforeCreate(string![]! args) -> void
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.ExistsAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.GetAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity?>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.GetListAsync(System.Collections.Generic.IEnumerable<TKey>! ids, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.GetRequiredAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.GetWithDetailsAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken), params System.Linq.Expressions.Expression<System.Func<TEntity!, object!>!>![]! includes) -> System.Threading.Tasks.Task<TEntity?>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.ToDictionaryAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>! predicate, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.Dictionary<TKey, TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.ToDictionaryAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.Dictionary<TKey, TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.UpdateAsync(TKey id, System.Action<TEntity!>! updateAction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.AnyAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ApplyOrderBy(System.Linq.IQueryable<TEntity!>! source, string? orderBy) -> System.Linq.IQueryable<TEntity!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.AsQueryable(bool withTracking = false) -> System.Linq.IQueryable<TEntity!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.AverageAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, decimal>!>! selector, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<decimal>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.CountAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.CountAsync(Tnzi.Data.Filtering.FilterGroup! filter, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.DeleteAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>! predicate, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.DeleteAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.DeleteManyAsync(System.Collections.Generic.IEnumerable<TEntity!>! entities, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.EnsureTransactionStartedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ExecuteSoftDeleteAsync(System.Linq.IQueryable<TEntity!>! query, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.FindAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>! predicate, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity?>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.FindAsync(params object![]! keys) -> System.Threading.Tasks.Task<TEntity?>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.FirstOrDefaultAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity?>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetBatchSize() -> int
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetFilteredListAsync(Tnzi.Data.Filtering.FilterGroup! filter, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetFilteredPagedListAsync(Tnzi.Data.Filtering.FilterGroup! filter, Tnzi.Data.PagedQuery! query, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? additionalPredicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetPagedListAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>! predicate, Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetPagedListAsync(Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetPagedListAsync<TResult>(System.Linq.Expressions.Expression<System.Func<TEntity!, TResult>!>! selector, Tnzi.Data.PagedQuery! query, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<TResult>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetQueryable() -> System.Linq.IQueryable<TEntity!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetQueryableAsNoTracking() -> System.Linq.IQueryable<TEntity!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.GetRequiredAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>! predicate, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.InsertAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.InsertManyAsync(System.Collections.Generic.IEnumerable<TEntity!>! entities, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.IsTransactionEnabled() -> bool
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.LongCountAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.MaxAsync<TResult>(System.Linq.Expressions.Expression<System.Func<TEntity!, TResult>!>! selector, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.MinAsync<TResult>(System.Linq.Expressions.Expression<System.Func<TEntity!, TResult>!>! selector, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.SaveChangesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.SelectAsync<TResult>(System.Linq.Expressions.Expression<System.Func<TEntity!, TResult>!>! selector, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<TResult>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ShouldSaveImmediately() -> bool
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.SingleOrDefaultAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity?>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.SumAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, decimal>!>! selector, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<decimal>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ToArrayAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TEntity![]!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ToCachedListAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>! predicate, string! cacheKey, System.TimeSpan? expiration = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.ToListAsync(System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? predicate = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<TEntity!>!>!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.UpdateAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.UpdateManyAsync(System.Collections.Generic.IEnumerable<TEntity!>! entities, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.Dispose(bool disposing) -> void
+virtual Tnzi.EFCore.EFCoreUnitOfWork<TDbContext>.DisposeAsyncCore() -> System.Threading.Tasks.ValueTask
+virtual Tnzi.EFCore.EntityManager.GetDbContextTypeForEntity(System.Type! entityType) -> System.Type!
+virtual Tnzi.EFCore.EntityManager.GetEntityRegisters(System.Type! dbContextType) -> Tnzi.EFCore.IEntityRegister![]!
+virtual Tnzi.EFCore.EntityManager.Initialize() -> void
+virtual Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.DbContextType.get -> System.Type?
+virtual Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.BuildExtraOptionsAction(System.Type! optionsBuilderType) -> System.Delegate?
+virtual Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.Configure(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! builder, string! connectionString, Tnzi.EFCore.Providers.DbProviderConfigureOptions? options = null) -> void
+virtual Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.FindExtensionMethod(System.Reflection.Assembly! assembly, string! methodName) -> System.Reflection.MethodInfo?
+virtual Tnzi.EFCore.Providers.DatabaseProviderConfiguratorBase.InvokeExtensionMethod(System.Reflection.MethodInfo! method, Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! builder, string! connectionString, Tnzi.EFCore.Providers.DbProviderConfigureOptions? options) -> void
+virtual Tnzi.EFCore.SlowQueryStatistics.<Clone>$() -> Tnzi.EFCore.SlowQueryStatistics!
+virtual Tnzi.EFCore.SlowQueryStatistics.EqualityContract.get -> System.Type!
+virtual Tnzi.EFCore.SlowQueryStatistics.Equals(Tnzi.EFCore.SlowQueryStatistics? other) -> bool
+virtual Tnzi.EFCore.SlowQueryStatistics.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Tnzi.EFCore.TableNamePrefixConfiguration.GetTableNamePrefix(System.Type! entityType, Tnzi.Extensions.IModuleContainer? moduleContainer = null) -> string?
+virtual Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureQueryFilters(Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder) -> void
+virtual Tnzi.EFCore.TnziDbContext<TDbContext>.GetCurrentTenantId() -> System.Guid?
+virtual Tnzi.EFCore.TnziDbContext<TDbContext>.IsMultiTenantFilterEnabled.get -> bool
+virtual Tnzi.EFCore.TnziDbContext<TDbContext>.IsSoftDeleteFilterEnabled.get -> bool
+virtual Tnzi.EFCore.UnitOfWorkManager.Dispose(bool disposing) -> void
+virtual Tnzi.EFCore.UnitOfWorkManager.DisposeAsyncCore() -> System.Threading.Tasks.ValueTask
+~override Tnzi.EFCore.Dapper.Internal.ColumnMapping.Equals(object obj) -> bool
+~override Tnzi.EFCore.Dapper.Internal.ColumnMapping.ToString() -> string

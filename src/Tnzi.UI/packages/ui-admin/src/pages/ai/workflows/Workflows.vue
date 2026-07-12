@@ -18,7 +18,7 @@
     :translate="t"
   >
     <template #primary>
-      <NButton type="primary" tertiary size="small" @click="goCreate">
+      <NButton v-if="crud.canCreate" type="primary" tertiary size="small" @click="goCreate">
         <template #icon>
           <TSvgIcon icon="mdi:plus" :size="16" />
         </template>
@@ -27,7 +27,7 @@
     </template>
 
     <template #batchActions="{ selectedIds }">
-      <NPopconfirm @positive-click="batchEnable(selectedIds as string[])">
+      <NPopconfirm v-if="can('ai.workflow.update')" @positive-click="batchEnable(selectedIds as string[])">
         <template #trigger>
           <NButton size="small" type="success" ghost>
             {{ t('actions.batchEnable') }}
@@ -35,7 +35,7 @@
         </template>
         {{ t('actions.confirmBatchEnable') }}
       </NPopconfirm>
-      <NPopconfirm @positive-click="batchDisable(selectedIds as string[])">
+      <NPopconfirm v-if="can('ai.workflow.update')" @positive-click="batchDisable(selectedIds as string[])">
         <template #trigger>
           <NButton size="small" type="warning" ghost>
             {{ t('actions.batchDisable') }}
@@ -61,7 +61,7 @@
         :translate="t"
       >
         <template #prepend="{ row: r }">
-          <NButton size="small" type="primary" ghost @click="goEdit(r as Row)">
+          <NButton v-if="can('ai.workflow.update')" size="small" type="primary" ghost @click="goEdit(r as Row)">
             {{ t('actions.editGraph') }}
           </NButton>
         </template>
@@ -171,6 +171,7 @@ import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import TRowActions from '../../../components/crud/TRowActions.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { type RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -193,6 +194,7 @@ type Row = WorkflowDefinitionDto
 const title = 'title'
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 // ui-admin shells don't always wrap with NMessage/NDialog providers (and unit
 // tests mount bare), so guard both — `useSafeMessage` no-ops without a provider,
 // and `useDialog` is wrapped so a missing provider falls back to native confirm.
@@ -210,6 +212,7 @@ const t = (key: string, params?: Record<string, unknown>) =>
 
 const crud = useCrudPage<WorkflowDefinitionDto>({
   pageId: 'ai.workflows',
+  permission: 'ai.workflow',
   columns: workflowColumns,
   rowKey: (r) => r.id,
   fetchData: (q) => bridge.workflows.fetch(q),
@@ -273,29 +276,36 @@ function goEdit(row: Row): void {
 // Collapses run / clone / validate / delete into a single dropdown so the
 // row action column stays narrow regardless of feature growth.
 function rowMenuOptions(row: Row): DropdownOption[] {
-  return [
-    {
+  const options: DropdownOption[] = []
+  if (can('ai.workflow.execute')) {
+    options.push({
       key: 'run',
       label: t('actions.run'),
       disabled: !row.isEnabled,
       icon: () => h(TSvgIcon, { icon: 'mdi:play', size: 16 }),
-    },
-    {
+    })
+  }
+  if (can('ai.workflow.create')) {
+    options.push({
       key: 'clone',
       label: t('actions.clone'),
       icon: () => h(TSvgIcon, { icon: 'mdi:content-copy', size: 16 }),
-    },
-    {
-      key: 'validate',
-      label: t('actions.validate'),
-      icon: () => h(TSvgIcon, { icon: 'mdi:check-circle-outline', size: 16 }),
-    },
-    {
+    })
+  }
+  // Validate is a read-only pre-run check - always available.
+  options.push({
+    key: 'validate',
+    label: t('actions.validate'),
+    icon: () => h(TSvgIcon, { icon: 'mdi:check-circle-outline', size: 16 }),
+  })
+  if (crud.canDelete) {
+    options.push({
       key: 'delete',
       label: t('admin.crud.delete'),
       icon: () => h(TSvgIcon, { icon: 'mdi:trash-can-outline', size: 16 }),
-    },
-  ]
+    })
+  }
+  return options
 }
 
 function handleRowMenu(key: string, row: Row): void {

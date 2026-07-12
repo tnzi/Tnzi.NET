@@ -1,7 +1,12 @@
 <script setup lang="ts">
 /**
- * `TMenuToggler` — sidebar collapse / expand button. Icon points "in" when
- * the sidebar is expanded, "out" when collapsed (matches soybean / antd).
+ * `TMenuToggler` — sidebar collapse / expand button. Faithful port of
+ * soybean-admin's `MenuToggler` (src/components/common/menu-toggler.vue):
+ * the icon is an animated `line-md` fold glyph whose stroke draws itself on
+ * mount, and the button carries `:key="String(collapsed)"` so it remounts on
+ * every toggle — replaying that draw-in animation each click. `fold-left`
+ * ("click to collapse") shows when expanded, `fold-right` ("click to expand")
+ * when collapsed.
  */
 import { computed } from 'vue'
 import TButtonIcon from '../display/TButtonIcon.vue'
@@ -27,7 +32,7 @@ function onClick(): void {
 }
 
 const icon = computed(() =>
-  props.collapsed ? 'mdi:menu-open' : 'mdi:menu-close',
+  props.collapsed ? 'line-md:menu-fold-right' : 'line-md:menu-fold-left',
 )
 const tooltip = computed(() =>
   props.translate
@@ -40,6 +45,7 @@ const tooltip = computed(() =>
 
 <template>
   <TButtonIcon
+    :key="String(collapsed)"
     :icon="icon"
     :tooltip="tooltip"
     class="t-menu-toggler"

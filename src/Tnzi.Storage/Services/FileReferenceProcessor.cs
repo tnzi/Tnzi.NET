@@ -10,19 +10,19 @@ public class FileReferenceProcessor : IFileReferenceProcessor
     private readonly IRepository<FileRecord, Guid> _fileRepository;
     private readonly IEventBus? _eventBus;
     private readonly ILogger<FileReferenceProcessor> _logger;
-    private readonly StorageOptions _options;
+    private readonly IOptionsMonitor<StorageOptions> _options;
 
     public FileReferenceProcessor(
         IRepository<FileReference, Guid> referenceRepository,
         IRepository<FileRecord, Guid> fileRepository,
         ILogger<FileReferenceProcessor> logger,
-        IOptions<StorageOptions> options,
+        IOptionsMonitor<StorageOptions> options,
         IEventBus? eventBus = null)
     {
         _referenceRepository = Check.NotNull(referenceRepository);
         _fileRepository = Check.NotNull(fileRepository);
         _logger = Check.NotNull(logger);
-        _options = Check.NotNull(options).Value;
+        _options = Check.NotNull(options);
         _eventBus = eventBus;
     }
 
@@ -32,7 +32,7 @@ public class FileReferenceProcessor : IFileReferenceProcessor
     public async Task ProcessChangesAsync(IReadOnlyList<FileReferenceChange> changes, CancellationToken cancellationToken = default)
     {
         // 引用追踪开关：关闭时跳过自动 [FileField] 追踪与手动引用处理
-        if (!_options.EnableFileReference)
+        if (!_options.CurrentValue.EnableFileReference)
             return;
 
         if (!changes.Any())

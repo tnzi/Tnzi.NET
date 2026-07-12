@@ -42,6 +42,16 @@ export enum CashFlowActivity {
   Operating = 'Operating',
   Investing = 'Investing',
   Financing = 'Financing',
+  /** Cash and cash equivalents: the subject the cash flow statement explains; excluded from activity buckets */
+  CashEquivalent = 'CashEquivalent',
+}
+
+/**
+ * Bank reconciliation status
+ */
+export enum ReconciliationStatus {
+  Draft = 'Draft',
+  Completed = 'Completed',
 }
 
 /**
@@ -87,3 +97,20 @@ export enum ItemType {
   Service = 'Service',
   Product = 'Product',
 }
+
+/**
+ * Suggested settlement instrument values for PaymentEntry/Expense `paymentMethod`.
+ * The field is free-form on the backend (jurisdiction-specific instruments vary);
+ * these mirror the `Tnzi.Finance.Metadata.PaymentMethods` constants.
+ */
+export const PAYMENT_METHODS = [
+  'Cash',
+  'Check',
+  'CreditCard',
+  'DebitCard',
+  'BankTransfer',
+  'Wire',
+  'Other',
+] as const;
+
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number] | (string & {});

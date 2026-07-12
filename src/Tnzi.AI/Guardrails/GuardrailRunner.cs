@@ -7,13 +7,13 @@ public class GuardrailRunner
 {
     private readonly IEnumerable<IInputGuardrail> _inputGuardrails;
     private readonly IEnumerable<IOutputGuardrail> _outputGuardrails;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<GuardrailRunner> _logger;
 
     public GuardrailRunner(
         IEnumerable<IInputGuardrail> inputGuardrails,
         IEnumerable<IOutputGuardrail> outputGuardrails,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILogger<GuardrailRunner> logger)
     {
         _inputGuardrails = Check.NotNull(inputGuardrails);
@@ -30,12 +30,12 @@ public class GuardrailRunner
     /// <returns>最终结果：通过时返回（可能已修改的）文本，拒绝时返回 GuardrailResult</returns>
     public async Task<(string text, GuardrailResult? rejection)> RunInputGuardrailsAsync(string input, CancellationToken ct = default)
     {
-        if (!_options.Value.Guardrails.Enabled)
+        if (!_options.CurrentValue.Guardrails.Enabled)
         {
             return (input, null);
         }
 
-        if (_options.Value.Guardrails.ExecutionMode == GuardrailExecutionMode.Parallel)
+        if (_options.CurrentValue.Guardrails.ExecutionMode == GuardrailExecutionMode.Parallel)
         {
             return await RunInputGuardrailsParallelAsync(input, ct);
         }
@@ -51,12 +51,12 @@ public class GuardrailRunner
     /// <returns>最终结果：通过时返回（可能已修改的）文本，拒绝时返回 GuardrailResult</returns>
     public async Task<(string text, GuardrailResult? rejection)> RunOutputGuardrailsAsync(string output, CancellationToken ct = default)
     {
-        if (!_options.Value.Guardrails.Enabled)
+        if (!_options.CurrentValue.Guardrails.Enabled)
         {
             return (output, null);
         }
 
-        if (_options.Value.Guardrails.ExecutionMode == GuardrailExecutionMode.Parallel)
+        if (_options.CurrentValue.Guardrails.ExecutionMode == GuardrailExecutionMode.Parallel)
         {
             return await RunOutputGuardrailsParallelAsync(output, ct);
         }

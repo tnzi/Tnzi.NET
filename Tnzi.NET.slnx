@@ -74,6 +74,7 @@
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
     <Project Path="tests/Tnzi.OpenTelemetry.Tests/Tnzi.OpenTelemetry.Tests.csproj" />
     <Project Path="tests/Tnzi.Payment.Tests/Tnzi.Payment.Tests.csproj" />
+    <Project Path="tests/Tnzi.PermissionCatalogue.Tests/Tnzi.PermissionCatalogue.Tests.csproj" />
     <Project Path="tests/Tnzi.Performance.Tests/Tnzi.Performance.Tests.csproj" />
     <Project Path="tests/Tnzi.RabbitMQ.Tests/Tnzi.RabbitMQ.Tests.csproj" />
     <Project Path="tests/Tnzi.Redis.Tests/Tnzi.Redis.Tests.csproj" />

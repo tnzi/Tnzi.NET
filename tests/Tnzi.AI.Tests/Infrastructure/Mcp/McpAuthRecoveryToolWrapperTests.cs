@@ -326,7 +326,7 @@ public class McpAuthRecoveryToolWrapperTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(NullLogger.Instance);
         var logger = new Mock<ILogger<McpToolProvider>>();
 
-        return new McpToolProvider(options, new OptionsBackedMcpServerCatalog(options), clientFactory, loggerFactory.Object, logger.Object);
+        return new McpToolProvider(new StaticOptionsMonitor<AIOptions>(options.Value), new OptionsBackedMcpServerCatalog(options), clientFactory, loggerFactory.Object, logger.Object);
     }
 
     private sealed class TrackingOAuthHandler : McpOAuthClientHandler

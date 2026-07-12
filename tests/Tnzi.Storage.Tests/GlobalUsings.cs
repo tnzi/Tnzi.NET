@@ -22,4 +22,5 @@ global using Tnzi.Storage.Options;
 global using Tnzi.Storage.Providers;
 global using Tnzi.Settings;
 global using Tnzi.Storage.Services;
+global using Tnzi.Storage.Tests.TestSupport;
 global using Xunit;

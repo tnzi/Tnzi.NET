@@ -53,17 +53,40 @@ public class ResultExtensionsTests
     }
 
     [Fact]
-    public void Validate_WhenDataIsNull_ShouldReturnFailure()
+    public void Validate_WhenDataIsNull_ShouldStillRunValidatorWithNull()
     {
-        // Arrange
+        // Arrange: "success but null" is a legal state — the validator must still run and receive null.
+        var originalResult = Result<string?>.Success(null);
+        bool validatorCalled = false;
+        string? observed = "sentinel";
+
+        // Act
+        var result = originalResult.Validate(data =>
+        {
+            validatorCalled = true;
+            observed = data;
+            return Result.Success();
+        });
+
+        // Assert: validator ran with null, and a passing validator keeps the success.
+        Assert.True(validatorCalled);
+        Assert.Null(observed);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void Validate_WhenDataIsNullAndValidatorFails_ShouldReturnFailure()
+    {
+        // Arrange: a "must be non-null" style validator can now flag null instead of it being skipped.
         var originalResult = Result<string?>.Success(null);
 
         // Act
-        var result = originalResult.Validate(_ => Result.Success());
+        var result = originalResult.Validate(data =>
+            data is null ? Result.Failure("Value is required", 400) : Result.Success());
 
         // Assert
         Assert.False(result.Succeeded);
-        Assert.Equal("Data is null, cannot validate.", result.Message);
+        Assert.Equal("Value is required", result.Message);
         Assert.Equal(400, result.Code);
     }
 
@@ -345,17 +368,23 @@ public class ResultExtensionsTests
     }
 
     [Fact]
-    public void OnSuccess_WhenResultSucceededButDataIsNull_ShouldNotExecuteAction()
+    public void OnSuccess_WhenResultSucceededButDataIsNull_ShouldExecuteActionWithNull()
     {
-        // Arrange
+        // Arrange: "success but null" is a legal state — the action must run and receive null.
         var result = Result<string?>.Success(null);
         var actionExecuted = false;
+        string? observed = "sentinel";
 
         // Act
-        var returnedResult = result.OnSuccess(_ => actionExecuted = true);
+        var returnedResult = result.OnSuccess(data =>
+        {
+            actionExecuted = true;
+            observed = data;
+        });
 
         // Assert
-        Assert.False(actionExecuted);
+        Assert.True(actionExecuted);
+        Assert.Null(observed);
         Assert.Same(result, returnedResult);
     }
 

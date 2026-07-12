@@ -110,6 +110,53 @@ public static class IndexFilterFactory
     }
 
     /// <summary>
+    /// 构建 "{列} = {false 字面量}" 的布尔判假表达式（按 provider 的标识符引用规则与布尔字面量）。
+    /// </summary>
+    private static string BuildIsFalseExpression(string columnName, DatabaseProvider provider)
+    {
+        var column = QuoteIdentifier(columnName, provider);
+        return provider switch
+        {
+            DatabaseProvider.SqlServer => $"{column} = 0",
+            DatabaseProvider.PostgreSQL => $"{column} = false",
+            DatabaseProvider.MySql => $"{column} = FALSE",
+            DatabaseProvider.Sqlite => $"{column} = 0",
+            _ => throw new NotSupportedException(
+                $"Database provider {provider} is not supported. " +
+                $"Supported providers: {string.Join(", ", _filters.Keys)}.")
+        };
+    }
+
+    /// <summary>
+    /// 获取 "IsDeleted = false" 的过滤 SQL，允许自定义 IsDeleted 列名。
+    /// </summary>
+    /// <param name="isDeletedColumn">IsDeleted 属性对应的实际数据库列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    /// <remarks>
+    /// 当实体用 <c>HasColumnName</c> 或 snake_case 命名约定使 IsDeleted 列名不等于属性名时，
+    /// MUST 使用此重载传入实际列名；否则无参重载生成的 SQL 会指向不存在的列（硬编码 "IsDeleted"）。
+    /// </remarks>
+    public static string GetIsDeletedFalse(string isDeletedColumn, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(isDeletedColumn);
+        return BuildIsFalseExpression(isDeletedColumn, provider);
+    }
+
+    /// <summary>
+    /// 获取 "IsDeleted = false" 的过滤 SQL，允许自定义 IsDeleted 列名（自动检测数据库提供者）。
+    /// 只能在 EntityTypeConfigurationBase.Configure 方法内部调用。
+    /// </summary>
+    /// <param name="isDeletedColumn">IsDeleted 属性对应的实际数据库列名</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetIsDeletedFalse(string isDeletedColumn)
+    {
+        Check.NotNullOrWhiteSpace(isDeletedColumn);
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return BuildIsFalseExpression(isDeletedColumn, provider);
+    }
+
+    /// <summary>
     /// 获取 "Code IS NOT NULL AND IsDeleted = false" 的过滤 SQL，用于唯一索引排除空 Code 与软删除行
     /// </summary>
     /// <param name="provider">数据库提供者类型</param>
@@ -151,6 +198,39 @@ public static class IndexFilterFactory
     {
         var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
         return GetCodeNotNullAndIsDeletedFalse(provider);
+    }
+
+    /// <summary>
+    /// 获取 "Code IS NOT NULL AND IsDeleted = false" 的过滤 SQL，允许自定义 Code 与 IsDeleted 列名。
+    /// </summary>
+    /// <param name="codeColumn">Code 属性对应的实际数据库列名</param>
+    /// <param name="isDeletedColumn">IsDeleted 属性对应的实际数据库列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    /// <remarks>
+    /// 当实体用 <c>HasColumnName</c> 或 snake_case 命名约定使列名不等于属性名时，MUST 使用此重载；
+    /// 否则无参重载生成的 SQL 会指向不存在的列（硬编码 "Code" / "IsDeleted"）。
+    /// </remarks>
+    public static string GetCodeNotNullAndIsDeletedFalse(string codeColumn, string isDeletedColumn, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(codeColumn);
+        Check.NotNullOrWhiteSpace(isDeletedColumn);
+        return $"{QuoteIdentifier(codeColumn, provider)} IS NOT NULL AND {BuildIsFalseExpression(isDeletedColumn, provider)}";
+    }
+
+    /// <summary>
+    /// 获取 "Code IS NOT NULL AND IsDeleted = false" 的过滤 SQL，允许自定义列名（自动检测数据库提供者）。
+    /// 只能在 EntityTypeConfigurationBase.Configure 方法内部调用。
+    /// </summary>
+    /// <param name="codeColumn">Code 属性对应的实际数据库列名</param>
+    /// <param name="isDeletedColumn">IsDeleted 属性对应的实际数据库列名</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetCodeNotNullAndIsDeletedFalse(string codeColumn, string isDeletedColumn)
+    {
+        Check.NotNullOrWhiteSpace(codeColumn);
+        Check.NotNullOrWhiteSpace(isDeletedColumn);
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetCodeNotNullAndIsDeletedFalse(codeColumn, isDeletedColumn, provider);
     }
 
     /// <summary>
@@ -215,6 +295,46 @@ public static class IndexFilterFactory
     {
         var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
         return GetColumnNotNullAndIsDeletedFalse(columnName, provider);
+    }
+
+    /// <summary>
+    /// 获取 "columnName IS NOT NULL AND IsDeleted = false" 的过滤 SQL，允许同时自定义业务列名与 IsDeleted 列名。
+    /// </summary>
+    /// <param name="columnName">可空业务列名（实际数据库列名）</param>
+    /// <param name="isDeletedColumn">IsDeleted 属性对应的实际数据库列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotNullAndIsDeletedFalse(string columnName, string isDeletedColumn, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(columnName);
+        Check.NotNullOrWhiteSpace(isDeletedColumn);
+        return $"{QuoteIdentifier(columnName, provider)} IS NOT NULL AND {BuildIsFalseExpression(isDeletedColumn, provider)}";
+    }
+
+    /// <summary>
+    /// 获取 "columnName = value AND IsDeleted = false" 的过滤 SQL，
+    /// 用于按枚举/状态列限定的部分唯一索引（如"每科目至多一张草稿"）同时排除软删除行
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <param name="value">整数常量值（枚举底层值）</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnEqualsAndIsDeletedFalse(string columnName, int value, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(columnName);
+        return $"{QuoteIdentifier(columnName, provider)} = {value} AND {GetIsDeletedFalse(provider)}";
+    }
+
+    /// <summary>
+    /// 获取 "columnName = value AND IsDeleted = false" 的过滤 SQL（自动检测数据库提供者）
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <param name="value">整数常量值（枚举底层值）</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnEqualsAndIsDeletedFalse(string columnName, int value)
+    {
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetColumnEqualsAndIsDeletedFalse(columnName, value, provider);
     }
 
     /// <summary>

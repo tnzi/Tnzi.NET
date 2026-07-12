@@ -214,7 +214,7 @@ public class ChatServiceTests
     {
         return new ChatService(
             runtime,
-            Microsoft.Extensions.Options.Options.Create(new AIOptions { DefaultProvider = "test" }),
+            new StaticOptionsMonitor<AIOptions>(new AIOptions { DefaultProvider = "test" }),
             new ServiceCollection()
                 .AddLogging()
                 .BuildServiceProvider());

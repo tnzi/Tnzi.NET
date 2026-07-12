@@ -142,7 +142,7 @@ public class AgentFactoryToolDefinitionsTests
                 ["test"] = new() { Enabled = true, DefaultModel = "m1" }
             }
         };
-        var opts = Microsoft.Extensions.Options.Options.Create(options);
+        var opts = new StaticOptionsMonitor<AIOptions>(options);
 
         var chatClient = new Mock<IChatClient>();
         chatClient

@@ -16,7 +16,7 @@ public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTes
             UserManager,
             ServiceProvider,
             EventBusMock.Object,
-            ServiceProvider.GetRequiredService<IOptions<IdentityOptions>>(),
+            ServiceProvider.GetRequiredService<IOptionsSnapshot<IdentityOptions>>(),
             cache: null);
     }
 

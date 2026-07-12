@@ -8,11 +8,11 @@ public class LlmJudgeGuardrailTests
     private const string PassResponse = "PASS";
     private const string FailResponse = "FAIL: Content contains harmful instructions";
 
-    private static IOptions<AIOptions> CreateOptions(Action<LlmJudgeOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptions(Action<LlmJudgeOptions>? configure = null)
     {
         var options = new AIOptions();
         configure?.Invoke(options.Guardrails.LlmJudge);
-        return Microsoft.Extensions.Options.Options.Create(options);
+        return new StaticOptionsMonitor<AIOptions>(options);
     }
 
     private static (Mock<IChatClientFactory> factory, Mock<IChatClient> client) CreateMockChatClient(string response)

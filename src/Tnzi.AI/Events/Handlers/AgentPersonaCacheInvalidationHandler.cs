@@ -23,31 +23,17 @@ public class AgentPersonaCacheInvalidationHandler
     public Task HandleAsync(AgentPersonaUpdatedEvent evt, CancellationToken ct = default)
     {
         Check.NotNull(evt);
-        try
-        {
-            ContextInjectionMiddleware.InvalidatePersona(evt.PersonaId);
-            _logger.LogDebug("Invalidated persona cache for {PersonaId} (updated)", evt.PersonaId);
-        }
-        catch (Exception ex)
-        {
-            // Defensive: cache invalidation must never break the publish path
-            _logger.LogWarning(ex, "Failed to invalidate persona cache for {PersonaId}", evt.PersonaId);
-        }
+        // 不再吞异常：失效失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        ContextInjectionMiddleware.InvalidatePersona(evt.PersonaId);
+        _logger.LogDebug("Invalidated persona cache for {PersonaId} (updated)", evt.PersonaId);
         return Task.CompletedTask;
     }
 
     public Task HandleAsync(AgentPersonaDeletedEvent evt, CancellationToken ct = default)
     {
         Check.NotNull(evt);
-        try
-        {
-            ContextInjectionMiddleware.InvalidatePersona(evt.PersonaId);
-            _logger.LogDebug("Invalidated persona cache for {PersonaId} (deleted)", evt.PersonaId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to invalidate persona cache for {PersonaId}", evt.PersonaId);
-        }
+        ContextInjectionMiddleware.InvalidatePersona(evt.PersonaId);
+        _logger.LogDebug("Invalidated persona cache for {PersonaId} (deleted)", evt.PersonaId);
         return Task.CompletedTask;
     }
 }

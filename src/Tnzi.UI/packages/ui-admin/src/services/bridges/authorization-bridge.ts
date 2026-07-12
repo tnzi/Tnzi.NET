@@ -11,18 +11,22 @@
  *   - functionModules  → /admin/modules
  *   - permissions      → /admin/modules/{moduleId}/functions  (read-only)
  *   - roleFunctions    → /admin/role-functions  (fetch by functionId)
+ *   - userFunctions    → /admin/user-functions  (direct grants, no role)
  *   - entityRoles      → /admin/data-auth/entity-roles (fetch by roleId)
  */
 import {
   useAdminFunctionModuleApi,
   useAdminModuleFunctionApi,
   useAdminRoleFunctionApi,
+  useAdminUserFunctionApi,
   useAdminEntityInfoApi,
   useAdminEntityRoleApi,
   type FunctionModuleDto,
   type CreateFunctionModuleDto,
   type UpdateFunctionModuleDto,
   type ModuleFunctionDto,
+  type CreateModuleFunctionDto,
+  type UpdateModuleFunctionDto,
   type RoleFunctionDto,
   type RoleFunctionQueryDto,
   type EntityInfoDto,
@@ -63,6 +67,7 @@ export interface AuthorizationBridgeDeps {
   functionModuleApi?: ReturnType<typeof useAdminFunctionModuleApi>
   moduleFunctionApi?: ReturnType<typeof useAdminModuleFunctionApi>
   roleFunctionApi?: ReturnType<typeof useAdminRoleFunctionApi>
+  userFunctionApi?: ReturnType<typeof useAdminUserFunctionApi>
   entityInfoApi?: ReturnType<typeof useAdminEntityInfoApi>
   entityRoleApi?: ReturnType<typeof useAdminEntityRoleApi>
 }
@@ -88,13 +93,22 @@ export interface AuthorizationBridge {
     previewCascade(id: string): Promise<ModuleCascadePreview>
   }
   /**
-   * Permissions (ModuleFunction) — read-only. Backend has no admin create/update/delete.
-   * Requires a `moduleId` filter in the query to fetch permissions for a given module.
+   * Permissions (ModuleFunction) — full management via
+   * /admin/module-functions (create/update/delete/enable/disable) plus the
+   * per-module read used by the Permissions master-detail page. `fetch`
+   * requires a `moduleId` filter. System-managed rows (declared by an
+   * `IPermissionDefinitionProvider`) reject code/module changes and delete
+   * server-side; enable/disable stays available for emergency ops control.
    */
   permissions: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<ModuleFunctionDto>>
     /** Direct, unpaginated fetch by module. */
     getByModule(moduleId: string): Promise<ModuleFunctionDto[]>
+    create(data: CreateModuleFunctionDto): Promise<ModuleFunctionDto>
+    update(id: string, data: UpdateModuleFunctionDto): Promise<ModuleFunctionDto>
+    delete(ids: string[]): Promise<void>
+    enable(id: string): Promise<void>
+    disable(id: string): Promise<void>
   }
   roleFunctions: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<RoleFunctionDto>>
@@ -117,6 +131,30 @@ export interface AuthorizationBridge {
      * number of new assignments inserted.
      */
     clone(targetRoleId: string, sourceRoleId: string): Promise<number>
+    /**
+     * Role names configured as super administrators - the assignment page
+     * renders those roles read-only (members bypass every check).
+     */
+    superAdminRoles(): Promise<string[]>
+  }
+  /**
+   * User-direct permission grants and denies (no role involved). Resolution
+   * is `(role grants ∪ direct grants) − direct denies`, so this surface can
+   * give ONE user extra codes or subtract a role-derived code from just that
+   * user. Writes are subject to the backend delegation guard (grantable
+   * subset of the grantor's own set, for grants and denies alike).
+   */
+  userFunctions: {
+    /** Function IDs directly granted to a user (drives the user matrix). */
+    getAssignedIds(userId: string): Promise<string[]>
+    /** Overwrite the user's whole direct-grant set (used by Save). */
+    setForUser(userId: string, functionIds: string[]): Promise<void>
+    /** Remove every direct grant from a user. */
+    clearForUser(userId: string): Promise<void>
+    /** Function IDs denied for a user (user-level subtraction). */
+    getDeniedIds(userId: string): Promise<string[]>
+    /** Overwrite the user's deny set; empty list clears all denies. */
+    setDeniedForUser(userId: string, functionIds: string[]): Promise<void>
   }
   /**
    * Data-auth entity registry (entity types that can be authorized at the row
@@ -156,17 +194,21 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
   const fmApi = deps.functionModuleApi ?? (deps.client ? useAdminFunctionModuleApi(deps.client) : null)
   const mfApi = deps.moduleFunctionApi ?? (deps.client ? useAdminModuleFunctionApi(deps.client) : null)
   const rfApi = deps.roleFunctionApi ?? (deps.client ? useAdminRoleFunctionApi(deps.client) : null)
+  const ufApi = deps.userFunctionApi ?? (deps.client ? useAdminUserFunctionApi(deps.client) : null)
   const eiApi = deps.entityInfoApi ?? (deps.client ? useAdminEntityInfoApi(deps.client) : null)
   const erApi = deps.entityRoleApi ?? (deps.client ? useAdminEntityRoleApi(deps.client) : null)
 
   // When called with no deps (e.g. scaffold test), return a no-op bridge rather than throwing.
   // Production callers MUST provide either `client` or all api deps.
+  // (userFunctionApi / entityInfoApi are later additions guarded at the call
+  // site instead, so tests injecting the original api set keep working.)
   if (!fmApi || !mfApi || !rfApi || !erApi) {
     const noOp = () => Promise.reject(new Error('createAuthorizationBridge: no deps provided'))
     return {
       functionModules: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, getAll: noOp as never, enable: noOp as never, disable: noOp as never, previewCascade: noOp as never },
-      permissions: { fetch: noOp as never, getByModule: noOp as never },
-      roleFunctions: { fetch: noOp as never, getAssignedIds: noOp as never, setForRole: noOp as never, clearForRole: noOp as never, compare: noOp as never, clone: noOp as never },
+      permissions: { fetch: noOp as never, getByModule: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, enable: noOp as never, disable: noOp as never },
+      roleFunctions: { fetch: noOp as never, getAssignedIds: noOp as never, setForRole: noOp as never, clearForRole: noOp as never, compare: noOp as never, clone: noOp as never, superAdminRoles: noOp as never },
+      userFunctions: { getAssignedIds: noOp as never, setForUser: noOp as never, clearForUser: noOp as never, getDeniedIds: noOp as never, setDeniedForUser: noOp as never },
       entityInfos: { getAll: noOp as never },
       entityRoles: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, getByEntityInfo: noOp as never, getForUser: noOp as never, setCell: noOp as never },
     }
@@ -237,7 +279,8 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
   }
 
-  // Permissions (ModuleFunction) — read-only; requires `moduleId` filter.
+  // Permissions (ModuleFunction) — list requires a `moduleId` filter; writes
+  // go to the dedicated /admin/module-functions endpoints.
   const permissions: AuthorizationBridge['permissions'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<ModuleFunctionDto>> => {
       const moduleId = (query.filters as Record<string, string>)?.moduleId
@@ -248,6 +291,19 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     getByModule: async (moduleId: string): Promise<ModuleFunctionDto[]> => {
       const items = unwrap<ModuleFunctionDto[]>(await mfApi.getByModule(moduleId))
       return Array.isArray(items) ? items : []
+    },
+    create: async (data) => unwrap(await mfApi.create(data)) as ModuleFunctionDto,
+    update: async (id, data) => unwrap(await mfApi.update(id, data)) as ModuleFunctionDto,
+    delete: async (ids) => {
+      for (const id of ids) {
+        await mfApi.delete(id)
+      }
+    },
+    enable: async (id) => {
+      unwrap(await mfApi.enable(id))
+    },
+    disable: async (id) => {
+      unwrap(await mfApi.disable(id))
     },
   }
 
@@ -295,6 +351,33 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       ),
     clone: async (targetRoleId, sourceRoleId) =>
       unwrap<number>(await rfApi.cloneRolePermissions(targetRoleId, sourceRoleId)),
+    superAdminRoles: async () =>
+      unwrap<string[]>(await rfApi.getSuperAdminRoles()) ?? [],
+  }
+
+  const requireUfApi = (): NonNullable<typeof ufApi> => {
+    if (!ufApi) throw new Error('createAuthorizationBridge: userFunctionApi not provided')
+    return ufApi
+  }
+
+  const userFunctions: AuthorizationBridge['userFunctions'] = {
+    getAssignedIds: async (userId: string): Promise<string[]> => {
+      const ids = unwrap<string[]>(await requireUfApi().getUserFunctionIds(userId))
+      return Array.isArray(ids) ? ids : []
+    },
+    setForUser: async (userId: string, functionIds: string[]): Promise<void> => {
+      await requireUfApi().setFunctions(userId, functionIds)
+    },
+    clearForUser: async (userId: string): Promise<void> => {
+      await requireUfApi().clearFunctions(userId)
+    },
+    getDeniedIds: async (userId: string): Promise<string[]> => {
+      const ids = unwrap<string[]>(await requireUfApi().getDeniedFunctionIds(userId))
+      return Array.isArray(ids) ? ids : []
+    },
+    setDeniedForUser: async (userId: string, functionIds: string[]): Promise<void> => {
+      await requireUfApi().setDeniedFunctions(userId, functionIds)
+    },
   }
 
   const entityInfos: AuthorizationBridge['entityInfos'] = {
@@ -349,5 +432,5 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
   }
 
-  return { functionModules, permissions, roleFunctions, entityInfos, entityRoles }
+  return { functionModules, permissions, roleFunctions, userFunctions, entityInfos, entityRoles }
 }

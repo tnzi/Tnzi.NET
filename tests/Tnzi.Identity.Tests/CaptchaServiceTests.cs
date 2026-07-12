@@ -4,7 +4,7 @@ namespace Tnzi.Identity.Tests;
 
 public class CaptchaServiceTests
 {
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsSnapshot<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<ICache> _cacheMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
@@ -12,7 +12,7 @@ public class CaptchaServiceTests
 
     public CaptchaServiceTests()
     {
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
+        _identityOptionsMock = new Mock<IOptionsSnapshot<IdentityOptions>>();
         _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
         {
             Captcha = new CaptchaOptions()

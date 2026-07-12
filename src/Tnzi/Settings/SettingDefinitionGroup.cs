@@ -26,5 +26,25 @@ public sealed class SettingDefinitionGroup
     /// <summary>同一菜单分组内的排列顺序（数值越小越靠前，默认 0）。</summary>
     public int Order { get; init; }
 
+    /// <summary>
+    /// 该组派生的配置权限码归属的权限组 name（如 "chat"、"ai"、"system"）。
+    /// 缺省 = <see cref="ModuleName"/> 规范化。详见 <c>SettingsPermissionNaming</c>。
+    /// </summary>
+    public string? PermissionGroup { get; init; }
+
+    /// <summary>
+    /// 权限码的实体面段（`{permGroup}.settings.{slug}.view/update` 中的 slug）。
+    /// 缺省从 <see cref="Key"/> 去归属组前缀后 camelCase 派生。
+    /// </summary>
+    public string? PermissionSlug { get; init; }
+
+    /// <summary>
+    /// 该组字段所属的 Options 类型（属性驱动定义时由提取器填充；GROUP MERGE 的组
+    /// 携带全部贡献者类型）。配置中心保存前用它们反查已注册的 IValidateOptions&lt;T&gt;，
+    /// 对「合并候选值绑出的实例」跑与运行时绑定完全相同的验证 — 防止字段级校验放行、
+    /// reload 后绑定/验证抛异常。手写 provider 可为 null（跳过 validator 预检）。
+    /// </summary>
+    public IReadOnlyList<Type>? OptionsTypes { get; init; }
+
     public required IReadOnlyList<SettingFieldDefinition> Fields { get; init; }
 }

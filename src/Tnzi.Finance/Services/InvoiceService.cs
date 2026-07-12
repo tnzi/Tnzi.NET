@@ -17,6 +17,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
     private readonly IDocumentNumberService _numberService;
     private readonly LedgerPostingEngine _engine;
     private readonly FinanceDocumentHelper _helper;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public InvoiceService(
@@ -28,7 +29,8 @@ public class InvoiceService : ApplicationService, IInvoiceService
         IDocumentNumberService numberService,
         LedgerPostingEngine engine,
         FinanceDocumentHelper helper,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _invoiceRepository = Check.NotNull(invoiceRepository);
@@ -38,6 +40,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         _numberService = Check.NotNull(numberService);
         _engine = Check.NotNull(engine);
         _helper = Check.NotNull(helper);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -178,6 +181,10 @@ public class InvoiceService : ApplicationService, IInvoiceService
         if (invoice.Lines.Count == 0)
             return Fail<InvoiceDto>("The invoice has no lines.", 400);
 
+        var guardResult = await _guards.CheckAsync(nameof(Invoice), invoice.Id.ToString(), FinancePostingOperation.Post, invoice, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<InvoiceDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
+
         var customer = await _customerRepository.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, cancellationToken);
         if (customer == null || !customer.IsActive)
             return Fail<InvoiceDto>("Customer not found or inactive.", 400);
@@ -256,7 +263,8 @@ public class InvoiceService : ApplicationService, IInvoiceService
                 AccountId = taxAccount!.Id,
                 TxnCredit = component.TaxAmount,
                 Currency = invoice.Currency,
-                Memo = component.RateName
+                Memo = component.RateName,
+                TaxRateId = component.TaxRateId
             });
         }
 
@@ -321,6 +329,10 @@ public class InvoiceService : ApplicationService, IInvoiceService
             return Fail<InvoiceDto>("Only posted invoices can be voided.", 409);
         if (invoice.AppliedTotal != 0)
             return Fail<InvoiceDto>("The invoice has applied payments. Unapply them before voiding.", 409);
+
+        var guardResult = await _guards.CheckAsync(nameof(Invoice), invoice.Id.ToString(), FinancePostingOperation.Void, invoice, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<InvoiceDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
         var original = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)

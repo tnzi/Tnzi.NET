@@ -11,6 +11,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import { renderSettingValue } from './setting-value-cell'
 
 /** Group every dictionary entry lives under (see Dictionaries.vue). */
 export const DICTIONARY_GROUP = 'Dictionary'
@@ -29,7 +30,7 @@ interface DictionaryRow {
 
 export const dictionaryColumns: ColumnDef<DictionaryRow>[] = [
   { key: 'key', title: 'columns.key', minWidth: 160 },
-  { key: 'value', title: 'columns.value', minWidth: 180 },
+  { key: 'value', title: 'columns.value', minWidth: 180, render: (row) => renderSettingValue(row.value) },
   { key: 'group', title: 'columns.group', minWidth: 120 },
   { key: 'description', title: 'columns.description', minWidth: 160 },
   {

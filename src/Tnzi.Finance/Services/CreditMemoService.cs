@@ -16,6 +16,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
     private readonly IDocumentNumberService _numberService;
     private readonly LedgerPostingEngine _engine;
     private readonly FinanceDocumentHelper _helper;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public CreditMemoService(
@@ -27,7 +28,8 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
         IDocumentNumberService numberService,
         LedgerPostingEngine engine,
         FinanceDocumentHelper helper,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _creditMemoRepository = Check.NotNull(creditMemoRepository);
@@ -37,6 +39,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
         _numberService = Check.NotNull(numberService);
         _engine = Check.NotNull(engine);
         _helper = Check.NotNull(helper);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -176,6 +179,10 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
         if (creditMemo.Lines.Count == 0)
             return Fail<CreditMemoDto>("The creditMemo has no lines.", 400);
 
+        var guardResult = await _guards.CheckAsync(nameof(CreditMemo), creditMemo.Id.ToString(), FinancePostingOperation.Post, creditMemo, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<CreditMemoDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
+
         var customer = await _customerRepository.FirstOrDefaultAsync(c => c.Id == creditMemo.CustomerId, cancellationToken);
         if (customer == null || !customer.IsActive)
             return Fail<CreditMemoDto>("Customer not found or inactive.", 400);
@@ -254,7 +261,8 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
                 AccountId = taxAccount!.Id,
                 TxnDebit = component.TaxAmount,
                 Currency = creditMemo.Currency,
-                Memo = component.RateName
+                Memo = component.RateName,
+                TaxRateId = component.TaxRateId
             });
         }
 
@@ -317,6 +325,10 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
             return Fail<CreditMemoDto>("Only posted creditMemos can be voided.", 409);
         if (creditMemo.AppliedTotal != 0)
             return Fail<CreditMemoDto>("The credit memo has been applied. Unapply it before voiding.", 409);
+
+        var guardResult = await _guards.CheckAsync(nameof(CreditMemo), creditMemo.Id.ToString(), FinancePostingOperation.Void, creditMemo, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<CreditMemoDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
         var original = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)

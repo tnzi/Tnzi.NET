@@ -6,12 +6,12 @@ namespace Tnzi.AI.Mcp.Server;
 public class McpServerHttpSecurityMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IOptions<McpServerOptions> _options;
+    private readonly IOptionsMonitor<McpServerOptions> _options;
     private readonly McpServerSecurityMiddleware _security;
 
     public McpServerHttpSecurityMiddleware(
         RequestDelegate next,
-        IOptions<McpServerOptions> options,
+        IOptionsMonitor<McpServerOptions> options,
         McpServerSecurityMiddleware security)
     {
         _next = Check.NotNull(next);
@@ -39,7 +39,7 @@ public class McpServerHttpSecurityMiddleware
             return;
         }
 
-        if (_options.Value.RateLimitPerTenant)
+        if (_options.CurrentValue.RateLimitPerTenant)
         {
             context.Items[McpServerSecurityMiddleware.TenantHeaderName] =
                 _security.ExtractTenantId(context.Request);

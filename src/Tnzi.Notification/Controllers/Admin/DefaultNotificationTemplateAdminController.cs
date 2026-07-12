@@ -84,6 +84,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// (name, category, subject, content, type, layouts, metadata) pass through.
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "notification.template.create")]
     public virtual async Task<ApiResult<TemplateDto>> Create([FromBody] CreateTemplateRequest request)
     {
         if (TemplateStoreService is null)
@@ -102,6 +103,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// delegating to the store service.
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "notification.template.update")]
     public virtual async Task<ApiResult<TemplateDto>> Update(Guid id, [FromBody] UpdateTemplateRequest request)
     {
         if (TemplateStoreService is null)
@@ -129,6 +131,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// Delete a notification template. Scope-checks the target before deleting.
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "notification.template.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         if (TemplateStoreService is null)
@@ -157,6 +160,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// caller should never see foreign ids in the first place).
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "notification.template.delete")]
     public virtual async Task<ApiResult> DeleteBatch([FromBody] IEnumerable<Guid> ids)
     {
         if (TemplateStoreService is null)

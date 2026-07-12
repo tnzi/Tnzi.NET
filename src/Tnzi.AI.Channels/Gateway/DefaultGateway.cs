@@ -10,14 +10,14 @@ public class DefaultGateway : IGateway
     private readonly ISessionBinder _binder;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DefaultGateway> _logger;
-    private readonly GatewayOptions _options;
+    private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly ConcurrentDictionary<string, GatewaySession> _activeSessions = new();
 
-    public DefaultGateway(ISessionBinder binder, IServiceScopeFactory scopeFactory, IOptions<GatewayOptions> options, ILogger<DefaultGateway> logger)
+    public DefaultGateway(ISessionBinder binder, IServiceScopeFactory scopeFactory, IOptionsMonitor<GatewayOptions> options, ILogger<DefaultGateway> logger)
     {
         _binder = Check.NotNull(binder);
         _scopeFactory = Check.NotNull(scopeFactory);
-        _options = Check.NotNull(options).Value;
+        _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
     }
 
@@ -124,16 +124,50 @@ public class DefaultGateway : IGateway
 
         Guid? resultThreadId = null;
 
+        // 流式节流：合并快速到达的 token 增量，最多每 StreamingThrottleMs 推送一次，
+        // 避免刷爆 IM 平台的编辑/限流阈值。首个 token 与最终消息始终立即下发。
+        var throttle = TimeSpan.FromMilliseconds(Math.Max(0, _options.CurrentValue.StreamingThrottleMs));
+        var pending = new StringBuilder();
+        var lastEmit = Stopwatch.GetTimestamp();
+        var hasEmitted = false;
+
         await foreach (var chunk in runtime.RunStreamingAsync(runRequest, ct).WithCancellation(ct))
         {
             resultThreadId ??= chunk.EventData?.TryGetValue("ThreadId", out var tid) == true && tid is Guid g ? g : null;
 
+            if (chunk.Text is { Length: > 0 })
+            {
+                pending.Append(chunk.Text);
+            }
+
+            var isFinal = chunk.FinishReason != null;
+
+            // 立即下发的条件：终止块 / 首块（快速首字）/ 距上次下发已达节流间隔；否则继续合并
+            if (isFinal || !hasEmitted || Stopwatch.GetElapsedTime(lastEmit) >= throttle)
+            {
+                yield return new GatewayStreamChunk
+                {
+                    TextDelta = pending.ToString(),
+                    IsFinal = isFinal,
+                    ThreadId = resultThreadId,
+                    FinishReason = chunk.FinishReason
+                };
+                pending.Clear();
+                lastEmit = Stopwatch.GetTimestamp();
+                hasEmitted = true;
+            }
+        }
+
+        // 冲刷残留：流在无 FinishReason 情况下结束且仍有未跨过节流阈值的缓冲文本
+        // （保持原语义：非终止块 IsFinal=false，枚举结束即为真正的终止信号）
+        if (pending.Length > 0)
+        {
             yield return new GatewayStreamChunk
             {
-                TextDelta = chunk.Text,
-                IsFinal = chunk.FinishReason != null,
+                TextDelta = pending.ToString(),
+                IsFinal = false,
                 ThreadId = resultThreadId,
-                FinishReason = chunk.FinishReason
+                FinishReason = null
             };
         }
 
@@ -213,7 +247,7 @@ public class DefaultGateway : IGateway
     /// </summary>
     private void EvictStaleSessions()
     {
-        var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromHours(_options.SessionEvictionHours);
+        var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromHours(_options.CurrentValue.SessionEvictionHours);
         var stale = _activeSessions
             .Where(kvp => kvp.Value.LastActivityAt < cutoff)
             .Select(kvp => kvp.Key)

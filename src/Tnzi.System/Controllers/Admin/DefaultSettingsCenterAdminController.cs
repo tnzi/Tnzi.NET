@@ -7,7 +7,13 @@ namespace Tnzi.System.Controllers.Admin;
 /// </summary>
 [DefaultController]
 [Route("admin/settings-center")]
-[ApiAuthorize(PermissionName = "system.parameter.view")]
+// Aggregate endpoint spanning many modules' config groups: no single class-level
+// module code fits. Authorization is enforced PER-GROUP in SettingsCenterService
+// (each group has its own {group}.settings.{slug}.view/update code, super-admin
+// bypasses). The controller is a bare authentication boundary - same self-service
+// exemption pattern as Menu user-tree / FunctionAuthorization access-profile.
+// GET returns only the caller's viewable groups; writes 403 per-group in service.
+[ApiAuthorize]
 public class DefaultSettingsCenterAdminController : ApiAdminControllerBase
 {
     protected readonly ISettingsCenterService SettingsCenterService;

@@ -10,7 +10,7 @@ public class FeatureManager : IFeatureManager, IDisposable
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEnumerable<IFeatureDefinitionProvider> _providers;
-    private readonly IOptions<FeatureOptions> _options;
+    private readonly IOptionsMonitor<FeatureOptions> _options;
     private readonly ILogger<FeatureManager> _logger;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private volatile IReadOnlyList<FeatureDefinitionRecord>? _snapshot;
@@ -23,7 +23,7 @@ public class FeatureManager : IFeatureManager, IDisposable
     public FeatureManager(
         IServiceScopeFactory scopeFactory,
         IEnumerable<IFeatureDefinitionProvider> providers,
-        IOptions<FeatureOptions> options,
+        IOptionsMonitor<FeatureOptions> options,
         ILogger<FeatureManager> logger)
     {
         _scopeFactory = Check.NotNull(scopeFactory);
@@ -79,7 +79,7 @@ public class FeatureManager : IFeatureManager, IDisposable
         if (snapshot == null)
             return false;
 
-        var cacheMinutes = _options.Value.CacheRefreshIntervalMinutes;
+        var cacheMinutes = _options.CurrentValue.CacheRefreshIntervalMinutes;
         var snapshotTime = new DateTime(Interlocked.Read(ref _snapshotTimeTicks), DateTimeKind.Utc);
         if (cacheMinutes > 0 && DateTime.UtcNow - snapshotTime >= TimeSpan.FromMinutes(cacheMinutes))
         {

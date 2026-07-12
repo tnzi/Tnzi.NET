@@ -16,7 +16,7 @@ public class WorkflowWatchdogService
     public WorkflowWatchdogService(
         IRepository<WorkflowExecution, Guid> repository,
         ILogger<WorkflowWatchdogService> logger,
-        IOptions<WorkflowWatchdogOptions> options)
+        IOptionsSnapshot<WorkflowWatchdogOptions> options)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);

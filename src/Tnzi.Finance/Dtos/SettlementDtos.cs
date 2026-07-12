@@ -91,11 +91,72 @@ public class ExternalPaymentIngestDto
     /// <summary>存入科目（null 回退 PostToUndepositedFunds 设置）</summary>
     public Guid? DepositToAccountId { get; set; }
 
+    /// <summary>结算方式（网关收款一般为 CreditCard/BankTransfer 等）</summary>
+    public string? PaymentMethod { get; set; }
+
     public string? Reference { get; set; }
     public string? Memo { get; set; }
 
     /// <summary>是否立即过账（默认 true）</summary>
     public bool AutoPost { get; set; } = true;
+}
+
+// ── 批量付款（Pay Bills / Receive Payments）─────────────────
+
+/// <summary>
+/// 批量结算请求：选定一组未清单据（同为 Invoice 或同为 Bill），
+/// 按（往来方 + 币种）分组各生成一张收付款单，过账后立即核销到对应单据。
+/// 整个操作在一个事务内执行——任一环节失败全部回滚
+/// </summary>
+public class BatchPaymentDto
+{
+    /// <summary>付款日期（生成的收付款单 DocDate）</summary>
+    public DateTime DocDate { get; set; }
+
+    /// <summary>
+    /// 资金科目：目标为 Bill 时是付出科目（必填），目标为 Invoice 时是存入科目
+    /// （可空回退 PostToUndepositedFunds 设置）
+    /// </summary>
+    public Guid? FundsAccountId { get; set; }
+
+    /// <summary>结算方式（推荐取值见 PaymentMethods 常量，可自定义）</summary>
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>外部参考号（应用到本次生成的全部收付款单）</summary>
+    public string? Reference { get; set; }
+
+    /// <summary>摘要（应用到本次生成的全部收付款单）</summary>
+    public string? Memo { get; set; }
+
+    /// <summary>目标单据与结算金额</summary>
+    public List<BatchPaymentTargetDto> Targets { get; set; } = null!;
+}
+
+/// <summary>
+/// 批量结算目标
+/// </summary>
+public class BatchPaymentTargetDto
+{
+    /// <summary>目标类型（Invoice / Bill；一次请求内须一致）</summary>
+    public SettlementDocType DocType { get; set; }
+
+    /// <summary>目标单据ID</summary>
+    public Guid DocId { get; set; }
+
+    /// <summary>结算金额（交易币；不得超过单据未清金额）</summary>
+    public decimal Amount { get; set; }
+}
+
+/// <summary>
+/// 批量结算结果
+/// </summary>
+public class BatchPaymentResultDto
+{
+    /// <summary>生成并过账的收付款单（每（往来方 + 币种）组一张）</summary>
+    public List<PaymentEntryDto> Payments { get; set; } = new();
+
+    /// <summary>产生的核销记录</summary>
+    public List<PaymentApplicationDto> Applications { get; set; } = new();
 }
 
 // ── Aging 报表 ───────────────────────────────────────────────

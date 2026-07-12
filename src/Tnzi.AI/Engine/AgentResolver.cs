@@ -6,7 +6,7 @@ namespace Tnzi.AI.Engine;
 public class AgentResolver : IAgentResolver
 {
     private readonly IAgentFactory _agentFactory;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IToolRegistry _toolRegistry;
     private readonly IPromptTemplateEngine _templateEngine;
@@ -18,7 +18,7 @@ public class AgentResolver : IAgentResolver
 
     public AgentResolver(
         IAgentFactory agentFactory,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IRepository<Agent, Guid> agentRepository,
         IToolRegistry toolRegistry,
         IPromptTemplateEngine templateEngine,
@@ -43,7 +43,7 @@ public class AgentResolver : IAgentResolver
     /// <inheritdoc />
     public async Task<AgentResolution> ResolveAgentAsync(Guid? agentId, string? provider, string? model, List<string>? toolGroups, CancellationToken ct, List<string>? toolNames = null)
     {
-        var defaultProvider = provider ?? _options.Value.DefaultProvider;
+        var defaultProvider = provider ?? _options.CurrentValue.DefaultProvider;
 
         // 1. 优先使用 AgentId（加载已定义的 Agent）
         if (agentId.HasValue)
@@ -52,10 +52,10 @@ public class AgentResolver : IAgentResolver
             if (entity == null)
             {
                 // Try workspace fallback before returning failure
-                if (_workspaceAgentProvider != null && _options.Value.Workspace.Enabled)
+                if (_workspaceAgentProvider != null && _options.CurrentValue.Workspace.Enabled)
                 {
                     var wsAgent = await _workspaceAgentProvider.LoadAsync(
-                        _options.Value.Workspace.GlobalPath, agentId.Value.ToString(), ct);
+                        _options.CurrentValue.Workspace.GlobalPath, agentId.Value.ToString(), ct);
                     if (wsAgent != null)
                     {
                         var wsProvider = wsAgent.Provider ?? defaultProvider;

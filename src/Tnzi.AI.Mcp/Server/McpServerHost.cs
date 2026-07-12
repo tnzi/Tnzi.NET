@@ -10,7 +10,7 @@ namespace Tnzi.AI.Mcp.Server;
 public partial class McpServerHost : IMcpServerHost
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly IOptions<McpServerOptions> _options;
+    private readonly IOptionsMonitor<McpServerOptions> _options;
     private readonly ILogger<McpServerHost> _logger;
     private readonly McpServerSecurityMiddleware _security;
     private readonly IHttpContextAccessor? _httpContextAccessor;
@@ -42,7 +42,7 @@ public partial class McpServerHost : IMcpServerHost
 
     public McpServerHost(
         IServiceProvider serviceProvider,
-        IOptions<McpServerOptions> options,
+        IOptionsMonitor<McpServerOptions> options,
         ILogger<McpServerHost> logger,
         McpServerSecurityMiddleware security,
         IHttpContextAccessor? httpContextAccessor = null)
@@ -109,7 +109,7 @@ public partial class McpServerHost : IMcpServerHost
 
     private void EnsureConfiguredAgentsExposed()
     {
-        foreach (var agentId in _options.Value.ExposedAgentIds)
+        foreach (var agentId in _options.CurrentValue.ExposedAgentIds)
         {
             if (!_agentTools.ContainsKey(agentId))
             {

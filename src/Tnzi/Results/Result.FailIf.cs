@@ -44,23 +44,28 @@ public static class ResultConditionExtensions
     #region 链式条件失败
 
     /// <summary>
-    /// 链式条件失败：如果结果成功且数据满足条件，则转为失败状态
+    /// 链式条件失败：如果结果成功（含数据为 null）且数据满足条件，则转为失败状态。
     /// </summary>
+    /// <remarks>
+    /// 分支只依据 <see cref="BaseResult{T}.Succeeded"/>：成功时对数据（可能为 null）求值 predicate。
+    /// 因此「必须非空」这类断言可写成 <c>FailIf(x =&gt; x is null, "required")</c> 并如期命中——
+    /// 空数据不再被静默跳过。若 predicate 会解引用数据，请自行处理 null。
+    /// </remarks>
     public static Result<T> FailIf<T>(this Result<T> result, Func<T, bool> predicate, string failureMessage, int code = 400, string? errorCode = null)
     {
         Check.NotNull(result);
         Check.NotNull(predicate);
 
-        if (!result.Succeeded || result.Data == null)
+        if (!result.Succeeded)
             return result;
 
-        return predicate(result.Data)
+        return predicate(result.Data!)
             ? Result<T>.Failure(failureMessage, code, errorCode)
             : result;
     }
 
     /// <summary>
-    /// 链式条件失败：支持惰性错误消息构建（可访问当前值）
+    /// 链式条件失败：支持惰性错误消息构建（可访问当前值，值可能为 null）。
     /// </summary>
     public static Result<T> FailIf<T>(this Result<T> result, Func<T, bool> predicate, Func<T, string> failureMessageFactory, int code = 400, string? errorCode = null)
     {
@@ -68,11 +73,11 @@ public static class ResultConditionExtensions
         Check.NotNull(predicate);
         Check.NotNull(failureMessageFactory);
 
-        if (!result.Succeeded || result.Data == null)
+        if (!result.Succeeded)
             return result;
 
-        return predicate(result.Data)
-            ? Result<T>.Failure(failureMessageFactory(result.Data), code, errorCode)
+        return predicate(result.Data!)
+            ? Result<T>.Failure(failureMessageFactory(result.Data!), code, errorCode)
             : result;
     }
 

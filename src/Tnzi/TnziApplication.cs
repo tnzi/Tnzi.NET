@@ -78,6 +78,10 @@ public class TnziApplication : ITnziApplication
 
         var context = new ServiceConfigurationContext(_services, _configuration);
 
+        // 注册框架内建的模块基础设施服务（健康检查、文件监听、重初始化重载器）。
+        // 这些服务作用于模块图本身，注册无条件；文件监听仅在热重载启用时才启动。
+        RegisterModuleInfrastructure(context);
+
         // 第一阶段：PreConfigureServices（所有模块）
         // 用于注册配置选项、验证器等
         foreach (var module in Modules)
@@ -143,28 +147,49 @@ public class TnziApplication : ITnziApplication
         _servicesConfigured = true;
     }
 
+    /// <summary>
+    /// 注册框架内建的模块基础设施服务：模块健康检查器、文件监听器、重初始化重载器。
+    /// 均为操作模块图的框架内部单例；<see cref="ModuleReloader"/> 是否真正启动文件监听
+    /// 由 <see cref="ModuleHotReloadOptions.Enabled"/> 控制（默认关闭），此处仅完成注册。
+    /// </summary>
+    private static void RegisterModuleInfrastructure(ServiceConfigurationContext context)
+    {
+        context.Services.AddTnziOptions<ModuleHotReloadOptions, ModuleHotReloadOptionsValidator>(context.Configuration);
+        context.Services.TryAddSingleton<ModuleHealthChecker>();
+        context.Services.TryAddSingleton<ModuleFileWatcher>();
+        context.Services.TryAddSingleton<IModuleReloader, ModuleReloader>();
+    }
+
     /// <inheritdoc />
     public async Task InitializeAsync(IServiceProvider serviceProvider, IApplicationBuilder? app = null, IWebHostEnvironment? env = null, WebApplication? webApp = null)
     {
         ServiceProvider = Check.NotNull(serviceProvider);
 
+        // 读取一次全局选项，用于门控模块依赖诊断输出（默认关闭）。
+        var tnziOptions = serviceProvider.GetService<IOptions<TnziOptions>>()?.Value;
+
         // 延迟诊断：模块加载发生在 DI 容器构建之前（无 logger 可用），此处聚合输出
-        // 「[OptionalDependsOn] 目标类型可解析（程序集已引用）但模块未加载」的情况 —
+        // 「[OptionalDependsOn] 目标类型可解析（程序集已引用）但模块未加载」的情况。
         // OptionalDependsOn 只对已加载模块排序、从不加载模块；需要某模块时必须将其纳入
-        // 启动模块的 [DependsOn] 闭包。此日志帮助发现该常见误解（一行聚合，Information 级）。
+        // 启动模块的 [DependsOn] 闭包。但该信息对 HostingModule「刻意用 [OptionalDependsOn]
+        // 声明全部业务模块」的智能适配设计是每次启动的持续噪音，因此收进模块依赖审计门控
+        // （EnableModuleDependencyAudit，默认关闭），仅在开发者显式开启审计时才输出。
         if (_skippedOptionalDependencies.Count > 0)
         {
-            var diagLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
-            if (diagLogger != null)
+            if (tnziOptions?.EnableModuleDependencyAudit == true)
             {
-                var details = string.Join("; ", _skippedOptionalDependencies
-                    .GroupBy(s => s.Wanted)
-                    .Select(g => $"{g.Key.Name} (wanted by {string.Join(", ", g.Select(x => x.Consumer.Name).Distinct())})"));
-                diagLogger.LogInformation(
-                    "Optional module dependencies referenced but NOT loaded: {Details}. " +
-                    "[OptionalDependsOn] only orders already-loaded modules — it never loads them. " +
-                    "If a capability is expected, add [DependsOn(typeof(TheModule))] to your startup module.",
-                    details);
+                var diagLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
+                if (diagLogger != null)
+                {
+                    var details = string.Join("; ", _skippedOptionalDependencies
+                        .GroupBy(s => s.Wanted)
+                        .Select(g => $"{g.Key.Name} (wanted by {string.Join(", ", g.Select(x => x.Consumer.Name).Distinct())})"));
+                    diagLogger.LogInformation(
+                        "Optional module dependencies referenced but NOT loaded: {Details}. " +
+                        "[OptionalDependsOn] only orders already-loaded modules, it never loads them. " +
+                        "If a capability is expected, add [DependsOn(typeof(TheModule))] to your startup module.",
+                        details);
+                }
             }
 
             _skippedOptionalDependencies = [];
@@ -173,28 +198,35 @@ public class TnziApplication : ITnziApplication
         // 模块依赖审计（通过 TnziOptions 配置启用，建议仅在开发环境使用）
         if (_moduleServiceMap != null)
         {
-            var tnziOptions = serviceProvider.GetService<IOptions<TnziOptions>>()?.Value;
             if (tnziOptions?.EnableModuleDependencyAudit == true)
             {
                 var auditLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
                 ModuleDependencyAuditor.Audit(Modules, _moduleServiceMap, auditLogger);
+            }
+
+            // 运行时设置消费审计独立门控且默认开启：命中即「admin 改了不生效」的真问题，
+            // 噪音低，不应被高噪音的模块依赖审计（默认关闭）连累而失去保护。
+            if (tnziOptions?.EnableRuntimeSettingConsumerAudit != false)
+            {
+                var auditLogger = serviceProvider.GetService<ILogger<TnziApplication>>();
                 RuntimeSettingConsumerAuditor.Audit(
                     _moduleServiceMap.SelectMany(kv => kv.Value),
                     _moduleServiceMap.Keys.Select(t => t.Assembly).Distinct(),
                     auditLogger);
             }
 
-            // Build module manifests before releasing the service map
+            // 惰性化 Manifest：不在启动时对每个模块做全程序集反射构建，而是把服务描述符
+            // 交给描述符，首次访问 Manifest（通常仅诊断端点）时才构建。
             foreach (var module in Modules)
             {
                 if (module is ModuleDescriptor descriptor &&
                     _moduleServiceMap.TryGetValue(module.Type, out var moduleServices))
                 {
-                    descriptor.Manifest = ModuleManifestBuilder.Build(module, moduleServices);
+                    descriptor.SetManifestSource(moduleServices);
                 }
             }
 
-            _moduleServiceMap = null; // 审计完成后释放
+            _moduleServiceMap = null; // 服务映射引用已转交各描述符，这里释放字典本身
         }
 
         var context = new ApplicationInitializationContext(serviceProvider, app, env, webApp);
@@ -261,6 +293,18 @@ public class TnziApplication : ITnziApplication
                 }
 
                 throw new ModuleException(module.Type, "OnApplicationInitialization", ex.Message, ex);
+            }
+        }
+
+        // 仅当显式启用模块热重载（重初始化）时才启动文件监听。
+        // 默认关闭，正常启动不产生任何文件监听开销。
+        var hotReloadOptions = serviceProvider.GetService<IOptions<ModuleHotReloadOptions>>()?.Value;
+        if (hotReloadOptions?.Enabled == true)
+        {
+            var reloader = serviceProvider.GetService<IModuleReloader>();
+            if (reloader != null)
+            {
+                await reloader.StartWatchingAsync().ConfigureAwait(false);
             }
         }
     }

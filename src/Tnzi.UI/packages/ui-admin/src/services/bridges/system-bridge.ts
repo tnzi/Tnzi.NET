@@ -23,6 +23,9 @@ import {
   useAdminSettingApi,
   useAdminAccessLogApi,
   useAdminSettingsCenterApi,
+  useAppearanceApi,
+  useAdminAppearanceApi,
+  type AdminGlobalThemeDto,
   type MenuInfoDto,
   type CreateMenuDto,
   type UpdateMenuDto,
@@ -45,6 +48,8 @@ export interface SystemBridgeDeps {
   settingApi?: ReturnType<typeof useAdminSettingApi>
   accessLogApi?: ReturnType<typeof useAdminAccessLogApi>
   settingsCenterApi?: ReturnType<typeof useAdminSettingsCenterApi>
+  appearanceApi?: ReturnType<typeof useAppearanceApi>
+  adminAppearanceApi?: ReturnType<typeof useAdminAppearanceApi>
 }
 
 export interface SystemBridge {
@@ -80,6 +85,19 @@ export interface SystemBridge {
     getDefinitions(): Promise<SettingsCenterGroupDto[]>
     saveGroup(groupKey: string, changedValues: Record<string, string | null>): Promise<SettingsCenterGroupDto>
     resetGroup(groupKey: string): Promise<SettingsCenterGroupDto>
+  }
+  /**
+   * Appearance - global admin theme snapshot. `getGlobal` reads the
+   * ANONYMOUS endpoint (deployment-level public appearance, so the login page
+   * and pre-auth exception pages get it too; theme = null when unset / endpoint
+   * missing on older backends); `saveGlobal` / `resetGlobal` hit the admin
+   * endpoints (system.appearance.update) and THROW on a failure envelope so
+   * callers never mistake a 403 for a saved theme.
+   */
+  appearance: {
+    getGlobal(): Promise<AdminGlobalThemeDto | null>
+    saveGlobal(theme: Record<string, unknown>): Promise<AdminGlobalThemeDto>
+    resetGlobal(): Promise<void>
   }
 }
 
@@ -184,8 +202,15 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
         saveGroup: noOp as never,
         resetGroup: noOp as never,
       },
+      appearance: {
+        getGlobal: noOp as never,
+        saveGlobal: noOp as never,
+        resetGlobal: noOp as never,
+      },
     }
   }
+  const appearanceApi = deps.appearanceApi ?? (deps.client ? useAppearanceApi(deps.client) : null)
+  const adminAppearanceApi = deps.adminAppearanceApi ?? (deps.client ? useAdminAppearanceApi(deps.client) : null)
 
   const menus: SystemBridge['menus'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<MenuInfoDto>> => {
@@ -320,5 +345,41 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       unwrap<SettingsCenterGroupDto>(await settingsCenterApi.resetGroup(groupKey)),
   }
 
-  return { menus, settings, accessLogs, scheduledJobs, features, settingsCenter }
+  /**
+   * Unwrap an ApiResult but THROW on a failure envelope. `unwrapResult`
+   * resolves failures to `undefined` (or the envelope itself), which is
+   * fine for reads but would let a 403 masquerade as a successful write.
+   */
+  function unwrapOrThrow<T>(res: unknown, fallbackMessage: string): T {
+    if (res && typeof res === 'object' && ('succeeded' in res || 'success' in res)) {
+      const envelope = res as { succeeded?: boolean; success?: boolean; data?: T; message?: string }
+      const ok = envelope.succeeded ?? envelope.success
+      if (!ok) throw new Error(envelope.message || fallbackMessage)
+      return envelope.data as T
+    }
+    return res as T
+  }
+
+  const appearance: SystemBridge['appearance'] = {
+    getGlobal: async () => {
+      if (!appearanceApi) throw new Error('appearance.getGlobal: HttpClient required')
+      const dto = unwrap<AdminGlobalThemeDto>(await appearanceApi.getAdminTheme())
+      // Failure envelopes can resolve to undefined or to the envelope object
+      // itself - only a shape with a `theme` key counts as a real payload.
+      return dto && typeof dto === 'object' && 'theme' in dto ? dto : null
+    },
+    saveGlobal: async (theme) => {
+      if (!adminAppearanceApi) throw new Error('appearance.saveGlobal: HttpClient required')
+      return unwrapOrThrow<AdminGlobalThemeDto>(
+        await adminAppearanceApi.saveTheme({ theme }),
+        'Failed to save the global theme',
+      )
+    },
+    resetGlobal: async () => {
+      if (!adminAppearanceApi) throw new Error('appearance.resetGlobal: HttpClient required')
+      unwrapOrThrow<void>(await adminAppearanceApi.resetTheme(), 'Failed to reset the global theme')
+    },
+  }
+
+  return { menus, settings, accessLogs, scheduledJobs, features, settingsCenter, appearance }
 }

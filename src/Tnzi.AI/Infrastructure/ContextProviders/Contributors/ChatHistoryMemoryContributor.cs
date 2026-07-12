@@ -7,7 +7,7 @@ namespace Tnzi.AI.Infrastructure.ContextProviders.Contributors;
 internal sealed class ChatHistoryMemoryContributor : IContextProviderContributor
 {
     private readonly ITextSearchService _textSearchService;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly ILoggerFactory _loggerFactory;
 
@@ -15,7 +15,7 @@ internal sealed class ChatHistoryMemoryContributor : IContextProviderContributor
 
     public ChatHistoryMemoryContributor(
         ITextSearchService textSearchService,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IAgentExecutionContextAccessor executionContextAccessor,
         ILoggerFactory loggerFactory)
     {
@@ -27,11 +27,11 @@ internal sealed class ChatHistoryMemoryContributor : IContextProviderContributor
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
     {
-        if (!_options.Value.ContextProviders.ChatHistoryMemory.Enabled) return null;
+        if (!_options.CurrentValue.ContextProviders.ChatHistoryMemory.Enabled) return null;
 
         try
         {
-            var chatHistoryOptions = _options.Value.ContextProviders.ChatHistoryMemory;
+            var chatHistoryOptions = _options.CurrentValue.ContextProviders.ChatHistoryMemory;
             var scope = new ChatHistoryMemoryScope
             {
                 UserId = context.UserId?.ToString(),

@@ -37,6 +37,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 创建通知（不发送）
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "notification.message.create")]
     public virtual async Task<ApiResult<NotificationInfo>> Create([FromBody] CreateNotificationRequest request)
     {
         var result = await NotificationService.CreateAsync(request);
@@ -47,6 +48,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 创建并发送通知
     /// </summary>
     [HttpPost("create-and-send")]
+    [ApiAuthorize(PermissionName = "notification.message.create")]
     public virtual async Task<ApiResult<NotificationInfo>> CreateAndSend([FromBody] CreateNotificationRequest request)
     {
         var result = await NotificationService.CreateAndSendAsync(request);
@@ -57,6 +59,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 发送通知
     /// </summary>
     [HttpPost("{id:guid}/send")]
+    [ApiAuthorize(PermissionName = "notification.message.update")]
     public virtual async Task<ApiResult> Send(Guid id)
     {
         var result = await NotificationService.SendAsync(id);
@@ -77,6 +80,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 重试失败的通知
     /// </summary>
     [HttpPost("{id:guid}/retry")]
+    [ApiAuthorize(PermissionName = "notification.message.update")]
     public virtual async Task<ApiResult> Retry(Guid id)
     {
         var result = await RetryService.RetryAsync(id);
@@ -87,6 +91,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 批量重试失败的通知
     /// </summary>
     [HttpPost("retry-failed")]
+    [ApiAuthorize(PermissionName = "notification.message.update")]
     public virtual async Task<ApiResult> RetryFailed(
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null)
@@ -99,6 +104,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 取消通知
     /// </summary>
     [HttpPost("{id:guid}/cancel")]
+    [ApiAuthorize(PermissionName = "notification.message.update")]
     public virtual async Task<ApiResult> Cancel(Guid id)
     {
         var result = await NotificationService.CancelAsync(id);
@@ -109,6 +115,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 删除（取消）通知
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "notification.message.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await NotificationService.CancelAsync(id);
@@ -168,6 +175,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 批量取消通知
     /// </summary>
     [HttpPost("batch-cancel")]
+    [ApiAuthorize(PermissionName = "notification.message.update")]
     public virtual async Task<ApiResult<int>> BatchCancel([FromBody] List<Guid> ids)
     {
         var result = await NotificationService.BatchCancelAsync(ids);
@@ -178,6 +186,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 批量删除通知
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "notification.message.delete")]
     public virtual async Task<ApiResult<int>> BatchDelete([FromBody] List<Guid> ids)
     {
         var result = await QueryService.BatchDeleteAsync(ids);
@@ -223,6 +232,7 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     /// 重发消息给失败的接收人
     /// </summary>
     [HttpPost("{id:guid}/resend-failed")]
+    [ApiAuthorize(PermissionName = "notification.message.update")]
     public virtual async Task<ApiResult<int>> ResendToFailed(Guid id)
     {
         var result = await NotificationService.ResendToFailedRecipientsAsync(id);

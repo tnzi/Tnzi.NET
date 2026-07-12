@@ -83,6 +83,7 @@ import {
 } from '../../services/bridges/signalr-bridge'
 import { makePageTranslator } from '../_shared/translate'
 import TContentPage from '../../components/layout/TContentPage.vue'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 
 const bridge = createSignalRBridge({ client: useAdminClient() })
 const t = makePageTranslator('system.signalr')
@@ -210,6 +211,8 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
 
 // Declarative operation column — force-disconnect every connection for a user
 // (confirm gated) via the existing disconnect handler.
+// 按钮级权限门控(fail-open,后端 [ApiAuthorize system.signalr.execute] 是真墙)
+const { can } = usePermissionGuard()
 const rowActions: RowAction<OnlineUserDto>[] = [
   {
     key: 'disconnect',
@@ -217,6 +220,7 @@ const rowActions: RowAction<OnlineUserDto>[] = [
     icon: 'mdi:close-circle-outline',
     type: 'warning',
     confirm: 'disconnectConfirm',
+    show: () => can('system.signalr.execute'),
     onClick: (row) => void disconnect(row.userId),
   },
 ]

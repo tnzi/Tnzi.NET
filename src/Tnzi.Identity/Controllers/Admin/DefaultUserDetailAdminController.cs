@@ -39,6 +39,7 @@ public class DefaultUserDetailAdminController : ApiAdminControllerBase
     /// <param name="dto">用户详情信息</param>
     /// <returns>用户详情</returns>
     [HttpPost("user/{userId}")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult<UserDetailDto>> CreateOrUpdate(Guid userId, [FromBody] CreateUserDetailDto dto)
     {
         var result = await UserDetailService.CreateOrUpdateAsync(userId, dto);
@@ -51,6 +52,7 @@ public class DefaultUserDetailAdminController : ApiAdminControllerBase
     /// <param name="userId">用户ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("user/{userId}")]
+    [ApiAuthorize(PermissionName = "user.delete")]
     public virtual async Task<ApiResult> Delete(Guid userId)
     {
         var result = await UserDetailService.DeleteAsync(userId);

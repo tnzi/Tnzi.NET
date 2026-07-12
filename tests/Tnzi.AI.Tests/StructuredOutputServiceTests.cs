@@ -33,7 +33,7 @@ public class StructuredOutputServiceTests
         _serviceProvider,
         _mockChatClientFactory.Object,
         _mockAgentFactory.Object,
-        Microsoft.Extensions.Options.Options.Create(options ?? new AIOptions { DefaultProvider = "OpenAI" }));
+        new StaticOptionsMonitor<AIOptions>(options ?? new AIOptions { DefaultProvider = "OpenAI" }));
 
     private void SetupChatClientResponse(string json)
     {

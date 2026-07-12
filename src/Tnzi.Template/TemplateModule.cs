@@ -26,6 +26,11 @@ public class TemplateModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, TemplatePermissions>();
+
         // 注册 MemoryCache（如果尚未注册），缓存大小限制从配置读取
         var templateOptions = context.Configuration.GetSection("Template").Get<TemplateOptions>();
         context.Services.AddMemoryCache(cacheOptions =>

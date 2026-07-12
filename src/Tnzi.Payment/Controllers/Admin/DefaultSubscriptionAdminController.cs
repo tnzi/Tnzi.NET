@@ -51,6 +51,7 @@ public class DefaultSubscriptionAdminController : ApiAdminControllerBase
     /// 创建订阅计划
     /// </summary>
     [HttpPost("plans")]
+    [ApiAuthorize(PermissionName = "payment.subscription.create")]
     public virtual async Task<ApiResult<SubscriptionPlanDto>> CreatePlan([FromBody] SubscriptionPlanDto dto)
     {
         var result = await _subscriptionService.CreatePlanAsync(dto);
@@ -61,6 +62,7 @@ public class DefaultSubscriptionAdminController : ApiAdminControllerBase
     /// 更新订阅计划
     /// </summary>
     [HttpPut("plans/{id:guid}")]
+    [ApiAuthorize(PermissionName = "payment.subscription.update")]
     public virtual async Task<ApiResult> UpdatePlan(Guid id, [FromBody] SubscriptionPlanDto dto)
     {
         var result = await _subscriptionService.UpdatePlanAsync(id, dto);
@@ -71,6 +73,7 @@ public class DefaultSubscriptionAdminController : ApiAdminControllerBase
     /// 删除订阅计划
     /// </summary>
     [HttpDelete("plans/{id:guid}")]
+    [ApiAuthorize(PermissionName = "payment.subscription.delete")]
     public virtual async Task<ApiResult> DeletePlan(Guid id)
     {
         var result = await _subscriptionService.DeletePlanAsync(id);
@@ -81,6 +84,7 @@ public class DefaultSubscriptionAdminController : ApiAdminControllerBase
     /// 取消订阅
     /// </summary>
     [HttpPost("{id:guid}/cancel")]
+    [ApiAuthorize(PermissionName = "payment.subscription.update")]
     public virtual async Task<ApiResult> Cancel(Guid id, [FromBody] CancelSubscriptionDto request)
     {
         var result = await _subscriptionService.CancelSubscriptionAsync(id, request);

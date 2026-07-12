@@ -7,20 +7,26 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
 {
     private readonly IRepository<JournalEntry, Guid> _entryRepository;
     private readonly IRepository<Account, Guid> _accountRepository;
+    private readonly IJournalEntryService _journalEntryService;
     private readonly LedgerPostingEngine _engine;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public LedgerPostingService(
         IServiceProvider serviceProvider,
         IRepository<JournalEntry, Guid> entryRepository,
         IRepository<Account, Guid> accountRepository,
+        IJournalEntryService journalEntryService,
         LedgerPostingEngine engine,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _entryRepository = Check.NotNull(entryRepository);
         _accountRepository = Check.NotNull(accountRepository);
+        _journalEntryService = Check.NotNull(journalEntryService);
         _engine = Check.NotNull(engine);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -32,6 +38,10 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
             return Fail<JournalEntryDto>("SourceType and SourceId are required.");
         if (request.Lines == null || request.Lines.Count < 2)
             return Fail<JournalEntryDto>("At least two posting lines are required.");
+
+        var guardResult = await _guards.CheckAsync(request.SourceType.Trim(), request.SourceId.Trim(), FinancePostingOperation.Post, request, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<JournalEntryDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
         var entry = new JournalEntry
         {
@@ -63,7 +73,8 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
                 Memo = line.Memo,
                 PartyType = line.PartyType,
                 PartyId = line.PartyId,
-                Dimensions = line.Dimensions
+                Dimensions = line.Dimensions,
+                TaxRateId = line.TaxRateId
             });
         }
 
@@ -93,6 +104,12 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
         }, cancellationToken);
 
         return Ok(entry.MapTo<JournalEntryDto>());
+    }
+
+    public async Task<Result<JournalEntryDto>> ReverseAsync(Guid journalEntryId, ReverseJournalEntryDto? input = null, CancellationToken cancellationToken = default)
+    {
+        // 委托凭证服务：期间锁定、并发（409）、事件与钩子（Reverse on JournalEntry）语义完全一致
+        return await _journalEntryService.ReverseAsync(journalEntryId, input ?? new ReverseJournalEntryDto(), cancellationToken);
     }
 
     public async Task<Result<List<JournalEntryDto>>> GetBySourceAsync(string sourceType, string sourceId, CancellationToken cancellationToken = default)

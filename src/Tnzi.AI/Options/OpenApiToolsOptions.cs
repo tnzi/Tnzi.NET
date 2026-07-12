@@ -8,7 +8,7 @@ namespace Tnzi.AI.Options;
 /// 配置路径：AI:OpenApiTools
 /// </remarks>
 [ConfigSection("AI:OpenApiTools")]
-[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "AI Tools",
+[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "Tools",
     I18nKey = "admin.modules.system.settings.groups.aiTools", Icon = "mdi:tools", Order = 130)]
 [ExperimentalApi(Reason = "OpenAPI tool generation is evolving")]
 public class OpenApiToolsOptions

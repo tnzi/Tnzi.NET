@@ -11,12 +11,12 @@ namespace Tnzi.AI.Sandbox.Quota;
 public sealed class ThreadResourceQuotaService : IThreadResourceQuota
 {
     private readonly ICache _cache;
-    private readonly IOptions<SandboxModuleOptions> _options;
+    private readonly IOptionsMonitor<SandboxModuleOptions> _options;
     private readonly ILogger<ThreadResourceQuotaService> _logger;
 
     public ThreadResourceQuotaService(
         ICache cache,
-        IOptions<SandboxModuleOptions> options,
+        IOptionsMonitor<SandboxModuleOptions> options,
         ILogger<ThreadResourceQuotaService> logger)
     {
         _cache = Check.NotNull(cache);
@@ -26,7 +26,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
 
     public async Task<ThreadQuotaCheckResult> CheckAsync(Guid threadId, CancellationToken ct = default)
     {
-        var quota = _options.Value.ThreadQuota;
+        var quota = _options.CurrentValue.ThreadQuota;
         if (!quota.Enabled)
             return ThreadQuotaCheckResult.Allow(long.MaxValue, long.MaxValue, long.MaxValue);
 
@@ -92,7 +92,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
 
     public async Task RecordExecutionAsync(Guid threadId, long durationMs, long outputBytes, CancellationToken ct = default)
     {
-        var quota = _options.Value.ThreadQuota;
+        var quota = _options.CurrentValue.ThreadQuota;
         if (!quota.Enabled) return;
 
         var ttl = quota.WindowDuration;

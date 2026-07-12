@@ -56,6 +56,9 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         AddRepo<CreditMemoLine>(services);
         AddRepo<PaymentEntry>(services);
         AddRepo<PaymentApplication>(services);
+        AddRepo<Transfer>(services);
+        AddRepo<Reconciliation>(services);
+        AddRepo<ReconciliationLine>(services);
 
         // UnitOfWork（让 ExecuteInUnitOfWorkAsync 走真实延迟保存路径）
         var entityManagerMock = new Mock<IEntityManager>();
@@ -87,12 +90,17 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
 
         // 业务单据服务（P2b）
         services.AddScoped<FinanceDocumentHelper>();
+        services.AddScoped<PostingGuardRunner>();
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<IBillService, BillService>();
         services.AddScoped<IExpenseService, ExpenseService>();
         services.AddScoped<ICreditMemoService, CreditMemoService>();
         services.AddScoped<IPaymentEntryService, PaymentEntryService>();
         services.AddScoped<ISettlementService, SettlementService>();
+
+        // P3a 银行域
+        services.AddScoped<ITransferService, TransferService>();
+        services.AddScoped<IReconciliationService, ReconciliationService>();
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

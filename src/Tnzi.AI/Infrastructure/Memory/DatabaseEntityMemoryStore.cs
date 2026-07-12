@@ -7,16 +7,18 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
 {
     private readonly IRepository<EntityMemory, Guid> _repository;
     private readonly ILogger<DatabaseEntityMemoryStore> _logger;
-    private readonly EntityMemoryOptions? _options;
+    private readonly IOptionsMonitor<AIOptions>? _aiOptions;
+
+    private EntityMemoryOptions? Options => _aiOptions?.CurrentValue.ContextProviders.EntityMemory;
 
     public DatabaseEntityMemoryStore(
         IRepository<EntityMemory, Guid> repository,
         ILogger<DatabaseEntityMemoryStore> logger,
-        IOptions<AIOptions>? aiOptions = null)
+        IOptionsMonitor<AIOptions>? aiOptions = null)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);
-        _options = aiOptions?.Value.ContextProviders.EntityMemory;
+        _aiOptions = aiOptions;
     }
 
     /// <inheritdoc />
@@ -38,9 +40,10 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
         }
 
         // 过期过滤
-        if (_options?.EntityExpiration.HasValue == true)
+        var options = Options;
+        if (options?.EntityExpiration.HasValue == true)
         {
-            var cutoff = DateTime.UtcNow - _options.EntityExpiration.Value;
+            var cutoff = DateTime.UtcNow - options.EntityExpiration.Value;
             query = query.Where(e => e.LastMentioned >= cutoff);
         }
 

@@ -263,6 +263,9 @@ public static class FinanceQueryExtensions
         if (query.VendorId.HasValue)
             queryable = queryable.Where(d => d.VendorId == query.VendorId.Value);
 
+        if (!string.IsNullOrWhiteSpace(query.PaymentMethod))
+            queryable = queryable.Where(d => d.PaymentMethod == query.PaymentMethod);
+
         if (query.DateFrom.HasValue)
         {
             var from = query.DateFrom.Value.ToUtcDate();
@@ -297,6 +300,9 @@ public static class FinanceQueryExtensions
         if (query.Direction.HasValue)
             queryable = queryable.Where(d => d.Direction == query.Direction.Value);
 
+        if (!string.IsNullOrWhiteSpace(query.PaymentMethod))
+            queryable = queryable.Where(d => d.PaymentMethod == query.PaymentMethod);
+
         if (query.PartyId.HasValue)
             queryable = queryable.Where(d => d.PartyId == query.PartyId.Value);
 
@@ -320,6 +326,46 @@ public static class FinanceQueryExtensions
                 (d.Reference != null && d.Reference.ToLower().Contains(keyword)) ||
                 (d.Memo != null && d.Memo.ToLower().Contains(keyword)));
         }
+
+        return queryable;
+    }
+
+    /// <summary>
+    /// 资金划转单查询过滤
+    /// </summary>
+    public static IQueryable<Transfer> Filter(this IQueryable<Transfer> queryable, TransferQueryDto query)
+    {
+        if (query.Status.HasValue)
+            queryable = queryable.Where(t => t.Status == query.Status.Value);
+
+        if (query.AccountId.HasValue)
+            queryable = queryable.Where(t => t.FromAccountId == query.AccountId.Value || t.ToAccountId == query.AccountId.Value);
+
+        if (query.From.HasValue)
+        {
+            var from = query.From.Value.ToUtcDate();
+            queryable = queryable.Where(t => t.TransferDate >= from);
+        }
+
+        if (query.To.HasValue)
+        {
+            var toExclusive = query.To.Value.ToUtcDate().AddDays(1);
+            queryable = queryable.Where(t => t.TransferDate < toExclusive);
+        }
+
+        return queryable;
+    }
+
+    /// <summary>
+    /// 银行对账查询过滤
+    /// </summary>
+    public static IQueryable<Reconciliation> Filter(this IQueryable<Reconciliation> queryable, ReconciliationQueryDto query)
+    {
+        if (query.AccountId.HasValue)
+            queryable = queryable.Where(r => r.AccountId == query.AccountId.Value);
+
+        if (query.Status.HasValue)
+            queryable = queryable.Where(r => r.Status == query.Status.Value);
 
         return queryable;
     }

@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// AI 模块配置选项
 /// </summary>
 [ConfigSection("AI")]
-[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "AI General",
+[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "General",
     I18nKey = "admin.modules.system.settings.groups.aiGeneral", Icon = "mdi:robot-outline", Order = 100)]
 public class AIOptions
 {
@@ -29,6 +29,10 @@ public class AIOptions
     /// sending the continuation request. Some models (e.g. DeepSeek) produce token
     /// fracturing when receiving both content and tool_calls in the same message.
     /// </summary>
+    [RuntimeSetting(Label = "Strip Text From Tool-Call Messages",
+        I18n = "admin.modules.system.settings.fields.stripTextFromToolCallMessages",
+        Type = SettingFieldType.Boolean,
+        Description = "Remove text content from assistant messages that also carry tool calls (fixes token fracturing on some models)")]
     public bool StripTextFromToolCallMessages { get; set; }
 
     /// <summary>

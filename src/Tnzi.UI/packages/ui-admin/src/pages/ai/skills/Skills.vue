@@ -61,7 +61,7 @@
             <template #icon><TSvgIcon icon="mdi:tray-arrow-up" :size="16" /></template>
             {{ t('importExport.export') }}
           </NButton>
-          <NButton size="small" tertiary :loading="importing" @click="triggerImport">
+          <NButton v-if="can('ai.skill.create')" size="small" tertiary :loading="importing" @click="triggerImport">
             <template #icon><TSvgIcon icon="mdi:tray-arrow-down" :size="16" /></template>
             {{ t('importExport.import') }}
           </NButton>
@@ -120,7 +120,7 @@
 
             <template #actions>
               <NButton
-                v-if="item.enabled"
+                v-if="can('ai.skill.update') && item.enabled"
                 size="small"
                 ghost
                 @click="toggleEnabled(item)"
@@ -128,7 +128,7 @@
                 {{ t('actions.deactivate') }}
               </NButton>
               <NButton
-                v-else
+                v-else-if="can('ai.skill.update')"
                 size="small"
                 type="success"
                 ghost
@@ -137,6 +137,7 @@
                 {{ t('actions.activate') }}
               </NButton>
               <NButton
+                v-if="crud.canUpdate"
                 size="small"
                 ghost
                 :disabled="item.isReadOnly"
@@ -144,13 +145,13 @@
               >
                 {{ t('actions.edit') }}
               </NButton>
-              <NPopconfirm v-if="!item.isReadOnly" @positive-click="removeOne(item)">
+              <NPopconfirm v-if="!item.isReadOnly && crud.canDelete" @positive-click="removeOne(item)">
                 <template #trigger>
                   <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
                 </template>
                 {{ t('deleteConfirm') }}
               </NPopconfirm>
-              <NButton v-else size="small" type="error" ghost disabled>
+              <NButton v-else-if="crud.canDelete" size="small" type="error" ghost disabled>
                 {{ t('actions.delete') }}
               </NButton>
             </template>
@@ -223,7 +224,7 @@
         </template>
 
         <template #detailFooter>
-          <NButton v-if="viewed && !viewed.isReadOnly" size="small" type="primary" @click="crud.openEdit(viewed)">
+          <NButton v-if="viewed && !viewed.isReadOnly && crud.canUpdate" size="small" type="primary" @click="crud.openEdit(viewed)">
             {{ t('actions.edit') }}
           </NButton>
         </template>
@@ -289,6 +290,7 @@ import TKpiCard from '../../../components/data/TKpiCard.vue'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
@@ -323,6 +325,7 @@ const message = (() => {
 })()
 
 const bridge = createAiBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 // --- card-source scope badge helpers (config-driven, both ordinal + name) ---
 const scopeKey = (scope: unknown) => scopeLabelKey(scope)
@@ -338,6 +341,7 @@ const categoryOptions = ref<CategoryOption[]>([])
 
 const crud = useCrudPage<SkillSummaryDto>({
   pageId: 'ai.skills',
+  permission: 'ai.skill',
   columns: skillColumns,
   // File-source skills have no DB row → backend returns Guid.Empty for `id`;
   // fall back to slug so card keys + selection stay unique within scope.

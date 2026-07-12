@@ -19,7 +19,12 @@ public class ChatConfigService : ApplicationService, IChatConfigService
             MaxGroupMembers = o.MaxGroupMembers,
             GroupAvatarMemberCount = Math.Clamp(o.GroupAvatarMemberCount, 1, 9),
             EnablePresence = o.EnablePresence,
+            AllowInvisible = o.AllowInvisible,
             EnableMessageSound = o.EnableMessageSound,
+            NotificationSound = o.NotificationSound,
+            MessageSound = o.MessageSound,
+            NewMessageEffect = o.NewMessageEffect,
+            FlashTitleOnMessage = o.FlashTitleOnMessage,
             EnableFileMessages = o.EnableFileMessages
         });
     }

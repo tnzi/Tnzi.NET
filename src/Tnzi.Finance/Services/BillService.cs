@@ -16,6 +16,7 @@ public class BillService : ApplicationService, IBillService
     private readonly IDocumentNumberService _numberService;
     private readonly LedgerPostingEngine _engine;
     private readonly FinanceDocumentHelper _helper;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public BillService(
@@ -27,7 +28,8 @@ public class BillService : ApplicationService, IBillService
         IDocumentNumberService numberService,
         LedgerPostingEngine engine,
         FinanceDocumentHelper helper,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _billRepository = Check.NotNull(billRepository);
@@ -37,6 +39,7 @@ public class BillService : ApplicationService, IBillService
         _numberService = Check.NotNull(numberService);
         _engine = Check.NotNull(engine);
         _helper = Check.NotNull(helper);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -177,6 +180,10 @@ public class BillService : ApplicationService, IBillService
         if (bill.Lines.Count == 0)
             return Fail<BillDto>("The bill has no lines.", 400);
 
+        var guardResult = await _guards.CheckAsync(nameof(Bill), bill.Id.ToString(), FinancePostingOperation.Post, bill, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<BillDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
+
         var vendor = await _vendorRepository.FirstOrDefaultAsync(c => c.Id == bill.VendorId, cancellationToken);
         if (vendor == null || !vendor.IsActive)
             return Fail<BillDto>("Vendor not found or inactive.", 400);
@@ -255,7 +262,8 @@ public class BillService : ApplicationService, IBillService
                 AccountId = taxAccount!.Id,
                 TxnDebit = component.TaxAmount,
                 Currency = bill.Currency,
-                Memo = component.RateName
+                Memo = component.RateName,
+                TaxRateId = component.TaxRateId
             });
         }
 
@@ -320,6 +328,10 @@ public class BillService : ApplicationService, IBillService
             return Fail<BillDto>("Only posted bills can be voided.", 409);
         if (bill.AppliedTotal != 0)
             return Fail<BillDto>("The bill has applied payments. Unapply them before voiding.", 409);
+
+        var guardResult = await _guards.CheckAsync(nameof(Bill), bill.Id.ToString(), FinancePostingOperation.Void, bill, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<BillDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
         var original = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)

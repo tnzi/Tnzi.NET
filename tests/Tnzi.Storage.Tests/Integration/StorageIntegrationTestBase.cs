@@ -121,7 +121,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, FileChunk, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             Storage,
-            Microsoft.Extensions.Options.Options.Create(options ?? StorageOptions),
+            new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions),
             ServiceProvider);
     }
 
@@ -131,7 +131,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             NullLogger<FileReferenceProcessor>.Instance,
-            Microsoft.Extensions.Options.Options.Create(options ?? StorageOptions));
+            new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions));
     }
 
     protected FileShareService CreateShareService()
@@ -154,7 +154,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, FileChunk, Guid>(DbContext, serviceProvider: ServiceProvider),
             Storage,
             currentTenant ?? new Tnzi.MultiTenancy.CurrentTenant(),
-            Microsoft.Extensions.Options.Options.Create(StorageOptions),
+            new StaticOptionsMonitor<StorageOptions>(StorageOptions),
             ServiceProvider,
             Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = multiTenancyEnabled }),
             orphanReferenceValidator);

@@ -26,12 +26,25 @@ public class DbContextRegistrar : IDbContextRegistrar
                 .GetMethod(nameof(TnziEFCoreExtensions.AddTnziDbContext))!
                 .MakeGenericMethod(dbContextType);
 
+            // 护栏：重试型 execution strategy 与框架 UnitOfWork 的手动事务互斥（EF Core 硬约束）。
+            // 在启动路径（每个 DbContext 注册时）显式告警，避免运行时才暴露冲突。
+            var providerOptions = config.BuildProviderConfigureOptions();
+            if (providerOptions.ConflictsWithUnitOfWorkTransaction)
+            {
+                logger?.LogWarning(
+                    "DbContext '{Name}' has EnableRetryOnFailure=true. The retrying execution strategy is mutually " +
+                    "exclusive with UnitOfWork's manual transactions: any UoW BeginTransaction on this DbContext will " +
+                    "throw at runtime. Disable the global UnitOfWork transaction for this DbContext, or wrap writes in " +
+                    "an explicit IExecutionStrategy.ExecuteAsync(...) block. See docs/modules/efcore.md (Retry & Execution Strategy).",
+                    config.Name);
+            }
+
             // 创建配置选项的 Action
             // 使用 GetEffectiveConnectionString() 获取合并连接池配置和环境变量展开后的连接字符串
             Action<DbContextOptionsBuilder> optionsAction = builder =>
             {
                 var effectiveConnectionString = config.GetEffectiveConnectionString(configuration, logger);
-                DatabaseProviderFactory.Configure(builder, effectiveConnectionString, config.Provider);
+                DatabaseProviderFactory.Configure(builder, effectiveConnectionString, config.Provider, providerOptions);
             };
 
             // 调用 AddTnziDbContext，传递 isPrimary 参数

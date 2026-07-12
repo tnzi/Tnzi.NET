@@ -31,8 +31,9 @@ useWidgetData(async () => {
       filters: { status: 'Failed' } as Record<string, unknown>,
     }),
   ])
-  if (allRes.status === 'fulfilled') total.value = allRes.value.totalCount ?? 0
-  if (failedRes.status === 'fulfilled') failed.value = failedRes.value.totalCount ?? 0
+  // `?.` - a 403/failed envelope can fulfil with undefined instead of throwing.
+  if (allRes.status === 'fulfilled') total.value = allRes.value?.totalCount ?? 0
+  if (failedRes.status === 'fulfilled') failed.value = failedRes.value?.totalCount ?? 0
 })
 
 function t(key: string, fallback: string): string {

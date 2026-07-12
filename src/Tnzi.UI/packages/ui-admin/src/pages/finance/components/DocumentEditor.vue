@@ -9,6 +9,11 @@
         <span class="fin-doc-editor__label">{{ t('editor.paidFrom') }}</span>
         <NSelect v-model:value="paidFromAccountId" :options="accountOptions" size="small" filterable :placeholder="t('editor.paidFrom')" />
       </div>
+      <div v-if="kind === 'expense'" class="fin-doc-editor__field">
+        <span class="fin-doc-editor__label">{{ t('editor.paymentMethod') }}</span>
+        <!-- Free-form on the backend: tag lets users type a custom instrument. -->
+        <NSelect v-model:value="paymentMethod" :options="methodOptions" size="small" filterable clearable tag :placeholder="t('editor.paymentMethodPlaceholder')" />
+      </div>
       <div class="fin-doc-editor__field">
         <span class="fin-doc-editor__label">{{ t('editor.docDate') }}</span>
         <NDatePicker v-model:value="docDateTs" type="date" size="small" style="width: 100%" />
@@ -89,6 +94,7 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NDatePicker, NInput, NInputNumber, NSelect } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { PAYMENT_METHODS } from '../../../services/bridges/finance-bridge'
 import { makePageTranslator } from '../../_shared/translate'
 import { useSafeMessage } from '../../_shared/safeMessage'
 import type { SelectOption } from '../options'
@@ -109,6 +115,7 @@ export interface EditableDocument {
   id?: string
   partyId?: string | null
   paidFromAccountId?: string | null
+  paymentMethod?: string | null
   docDate?: string
   dueDate?: string | null
   currency?: string
@@ -128,6 +135,7 @@ export interface EditableDocument {
 export interface DocumentEditorPayload {
   partyId: string | null
   paidFromAccountId: string | null
+  paymentMethod: string | null
   docDate: string
   dueDate: string | null
   currency: string | null
@@ -170,6 +178,7 @@ const message = useSafeMessage()
 
 const partyId = ref<string | null>(null)
 const paidFromAccountId = ref<string | null>(null)
+const paymentMethod = ref<string | null>(null)
 const docDateTs = ref<number>(Date.now())
 const dueDateTs = ref<number | null>(null)
 const currency = ref('')
@@ -182,9 +191,13 @@ function emptyLine(): EditableLine {
   return { itemId: null, description: '', accountId: null, quantity: 1, unitPrice: null, amount: null, taxCodeId: null }
 }
 
+const methodOptions = computed<SelectOption[]>(() =>
+  PAYMENT_METHODS.map((m) => ({ label: t(`method.${m.charAt(0).toLowerCase()}${m.slice(1)}`), value: m })))
+
 function resetFrom(entry: EditableDocument | null) {
   partyId.value = entry?.partyId ?? null
   paidFromAccountId.value = entry?.paidFromAccountId ?? null
+  paymentMethod.value = entry?.paymentMethod ?? null
   docDateTs.value = entry?.docDate ? isoDateToLocalTs(entry.docDate) : Date.now()
   dueDateTs.value = entry?.dueDate ? isoDateToLocalTs(entry.dueDate) : null
   currency.value = entry?.currency ?? ''
@@ -240,6 +253,7 @@ async function save(post: boolean) {
   const payload: DocumentEditorPayload = {
     partyId: partyId.value,
     paidFromAccountId: paidFromAccountId.value,
+    paymentMethod: paymentMethod.value,
     docDate: tsToIsoDate(docDateTs.value),
     dueDate: dueDateTs.value ? tsToIsoDate(dueDateTs.value) : null,
     currency: currency.value.trim() ? currency.value.trim().toUpperCase() : null,

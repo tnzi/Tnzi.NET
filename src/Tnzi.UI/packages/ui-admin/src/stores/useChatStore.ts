@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import type { ConversationListItemDto, ChatMessageDto, PresenceChangedPayload, ConversationMemberSettingsDto, ChatClientConfigDto } from '@tnzi/core/services/chat'
 import type { ChatImBridge } from '../services/bridges/chat-im-bridge'
 import type { NewMessagePayload, MessageReadPayload } from '@tnzi/core/services/chat'
-import { MessageContentType, UserPresenceStatus } from '@tnzi/core/services/chat'
+import { MessageContentType, UserPresenceStatus, ChatSoundEffect, ChatNewMessageEffect } from '@tnzi/core/services/chat'
 import { useAdminAuthStore } from './useAdminAuthStore'
 
 /** Everything enabled — used until GET /chat/config resolves (and as the
@@ -13,7 +13,12 @@ export const DEFAULT_CHAT_CONFIG: ChatClientConfigDto = Object.freeze({
   maxGroupMembers: 0,
   groupAvatarMemberCount: 9,
   enablePresence: true,
+  allowInvisible: true,
   enableMessageSound: true,
+  notificationSound: ChatSoundEffect.Chime,
+  messageSound: ChatSoundEffect.Pop,
+  newMessageEffect: ChatNewMessageEffect.Shake,
+  flashTitleOnMessage: true,
   enableFileMessages: true,
 })
 

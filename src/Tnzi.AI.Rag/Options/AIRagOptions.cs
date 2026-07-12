@@ -3,16 +3,25 @@ namespace Tnzi.AI.Rag.Options;
 /// <summary>
 /// AI RAG 模块配置选项
 /// </summary>
+[ConfigSection("AI:Rag")]
+[RuntimeSettingGroup(Key = "ai-rag", Module = "AI", DisplayName = "RAG",
+    I18nKey = "admin.modules.system.settings.groups.aiRag", Icon = "mdi:book-search-outline", Order = 155)]
 public class AIRagOptions
 {
     /// <summary>
     /// 默认切块大小（字符数）
     /// </summary>
+    [RuntimeSetting(Label = "Default Chunk Size", I18n = "admin.modules.system.settings.fields.ragDefaultChunkSize",
+        Type = SettingFieldType.Int, Min = 128, Max = 8192, Subsection = "Chunking & Retrieval",
+        Description = "Default number of characters per chunk when a knowledge base does not override it")]
     public int DefaultChunkSize { get; set; } = 1024;
 
     /// <summary>
     /// 默认切块重叠（字符数）
     /// </summary>
+    [RuntimeSetting(Label = "Default Chunk Overlap", I18n = "admin.modules.system.settings.fields.ragDefaultChunkOverlap",
+        Type = SettingFieldType.Int, Min = 0, Subsection = "Chunking & Retrieval",
+        Description = "Default overlap in characters between consecutive chunks (must be less than chunk size)")]
     public int DefaultChunkOverlap { get; set; } = 128;
 
     /// <summary>
@@ -23,6 +32,9 @@ public class AIRagOptions
     /// <summary>
     /// 嵌入生成的批量大小
     /// </summary>
+    [RuntimeSetting(Label = "Embedding Batch Size", I18n = "admin.modules.system.settings.fields.ragEmbeddingBatchSize",
+        Type = SettingFieldType.Int, Min = 1, Max = 1000, Subsection = "Chunking & Retrieval",
+        Description = "Number of texts embedded per batch call during ingestion")]
     public int EmbeddingBatchSize { get; set; } = 200;
 
     /// <summary>
@@ -63,6 +75,9 @@ public class AIRagOptions
     /// <summary>
     /// 搜索 TopK 最大值限制
     /// </summary>
+    [RuntimeSetting(Label = "Max Top-K", I18n = "admin.modules.system.settings.fields.ragMaxTopK",
+        Type = SettingFieldType.Int, Min = 1, Max = 1000, Subsection = "Chunking & Retrieval",
+        Description = "Upper bound the search TopK is clamped to")]
     public int MaxTopK { get; set; } = 100;
 
     /// <summary>
@@ -111,6 +126,9 @@ public class AIRagOptions
 /// <summary>
 /// GraphRAG（知识图谱）配置选项
 /// </summary>
+[ConfigSection("AI:Rag:GraphRag")]
+[RuntimeSettingGroup(Key = "ai-rag", Module = "AI", DisplayName = "RAG",
+    I18nKey = "admin.modules.system.settings.groups.aiRag", Icon = "mdi:book-search-outline", Order = 155)]
 public class GraphRagOptions
 {
     /// <summary>
@@ -120,13 +138,23 @@ public class GraphRagOptions
     /// 带来额外的延迟和成本。关闭时图谱表保持为空，<see cref="Graph.IGraphSearchService"/> 返回空结果，
     /// 摄取行为与成本不变。
     /// </para>
+    /// <para>
+    /// 运行时分支（非装配门）：<c>IGraphExtractor</c> 始终注册，本开关仅在
+    /// <see cref="Services.DocumentIngestionService"/> 摄取时决定是否执行图谱抽取，因此可热更新。
+    /// </para>
     /// </summary>
+    [RuntimeSetting(Label = "GraphRAG Enabled", I18n = "admin.modules.system.settings.fields.ragGraphRagEnabled",
+        Type = SettingFieldType.Boolean, Subsection = "GraphRAG",
+        Description = "Extract knowledge-graph entities/relations during ingestion (adds an extra LLM call per document)")]
     public bool Enabled { get; set; }
 }
 
 /// <summary>
 /// Parent Document Retrieval 配置选项
 /// </summary>
+[ConfigSection("AI:Rag:ParentDocumentRetrieval")]
+[RuntimeSettingGroup(Key = "ai-rag", Module = "AI", DisplayName = "RAG",
+    I18nKey = "admin.modules.system.settings.groups.aiRag", Icon = "mdi:book-search-outline", Order = 155)]
 public class ParentDocumentRetrievalOptions
 {
     /// <summary>
@@ -137,17 +165,26 @@ public class ParentDocumentRetrievalOptions
     /// <summary>
     /// 窗口大小 — 匹配块前后各扩展的块数（默认 2）
     /// </summary>
+    [RuntimeSetting(Label = "Parent Window Size", I18n = "admin.modules.system.settings.fields.ragParentWindowSize",
+        Type = SettingFieldType.Int, Min = 1, Max = 10, Subsection = "Parent Retrieval",
+        Description = "Number of chunks expanded before and after each matched chunk")]
     public int WindowSize { get; set; } = 2;
 
     /// <summary>
     /// 每个合并结果的最大 Token 数（默认 4000）
     /// </summary>
+    [RuntimeSetting(Label = "Parent Max Tokens", I18n = "admin.modules.system.settings.fields.ragParentMaxTokens",
+        Type = SettingFieldType.Int, Min = 256, Max = 32000, Subsection = "Parent Retrieval",
+        Description = "Maximum token count per merged parent-document result")]
     public int MaxTokens { get; set; } = 4000;
 }
 
 /// <summary>
 /// Embedding 缓存配置选项
 /// </summary>
+[ConfigSection("AI:Rag:EmbeddingCache")]
+[RuntimeSettingGroup(Key = "ai-rag", Module = "AI", DisplayName = "RAG",
+    I18nKey = "admin.modules.system.settings.groups.aiRag", Icon = "mdi:book-search-outline", Order = 155)]
 public class EmbeddingCacheOptions
 {
     /// <summary>
@@ -158,5 +195,8 @@ public class EmbeddingCacheOptions
     /// <summary>
     /// 缓存 TTL（小时），默认 720 小时（30 天）
     /// </summary>
+    [RuntimeSetting(Label = "Embedding Cache TTL (hours)", I18n = "admin.modules.system.settings.fields.ragEmbeddingCacheTtlHours",
+        Type = SettingFieldType.Int, Min = 1, Max = 8760, Subsection = "Embedding Cache",
+        Description = "Time-to-live in hours for cached embeddings")]
     public int TtlHours { get; set; } = 720;
 }

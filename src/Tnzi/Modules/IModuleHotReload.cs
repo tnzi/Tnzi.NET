@@ -1,10 +1,11 @@
 namespace Tnzi.Modules;
 
 /// <summary>
-/// 模块热重载接口
-/// 实现此接口的模块可以支持热重载功能
+/// 模块重初始化钩子接口
+/// 实现此接口的模块可在重初始化时自定义否决、状态保存/恢复与重载后回调逻辑。
+/// 未实现此接口的模块仍可被重初始化（仅重跑关闭/初始化生命周期钩子）。
 /// </summary>
-[ExperimentalApi(Reason = "Hot reload is not fully implemented")]
+[ExperimentalApi(Reason = "Module re-initialization only; assembly unload/reload is not supported")]
 public interface IModuleHotReload
 {
     /// <summary>

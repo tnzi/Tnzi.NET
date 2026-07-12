@@ -45,5 +45,6 @@ global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Services;
+global using Tnzi.Settings;
 global using Tnzi.Threading;
 global using Tnzi.Utilities;

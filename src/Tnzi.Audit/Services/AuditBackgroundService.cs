@@ -9,18 +9,18 @@ public class AuditBackgroundService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AuditBackgroundService> _logger;
     private readonly IAuditConsumer _auditConsumer;
-    private readonly int _batchSize;
+    private readonly IOptionsMonitor<Audit.Options.AuditOptions> _options;
 
     public AuditBackgroundService(
         IServiceProvider serviceProvider,
         ILogger<AuditBackgroundService> logger,
         IAuditConsumer auditConsumer,
-        IOptions<Audit.Options.AuditOptions> options)
+        IOptionsMonitor<Audit.Options.AuditOptions> options)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         _auditConsumer = Check.NotNull(auditConsumer);
-        _batchSize = Check.NotNull(options).Value.BatchSize;
+        _options = Check.NotNull(options);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -54,8 +54,11 @@ public class AuditBackgroundService : BackgroundService
     {
         var operations = new List<AuditOperation>();
 
+        // 每批读取时取最新配置（BatchSize 随配置中心热更新生效）
+        var batchSize = _options.CurrentValue.BatchSize;
+
         // 尝试读取一批数据
-        while (operations.Count < _batchSize && _auditConsumer.Reader.TryRead(out var operation))
+        while (operations.Count < batchSize && _auditConsumer.Reader.TryRead(out var operation))
         {
             operations.Add(operation);
         }

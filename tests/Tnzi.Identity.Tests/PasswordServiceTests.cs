@@ -6,7 +6,7 @@ namespace Tnzi.Identity.Tests;
 public class PasswordServiceTests
 {
     private readonly Mock<UserManager<User>> _userManagerMock;
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsSnapshot<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<IConfiguration> _configurationMock;
     private readonly Mock<IPasswordPolicyService> _passwordPolicyServiceMock;
@@ -20,7 +20,7 @@ public class PasswordServiceTests
         var store = new Mock<IUserStore<User>>();
         _userManagerMock = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
 
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
+        _identityOptionsMock = new Mock<IOptionsSnapshot<IdentityOptions>>();
         _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
         {
             Recovery = new RecoveryOptions

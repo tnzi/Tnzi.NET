@@ -35,6 +35,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// 创建模板
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "template.template.create")]
     public virtual async Task<ApiResult<TemplateDto>> Create([FromBody] CreateTemplateRequest request)
     {
         var result = await TemplateStoreService.CreateTemplateAsync(request);
@@ -45,6 +46,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// 更新模板
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "template.template.update")]
     public virtual async Task<ApiResult<TemplateDto>> Update(Guid id, [FromBody] UpdateTemplateRequest request)
     {
         var result = await TemplateStoreService.UpdateTemplateAsync(id, request);
@@ -55,6 +57,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// 删除模板
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "template.template.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await TemplateStoreService.DeleteTemplateAsync(id);
@@ -65,6 +68,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// 批量删除模板
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "template.template.delete")]
     public virtual async Task<ApiResult> DeleteBatch([FromBody] IEnumerable<Guid> ids)
     {
         var result = await TemplateStoreService.DeleteTemplatesAsync(ids);
@@ -110,6 +114,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// 克隆模板
     /// </summary>
     [HttpPost("{id:guid}/clone")]
+    [ApiAuthorize(PermissionName = "template.template.create")]
     public virtual async Task<ApiResult<TemplateDto>> Clone(Guid id, [FromQuery] string newName)
     {
         var result = await TemplateStoreService.CloneTemplateAsync(id, newName);
@@ -130,6 +135,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// Import templates from JSON
     /// </summary>
     [HttpPost("import")]
+    [ApiAuthorize(PermissionName = "template.template.create")]
     public virtual async Task<ApiResult<TemplateImportResultDto>> Import([FromBody] TemplateImportRequest request)
     {
         var result = await TemplateStoreService.ImportTemplatesAsync(request.Json, request.OverwriteExisting);
@@ -150,6 +156,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     /// Batch activate or deactivate templates
     /// </summary>
     [HttpPost("batch-activate")]
+    [ApiAuthorize(PermissionName = "template.template.update")]
     public virtual async Task<ApiResult<int>> BatchActivate([FromBody] BatchActivateRequest request)
     {
         var result = await TemplateStoreService.BatchActivateAsync(request.Ids, request.IsActive);

@@ -25,7 +25,7 @@ public class PgVectorStore : IVectorStore
 
     public PgVectorStore(
         IConfiguration configuration,
-        IOptions<AIRagOptions> options,
+        IOptionsMonitor<AIRagOptions> options,
         ILogger<PgVectorStore> logger,
         IServiceProvider serviceProvider,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
@@ -36,7 +36,7 @@ public class PgVectorStore : IVectorStore
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _connectionString = RagConnectionStringResolver.Resolve(configuration, nameof(PgVectorStore));
 
-        var prefix = Check.NotNull(options).Value.TableNamePrefix;
+        var prefix = Check.NotNull(options).CurrentValue.TableNamePrefix;
         _chunkTable = $"{prefix}_DocumentChunk";
         _knowledgeBaseTable = $"{prefix}_KnowledgeBase";
     }

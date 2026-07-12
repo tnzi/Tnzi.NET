@@ -40,6 +40,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
     PaymentDirection: original.PaymentDirection,
     FinancePartyType: original.FinancePartyType,
     SettlementDocType: original.SettlementDocType,
+    PAYMENT_METHODS: original.PAYMENT_METHODS,
     ItemType: original.ItemType,
     createFinanceBridge: () => ({
       accounts: { tree: vi.fn(async () => []) },

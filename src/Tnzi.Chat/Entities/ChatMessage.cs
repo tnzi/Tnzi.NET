@@ -20,5 +20,14 @@ public class ChatMessage : MultiTenantAuditedEntity<Guid>
     public string? FileName { get; set; }
     public long? FileSize { get; set; }
 
+    /// <summary>可选标题（富系统通知的标题栏，如 "Order shipped"）。普通消息为 null。</summary>
+    public string? Title { get; set; }
+
+    /// <summary>可选点击跳转链接（富系统通知的 call-to-action，如订单详情 URL）。普通消息为 null。</summary>
+    public string? LinkUrl { get; set; }
+
+    /// <summary>可选分类标签（富系统通知的归类，如 "order" / "billing"）。普通消息为 null。</summary>
+    public string? Category { get; set; }
+
     public virtual Conversation? Conversation { get; set; }
 }

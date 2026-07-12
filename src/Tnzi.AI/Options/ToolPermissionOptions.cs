@@ -3,11 +3,17 @@ namespace Tnzi.AI.Options;
 /// <summary>
 /// 工具权限规则配置
 /// </summary>
+[ConfigSection("AI:Permissions")]
+[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "Tools",
+    I18nKey = "admin.modules.system.settings.groups.aiTools", Icon = "mdi:tools", Order = 130)]
 public class ToolPermissionOptions
 {
     /// <summary>
     /// 是否启用规则引擎
     /// </summary>
+    [RuntimeSetting(Label = "Permission Rules Enabled", I18n = "admin.modules.system.settings.fields.permissionsEnabled",
+        Type = SettingFieldType.Boolean, Subsection = "Permissions",
+        Description = "Enable the tool permission rule engine (allow / deny / ask)")]
     public bool Enabled { get; set; }
 
     /// <summary>

@@ -19,7 +19,7 @@ public class TxTestDoc : FullAuditedEntity<Guid>
 }
 
 /// <summary>
-/// 最小 DbContext，承载 <see cref="TxTestDoc"/> 以驱动 TuanZiDbContextHelper 的文件引用处理。
+/// 最小 DbContext，承载 <see cref="TxTestDoc"/> 以驱动 TnziDbContextHelper 的文件引用处理。
 /// </summary>
 public class TxConsistencyDbContext : TnziDbContext<TxConsistencyDbContext>
 {
@@ -81,7 +81,7 @@ public class FileReferenceTransactionConsistencyTests : IntegratedTestBase<TxCon
         var doc = new TxTestDoc { Title = "doc", CoverImageId = Guid.NewGuid() };
         DbContext.Docs.Add(doc);
 
-        // 修复前：异常被 TuanZiDbContextHelper 的 catch 吞掉，SaveChanges 静默成功
+        // 修复前：异常被 TnziDbContextHelper 的 catch 吞掉，SaveChanges 静默成功
         // 修复后：异常向上传播，使外层事务/调用方得以回滚主业务
         await Assert.ThrowsAsync<InvalidOperationException>(() => DbContext.SaveChangesAsync());
     }

@@ -90,9 +90,9 @@ public class FunctionAuthCacheTests
 
     // NOTE: FunctionAuthCache.CheckPermissionAsync/CheckPermissionsAsync were
     // removed — the per-user cache key holds EXPLICIT grants only, so any
-    // check built on it would return false negatives for business admins.
-    // Permission checks are tier-aware and live in FunctionAuthorizationService
-    // (covered by AdminTierIntegrationTests).
+    // check built on it would bypass the super-admin short-circuit.
+    // Permission checks live in FunctionAuthorizationService (covered by
+    // SuperAdminAccessIntegrationTests).
 
     [Fact]
     public async Task ClearAllAsync_CallsRemoveByPrefix()

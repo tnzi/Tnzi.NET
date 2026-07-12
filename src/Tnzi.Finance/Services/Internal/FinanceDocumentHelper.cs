@@ -14,7 +14,7 @@ public sealed class FinanceDocumentHelper
         IReadOnlyRepository<Account, Guid> accountRepository,
         IReadOnlyRepository<Item, Guid> itemRepository,
         ITaxCalculator taxCalculator,
-        IOptions<FinanceOptions> options)
+        IOptionsSnapshot<FinanceOptions> options)
     {
         _accountRepository = Check.NotNull(accountRepository);
         _itemRepository = Check.NotNull(itemRepository);
@@ -55,6 +55,32 @@ public sealed class FinanceDocumentHelper
             return Result<Account>.Failure($"Cannot post to group account '{account.Code}'.", 400);
         if (!account.IsActive)
             return Result<Account>.Failure($"Account '{account.Code}' is inactive.", 400);
+
+        return Result<Account>.Success(account);
+    }
+
+    /// <summary>
+    /// 校验科目为可过账的资金叶子（CashFlowActivity = CashEquivalent），并可选校验币种兼容。
+    /// P3a 银行域（划转/对账）的统一资格判据——资金科目定义演进时只改这里
+    /// </summary>
+    /// <param name="accountId">科目ID</param>
+    /// <param name="requiredCurrency">要求兼容的币种（科目限定币种时须相等）；null 不校验币种</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task<Result<Account>> GetFundsAccountAsync(Guid accountId, string? requiredCurrency, CancellationToken cancellationToken)
+    {
+        var accountResult = await GetPostableAccountAsync(accountId, cancellationToken);
+        if (!accountResult.Succeeded)
+            return accountResult;
+
+        var account = accountResult.Data!;
+        if (account.CashFlowActivity != CashFlowActivity.CashEquivalent)
+            return Result<Account>.Failure($"Account '{account.Code}' is not a funds account. Mark it as CashEquivalent in the chart of accounts.", 400);
+
+        if (requiredCurrency != null && !string.IsNullOrEmpty(account.Currency) &&
+            !string.Equals(account.Currency, requiredCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result<Account>.Failure($"Account '{account.Code}' is restricted to {account.Currency} and cannot be used with {requiredCurrency}.", 400);
+        }
 
         return Result<Account>.Success(account);
     }

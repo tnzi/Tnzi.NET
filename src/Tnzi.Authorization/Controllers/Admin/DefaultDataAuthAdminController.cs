@@ -80,6 +80,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="request">实体信息</param>
     /// <returns>创建的实体信息</returns>
     [HttpPost("entity-infos")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.create")]
     public virtual async Task<ApiResult<EntityInfo>> CreateEntityInfo([FromBody] CreateEntityInfoRequest request)
     {
         var result = await DataAuthService.CreateEntityInfoAsync(request);
@@ -93,6 +94,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="request">实体信息</param>
     /// <returns>更新后的实体信息</returns>
     [HttpPut("entity-infos/{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.update")]
     public virtual async Task<ApiResult<EntityInfo>> UpdateEntityInfo(Guid id, [FromBody] UpdateEntityInfoRequest request)
     {
         var result = await DataAuthService.UpdateEntityInfoAsync(id, request);
@@ -105,6 +107,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="id">实体信息ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("entity-infos/{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.delete")]
     public virtual async Task<ApiResult> DeleteEntityInfo(Guid id)
     {
         var result = await DataAuthService.DeleteEntityInfoAsync(id);
@@ -169,6 +172,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="request">实体角色信息</param>
     /// <returns>创建的实体角色</returns>
     [HttpPost("entity-roles")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.create")]
     public virtual async Task<ApiResult<EntityRole>> CreateEntityRole([FromBody] CreateEntityRoleRequest request)
     {
         var result = await DataAuthService.CreateEntityRoleAsync(request);
@@ -182,6 +186,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="request">实体角色信息</param>
     /// <returns>更新后的实体角色</returns>
     [HttpPut("entity-roles/{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.update")]
     public virtual async Task<ApiResult<EntityRole>> UpdateEntityRole(Guid id, [FromBody] UpdateEntityRoleRequest request)
     {
         var result = await DataAuthService.UpdateEntityRoleAsync(id, request);
@@ -194,6 +199,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="id">实体角色ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("entity-roles/{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.delete")]
     public virtual async Task<ApiResult> DeleteEntityRole(Guid id)
     {
         var result = await DataAuthService.DeleteEntityRoleAsync(id);
@@ -206,6 +212,7 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     /// <param name="request">批量请求</param>
     /// <returns>创建的实体角色列表</returns>
     [HttpPost("entity-roles/batch")]
+    [ApiAuthorize(PermissionName = "authorization.entityRole.create")]
     public virtual async Task<ApiResult<IEnumerable<EntityRole>>> BatchCreateEntityRoles([FromBody] BatchEntityRoleRequest request)
     {
         var result = await DataAuthService.BatchCreateEntityRolesAsync(request);

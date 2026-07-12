@@ -11,7 +11,7 @@ public class FiscalYearService : ApplicationService, IFiscalYearService
     public FiscalYearService(
         IServiceProvider serviceProvider,
         IRepository<FiscalYear, Guid> fiscalYearRepository,
-        IOptions<FinanceOptions> options)
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _fiscalYearRepository = Check.NotNull(fiscalYearRepository);

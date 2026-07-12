@@ -32,6 +32,7 @@ public class DefaultAgentMemoryAdminController : ApiAdminControllerBase
     /// 为某 Agent 创建一条记忆
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<AgentMemoryDto>> Create(Guid agentId, [FromBody] CreateAgentMemoryDto dto)
     {
         var result = await MemoryService.CreateAsync(agentId, dto, HttpContext.RequestAborted);
@@ -42,6 +43,7 @@ public class DefaultAgentMemoryAdminController : ApiAdminControllerBase
     /// 更新某 Agent 的一条记忆
     /// </summary>
     [HttpPut("{memoryId:guid}")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<AgentMemoryDto>> Update(Guid agentId, Guid memoryId, [FromBody] UpdateAgentMemoryDto dto)
     {
         var result = await MemoryService.UpdateAsync(agentId, memoryId, dto, HttpContext.RequestAborted);
@@ -52,6 +54,7 @@ public class DefaultAgentMemoryAdminController : ApiAdminControllerBase
     /// 删除某 Agent 的一条记忆
     /// </summary>
     [HttpDelete("{memoryId:guid}")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult> Delete(Guid agentId, Guid memoryId)
     {
         var result = await MemoryService.DeleteAsync(agentId, memoryId, HttpContext.RequestAborted);

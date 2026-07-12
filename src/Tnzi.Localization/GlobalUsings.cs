@@ -24,3 +24,4 @@ global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Utilities;
+global using Tnzi.Localization.Permissions;

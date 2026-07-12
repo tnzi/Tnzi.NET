@@ -11,7 +11,7 @@ namespace Tnzi.AI.Rag.Search;
 /// </summary>
 public class WeightedDiminishingReranker : ISearchPostProcessor
 {
-    private readonly IOptions<AIRagOptions> _ragOptions;
+    private readonly IOptionsSnapshot<AIRagOptions> _ragOptions;
     private readonly ILogger<WeightedDiminishingReranker> _logger;
 
     /// <summary>
@@ -19,7 +19,7 @@ public class WeightedDiminishingReranker : ISearchPostProcessor
     /// </summary>
     public int Order => 50;
 
-    public WeightedDiminishingReranker(IOptions<AIRagOptions> ragOptions, ILogger<WeightedDiminishingReranker> logger)
+    public WeightedDiminishingReranker(IOptionsSnapshot<AIRagOptions> ragOptions, ILogger<WeightedDiminishingReranker> logger)
     {
         _ragOptions = Check.NotNull(ragOptions);
         _logger = Check.NotNull(logger);

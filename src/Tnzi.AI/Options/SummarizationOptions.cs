@@ -18,18 +18,33 @@ public enum SummarizationTriggerType
 /// <summary>
 /// 摘要触发条件配置
 /// </summary>
+[ConfigSection("AI:Summarization:Trigger")]
+[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "Summarization",
+    I18nKey = "admin.modules.system.settings.groups.aiSummarization", Icon = "mdi:text-short", Order = 140)]
 public class SummarizationTrigger
 {
     /// <summary>触发方式</summary>
+    [RuntimeSetting(Label = "Trigger Type", I18n = "admin.modules.system.settings.fields.summarizationTriggerType",
+        Type = SettingFieldType.Select, Subsection = "Trigger",
+        Description = "Fraction (of context window) / Tokens (absolute) / Messages (count)")]
     public SummarizationTriggerType Type { get; set; } = SummarizationTriggerType.Fraction;
 
     /// <summary>比例阈值（Type=Fraction 时使用，默认 0.93，与 Claude Code 一致）</summary>
+    [RuntimeSetting(Label = "Fraction Threshold", I18n = "admin.modules.system.settings.fields.summarizationTriggerFractionThreshold",
+        Type = SettingFieldType.Decimal, Min = 0, Max = 1, Subsection = "Trigger",
+        Description = "Context-window fraction that triggers summarization (Type = Fraction)")]
     public double FractionThreshold { get; set; } = 0.93;
 
     /// <summary>Token 数阈值（Type=Tokens 时使用）</summary>
+    [RuntimeSetting(Label = "Token Threshold", I18n = "admin.modules.system.settings.fields.summarizationTriggerTokenThreshold",
+        Type = SettingFieldType.Int, Min = 0, Subsection = "Trigger",
+        Description = "Absolute token count that triggers summarization (Type = Tokens)")]
     public int TokenThreshold { get; set; } = 100_000;
 
     /// <summary>消息数阈值（Type=Messages 时使用）</summary>
+    [RuntimeSetting(Label = "Message Threshold", I18n = "admin.modules.system.settings.fields.summarizationTriggerMessageThreshold",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Trigger",
+        Description = "Message count that triggers summarization (Type = Messages)")]
     public int MessageThreshold { get; set; } = 50;
 }
 
@@ -37,17 +52,20 @@ public class SummarizationTrigger
 /// 上下文保留配置
 /// </summary>
 [ConfigSection("AI:Summarization:Keep")]
-[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "AI Summarization",
+[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "Summarization",
     I18nKey = "admin.modules.system.settings.groups.aiSummarization", Icon = "mdi:text-short", Order = 140)]
 public class ContextRetention
 {
     /// <summary>保留最近 N 条完整消息（不参与摘要）</summary>
     [RuntimeSetting(Label = "Keep Last Messages", I18n = "admin.modules.system.settings.fields.summarizationKeepLastMessages",
-        Type = SettingFieldType.Int, Min = 1, Max = 50,
+        Type = SettingFieldType.Int, Min = 1, Max = 50, Subsection = "Keep",
         Description = "Number of recent messages preserved verbatim (not included in summary)")]
     public int KeepLastMessages { get; set; } = 6;
 
     /// <summary>始终保留系统消息</summary>
+    [RuntimeSetting(Label = "Keep System Messages", I18n = "admin.modules.system.settings.fields.summarizationKeepSystemMessages",
+        Type = SettingFieldType.Boolean, Subsection = "Keep",
+        Description = "Always preserve system messages when summarizing")]
     public bool KeepSystemMessages { get; set; } = true;
 }
 
@@ -55,7 +73,7 @@ public class ContextRetention
 /// 对话摘要配置选项
 /// </summary>
 [ConfigSection("AI:Summarization")]
-[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "AI Summarization",
+[RuntimeSettingGroup(Key = "ai-summarization", Module = "AI", DisplayName = "Summarization",
     I18nKey = "admin.modules.system.settings.groups.aiSummarization", Icon = "mdi:text-short", Order = 140)]
 public class SummarizationOptions
 {
@@ -77,9 +95,13 @@ public class SummarizationOptions
     public int TrimTokensToSummarize { get; set; } = 4000;
 
     /// <summary>摘要用的模型名称（null=使用当前 Agent 的模型）</summary>
+    [RuntimeSetting(Label = "Summarization Model", I18n = "admin.modules.system.settings.fields.summarizationModelName",
+        Description = "Model used to generate the summary (empty = current agent's model)")]
     public string? ModelName { get; set; }
 
     /// <summary>自定义摘要提示词（null=使用内置默认）</summary>
+    [RuntimeSetting(Label = "Summarization Prompt", I18n = "admin.modules.system.settings.fields.summarizationSummaryPrompt",
+        Type = SettingFieldType.Text, Description = "Custom summary prompt (empty = built-in default)")]
     public string? SummaryPrompt { get; set; }
 
     /// <summary>模型上下文窗口大小（token 数，用于 Fraction 触发计算）</summary>

@@ -10,7 +10,7 @@ namespace Tnzi.AI.Guardrails;
 /// </remarks>
 public partial class PiiDetectionGuardrail : IInputGuardrail, IGuardrailProvider
 {
-    private readonly bool _enabled;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public string Name => nameof(PiiDetectionGuardrail);
 
@@ -38,14 +38,14 @@ public partial class PiiDetectionGuardrail : IInputGuardrail, IGuardrailProvider
         (CreditCardRegex(), "credit_card")
     ];
 
-    public PiiDetectionGuardrail(IOptions<AIOptions> options)
+    public PiiDetectionGuardrail(IOptionsMonitor<AIOptions> options)
     {
-        _enabled = Check.NotNull(options).Value.Guardrails.EnablePiiDetection;
+        _options = Check.NotNull(options);
     }
 
     public Task<GuardrailResult> ValidateAsync(string input, CancellationToken ct = default)
     {
-        if (!_enabled)
+        if (!_options.CurrentValue.Guardrails.EnablePiiDetection)
         {
             return Task.FromResult(GuardrailResult.Allowed());
         }

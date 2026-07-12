@@ -102,10 +102,10 @@
         </div>
 
         <template #actions>
-          <NButton size="small" ghost @click="crud.openEdit(item)">
+          <NButton v-if="crud.canUpdate" size="small" ghost @click="crud.openEdit(item)">
             {{ t('actions.edit') }}
           </NButton>
-          <NPopconfirm @positive-click="cloneOne(item)">
+          <NPopconfirm v-if="can('ai.agent.create')" @positive-click="cloneOne(item)">
             <template #trigger>
               <NButton size="small" ghost :loading="cloningId === item.id">
                 {{ t('actions.clone') }}
@@ -113,7 +113,7 @@
             </template>
             {{ t('cloneConfirm') }}
           </NPopconfirm>
-          <NPopconfirm @positive-click="removeOne(item)">
+          <NPopconfirm v-if="crud.canDelete" @positive-click="removeOne(item)">
             <template #trigger>
               <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
             </template>
@@ -135,6 +135,7 @@ import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
 import TKpiCard, { type TKpiCardTone } from '../../../components/data/TKpiCard.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
@@ -163,9 +164,11 @@ const message = (() => {
 })()
 
 const bridge = createAiBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 const crud = useCrudPage<AgentDto>({
   pageId: 'ai.agents',
+  permission: 'ai.agent',
   columns: [], // card page renders via #card slot; column defs unused
   rowKey: (a) => a.id,
   fetchData: (query) => bridge.agents.fetch(query),

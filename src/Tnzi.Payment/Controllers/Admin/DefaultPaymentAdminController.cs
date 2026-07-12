@@ -41,6 +41,7 @@ public class DefaultPaymentAdminController : ApiAdminControllerBase
     /// 关闭支付订单
     /// </summary>
     [HttpPost("{tradeNo}/close")]
+    [ApiAuthorize(PermissionName = "payment.order.update")]
     public virtual async Task<ApiResult> Close(string tradeNo, [FromBody] ClosePaymentDto request)
     {
         var result = await _paymentService.ClosePaymentAsync(tradeNo, request.Reason);
@@ -51,6 +52,7 @@ public class DefaultPaymentAdminController : ApiAdminControllerBase
     /// 同步订单状态
     /// </summary>
     [HttpPost("{tradeNo}/sync")]
+    [ApiAuthorize(PermissionName = "payment.order.update")]
     public virtual async Task<ApiResult> Sync(string tradeNo)
     {
         var result = await _paymentService.SyncOrderAsync(tradeNo);

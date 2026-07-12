@@ -17,6 +17,7 @@ public class SettlementService : ApplicationService, ISettlementService
     private readonly IRepository<PaymentEntry, Guid> _paymentRepository;
     private readonly IRepository<CreditMemo, Guid> _creditMemoRepository;
     private readonly IRepository<JournalEntry, Guid> _entryRepository;
+    private readonly IPaymentEntryService _paymentEntryService;
     private readonly LedgerPostingEngine _engine;
     private readonly FinanceDocumentHelper _helper;
 
@@ -28,6 +29,7 @@ public class SettlementService : ApplicationService, ISettlementService
         IRepository<PaymentEntry, Guid> paymentRepository,
         IRepository<CreditMemo, Guid> creditMemoRepository,
         IRepository<JournalEntry, Guid> entryRepository,
+        IPaymentEntryService paymentEntryService,
         LedgerPostingEngine engine,
         FinanceDocumentHelper helper)
         : base(serviceProvider)
@@ -38,6 +40,7 @@ public class SettlementService : ApplicationService, ISettlementService
         _paymentRepository = Check.NotNull(paymentRepository);
         _creditMemoRepository = Check.NotNull(creditMemoRepository);
         _entryRepository = Check.NotNull(entryRepository);
+        _paymentEntryService = Check.NotNull(paymentEntryService);
         _engine = Check.NotNull(engine);
         _helper = Check.NotNull(helper);
     }
@@ -128,24 +131,27 @@ public class SettlementService : ApplicationService, ISettlementService
         Result applyResult;
         try
         {
+            // 多目标循环内的中途失败 MUST 抛 UnitOfWorkAbortException（而非 return 失败 Result）：
+            // ExecuteInUnitOfWorkAsync 只在异常时回滚，返回失败 Result 仍会提交，
+            // 先前迭代已插入的核销与已更新的目标会被部分提交。
             applyResult = await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
                 foreach (var allocation in input.Targets)
                 {
                     if (allocation.TargetType != source.AllowedTargetType)
-                        return Result.Failure($"A {input.SourceType} can only be applied to {source.AllowedTargetType} documents.", 400);
+                        throw new UnitOfWorkAbortException(Result.Failure($"A {input.SourceType} can only be applied to {source.AllowedTargetType} documents.", 400));
 
                     var targetResult = await LoadTargetAsync(allocation.TargetType, allocation.TargetId, ct);
                     if (!targetResult.Succeeded)
-                        return Result.Failure(targetResult.Message!, targetResult.Code ?? 400);
+                        throw new UnitOfWorkAbortException(Result.Failure(targetResult.Message!, targetResult.Code ?? 400));
                     var target = targetResult.Data!;
 
                     if (!string.Equals(target.Currency, source.Currency, StringComparison.OrdinalIgnoreCase))
-                        return Result.Failure($"Currency mismatch: source is {source.Currency}, target {target.Number} is {target.Currency}. Cross-currency settlement is not supported.", 400);
+                        throw new UnitOfWorkAbortException(Result.Failure($"Currency mismatch: source is {source.Currency}, target {target.Number} is {target.Currency}. Cross-currency settlement is not supported.", 400));
                     if (target.PartyId != source.PartyId)
-                        return Result.Failure($"Target {target.Number} belongs to a different party.", 400);
+                        throw new UnitOfWorkAbortException(Result.Failure($"Target {target.Number} belongs to a different party.", 400));
                     if (allocation.Amount > target.Outstanding)
-                        return Result.Failure($"Allocation {allocation.Amount} exceeds the outstanding {target.Outstanding} of {target.Number}.", 400);
+                        throw new UnitOfWorkAbortException(Result.Failure($"Allocation {allocation.Amount} exceeds the outstanding {target.Outstanding} of {target.Number}.", 400));
 
                     var application = new PaymentApplication
                     {
@@ -159,7 +165,7 @@ public class SettlementService : ApplicationService, ISettlementService
                     // realized FX：同交易币但捕获汇率不同 → 控制科目残差调整到汇兑损益
                     var fxResult = await PostRealizedFxAsync(source, target, allocation.Amount, ct);
                     if (!fxResult.Succeeded)
-                        return Result.Failure(fxResult.Message!, fxResult.Code ?? 400);
+                        throw new UnitOfWorkAbortException(Result.Failure(fxResult.Message!, fxResult.Code ?? 400));
                     application.RealizedFxJournalEntryId = fxResult.Data;
 
                     await _applicationRepository.InsertAsync(application, ct);
@@ -171,6 +177,11 @@ public class SettlementService : ApplicationService, ISettlementService
                 await ApplyToSourceAsync(source, allocateTotal, ct);
                 return Result.Success();
             }, cancellationToken);
+        }
+        catch (UnitOfWorkAbortException ex)
+        {
+            // 事务已整体回滚（先前迭代的核销/状态更新一并撤销），转换回业务失败
+            applyResult = ex.Result;
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -237,6 +248,147 @@ public class SettlementService : ApplicationService, ISettlementService
         return unapplyResult.Succeeded
             ? Ok()
             : Fail(unapplyResult.Message ?? "Unapply failed.", unapplyResult.Code ?? 400);
+    }
+
+    public async Task<Result<BatchPaymentResultDto>> PayAsync(BatchPaymentDto input, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(input);
+
+        if (input.Targets == null || input.Targets.Count == 0)
+            return Fail<BatchPaymentResultDto>("At least one target document is required.");
+        if (input.Targets.Any(t => t.Amount <= 0))
+            return Fail<BatchPaymentResultDto>("Target amounts must be greater than zero.");
+        if (input.Targets.GroupBy(t => (t.DocType, t.DocId)).Any(g => g.Count() > 1))
+            return Fail<BatchPaymentResultDto>("Duplicate target documents in one batch.");
+
+        var docTypes = input.Targets.Select(t => t.DocType).Distinct().ToList();
+        if (docTypes.Count > 1)
+            return Fail<BatchPaymentResultDto>("All targets must share the same document type (all invoices or all bills).");
+        var docType = docTypes[0];
+        if (docType is not (SettlementDocType.Invoice or SettlementDocType.Bill))
+            return Fail<BatchPaymentResultDto>("Batch payment targets must be invoices or bills.");
+
+        var direction = docType == SettlementDocType.Invoice ? PaymentDirection.Inbound : PaymentDirection.Outbound;
+        var partyType = direction == PaymentDirection.Inbound ? FinancePartyType.Customer : FinancePartyType.Vendor;
+
+        // 预检目标头部（快速失败与分组元数据；权威校验仍由事务内的过账与 ApplyAsync 重跑）
+        var ids = input.Targets.Select(t => t.DocId).ToList();
+        var headers = docType == SettlementDocType.Invoice
+            ? await _invoiceRepository.AsNoTracking().Where(i => ids.Contains(i.Id))
+                .Select(i => new BatchTargetHeader
+                {
+                    Id = i.Id,
+                    Number = i.Number,
+                    PartyId = i.CustomerId,
+                    Currency = i.Currency,
+                    Status = i.Status,
+                    Outstanding = i.Total - i.AppliedTotal
+                })
+                .ToListAsync(cancellationToken)
+            : await _billRepository.AsNoTracking().Where(b => ids.Contains(b.Id))
+                .Select(b => new BatchTargetHeader
+                {
+                    Id = b.Id,
+                    Number = b.Number,
+                    PartyId = b.VendorId,
+                    Currency = b.Currency,
+                    Status = b.Status,
+                    Outstanding = b.Total - b.AppliedTotal
+                })
+                .ToListAsync(cancellationToken);
+
+        var byId = headers.ToDictionary(h => h.Id);
+        foreach (var target in input.Targets)
+        {
+            if (!byId.TryGetValue(target.DocId, out var header))
+                return Fail<BatchPaymentResultDto>($"Target document {target.DocId} was not found.", 404);
+            if (header.Status is not (FinanceDocumentStatus.Posted or FinanceDocumentStatus.PartiallyPaid))
+                return Fail<BatchPaymentResultDto>($"Document {header.Number} is not open.", 409);
+            if (target.Amount > header.Outstanding)
+                return Fail<BatchPaymentResultDto>($"Allocation {target.Amount} exceeds the outstanding {header.Outstanding} of {header.Number}.", 400);
+        }
+
+        // （往来方 + 币种）分组，各组一张收付款单
+        var groups = input.Targets.GroupBy(t => (byId[t.DocId].PartyId, byId[t.DocId].Currency)).ToList();
+
+        var payments = new List<PaymentEntryDto>();
+        var applications = new List<PaymentApplicationDto>();
+        try
+        {
+            // 任一环节失败以 UnitOfWorkAbortException 中止 → 整个批次回滚
+            //（已分配的付款单号、已过账凭证、已核销目标一并撤销），绝不产生半批次。
+            await ExecuteInUnitOfWorkAsync(async ct =>
+            {
+                foreach (var group in groups)
+                {
+                    var draft = await _paymentEntryService.CreateDraftAsync(new CreatePaymentEntryDto
+                    {
+                        Direction = direction,
+                        PartyType = partyType,
+                        PartyId = group.Key.PartyId,
+                        DocDate = input.DocDate,
+                        Currency = group.Key.Currency,
+                        Amount = group.Sum(t => t.Amount),
+                        DepositToAccountId = input.FundsAccountId,
+                        PaymentMethod = input.PaymentMethod,
+                        Reference = input.Reference,
+                        Memo = input.Memo
+                    }, ct);
+                    if (!draft.Succeeded)
+                        throw new UnitOfWorkAbortException(Result.Failure(draft.Message ?? "Payment creation failed.", draft.Code ?? 400));
+
+                    var posted = await _paymentEntryService.PostAsync(draft.Data!.Id, ct);
+                    if (!posted.Succeeded)
+                        throw new UnitOfWorkAbortException(Result.Failure(posted.Message ?? "Payment posting failed.", posted.Code ?? 400));
+
+                    var applied = await ApplyAsync(new ApplySettlementDto
+                    {
+                        SourceType = SettlementDocType.PaymentEntry,
+                        SourceId = posted.Data!.Id,
+                        Targets = group.Select(t => new ApplySettlementTargetDto
+                        {
+                            TargetType = docType,
+                            TargetId = t.DocId,
+                            Amount = t.Amount
+                        }).ToList()
+                    }, ct);
+                    if (!applied.Succeeded)
+                        throw new UnitOfWorkAbortException(Result.Failure(applied.Message ?? "Settlement failed.", applied.Code ?? 400));
+
+                    payments.Add(posted.Data!);
+                    applications.AddRange(applied.Data!);
+                }
+            }, cancellationToken);
+        }
+        catch (UnitOfWorkAbortException ex)
+        {
+            return Fail<BatchPaymentResultDto>(ex.Result.Message ?? "Batch payment failed.", ex.Result.Code ?? 400);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Fail<BatchPaymentResultDto>("A document was modified by another operation. Reload and retry.", 409);
+        }
+
+        // 付款单 DTO 生成于核销之前，刷新核销派生字段（AppliedTotal）
+        for (var i = 0; i < payments.Count; i++)
+        {
+            var refreshed = await _paymentEntryService.GetAsync(payments[i].Id, cancellationToken);
+            if (refreshed.Succeeded)
+                payments[i] = refreshed.Data!;
+        }
+
+        return Ok(new BatchPaymentResultDto { Payments = payments, Applications = applications });
+    }
+
+    /// <summary>批量结算预检用的目标单据头部投影</summary>
+    private sealed class BatchTargetHeader
+    {
+        public Guid Id { get; init; }
+        public string? Number { get; init; }
+        public Guid PartyId { get; init; }
+        public string Currency { get; init; } = string.Empty;
+        public FinanceDocumentStatus Status { get; init; }
+        public decimal Outstanding { get; init; }
     }
 
     // ── 内部：源/目标的统一视图 ─────────────────────────────────

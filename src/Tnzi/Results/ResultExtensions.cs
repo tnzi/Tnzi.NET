@@ -10,24 +10,22 @@ public static class ResultExtensions
     #region 链式验证
 
     /// <summary>
-    /// 链式验证：如果当前结果成功，则执行验证函数，否则返回当前失败结果
+    /// 链式验证：如果当前结果成功（含数据为 null），则执行验证函数，否则返回当前失败结果
     /// </summary>
     /// <typeparam name="T">数据类型</typeparam>
     /// <param name="result">当前结果</param>
-    /// <param name="validator">验证函数，返回验证结果</param>
+    /// <param name="validator">验证函数，返回验证结果；成功但数据为 null 时以 null 调用</param>
     /// <returns>验证后的结果</returns>
     public static Result<T> Validate<T>(this Result<T> result, Func<T, Result> validator)
     {
         Check.NotNull(result);
         Check.NotNull(validator);
 
+        // 分支只依据 Succeeded：空数据是合法成功值，交给 validator 决定（不再把 null 当失败）
         if (!result.Succeeded)
             return result;
 
-        if (result.Data == null)
-            return Result<T>.Failure("Data is null, cannot validate.", 400, ErrorCodes.VALIDATION_ERROR);
-
-        var validationResult = validator(result.Data);
+        var validationResult = validator(result.Data!);
         if (!validationResult.Succeeded)
         {
             return Result<T>.Failure(
@@ -68,24 +66,22 @@ public static class ResultExtensions
     }
 
     /// <summary>
-    /// 链式验证：如果当前结果成功且数据不为空，则执行验证函数，否则返回当前结果
+    /// 链式验证：如果当前结果成功（含数据为 null），则执行验证函数，否则返回当前结果
     /// </summary>
     /// <typeparam name="T">数据类型</typeparam>
     /// <param name="result">当前结果</param>
-    /// <param name="validator">验证函数，如果验证失败返回错误消息，否则返回 null</param>
+    /// <param name="validator">验证函数，如果验证失败返回错误消息，否则返回 null；成功但数据为 null 时以 null 调用</param>
     /// <returns>验证后的结果</returns>
     public static Result<T> Validate<T>(this Result<T> result, Func<T, string?> validator)
     {
         Check.NotNull(result);
         Check.NotNull(validator);
 
+        // 分支只依据 Succeeded：空数据是合法成功值，交给 validator 决定（不再静默跳过 null）
         if (!result.Succeeded)
             return result;
 
-        if (result.Data == null)
-            return result;
-
-        var errorMessage = validator(result.Data);
+        var errorMessage = validator(result.Data!);
         if (!string.IsNullOrEmpty(errorMessage))
         {
             return Result<T>.Failure(errorMessage, 400, ErrorCodes.VALIDATION_ERROR);
@@ -246,20 +242,21 @@ public static class ResultExtensions
     #region 条件操作
 
     /// <summary>
-    /// 如果结果成功，则执行操作
+    /// 如果结果成功（含数据为 null），则执行操作
     /// </summary>
     /// <typeparam name="T">数据类型</typeparam>
     /// <param name="result">结果</param>
-    /// <param name="action">要执行的操作</param>
+    /// <param name="action">要执行的操作，成功但数据为 null 时以 null 调用</param>
     /// <returns>原结果</returns>
     public static Result<T> OnSuccess<T>(this Result<T> result, Action<T> action)
     {
         Check.NotNull(result);
         Check.NotNull(action);
 
-        if (result.Succeeded && result.Data != null)
+        // 分支只依据 Succeeded；成功但数据为 null 时把 null 传给 action（空数据是合法成功值）
+        if (result.Succeeded)
         {
-            action(result.Data);
+            action(result.Data!);
         }
 
         return result;

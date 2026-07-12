@@ -8,7 +8,7 @@ public class TwoFactorServiceTests
     private readonly Mock<IRepository<TwoFactorCode, Guid>> _repositoryMock;
     private readonly Mock<UserManager<User>> _userManagerMock;
     private readonly Mock<IEventBus> _eventBusMock;
-    private readonly Mock<IOptions<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<IOptionsSnapshot<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<ILogger<TwoFactorService>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
@@ -22,7 +22,7 @@ public class TwoFactorServiceTests
         _userManagerMock = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
 
         _eventBusMock = new Mock<IEventBus>();
-        _identityOptionsMock = new Mock<IOptions<IdentityOptions>>();
+        _identityOptionsMock = new Mock<IOptionsSnapshot<IdentityOptions>>();
         _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
         {
             Otp = new OtpOptions

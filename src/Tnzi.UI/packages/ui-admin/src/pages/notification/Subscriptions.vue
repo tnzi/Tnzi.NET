@@ -77,6 +77,14 @@ const fieldRenderers: Record<string, FieldRenderer> = {
 
 const crud = useCrudPage<NotificationPreferenceDto>({
   pageId: 'notification.subscriptions',
+  // Preferences are per-user UPSERTS on the backend (SetPreference), so the
+  // catalogue declares no `.create` code - "create" in this UI is the same
+  // operation as update and gates on the update code.
+  permission: {
+    create: 'notification.subscription.update',
+    update: 'notification.subscription.update',
+    delete: 'notification.subscription.delete',
+  },
   columns: notificationSubscriptionColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (query) => bridge.subscriptions.fetch(query),

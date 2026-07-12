@@ -14,6 +14,7 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { deleteAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -27,6 +28,7 @@ import { tsToIsoDate } from './money'
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.fiscalYears')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const fiscalYearColumns = buildFiscalYearColumns(t)
 
@@ -41,6 +43,7 @@ function toPayload(d: Record<string, unknown>) {
 
 const crud = useCrudPage<FiscalYearRow>({
   pageId: 'finance.fiscalYears',
+  permission: 'finance.fiscalYear',
   columns: fiscalYearColumns,
   rowKey: (r) => String(r.id ?? ''),
   // The backend returns the full (small) list — wrap it as a single page.
@@ -75,8 +78,8 @@ async function reopenYear(row: FiscalYearRow) {
 }
 
 const rowActions: RowAction<FiscalYearRow>[] = [
-  { key: 'close', label: 'actions.close', type: 'warning', show: (row) => !row.isClosed, confirm: 'confirmClose', onClick: closeYear },
-  { key: 'reopen', label: 'actions.reopen', show: (row) => row.isClosed === true, confirm: 'confirmReopen', onClick: reopenYear },
+  { key: 'close', label: 'actions.close', type: 'warning', show: (row) => can('finance.fiscalYear.update') && !row.isClosed, confirm: 'confirmClose', onClick: closeYear },
+  { key: 'reopen', label: 'actions.reopen', show: (row) => can('finance.fiscalYear.update') && row.isClosed === true, confirm: 'confirmReopen', onClick: reopenYear },
   deleteAction(crud),
 ]
 </script>

@@ -51,12 +51,17 @@ public class ResilienceModule : TnziInfrastructureModule
         });
 
         // 添加事件总线专用 Pipeline
-        context.Services.AddResiliencePipeline("eventbus", builder =>
+        // 重试参数与 EventBusOptions 对齐(单一参数来源):LocalEventBus 在 EnableRetry 时优先消费此管线
+        context.Services.AddResiliencePipeline("eventbus", (builder, pipelineContext) =>
         {
+            var eventBusOptions = pipelineContext.ServiceProvider.GetService<IOptions<EventBusOptions>>()?.Value;
+            var maxRetries = eventBusOptions?.RetryCount ?? 3;
+            var baseDelayMs = eventBusOptions?.RetryIntervalMs ?? 1000;
+
             builder.AddRetry(new Polly.Retry.RetryStrategyOptions
             {
-                MaxRetryAttempts = 2,
-                Delay = TimeSpan.FromMilliseconds(100),
+                MaxRetryAttempts = maxRetries > 0 ? maxRetries : 3,
+                Delay = TimeSpan.FromMilliseconds(baseDelayMs > 0 ? baseDelayMs : 1000),
                 BackoffType = DelayBackoffType.Exponential
             });
         });

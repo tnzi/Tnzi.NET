@@ -31,7 +31,7 @@
     </template>
 
     <template #primary>
-      <NButton size="small" type="primary" tertiary class="t-list-shell__action" @click="openCreate">
+      <NButton v-if="crud.canCreate" size="small" type="primary" tertiary class="t-list-shell__action" @click="openCreate">
         <template #icon><TSvgIcon icon="mdi:plus" :size="16" /></template>
         {{ t('actions.create') }}
       </NButton>
@@ -64,6 +64,7 @@ import {
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, type RowAction } from '../../headless/rowActions'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TFormSchemaRenderer, { type FieldRenderer } from '../_shared/form-schema'
@@ -71,6 +72,7 @@ import { buildPromotionColumns, promotionFormSchema } from './promotion-config'
 
 const t = makePageTranslator('payment.promotions')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const bridge = createPromotionBridge({ client: useAdminClient() })
 
@@ -90,6 +92,7 @@ function onActiveFilterChange(v: string | null): void {
 
 const crud = useCrudPage<PromotionDto>({
   pageId: 'payment.promotions',
+  permission: 'payment.promotion',
   columns,
   rowKey: (r) => r.id,
   fetchData: async (q) => {
@@ -153,7 +156,7 @@ const rowActions: RowAction<PromotionDto>[] = [
     label: 'actions.deactivate',
     type: 'warning',
     icon: 'mdi:pause',
-    show: (r) => r.isActive,
+    show: (r) => can('payment.promotion.update') && r.isActive,
     confirm: (r) => t('deactivateConfirm', { code: r.promotionCode }),
     onClick: (r) => void deactivate(r.id),
   },

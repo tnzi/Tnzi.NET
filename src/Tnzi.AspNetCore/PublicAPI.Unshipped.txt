@@ -1,0 +1,17 @@
+#nullable enable
+Tnzi.AspNetCore.Controllers.DefaultAdminShellController
+Tnzi.AspNetCore.Controllers.DefaultAdminShellController.DefaultAdminShellController() -> void
+Tnzi.AspNetCore.Dtos.AdminShellModuleDto
+Tnzi.AspNetCore.Dtos.AdminShellModuleDto.AdminShellModuleDto() -> void
+Tnzi.AspNetCore.Dtos.AdminShellModuleDto.IsEnabled.get -> bool
+Tnzi.AspNetCore.Dtos.AdminShellModuleDto.IsEnabled.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellModuleDto.Name.get -> string!
+Tnzi.AspNetCore.Dtos.AdminShellModuleDto.Name.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellModulesDto
+Tnzi.AspNetCore.Dtos.AdminShellModulesDto.AdminShellModulesDto() -> void
+Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Modules.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminShellModuleDto!>!
+Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Modules.set -> void
+virtual Tnzi.AspNetCore.Controllers.DefaultAdminShellController.GetModules(Tnzi.ITnziApplication! tnziApp) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminShellModulesDto!>!
+Tnzi.AspNetCore.Permissions.AspNetCorePermissions
+Tnzi.AspNetCore.Permissions.AspNetCorePermissions.AspNetCorePermissions() -> void
+Tnzi.AspNetCore.Permissions.AspNetCorePermissions.Define(Tnzi.Security.Authorization.IPermissionDefinitionContext! context) -> void

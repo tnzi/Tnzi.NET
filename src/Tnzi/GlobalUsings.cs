@@ -11,6 +11,7 @@ global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Logging.Abstractions;
 global using Microsoft.Extensions.Options;
 global using Polly;
+global using Polly.Registry;
 
 
 global using System;

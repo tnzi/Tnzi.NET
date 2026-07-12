@@ -7,6 +7,7 @@ public class PresenceService : ApplicationService, IPresenceService
     private readonly IRepository<UserPresence, Guid> _presenceRepository;
     private readonly IRepository<ConversationMember, Guid> _memberRepository;
     private readonly IRepository<Conversation, Guid> _conversationRepository;
+    private readonly IOptionsSnapshot<ChatOptions> _options;
     private readonly IConnectionManager? _connectionManager;
     private readonly IMessagePushService? _push;
 
@@ -15,12 +16,14 @@ public class PresenceService : ApplicationService, IPresenceService
         IRepository<UserPresence, Guid> presenceRepository,
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<Conversation, Guid> conversationRepository,
+        IOptionsSnapshot<ChatOptions> options,
         IConnectionManager? connectionManager = null,
         IMessagePushService? push = null) : base(serviceProvider)
     {
         _presenceRepository = Check.NotNull(presenceRepository);
         _memberRepository = Check.NotNull(memberRepository);
         _conversationRepository = Check.NotNull(conversationRepository);
+        _options = Check.NotNull(options);
         _connectionManager = connectionManager;
         _push = push;
     }
@@ -29,6 +32,11 @@ public class PresenceService : ApplicationService, IPresenceService
     {
         // Offline 不作为手动意图；越界回落 Online
         if (status == UserPresenceStatus.Offline) status = UserPresenceStatus.Online;
+
+        // 部署禁用隐身时拒绝隐身意图（前端已隐藏该选项，此处为服务端强制）。
+        if (status == UserPresenceStatus.Invisible && !_options.Value.AllowInvisible)
+            return Fail("Invisible status is disabled by the administrator.", 403);
+
         var me = GetRequiredCurrentUser().Id!.Value;
 
         await ExecuteInUnitOfWorkAsync(async ct =>
@@ -84,12 +92,16 @@ public class PresenceService : ApplicationService, IPresenceService
         var idSet = userIds.Distinct().ToHashSet();
         var records = (await _presenceRepository.ToListAsync(p => idSet.Contains(p.UserId)))
             .ToDictionary(p => p.UserId);
+        var allowInvisible = _options.Value.AllowInvisible;
 
         var result = new List<UserPresenceDto>(idSet.Count);
         foreach (var id in idSet)
         {
             records.TryGetValue(id, out var rec);
             var intent = rec?.Status ?? UserPresenceStatus.Online;
+            // 部署禁用隐身时，历史隐身意图不再对外隐藏——按在线意图解析（仍受连接状态约束）。
+            if (!allowInvisible && intent == UserPresenceStatus.Invisible)
+                intent = UserPresenceStatus.Online;
             var lastSeen = rec?.LastSeenAt;
 
             UserPresenceStatus effective;

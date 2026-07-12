@@ -41,6 +41,7 @@ public class DefaultEvaluationAdminController : ApiAdminControllerBase
     /// 删除评估运行记录
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.evaluation.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await EvaluationService.DeleteAsync(id);
@@ -51,6 +52,7 @@ public class DefaultEvaluationAdminController : ApiAdminControllerBase
     /// 创建并执行评估运行
     /// </summary>
     [HttpPost("run")]
+    [ApiAuthorize(PermissionName = "ai.evaluation.execute")]
     public virtual async Task<ApiResult<EvaluationRunDetailDto>> CreateAndRun([FromBody] CreateEvaluationRunDto dto, CancellationToken ct)
     {
         var result = await EvaluationService.CreateAndRunAsync(dto, ct);
@@ -61,6 +63,7 @@ public class DefaultEvaluationAdminController : ApiAdminControllerBase
     /// 批量评估多个 Agent/版本
     /// </summary>
     [HttpPost("batch")]
+    [ApiAuthorize(PermissionName = "ai.evaluation.execute")]
     public virtual async Task<ApiResult<BatchEvaluationResultDto>> RunBatch([FromBody] BatchEvaluationDto dto, CancellationToken ct)
     {
         var result = await EvaluationService.RunBatchAsync(dto, ct);

@@ -58,6 +58,7 @@ import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -69,6 +70,7 @@ import type { RefundDto } from '@tnzi/core/services/payment'
 
 const t = makePageTranslator('payment.refunds')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const bridge = createPaymentBridge({ client: useAdminClient() })
 
@@ -129,7 +131,7 @@ const rowActions: RowAction<RefundDto>[] = [
     label: 'actions.approve',
     type: 'success',
     icon: 'mdi:check',
-    show: isReviewable,
+    show: (row) => can('payment.refund.update') && isReviewable(row),
     confirm: 'approvePrompt',
     onClick: (row) => void approve(row.id),
   },
@@ -138,7 +140,7 @@ const rowActions: RowAction<RefundDto>[] = [
     label: 'actions.reject',
     type: 'error',
     icon: 'mdi:close',
-    show: isReviewable,
+    show: (row) => can('payment.refund.update') && isReviewable(row),
     onClick: (row) => void rejectDetail.open('edit', row),
   },
 ]

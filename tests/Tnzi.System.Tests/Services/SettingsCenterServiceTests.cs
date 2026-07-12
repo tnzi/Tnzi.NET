@@ -1,5 +1,7 @@
 namespace Tnzi.System.Tests.Services;
 
+using Tnzi.Security.Authorization;
+
 public class SettingsCenterServiceTests
 {
     private readonly Mock<IRepository<Setting, Guid>> _repositoryMock = new();
@@ -156,6 +158,129 @@ public class SettingsCenterServiceTests
         (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:N"] = "0" })).Succeeded.ShouldBeFalse();
         (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:N"] = "11" })).Succeeded.ShouldBeFalse();
         (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:S"] = "c" })).Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SaveGroup_Duration_Should_Reject_Invalid_And_Accept_Canonical_TimeSpan()
+    {
+        _providers.Add(new FakeProvider(DemoGroup(
+            new SettingFieldDefinition { Key = "Demo:Ttl", Label = "TTL", Type = SettingFieldType.Duration })));
+        var service = CreateService();
+
+        // 非法时长 → 400。
+        (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:Ttl"] = "not-a-duration" })).Code.ShouldBe(400);
+
+        // canonical TimeSpan 字符串往返写入。
+        _settingServiceMock
+            .Setup(s => s.SetSettingAsync("Demo:Ttl", "00:05:00", It.IsAny<string?>(), "demo"))
+            .ReturnsAsync(Result.Success());
+        (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:Ttl"] = "00:05:00" })).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SaveGroup_Should_Reject_Pattern_Mismatch()
+    {
+        _providers.Add(new FakeProvider(DemoGroup(
+            new SettingFieldDefinition { Key = "Demo:Url", Label = "U", Type = SettingFieldType.String, Pattern = "https?://.+" })));
+        var service = CreateService();
+
+        (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:Url"] = "not-a-url" })).Code.ShouldBe(400);
+        _settingServiceMock
+            .Setup(s => s.SetSettingAsync("Demo:Url", "https://ok.example", It.IsAny<string?>(), "demo"))
+            .ReturnsAsync(Result.Success());
+        (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:Url"] = "https://ok.example" })).Succeeded.ShouldBeTrue();
+    }
+
+    [ConfigSection("Demo")]
+    public sealed class CrossFieldOptions
+    {
+        public int A { get; set; }
+        public int B { get; set; }
+    }
+
+    public sealed class CrossFieldValidator : IValidateOptions<CrossFieldOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, CrossFieldOptions options)
+            => options.B >= options.A ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail("B must be >= A");
+    }
+
+    private void SetupCrossFieldGroup()
+    {
+        _providers.Add(new FakeProvider(new SettingDefinitionGroup
+        {
+            Key = "demo",
+            ModuleName = "Demo",
+            DisplayName = "Demo Group",
+            OptionsTypes = [typeof(CrossFieldOptions)],
+            Fields =
+            [
+                new SettingFieldDefinition { Key = "Demo:A", Label = "A", Type = SettingFieldType.Int },
+                new SettingFieldDefinition { Key = "Demo:B", Label = "B", Type = SettingFieldType.Int },
+            ],
+        }));
+        // 非泛型 GetServices(Type) 底层解析 IEnumerable<IValidateOptions<T>>
+        _serviceProviderMock
+            .Setup(x => x.GetService(typeof(IEnumerable<IValidateOptions<CrossFieldOptions>>)))
+            .Returns(new IValidateOptions<CrossFieldOptions>[] { new CrossFieldValidator() });
+    }
+
+    [Fact]
+    public async Task SaveGroup_Should_Reject_Cross_Field_Violation_Via_Options_Validator()
+    {
+        // 回归：字段级校验放行的跨字段非法组合（B < A）必须在写入前被模块自己的
+        // IValidateOptions 预检拦下 — 否则持久化后 reload 重绑定抛 OptionsValidationException。
+        SetupCrossFieldGroup();
+
+        var result = await CreateService().SaveGroupAsync("demo", new Dictionary<string, string?>
+        {
+            ["Demo:A"] = "5",
+            ["Demo:B"] = "3",
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message.ShouldContain("B must be >= A");
+        _settingServiceMock.Verify(s => s.SetSettingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveGroup_Should_Pass_Options_Validator_With_Valid_Candidate()
+    {
+        SetupCrossFieldGroup();
+        _settingServiceMock
+            .Setup(s => s.SetSettingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), "demo"))
+            .ReturnsAsync(Result.Success());
+
+        var result = await CreateService().SaveGroupAsync("demo", new Dictionary<string, string?>
+        {
+            ["Demo:A"] = "2",
+            ["Demo:B"] = "7",
+        });
+
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SaveGroup_Validator_Candidate_Should_Merge_Existing_Effective_Values()
+    {
+        // 只改 B 时，候选实例的 A 必须来自当前生效配置（而非类型默认 0）—— 否则
+        // 合法请求会被误拒 / 非法请求会被误放。
+        SetupCrossFieldGroup();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:A"] = "5" })
+            .Build();
+        var service = new SettingsCenterService(
+            _serviceProviderMock.Object, _settingServiceMock.Object, _repositoryMock.Object,
+            config, _providers, _handlers);
+
+        // B=3 < 生效 A=5 → 拒
+        (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:B"] = "3" })).Code.ShouldBe(400);
+
+        // B=9 ≥ 生效 A=5 → 过
+        _settingServiceMock
+            .Setup(s => s.SetSettingAsync("Demo:B", "9", It.IsAny<string?>(), "demo"))
+            .ReturnsAsync(Result.Success());
+        (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:B"] = "9" })).Succeeded.ShouldBeTrue();
     }
 
     [Fact]
@@ -333,5 +458,117 @@ public class SettingsCenterServiceTests
 
         // 值已提交，钩子副作用失败只记日志不报错（与事件处理器同样的隔离纪律）。
         result.Succeeded.ShouldBeTrue();
+    }
+
+    // ── 按组授权（配置中心细粒度权限）────────────────────────────────────────
+    // 每个配置组由自己的 {group}.settings.{slug}.view/update 码把守；
+    // PermissionChecker 为 null（Authorization 未加载）时上面所有测试走 fail-open。
+
+    private Mock<IPermissionChecker> SetupPermissionChecker()
+    {
+        var checker = new Mock<IPermissionChecker>();
+        _serviceProviderMock.Setup(x => x.GetService(typeof(IPermissionChecker))).Returns(checker.Object);
+        return checker;
+    }
+
+    private void AddChatAndAiGroups()
+    {
+        _providers.Add(new FakeProvider(
+            new SettingDefinitionGroup
+            {
+                Key = "chat-general", ModuleName = "Chat", DisplayName = "Chat",
+                Fields = [new SettingFieldDefinition { Key = "Chat:X", Label = "X" }],
+            },
+            new SettingDefinitionGroup
+            {
+                Key = "ai-budget", ModuleName = "AI", DisplayName = "AI Budget",
+                Fields = [new SettingFieldDefinition { Key = "AI:B", Label = "B" }],
+            }));
+    }
+
+    [Fact]
+    public async Task GetDefinitions_Should_Return_Only_Groups_The_User_Can_View()
+    {
+        AddChatAndAiGroups();
+        var checker = SetupPermissionChecker();
+        // Grant chat view only; ai view stays denied (Moq default false).
+        checker.Setup(c => c.IsGrantedAsync("chat.settings.general.view")).ReturnsAsync(true);
+
+        var result = await CreateService().GetDefinitionsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Select(g => g.Key).ShouldBe(new[] { "chat-general" });
+    }
+
+    [Fact]
+    public async Task GetDefinitions_CanEdit_Should_Reflect_Update_Permission()
+    {
+        AddChatAndAiGroups();
+        var checker = SetupPermissionChecker();
+        checker.Setup(c => c.IsGrantedAsync("chat.settings.general.view")).ReturnsAsync(true);
+        checker.Setup(c => c.IsGrantedAsync("ai.settings.budget.view")).ReturnsAsync(true);
+        // Chat editable, AI view-only.
+        checker.Setup(c => c.IsGrantedAsync("chat.settings.general.update")).ReturnsAsync(true);
+
+        var result = await CreateService().GetDefinitionsAsync();
+
+        result.Data!.Single(g => g.Key == "chat-general").CanEdit.ShouldBeTrue();
+        result.Data!.Single(g => g.Key == "ai-budget").CanEdit.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetDefinitions_Should_Be_Empty_When_User_Holds_No_Settings_Permission()
+    {
+        AddChatAndAiGroups();
+        SetupPermissionChecker(); // grants nothing
+
+        var result = await CreateService().GetDefinitionsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SaveGroup_Should_403_When_User_Lacks_Update_Permission()
+    {
+        AddChatAndAiGroups();
+        SetupPermissionChecker(); // update denied
+
+        var result = await CreateService().SaveGroupAsync("chat-general", new Dictionary<string, string?> { ["Chat:X"] = "v" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        _settingServiceMock.Verify(
+            s => s.SetSettingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResetGroup_Should_403_When_User_Lacks_Update_Permission()
+    {
+        AddChatAndAiGroups();
+        SetupPermissionChecker(); // update denied
+
+        var result = await CreateService().ResetGroupAsync("chat-general");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        _settingServiceMock.Verify(s => s.DeleteSettingAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveGroup_Should_Succeed_When_Update_Permission_Granted()
+    {
+        AddChatAndAiGroups();
+        var checker = SetupPermissionChecker();
+        checker.Setup(c => c.IsGrantedAsync("chat.settings.general.update")).ReturnsAsync(true);
+        _settingServiceMock
+            .Setup(s => s.SetSettingAsync("Chat:X", "v", It.IsAny<string?>(), "chat-general"))
+            .ReturnsAsync(Result.Success());
+
+        var result = await CreateService().SaveGroupAsync("chat-general", new Dictionary<string, string?> { ["Chat:X"] = "v" });
+
+        result.Succeeded.ShouldBeTrue();
+        _settingServiceMock.Verify(s => s.SetSettingAsync("Chat:X", "v", It.IsAny<string?>(), "chat-general"), Times.Once);
     }
 }

@@ -127,6 +127,7 @@ import {
 } from 'naive-ui'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
 import { type RowAction } from '../../headless/rowActions'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import type { DataTableColumns } from 'naive-ui'
@@ -153,6 +154,7 @@ const identityBridge = createIdentityBridge({ client })
 const message = useSafeMessage()
 const router = useRouter()
 const t = makePageTranslator('identity.loginSecurity')
+const { can } = usePermissionGuard()
 
 const loading = ref(false)
 const overview = ref<SecurityOverviewDto | null>(null)
@@ -277,6 +279,7 @@ const rowActions: RowAction<UserFailedLoginSummaryDto>[] = [
     label: 'rowActions.lock',
     icon: 'mdi:lock-outline',
     type: 'warning',
+    show: () => can('user.update'),
     confirm: (row) => t('rowActions.confirmLock', { user: row.userName ?? row.userId }),
     disabled: (row) => pendingRows.value.has(row.userId),
     onClick: (row) => void handleLock(row),

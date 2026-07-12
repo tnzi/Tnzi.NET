@@ -31,6 +31,7 @@ public class DefaultFinanceExchangeRateAdminController : ApiAdminControllerBase
     /// 录入/更新汇率（按 币种对 + 日期 幂等）
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.rate.create")]
     public virtual async Task<ApiResult<ExchangeRateDto>> Upsert([FromBody] UpsertExchangeRateDto request)
     {
         var result = await _exchangeRateService.UpsertAsync(request);
@@ -41,6 +42,7 @@ public class DefaultFinanceExchangeRateAdminController : ApiAdminControllerBase
     /// 删除汇率
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.rate.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _exchangeRateService.DeleteAsync(id);
@@ -51,6 +53,7 @@ public class DefaultFinanceExchangeRateAdminController : ApiAdminControllerBase
     /// 从外部提供者刷新汇率
     /// </summary>
     [HttpPost("refresh")]
+    [ApiAuthorize(PermissionName = "finance.rate.create")]
     public virtual async Task<ApiResult<int>> Refresh()
     {
         var result = await _exchangeRateService.RefreshFromProviderAsync();

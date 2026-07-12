@@ -12,6 +12,7 @@ public class PaymentEntryConfiguration : EntityTypeConfigurationBase<PaymentEntr
         builder.Property(e => e.Number).HasMaxLength(64);
         builder.Property(e => e.Memo).HasMaxLength(500);
         builder.Property(e => e.Reference).HasMaxLength(128);
+        builder.Property(e => e.PaymentMethod).HasMaxLength(32);
         builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
         builder.Property(e => e.SourceType).HasMaxLength(64);
         builder.Property(e => e.SourceId).HasMaxLength(64);

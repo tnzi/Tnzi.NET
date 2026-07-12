@@ -49,6 +49,14 @@ public class TnziOptions
     public bool EnableModuleDependencyAudit { get; set; } = false;
 
     /// <summary>
+    /// 是否启用运行时设置消费审计
+    /// 启动时检测「标记 [RuntimeSetting]（可热设置）的 Options 却被 IOptions&lt;T&gt; 启动快照消费」
+    /// 的沉默失败（admin 改了不生效）。与模块依赖审计不同，此审计噪音低、命中即真问题，因此独立门控且默认开启
+    /// 默认值：true
+    /// </summary>
+    public bool EnableRuntimeSettingConsumerAudit { get; set; } = true;
+
+    /// <summary>
     /// 启动失败时是否写入错误日志文件 (startup-error.log)
     /// 文件写入 AppContext.BaseDirectory，适用于 IIS/Docker/Windows Service 等控制台输出不可见的场景
     /// 默认值：true

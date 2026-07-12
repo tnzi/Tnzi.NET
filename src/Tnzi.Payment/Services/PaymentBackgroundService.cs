@@ -8,21 +8,21 @@ public class PaymentBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<PaymentBackgroundService> _logger;
-    private readonly TimeSpan _interval;
+    private readonly IOptionsMonitor<PaymentOptions> _options;
 
     public PaymentBackgroundService(
         IServiceProvider serviceProvider,
         ILogger<PaymentBackgroundService> logger,
-        IOptions<PaymentOptions> options)
+        IOptionsMonitor<PaymentOptions> options)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
-        _interval = TimeSpan.FromMinutes(Check.NotNull(options).Value.BackgroundTaskIntervalMinutes);
+        _options = Check.NotNull(options);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("PaymentBackgroundService started. Interval: {Interval}min", _interval.TotalMinutes);
+        _logger.LogInformation("PaymentBackgroundService started. Interval: {Interval}min", _options.CurrentValue.BackgroundTaskIntervalMinutes);
 
         // 启动后延迟 30 秒再开始首次执行，避免应用启动时负载
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
@@ -42,7 +42,9 @@ public class PaymentBackgroundService : BackgroundService
                 _logger.LogError(ex, "PaymentBackgroundService encountered an error");
             }
 
-            await Task.Delay(_interval, stoppingToken);
+            // 每轮迭代读取 CurrentValue，使 admin 配置中心对执行间隔的改动即时生效
+            var interval = TimeSpan.FromMinutes(_options.CurrentValue.BackgroundTaskIntervalMinutes);
+            await Task.Delay(interval, stoppingToken);
         }
 
         _logger.LogInformation("PaymentBackgroundService stopped");

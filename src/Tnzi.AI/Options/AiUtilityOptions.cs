@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// AI Utility 全局默认配置，绑定 AI:Utility 配置节
 /// </summary>
 [ConfigSection("AI:Utility")]
-[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "AI General",
+[RuntimeSettingGroup(Key = "ai-general", Module = "AI", DisplayName = "General",
     I18nKey = "admin.modules.system.settings.groups.aiGeneral", Icon = "mdi:robot-outline", Order = 100)]
 public class AiUtilityOptions
 {

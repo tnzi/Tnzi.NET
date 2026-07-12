@@ -207,8 +207,8 @@ public class AuthorizationEnhancedTests
         dto.EnabledFunctions.ShouldBe(0);
         dto.TotalRoleFunctionAssignments.ShouldBe(0);
         dto.EnabledRoleFunctionAssignments.ShouldBe(0);
-        dto.TotalModuleRoleAssignments.ShouldBe(0);
-        dto.TotalModuleUserAssignments.ShouldBe(0);
+        dto.TotalUserFunctionAssignments.ShouldBe(0);
+        dto.EnabledUserFunctionAssignments.ShouldBe(0);
     }
 
     [Fact]
@@ -223,8 +223,8 @@ public class AuthorizationEnhancedTests
             EnabledFunctions = 45,
             TotalRoleFunctionAssignments = 200,
             EnabledRoleFunctionAssignments = 180,
-            TotalModuleRoleAssignments = 30,
-            TotalModuleUserAssignments = 15
+            TotalUserFunctionAssignments = 30,
+            EnabledUserFunctionAssignments = 15
         };
 
         // Assert
@@ -234,8 +234,8 @@ public class AuthorizationEnhancedTests
         dto.EnabledFunctions.ShouldBe(45);
         dto.TotalRoleFunctionAssignments.ShouldBe(200);
         dto.EnabledRoleFunctionAssignments.ShouldBe(180);
-        dto.TotalModuleRoleAssignments.ShouldBe(30);
-        dto.TotalModuleUserAssignments.ShouldBe(15);
+        dto.TotalUserFunctionAssignments.ShouldBe(30);
+        dto.EnabledUserFunctionAssignments.ShouldBe(15);
     }
 
     #endregion
@@ -935,20 +935,38 @@ public class AuthorizationEnhancedTests
     private FunctionAuthorizationService CreateService(
         Mock<IRepository<FunctionModule, Guid>>? moduleRepository = null,
         Mock<IRepository<ModuleFunction, Guid>>? moduleFunctionRepository = null,
-        Mock<IRepository<ModuleUser, Guid>>? moduleUserRepository = null,
-        Mock<IRepository<ModuleRole, Guid>>? moduleRoleRepository = null,
         Mock<IRepository<RoleFunction, Guid>>? roleFunctionRepository = null,
         IUserRoleService? userRoleService = null)
     {
         return new FunctionAuthorizationService(
             moduleRepository?.Object ?? new Mock<IRepository<FunctionModule, Guid>>().Object,
             moduleFunctionRepository?.Object ?? CreateMockModuleFunctionRepository(new List<ModuleFunction>()).Object,
-            moduleUserRepository?.Object ?? new Mock<IRepository<ModuleUser, Guid>>().Object,
-            moduleRoleRepository?.Object ?? new Mock<IRepository<ModuleRole, Guid>>().Object,
             roleFunctionRepository?.Object ?? CreateMockRoleFunctionRepository(new List<RoleFunction>()).Object,
+            CreateMockUserFunctionRepository(new List<UserFunction>()).Object,
             _serviceProviderMock.Object,
             userRoleService
         );
+    }
+
+    /// <summary>
+    /// 创建支持 IQueryable 的 UserFunction Repository Mock
+    /// 使用 MockQueryable 来支持 LINQ 扩展方法（Where/Select/ToListAsync）
+    /// </summary>
+    private static Mock<IRepository<UserFunction, Guid>> CreateMockUserFunctionRepository(List<UserFunction> data)
+    {
+        var mock = new Mock<IRepository<UserFunction, Guid>>();
+        var mockQueryable = data.BuildMock();
+
+        mock.As<IQueryable<UserFunction>>()
+            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
+        mock.As<IQueryable<UserFunction>>()
+            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
+        mock.As<IQueryable<UserFunction>>()
+            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
+        mock.As<IQueryable<UserFunction>>()
+            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
+
+        return mock;
     }
 
     /// <summary>

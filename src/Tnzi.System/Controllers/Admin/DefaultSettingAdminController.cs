@@ -44,6 +44,7 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     /// 创建配置
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "system.parameter.create")]
     public virtual async Task<ApiResult<SettingDto>> Create([FromBody] CreateSettingDto input)
     {
         var result = await SettingService.CreateSettingAsync(input);
@@ -54,6 +55,7 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     /// 更新配置
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "system.parameter.update")]
     public virtual async Task<ApiResult<SettingDto>> Update(Guid id, [FromBody] UpdateSettingDto input)
     {
         var result = await SettingService.UpdateSettingAsync(id, input);
@@ -64,6 +66,7 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     /// 删除配置
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "system.parameter.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await SettingService.DeleteSettingAsync(id);
@@ -74,6 +77,7 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     /// 批量删除配置
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "system.parameter.delete")]
     public virtual async Task<ApiResult> DeleteSettings([FromBody] IEnumerable<Guid> ids)
     {
         var result = await SettingService.DeleteSettingsAsync(ids);
@@ -94,6 +98,7 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     /// Set an encrypted setting value
     /// </summary>
     [HttpPut("{group}/{key}/encrypted")]
+    [ApiAuthorize(PermissionName = "system.parameter.update")]
     public virtual async Task<ApiResult> SetEncrypted(string group, string key, [FromBody] SetEncryptedSettingDto input)
     {
         var result = await SettingService.SetEncryptedAsync(group, key, input.Value, input.Description);
@@ -101,9 +106,13 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Get decrypted setting value
+    /// Get decrypted setting value. Returns SECRETS IN PLAINTEXT - gated at
+    /// write-level trust (system.parameter.update, the same code that sets
+    /// encrypted values), not the read-level .view the rest of this
+    /// controller's GETs use.
     /// </summary>
     [HttpGet("{group}/{key}/decrypted")]
+    [ApiAuthorize(PermissionName = "system.parameter.update")]
     public virtual async Task<ApiResult<string?>> GetDecrypted(string group, string key)
     {
         var result = await SettingService.GetDecryptedAsync(group, key);

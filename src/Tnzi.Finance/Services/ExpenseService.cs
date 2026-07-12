@@ -17,6 +17,7 @@ public class ExpenseService : ApplicationService, IExpenseService
     private readonly IDocumentNumberService _numberService;
     private readonly LedgerPostingEngine _engine;
     private readonly FinanceDocumentHelper _helper;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public ExpenseService(
@@ -29,7 +30,8 @@ public class ExpenseService : ApplicationService, IExpenseService
         IDocumentNumberService numberService,
         LedgerPostingEngine engine,
         FinanceDocumentHelper helper,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _expenseRepository = Check.NotNull(expenseRepository);
@@ -40,6 +42,7 @@ public class ExpenseService : ApplicationService, IExpenseService
         _numberService = Check.NotNull(numberService);
         _engine = Check.NotNull(engine);
         _helper = Check.NotNull(helper);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -59,6 +62,7 @@ public class ExpenseService : ApplicationService, IExpenseService
                 VendorId = e.VendorId,
                 VendorName = e.Vendor != null ? e.Vendor.Name : null,
                 PaidFromAccountId = e.PaidFromAccountId,
+                PaymentMethod = e.PaymentMethod,
                 DocDate = e.DocDate,
                 Currency = e.Currency,
                 ExchangeRate = e.ExchangeRate,
@@ -188,6 +192,10 @@ public class ExpenseService : ApplicationService, IExpenseService
         if (expense.Lines.Count == 0)
             return Fail<ExpenseDto>("The expense has no lines.", 400);
 
+        var guardResult = await _guards.CheckAsync(nameof(Expense), expense.Id.ToString(), FinancePostingOperation.Post, expense, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<ExpenseDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
+
         var paidFromResult = await _helper.GetPostableAccountAsync(expense.PaidFromAccountId, cancellationToken);
         if (!paidFromResult.Succeeded)
             return Fail<ExpenseDto>($"Paid-from account: {paidFromResult.Message}", paidFromResult.Code ?? 400);
@@ -252,7 +260,8 @@ public class ExpenseService : ApplicationService, IExpenseService
                 AccountId = taxAccount!.Id,
                 TxnDebit = component.TaxAmount,
                 Currency = expense.Currency,
-                Memo = component.RateName
+                Memo = component.RateName,
+                TaxRateId = component.TaxRateId
             });
         }
 
@@ -320,6 +329,10 @@ public class ExpenseService : ApplicationService, IExpenseService
             return Fail<ExpenseDto>("Expense not found.", 404);
         if (expense.Status != FinanceDocumentStatus.Posted)
             return Fail<ExpenseDto>("Only posted expenses can be voided.", 409);
+
+        var guardResult = await _guards.CheckAsync(nameof(Expense), expense.Id.ToString(), FinancePostingOperation.Void, expense, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<ExpenseDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
         var original = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)
@@ -390,6 +403,7 @@ public class ExpenseService : ApplicationService, IExpenseService
 
         expense.VendorId = input.VendorId;
         expense.PaidFromAccountId = input.PaidFromAccountId;
+        expense.PaymentMethod = input.PaymentMethod;
         expense.DocDate = input.DocDate.ToUtcDate();
         expense.Currency = _helper.NormalizeCurrency(input.Currency);
         expense.ExchangeRate = input.ExchangeRate ?? 0m;

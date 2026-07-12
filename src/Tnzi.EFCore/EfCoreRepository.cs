@@ -759,11 +759,27 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     }
 
     /// <summary>
+    /// 执行 ExecuteUpdate/ExecuteDelete 等裸 SQL 前，若事务已启用则幂等地确保物理事务已开启。
+    /// 框架事务延迟物理开启（首次 UoW SaveChanges 才 BEGIN）；当删除是请求内首个写操作时，
+    /// 裸 SQL 会在自动提交模式下落库，脱离 UoW 事务、无法被回滚撤销。此处提前 BEGIN 使其加入事务。
+    /// </summary>
+    private async Task EnsureBulkSqlJoinsTransactionAsync(CancellationToken cancellationToken)
+    {
+        if (IsTransactionEnabled())
+        {
+            await EnsureTransactionStartedAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// 执行软删除：通过 ExecuteUpdateAsync 在数据库层批量设置审计字段
     /// 根据实体实现的接口组合动态构建 SetProperty 调用链
     /// </summary>
     protected virtual async Task ExecuteSoftDeleteAsync(IQueryable<TEntity> query, CancellationToken cancellationToken)
     {
+        // 事务已启用时先确保物理事务开启，使下面的 ExecuteUpdate 裸 SQL 加入 UoW 事务（可回滚）
+        await EnsureBulkSqlJoinsTransactionAsync(cancellationToken);
+
         var currentUser = _serviceProvider?.GetService<ICurrentUser>();
         var userId = currentUser?.Id;
         var tp = _serviceProvider?.GetService<TimeProvider>() ?? TimeProvider.System;
@@ -838,6 +854,8 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
             }
             else
             {
+                // 事务已启用时先确保物理事务开启，使 ExecuteDelete 裸 SQL 加入 UoW 事务（可回滚）
+                await EnsureBulkSqlJoinsTransactionAsync(cancellationToken);
                 // 无文件字段，安全使用 ExecuteDeleteAsync 优化
                 await DbSet.Where(predicate).ExecuteDeleteAsync(cancellationToken);
             }

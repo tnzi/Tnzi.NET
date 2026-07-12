@@ -19,7 +19,7 @@
     :row-actions="rowActions"
   >
     <template #batchActions="{ selectedIds }">
-      <NPopconfirm @positive-click="() => batchRevoke(selectedIds)">
+      <NPopconfirm v-if="can('storage.file.delete')" @positive-click="() => batchRevoke(selectedIds)">
         <template #trigger>
           <NButton size="small" type="error" ghost :disabled="!selectedIds.length">
             {{ t('actions.revoke') }}
@@ -35,6 +35,7 @@
 import { NButton, NPopconfirm } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { type RowAction } from '../../headless/rowActions'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -45,12 +46,14 @@ import type { FileShareSummaryDto } from '@tnzi/core/services/storage'
 
 const t = makePageTranslator('storage.shares')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 const bridge = createStorageBridge({ client: useAdminClient() })
 
 const shareColumns = buildShareColumns(t)
 
 const crud = useCrudPage<FileShareSummaryDto, string>({
   pageId: 'storage.shares',
+  permission: 'storage.file',
   columns: shareColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.shares.fetch(query),
@@ -67,7 +70,7 @@ const rowActions: RowAction<FileShareSummaryDto>[] = [
     label: 'actions.revoke',
     type: 'error',
     confirm: 'actions.confirmRevoke',
-    show: (row) => row.isEnabled === true,
+    show: (row) => can('storage.file.delete') && row.isEnabled === true,
     onClick: (row) => void revokeOne(row),
   },
 ]

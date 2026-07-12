@@ -38,29 +38,22 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
             return;
         }
 
-        try
-        {
-            // 1. 获取应用配置
-            var (appName, frontendUrl, apiBaseUrl) = await GetApplicationConfigAsync();
+        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        // 1. 获取应用配置
+        var (appName, frontendUrl, apiBaseUrl) = await GetApplicationConfigAsync();
 
-            // 2. 获取注册配置
-            var requireEmailConfirmation = _identityOptions?.CurrentValue?.Registration?.RequireConfirmedEmail ?? false;
+        // 2. 获取注册配置
+        var requireEmailConfirmation = _identityOptions?.CurrentValue?.Registration?.RequireConfirmedEmail ?? false;
 
-            // 3. 生成邮箱确认链接（如果需要）
-            var confirmationUrl = requireEmailConfirmation
-                ? await GenerateConfirmationUrlAsync(@event.UserId, apiBaseUrl, frontendUrl)
-                : string.Empty;
+        // 3. 生成邮箱确认链接（如果需要）
+        var confirmationUrl = requireEmailConfirmation
+            ? await GenerateConfirmationUrlAsync(@event.UserId, apiBaseUrl, frontendUrl)
+            : string.Empty;
 
-            // 4. 发送欢迎邮件
-            await SendWelcomeEmailAsync(@event, appName, requireEmailConfirmation, confirmationUrl, cancellationToken);
+        // 4. 发送欢迎邮件
+        await SendWelcomeEmailAsync(@event, appName, requireEmailConfirmation, confirmationUrl, cancellationToken);
 
-            _logger.LogInformation("Welcome email sent to user {UserId} ({Email})", @event.UserId, @event.Email);
-        }
-        catch (Exception ex)
-        {
-            // 记录错误但不抛出（事件处理器的错误不应影响主业务流程）
-            _logger.LogError(ex, "Failed to send welcome email to user {UserId} ({Email})", @event.UserId, @event.Email);
-        }
+        _logger.LogInformation("Welcome email sent to user {UserId} ({Email})", @event.UserId, @event.Email);
     }
 
     /// <summary>

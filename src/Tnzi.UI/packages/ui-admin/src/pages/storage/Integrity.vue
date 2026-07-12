@@ -17,6 +17,8 @@
         :step="100"
         class="w-130px"
       />
+      <!-- Read-only diagnostic (matches the ungated backend endpoint) -
+           no permission gate beyond the page's own storage.file.view. -->
       <NButton size="small" type="primary" :loading="loading" @click="runVerify">
         <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
         {{ t('actions.verify') }}

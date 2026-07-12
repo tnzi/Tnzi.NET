@@ -2,7 +2,7 @@
   <TContentPage :title="t('title')" :translate="t" card scroll="fill">
     <template #actions>
       <NButton size="small" @click="loadTree">{{ t('refresh') }}</NButton>
-      <NButton size="small" type="primary" @click="openCreate(null)">
+      <NButton v-if="can('organization.create')" size="small" type="primary" @click="openCreate(null)">
         {{ t('addRoot') }}
       </NButton>
     </template>
@@ -45,10 +45,10 @@
             <header class="t-org-page__detail-header">
               <h3>{{ selectedNode.name }}</h3>
               <NSpace>
-                <NButton size="small" @click="openCreate(selectedNode.id)">
+                <NButton v-if="can('organization.create')" size="small" @click="openCreate(selectedNode.id)">
                   {{ t('addChild') }}
                 </NButton>
-                <NPopconfirm @positive-click="handleDelete">
+                <NPopconfirm v-if="can('organization.delete')" @positive-click="handleDelete">
                   <template #trigger>
                     <NButton size="small" type="error" ghost>
                       {{ t('delete') }}
@@ -81,7 +81,7 @@
               </NFormItem>
             </NForm>
             <div class="t-org-page__actions">
-              <NButton type="primary" :loading="saving" @click="saveUpdate">
+              <NButton v-if="can('organization.update')" type="primary" :loading="saving" @click="saveUpdate">
                 {{ t('save') }}
               </NButton>
               <NButton @click="resetForm">{{ t('reset') }}</NButton>
@@ -187,6 +187,7 @@ import {
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { type RowAction } from '../../headless/rowActions'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createIdentityBridge, type OrganizationTreeNodeDto, type OrganizationDto } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -199,6 +200,7 @@ import type { UserListItemDto } from '@tnzi/core/services/identity'
 
 const bridge = createIdentityBridge({ client: useAdminClient() })
 const t = makePageTranslator('identity.organizations')
+const { can } = usePermissionGuard()
 
 type OrgMemberRow = UserListItemDto
 
@@ -445,6 +447,7 @@ const memberRowActions: RowAction<OrgMemberRow>[] = [
     key: 'remove',
     label: 'members.remove',
     type: 'error',
+    show: () => can('user.update'),
     confirm: (row) => t('members.confirmRemove', { user: row.userName }),
     onClick: (row) => void removeMember(row),
   },

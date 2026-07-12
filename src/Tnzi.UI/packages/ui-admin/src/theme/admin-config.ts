@@ -48,6 +48,11 @@ export interface AdminThemeSnapshotV1 {
     breadcrumbShowIcon?: boolean
     multilingualVisible?: boolean
     globalSearchVisible?: boolean
+    /** Global-theme era - remaining header chrome toggles (older snapshots
+        omit them; readers keep the current values). */
+    fullscreenVisible?: boolean
+    themeSchemaVisible?: boolean
+    reloadVisible?: boolean
     /** Phase F additions — same versioning rules. */
     grayscale?: boolean
     colourWeakness?: boolean
@@ -61,6 +66,10 @@ export interface AdminThemeSnapshotV1 {
     mixCollapsedWidth?: number
     mixChildMenuWidth?: number
     autoSelectFirstMenu?: boolean
+    /** Global-theme era - whether non-privileged users get the preset
+        color-scheme picker (palette button in the header). Governed by
+        the super admin via the drawer's General → Global section. */
+    presetPickerVisible?: boolean
     /** Theme Drawer additions — radius slider + footer height knob. */
     themeRadius?: number
     footerHeight?: number

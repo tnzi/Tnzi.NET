@@ -85,23 +85,134 @@
       </NButton>
     </template>
   </TDetailHost>
+
+  <!--
+    Direct-grants overlay (Users → More → Direct Permissions). Grants
+    permission codes to ONE user without touching any role — resolution is the
+    pure-allow union of role grants and direct grants (backend UserFunction).
+    Renders the shared TPermissionMatrix (reusing the role page's matrix i18n
+    namespace); delegation-aware graying mirrors the backend guard. A
+    super-admin target renders an explainer instead — direct rows have no
+    effect on members who bypass every check, and only supers may touch them.
+    Deep-linked as `?grants=edit:<id>`.
+  -->
+  <TDetailHost :state="grantsDetail" :title="grantsTitle" :width="920" :translate="t">
+    <template #default>
+      <NSpin :show="grantsLoading">
+        <div v-if="grantsTargetIsSuper" class="t-users-page__grants-super">
+          <p class="t-users-page__hint">{{ t('grants.superTarget') }}</p>
+        </div>
+        <NTabs v-else v-model:value="grantsTab" type="line" size="small" animated>
+          <NTabPane name="granted">
+            <template #tab>
+              {{ t('grants.tabGranted') }}
+              <NTag v-if="grantsCheckedIds.length" size="tiny" :bordered="false" round class="t-users-page__tab-count">
+                {{ grantsCheckedIds.length }}
+              </NTag>
+            </template>
+            <p class="t-users-page__hint">{{ t('grants.hint') }}</p>
+            <div class="t-users-page__grants-toolbar">
+              <span class="t-users-page__grants-count">
+                {{ t('grants.assignedPrefix') }} <b>{{ grantsCheckedIds.length }}</b>
+              </span>
+              <NTag v-if="grantsDirty" size="small" type="warning" :bordered="false" round>
+                {{ t('grants.dirty', { added: grantsDirtyAdded, removed: grantsDirtyRemoved }) }}
+              </NTag>
+              <NInput
+                v-model:value="grantsKeyword"
+                size="small"
+                clearable
+                class="t-users-page__grants-search"
+                :placeholder="t('grants.searchPlaceholder')"
+              />
+            </div>
+            <TPermissionMatrix
+              :modules="grantModules"
+              :functions-by-module="grantFunctionsByModule"
+              :checked-ids="grantsCheckedIds"
+              :grantable-codes="grantableCodes"
+              :keyword="grantsKeyword"
+              :label-overrides="labelOverrides"
+              expand-first
+              :translate="tMatrix"
+              @update:checked-ids="onGrantsChecked"
+            />
+          </NTabPane>
+          <NTabPane name="denied">
+            <template #tab>
+              {{ t('grants.tabDenied') }}
+              <NTag v-if="deniedCheckedIds.length" size="tiny" type="error" :bordered="false" round class="t-users-page__tab-count">
+                {{ deniedCheckedIds.length }}
+              </NTag>
+            </template>
+            <p class="t-users-page__hint">{{ t('grants.denyHint') }}</p>
+            <div class="t-users-page__grants-toolbar">
+              <span class="t-users-page__grants-count">
+                {{ t('grants.deniedPrefix') }} <b>{{ deniedCheckedIds.length }}</b>
+              </span>
+              <NTag v-if="deniedDirty" size="small" type="warning" :bordered="false" round>
+                {{ t('grants.dirty', { added: deniedDirtyAdded, removed: deniedDirtyRemoved }) }}
+              </NTag>
+              <NInput
+                v-model:value="grantsKeyword"
+                size="small"
+                clearable
+                class="t-users-page__grants-search"
+                :placeholder="t('grants.searchPlaceholder')"
+              />
+            </div>
+            <TPermissionMatrix
+              :modules="grantModules"
+              :functions-by-module="grantFunctionsByModule"
+              :checked-ids="deniedCheckedIds"
+              :grantable-codes="grantableCodes"
+              :keyword="grantsKeyword"
+              :label-overrides="labelOverrides"
+              expand-first
+              :translate="tMatrix"
+              @update:checked-ids="onDeniedChecked"
+            />
+          </NTabPane>
+        </NTabs>
+      </NSpin>
+    </template>
+    <template #footer="{ close }">
+      <NButton @click="close">{{ t('admin.crud.cancel') }}</NButton>
+      <NButton
+        v-if="canAssignGrants && !grantsTargetIsSuper"
+        type="primary"
+        :loading="grantsSaving"
+        :disabled="grantsLoading || !anyGrantsDirty"
+        @click="submitGrants"
+      >
+        {{ t('admin.crud.confirm') }}
+      </NButton>
+    </template>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
+import TPermissionMatrix from '../../components/forms/TPermissionMatrix.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
+import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { userColumns, userSearchFields, userFormSchema } from './user-config'
+import { ZH_SURFACE_LABELS } from '../authorization/surface-labels'
+import { useAdminAppStore } from '../../stores/useAdminAppStore'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { computed, ref, shallowRef, watch } from 'vue'
-import { NForm, NFormItem, NInput, NButton, NSpin, NCheckbox, NCheckboxGroup } from 'naive-ui'
+import { NForm, NFormItem, NInput, NButton, NSpin, NCheckbox, NCheckboxGroup, NTag, NTabs, NTabPane } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safeMessage'
 import type { RoleDto } from '@tnzi/core/services/identity'
+import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
 
 interface UserListItem {
   id: string
@@ -122,6 +233,7 @@ const bridge = createIdentityBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<UserListItem>({
   pageId: 'identity.users',
+  permission: 'user',
   columns: userColumns,
   rowKey: (u) => u.id,
   // 0.2.72+ (C4): fetch now returns the full `PagedList<T>` shape so
@@ -258,6 +370,177 @@ async function submitRoles(): Promise<void> {
   }
 }
 
+// ─── Direct-grants overlay (UserFunction) ─────────────────────────────────
+const authBridge = createAuthorizationBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
+const canViewGrants = computed(() => can('authorization.userFunction.view'))
+const canAssignGrants = computed(() => can('authorization.userFunction.assign'))
+
+const grantsDetail = useDetail<UserListItem>({
+  mode: 'drawer',
+  url: 'grants',
+  source: crud,
+})
+const grantsUser = computed(() => grantsDetail.data.value)
+const grantsTitle = computed(() =>
+  t('grants.title', { user: grantsUser.value?.userName || '—' }),
+)
+
+const grantsLoading = ref(false)
+const grantsSaving = ref(false)
+const grantsKeyword = ref('')
+const grantsTab = ref<'granted' | 'denied'>('granted')
+const grantsCheckedIds = ref<string[]>([])
+const grantsOriginalIds = ref<Set<string>>(new Set())
+const deniedCheckedIds = ref<string[]>([])
+const deniedOriginalIds = ref<Set<string>>(new Set())
+
+// The two sets are mutually exclusive per function (one row per (user,
+// function) on the backend — allow XOR deny). Mirror that in the UI: ticking
+// a function on one tab silently unticks it on the other.
+function onGrantsChecked(ids: string[]): void {
+  grantsCheckedIds.value = ids
+  const allowSet = new Set(ids)
+  deniedCheckedIds.value = deniedCheckedIds.value.filter((id) => !allowSet.has(id))
+}
+
+function onDeniedChecked(ids: string[]): void {
+  deniedCheckedIds.value = ids
+  const denySet = new Set(ids)
+  grantsCheckedIds.value = grantsCheckedIds.value.filter((id) => !denySet.has(id))
+}
+
+// Permission catalogue (modules + functions), loaded once on first open and
+// reused — it is global and changes rarely, mirroring the role page.
+const grantModules = shallowRef<FunctionModuleDto[]>([])
+const grantFunctionsByModule = shallowRef(new Map<string, ModuleFunctionDto[]>())
+const catalogueLoaded = ref(false)
+
+// Delegation-aware graying (mirrors the backend guard): a non-super grantor
+// may only hand out codes from their own set. null = everything grantable.
+const authStore = useAdminAuthStore()
+const grantableCodes = computed<string[] | null>(() =>
+  authStore.isSuperUser || authStore.userInfo === null ? null : authStore.userPermissions,
+)
+
+// The role matrix i18n namespace already carries every matrix.* key in both
+// locales — reuse it instead of duplicating the strings under identity.users.
+const tMatrix = makePageTranslator('authorization.roleFunctions')
+const appStore = useAdminAppStore()
+const labelOverrides = computed(() => (appStore.locale === 'zh-cn' ? ZH_SURFACE_LABELS : null))
+
+// Direct rows have no effect on super-admin members (they bypass every
+// check) and the backend guard rejects non-super writes on them — render an
+// explainer instead of an editable matrix. Best-effort: role names come from
+// the list row; the super-role list from the read endpoint (empty on older
+// backends → normal rendering, the backend guard still enforces).
+const superRoleNames = ref<Set<string>>(new Set())
+const grantsTargetIsSuper = computed(() => {
+  const roles = grantsUser.value?.roles ?? []
+  return roles.some((name) => superRoleNames.value.has(name.toLowerCase()))
+})
+
+async function ensureCatalogueLoaded(): Promise<void> {
+  if (catalogueLoaded.value) return
+  const modules = await authBridge.functionModules.getAll()
+  const next = new Map<string, ModuleFunctionDto[]>()
+  await Promise.all(
+    modules.map(async (m) => {
+      try {
+        next.set(m.id, await authBridge.permissions.getByModule(m.id))
+      } catch {
+        next.set(m.id, [])
+      }
+    }),
+  )
+  grantModules.value = modules
+  grantFunctionsByModule.value = next
+  catalogueLoaded.value = true
+  try {
+    const names = await authBridge.roleFunctions.superAdminRoles()
+    superRoleNames.value = new Set(names.map((n) => n.toLowerCase()))
+  } catch {
+    superRoleNames.value = new Set()
+  }
+}
+
+// Load catalogue + the user's direct grants/denies whenever the overlay
+// binds to a user (in-session open OR a `?grants=edit:<id>` deep link).
+watch(() => grantsDetail.data.value, async (user) => {
+  if (!user) return
+  grantsLoading.value = true
+  grantsKeyword.value = ''
+  grantsTab.value = 'granted'
+  grantsCheckedIds.value = []
+  grantsOriginalIds.value = new Set()
+  deniedCheckedIds.value = []
+  deniedOriginalIds.value = new Set()
+  try {
+    await ensureCatalogueLoaded()
+    const [ids, deniedIds] = await Promise.all([
+      authBridge.userFunctions.getAssignedIds(user.id),
+      authBridge.userFunctions.getDeniedIds(user.id),
+    ])
+    grantsCheckedIds.value = [...ids]
+    grantsOriginalIds.value = new Set(ids)
+    deniedCheckedIds.value = [...deniedIds]
+    deniedOriginalIds.value = new Set(deniedIds)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+    grantsDetail.close()
+  } finally {
+    grantsLoading.value = false
+  }
+})
+
+function setDirty(checked: string[], original: Set<string>): boolean {
+  if (original.size !== checked.length) return true
+  return checked.some((id) => !original.has(id))
+}
+function countAdded(checked: string[], original: Set<string>): number {
+  return checked.filter((id) => !original.has(id)).length
+}
+function countRemoved(checked: string[], original: Set<string>): number {
+  const set = new Set(checked)
+  let n = 0
+  for (const id of original) {
+    if (!set.has(id)) n += 1
+  }
+  return n
+}
+
+const grantsDirty = computed(() => setDirty(grantsCheckedIds.value, grantsOriginalIds.value))
+const grantsDirtyAdded = computed(() => countAdded(grantsCheckedIds.value, grantsOriginalIds.value))
+const grantsDirtyRemoved = computed(() => countRemoved(grantsCheckedIds.value, grantsOriginalIds.value))
+const deniedDirty = computed(() => setDirty(deniedCheckedIds.value, deniedOriginalIds.value))
+const deniedDirtyAdded = computed(() => countAdded(deniedCheckedIds.value, deniedOriginalIds.value))
+const deniedDirtyRemoved = computed(() => countRemoved(deniedCheckedIds.value, deniedOriginalIds.value))
+const anyGrantsDirty = computed(() => grantsDirty.value || deniedDirty.value)
+
+async function submitGrants(): Promise<void> {
+  const user = grantsDetail.data.value
+  if (!user) return
+  grantsSaving.value = true
+  try {
+    // Save the deny set first so a grant→deny move never passes through a
+    // transient state where the code is granted with the deny not yet saved.
+    if (deniedDirty.value) {
+      await authBridge.userFunctions.setDeniedForUser(user.id, deniedCheckedIds.value)
+      deniedOriginalIds.value = new Set(deniedCheckedIds.value)
+    }
+    if (grantsDirty.value) {
+      await authBridge.userFunctions.setForUser(user.id, grantsCheckedIds.value)
+      grantsOriginalIds.value = new Set(grantsCheckedIds.value)
+    }
+    message.success(t('grants.success'))
+    grantsDetail.close()
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  } finally {
+    grantsSaving.value = false
+  }
+}
+
 /**
  * Declarative operation actions. `editAction`/`deleteAction` wire to the CRUD
  * state; the per-row state toggles (enable/disable, lock/unlock) use `show`
@@ -270,12 +553,13 @@ async function submitRoles(): Promise<void> {
  */
 const rowActions: RowAction<UserListItem>[] = [
   editAction(crud),
-  { key: 'manageRoles', label: 'actions.manageRoles', onClick: (row) => void rolesDetail.open('edit', row) },
-  { key: 'enable', label: 'actions.enable', show: (row) => row.isLockedOut === true, confirm: 'actions.confirmEnable', onClick: (row) => void handleEnable(row.id) },
-  { key: 'disable', label: 'actions.disable', show: (row) => row.isLockedOut !== true, confirm: 'actions.confirmDisable', onClick: (row) => void handleDisable(row.id) },
-  { key: 'unlock', label: 'actions.unlock', show: (row) => row.isLockedOut === true, onClick: (row) => void handleUnlock(row.id) },
-  { key: 'lock', label: 'actions.lock', show: (row) => row.isLockedOut !== true, onClick: (row) => void handleLock(row.id) },
-  { key: 'resetPassword', label: 'actions.resetPassword', onClick: (row) => void resetPwdDetail.open('edit', row) },
+  { key: 'manageRoles', label: 'actions.manageRoles', show: () => crud.canUpdate, onClick: (row) => void rolesDetail.open('edit', row) },
+  { key: 'directGrants', label: 'actions.managePermissions', show: () => canViewGrants.value, onClick: (row) => void grantsDetail.open('edit', row) },
+  { key: 'enable', label: 'actions.enable', show: (row) => crud.canUpdate && row.isLockedOut === true, confirm: 'actions.confirmEnable', onClick: (row) => void handleEnable(row.id) },
+  { key: 'disable', label: 'actions.disable', show: (row) => crud.canUpdate && row.isLockedOut !== true, confirm: 'actions.confirmDisable', onClick: (row) => void handleDisable(row.id) },
+  { key: 'unlock', label: 'actions.unlock', show: (row) => crud.canUpdate && row.isLockedOut === true, onClick: (row) => void handleUnlock(row.id) },
+  { key: 'lock', label: 'actions.lock', show: (row) => crud.canUpdate && row.isLockedOut !== true, onClick: (row) => void handleLock(row.id) },
+  { key: 'resetPassword', label: 'actions.resetPassword', show: () => crud.canUpdate, onClick: (row) => void resetPwdDetail.open('edit', row) },
   deleteAction(crud),
 ]
 </script>
@@ -302,5 +586,28 @@ const rowActions: RowAction<UserListItem>[] = [
 }
 .t-users-page__role-group :deep(.n-checkbox) {
   margin-right: 0;
+}
+/* Direct-grants drawer: count + dirty chip on the left, keyword filter on
+   the right, matrix below. */
+.t-users-page__grants-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.t-users-page__grants-count {
+  font-size: 13px;
+  color: var(--tnzi-base-text-muted);
+  white-space: nowrap;
+}
+.t-users-page__grants-search {
+  margin-left: auto;
+  max-width: 240px;
+}
+.t-users-page__grants-super {
+  padding: 24px 8px;
+}
+.t-users-page__tab-count {
+  margin-left: 6px;
 }
 </style>

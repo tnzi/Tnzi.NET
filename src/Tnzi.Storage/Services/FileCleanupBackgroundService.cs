@@ -7,33 +7,33 @@ namespace Tnzi.Storage.Services;
 public class FileCleanupBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly StorageOptions _options;
+    private readonly IOptionsMonitor<StorageOptions> _options;
     private readonly ILogger<FileCleanupBackgroundService> _logger;
 
     public FileCleanupBackgroundService(
         IServiceProvider serviceProvider,
-        IOptions<StorageOptions> options,
+        IOptionsMonitor<StorageOptions> options,
         ILogger<FileCleanupBackgroundService> logger)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
-        _options = Check.NotNull(options).Value;
+        _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Cleanup.Enabled)
+        if (!_options.CurrentValue.Cleanup.Enabled)
         {
             _logger.LogInformation("File cleanup background task is disabled");
             return;
         }
 
         _logger.LogInformation("File cleanup background task started, interval: {Interval} minutes",
-            _options.Cleanup.IntervalMinutes);
+            _options.CurrentValue.Cleanup.IntervalMinutes);
 
         // 解析 Cron 表达式（设置则优先于 IntervalMinutes）；非法表达式回退到固定间隔。
         Cronos.CronExpression? cron = null;
-        var cronExpr = _options.Cleanup.CronExpression;
+        var cronExpr = _options.CurrentValue.Cleanup.CronExpression;
         if (!string.IsNullOrWhiteSpace(cronExpr))
         {
             try
@@ -45,7 +45,7 @@ public class FileCleanupBackgroundService : BackgroundService
             {
                 _logger.LogError(ex,
                     "Invalid Cleanup.CronExpression '{CronExpression}', falling back to IntervalMinutes ({Interval} min).",
-                    cronExpr, _options.Cleanup.IntervalMinutes);
+                    cronExpr, _options.CurrentValue.Cleanup.IntervalMinutes);
             }
         }
 
@@ -110,7 +110,7 @@ public class FileCleanupBackgroundService : BackgroundService
             {
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMinutes(_options.Cleanup.IntervalMinutes), stoppingToken);
+                    await Task.Delay(TimeSpan.FromMinutes(_options.CurrentValue.Cleanup.IntervalMinutes), stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {

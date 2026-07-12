@@ -21,13 +21,13 @@ public class OutputGuardrailMiddlewareTests
         var actualRunner = runner ?? new GuardrailRunner(
             Enumerable.Empty<IInputGuardrail>(),
             guardrails,
-            Microsoft.Extensions.Options.Options.Create(opts),
+            new StaticOptionsMonitor<AIOptions>(opts),
             Mock.Of<ILogger<GuardrailRunner>>());
 
         return new OutputGuardrailMiddleware(
             actualRunner,
             guardrails,
-            Microsoft.Extensions.Options.Options.Create(opts),
+            new StaticOptionsMonitor<AIOptions>(opts),
             Mock.Of<ILogger<OutputGuardrailMiddleware>>());
     }
 

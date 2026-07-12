@@ -19,6 +19,7 @@ public class DefaultAgentPersonaAdminController : ApiAdminControllerBase
     /// 创建人格
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.persona.create")]
     public virtual async Task<ApiResult<AgentPersonaDto>> Create([FromBody] CreateAgentPersonaDto input, CancellationToken ct = default)
     {
         var result = await PersonaService.CreateAsync(input, ct);
@@ -29,6 +30,7 @@ public class DefaultAgentPersonaAdminController : ApiAdminControllerBase
     /// 更新人格
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.persona.update")]
     public virtual async Task<ApiResult<AgentPersonaDto>> Update(Guid id, [FromBody] UpdateAgentPersonaDto input, CancellationToken ct = default)
     {
         var result = await PersonaService.UpdateAsync(id, input, ct);
@@ -39,6 +41,7 @@ public class DefaultAgentPersonaAdminController : ApiAdminControllerBase
     /// 删除人格
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.persona.delete")]
     public virtual async Task<ApiResult> Delete(Guid id, CancellationToken ct = default)
     {
         var result = await PersonaService.DeleteAsync(id, ct);

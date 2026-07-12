@@ -7,6 +7,7 @@ import { humanise } from '../pages/_shared/translate'
 import { useAdminAppStore } from './useAdminAppStore'
 import { useAdminAuthStore } from './useAdminAuthStore'
 import type { MenuTreeNode } from '@tnzi/core/services/system'
+import { normalizeModuleName } from '../services/admin-shell-modules'
 
 /**
  * Resolve a dotted i18n key against the bundled admin locale pack.
@@ -60,6 +61,19 @@ function resolveI18nKey(
   return humanise(key)
 }
 
+/**
+ * Resolve the module-availability gate key for a route, or null when the route
+ * isn't gated. `meta.moduleGate === true` → the route's own `name`; a string →
+ * that explicit module short name; both normalized (lowercase, dots → dashes)
+ * to line up with the backend's loaded-module short names.
+ */
+function moduleGateKey(route: AdminRouteRecord): string | null {
+  const gate = route.meta?.moduleGate
+  if (gate === true) return normalizeModuleName(route.name)
+  if (typeof gate === 'string' && gate) return normalizeModuleName(gate)
+  return null
+}
+
 export interface AdminRouteMeta {
   title: string
   i18nKey?: string
@@ -80,6 +94,15 @@ export interface AdminRouteMeta {
   activeMenu?: string
   fixedIndexInTab?: number
   multiTab?: boolean
+  /**
+   * Backend module-availability gate. When `defineAdminApp({ moduleGating })`
+   * is on, a top-level module node carrying `moduleGate` is HIDDEN from the
+   * menu and made unreachable if the backend host didn't load its module (per
+   * `GET /admin/shell/modules`). `true` = gate by the route's own `name`;
+   * a string = gate by that explicit module short name. Orthogonal to
+   * permissions, so the gate holds for super-admins too. Absent = never gated.
+   */
+  moduleGate?: boolean | string
 }
 
 export interface AdminRouteRecord {
@@ -160,6 +183,24 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   const routesLoaded = ref(false)
   /** Backend Sys_Menu tree for the 'merge' source (overrides by menuKey). Empty = 'route' source. */
   const backendMenuNodes = ref<MenuTreeNode[]>([])
+  /**
+   * Loaded framework module short names (normalized), from `GET /admin/shell/modules`.
+   * `null` = signal unavailable / not yet fetched → module gating is OFF
+   * (fail-open, show everything). A Set (even empty) = signal known → gate
+   * top-level `moduleGate` nodes whose module the backend didn't load.
+   */
+  const availableModules = ref<Set<string> | null>(null)
+
+  /**
+   * True while the module-availability signal is being fetched for the first
+   * time (the `defineAdminApp().install()` probe). SIDE-EFFECTFUL surfaces
+   * (the built-in chat host, dashboard data widgets, pollers) defer mounting
+   * while this is true so they never fire requests at a module the incoming
+   * signal is about to rule out. Pure-VISIBILITY surfaces (menus, `v-module`)
+   * ignore this flag and stay fail-open, so the sidebar is never blanked
+   * while the signal is in flight.
+   */
+  const moduleSignalPending = ref(false)
 
   const allRoutes = computed<AdminRouteRecord[]>(() => [
     ...constantRoutes.value,
@@ -192,7 +233,20 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
       authStore.userPermissions.map((p) => p.toLowerCase()),
     )
     const permissionsLoaded = authStore.userInfo !== null
-    const bypassPermissionFilter = authStore.isSuperUser || !permissionsLoaded
+    // Fail-open ONLY while a SESSION IS ACTIVE (token present) but its permission
+    // list hasn't arrived yet — the async gap between setToken and setUserInfo on
+    // login / session-restore, and consumers that wire auth but never call
+    // loadPermissions. When LOGGED OUT (no token) do NOT fail-open: filter
+    // normally so the sidebar collapses to public entries instead of flashing
+    // EVERY menu. `userInfo === null` is reached in two very different runtime
+    // states — "logged in, permissions still loading" (isLogin true → fail-open
+    // is right) and "logged out" (isLogin false). Treating them the same is what
+    // (a) flashed the full menu for the 1-2s the backend logout call takes before
+    // the login redirect, and (b) let a freshly-switched role transiently see the
+    // previous / full menu and click a page it can't open (→ 403). Gating on
+    // `isLogin` separates the two. Super users still bypass unconditionally.
+    const bypassPermissionFilter =
+      authStore.isSuperUser || (!permissionsLoaded && authStore.isLogin)
     function isVisible(route: AdminRouteRecord): boolean {
       if (bypassPermissionFilter) return true
       const single = route.meta?.permission
@@ -222,6 +276,14 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     }
     function toMenuItem(route: AdminRouteRecord, parentPath: string): AdminMenuItem | null {
       if (route.meta?.hideInMenu) return null
+      // Module-availability gate — ORTHOGONAL to permissions, so it holds for
+      // super users too (unlike isVisible below, which bypasses for them). When
+      // the loaded-module signal is known (non-null) and this gated node's
+      // module isn't loaded, drop it. Signal unknown (null) = fail-open.
+      const gateKey = moduleGateKey(route)
+      if (gateKey && availableModules.value !== null && !availableModules.value.has(gateKey)) {
+        return null
+      }
       if (!isVisible(route)) return null
       const rawTitle = route.meta?.title ?? route.name
       const absolutePath = joinPath(parentPath, route.path)
@@ -301,6 +363,35 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     return denied
   })
 
+  /**
+   * Route names unreachable because their FRAMEWORK MODULE isn't loaded by the
+   * backend — the module-availability twin of `deniedRouteNames`. Computed over
+   * the FULL route table (a gated top-level node + ALL its descendants), so the
+   * navigation guard can bounce a deep link / persisted tab into an unloaded
+   * module to /403 and such tabs get pruned. ORTHOGONAL to permissions, so it
+   * applies to super-admins too; empty when the loaded-module signal is
+   * unavailable (null) — fail-open, same as the menu layer.
+   */
+  const unavailableRouteNames = computed<Set<string>>(() => {
+    const denied = new Set<string>()
+    const available = availableModules.value
+    if (available === null) return denied
+    const collect = (route: AdminRouteRecord): void => {
+      denied.add(route.name)
+      route.children?.forEach(collect)
+    }
+    const walk = (route: AdminRouteRecord): void => {
+      const gateKey = moduleGateKey(route)
+      if (gateKey && !available.has(gateKey)) {
+        collect(route)
+        return
+      }
+      route.children?.forEach(walk)
+    }
+    allRoutes.value.forEach(walk)
+    return denied
+  })
+
   function collectCacheRouteNames(routes: AdminRouteRecord[]): string[] {
     const names: string[] = []
     for (const route of routes) {
@@ -343,10 +434,31 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     backendMenuNodes.value = nodes
   }
 
+  /**
+   * Set the loaded-module signal (from `GET /admin/shell/modules`). Pass a Set
+   * of normalized module short names to enable module gating, or `null` to
+   * disable it (fail-open). Drives both the `menus` module gate and
+   * `unavailableRouteNames` (guard + tab pruning).
+   */
+  function setAvailableModules(names: Set<string> | null): void {
+    availableModules.value = names
+  }
+
+  /**
+   * Flip the "module signal in flight" flag. `defineAdminApp().install()` sets
+   * it `true` when it starts the availability probe and `false` once the probe
+   * settles (fetched, failed, or timed out) — see {@link moduleSignalPending}.
+   */
+  function setModuleSignalPending(pending: boolean): void {
+    moduleSignalPending.value = pending
+  }
+
   function clearRoutes(): void {
     constantRoutes.value = []
     authRoutes.value = []
     backendMenuNodes.value = []
+    availableModules.value = null
+    moduleSignalPending.value = false
     cacheRoutes.value = []
     routesLoaded.value = false
   }
@@ -357,12 +469,17 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     allRoutes,
     routesLoaded,
     backendMenuNodes,
+    availableModules,
+    moduleSignalPending,
     menus,
     deniedRouteNames,
+    unavailableRouteNames,
     cacheRoutes,
     setConstantRoutes,
     setAuthRoutes,
     setBackendMenus,
+    setAvailableModules,
+    setModuleSignalPending,
     resetRouteCache,
     clearRoutes,
   }

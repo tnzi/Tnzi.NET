@@ -9,7 +9,7 @@
     :detail-title="detailTitle"
   >
     <template #primary>
-      <NButton type="primary" tertiary size="small" @click="openCreate">
+      <NButton v-if="can('finance.journal.create')" type="primary" tertiary size="small" @click="openCreate">
         <template #icon>
           <TSvgIcon icon="mdi:plus" :size="16" />
         </template>
@@ -75,6 +75,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge, JournalEntryStatus, type AccountTreeDto, type JournalEntryDto, type JournalLineDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -87,11 +88,13 @@ import JournalEntryEditor from './components/JournalEntryEditor.vue'
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.journals')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const journalEntryColumns = buildJournalEntryColumns(t)
 
 const crud = useCrudPage<JournalRow>({
   pageId: 'finance.journals',
+  permission: 'finance.journal',
   columns: journalEntryColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.journals.fetch(q),
@@ -246,10 +249,10 @@ const isPosted = (row: JournalRow) => row.status === JournalEntryStatus.Posted
 
 const rowActions: RowAction<JournalRow>[] = [
   viewAction(crud),
-  { key: 'edit', type: 'primary', show: isDraft, onClick: openEdit },
-  { key: 'post', label: 'actions.post', type: 'primary', show: isDraft, confirm: 'confirmPost', onClick: postEntry },
-  { key: 'reverse', label: 'actions.reverse', type: 'warning', show: isPosted, confirm: 'confirmReverse', onClick: reverseEntry },
-  { key: 'delete', label: 'actions.delete', type: 'error', show: isDraft, confirm: 'confirmDelete', onClick: deleteEntry },
+  { key: 'edit', type: 'primary', show: (row) => can('finance.journal.update') && isDraft(row), onClick: openEdit },
+  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.journal.update') && isDraft(row), confirm: 'confirmPost', onClick: postEntry },
+  { key: 'reverse', label: 'actions.reverse', type: 'warning', show: (row) => can('finance.journal.update') && isPosted(row), confirm: 'confirmReverse', onClick: reverseEntry },
+  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.journal.delete') && isDraft(row), confirm: 'confirmDelete', onClick: deleteEntry },
 ]
 </script>
 

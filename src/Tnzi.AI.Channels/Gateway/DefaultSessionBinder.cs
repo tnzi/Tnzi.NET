@@ -15,7 +15,7 @@ namespace Tnzi.AI.Channels.Gateway;
 public class DefaultSessionBinder : ISessionBinder
 {
     private readonly IReadOnlyList<SessionBindingRule> _configRules;
-    private readonly GatewayOptions _options;
+    private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly TimeSpan _cacheTtl;
 
@@ -26,7 +26,7 @@ public class DefaultSessionBinder : ISessionBinder
 
     public DefaultSessionBinder(
         IReadOnlyList<SessionBindingRule> rules,
-        IOptions<GatewayOptions> options,
+        IOptionsMonitor<GatewayOptions> options,
         IServiceScopeFactory? scopeFactory = null,
         TimeSpan? cacheTtl = null)
     {
@@ -34,7 +34,7 @@ public class DefaultSessionBinder : ISessionBinder
         Check.NotNull(options);
 
         _configRules = rules;
-        _options = options.Value;
+        _options = options;
         _scopeFactory = scopeFactory;
         // 默认 5 分钟 TTL — 避免每次 Resolve 查库，同时让 admin 写入后较快生效。
         _cacheTtl = cacheTtl ?? TimeSpan.FromMinutes(5);
@@ -45,10 +45,14 @@ public class DefaultSessionBinder : ISessionBinder
     {
         Check.NotNull(context);
 
+        // 默认作用域/默认 Agent 为 KEEP-STATIC（不进配置中心热设置），但仍经 IOptionsMonitor
+        // 读取以避免运行时热设置消费审计误报，并在 appsettings 重载时保持一致。
+        var options = _options.CurrentValue;
+
         // 显式指定 AgentId 时直接使用
         if (!string.IsNullOrEmpty(context.ExplicitAgentId) && Guid.TryParse(context.ExplicitAgentId, out var explicitId))
         {
-            return BuildBinding(explicitId, _options.DefaultScope, context);
+            return BuildBinding(explicitId, options.DefaultScope, context);
         }
 
         // 按优先级迭代规则（配置 + 缓存的数据库规则），首个匹配者胜出
@@ -62,8 +66,8 @@ public class DefaultSessionBinder : ISessionBinder
         }
 
         // 无匹配 — 使用默认配置
-        var defaultAgentId = _options.DefaultAgentId ?? Guid.Empty;
-        return BuildBinding(defaultAgentId, _options.DefaultScope, context);
+        var defaultAgentId = options.DefaultAgentId ?? Guid.Empty;
+        return BuildBinding(defaultAgentId, options.DefaultScope, context);
     }
 
     /// <summary>

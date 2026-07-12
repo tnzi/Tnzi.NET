@@ -9,14 +9,14 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
     private readonly IRepository<FileChunk, Guid> _chunkRepository;
     private readonly IRepository<FileRecord, Guid> _fileRepository;
     private readonly IFileStorage _storage;
-    private readonly StorageOptions _options;
+    private readonly IOptionsMonitor<StorageOptions> _options;
 
     public FileChunkUploadService(
         IRepository<FileUploadSession, Guid> uploadSessionRepository,
         IRepository<FileChunk, Guid> chunkRepository,
         IRepository<FileRecord, Guid> fileRepository,
         IFileStorage storage,
-        IOptions<StorageOptions> options,
+        IOptionsMonitor<StorageOptions> options,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -24,7 +24,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         _chunkRepository = Check.NotNull(chunkRepository);
         _fileRepository = Check.NotNull(fileRepository);
         _storage = Check.NotNull(storage);
-        _options = options?.Value ?? new StorageOptions();
+        _options = Check.NotNull(options);
     }
 
     public async Task<Result<FileUploadSession>> InitiateChunkedUploadAsync(
@@ -172,7 +172,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
 
                     // 回读分片并校验其完整性（受 EnableMd5Validation 控制）。
                     // 损坏的分片在合并时会被检测出来，避免静默合出坏文件。
-                    if (_options.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash))
+                    if (_options.CurrentValue.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash))
                     {
                         using var verifyStream = await _storage.DownloadAsync(chunk.ChunkPath);
                         var actualChunkMd5 = await Md5Helper.CalculateAsync(verifyStream);
@@ -196,7 +196,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
 
                 // 计算合并后的 MD5（受 EnableMd5Validation 控制；关闭时跳过整文件校验）
                 string? md5Hash = null;
-                if (_options.EnableMd5Validation)
+                if (_options.CurrentValue.EnableMd5Validation)
                 {
                     mergedStream.Position = 0;
                     md5Hash = await Md5Helper.CalculateAsync(mergedStream);

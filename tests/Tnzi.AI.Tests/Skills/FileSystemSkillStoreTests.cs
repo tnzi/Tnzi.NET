@@ -645,7 +645,7 @@ public class FileSystemSkillStoreTests : IDisposable
         List<string>? pluginPaths = null,
         List<string>? managedPaths = null)
     {
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
             ContextProviders = new ContextProvidersOptions
             {

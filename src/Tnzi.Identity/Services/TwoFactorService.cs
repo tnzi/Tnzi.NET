@@ -19,13 +19,14 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
         UserManager<User> userManager,
         IServiceProvider serviceProvider,
         IEventBus? eventBus = null,
-        IOptions<IdentityOptions>? identityOptions = null,
+        IOptionsSnapshot<IdentityOptions>? identityOptions = null,
         ICache? cache = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _userManager = Check.NotNull(userManager);
         _eventBus = eventBus;
+        // Scoped 服务：IOptionsSnapshot 每请求重算，构造期捕获 Otp 即随请求热更新。
         _otpOptions = identityOptions?.Value.Otp ?? new OtpOptions();
         _cache = cache;
     }

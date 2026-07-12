@@ -3,6 +3,10 @@ namespace Tnzi.AI.Mcp.Options;
 /// <summary>
 /// MCP Server 配置选项 — 将 Tnzi.AI Agent 暴露为 MCP Server 供外部客户端调用
 /// </summary>
+[ConfigSection("AI:McpServer")]
+[RuntimeSettingGroup(Key = "ai-mcp-server", Module = "AI", DisplayName = "MCP Server",
+    I18nKey = "admin.modules.system.settings.groups.aiMcpServer",
+    Icon = "mdi:server-network-outline", Order = 190)]
 public class McpServerOptions
 {
     /// <summary>
@@ -23,6 +27,9 @@ public class McpServerOptions
     /// <summary>
     /// 是否要求认证（默认开启）
     /// </summary>
+    [RuntimeSetting(Label = "Require Authentication", I18n = "admin.modules.system.settings.fields.mcpServerRequireAuthentication",
+        Type = SettingFieldType.Boolean, Subsection = "Authentication",
+        Description = "SECURITY BOUNDARY. When OFF, every request to the MCP endpoint is accepted without an API key, exposing all wired agents/tools to anyone who can reach the endpoint. Keep this ON in any shared or internet-reachable deployment.")]
     public bool RequireAuthentication { get; set; } = true;
 
     /// <summary>
@@ -43,6 +50,9 @@ public class McpServerOptions
     /// 故命名为 RateLimitPerTenant 而非 TenantIsolation 以免误导）。
     /// </para>
     /// </summary>
+    [RuntimeSetting(Label = "Rate-limit per Tenant", I18n = "admin.modules.system.settings.fields.mcpServerRateLimitPerTenant",
+        Type = SettingFieldType.Boolean, Subsection = "Rate Limiting",
+        Description = "Partition rate-limit buckets by the (untrusted) X-Tenant-Id header. This is rate-limit partitioning only, NOT execution or data isolation.")]
     public bool RateLimitPerTenant { get; set; } = true;
 
     /// <summary>
@@ -52,6 +62,9 @@ public class McpServerOptions
     /// <b>不影响</b>工具运营统计（见 <see cref="EnableToolAnalytics"/>）。
     /// </para>
     /// </summary>
+    [RuntimeSetting(Label = "Enable Audit Log", I18n = "admin.modules.system.settings.fields.mcpServerEnableAuditLog",
+        Type = SettingFieldType.Boolean, Subsection = "Logging",
+        Description = "Write per-call audit entries via IUsageLogService (operation type McpToolCall). Independent of tool analytics.")]
     public bool EnableAuditLog { get; set; } = true;
 
     /// <summary>
@@ -62,11 +75,17 @@ public class McpServerOptions
     /// 关闭审计日志不会同时关闭运营统计，反之亦然。
     /// </para>
     /// </summary>
+    [RuntimeSetting(Label = "Enable Tool Analytics", I18n = "admin.modules.system.settings.fields.mcpServerEnableToolAnalytics",
+        Type = SettingFieldType.Boolean, Subsection = "Logging",
+        Description = "Record per-tool operational stats (call count, P95 latency, error rate, unique callers). Independent of the audit log.")]
     public bool EnableToolAnalytics { get; set; } = true;
 
     /// <summary>
     /// 每分钟速率限制（每客户端，默认 600）
     /// </summary>
+    [RuntimeSetting(Label = "Rate Limit (per minute)", I18n = "admin.modules.system.settings.fields.mcpServerRateLimitPerMinute",
+        Type = SettingFieldType.Int, Min = 0, Subsection = "Rate Limiting",
+        Description = "Per-client sliding-window request cap per minute. 0 disables rate limiting.")]
     public int RateLimitPerMinute { get; set; } = 600;
 
     /// <summary>
@@ -77,6 +96,9 @@ public class McpServerOptions
     /// X-Api-Key header or Authorization: Bearer. Every query-string key extraction
     /// emits a warning log entry when this is enabled.
     /// </summary>
+    [RuntimeSetting(Label = "Allow API Key in Query String", I18n = "admin.modules.system.settings.fields.mcpServerAllowApiKeyInQuery",
+        Type = SettingFieldType.Boolean, Subsection = "Authentication",
+        Description = "SECURITY RISK. When ON, API keys may be passed as ?apiKey=... . Query strings leak into access logs, proxy caches, browser history, and referrer headers. Enable ONLY for transitional legacy-client compatibility; prefer the X-Api-Key header.")]
     public bool AllowApiKeyInQuery { get; set; } = false;
 
     /// <summary>
@@ -85,5 +107,8 @@ public class McpServerOptions
     /// When the dict reaches this size, opportunistic eviction is forced on the
     /// next CheckRateLimit call regardless of the usual eviction interval.
     /// </summary>
+    [RuntimeSetting(Label = "Rate-limit Tracking Max Entries", I18n = "admin.modules.system.settings.fields.mcpServerRateLimitTrackingMaxEntries",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Rate Limiting",
+        Description = "Hard cap on the rate-limit tracking dictionary to bound memory under key-space flood attacks.")]
     public int RateLimitTrackingMaxEntries { get; set; } = 10_000;
 }

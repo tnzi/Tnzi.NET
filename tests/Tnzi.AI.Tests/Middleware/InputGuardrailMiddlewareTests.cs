@@ -27,7 +27,7 @@ public class InputGuardrailMiddlewareTests
         return new GuardrailRunner(
             inputGuardrails ?? [],
             Enumerable.Empty<IOutputGuardrail>(),
-            Microsoft.Extensions.Options.Options.Create(options),
+            new StaticOptionsMonitor<AIOptions>(options),
             Mock.Of<ILogger<GuardrailRunner>>());
     }
 

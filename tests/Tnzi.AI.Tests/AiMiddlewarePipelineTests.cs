@@ -43,11 +43,11 @@ public class AiMiddlewarePipelineTests
         };
     }
 
-    private static IOptions<AIOptions> CreateOptions(Action<AIOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptions(Action<AIOptions>? configure = null)
     {
         var options = new AIOptions();
         configure?.Invoke(options);
-        return Microsoft.Extensions.Options.Options.Create(options);
+        return new StaticOptionsMonitor<AIOptions>(options);
     }
 
     private static async IAsyncEnumerable<AgentStreamChunk> AppendSuffix(

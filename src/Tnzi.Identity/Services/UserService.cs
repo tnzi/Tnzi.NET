@@ -20,6 +20,7 @@ public class UserService : ApplicationService, IUserService
     private readonly IUserRoleService? _userRoleService;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
 
     public UserService(
         UserManager<User> userManager,
@@ -35,7 +36,8 @@ public class UserService : ApplicationService, IUserService
         IUserRoleService? userRoleService = null,
         IRepository<UserRole>? userRoleRepository = null,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        IFunctionAuthorizationService? functionAuthorization = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -50,6 +52,7 @@ public class UserService : ApplicationService, IUserService
         _userRoleRepository = userRoleRepository;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        _functionAuthorization = functionAuthorization;
     }
 
     public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
@@ -642,6 +645,12 @@ public class UserService : ApplicationService, IUserService
             return Fail("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        var membershipViolation = await GetRoleMembershipViolationAsync(roles);
+        if (membershipViolation != null)
+        {
+            return Fail(membershipViolation, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var result = await _userManager.AddToRolesAsync(user, roles.Select(r => r.Name!));
         if (!result.Succeeded)
         {
@@ -680,6 +689,14 @@ public class UserService : ApplicationService, IUserService
         if (roles.Count != idList.Distinct().Count())
         {
             return Fail("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        // 摘除成员与授予成员同受支配约束——弱管理员把用户从强角色里摘出去
+        // 同样是越权干预(变相削权/锁死他人访问)。
+        var membershipViolation = await GetRoleMembershipViolationAsync(roles);
+        if (membershipViolation != null)
+        {
+            return Fail(membershipViolation, 403, ErrorCodes.FORBIDDEN);
         }
 
         var result = await _userManager.RemoveFromRolesAsync(user, roles.Select(r => r.Name!));
@@ -735,6 +752,33 @@ public class UserService : ApplicationService, IUserService
             Logger.LogWarning(ex,
                 "Failed to publish UserRolesChangedEvent for user {UserId}", user.Id);
         }
+    }
+
+    /// <summary>
+    /// 角色成员变更的委托护栏。非超管调用者仅能变更自己支配的角色的成员
+    /// (支配语义由 Authorization 模块的 CanManageRoleAsync 提供:权限集包含
+    /// 且非超管配置角色)。允许时返回 null,越界返回英文错误消息。
+    /// Authorization 模块未加载(_functionAuthorization null)或无用户上下文
+    /// (系统/播种路径与单元测试)时整体跳过,保持旧行为。
+    /// </summary>
+    private async Task<string?> GetRoleMembershipViolationAsync(IReadOnlyCollection<Role> roles)
+    {
+        if (_functionAuthorization == null) return null;
+
+        var grantorId = CurrentUser?.Id;
+        if (grantorId == null || grantorId == Guid.Empty) return null;
+        if (await _functionAuthorization.IsSuperAdminAsync(grantorId.Value)) return null;
+
+        foreach (var role in roles)
+        {
+            if (!await _functionAuthorization.CanManageRoleAsync(grantorId.Value, role.Id))
+            {
+                return $"You cannot change membership of role '{role.Name}': " +
+                       "its permission set is not contained in yours, or it is a super-admin role.";
+            }
+        }
+
+        return null;
     }
 
     public async Task<Result<UserStatisticsDto>> GetStatisticsAsync(Guid? organizationId = null, Guid? roleId = null)

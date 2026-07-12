@@ -44,6 +44,7 @@ public class DefaultAccessLogAdminController : ApiAdminControllerBase
     /// 记录访问日志
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "system.accessLog.create")]
     public virtual async Task<ApiResult> LogAccess([FromBody] AccessLogDto log)
     {
         var result = await AccessLogService.LogAccessAsync(log);
@@ -66,6 +67,7 @@ public class DefaultAccessLogAdminController : ApiAdminControllerBase
     /// 删除过期访问日志
     /// </summary>
     [HttpDelete("expired")]
+    [ApiAuthorize(PermissionName = "system.accessLog.delete")]
     public virtual async Task<ApiResult> DeleteExpiredAccessLogs([FromQuery] int days = 90)
     {
         var result = await AccessLogService.DeleteExpiredAccessLogsAsync(days);
@@ -76,6 +78,7 @@ public class DefaultAccessLogAdminController : ApiAdminControllerBase
     /// 批量删除访问日志
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "system.accessLog.delete")]
     public virtual async Task<ApiResult> DeleteAccessLogs([FromBody] IEnumerable<Guid> ids)
     {
         var result = await AccessLogService.DeleteAccessLogsAsync(ids);

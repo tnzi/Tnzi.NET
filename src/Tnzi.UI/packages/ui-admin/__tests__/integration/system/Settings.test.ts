@@ -60,6 +60,32 @@ const demoGroup: SettingsCenterGroupDto = {
 
 const clone = <T>(v: T): T => structuredClone(v)
 
+// Minimal complete field DTO factory for the search/subsection/duration cases.
+function makeField(
+  over: Partial<SettingsCenterGroupDto['fields'][number]> & { key: string; label: string },
+): SettingsCenterGroupDto['fields'][number] {
+  return {
+    key: over.key, label: over.label, i18nKey: null, description: null, type: 'String',
+    isEncrypted: false, isReadOnly: false, isRequired: false, min: null, max: null, options: null,
+    subsection: null, value: null, defaultValue: null, isOverridden: false, isSet: false, ...over,
+  }
+}
+
+const budgetGroup: SettingsCenterGroupDto = {
+  key: 'ai-budget', moduleName: 'AI', displayName: 'Budget', i18nKey: null, description: null,
+  icon: null, order: 1,
+  fields: [makeField({ key: 'AI:Budget:CacheTtl', label: 'Cache TTL' })],
+}
+
+const retryGroup: SettingsCenterGroupDto = {
+  key: 'ai-retry', moduleName: 'AI', displayName: 'Retry', i18nKey: null, description: null,
+  icon: null, order: 2,
+  fields: [
+    makeField({ key: 'AI:Retry:BaseDelay', label: 'Base Delay', type: 'Duration', value: '00:00:05' }),
+    makeField({ key: 'AI:Retry:MaxJitter', label: 'Max Jitter', type: 'Duration', subsection: 'Backoff' }),
+  ],
+}
+
 function findButton(wrapper: ReturnType<typeof mount>, label: string) {
   return wrapper.findAll('button').find((b) => b.text() === label)
 }
@@ -188,6 +214,60 @@ describe('Settings page (TSettingsPage integration)', () => {
     expect(wrapper.text()).not.toContain('Site Name')
     // The advanced parameters section is still offered.
     expect(wrapper.text()).toContain('Parameters')
+  })
+
+  it('global search filters the left nav to matching groups (deep-link engine keeps full list)', async () => {
+    getDefinitions.mockResolvedValue([clone(demoGroup), clone(budgetGroup)])
+    const wrapper = mount(TSettingsPage)
+    await flushPromises()
+
+    const layout = wrapper.findComponent(TDetailLayout)
+    const keys = () => (layout.props('sections') as { key: string }[]).map((s) => s.key)
+    expect(keys()).toContain('system-general')
+    expect(keys()).toContain('ai-budget')
+
+    // Type into the nav-header search box → only the matching group stays in the nav.
+    const search = wrapper.find('.t-detail-layout__nav-header input')
+    expect(search.exists()).toBe(true)
+    await search.setValue('Budget')
+    await flushPromises()
+
+    expect(keys()).toEqual(['ai-budget'])
+    // Clearing restores the full nav.
+    await search.setValue('')
+    await flushPromises()
+    expect(keys()).toContain('system-general')
+    expect(keys()).toContain('ai-budget')
+  })
+
+  it('renders subsection fields in a collapsible section and duration inputs with a format hint', async () => {
+    getDefinitions.mockResolvedValue([clone(retryGroup)])
+    const wrapper = mount(TSettingsPage)
+    await flushPromises()
+
+    // Default-area duration field.
+    expect(wrapper.text()).toContain('Base Delay')
+    // Duration placeholder hint.
+    expect(wrapper.find('.t-settings-group input[placeholder="d.hh:mm:ss / hh:mm:ss"]').exists()).toBe(true)
+    // Subsection title + its field (NCollapse default-expanded).
+    expect(wrapper.text()).toContain('Backoff')
+    expect(wrapper.text()).toContain('Max Jitter')
+  })
+
+  it('rejects an invalid duration client-side without calling saveGroup', async () => {
+    getDefinitions.mockResolvedValue([clone(retryGroup)])
+    const wrapper = mount(TSettingsPage)
+    await flushPromises()
+
+    const input = wrapper.find('.t-settings-group input[placeholder="d.hh:mm:ss / hh:mm:ss"]')
+    await input.setValue('not-a-duration')
+
+    const save = findButton(wrapper, 'Save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(saveGroup).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('valid duration')
   })
 
   it('still renders the page (advanced section intact) when getDefinitions rejects', async () => {

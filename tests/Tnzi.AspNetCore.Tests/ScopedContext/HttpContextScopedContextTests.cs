@@ -114,4 +114,25 @@ public class HttpContextScopedContextTests
         // Assert
         Assert.Equal("value1", retrieved); // 应该从base获取
     }
+
+    [Fact]
+    public void GetItem_ThroughInterface_ReadsHttpContextItems()
+    {
+        // 精确锁定 override（非 new）修复：中间件直接写入 HttpContext.Items（未经 SetItem，
+        // 故基类 _items 无此键）。经 IScopedContext 接口调用 GetItem 时，若派生方法用 new
+        // 会被静态派发回基类实现（只读 _items）从而绕过 HttpContext.Items 返回默认值；
+        // override 后接口调用走派生实现，能读到 HttpContext.Items。
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Items["direct-key"] = "direct-value";
+        var httpContextAccessor = new Mock<IHttpContextAccessor>();
+        httpContextAccessor.Setup(x => x.HttpContext).Returns(httpContext);
+        IScopedContext context = new HttpContextScopedContext(httpContextAccessor.Object);
+
+        // Act
+        var value = context.GetItem<string>("direct-key");
+
+        // Assert
+        Assert.Equal("direct-value", value);
+    }
 }

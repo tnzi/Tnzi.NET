@@ -34,6 +34,7 @@ import {
   createLoginSecurityBridge,
 } from '../../services/bridges/login-security-bridge'
 import { useWidgetData } from '../shell/useWidgetData'
+import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { translatePageKey } from '../../pages/_shared/translate'
 
 interface Snapshot {
@@ -71,13 +72,25 @@ async function safeFetch<T>(p: Promise<T>): Promise<T | null> {
   }
 }
 
+// Per-probe module gate — this rollup widget mixes always-present surfaces
+// (diagnostics / performance / SignalR ship with the AspNetCore host layer)
+// with probes owned by OPTIONAL business modules: channels → Tnzi.AI.Channels,
+// login security → Tnzi.Identity. Those two skip their fetch entirely when
+// the host didn't load the module (the row then renders its "—" empty state),
+// instead of firing a request that can only 404.
+const moduleAvailability = useModuleAvailability()
+
 useWidgetData(async () => {
   const [exc, perf, sigStats, chanStatus, secOverview] = await Promise.all([
     safeFetch(diagnostics.exceptions.getSummary(60)),
     safeFetch(performance.getSummary(60)),
     safeFetch(signalr.getStats()),
-    safeFetch(channels.channels.getStatus()),
-    safeFetch(loginSec.getOverview(24)),
+    moduleAvailability.canActivate('ai.channels')
+      ? safeFetch(channels.channels.getStatus())
+      : Promise.resolve(null),
+    moduleAvailability.canActivate('identity')
+      ? safeFetch(loginSec.getOverview(24))
+      : Promise.resolve(null),
   ])
   data.value = {
     exceptions: exc?.totalCount ?? null,

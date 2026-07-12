@@ -83,20 +83,22 @@ const resolved = computed(() => {
     <div class="t-exception-page__blob t-exception-page__blob--a" />
     <div class="t-exception-page__blob t-exception-page__blob--b" />
 
-    <div class="t-exception-page__card">
+    <div class="t-exception-page__content">
       <TSvgIcon
         class="t-exception-page__icon"
         :icon="resolved.icon"
-        :size="120"
+        :size="140"
+        color="var(--tnzi-primary)"
       />
       <h1 class="t-exception-page__title">{{ resolved.title }}</h1>
       <p class="t-exception-page__subtitle">{{ resolved.subtitle }}</p>
       <div class="t-exception-page__actions">
-        <NButton type="primary" @click="emit('primary')">
+        <NButton type="primary" size="large" @click="emit('primary')">
           {{ primaryLabel }}
         </NButton>
         <NButton
           v-if="secondaryLabel"
+          size="large"
           quaternary
           @click="emit('secondary')"
         >
@@ -114,7 +116,8 @@ const resolved = computed(() => {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   padding: 32px;
   overflow: hidden;
   background-color: var(--tnzi-layout-bg);
@@ -141,17 +144,16 @@ const resolved = computed(() => {
   background: rgb(var(--tnzi-info-rgb, 32 128 240) / 0.16);
 }
 
-.t-exception-page__card {
+/* No card chrome — the content sits directly on the page background (soybean
+   style): keeps the illustration + heading + single CTA the sole focus, with
+   no box/shadow competing for attention. */
+.t-exception-page__content {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  max-width: 520px;
-  padding: 48px 40px;
-  background-color: var(--tnzi-container-bg);
-  border-radius: var(--tnzi-admin-radius-lg, 12px);
-  box-shadow: var(--tnzi-shadow-drawer, 0 8px 24px rgb(0 0 0 / 12%));
+  max-width: 480px;
   animation: t-exception-rise 0.4s var(--tnzi-admin-motion-ease-out, ease-out);
 }
 
@@ -167,8 +169,9 @@ const resolved = computed(() => {
 }
 
 .t-exception-page__icon {
-  color: var(--tnzi-primary);
-  margin-bottom: 16px;
+  /* Colour is set via TSvgIcon's `color` prop (inline style beats a scoped
+     class rule, which is why the class-based colour never took effect). */
+  margin-bottom: 20px;
 }
 
 .t-exception-page__title {
@@ -195,9 +198,6 @@ const resolved = computed(() => {
 }
 
 @media (max-width: 640px) {
-  .t-exception-page__card {
-    padding: 32px 24px;
-  }
   .t-exception-page__title {
     font-size: 44px;
   }

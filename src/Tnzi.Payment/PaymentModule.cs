@@ -42,6 +42,11 @@ public class PaymentModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, PaymentPermissions>();
+
         // 注册服务
         context.Services.AddScoped<IPaymentService, PaymentService>();
         context.Services.AddScoped<IRefundService, RefundService>();

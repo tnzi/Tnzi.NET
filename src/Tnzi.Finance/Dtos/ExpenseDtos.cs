@@ -14,6 +14,7 @@ public class ExpenseDto
 
     /// <summary>付款科目名称（仅详情解析；列表投影为 null）</summary>
     public string? PaidFromAccountName { get; set; }
+    public string? PaymentMethod { get; set; }
     public DateTime DocDate { get; set; }
     public string Currency { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; }
@@ -50,6 +51,9 @@ public class CreateExpenseDto
 
     /// <summary>付款科目（银行/现金/信用卡叶子科目）</summary>
     public Guid PaidFromAccountId { get; set; }
+
+    /// <summary>结算方式（推荐取值见 PaymentMethods 常量，可自定义）</summary>
+    public string? PaymentMethod { get; set; }
     public DateTime DocDate { get; set; }
     /// <summary>交易币种（null 表示本位币）</summary>
     public string? Currency { get; set; }
@@ -88,6 +92,9 @@ public class ExpenseQueryDto : PagedQueryDto
 
     /// <summary>按供应商过滤</summary>
     public Guid? VendorId { get; set; }
+
+    /// <summary>按结算方式过滤</summary>
+    public string? PaymentMethod { get; set; }
 
     /// <summary>单据日期起</summary>
     public DateTime? DateFrom { get; set; }

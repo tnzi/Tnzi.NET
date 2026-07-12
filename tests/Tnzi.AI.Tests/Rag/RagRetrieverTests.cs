@@ -30,7 +30,7 @@ public class RagRetrieverTests
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
             .Returns(NullLoggerFactory.Instance);
 
-        var ragOptions = Microsoft.Extensions.Options.Options.Create(new AIRagOptions
+        var ragOptions = new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions
         {
             DefaultEmbeddingProvider = "openai",
             DefaultEmbeddingModel = "text-embedding-3-small"

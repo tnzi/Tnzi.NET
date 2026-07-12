@@ -128,3 +128,48 @@ describe('TMessageList', () => {
     expect(mineRows).toHaveLength(1)
   })
 })
+
+describe('TMessageBubble — rich system notification', () => {
+  const richNotice: ChatMessageDto = {
+    id: 'n1',
+    conversationId: 'sys',
+    senderId: null,
+    senderName: null,
+    contentType: MessageContentType.System,
+    content: 'Your order #1001 has shipped.',
+    title: 'Order shipped',
+    linkUrl: 'https://example.com/orders/1001',
+    category: 'order',
+    fileId: null,
+    fileName: null,
+    fileSize: null,
+    sentAt: '2024-03-15T09:00:00Z',
+  }
+
+  function mountBubble(message: ChatMessageDto) {
+    return mount(TMessageBubble, {
+      props: { message, mine: false, showSender: false, isSystem: true },
+      global: { stubs: { Icon: IconStub, NImage: true, TChatAvatar: true } },
+    })
+  }
+
+  it('renders title, body, category and a click-through link', () => {
+    const w = mountBubble(richNotice)
+    expect(w.find('.t-bubble-notice').exists()).toBe(true)
+    expect(w.find('.t-bubble-notice__title').text()).toBe('Order shipped')
+    expect(w.find('.t-bubble-notice__category').text()).toBe('order')
+    expect(w.find('.t-bubble-notice__body').text()).toBe('Your order #1001 has shipped.')
+    const link = w.find('.t-bubble-notice__link')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe('https://example.com/orders/1001')
+  })
+
+  it('omits title/link/category for a plain system notification', () => {
+    const w = mountBubble({ ...richNotice, title: null, linkUrl: null, category: null })
+    expect(w.find('.t-bubble-notice').exists()).toBe(true)
+    expect(w.find('.t-bubble-notice__title').exists()).toBe(false)
+    expect(w.find('.t-bubble-notice__link').exists()).toBe(false)
+    expect(w.find('.t-bubble-notice__category').exists()).toBe(false)
+    expect(w.find('.t-bubble-notice__body').text()).toBe('Your order #1001 has shipped.')
+  })
+})

@@ -32,7 +32,6 @@ import TWidgetNotificationStats from './builtin/TWidgetNotificationStats.vue'
 import TWidgetChatStats from './builtin/TWidgetChatStats.vue'
 import TWidgetAuditRecent from './builtin/TWidgetAuditRecent.vue'
 import TWidgetActivityTimeline from './builtin/TWidgetActivityTimeline.vue'
-import TWidgetTips from './builtin/TWidgetTips.vue'
 import TWidgetOpsSnapshot from './builtin/TWidgetOpsSnapshot.vue'
 
 /**
@@ -87,6 +86,7 @@ export function defaultQuickActions(): QuickAction[] {
       to: '/admin/identity/users',
       tone: 'primary',
       permission: 'user.view',
+      module: 'identity',
     },
     {
       key: 'audit',
@@ -95,6 +95,7 @@ export function defaultQuickActions(): QuickAction[] {
       to: '/admin/audit/logs',
       tone: 'info',
       permission: 'audit.log.view',
+      module: 'audit',
     },
     {
       key: 'agents',
@@ -103,6 +104,7 @@ export function defaultQuickActions(): QuickAction[] {
       to: '/admin/ai/agents',
       tone: 'success',
       permission: 'ai.agent.view',
+      module: 'ai',
     },
     {
       key: 'settings',
@@ -113,6 +115,7 @@ export function defaultQuickActions(): QuickAction[] {
       // Settings Center is gated by system.parameter.view (Technical) — hidden
       // from business admins so the tile doesn't just bounce to /403.
       permission: 'system.parameter.view',
+      module: 'system',
     },
   ]
 }
@@ -155,7 +158,7 @@ export function defaultTimelineItems(): TimelineItem[] {
  *   2. Quick actions (24)
  *   3. Four business stat cards (lg: 6 each, md: 12 each, xs: 24)
  *   4. System health + activity timeline (8 / 16 at lg)
- *   5. Recent audit + chat + tips
+ *   5. Recent audit + ops health + chat
  */
 export function defaultWorkbenchWidgets(): WidgetDef[] {
   return [
@@ -178,12 +181,21 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       refreshable: false,
       props: { actions: defaultQuickActions() },
     },
+    // Data widgets carry the permission code of the surface they fetch from,
+    // so a user without the grant never mounts the widget (no doomed 403
+    // fetches, no dead cards on a zero-permission "empty shell" dashboard).
+    // Dashboard.vue fails open for super admins / the pre-permission window.
+    // They ALSO carry the backend module their data lives in (`module`), so a
+    // host that never loaded that module drops the widget for everyone —
+    // including super admins — instead of firing fetches that can only fail.
     {
       id: 'identity-stats',
       component: TWidgetIdentityStats,
       title: 'admin.widgets.identityStats.title',
       icon: 'mdi:account-group-outline',
       span: { xs: 24, sm: 24, md: 12, lg: 6 },
+      permission: 'user.view',
+      module: 'identity',
     },
     {
       id: 'ai-usage',
@@ -191,6 +203,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.aiUsage.title',
       icon: 'mdi:robot-outline',
       span: { xs: 24, sm: 24, md: 12, lg: 6 },
+      permission: 'ai.usage.view',
+      module: 'ai',
     },
     {
       id: 'storage-usage',
@@ -198,6 +212,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.storage.title',
       icon: 'mdi:harddisk',
       span: { xs: 24, sm: 24, md: 12, lg: 6 },
+      permission: 'storage.file.view',
+      module: 'storage',
     },
     {
       id: 'notification-stats',
@@ -205,6 +221,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.notifications.title',
       icon: 'mdi:email-multiple-outline',
       span: { xs: 24, sm: 24, md: 12, lg: 6 },
+      permission: 'notification.message.view',
+      module: 'notification',
     },
     {
       id: 'system-health',
@@ -227,6 +245,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       // the timeline can be re-polled from the widget toolbar (the
       // hardcoded i18n placeholder list never benefited from refresh).
       props: { limit: 6 },
+      permission: 'audit.log.view',
+      module: 'audit',
     },
     {
       id: 'audit-recent',
@@ -234,6 +254,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.auditRecent.title',
       icon: 'mdi:shield-check-outline',
       span: { xs: 24, sm: 24, md: 12, lg: 12 },
+      permission: 'audit.log.view',
+      module: 'audit',
     },
     {
       id: 'ops-health',
@@ -252,17 +274,10 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.chat.title',
       icon: 'mdi:forum-outline',
       span: { xs: 24, sm: 24, md: 12, lg: 6 },
-    },
-    {
-      id: 'tips',
-      component: TWidgetTips,
-      title: 'admin.modules.dashboard.tips.title',
-      icon: 'mdi:lightbulb-on-outline',
-      span: { xs: 24, sm: 24, md: 24, lg: 6 },
-      refreshable: false,
-      props: {
-        body: 'admin.modules.dashboard.tips.body',
-      },
+      // Static quick-link to chat.conversations - hide when the target route
+      // is out of reach so the tile doesn't just bounce to /403.
+      permission: 'chat.session.view',
+      module: 'chat',
     },
   ]
 }

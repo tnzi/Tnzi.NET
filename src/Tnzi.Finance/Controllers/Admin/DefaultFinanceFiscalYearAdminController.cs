@@ -31,6 +31,7 @@ public class DefaultFinanceFiscalYearAdminController : ApiAdminControllerBase
     /// 创建会计年度
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.fiscalYear.create")]
     public virtual async Task<ApiResult<FiscalYearDto>> Create([FromBody] CreateFiscalYearDto request)
     {
         var result = await _fiscalYearService.CreateAsync(request);
@@ -41,6 +42,7 @@ public class DefaultFinanceFiscalYearAdminController : ApiAdminControllerBase
     /// 关闭会计年度（区间内禁止过账）
     /// </summary>
     [HttpPost("{id:guid}/close")]
+    [ApiAuthorize(PermissionName = "finance.fiscalYear.update")]
     public virtual async Task<ApiResult> Close(Guid id)
     {
         var result = await _fiscalYearService.CloseAsync(id);
@@ -51,6 +53,7 @@ public class DefaultFinanceFiscalYearAdminController : ApiAdminControllerBase
     /// 重新打开会计年度
     /// </summary>
     [HttpPost("{id:guid}/reopen")]
+    [ApiAuthorize(PermissionName = "finance.fiscalYear.update")]
     public virtual async Task<ApiResult> Reopen(Guid id)
     {
         var result = await _fiscalYearService.ReopenAsync(id);
@@ -61,6 +64,7 @@ public class DefaultFinanceFiscalYearAdminController : ApiAdminControllerBase
     /// 删除会计年度
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.fiscalYear.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _fiscalYearService.DeleteAsync(id);

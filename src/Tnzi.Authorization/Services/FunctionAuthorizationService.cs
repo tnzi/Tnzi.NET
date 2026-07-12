@@ -8,12 +8,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 {
     private readonly IRepository<FunctionModule, Guid> _moduleRepository;
     private readonly IRepository<ModuleFunction, Guid> _moduleFunctionRepository;
-    private readonly IRepository<ModuleUser, Guid> _moduleUserRepository;
-    private readonly IRepository<ModuleRole, Guid> _moduleRoleRepository;
     private readonly IRepository<RoleFunction, Guid> _roleFunctionRepository;
+    private readonly IRepository<UserFunction, Guid> _userFunctionRepository;
     private readonly IUserRoleService? _userRoleService;
     private readonly FunctionAuthCache? _functionAuthCache;
     private readonly IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? _options;
+    private readonly IRepository<Tnzi.Identity.Entities.Role, Guid>? _roleRepository;
 
     /// <summary>
     /// 初始化一个<see cref="FunctionAuthorizationService"/>类型的新实例
@@ -21,79 +21,127 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     public FunctionAuthorizationService(
         IRepository<FunctionModule, Guid> moduleRepository,
         IRepository<ModuleFunction, Guid> moduleFunctionRepository,
-        IRepository<ModuleUser, Guid> moduleUserRepository,
-        IRepository<ModuleRole, Guid> moduleRoleRepository,
         IRepository<RoleFunction, Guid> roleFunctionRepository,
+        IRepository<UserFunction, Guid> userFunctionRepository,
         IServiceProvider serviceProvider,
         IUserRoleService? userRoleService = null,
         FunctionAuthCache? functionAuthCache = null,
-        IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? options = null)
+        IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? options = null,
+        IRepository<Tnzi.Identity.Entities.Role, Guid>? roleRepository = null)
         : base(serviceProvider)
     {
         _moduleRepository = Check.NotNull(moduleRepository);
         _moduleFunctionRepository = Check.NotNull(moduleFunctionRepository);
-        _moduleUserRepository = Check.NotNull(moduleUserRepository);
-        _moduleRoleRepository = Check.NotNull(moduleRoleRepository);
         _roleFunctionRepository = Check.NotNull(roleFunctionRepository);
+        _userFunctionRepository = Check.NotNull(userFunctionRepository);
         _userRoleService = userRoleService;
         _functionAuthCache = functionAuthCache;
         _options = options;
+        _roleRepository = roleRepository;
     }
 
     /// <summary>
-    /// Admin tier resolved from role membership — the two-tier admin model.
+    /// Whether the user is a super administrator - member of any role listed
+    /// in <c>Authorization:SuperAdminRoles</c> (case-insensitive role-name
+    /// match). Super admins bypass every permission check and see the full
+    /// enabled-function catalogue; every other user resolves through explicit
+    /// grants only (deny-by-default).
     /// </summary>
-    private enum AdminTier
+    public async Task<bool> IsSuperAdminAsync(Guid userId)
     {
-        /// <summary>Regular user: explicit grants only.</summary>
-        None,
-
-        /// <summary>
-        /// Member of <c>Authorization:BusinessAdminRoles</c>: implicitly
-        /// granted every enabled Business-category permission (plus explicit
-        /// grants), but not Technical ones.
-        /// </summary>
-        BusinessAdmin,
-
-        /// <summary>
-        /// Member of <c>Authorization:SuperAdminRoles</c>: bypasses every
-        /// permission check and sees the full enabled-function catalogue.
-        /// </summary>
-        SuperAdmin,
-    }
-
-    /// <summary>
-    /// Resolve the user's admin tier from <c>Authorization:SuperAdminRoles</c> /
-    /// <c>Authorization:BusinessAdminRoles</c> (case-insensitive role-name
-    /// match). A role listed in both resolves as super admin — the super check
-    /// runs first. Single role fetch covers both checks.
-    /// </summary>
-    private async Task<AdminTier> GetAdminTierAsync(Guid userId)
-    {
-        var opts = _options?.Value;
-        var superRoles = opts?.SuperAdminRoles;
-        var businessRoles = opts?.BusinessAdminRoles;
-        var superConfigured = superRoles is { Count: > 0 };
-        var businessConfigured = businessRoles is { Count: > 0 };
-        if ((!superConfigured && !businessConfigured) || _userRoleService == null)
-            return AdminTier.None;
+        var superRoles = _options?.Value.SuperAdminRoles;
+        if (superRoles is not { Count: > 0 } || _userRoleService == null)
+            return false;
 
         var lookup = await _userRoleService.GetUserRolesAsync(new[] { userId });
-        if (!lookup.TryGetValue(userId, out var userRoles)) return AdminTier.None;
+        if (!lookup.TryGetValue(userId, out var userRoles)) return false;
 
-        if (superConfigured)
+        var superSet = new HashSet<string>(superRoles, StringComparer.OrdinalIgnoreCase);
+        return userRoles.Any(r => superSet.Contains(r));
+    }
+
+    /// <summary>
+    /// 委托支配判定（权限集包含模型）：超管支配一切角色；其余授权者仅支配
+    /// "显式权限集 ⊆ 自己有效权限集" 的角色，且永远不能支配超管配置角色
+    /// （超管角色通常零显式授权，否则会被任何人平凡支配）。
+    /// </summary>
+    public async Task<bool> CanManageRoleAsync(Guid grantorUserId, Guid roleId)
+    {
+        if (await IsSuperAdminAsync(grantorUserId)) return true;
+        if (await IsSuperAdminRoleAsync(roleId)) return false;
+
+        var grantorCodes = ToCaseInsensitiveSet(await GetUserPermissionNamesAsync(grantorUserId));
+        var roleCodes = await GetRoleGrantedCodesAsync(roleId);
+        return roleCodes.All(grantorCodes.Contains);
+    }
+
+    /// <summary>
+    /// 角色名是否列于 <c>Authorization:SuperAdminRoles</c>。已配置超管角色但角色
+    /// 仓储不可用时 fail CLOSED(视一切角色为受保护):超管角色的显式授权集通常
+    /// 为空,静默撤保护会让任何授权者"平凡支配"它并借成员路径自提权。
+    /// </summary>
+    private async Task<bool> IsSuperAdminRoleAsync(Guid roleId)
+    {
+        var superRoles = _options?.Value.SuperAdminRoles;
+        if (superRoles is not { Count: > 0 }) return false;
+        if (_roleRepository == null) return true;
+
+        var roleName = await _roleRepository
+            .Where(r => r.Id == roleId)
+            .Select(r => r.Name)
+            .FirstOrDefaultAsync();
+        return !string.IsNullOrEmpty(roleName)
+            && superRoles.Contains(roleName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>角色显式授予的功能码（RoleFunction 直连），仅启用项。</summary>
+    private async Task<List<string>> GetRoleGrantedCodesAsync(Guid roleId)
+    {
+        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled);
+
+        return await _roleFunctionRepository
+            .Where(rf => rf.RoleId == roleId && rf.IsEnabled)
+            .Join(enabledFunctions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .Distinct()
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// 角色授权写路径的委托护栏。非超管授权者仅能操作自己支配的角色
+    /// （见 <see cref="CanManageRoleAsync"/>），且仅能授出自己持有的权限码。
+    /// 允许时返回 null，越界时返回英文错误消息（调用方包装为 403）。
+    /// 无用户上下文（系统/播种/内部路径与单元测试）时整体跳过。
+    /// </summary>
+    private async Task<string?> GetRoleGrantViolationAsync(Guid roleId, IReadOnlyCollection<Guid>? functionIdsToGrant = null)
+    {
+        var grantorId = CurrentUser?.Id;
+        if (grantorId == null || grantorId == Guid.Empty) return null;
+        if (await IsSuperAdminAsync(grantorId.Value)) return null;
+
+        if (!await CanManageRoleAsync(grantorId.Value, roleId))
         {
-            var superSet = new HashSet<string>(superRoles!, StringComparer.OrdinalIgnoreCase);
-            if (userRoles.Any(r => superSet.Contains(r))) return AdminTier.SuperAdmin;
+            return "You cannot manage this role: its permission set is not contained in yours, or it is a super-admin role.";
         }
 
-        if (businessConfigured)
+        if (functionIdsToGrant is { Count: > 0 })
         {
-            var businessSet = new HashSet<string>(businessRoles!, StringComparer.OrdinalIgnoreCase);
-            if (userRoles.Any(r => businessSet.Contains(r))) return AdminTier.BusinessAdmin;
+            var grantorCodes = ToCaseInsensitiveSet(await GetUserPermissionNamesAsync(grantorId.Value));
+            var idList = functionIdsToGrant.ToList();
+            var requestedCodes = await _moduleFunctionRepository
+                .Where(f => idList.Contains(f.Id))
+                .Select(f => f.Code)
+                .ToListAsync();
+            var exceeded = requestedCodes
+                .Where(c => !grantorCodes.Contains(c))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (exceeded.Count > 0)
+            {
+                return $"You cannot grant permissions you do not hold: {string.Join(", ", exceeded)}";
+            }
         }
 
-        return AdminTier.None;
+        return null;
     }
 
     /// <summary>
@@ -108,11 +156,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return false;
 
         // SuperAdmin bypass — short-circuit before touching the function
-        // tables. BusinessAdmin is NOT a bypass: it resolves through the
-        // permission-name set below (business catalogue ∪ explicit grants),
-        // so Technical codes correctly deny for business admins.
-        var tier = await GetAdminTierAsync(userId);
-        if (tier == AdminTier.SuperAdmin) return true;
+        // tables. Everyone else resolves through explicit grants only
+        // (deny-by-default): no role is implicitly granted anything.
+        if (await IsSuperAdminAsync(userId)) return true;
 
         // Permission codes are matched case-insensitively. The admin-roles
         // comparison above already uses OrdinalIgnoreCase; this brings the
@@ -120,7 +166,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // a controller-declared `catalog.product.create` (and vice versa).
         // Without this, a single character-case mismatch between the DB row
         // and the [ApiAuthorize(PermissionName=...)] attribute silently 403s.
-        var userPermissionNames = await GetUserPermissionNamesCoreAsync(userId, tier);
+        var userPermissionNames = await GetExplicitUserPermissionNamesAsync(userId);
         return ToCaseInsensitiveSet(userPermissionNames).Contains(permissionName);
     }
 
@@ -137,6 +183,16 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (permissionNameList.Count == 0)
         {
             return new Dictionary<string, bool>();
+        }
+
+        // SuperAdmin bypass - mirror CheckPermissionAsync exactly: supers pass
+        // every code, enabled or not, declared or not. Without this the batch
+        // path resolved through the ENABLED-only catalogue, so an endpoint
+        // gate (single check) and an in-service RequireAllPermissionsAsync
+        // (batch check) could reach opposite verdicts for the same super admin.
+        if (await IsSuperAdminAsync(userId))
+        {
+            return permissionNameList.ToDictionary(p => p, _ => true);
         }
 
         // 一次性获取用户的所有权限名称（带缓存）
@@ -183,47 +239,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// Resolve the business-admin catalogue (enabled functions whose
-    /// <see cref="PermissionCategory"/> is Business) with cache — same
-    /// shared-key semantics as the super-admin catalogue.
-    /// </summary>
-    private async Task<IReadOnlyList<string>> GetBusinessAdminCatalogueAsync()
-    {
-        if (_functionAuthCache != null)
-        {
-            var cached = await _functionAuthCache.GetBusinessAdminCatalogueAsync();
-            if (cached != null) return cached;
-        }
-
-        var codes = await _moduleFunctionRepository
-            .Where(f => f.IsEnabled && f.Category == PermissionCategory.Business)
-            .Select(f => f.Code)
-            .Distinct()
-            .ToListAsync();
-
-        if (_functionAuthCache != null)
-        {
-            await _functionAuthCache.SetBusinessAdminCatalogueAsync(codes);
-        }
-        return codes;
-    }
-
-    /// <summary>
     /// 获取用户的所有权限名称
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <returns>权限名称集合</returns>
     public async Task<IEnumerable<string>> GetUserPermissionNamesAsync(Guid userId)
-    {
-        var tier = await GetAdminTierAsync(userId);
-        return await GetUserPermissionNamesCoreAsync(userId, tier);
-    }
-
-    /// <summary>
-    /// Tier-aware permission-name resolution. Split from the public method so
-    /// <see cref="CheckPermissionAsync"/> can resolve the tier once and reuse it.
-    /// </summary>
-    private async Task<IEnumerable<string>> GetUserPermissionNamesCoreAsync(Guid userId, AdminTier tier)
     {
         // SuperAdmin bypass — return the full catalogue of enabled functions so
         // both the legacy "has X" check and any caller that enumerates the user's
@@ -232,30 +252,20 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // shared cache key (1h TTL), invalidated by Function/Module enable
         // changes. This avoids a full ModuleFunction scan per super-admin
         // request when a UI repeatedly enumerates permissions.
-        if (tier == AdminTier.SuperAdmin)
+        if (await IsSuperAdminAsync(userId))
         {
             return await GetSuperAdminCatalogueAsync();
-        }
-
-        // BusinessAdmin — implicit Business-category catalogue ∪ explicit
-        // grants. The union is computed per call from two independent caches
-        // (shared business catalogue + per-user grants) rather than cached as
-        // a third key, so catalogue and grant invalidations stay independent.
-        if (tier == AdminTier.BusinessAdmin)
-        {
-            var businessCatalogue = await GetBusinessAdminCatalogueAsync();
-            var explicitGrants = await GetExplicitUserPermissionNamesAsync(userId);
-            return businessCatalogue
-                .Union(explicitGrants, StringComparer.OrdinalIgnoreCase)
-                .ToList();
         }
 
         return await GetExplicitUserPermissionNamesAsync(userId);
     }
 
     /// <summary>
-    /// Explicitly-granted permission names (ModuleUser + ModuleRole +
-    /// RoleFunction union), tier-independent, with per-user cache.
+    /// Explicit effective permission names, tier-independent, with per-user
+    /// cache. Resolution: <c>(RoleFunction ∪ user-allow) − user-deny</c> —
+    /// a user-level deny row removes a code no matter which role granted it
+    /// (user-level wins; super admins short-circuit upstream and are never
+    /// affected by deny rows).
     /// </summary>
     private async Task<IEnumerable<string>> GetExplicitUserPermissionNamesAsync(Guid userId)
     {
@@ -276,26 +286,26 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // 基础功能查询器（仅获取启用的功能）
         var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled);
 
-        // a. 用户直接绑定的模块下的所有功能
-        var userModuleFunctionCodes = _moduleUserRepository
-            .Where(mu => mu.UserId == userId && mu.IsEnabled)
-            .Join(enabledFunctions, mu => mu.ModuleId, f => f.ModuleId, (mu, f) => f.Code);
-
-        // b. 用户角色绑定的模块下的所有功能
-        var roleModuleFunctionCodes = _moduleRoleRepository
-            .Where(mr => roleIdList.Contains(mr.RoleId) && mr.IsEnabled)
-            .Join(enabledFunctions, mr => mr.ModuleId, f => f.ModuleId, (mr, f) => f.Code);
-
-        // c. 用户角色直接绑定的具体功能
+        // a. 用户角色直接绑定的具体功能
         var directRoleFunctionCodes = _roleFunctionRepository
             .Where(rf => roleIdList.Contains(rf.RoleId) && rf.IsEnabled)
             .Join(enabledFunctions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code);
 
-        // 合并并去重，EF Core 会将其翻译为 UNION SQL
-        var permissions = await userModuleFunctionCodes
-            .Union(roleModuleFunctionCodes)
-            .Union(directRoleFunctionCodes)
-            .Distinct()
+        // b. 用户直接授权的具体功能（不经角色）
+        var directUserFunctionCodes = _userFunctionRepository
+            .Where(uf => uf.UserId == userId && uf.IsEnabled && uf.IsGranted)
+            .Join(enabledFunctions, uf => uf.FunctionId, f => f.Id, (uf, f) => f.Code);
+
+        // c. 用户级否定权限（deny 行）从并集中扣除——"唯独这个用户不行"，
+        //    角色给了也无效。缓存存的是扣除后的最终集，检查路径零额外成本。
+        var deniedCodes = _userFunctionRepository
+            .Where(uf => uf.UserId == userId && uf.IsEnabled && !uf.IsGranted)
+            .Join(enabledFunctions, uf => uf.FunctionId, f => f.Id, (uf, f) => f.Code);
+
+        // 合并去重再扣除，EF Core 翻译为 UNION / EXCEPT SQL
+        var permissions = await directRoleFunctionCodes
+            .Union(directUserFunctionCodes)
+            .Except(deniedCodes)
             .ToListAsync();
 
         // 3. 结果存入缓存 (30分钟)
@@ -715,6 +725,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Ok("No functions to assign");
         }
 
+        var violation = await GetRoleGrantViolationAsync(roleId, functionIdList);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // 验证功能是否存在
         var existingFunctions = await _moduleFunctionRepository
             .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled)
@@ -766,6 +782,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Ok("No functions to remove");
         }
 
+        // 回收虽不授出新权限,但支配约束仍适用——弱管理员不得剥夺强角色的权限。
+        var violation = await GetRoleGrantViolationAsync(roleId);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // 批量删除
         await _roleFunctionRepository.DeleteAsync(rf => rf.RoleId == roleId && functionIdList.Contains(rf.FunctionId));
 
@@ -784,6 +807,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     public async Task<Result> SetRoleFunctionsAsync(Guid roleId, IEnumerable<Guid> functionIds)
     {
         var functionIdList = functionIds.ToList();
+
+        var violation = await GetRoleGrantViolationAsync(roleId, functionIdList);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+        }
 
         // 验证新功能是否存在
         if (functionIdList.Count > 0)
@@ -873,6 +902,18 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Ok("No roles or functions to assign");
         }
 
+        // Pre-check the delegation guard for EVERY target role before writing
+        // anything - the per-role assign below commits one role at a time, so
+        // a mid-loop guard failure would otherwise leave a partial batch.
+        foreach (var roleId in roleIdList)
+        {
+            var violation = await GetRoleGrantViolationAsync(roleId, functionIdList);
+            if (violation != null)
+            {
+                return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+            }
+        }
+
         foreach (var roleId in roleIdList)
         {
             var result = await AssignFunctionsToRoleAsync(roleId, functionIdList);
@@ -893,6 +934,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="roleId">角色ID</param>
     public async Task<Result> ClearRoleFunctionsAsync(Guid roleId)
     {
+        // 清空同样受支配约束——弱管理员不得清空强角色。
+        var violation = await GetRoleGrantViolationAsync(roleId);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // 批量删除
         await _roleFunctionRepository.DeleteAsync(rf => rf.RoleId == roleId);
 
@@ -949,12 +997,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         function.IsEnabled = true;
 
         await _moduleFunctionRepository.InsertAsync(function);
-        // A new enabled function belongs in the admin-tier catalogues
-        // immediately; without this, it would be invisible to super/business
-        // admins until the catalogue TTL (1h) expires.
+        // A new enabled function belongs in the super-admin catalogue
+        // immediately; without this, it would be invisible to super admins
+        // until the catalogue TTL (1h) expires.
         if (_functionAuthCache != null)
         {
-            await _functionAuthCache.InvalidateAdminCataloguesAsync();
+            await _functionAuthCache.InvalidateSuperAdminCatalogueAsync();
         }
         LogInformation("Module function created: {Code}, Name: {Name}", request.Code, request.Name);
         return Ok(function, "Module function created successfully");
@@ -1020,8 +1068,8 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         //   re-asserts it), protected like Code/ModuleId — admin edits ignored;
         // - admin-created rows: apply only when the request explicitly provides
         //   a value. A nullable-with-default would silently downgrade Technical
-        //   to Business on any update that omits the field, instantly granting
-        //   the permission to every business admin (privilege escalation).
+        //   to Business on any update that omits the field, erasing the
+        //   warning badge assignment UIs rely on to flag dangerous surfaces.
         var currentCategory = function.Category;
         request.MapTo(function);
         function.Category = function.IsSystemManaged
@@ -1065,6 +1113,16 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail("Cannot delete function with role associations", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
+        // 检查是否有用户直授关联
+        var hasUserFunctions = await _userFunctionRepository
+            .Where(uf => uf.FunctionId == id)
+            .AnyAsync();
+
+        if (hasUserFunctions)
+        {
+            return Fail("Cannot delete function with user direct-grant associations", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         await _moduleFunctionRepository.DeleteAsync(function);
         await InvalidateAllCacheAsync();
         LogInformation("Module function deleted: {Code}, Name: {Name}", function.Code, function.Name);
@@ -1085,7 +1143,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         function.IsEnabled = true;
         await _moduleFunctionRepository.UpdateAsync(function);
-        await InvalidateCacheForFunctionAsync(function.Id, function.ModuleId);
+        await InvalidateCacheForFunctionAsync(function.Id);
         await PublishFunctionEnabledChangedAsync(function.Id, function.Code, function.ModuleId, true);
         LogInformation("Module function enabled: {Code}, Name: {Name}", function.Code, function.Name);
         return Ok("Module function enabled successfully");
@@ -1105,7 +1163,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         function.IsEnabled = false;
         await _moduleFunctionRepository.UpdateAsync(function);
-        await InvalidateCacheForFunctionAsync(function.Id, function.ModuleId);
+        await InvalidateCacheForFunctionAsync(function.Id);
         await PublishFunctionEnabledChangedAsync(function.Id, function.Code, function.ModuleId, false);
         LogInformation("Module function disabled: {Code}, Name: {Name}", function.Code, function.Name);
         return Ok("Module function disabled successfully");
@@ -1219,7 +1277,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// Reverse permission query: get all user IDs that have a specific permission (via roles)
+    /// Reverse permission query: get all user IDs that have a specific
+    /// permission, via roles or via direct UserFunction grants. Direct-grant
+    /// users carry an empty RoleIds list.
     /// </summary>
     /// <param name="permissionName">Permission name (function code)</param>
     /// <returns>List of users with the permission</returns>
@@ -1252,11 +1312,6 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             .Distinct()
             .ToListAsync();
 
-        if (roleIds.Count == 0)
-        {
-            return Ok(Enumerable.Empty<PermissionUserDto>());
-        }
-
         // For each role, get the users
         var userRoleMap = new Dictionary<Guid, List<Guid>>(); // userId -> roleIds
         foreach (var roleId in roleIds)
@@ -1271,6 +1326,33 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 }
                 roles.Add(roleId);
             }
+        }
+
+        // Users holding the function via a direct grant (no role involved).
+        // They appear with an empty RoleIds list unless a role also grants it.
+        var directUserIds = await _userFunctionRepository
+            .Where(uf => uf.FunctionId == function.Id && uf.IsEnabled && uf.IsGranted)
+            .Select(uf => uf.UserId)
+            .Distinct()
+            .ToListAsync();
+        foreach (var userId in directUserIds)
+        {
+            if (!userRoleMap.ContainsKey(userId))
+            {
+                userRoleMap[userId] = new List<Guid>();
+            }
+        }
+
+        // User-level deny rows override every grant path — drop those users
+        // so the reverse query mirrors the actual resolution semantics.
+        var deniedUserIds = await _userFunctionRepository
+            .Where(uf => uf.FunctionId == function.Id && uf.IsEnabled && !uf.IsGranted)
+            .Select(uf => uf.UserId)
+            .Distinct()
+            .ToListAsync();
+        foreach (var userId in deniedUserIds)
+        {
+            userRoleMap.Remove(userId);
         }
 
         var result = userRoleMap.Select(kvp => new PermissionUserDto
@@ -1318,8 +1400,15 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             })
             .FirstOrDefaultAsync();
 
-        var moduleRoleCount = await _moduleRoleRepository.AsQueryable().CountAsync();
-        var moduleUserCount = await _moduleUserRepository.AsQueryable().CountAsync();
+        // Single query approach using GroupBy for user-function direct grants
+        var ufStats = await _userFunctionRepository.AsQueryable()
+            .GroupBy(o => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Enabled = g.Count(uf => uf.IsEnabled)
+            })
+            .FirstOrDefaultAsync();
 
         var statistics = new AuthorizationStatisticsDto
         {
@@ -1329,11 +1418,26 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             EnabledFunctions = functionStats?.Enabled ?? 0,
             TotalRoleFunctionAssignments = rfStats?.Total ?? 0,
             EnabledRoleFunctionAssignments = rfStats?.Enabled ?? 0,
-            TotalModuleRoleAssignments = moduleRoleCount,
-            TotalModuleUserAssignments = moduleUserCount
+            TotalUserFunctionAssignments = ufStats?.Total ?? 0,
+            EnabledUserFunctionAssignments = ufStats?.Enabled ?? 0
         };
 
         return Ok(statistics);
+    }
+
+    /// <summary>
+    /// Resolve the user's access profile - effective permission codes plus
+    /// the backend-authoritative super-admin flag.
+    /// </summary>
+    public async Task<Result<AccessProfileDto>> GetAccessProfileAsync(Guid userId)
+    {
+        var isSuperAdmin = await IsSuperAdminAsync(userId);
+        var permissions = await GetUserPermissionNamesAsync(userId);
+        return Ok(new AccessProfileDto
+        {
+            IsSuperAdmin = isSuperAdmin,
+            Permissions = permissions.ToList(),
+        });
     }
 
     /// <summary>
@@ -1407,6 +1511,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Ok(0);
         }
 
+        var violation = await GetRoleGrantViolationAsync(targetRoleId, sourceFunctionIds);
+        if (violation != null)
+        {
+            return Fail<int>(violation, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // Get target role's existing function IDs
         var existingTargetFunctionIds = await _roleFunctionRepository
             .Where(rf => rf.RoleId == targetRoleId && sourceFunctionIds.Contains(rf.FunctionId))
@@ -1468,6 +1578,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <summary>
     /// Import function assignments to a role from exported data
     /// </summary>
+    public IReadOnlyList<string> GetSuperAdminRoleNames()
+        => _options?.Value.SuperAdminRoles ?? [];
+
     public async Task<Result<PermissionImportResultDto>> ImportRolePermissionsAsync(Guid roleId, RolePermissionExportDto importData)
     {
         if (importData.FunctionCodes.Count == 0)
@@ -1485,6 +1598,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         var foundCodes = functions.Select(f => f.Code).ToHashSet();
         var notFoundCodes = codeList.Where(c => !foundCodes.Contains(c)).ToList();
         var resolvedFunctionIds = functions.Select(f => f.Id).ToList();
+
+        var violation = await GetRoleGrantViolationAsync(roleId, resolvedFunctionIds);
+        if (violation != null)
+        {
+            return Fail<PermissionImportResultDto>(violation, 403, ErrorCodes.FORBIDDEN);
+        }
 
         // Get existing assignments for this role
         var existingFunctionIds = resolvedFunctionIds.Count > 0
@@ -1592,14 +1711,14 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
     /// <summary>
     /// Invalidate only the users actually reachable by a single function —
-    /// users granted that function via any of the 3 paths
-    /// (<see cref="ModuleUser"/>, <see cref="ModuleRole"/>+UserRole,
-    /// <see cref="RoleFunction"/>+UserRole), plus the super-admin catalogue
+    /// users granted that function via either path
+    /// (<see cref="RoleFunction"/>+UserRole, direct <see cref="UserFunction"/>),
+    /// plus the super-admin catalogue
     /// (which always includes every enabled function). Cheaper than
     /// <see cref="InvalidateAllCacheAsync"/> for the common
     /// "admin toggled one function" path.
     /// </summary>
-    private async Task InvalidateCacheForFunctionAsync(Guid functionId, Guid moduleId)
+    private async Task InvalidateCacheForFunctionAsync(Guid functionId)
     {
         if (_functionAuthCache == null || _userRoleService == null)
         {
@@ -1611,26 +1730,21 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         try
         {
-            // (a) Direct ModuleUser grants on the function's module.
-            var moduleUserIds = await _moduleUserRepository
-                .Where(mu => mu.ModuleId == moduleId && mu.IsEnabled)
-                .Select(mu => mu.UserId)
+            // (a) Direct UserFunction grants on the function itself.
+            var directGrantUserIds = await _userFunctionRepository
+                .Where(uf => uf.FunctionId == functionId && uf.IsEnabled)
+                .Select(uf => uf.UserId)
                 .ToListAsync();
 
-            // (b) Role-scoped grants — collect every role that touches this
-            // function (either via ModuleRole on its module, or directly via
-            // RoleFunction) and fan out to their users.
-            var moduleRoleIds = await _moduleRoleRepository
-                .Where(mr => mr.ModuleId == moduleId && mr.IsEnabled)
-                .Select(mr => mr.RoleId)
-                .ToListAsync();
+            // (b) Role-scoped grants — collect every role that carries this
+            // function via RoleFunction and fan out to their users.
             var roleFunctionRoleIds = await _roleFunctionRepository
                 .Where(rf => rf.FunctionId == functionId && rf.IsEnabled)
                 .Select(rf => rf.RoleId)
                 .ToListAsync();
 
-            var affectedUserIds = new HashSet<Guid>(moduleUserIds);
-            foreach (var roleId in moduleRoleIds.Concat(roleFunctionRoleIds).Distinct())
+            var affectedUserIds = new HashSet<Guid>(directGrantUserIds);
+            foreach (var roleId in roleFunctionRoleIds.Distinct())
             {
                 var roleUsers = await _userRoleService.GetRoleUserIdsAsync(roleId);
                 if (roleUsers != null)
@@ -1644,10 +1758,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 await _functionAuthCache.RemoveUserPermissionNamesAsync(affectedUserIds);
             }
 
-            // The admin-tier catalogues are derived from "all enabled
-            // functions" (full set / Business subset) — any function
-            // enable/disable or category change affects them.
-            await _functionAuthCache.InvalidateAdminCataloguesAsync();
+            // The super-admin catalogue is derived from "all enabled
+            // functions" - any function enable/disable affects it.
+            await _functionAuthCache.InvalidateSuperAdminCatalogueAsync();
         }
         catch (Exception ex)
         {

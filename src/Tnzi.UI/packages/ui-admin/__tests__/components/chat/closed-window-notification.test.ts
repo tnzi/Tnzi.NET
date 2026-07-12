@@ -18,7 +18,8 @@ import { useChatStore } from '../../../src/stores/useChatStore'
 
 // ── Shared mutable captures ────────────────────────────────────────────────
 let capturedOnNewMessage: ((p: NewMessagePayload) => void) | undefined
-const mockSoundPlay = vi.fn()
+const mockPlayNotification = vi.fn()
+const mockPlayMessage = vi.fn()
 
 // ── Fake bridge (one unmuted conversation) ─────────────────────────────────
 const fakeBridge = {
@@ -50,8 +51,13 @@ vi.mock('../../../src/headless/useChatRealtime', () => ({
   },
 }))
 
-vi.mock('../../../src/headless/useNotificationSound', () => ({
-  useNotificationSound: () => ({ play: mockSoundPlay, setEnabled: vi.fn(), enabled: { value: true } }),
+vi.mock('../../../src/headless/useChatSound', () => ({
+  useChatSound: () => ({
+    configure: vi.fn(),
+    playNotification: mockPlayNotification,
+    playMessage: mockPlayMessage,
+    preview: vi.fn(),
+  }),
 }))
 
 vi.mock('../../../src/plugin/client', () => ({
@@ -62,7 +68,7 @@ vi.mock('../../../src/plugin/client', () => ({
 vi.mock('pinia-plugin-persistedstate', () => ({ default: vi.fn() }))
 
 // ── Named stubs (so tests can emit open / update:show on them) ─────────────
-const LauncherStub = { name: 'TChatLauncher', template: '<button />', props: ['unreadCount'], emits: ['open'] }
+const LauncherStub = { name: 'TChatLauncher', template: '<button />', props: ['unreadCount', 'effect', 'attention'], emits: ['open'] }
 const WindowStub = { name: 'TChatWindow', template: '<div />', props: ['show'], emits: ['update:show'] }
 
 const globalStubs = { TChatLauncher: LauncherStub, TChatWindow: WindowStub }
@@ -95,7 +101,7 @@ describe('TChatHost — closed window still notifies for the last active convers
     return { wrapper, store }
   }
 
-  it('plays the sound (and does NOT markRead) after the window was opened once and closed', async () => {
+  it('plays the notification tone (and does NOT markRead) after the window was opened once and closed', async () => {
     const { wrapper, store } = await mountHost()
     expect(capturedOnNewMessage).toBeDefined()
 
@@ -112,12 +118,16 @@ describe('TChatHost — closed window still notifies for the last active convers
     capturedOnNewMessage!(payload('m1'))
     await wrapper.vm.$nextTick()
 
-    expect(mockSoundPlay).toHaveBeenCalledTimes(1)
+    // Closed window → the attention tone, not the in-conversation one.
+    expect(mockPlayNotification).toHaveBeenCalledTimes(1)
+    expect(mockPlayMessage).not.toHaveBeenCalled()
     expect(fakeBridge.markRead.mock.calls.length).toBe(readCallsBefore)
+    // ...and the launcher icon gets an attention bump (window is closed).
+    expect(wrapper.findComponent(LauncherStub).props('attention')).toBe(1)
     wrapper.unmount()
   })
 
-  it('marks read without sound while the window is open on the active conversation', async () => {
+  it('plays the gentle in-conversation tone (and marks read) while the window is open on the active conversation', async () => {
     const { wrapper, store } = await mountHost()
 
     wrapper.findComponent(LauncherStub).vm.$emit('open')
@@ -128,8 +138,12 @@ describe('TChatHost — closed window still notifies for the last active convers
     capturedOnNewMessage!(payload('m2'))
     await wrapper.vm.$nextTick()
 
-    expect(mockSoundPlay).not.toHaveBeenCalled()
+    // Active thread on screen → the subtle message tone, and it still marks read.
+    expect(mockPlayMessage).toHaveBeenCalledTimes(1)
+    expect(mockPlayNotification).not.toHaveBeenCalled()
     expect(fakeBridge.markRead.mock.calls.length).toBe(readCallsBefore + 1)
+    // Window is open on this thread → no launcher attention bump.
+    expect(wrapper.findComponent(LauncherStub).props('attention')).toBe(0)
     wrapper.unmount()
   })
 

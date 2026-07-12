@@ -47,6 +47,7 @@ import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createTemplateBridge } from '../../services/bridges/template-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -58,9 +59,11 @@ import type { TemplateInfoDto } from '@tnzi/core/services/template'
 type TemplateRow = TemplateInfoDto & { id: string }
 
 const bridge = createTemplateBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 const crud = useCrudPage<TemplateInfoDto, string>({
   pageId: 'template.templates',
+  permission: 'template.template',
   columns: templateColumns,
   // File-source rows have no DB id (backend returns Guid.Empty); use the
   // module + name as the row key so selection still works.
@@ -86,7 +89,7 @@ const crud = useCrudPage<TemplateInfoDto, string>({
 const rowActions: RowAction<TemplateRow>[] = [
   editAction(crud, { show: (row) => !(row as TemplateRow).isReadOnly }),
   { key: 'preview', label: 'actions.preview', onClick: (row) => void openPreview(row) },
-  { key: 'clone', label: 'actions.clone', onClick: (row) => void handleClone(row) },
+  { key: 'clone', label: 'actions.clone', show: () => can('template.template.create'), onClick: (row) => void handleClone(row) },
   deleteAction(crud, { show: (row) => !(row as TemplateRow).isReadOnly }),
 ]
 

@@ -6,9 +6,19 @@
     @update:show="(v: boolean) => emit('update:show', v)"
   >
     <NDrawerContent :title="title" :closable="closable">
+      <!-- Rich header (title + tag / info popover): a `#header` slot overrides the
+           plain `title` prop for callers that need more than a string. Omit it and
+           the `title` prop drives the header as before. -->
+      <template v-if="$slots.header" #header>
+        <slot name="header" />
+      </template>
       <slot />
       <template v-if="$slots.footer" #footer>
-        <slot name="footer" />
+        <!-- Same chrome-level action layout as TModalShell: bare buttons in
+             #footer get a uniform right-aligned gap instead of touching. -->
+        <div class="t-drawer-shell__footer">
+          <slot name="footer" />
+        </div>
       </template>
     </NDrawerContent>
   </NDrawer>
@@ -38,3 +48,14 @@ withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 </script>
+
+<style scoped>
+.t-drawer-shell__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+</style>

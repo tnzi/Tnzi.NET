@@ -29,6 +29,7 @@ public class DefaultSkillCategoryAdminController : ApiAdminControllerBase
     /// 创建技能分类
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.skill.create")]
     public virtual async Task<ApiResult<SkillCategoryDto>> Create([FromBody] CreateSkillCategoryDto input)
     {
         var result = await CategoryService.CreateAsync(input);
@@ -39,6 +40,7 @@ public class DefaultSkillCategoryAdminController : ApiAdminControllerBase
     /// 更新技能分类
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.skill.update")]
     public virtual async Task<ApiResult<SkillCategoryDto>> Update(Guid id, [FromBody] UpdateSkillCategoryDto input)
     {
         var result = await CategoryService.UpdateAsync(id, input);
@@ -49,6 +51,7 @@ public class DefaultSkillCategoryAdminController : ApiAdminControllerBase
     /// 删除技能分类
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.skill.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await CategoryService.DeleteAsync(id);

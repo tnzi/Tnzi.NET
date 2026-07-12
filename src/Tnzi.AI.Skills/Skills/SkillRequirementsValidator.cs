@@ -5,16 +5,18 @@ namespace Tnzi.AI.Skills;
 /// </summary>
 public class SkillRequirementsValidator : ISkillRequirementsValidator
 {
-    private readonly SkillsOptions _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IConfiguration? _configuration;
     private readonly IToolRegistry? _toolRegistry;
 
+    private SkillsOptions Options => _options.CurrentValue.ContextProviders.Skills;
+
     public SkillRequirementsValidator(
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IConfiguration? configuration = null,
         IToolRegistry? toolRegistry = null)
     {
-        _options = Check.NotNull(options).Value.ContextProviders.Skills;
+        _options = Check.NotNull(options);
         _configuration = configuration;
         _toolRegistry = toolRegistry;
     }
@@ -24,7 +26,7 @@ public class SkillRequirementsValidator : ISkillRequirementsValidator
     {
         Check.NotNull(skill);
 
-        if (!_options.RequireChecksEnabled || skill.Requirements == null)
+        if (!Options.RequireChecksEnabled || skill.Requirements == null)
             return new SkillValidationResult { IsValid = true };
 
         var result = new SkillValidationResult { IsValid = true };

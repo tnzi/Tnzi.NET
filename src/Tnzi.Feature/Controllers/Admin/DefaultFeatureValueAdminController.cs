@@ -38,6 +38,7 @@ public class DefaultFeatureValueAdminController : ApiAdminControllerBase
     /// </summary>
     /// <param name="request">Set value request</param>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "feature.update")]
     public virtual async Task<ApiResult<FeatureValueDto>> SetValue([FromBody] SetFeatureValueRequest request)
     {
         var result = await FeatureService.SetValueAsync(request);
@@ -49,6 +50,7 @@ public class DefaultFeatureValueAdminController : ApiAdminControllerBase
     /// </summary>
     /// <param name="id">Feature value ID</param>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "feature.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await FeatureService.DeleteValueAsync(id);
@@ -60,6 +62,7 @@ public class DefaultFeatureValueAdminController : ApiAdminControllerBase
     /// </summary>
     /// <param name="request">Batch set request</param>
     [HttpPost("batch")]
+    [ApiAuthorize(PermissionName = "feature.update")]
     public virtual async Task<ApiResult<BatchSetFeatureValuesResultDto>> BatchSetValues([FromBody] BatchSetFeatureValuesRequest request)
     {
         var result = await FeatureService.BatchSetValuesAsync(request);

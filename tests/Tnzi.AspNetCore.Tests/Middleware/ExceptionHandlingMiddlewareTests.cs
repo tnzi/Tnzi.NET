@@ -709,6 +709,70 @@ public class ExceptionHandlingMiddlewareTests
         // Assert
         Assert.Equal(400, context.Response.StatusCode);
     }
+
+    [Fact]
+    public async Task InvokeAsync_WhenLogRequestBodyEnabled_CapturesBodyIntoErrorLog()
+    {
+        // Arrange
+        RequestDelegate next = _ => throw new Exception("boom");
+
+        var options = new ExceptionHandlingOptions { LogRequestBody = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var bodyBytes = "{\"token\":\"secret-payload-123\"}"u8.ToArray();
+        context.Request.Method = "POST";
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert — the request body was captured into an error log entry
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenLogRequestBodyDisabled_DoesNotCaptureBody()
+    {
+        // Arrange
+        RequestDelegate next = _ => throw new Exception("boom");
+
+        var options = new ExceptionHandlingOptions { LogRequestBody = false };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var bodyBytes = "{\"token\":\"secret-payload-123\"}"u8.ToArray();
+        context.Request.Method = "POST";
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert — no log entry ever contains the body (default: buffering off)
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
 }
 
 /// <summary>

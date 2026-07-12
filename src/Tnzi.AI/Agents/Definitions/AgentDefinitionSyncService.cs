@@ -11,13 +11,13 @@ public class AgentDefinitionSyncService : IHostedService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IAgentDefinitionProvider _definitionProvider;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<AgentDefinitionSyncService> _logger;
 
     public AgentDefinitionSyncService(
         IServiceProvider serviceProvider,
         IAgentDefinitionProvider definitionProvider,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILogger<AgentDefinitionSyncService> logger)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
@@ -28,7 +28,7 @@ public class AgentDefinitionSyncService : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var config = _options.Value.AgentDefinitions;
+        var config = _options.CurrentValue.AgentDefinitions;
         if (!config.Enabled || !config.SyncOnStartup)
         {
             _logger.LogDebug("Agent definition sync is disabled");

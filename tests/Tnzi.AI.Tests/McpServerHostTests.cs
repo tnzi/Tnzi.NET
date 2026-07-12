@@ -26,7 +26,7 @@ public class McpServerHostTests
         using var serviceProvider = services.BuildServiceProvider();
 
         var security = new McpServerSecurityMiddleware(
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 ExposedAgentIds = [agentId]
@@ -36,7 +36,7 @@ public class McpServerHostTests
 
         var host = new McpServerHost(
             serviceProvider,
-            MsOptions.Create(new McpServerOptions
+            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
             {
                 Enabled = true,
                 ExposedAgentIds = [agentId]
@@ -79,7 +79,7 @@ public class McpServerHostTests
         services.AddSingleton(agentRuntime.Object);
         using var serviceProvider = services.BuildServiceProvider();
 
-        var options = MsOptions.Create(new McpServerOptions
+        var options = new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
         {
             Enabled = true,
             ExposedAgentIds = [agentId],

@@ -143,5 +143,7 @@ public class BroadcastLogDto
     public int RecipientCount { get; set; }
     public Guid? SenderId { get; set; }
     public string? SenderName { get; set; }
+    /// <summary>来源标识：管理端 UI 广播为 null；业务模块程序化发送记录调用方标签。</summary>
+    public string? Source { get; set; }
     public DateTime CreationTime { get; set; }
 }

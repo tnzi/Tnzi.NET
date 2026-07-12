@@ -23,6 +23,7 @@ public class DefaultThreadAdminController : ApiAdminControllerBase
     /// 创建线程
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.thread.create")]
     public virtual async Task<ApiResult<AgentThreadDto>> Create([FromBody] CreateAgentThreadDto input)
     {
         var result = await ThreadService.CreateAsync(input);
@@ -63,6 +64,7 @@ public class DefaultThreadAdminController : ApiAdminControllerBase
     /// 更新线程标题
     /// </summary>
     [HttpPatch("{id:guid}/title")]
+    [ApiAuthorize(PermissionName = "ai.thread.update")]
     public virtual async Task<ApiResult<AgentThreadDto>> UpdateTitle(Guid id, [FromBody] UpdateThreadTitleDto input)
     {
         var result = await ThreadService.UpdateTitleAsync(id, input.Title);
@@ -73,6 +75,7 @@ public class DefaultThreadAdminController : ApiAdminControllerBase
     /// 删除线程
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.thread.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await ThreadService.DeleteAsync(id);

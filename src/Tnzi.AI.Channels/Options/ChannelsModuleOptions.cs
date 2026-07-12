@@ -17,9 +17,6 @@ public class ChannelsModuleOptions
     /// <summary>最大并发消息处理数</summary>
     public int MaxConcurrency { get; set; } = 5;
 
-    /// <summary>流式更新最小间隔（毫秒）</summary>
-    public int StreamingThrottleMs { get; set; } = 350;
-
     /// <summary>默认 Agent ID（为空则使用系统默认 Agent）</summary>
     public Guid? DefaultAgentId { get; set; }
 

@@ -1,16 +1,27 @@
 using System.Linq.Expressions;
+using Microsoft.Extensions.Options;
 using Moq;
+using Tnzi.Chat.Options;
 using Tnzi.Chat.Services;
 using Tnzi.Domain.Repositories;
+using Tnzi.Results;
 using Tnzi.SignalR.Services;
 
 namespace Tnzi.Chat.Tests.Services;
 
 public class PresenceServiceTests
 {
+    private static IOptionsSnapshot<ChatOptions> Options(bool allowInvisible = true)
+    {
+        var opt = new Mock<IOptionsSnapshot<ChatOptions>>();
+        opt.Setup(o => o.Value).Returns(new ChatOptions { AllowInvisible = allowInvisible });
+        return opt.Object;
+    }
+
     private static PresenceService Build(
         Mock<IConnectionManager>? conn = null,
-        List<UserPresence>? presences = null)
+        List<UserPresence>? presences = null,
+        bool allowInvisible = true)
     {
         var sp = new Mock<IServiceProvider>();
         var presenceRepo = new Mock<IRepository<UserPresence, Guid>>();
@@ -20,7 +31,7 @@ public class PresenceServiceTests
             .ReturnsAsync((Expression<Func<UserPresence, bool>> p, CancellationToken _) =>
                 (presences ?? new()).Where(p.Compile()).ToList());
         return new PresenceService(sp.Object, presenceRepo.Object, memberRepo.Object, convRepo.Object,
-            connectionManager: conn?.Object, push: null);
+            Options(allowInvisible), connectionManager: conn?.Object, push: null);
     }
 
     /// <summary>
@@ -49,7 +60,7 @@ public class PresenceServiceTests
                 conversations.Where(p.Compile()).ToList());
 
         return new PresenceService(sp.Object, presenceRepo.Object, memberRepo.Object, convRepo.Object,
-            connectionManager: null, push: push?.Object);
+            Options(), connectionManager: null, push: push?.Object);
     }
 
     [Fact]
@@ -84,6 +95,30 @@ public class PresenceServiceTests
         var svc = Build(conn, new() { new UserPresence { UserId = uid, Status = UserPresenceStatus.Invisible } });
         var r = await svc.ResolveEffectiveAsync(new[] { uid });
         r.Single().Status.ShouldBe(UserPresenceStatus.Offline);
+    }
+
+    [Fact]
+    public async Task SetStatus_Invisible_Should_Fail_403_When_Invisible_Disabled()
+    {
+        // AllowInvisible=false → 服务端强制拒绝隐身意图（前端已隐藏选项，此为兜底）。
+        // 该拒绝在读取 CurrentUser 之前短路，故无需完整鉴权上下文。
+        var svc = Build(allowInvisible: false);
+        var r = await svc.SetStatusAsync(UserPresenceStatus.Invisible);
+        r.Succeeded.ShouldBeFalse();
+        r.Code.ShouldBe(403);
+    }
+
+    [Fact]
+    public async Task ResolveEffective_Invisible_Disabled_Resolves_As_Online_When_Connected()
+    {
+        // 禁用隐身后，历史隐身意图不再对外隐藏——有连接时按在线解析。
+        var uid = Guid.NewGuid();
+        var conn = new Mock<IConnectionManager>();
+        conn.Setup(c => c.IsUserOnlineAsync(uid)).ReturnsAsync(true);
+        var svc = Build(conn, new() { new UserPresence { UserId = uid, Status = UserPresenceStatus.Invisible } },
+            allowInvisible: false);
+        var r = await svc.ResolveEffectiveAsync(new[] { uid });
+        r.Single().Status.ShouldBe(UserPresenceStatus.Online);
     }
 
     [Fact]

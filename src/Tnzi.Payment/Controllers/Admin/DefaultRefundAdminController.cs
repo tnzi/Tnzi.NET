@@ -51,6 +51,7 @@ public class DefaultRefundAdminController : ApiAdminControllerBase
     /// 审批退款
     /// </summary>
     [HttpPost("{id:guid}/approve")]
+    [ApiAuthorize(PermissionName = "payment.refund.update")]
     public virtual async Task<ApiResult> Approve(Guid id, [FromBody] ApproveRefundDto request)
     {
         var result = await _refundService.ApproveRefundAsync(id, request);
@@ -61,6 +62,7 @@ public class DefaultRefundAdminController : ApiAdminControllerBase
     /// 执行退款
     /// </summary>
     [HttpPost("{id:guid}/process")]
+    [ApiAuthorize(PermissionName = "payment.refund.update")]
     public virtual async Task<ApiResult> Process(Guid id)
     {
         var result = await _refundService.ProcessRefundAsync(id);
@@ -71,6 +73,7 @@ public class DefaultRefundAdminController : ApiAdminControllerBase
     /// 取消退款
     /// </summary>
     [HttpPost("{id:guid}/cancel")]
+    [ApiAuthorize(PermissionName = "payment.refund.update")]
     public virtual async Task<ApiResult> Cancel(Guid id, [FromBody] CancelRefundDto request)
     {
         var result = await _refundService.CancelRefundAsync(id, request.Reason);

@@ -50,6 +50,7 @@ public class DefaultQuotaAdminController : ApiAdminControllerBase
     /// <param name="ct">取消令牌</param>
     /// <returns>配额信息</returns>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.quota.update")]
     public virtual async Task<ApiResult<UserQuotaDto>> SetQuota([FromBody] SetQuotaDto request, CancellationToken ct = default)
     {
         var result = await QuotaService.SetQuotaAsync(
@@ -70,6 +71,7 @@ public class DefaultQuotaAdminController : ApiAdminControllerBase
     /// <param name="ct">取消令牌</param>
     /// <returns>操作结果</returns>
     [HttpPost("reset")]
+    [ApiAuthorize(PermissionName = "ai.quota.update")]
     public virtual async Task<ApiResult> ResetQuota([FromBody] ResetQuotaDto request, CancellationToken ct = default)
     {
         var result = await QuotaService.ResetQuotaAsync(

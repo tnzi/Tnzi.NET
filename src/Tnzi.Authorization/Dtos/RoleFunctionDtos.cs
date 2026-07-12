@@ -203,14 +203,14 @@ public class AuthorizationStatisticsDto
     public int EnabledRoleFunctionAssignments { get; set; }
 
     /// <summary>
-    /// Total module-role assignments
+    /// Total user-function direct-grant assignments
     /// </summary>
-    public int TotalModuleRoleAssignments { get; set; }
+    public int TotalUserFunctionAssignments { get; set; }
 
     /// <summary>
-    /// Total module-user assignments
+    /// Number of enabled user-function direct-grant assignments
     /// </summary>
-    public int TotalModuleUserAssignments { get; set; }
+    public int EnabledUserFunctionAssignments { get; set; }
 }
 
 /// <summary>

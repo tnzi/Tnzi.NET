@@ -13,7 +13,7 @@ namespace Tnzi.AI.Options;
 /// </para>
 /// </remarks>
 [ConfigSection("AI:Mcp")]
-[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "AI Tools",
+[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "Tools",
     I18nKey = "admin.modules.system.settings.groups.aiTools", Icon = "mdi:tools", Order = 130)]
 public class McpOptions
 {
@@ -21,7 +21,7 @@ public class McpOptions
     /// 是否启用 MCP
     /// </summary>
     [RuntimeSetting(Label = "MCP Enabled", I18n = "admin.modules.system.settings.fields.mcpEnabled",
-        Type = SettingFieldType.Boolean)]
+        Type = SettingFieldType.Boolean, Subsection = "MCP")]
     public bool Enabled { get; set; } = false;
 
     /// <summary>
@@ -32,12 +32,18 @@ public class McpOptions
     /// <summary>
     /// MCP 工具列表缓存秒数（默认 300 秒即 5 分钟，0 表示不缓存）
     /// </summary>
+    [RuntimeSetting(Label = "MCP Tool Cache (s)", I18n = "admin.modules.system.settings.fields.mcpToolCacheSeconds",
+        Type = SettingFieldType.Int, Min = 0, Max = 3600, Subsection = "MCP",
+        Description = "How long MCP tool lists are cached, in seconds (0 = no cache)")]
     public int ToolCacheSeconds { get; set; } = 300;
 
     /// <summary>
     /// 是否允许 MCP 客户端连接私有/内网地址（loopback、RFC1918、link-local 等）。
     /// 默认 false（SSRF egress guard 生效，拒绝内网目标）。仅在连接受信内网 MCP 服务器时设为 true。
     /// </summary>
+    [RuntimeSetting(Label = "Allow Private Endpoints", I18n = "admin.modules.system.settings.fields.mcpAllowPrivateEndpoints",
+        Type = SettingFieldType.Boolean, Subsection = "MCP",
+        Description = "Allow MCP clients to connect to private/internal addresses (disables SSRF egress guard)")]
     public bool AllowPrivateEndpoints { get; set; } = false;
 }
 

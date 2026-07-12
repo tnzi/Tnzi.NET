@@ -266,7 +266,8 @@ public class SettingServiceTests
             _applicationOptionsMock.Object,
             encryptionOptions,
             _cacheMock.Object,
-            Enumerable.Empty<ISettingProvider>());
+            Enumerable.Empty<ISettingProvider>(),
+            Enumerable.Empty<ISettingDefinitionProvider>());
     }
 
     [Fact]
@@ -331,5 +332,95 @@ public class SettingServiceTests
 
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe("UpdatedApp");
+    }
+
+    private sealed class ManagedKeyProvider : ISettingDefinitionProvider
+    {
+        public IReadOnlyList<SettingDefinitionGroup> GetGroups() =>
+        [
+            new SettingDefinitionGroup
+            {
+                Key = "demo",
+                ModuleName = "Demo",
+                DisplayName = "Demo",
+                Fields = [new SettingFieldDefinition { Key = "Demo:Managed", Label = "M", Type = SettingFieldType.Int }],
+            },
+        ];
+    }
+
+    private SettingService CreateServiceWithManagedKeys()
+    {
+        var encryptionOptions = Microsoft.Extensions.Options.Options.Create(new SettingEncryptionOptions());
+        return new SettingService(
+            _serviceProviderMock.Object,
+            _settingRepositoryMock.Object,
+            _applicationOptionsMock.Object,
+            encryptionOptions,
+            _cacheMock.Object,
+            Enumerable.Empty<ISettingProvider>(),
+            new ISettingDefinitionProvider[] { new ManagedKeyProvider() });
+    }
+
+    [Fact]
+    public async Task CreateSetting_Should_Reject_Global_Key_Managed_By_Settings_Center()
+    {
+        // 后门收口回归：原始 CRUD 零 schema 校验，命中配置中心定义的 Global 键必须 400
+        //（否则非法值经 SettingConfigurationProvider 流入 IConfiguration，重绑定即抛异常）。
+        var service = CreateServiceWithManagedKeys();
+
+        var result = await service.CreateSettingAsync(new CreateSettingDto
+        {
+            Key = "Demo:Managed",
+            Value = "not-an-int",
+            Scope = SettingScope.Global,
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message.ShouldContain("settings center");
+        _settingRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Setting>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateSetting_Should_Reject_Global_Key_Managed_By_Settings_Center()
+    {
+        var service = CreateServiceWithManagedKeys();
+        var row = new Setting { Id = Guid.NewGuid(), Key = "Demo:Managed", Value = "1", Scope = SettingScope.Global };
+        _settingRepositoryMock.Setup(r => r.GetAsync(row.Id, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+
+        var result = await service.UpdateSettingAsync(row.Id, new UpdateSettingDto { Value = "abc" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        _settingRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Setting>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateSetting_Should_Allow_NonGlobal_Scope_And_Unmanaged_Keys()
+    {
+        // 仅 Global 作用域受管（Tenant/User 行不进 IConfiguration）；未受管的自定义键不受影响。
+        // 哨兵异常证明「后门拦截层已通过、到达唯一性检查」（内存 IQueryable 跑不了 EF 异步算子，
+        // 无法走完完整创建路径 — 这里只锁拦截边界）。
+        var service = CreateServiceWithManagedKeys();
+        _settingRepositoryMock
+            .Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Throws(new InvalidOperationException("sentinel: reached uniqueness check"));
+
+        var tenantScoped = await Should.ThrowAsync<InvalidOperationException>(() => service.CreateSettingAsync(new CreateSettingDto
+        {
+            Key = "Demo:Managed",
+            Value = "42",
+            Scope = SettingScope.Tenant,
+            ScopeId = "t1",
+        }));
+        tenantScoped.Message.ShouldContain("sentinel");
+
+        var unmanaged = await Should.ThrowAsync<InvalidOperationException>(() => service.CreateSettingAsync(new CreateSettingDto
+        {
+            Key = "Custom.Key",
+            Value = "v",
+            Scope = SettingScope.Global,
+        }));
+        unmanaged.Message.ShouldContain("sentinel");
     }
 }

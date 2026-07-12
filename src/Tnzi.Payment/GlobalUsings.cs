@@ -67,3 +67,4 @@ global using Tnzi.Template.Models;
 global using PaymentEntity = Tnzi.Payment.Entities.Payment;
 global using System.Globalization;
 global using Tnzi.Settings;
+global using Tnzi.Payment.Permissions;

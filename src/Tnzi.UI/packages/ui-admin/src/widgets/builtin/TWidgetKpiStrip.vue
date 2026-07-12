@@ -13,7 +13,7 @@
  *     backend endpoint, permission denied) silently degrade to `0` so
  *     one failed bridge doesn't blank the whole strip.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NGrid, NGi, NCard } from 'naive-ui'
 import { TCountTo } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -21,6 +21,7 @@ import { maybeTranslate } from '../../pages/_shared/translate'
 import type { KpiCard } from '../../components/pages/TDashboardPage.vue'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
+import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { createAiBridge } from '../../services/bridges/ai-bridge'
@@ -67,17 +68,25 @@ function canSee(permission: string): boolean {
   return authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission(permission)
 }
 
+// Per-KPI module gate — each tile fetches from a DIFFERENT optional backend
+// module, so the widget-level `WidgetDef.module` tag can't cover it. Uses
+// `canActivate` (no super-user bypass, defers while the availability probe is
+// in flight) so no tile ever fires a fetch at a module the host didn't load.
+const moduleAvailability = useModuleAvailability()
+
 interface KpiSpec {
   key: string
   /** Permission gating this KPI's endpoint — dropped when the user lacks it. */
   permission: string
+  /** Backend module this KPI's endpoint lives in — dropped when not loaded. */
+  module: string
   title: string
   icon: string
   gradient: { start: string; end: string }
   load: () => Promise<number>
 }
 
-useWidgetData(async () => {
+const { reload } = useWidgetData(async () => {
   if (!isAuto.value) return // consumer-supplied kpis — skip
   const emptyQuery = { pageIndex: 1, pageSize: 1, searchText: '', filters: {} }
   // AI usage summary backend (`UsageAnalyticsService.GetSummaryAsync`)
@@ -97,31 +106,33 @@ useWidgetData(async () => {
   // tile entirely instead of rendering a misleading 0 from a swallowed 403.
   const specs: KpiSpec[] = [
     {
-      key: 'users', permission: 'user.view',
+      key: 'users', permission: 'user.view', module: 'identity',
       title: 'admin.modules.dashboard.kpi.users', icon: 'mdi:account-group',
       gradient: { start: '#ec4786', end: '#b955a4' },
       load: async () => (await identityBridge.users.fetch(emptyQuery)).totalCount ?? 0,
     },
     {
-      key: 'access-logs', permission: 'system.accessLog.view',
+      key: 'access-logs', permission: 'system.accessLog.view', module: 'system',
       title: 'admin.modules.dashboard.kpi.accessLogs', icon: 'mdi:chart-areaspline',
       gradient: { start: '#865ec0', end: '#5144b4' },
       load: async () => (await systemBridge.accessLogs.fetch(emptyQuery)).totalCount ?? 0,
     },
     {
-      key: 'ai-requests', permission: 'ai.usage.view',
+      key: 'ai-requests', permission: 'ai.usage.view', module: 'ai',
       title: 'admin.modules.dashboard.kpi.aiRequests', icon: 'mdi:robot-outline',
       gradient: { start: '#56cdf3', end: '#719de3' },
       load: async () => (await aiBridge.usage.summary(aiUsageQuery)).requestCount ?? 0,
     },
     {
-      key: 'orders', permission: 'payment.order.view',
+      key: 'orders', permission: 'payment.order.view', module: 'payment',
       title: 'admin.modules.dashboard.kpi.orders', icon: 'mdi:cart-arrow-down',
       gradient: { start: '#fcbc25', end: '#f68057' },
       load: async () => (await paymentBridge.orders.fetch(emptyQuery)).totalCount ?? 0,
     },
   ]
-  const visible = specs.filter((s) => canSee(s.permission))
+  const visible = specs.filter(
+    (s) => canSee(s.permission) && moduleAvailability.canActivate(s.module),
+  )
   const results = await Promise.allSettled(visible.map((s) => s.load()))
   dynamicKpis.value = visible.map((s, i) => {
     const r = results[i]
@@ -134,6 +145,17 @@ useWidgetData(async () => {
     }
   })
 })
+
+// Re-run the auto-fetch when the module-availability signal settles or
+// refreshes: the mount-time run may have executed while the probe was still
+// in flight (module-tagged KPIs deferred, zero requests fired), and a
+// post-login refresh can change the loaded set.
+watch(
+  () => [moduleAvailability.pending.value, moduleAvailability.modules.value] as const,
+  () => {
+    if (isAuto.value) void reload()
+  },
+)
 </script>
 
 <template>

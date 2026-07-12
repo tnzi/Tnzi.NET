@@ -50,6 +50,7 @@ public class DefaultMcpToolAnalyticsAdminController : ApiAdminControllerBase
     /// 清理过期记录
     /// </summary>
     [HttpDelete("cleanup")]
+    [ApiAuthorize(PermissionName = "ai.mcp.delete")]
     public virtual async Task<ApiResult<int>> Cleanup([FromQuery][Range(1, 3650)] int retentionDays = 90)
     {
         var result = await _analyticsService.CleanupOldRecordsAsync(retentionDays);

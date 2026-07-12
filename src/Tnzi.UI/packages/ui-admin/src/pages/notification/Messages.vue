@@ -20,7 +20,7 @@
       <NPopconfirm @positive-click="() => batchResend(selectedIds)">
         <template #trigger>
           <NButton
-            v-if="selectedIds.length > 0"
+            v-if="selectedIds.length > 0 && can('notification.message.update')"
             size="small"
             type="warning"
             ghost
@@ -45,7 +45,7 @@
       <TRowActions :row="(row as NotificationInfo)" :actions="rowActions" :translate="t">
         <template #prepend>
           <NButton
-            v-if="isFailed(row)"
+            v-if="isFailed(row) && can('notification.message.update')"
             size="small"
             type="warning"
             ghost
@@ -66,6 +66,7 @@ import { NButton, NPopconfirm } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -76,9 +77,11 @@ import { NotificationStatus, type NotificationInfo } from '@tnzi/core/services/n
 
 const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 const crud = useCrudPage<NotificationInfo>({
   pageId: 'notification.messages',
+  permission: 'notification.message',
   columns: notificationMessageColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.messages.fetch(query),

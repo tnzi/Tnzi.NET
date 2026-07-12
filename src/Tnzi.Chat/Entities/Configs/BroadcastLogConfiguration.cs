@@ -9,6 +9,7 @@ public class BroadcastLogConfiguration : EntityTypeConfigurationBase<BroadcastLo
 
         builder.Property(b => b.Content).HasMaxLength(4000).IsRequired();
         builder.Property(b => b.TargetSummary).HasMaxLength(200);
+        builder.Property(b => b.Source).HasMaxLength(128);
         builder.HasIndex(b => b.CreationTime);
     }
 }

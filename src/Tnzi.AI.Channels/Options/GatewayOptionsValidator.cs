@@ -20,5 +20,8 @@ public class GatewayOptionsValidator : OptionsValidatorBase<GatewayOptions>
 
         if (options.SessionEvictionHours < 1)
             errors.Add("SessionEvictionHours must be at least 1");
+
+        if (options.StreamingThrottleMs < 100)
+            errors.Add("StreamingThrottleMs must be at least 100ms");
     }
 }

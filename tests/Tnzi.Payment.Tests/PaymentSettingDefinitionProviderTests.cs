@@ -35,9 +35,11 @@ public class PaymentSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void Group_HasFiveFields()
+    public void Group_HasSevenFields()
     {
-        Assert.Equal(5, _group.Fields.Count);
+        // 原 5 个退款/通知字段 + 新增后台任务运营字段（AutoCloseExpireMinutes / BackgroundTaskIntervalMinutes，
+        // 经父 IOptionsMonitor<PaymentOptions> 热消费）。
+        Assert.Equal(7, _group.Fields.Count);
     }
 
     [Fact]
@@ -49,6 +51,8 @@ public class PaymentSettingDefinitionProviderTests
         Assert.Contains(fields, f => f.Key == "Payment:EnableRefundApproval");
         Assert.Contains(fields, f => f.Key == "Payment:RefundApprovalThreshold");
         Assert.Contains(fields, f => f.Key == "Payment:MaxRefundAmountPerDay");
+        Assert.Contains(fields, f => f.Key == "Payment:AutoCloseExpireMinutes");
+        Assert.Contains(fields, f => f.Key == "Payment:BackgroundTaskIntervalMinutes");
     }
 
     [Fact]

@@ -38,27 +38,20 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
             return;
         }
 
-        try
-        {
-            // 1. 获取应用配置
-            var (appName, frontendUrl, apiBaseUrl) = await GetApplicationConfigAsync();
+        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        // 1. 获取应用配置
+        var (appName, frontendUrl, apiBaseUrl) = await GetApplicationConfigAsync();
 
-            // 2. 生成重置密码链接
-            var resetUrl = GenerateResetPasswordUrl(@event.Email, @event.ResetToken, apiBaseUrl, frontendUrl);
+        // 2. 生成重置密码链接
+        var resetUrl = GenerateResetPasswordUrl(@event.Email, @event.ResetToken, apiBaseUrl, frontendUrl);
 
-            // 3. 获取过期时间（从配置中读取，默认 30 分钟）
-            var expirationMinutes = _identityOptions?.CurrentValue?.Recovery?.ResetTokenExpirationMinutes ?? 30;
+        // 3. 获取过期时间（从配置中读取，默认 30 分钟）
+        var expirationMinutes = _identityOptions?.CurrentValue?.Recovery?.ResetTokenExpirationMinutes ?? 30;
 
-            // 4. 发送密码重置邮件
-            await SendPasswordResetEmailAsync(@event, appName, resetUrl, expirationMinutes, cancellationToken);
+        // 4. 发送密码重置邮件
+        await SendPasswordResetEmailAsync(@event, appName, resetUrl, expirationMinutes, cancellationToken);
 
-            _logger.LogInformation("Password reset email sent to user {UserId} ({Email})", @event.UserId, @event.Email);
-        }
-        catch (Exception ex)
-        {
-            // 记录错误但不抛出（事件处理器的错误不应影响主业务流程）
-            _logger.LogError(ex, "Failed to send password reset email to user {UserId} ({Email})", @event.UserId, @event.Email);
-        }
+        _logger.LogInformation("Password reset email sent to user {UserId} ({Email})", @event.UserId, @event.Email);
     }
 
     /// <summary>

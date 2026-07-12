@@ -12,8 +12,15 @@
             :aria-label="appStore.siderCollapse ? 'Expand sider' : 'Collapse sider'"
             @click="appStore.toggleSiderCollapse()"
           >
+            <!-- soybean parity: animated `line-md` fold icon whose stroke
+                 draws itself on mount. The `:key` remounts the icon on every
+                 collapse toggle so the draw-in animation replays each click
+                 (matches soybean's `<ButtonIcon :key="String(collapsed)">`).
+                 fold-left = "click to collapse" (expanded), fold-right =
+                 "click to expand" (collapsed). -->
             <Icon
-              :icon="appStore.siderCollapse ? 'mdi:menu' : 'mdi:menu-open'"
+              :key="String(appStore.siderCollapse)"
+              :icon="appStore.siderCollapse ? 'line-md:menu-fold-right' : 'line-md:menu-fold-left'"
               width="20"
               height="20"
             />

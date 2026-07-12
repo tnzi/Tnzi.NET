@@ -204,7 +204,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
         var tenantB = new SkillEntity { Slug = "tenant-b-skill", Name = "Tenant B Skill", Content = "x", Scope = SkillScope.Tenant, TenantId = _tenantB, Enabled = true };
 
         ctx.Set<SkillEntity>().AddRange(system, tenantA, tenantB);
-        ctx.SaveChanges();
+        ctx.SaveChangesAsync().GetAwaiter().GetResult();
 
         _systemSkillId = system.Id;
         _tenantASkillId = tenantA.Id;
@@ -233,7 +233,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
         registry.Setup(r => r.InvalidateCache());
         var templateEngine = new Mock<ISkillTemplateEngine>();
 
-        var aiOptions = MsOptions.Create(new AIOptions
+        var aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
             ContextProviders = new ContextProvidersOptions
             {

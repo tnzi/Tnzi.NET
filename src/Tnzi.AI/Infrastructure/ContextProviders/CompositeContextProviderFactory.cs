@@ -9,14 +9,14 @@ namespace Tnzi.AI.Infrastructure.ContextProviders;
 public sealed class CompositeContextProviderFactory
 {
     private readonly IContextProviderContributor[] _orderedContributors;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ITokenEstimator _tokenEstimator;
     private readonly ILogger<CompositeContextProvider> _compositeLogger;
     private readonly ILogger<CompositeContextProviderFactory> _logger;
 
     public CompositeContextProviderFactory(
         IEnumerable<IContextProviderContributor> contributors,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ITokenEstimator tokenEstimator,
         ILoggerFactory loggerFactory,
         ILogger<CompositeContextProviderFactory> logger)
@@ -38,7 +38,7 @@ public sealed class CompositeContextProviderFactory
     {
         Check.NotNull(creationContext);
 
-        if (!_options.Value.ContextProviders.Enabled)
+        if (!_options.CurrentValue.ContextProviders.Enabled)
         {
             return null;
         }

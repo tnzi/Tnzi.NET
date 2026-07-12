@@ -6,12 +6,12 @@ namespace Tnzi.Payment.Providers;
 public class PaymentProviderFactory : IPaymentProviderFactory
 {
     private readonly IReadOnlyDictionary<string, IPaymentProvider> _providers;
-    private readonly IOptions<PaymentOptions> _paymentOptions;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptions;
     private readonly ILogger<PaymentProviderFactory> _logger;
 
     public PaymentProviderFactory(
         IEnumerable<IPaymentProvider> providers,
-        IOptions<PaymentOptions> paymentOptions,
+        IOptionsMonitor<PaymentOptions> paymentOptions,
         ILogger<PaymentProviderFactory> logger)
     {
         Check.NotNull(providers);
@@ -31,14 +31,14 @@ public class PaymentProviderFactory : IPaymentProviderFactory
         // 测试渠道（NullProvider）仅在显式开启时可用，防止生产环境无实际收款即"支付成功"
         if (string.Equals(provider.ChannelCode, "Null", StringComparison.OrdinalIgnoreCase))
         {
-            if (_paymentOptions.Value.AllowTestProvider)
+            if (_paymentOptions.CurrentValue.AllowTestProvider)
                 return provider;
 
             _logger.LogWarning("Test payment channel 'Null' is disabled. Set Payment:AllowTestProvider=true to enable (non-production only).");
             return null;
         }
 
-        var channelOptions = _paymentOptions.Value.Channels
+        var channelOptions = _paymentOptions.CurrentValue.Channels
             .FirstOrDefault(x => string.Equals(x.Key, provider.ChannelCode, StringComparison.OrdinalIgnoreCase))
             .Value;
 

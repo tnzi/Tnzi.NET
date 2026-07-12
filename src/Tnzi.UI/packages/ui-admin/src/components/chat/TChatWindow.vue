@@ -28,9 +28,10 @@
           :conversations="store.sortedConversations"
           :active-id="store.activeId"
           :my-status="store.myStatus"
-          :my-name="auth.userInfo?.displayName || auth.userInfo?.username"
+          :my-name="auth.userInfo?.shortName || auth.userInfo?.displayName || auth.userInfo?.username"
           :my-avatar-file-id="auth.userInfo?.avatarId ?? undefined"
           :presence="store.config.enablePresence"
+          :allow-invisible="store.config.allowInvisible"
           @select="onSelect"
           @new-chat="newChatShow = true"
           @set-status="(s) => store.setMyStatus(s)"
@@ -58,7 +59,7 @@
           :conversation="store.activeConversation"
           :messages="store.activeId ? (store.messagesByConv[store.activeId] ?? []) : []"
           :my-id="auth.userInfo?.id"
-          :my-name="auth.userInfo?.displayName || auth.userInfo?.username"
+          :my-name="auth.userInfo?.shortName || auth.userInfo?.displayName || auth.userInfo?.username"
           :my-avatar-file-id="auth.userInfo?.avatarId ?? undefined"
           :uploading="uploading"
           :upload-progress="uploadProgress"
@@ -66,7 +67,7 @@
           :upload-name="uploadName"
           :info-show="infoShow"
           :attachments="store.config.enableFileMessages"
-          @send="(text) => store.activeId && store.sendText(store.activeId, text)"
+          @send="onSendText"
           @pick-file="onPickFile"
           @drop-file="onDroppedFile"
           @toggle-info="infoShow = !infoShow"
@@ -131,6 +132,7 @@ import { useChatStore } from '../../stores/useChatStore'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { useChatSound } from '../../headless/useChatSound'
 import { unwrapResult } from '../../services/_mappers'
 import { translatePageKey, interpolate } from '../../pages/_shared/translate'
 import TConversationList from './TConversationList.vue'
@@ -144,6 +146,15 @@ const store = useChatStore()
 const auth = useAdminAuthStore()
 const client = useAdminClient(false)
 const { isSm } = useBreakpoint()
+const sound = useChatSound()
+
+// Send a text message, then play the gentle in-conversation tone as feedback for
+// my own action (the server never echoes my message back, so this is the only
+// place the sender hears it).
+function onSendText(text: string): void {
+  if (!store.activeId) return
+  void store.sendText(store.activeId, text).then(() => sound.playMessage())
+}
 
 const t = (k: string) => translatePageKey('chat', k)
 
@@ -321,6 +332,7 @@ async function uploadAndSend(file: File) {
       fileName: uploaded.originalName || uploaded.fileName,
       fileSize: uploaded.size,
     })
+    sound.playMessage()
   } catch {
     message?.error(t('window.uploadFailed'))
   } finally {

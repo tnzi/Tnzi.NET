@@ -29,6 +29,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 创建 Agent
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.agent.create")]
     public virtual async Task<ApiResult<AgentDto>> Create([FromBody] CreateAgentDto input)
     {
         var result = await AgentService.CreateAsync(input);
@@ -39,6 +40,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 更新 Agent
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<AgentDto>> Update(Guid id, [FromBody] UpdateAgentDto input)
     {
         var result = await AgentService.UpdateAsync(id, input);
@@ -49,6 +51,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 删除 Agent
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.agent.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await AgentService.DeleteAsync(id);
@@ -79,6 +82,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 克隆 Agent
     /// </summary>
     [HttpPost("{id:guid}/clone")]
+    [ApiAuthorize(PermissionName = "ai.agent.create")]
     public virtual async Task<ApiResult<AgentDto>> Clone(Guid id, [FromQuery] string? name = null)
     {
         var result = await AgentService.CloneAsync(id, name);
@@ -89,6 +93,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 运行 Agent
     /// </summary>
     [HttpPost("{id:guid}/run")]
+    [ApiAuthorize(PermissionName = "ai.agent.execute")]
     public virtual async Task<ApiResult<AgentResponseDto>> Run(Guid id, [FromBody] RunAgentRequestDto request, CancellationToken cancellationToken = default)
     {
         // 管理员可代理但默认用自身 ID
@@ -121,6 +126,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 回滚到指定版本
     /// </summary>
     [HttpPost("{id:guid}/versions/{version:int}/rollback")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<AgentDto>> RollbackToVersion(Guid id, int version)
     {
         var result = await AgentService.RollbackToVersionAsync(id, version);
@@ -131,6 +137,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 配置 A/B 测试
     /// </summary>
     [HttpPost("{id:guid}/ab-test")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<AgentDto>> ConfigureAbTest(Guid id, [FromBody] ConfigureAbTestDto input)
     {
         var result = await AgentService.ConfigureAbTestAsync(id, input);
@@ -141,6 +148,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 停止 A/B 测试
     /// </summary>
     [HttpDelete("{id:guid}/ab-test")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<AgentDto>> StopAbTest(Guid id)
     {
         var result = await AgentService.StopAbTestAsync(id);
@@ -151,6 +159,7 @@ public class DefaultAgentAdminController : ApiAdminControllerBase
     /// 流式运行 Agent（支持 SSE 和 NDJSON 格式）
     /// </summary>
     [HttpPost("{id:guid}/run/stream")]
+    [ApiAuthorize(PermissionName = "ai.agent.execute")]
     public virtual async Task RunStreaming(Guid id, [FromBody] RunAgentRequestDto request, CancellationToken cancellationToken = default)
     {
         var userId = CurrentUser?.Id ?? request.UserId;

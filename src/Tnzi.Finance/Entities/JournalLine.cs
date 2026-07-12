@@ -88,6 +88,16 @@ public class JournalLine : EntityBase<Guid>, IMultiTenant
     public string? Dimensions { get; set; }
 
     /// <summary>
+    /// 税率ID（结构化税务维度；仅税额行携带，非税行为 null）
+    /// </summary>
+    /// <remarks>
+    /// 过账时由单据过账点（Invoice/Bill/Expense/CreditMemo）按税额组件写入，
+    /// 冲销凭证原样复制。与 <see cref="PartyId"/> 同为事实表冗余引用，
+    /// 不建外键（税率软删后历史行仍可聚合）；TaxSummary 报表按此列纯 GL 聚合。
+    /// </remarks>
+    public Guid? TaxRateId { get; set; }
+
+    /// <summary>
     /// 是否已过账（冗余自凭证头；报表只统计已过账行）
     /// </summary>
     public bool IsPosted { get; set; }

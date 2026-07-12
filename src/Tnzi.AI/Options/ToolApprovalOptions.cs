@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// 工具审批配置选项
 /// </summary>
 [ConfigSection("AI:ToolApproval")]
-[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "AI Tools",
+[RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "Tools",
     I18nKey = "admin.modules.system.settings.groups.aiTools", Icon = "mdi:tools", Order = 130)]
 public class ToolApprovalOptions
 {
@@ -12,12 +12,15 @@ public class ToolApprovalOptions
     /// 是否启用审批机制
     /// </summary>
     [RuntimeSetting(Label = "Tool Approval Enabled", I18n = "admin.modules.system.settings.fields.toolApprovalEnabled",
-        Type = SettingFieldType.Boolean)]
+        Type = SettingFieldType.Boolean, Subsection = "Approval")]
     public bool Enabled { get; set; } = false;
 
     /// <summary>
     /// 审批模式
     /// </summary>
+    [RuntimeSetting(Label = "Approval Mode", I18n = "admin.modules.system.settings.fields.toolApprovalMode",
+        Type = SettingFieldType.Select, Subsection = "Approval",
+        Description = "NeverRequire / AlwaysRequire / Specific (use per-tool lists)")]
     public ToolApprovalMode Mode { get; set; } = ToolApprovalMode.NeverRequire;
 
     /// <summary>
@@ -38,6 +41,8 @@ public class ToolApprovalOptions
     /// <summary>
     /// 审批超时时间（秒）
     /// </summary>
+    [RuntimeSetting(Label = "Approval Timeout (s)", I18n = "admin.modules.system.settings.fields.toolApprovalTimeoutSeconds",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Approval")]
     public int TimeoutSeconds { get; set; } = 120;
 }
 

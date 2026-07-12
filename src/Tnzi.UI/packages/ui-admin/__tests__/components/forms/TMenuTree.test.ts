@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TMenuTree from '../../../src/components/forms/TMenuTree.vue'
 
-// TPermissionTree has its own dedicated spec (TPermissionTree.test.ts); this
-// file covers the draggable menu-reorder tree only.
+// The permission-assignment grid has its own dedicated spec
+// (TPermissionMatrix.test.ts); this file covers the draggable
+// menu-reorder tree only.
 const treeStub = {
   name: 'Tree',
   props: ['data', 'draggable', 'keyField', 'labelField', 'childrenField', 'blockLine'],

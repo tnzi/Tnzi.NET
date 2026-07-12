@@ -29,7 +29,7 @@ public sealed class LedgerPostingEngine
         IExchangeRateService exchangeRateService,
         IDocumentNumberService numberService,
         TimeProvider timeProvider,
-        IOptions<FinanceOptions> options,
+        IOptionsSnapshot<FinanceOptions> options,
         ICurrentUser? currentUser = null)
     {
         _accountRepository = Check.NotNull(accountRepository);
@@ -240,6 +240,7 @@ public sealed class LedgerPostingEngine
                 PartyType = line.PartyType,
                 PartyId = line.PartyId,
                 Dimensions = line.Dimensions,
+                TaxRateId = line.TaxRateId,
                 IsPosted = true,
                 PostingDate = date
             });

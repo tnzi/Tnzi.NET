@@ -26,7 +26,8 @@ public static class DatabaseProviderFactory
     /// <param name="builder">DbContext 选项构建器</param>
     /// <param name="connectionString">连接字符串</param>
     /// <param name="provider">数据库提供者类型</param>
-    public static void Configure(DbContextOptionsBuilder builder, string connectionString, DatabaseProvider provider)
+    /// <param name="options">provider 连接级选项（重试策略、命令超时）；为 null 时保持 provider 默认行为</param>
+    public static void Configure(DbContextOptionsBuilder builder, string connectionString, DatabaseProvider provider, DbProviderConfigureOptions? options = null)
     {
         if (!_configurators.TryGetValue(provider, out var configurator))
         {
@@ -34,8 +35,8 @@ public static class DatabaseProviderFactory
                 $"Database provider {provider} is not supported. " +
                 $"Supported providers: {string.Join(", ", _configurators.Keys)}.");
         }
-        
-        configurator.Configure(builder, connectionString);
+
+        configurator.Configure(builder, connectionString, options);
     }
     
     /// <summary>

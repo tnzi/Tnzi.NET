@@ -16,7 +16,8 @@ import type { NewMessagePayload } from '@tnzi/core/services/chat'
 
 // ── Shared mutable captures ────────────────────────────────────────────────
 let capturedOnNewMessage: ((p: NewMessagePayload) => void) | undefined
-const mockSoundPlay = vi.fn()
+const mockPlayNotification = vi.fn()
+const mockPlayMessage = vi.fn()
 
 // ── Fake bridge (two conversations: one muted, one not) ─────────────────────
 const fakeBridge = {
@@ -60,8 +61,13 @@ vi.mock('../../../src/headless/useChatRealtime', () => ({
   },
 }))
 
-vi.mock('../../../src/headless/useNotificationSound', () => ({
-  useNotificationSound: () => ({ play: mockSoundPlay, setEnabled: vi.fn(), enabled: { value: true } }),
+vi.mock('../../../src/headless/useChatSound', () => ({
+  useChatSound: () => ({
+    configure: vi.fn(),
+    playNotification: mockPlayNotification,
+    playMessage: mockPlayMessage,
+    preview: vi.fn(),
+  }),
 }))
 
 vi.mock('../../../src/headless/useBreakpoint', () => ({
@@ -122,7 +128,8 @@ describe('TChatHost — muted conversations do not play sound', () => {
     capturedOnNewMessage!(payload)
     await wrapper.vm.$nextTick()
 
-    expect(mockSoundPlay).not.toHaveBeenCalled()
+    expect(mockPlayNotification).not.toHaveBeenCalled()
+    expect(mockPlayMessage).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -140,7 +147,9 @@ describe('TChatHost — muted conversations do not play sound', () => {
     capturedOnNewMessage!(payload)
     await wrapper.vm.$nextTick()
 
-    expect(mockSoundPlay).toHaveBeenCalledTimes(1)
+    // Not the active thread → the attention (notification) tone.
+    expect(mockPlayNotification).toHaveBeenCalledTimes(1)
+    expect(mockPlayMessage).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

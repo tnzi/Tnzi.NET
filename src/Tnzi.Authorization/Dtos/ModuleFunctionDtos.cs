@@ -50,9 +50,9 @@ public class ModuleFunctionDto
     public bool IsSystemManaged { get; set; }
 
     /// <summary>
-    /// Permission category: Business (reachable by business admins via
-    /// BusinessAdminRoles) or Technical (explicit grant / super-admin only).
-    /// Admin UI shows a "technical" badge and can group assignments by it.
+    /// Permission category - informational metadata only. Admin UI shows a
+    /// "technical" badge on ops/dangerous surfaces and can group assignments
+    /// by it; it does not drive any implicit grant.
     /// </summary>
     public PermissionCategory Category { get; set; }
 }

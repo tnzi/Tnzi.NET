@@ -32,7 +32,7 @@ public class CachingEmbeddingDecorator : IEmbeddingService
     public CachingEmbeddingDecorator(
         [FromKeyedServices(InnerServiceKey)] IEmbeddingService inner,
         ILogger<CachingEmbeddingDecorator> logger,
-        IOptions<AIRagOptions> options,
+        IOptionsSnapshot<AIRagOptions> options,
         ICache? cache = null,
         ICurrentTenant? currentTenant = null)
     {

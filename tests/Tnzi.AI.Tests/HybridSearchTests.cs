@@ -350,7 +350,7 @@ public class HybridSearchTests
         var embeddingServiceMock = new Mock<IEmbeddingService>();
         var rerankerMock = new Mock<IReranker>();
         var docRepoMock = new Mock<IRepository<KnowledgeDocument, Guid>>();
-        var ragOptions = Microsoft.Extensions.Options.Options.Create(options);
+        var ragOptions = new StaticOptionsMonitor<AIRagOptions>(options);
 
         return new HybridSearchService(
             serviceProviderMock.Object,
@@ -399,7 +399,7 @@ public class HybridSearchTests
             mocks.Embedding.Object,
             mocks.Reranker.Object,
             mocks.DocRepo.Object,
-            Microsoft.Extensions.Options.Options.Create(options));
+            new StaticOptionsMonitor<AIRagOptions>(options));
 
         return (service, mocks);
     }

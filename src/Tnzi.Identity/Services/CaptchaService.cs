@@ -14,11 +14,12 @@ public class CaptchaService : ApplicationService, ICaptchaService
     private const int FailureRecordExpirationMinutes = 30; // 失败记录保留30分钟
 
     public CaptchaService(
-        IOptions<IdentityOptions> identityOptions,
+        IOptionsSnapshot<IdentityOptions> identityOptions,
         IServiceProvider serviceProvider,
         ICache? cache = null)
         : base(serviceProvider)
     {
+        // Scoped 服务：IOptionsSnapshot 每请求重算，CaptchaFailThreshold 随请求热更新。
         _captchaOptions = Check.NotNull(identityOptions).Value.Captcha ?? new CaptchaOptions();
         _cache = cache;
         _validateCoder = new ValidateCoder

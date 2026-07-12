@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// USD 成本预算配置选项
 /// </summary>
 [ConfigSection("AI:Budget")]
-[RuntimeSettingGroup(Key = "ai-budget", Module = "AI", DisplayName = "AI Budget",
+[RuntimeSettingGroup(Key = "ai-budget", Module = "AI", DisplayName = "Budget",
     I18nKey = "admin.modules.system.settings.groups.aiBudget", Icon = "mdi:cash-multiple", Order = 110)]
 public class BudgetOptions
 {

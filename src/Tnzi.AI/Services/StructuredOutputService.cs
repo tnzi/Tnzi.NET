@@ -14,7 +14,7 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
 {
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IAgentFactory _agentFactory;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     private const string DefaultSystemPrompt = """
         You are a helpful assistant that outputs responses in JSON format.
@@ -27,7 +27,7 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
         IServiceProvider serviceProvider,
         IChatClientFactory chatClientFactory,
         IAgentFactory agentFactory,
-        IOptions<AIOptions> options)
+        IOptionsMonitor<AIOptions> options)
         : base(serviceProvider)
     {
         _chatClientFactory = Check.NotNull(chatClientFactory);
@@ -122,7 +122,7 @@ public class StructuredOutputService : ApplicationService, IStructuredOutputServ
         bool isRetry,
         CancellationToken ct) where T : class
     {
-        var providerName = options.Provider ?? _options.Value.DefaultProvider;
+        var providerName = options.Provider ?? _options.CurrentValue.DefaultProvider;
 
         // 构建消息列表
         var messageList = new List<ChatMessage>();

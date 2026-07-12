@@ -114,6 +114,7 @@ const message = useSafeMessage()
 // delete removes the thread (bridge.threads.update only sends `{ title }`).
 const crud = useCrudPage<AgentThreadDto>({
   pageId: 'ai.threads',
+  permission: 'ai.thread',
   columns: threadColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.threads.fetch(q),

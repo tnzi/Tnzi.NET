@@ -51,7 +51,11 @@
               </header>
               <div class="t-user-center__section-body">
                 <div class="t-detail-content">
-                <div class="t-user-center__avatar-field">
+                <!-- Avatar upload pushes to the Storage module — hide the
+                     picker on hosts that never loaded it (v-module is the
+                     module twin of v-permission; imported locally so bare
+                     test mounts resolve it without global registration). -->
+                <div v-module="'storage'" class="t-user-center__avatar-field">
                   <TImageUpload
                     shape="circle"
                     :cropper="true"
@@ -440,6 +444,7 @@ import {
   NTag,
 } from 'naive-ui'
 import { TSvgIcon, TImageUpload, TAvatar } from '@tnzi/ui'
+import { vModule } from '../../directives/vModule'
 import { formatDateTime } from '@tnzi/core'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
@@ -726,6 +731,8 @@ async function saveProfile(): Promise<void> {
       authStore.setUserInfo({
         ...authStore.userInfo,
         displayName: updated.nickname || (fullName || undefined) || authStore.userInfo.username,
+        // Short label (header bar / greeting / chat "me") — first name, no surname.
+        shortName: updated.nickname || updated.firstName || authStore.userInfo.username,
       })
     }
     message.success(t('profile.saved'))

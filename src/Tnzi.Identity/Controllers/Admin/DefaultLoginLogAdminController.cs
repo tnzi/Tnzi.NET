@@ -118,6 +118,7 @@ public class DefaultLoginLogAdminController : ApiAdminControllerBase
     /// <param name="days">保留天数（默认90天）</param>
     /// <returns>删除的记录数</returns>
     [HttpDelete("expired")]
+    [ApiAuthorize(PermissionName = "identity.loginLog.delete")]
     public virtual async Task<ApiResult<int>> DeleteExpired([FromQuery] int days = 90)
     {
         var result = await LoginLogService.DeleteExpiredLogsAsync(days);

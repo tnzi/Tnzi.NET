@@ -162,7 +162,7 @@ public class RagTenantSqlFilterTests
         // host 上下文（ICurrentTenant 解析为 null）+ MT 启用 + 无 KB 范围 → 守卫先于连接打开抛出
         var store = new PgVectorStore(
             BuildConfiguration(),
-            Microsoft.Extensions.Options.Options.Create(new AIRagOptions()),
+            new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions()),
             NullLogger<PgVectorStore>.Instance,
             BuildServiceProvider(tenantId: null),
             Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = true }));
@@ -178,7 +178,7 @@ public class RagTenantSqlFilterTests
     {
         var provider = new PgFullTextSearchProvider(
             BuildConfiguration(),
-            Microsoft.Extensions.Options.Options.Create(new AIRagOptions()),
+            new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions()),
             NullLogger<PgFullTextSearchProvider>.Instance,
             currentTenant: null,
             Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = true }));

@@ -41,6 +41,7 @@ public class DefaultFinanceCustomerAdminController : ApiAdminControllerBase
     /// 创建客户
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.customer.create")]
     public virtual async Task<ApiResult<CustomerDto>> Create([FromBody] CreateCustomerDto request)
     {
         var result = await _customerService.CreateAsync(request);
@@ -51,6 +52,7 @@ public class DefaultFinanceCustomerAdminController : ApiAdminControllerBase
     /// 更新客户
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.customer.update")]
     public virtual async Task<ApiResult<CustomerDto>> Update(Guid id, [FromBody] UpdateCustomerDto request)
     {
         var result = await _customerService.UpdateAsync(id, request);
@@ -61,6 +63,7 @@ public class DefaultFinanceCustomerAdminController : ApiAdminControllerBase
     /// 删除客户
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.customer.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _customerService.DeleteAsync(id);

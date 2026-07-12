@@ -23,6 +23,28 @@ public class RoleFunctionsChangedEvent : EventBase
 }
 
 /// <summary>
+/// 用户功能直授变更事件
+/// 当用户的直接授权被分配、移除或重置时触发
+/// </summary>
+public class UserFunctionsChangedEvent : EventBase
+{
+    /// <summary>
+    /// 用户ID
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 变更类型
+    /// </summary>
+    public PermissionChangeType ChangeType { get; set; }
+
+    /// <summary>
+    /// 受影响的功能ID列表
+    /// </summary>
+    public List<Guid> AffectedFunctionIds { get; set; } = [];
+}
+
+/// <summary>
 /// 模块启用/禁用事件
 /// 当模块被启用或禁用时触发（包括级联操作）
 /// </summary>

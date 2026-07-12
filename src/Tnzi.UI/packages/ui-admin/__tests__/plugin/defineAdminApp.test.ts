@@ -6,6 +6,7 @@ import { defineAdminApp } from '../../src/plugin/defineAdminApp'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
+import { ADMIN_LOGIN_CONFIG_KEY, type AdminLoginConfig } from '../../src/plugin/loginConfig'
 
 const dummyClient = {
   get: async () => ({ success: true, code: 200, data: null }),
@@ -37,6 +38,167 @@ describe('defineAdminApp', () => {
     expect(childNames).toContain('identity')
     expect(childNames).toContain('authorization')
     expect(childNames).toContain('system')
+  })
+
+  it('applies the GLOBAL admin theme at bootstrap — anonymous, before login', async () => {
+    // The super-admin-configured global theme must reach the login page and the
+    // top-level exception pages (403/404/500), which render OUTSIDE the
+    // authenticated shell. So install() kicks off `GET /appearance/admin-theme`
+    // at bootstrap (the endpoint is anonymous), not just once signed in —
+    // otherwise the theme snapped back to the built-in palette on every refresh
+    // of those pages.
+    const get = vi.fn(async () => ({
+      success: true,
+      code: 200,
+      data: { theme: null, updatedAt: null },
+    }))
+    const client = {
+      get,
+      post: async () => ({ success: true, code: 200, data: null }),
+      addUnauthorizedListener: () => () => {},
+    } as never
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const router = {
+      beforeEach: vi.fn(),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    defineAdminApp({ client }).install(app, pinia, router)
+    // The load is fire-and-forget; flush the microtask/macrotask queue.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(
+      get.mock.calls.some((c) => String(c[0]).includes('appearance/admin-theme')),
+    ).toBe(true)
+  })
+
+  it('preserves meta.moduleGate through the RouteRecordRaw → store round-trip (regression)', () => {
+    // toAdminRouteRecords() re-maps meta field-by-field; if it forgets to carry
+    // `moduleGate` (as it once forgot `permission`), the store sees `undefined`
+    // and NEVER gates the node — the sidebar keeps showing menus for modules the
+    // backend never loaded, even for super-admins. Unit tests that seed the store
+    // directly bypass this conversion, so this MUST install through the real path.
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const router = {
+      beforeEach: vi.fn(),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    defineAdminApp({ client: dummyClient }).install(app, pinia, router)
+    const store = useAdminRouteStore()
+
+    // The marker survives the conversion (was `undefined` before the fix).
+    const identity = store.allRoutes.find((r) => r.name === 'identity')
+    expect(identity?.meta?.moduleGate).toBe(true)
+
+    // …and actually drives gating end-to-end: with a known loaded-module signal
+    // that omits identity, the identity subtree becomes unreachable and drops
+    // from the menu, while a loaded module (authorization) stays. Super-user
+    // bypasses the permission filter (which no longer fails open when logged
+    // out), so this isolates the module gate — which holds for super-admins too.
+    useAdminAuthStore().setSuperUser(true)
+    store.setAvailableModules(new Set(['authorization']))
+    expect(store.unavailableRouteNames.has('identity')).toBe(true)
+    const menuKeys = store.menus.map((m) => m.key)
+    expect(menuKeys).not.toContain('identity')
+    expect(menuKeys).toContain('authorization')
+
+    // STRING-valued gate variant: the Settings Center route carries
+    // `moduleGate: 'system'` (its backend lives in the System module). The
+    // marker must survive the same walk, and a signal without 'system' must
+    // make the settings route unreachable (drives the sidebar gear too).
+    const settings = store.allRoutes.find((r) => r.name === 'settings')
+    expect(settings?.meta?.moduleGate).toBe('system')
+    expect(store.unavailableRouteNames.has('settings')).toBe(true) // 'authorization'-only signal
+    store.setAvailableModules(new Set(['authorization', 'system']))
+    expect(store.unavailableRouteNames.has('settings')).toBe(false)
+  })
+
+  it('raises moduleSignalPending during the availability probe and settles it with the signal', async () => {
+    // Side-effectful surfaces (TChatHost, module-tagged dashboard widgets)
+    // defer on this flag so they never fire requests at a module the incoming
+    // signal is about to rule out. It must be raised SYNCHRONOUSLY by
+    // install() (before any component mounts) and settle regardless of
+    // probe outcome.
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const router = {
+      beforeEach: vi.fn(),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    let releaseProbe!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseProbe = resolve
+    })
+    const client = {
+      get: vi.fn(async (url: string) => {
+        if (url === '/admin/shell/modules') {
+          await gate
+          return {
+            success: true,
+            code: 200,
+            data: { modules: [{ name: 'Identity', isEnabled: true }] },
+          }
+        }
+        return { success: true, code: 200, data: null }
+      }),
+      post: async () => ({ success: true, code: 200, data: null }),
+      addUnauthorizedListener: () => () => {},
+    } as never
+
+    defineAdminApp({ client }).install(app, pinia, router)
+    const store = useAdminRouteStore()
+    expect(store.moduleSignalPending).toBe(true)
+
+    releaseProbe()
+    await vi.waitFor(() => expect(store.moduleSignalPending).toBe(false))
+    expect(store.availableModules?.has('identity')).toBe(true)
+  })
+
+  it('settles moduleSignalPending even when the probe fails (fail-open, no signal)', async () => {
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const router = {
+      beforeEach: vi.fn(),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    const client = {
+      get: async () => {
+        throw new Error('network down')
+      },
+      post: async () => ({ success: true, code: 200, data: null }),
+      addUnauthorizedListener: () => () => {},
+    } as never
+
+    defineAdminApp({ client }).install(app, pinia, router)
+    const store = useAdminRouteStore()
+    await vi.waitFor(() => expect(store.moduleSignalPending).toBe(false))
+    expect(store.availableModules).toBeNull()
+  })
+
+  it('never raises moduleSignalPending when moduleGating is disabled', () => {
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const router = {
+      beforeEach: vi.fn(),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    defineAdminApp({ client: dummyClient, moduleGating: false }).install(app, pinia, router)
+    expect(useAdminRouteStore().moduleSignalPending).toBe(false)
   })
 
   it('hideModules removes the named module subtree from /admin', () => {
@@ -227,6 +389,54 @@ describe('defineAdminApp', () => {
     expect(useAdminAuthStore().isSuperUser).toBe(false)
   })
 
+  it('loadPermissions leaves the store untouched when it resolves neither identity nor permissions', async () => {
+    // dummyClient answers every request with data:null - the exact shape of
+    // an expired-token background refresh (profile 401, access-profile 401).
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    const auth = useAdminAuthStore()
+    expect(auth.userInfo).toBeNull()
+
+    const result = await loadPermissions()
+
+    expect(result).toEqual([])
+    // A poisoned write here ({ id: '', permissions: [] }) would flip userInfo
+    // non-null with ZERO permissions: the permission guard stops failing open
+    // and the next navigation bounces to /403 even while a real login is
+    // completing in parallel (the "logout → sign in as another admin → 403"
+    // regression).
+    expect(auth.userInfo).toBeNull()
+  })
+
+  it('loadPermissions treats a failure envelope WITHOUT a data field as unresolved too', async () => {
+    // The real backend 401 envelope may omit `data` entirely - the bridge's
+    // unwrap then resolves to UNDEFINED (not null, no throw). The failed-
+    // resolution guard must catch that shape as well; matching only `null`
+    // was exactly the browser-reproduced poisoning bug.
+    const noDataClient = {
+      get: async () => ({ success: false, code: 401 }),
+      post: async () => ({ success: false, code: 401 }),
+      addUnauthorizedListener: () => () => {},
+    } as never
+    const { loadPermissions } = defineAdminApp({ client: noDataClient })
+    const auth = useAdminAuthStore()
+
+    await loadPermissions()
+
+    expect(auth.userInfo).toBeNull()
+  })
+
+  it('a failed background refresh does not clobber a previously valid session', async () => {
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: 'u1', username: 'admin', displayName: 'admin', roles: [], permissions: ['user.view'] })
+    auth.setSuperUser(true)
+
+    await loadPermissions()
+
+    expect(auth.userInfo?.permissions).toEqual(['user.view'])
+    expect(auth.isSuperUser).toBe(true)
+  })
+
   describe('session-expired redirect', () => {
     interface SessionSetup {
       trigger: (() => void) | undefined
@@ -327,6 +537,64 @@ describe('defineAdminApp', () => {
     })
   })
 
+  describe('deliberate sign-out (wrapped login.user.onLogout)', () => {
+    function installWithLogout(onLogout: () => void | Promise<void>) {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+      const router = { beforeEach: vi.fn(), afterEach: vi.fn(), onError: vi.fn() } as unknown as Router
+      defineAdminApp({
+        client: dummyClient,
+        login: { user: { userName: 'admin', onLogout } },
+      }).install(app, pinia, router)
+      const wrapped = app._context.provides[
+        ADMIN_LOGIN_CONFIG_KEY as unknown as string | symbol
+      ] as AdminLoginConfig
+      return { wrapped }
+    }
+
+    it('runs the consumer callback FIRST (store still populated), then clears the store', async () => {
+      // Order matters: the store MUST still be populated while the consumer's
+      // logout (backend sign-out + redirect) runs — clearing it first nulled
+      // `userInfo` while the shell was mounted and flashed the full fail-open
+      // menu for the 1-2s the backend call took before the redirect.
+      let stillLoggedInDuringConsumer: boolean | null = null
+      // install() switches the active pinia, so populate the store AFTER it.
+      const { wrapped } = installWithLogout(() => {
+        stillLoggedInDuringConsumer = auth.isLogin && auth.userInfo !== null
+      })
+      const auth = useAdminAuthStore()
+      auth.setToken('tok')
+      auth.setUserInfo({ id: 'u1', username: 'admin', roles: [], permissions: ['user.view'] })
+      auth.setSuperUser(true)
+
+      await wrapped.user!.onLogout!()
+
+      expect(stillLoggedInDuringConsumer).toBe(true) // consumer saw a live session
+      expect(auth.isLogin).toBe(false) // …and the store is cleared afterwards
+      expect(auth.userInfo).toBeNull()
+      expect(auth.isSuperUser).toBe(false) // no cross-session super-user leak
+    })
+
+    it('clears the store even when the consumer callback throws (finally)', async () => {
+      const { wrapped } = installWithLogout(() => {
+        throw new Error('backend logout failed')
+      })
+      const auth = useAdminAuthStore()
+      auth.setToken('tok')
+      auth.setUserInfo({ id: 'u1', username: 'admin', roles: [], permissions: [] })
+      auth.setSuperUser(true)
+
+      await expect(wrapped.user!.onLogout!()).rejects.toThrow('backend logout failed')
+      // The store is still cleared — a failed backend sign-out must not leave a
+      // stale super-user / permission set to leak into the next sign-in.
+      expect(auth.isLogin).toBe(false)
+      expect(auth.userInfo).toBeNull()
+      expect(auth.isSuperUser).toBe(false)
+    })
+  })
+
   it('hideRoutes marks the matching sub-menu meta.hideInMenu without touching others', () => {
     const { routes } = defineAdminApp({
       client: dummyClient,
@@ -362,6 +630,9 @@ describe('defineAdminApp', () => {
     })
     install(app, pinia)
 
+    // Super-user renders the full menu (the permission filter no longer fails
+    // open when logged out), isolating the hideRoutes filter under test.
+    useAdminAuthStore().setSuperUser(true)
     const routeStore = useAdminRouteStore()
     const identityMenu = routeStore.menus.find((m) => m.key === 'identity')
     expect(identityMenu).toBeTruthy()
@@ -501,7 +772,7 @@ describe('defineAdminApp', () => {
       return routes.find((r) => r.name === name)
     }
 
-    it('defaults to /admin and prefixes EVERY route (login/403 included)', () => {
+    it('defaults to /admin and prefixes EVERY route (login/403/404/500 included)', () => {
       const { routes } = defineAdminApp({ client: dummyClient })
       const adminRoot = findByName(routes, 'admin-root')
       const login = findByName(routes, 'login')
@@ -515,6 +786,9 @@ describe('defineAdminApp', () => {
         '/admin/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
       )
       expect(forbidden?.path).toBe('/admin/403')
+      // The 404 / 500 exception routes are top-level too and share the prefix.
+      expect(findByName(routes, 'not-found')?.path).toBe('/admin/404')
+      expect(findByName(routes, 'server-error')?.path).toBe('/admin/500')
     })
 
     it('basePath="/console" prefixes admin-root and login', () => {

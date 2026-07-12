@@ -50,6 +50,7 @@ public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
     /// <param name="request">功能信息</param>
     /// <returns>创建的功能</returns>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "authorization.permission.create")]
     public virtual async Task<ApiResult<ModuleFunction>> Create([FromBody] CreateModuleFunctionRequest request)
     {
         var result = await ModuleManagementService.CreateModuleFunctionAsync(request);
@@ -63,6 +64,7 @@ public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
     /// <param name="request">功能信息</param>
     /// <returns>更新后的功能</returns>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.permission.update")]
     public virtual async Task<ApiResult<ModuleFunction>> Update(Guid id, [FromBody] UpdateModuleFunctionRequest request)
     {
         var result = await ModuleManagementService.UpdateModuleFunctionAsync(id, request);
@@ -75,6 +77,7 @@ public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
     /// <param name="id">功能ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.permission.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await ModuleManagementService.DeleteModuleFunctionAsync(id);
@@ -87,6 +90,7 @@ public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
     /// <param name="id">功能ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id:guid}/enable")]
+    [ApiAuthorize(PermissionName = "authorization.permission.update")]
     public virtual async Task<ApiResult> Enable(Guid id)
     {
         var result = await ModuleManagementService.EnableModuleFunctionAsync(id);
@@ -99,6 +103,7 @@ public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
     /// <param name="id">功能ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id:guid}/disable")]
+    [ApiAuthorize(PermissionName = "authorization.permission.update")]
     public virtual async Task<ApiResult> Disable(Guid id)
     {
         var result = await ModuleManagementService.DisableModuleFunctionAsync(id);

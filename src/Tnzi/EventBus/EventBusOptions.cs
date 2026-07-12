@@ -102,9 +102,29 @@ public class EventBusOptions
     /// <summary>
     /// 获取或设置 是否启用死信队列
     /// 默认值：false
-    /// 
+    ///
     /// 当为 true 时，重试失败后的事件会被发送到死信队列
     /// </summary>
     public bool EnableDeadLetterQueue { get; set; } = false;
+
+    /// <summary>
+    /// 获取或设置 内存死信队列的最大容量（默认 1000）
+    /// 超过容量时按失败时间驱逐最旧条目并记录警告,防止处理器持续失败导致内存无界增长
+    /// 仅对内存实现生效;持久化实现(如基于 Outbox 的实现)不受此限制
+    /// </summary>
+    public int DeadLetterQueueCapacity { get; set; } = 1000;
+
+    /// <summary>
+    /// 获取或设置 是否启用事务感知发布（默认 true）
+    ///
+    /// 启用时,若 PublishAsync 发生在活跃的工作单元事务中(经 AmbientUnitOfWork 检测),
+    /// 发布会自动延迟到事务提交后执行;事务回滚则丢弃该事件。
+    /// 这使得业务代码中直接注入 IEventBus 发布也默认具备事务安全性,
+    /// 避免"事务回滚但事件已发出"的幽灵事件。
+    ///
+    /// 设为 false 恢复旧行为：无论是否在事务中都立即发布(同步处理器在发布点内联执行)。
+    /// 需要在事务内立即触发处理器的罕见场景才应关闭。
+    /// </summary>
+    public bool TransactionAwarePublish { get; set; } = true;
 }
 

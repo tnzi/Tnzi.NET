@@ -16,7 +16,7 @@ public class DefaultAuthController : ApiControllerBase
     protected readonly IPasswordService PasswordService;
     protected readonly IOAuthService? OAuthService;
     protected readonly ICaptchaService? CaptchaService;
-    protected readonly IOptions<IdentityOptions>? IdentityOptions;
+    protected readonly IOptionsMonitor<IdentityOptions>? IdentityOptions;
     protected readonly IConfiguration? Configuration;
     protected readonly IIdentityPageService? IdentityPageService;
     protected readonly IPasswordPolicyService? PasswordPolicyService;
@@ -41,7 +41,7 @@ public class DefaultAuthController : ApiControllerBase
         IPasswordService passwordService,
         IOAuthService? oAuthService = null,
         ICaptchaService? captchaService = null,
-        IOptions<IdentityOptions>? identityOptions = null,
+        IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IConfiguration? configuration = null,
         IIdentityPageService? identityPageService = null,
         IPasswordPolicyService? passwordPolicyService = null)
@@ -168,7 +168,7 @@ public class DefaultAuthController : ApiControllerBase
             try
             {
                 var frontendUrl = Configuration["App:FrontendUrl"];
-                var resetPasswordRoute = IdentityOptions.Value?.Recovery?.ResetPasswordRoute;
+                var resetPasswordRoute = IdentityOptions.CurrentValue?.Recovery?.ResetPasswordRoute;
 
                 // 如果配置了 ResetPasswordRoute 和 FrontendUrl，重定向到前端
                 if (!string.IsNullOrEmpty(resetPasswordRoute) && !string.IsNullOrEmpty(frontendUrl))

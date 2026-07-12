@@ -188,7 +188,7 @@ public class RetryMiddlewareTests
         };
 
         return new RetryMiddleware(
-            Microsoft.Extensions.Options.Options.Create(options),
+            new StaticOptionsMonitor<AIOptions>(options),
             NullLogger<RetryMiddleware>.Instance);
     }
 

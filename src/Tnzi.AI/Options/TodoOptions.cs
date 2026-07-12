@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// Todo/计划模式配置选项
 /// </summary>
 [ConfigSection("AI:Todo")]
-[RuntimeSettingGroup(Key = "ai-conversation", Module = "AI", DisplayName = "AI Conversation",
+[RuntimeSettingGroup(Key = "ai-conversation", Module = "AI", DisplayName = "Conversation",
     I18nKey = "admin.modules.system.settings.groups.aiConversation", Icon = "mdi:message-cog-outline", Order = 160)]
 public class TodoOptions
 {

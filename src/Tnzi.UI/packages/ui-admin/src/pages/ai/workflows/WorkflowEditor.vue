@@ -38,11 +38,12 @@
         <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
         {{ t('actions.validate') }}
       </NButton>
-      <NButton size="small" type="info" :disabled="!workflow?.isEnabled" @click="openRun">
+      <NButton v-if="can('ai.workflow.execute')" size="small" type="info" :disabled="!workflow?.isEnabled" @click="openRun">
         <template #icon><TSvgIcon icon="mdi:play" :size="16" /></template>
         {{ t('actions.run') }}
       </NButton>
       <NButton
+        v-if="can('ai.workflow.update')"
         size="small"
         :type="workflow?.isEnabled ? 'warning' : 'success'"
         :disabled="!workflow"
@@ -50,7 +51,7 @@
       >
         {{ workflow?.isEnabled ? t('actions.disable') : t('actions.enable') }}
       </NButton>
-      <NButton size="small" type="primary" :loading="saving" :disabled="!dirty" @click="onSave">
+      <NButton v-if="can('ai.workflow.update')" size="small" type="primary" :loading="saving" :disabled="!dirty" @click="onSave">
         <template #icon><TSvgIcon icon="mdi:content-save-outline" :size="16" /></template>
         {{ t('admin.common.save') }}
       </NButton>
@@ -463,6 +464,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import { useDetail } from '../../../headless/useDetail'
 import { useTabTitle } from '../../../headless/useTabTitle'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useSafeMessage } from '../../_shared/safeMessage'
@@ -552,6 +554,7 @@ const WorkflowCanvas = defineAsyncComponent({
 const route = useRoute()
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 // Guarded message — ui-admin shells don't always wrap with NMessageProvider
 // (and unit tests mount bare), so `useSafeMessage` no-ops without a provider.
 const message = useSafeMessage()
@@ -980,6 +983,7 @@ function onCanvasConnect(connection: unknown): void {
 
 // --- Save -------------------------------------------------------------------
 async function onSave(): Promise<void> {
+  if (!can('ai.workflow.update')) return
   if (!workflow.value) return
   if (stepsJsonError.value && viewMode.value === 'json') {
     message.error(stepsJsonError.value)
@@ -1010,6 +1014,7 @@ async function onSave(): Promise<void> {
 
 // --- Toggle publish ---------------------------------------------------------
 async function togglePublish(): Promise<void> {
+  if (!can('ai.workflow.update')) return
   if (!workflow.value) return
   try {
     const updated = workflow.value.isEnabled
@@ -1057,6 +1062,7 @@ function openRun(): void {
 }
 
 async function confirmRun(): Promise<void> {
+  if (!can('ai.workflow.execute')) return
   if (!workflow.value) return
   runModal.running = true
   try {

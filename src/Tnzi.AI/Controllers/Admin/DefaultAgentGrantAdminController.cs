@@ -64,6 +64,7 @@ public class DefaultAgentGrantAdminController : ApiAdminControllerBase
     /// Sets a single grant's enabled flag. 404 when the grant id does not exist for the resource type.
     /// </summary>
     [HttpPost("{grantType}/{grantId:guid}/enabled")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult> SetEnabled(
         GrantResourceType grantType, Guid grantId, [FromBody] SetGrantEnabledDto input, CancellationToken ct = default)
     {
@@ -78,6 +79,7 @@ public class DefaultAgentGrantAdminController : ApiAdminControllerBase
     /// Sets a single grant's priority. 404 when the grant id does not exist for the resource type.
     /// </summary>
     [HttpPost("{grantType}/{grantId:guid}/priority")]
+    [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult> SetPriority(
         GrantResourceType grantType, Guid grantId, [FromBody] SetGrantPriorityDto input, CancellationToken ct = default)
     {

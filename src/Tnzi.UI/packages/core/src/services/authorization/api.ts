@@ -3,6 +3,7 @@
  * Aligned with Tnzi.NET backend Authorization module controllers:
  *   - /admin/modules                 (DefaultModuleAdminController)
  *   - /admin/role-functions          (DefaultRoleFunctionAdminController)
+ *   - /admin/user-functions          (DefaultUserFunctionAdminController)
  *   - /admin/data-auth               (DefaultDataAuthAdminController)
  *   - /admin/function-authorization  (DefaultFunctionAuthorizationAdminController)
  */
@@ -14,6 +15,8 @@ import type {
   CreateFunctionModuleDto,
   UpdateFunctionModuleDto,
   ModuleFunctionDto,
+  CreateModuleFunctionDto,
+  UpdateModuleFunctionDto,
   RoleFunctionDto,
   RoleFunctionQueryDto,
   EntityInfoDto,
@@ -24,10 +27,13 @@ import type {
   UpdateEntityRoleDto,
   PermissionComparisonDto,
   CloneRolePermissionsRequest,
+  AccessProfileDto,
 } from './types'
 
 const MODULES_BASE = '/admin/modules'
+const MODULE_FUNCTIONS_BASE = '/admin/module-functions'
 const ROLE_FUNCTIONS_BASE = '/admin/role-functions'
+const USER_FUNCTIONS_BASE = '/admin/user-functions'
 const DATA_AUTH_BASE = '/admin/data-auth'
 const FUNCTION_AUTH_BASE = '/admin/function-authorization'
 
@@ -38,6 +44,23 @@ export function useAdminModuleFunctionApi(client: HttpClient) {
     /** Get all functions (permissions) for a specific module */
     getByModule: (moduleId: string) =>
       client.get<ModuleFunctionDto[]>(`${MODULES_BASE}/${moduleId}/functions`),
+
+    /** Create a custom permission point */
+    create: (data: CreateModuleFunctionDto) =>
+      client.post<ModuleFunctionDto>(MODULE_FUNCTIONS_BASE, data),
+
+    /** Update a permission point (system-managed rows: order/name only) */
+    update: (id: string, data: UpdateModuleFunctionDto) =>
+      client.put<ModuleFunctionDto>(`${MODULE_FUNCTIONS_BASE}/${id}`, data),
+
+    /** Delete a custom permission point (system-managed rows are rejected) */
+    delete: (id: string) => client.delete<void>(`${MODULE_FUNCTIONS_BASE}/${id}`),
+
+    /** Re-enable a single permission point */
+    enable: (id: string) => client.post<void>(`${MODULE_FUNCTIONS_BASE}/${id}/enable`),
+
+    /** Emergency-disable a single permission point (role grants stop working) */
+    disable: (id: string) => client.post<void>(`${MODULE_FUNCTIONS_BASE}/${id}/disable`),
   }
 }
 
@@ -127,6 +150,65 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
       client.post<number>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/clone`, {
         sourceRoleId,
       } satisfies CloneRolePermissionsRequest),
+
+    /**
+     * Role names configured as super administrators
+     * (`Authorization:SuperAdminRoles`). Their members bypass every
+     * permission check, so assignment UIs render those roles read-only.
+     */
+    getSuperAdminRoles: () =>
+      client.get<string[]>(`${ROLE_FUNCTIONS_BASE}/super-admin-roles`),
+  }
+}
+
+// ─── User Function API (direct user grants, no role involved) ────────────────
+
+/**
+ * User-direct permission grants — maps to `DefaultUserFunctionAdminController`
+ * (`/admin/user-functions`). Complements the role surface: permission
+ * resolution is `(role grants ∪ direct grants) − direct denies`, so this
+ * surface can give ONE user extra codes OR take a role-derived code away
+ * from just that user (user-level wins; super admins are unaffected).
+ * All writes are subject to the backend delegation guard (a non-super grantor
+ * may only grant/deny codes from their own permission set).
+ */
+export function useAdminUserFunctionApi(client: HttpClient) {
+  return {
+    /** Get the functions directly granted to a user */
+    getUserFunctions: (userId: string) =>
+      client.get<ModuleFunctionDto[]>(`${USER_FUNCTIONS_BASE}/user/${userId}`),
+
+    /** Get all function IDs directly granted to a user */
+    getUserFunctionIds: (userId: string) =>
+      client.get<string[]>(`${USER_FUNCTIONS_BASE}/user/${userId}/function-ids`),
+
+    /** Directly grant functions to a user (additive; flips existing deny rows) */
+    assignFunctions: (userId: string, functionIds: string[]) =>
+      client.post<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/assign`, { functionIds }),
+
+    /** Remove direct grants from a user (role-derived permissions unaffected) */
+    removeFunctions: (userId: string, functionIds: string[]) =>
+      client.post<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/remove`, { functionIds }),
+
+    /** Set (overwrite) the user's whole direct-grant set */
+    setFunctions: (userId: string, functionIds: string[]) =>
+      client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set`, { functionIds }),
+
+    /** Clear every direct grant from a user */
+    clearFunctions: (userId: string) =>
+      client.delete<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/clear`),
+
+    /** Get all function IDs denied for a user (user-level subtraction) */
+    getDeniedFunctionIds: (userId: string) =>
+      client.get<string[]>(`${USER_FUNCTIONS_BASE}/user/${userId}/denied-function-ids`),
+
+    /**
+     * Set (overwrite) the user's deny set — each denied code is removed from
+     * the user's effective permissions no matter which role granted it.
+     * Pass an empty list to clear all denies.
+     */
+    setDeniedFunctions: (userId: string, functionIds: string[]) =>
+      client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set-denied`, { functionIds }),
   }
 }
 
@@ -207,6 +289,14 @@ export function useAdminFunctionAuthorizationApi(client: HttpClient) {
     /** Get the flat list of permission codes granted to a user. */
     getUserPermissionNames: (userId: string) =>
       client.get<string[]>(`${FUNCTION_AUTH_BASE}/user/${userId}/permissions`),
+    /**
+     * Get the current user's access profile: permission codes plus the
+     * backend-authoritative super-admin flag. Preferred over
+     * `getUserPermissionNames` - no userId needed and no client-side
+     * super-admin inference.
+     */
+    getAccessProfile: () =>
+      client.get<AccessProfileDto>(`${FUNCTION_AUTH_BASE}/access-profile`),
     /** Check whether a user holds a specific permission code. */
     checkPermission: (userId: string, permissionName: string) =>
       client.get<boolean>(`${FUNCTION_AUTH_BASE}/check`, {

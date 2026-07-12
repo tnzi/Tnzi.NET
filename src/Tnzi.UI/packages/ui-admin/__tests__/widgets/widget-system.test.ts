@@ -8,9 +8,12 @@ import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi
 import TWidgetCard from '../../src/widgets/shell/TWidgetCard.vue'
 import TWorkbenchLayout from '../../src/components/pages/TWorkbenchLayout.vue'
 import TWidgetQuickActions from '../../src/widgets/builtin/TWidgetQuickActions.vue'
+import TWidgetList from '../../src/widgets/builtin/TWidgetList.vue'
+import TKpiCard from '../../src/components/data/TKpiCard.vue'
 import { useWidget } from '../../src/widgets/shell/useWidget'
 import { useWidgetData } from '../../src/widgets/shell/useWidgetData'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
+import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import {
   defaultKpiCards,
   defaultQuickActions,
@@ -247,6 +250,134 @@ describe('TWidgetQuickActions permission filtering', () => {
   })
 })
 
+describe('TWidgetQuickActions module filtering', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    if (typeof window !== 'undefined') window.localStorage.clear()
+  })
+
+  const actions = [
+    { key: 'chat', icon: 'mdi:forum', label: 'Chat', to: '/admin/chat', module: 'chat' },
+    { key: 'users', icon: 'mdi:account', label: 'Users', to: '/admin/identity/users', module: 'identity' },
+    { key: 'always', icon: 'mdi:star', label: 'Always', to: '/admin/x' },
+  ]
+
+  function mountActions() {
+    return mount(TWidgetQuickActions, {
+      props: { actions },
+      global: { plugins: [mockRouter()], provide: themeProvide() },
+    })
+  }
+
+  it('hides tiles whose module the backend did not load — even for super users', () => {
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: '1', username: 'root', roles: [], permissions: [] })
+    auth.setSuperUser(true)
+    useAdminRouteStore().setAvailableModules(new Set(['identity']))
+    const wrapper = mountActions()
+    const tiles = wrapper.findAll('.t-widget-quick-actions__tile')
+    expect(tiles.length).toBe(2)
+    expect(wrapper.text()).toContain('Users')
+    expect(wrapper.text()).toContain('Always')
+    expect(wrapper.text()).not.toContain('Chat')
+  })
+
+  it('fails open (shows every tile) while the module signal is unavailable', () => {
+    const wrapper = mountActions()
+    expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(3)
+  })
+})
+
+describe('TWidgetList', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    if (typeof window !== 'undefined') window.localStorage.clear()
+  })
+
+  const rows = Array.from({ length: 7 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
+
+  function mountList(props: Record<string, unknown> = {}) {
+    return mount(TWidgetList, {
+      props: { items: rows, pageSize: 3, ...props },
+      slots: { row: ({ item }: { item: { name: string } }) => h('span', { class: 'row-name' }, item.name) },
+      global: { plugins: [mockRouter()], provide: themeProvide() },
+    })
+  }
+
+  it('paginates to pageSize rows and shows a pager for the overflow', () => {
+    const wrapper = mountList()
+    expect(wrapper.findAll('.t-widget-list__row').length).toBe(3)
+    expect(wrapper.find('.t-widget-list__pager').exists()).toBe(true)
+    // 7 items / pageSize 3 → 3 pages.
+    expect(wrapper.find('.t-widget-list__pager-info').text()).toBe('1 / 3')
+  })
+
+  it('advances the page and re-slices the rows', async () => {
+    const wrapper = mountList()
+    const next = wrapper.findAll('.t-widget-list__pager-btn')[1]
+    await next.trigger('click')
+    expect(wrapper.find('.t-widget-list__pager-info').text()).toBe('2 / 3')
+    expect(wrapper.findAll('.row-name')[0].text()).toBe('Row 4')
+  })
+
+  it('emits row-click with the item and its absolute index', async () => {
+    const wrapper = mountList()
+    await wrapper.findAll('.t-widget-list__row')[1].trigger('click')
+    expect(wrapper.emitted('row-click')?.[0]).toEqual([rows[1], 1])
+  })
+
+  it('emits link when the header link is clicked', async () => {
+    const wrapper = mountList({ title: 'Files', linkText: 'View all' })
+    await wrapper.find('.t-widget-list__link').trigger('click')
+    expect(wrapper.emitted('link')?.length).toBe(1)
+  })
+
+  it('renders the empty state when there are no items', () => {
+    const wrapper = mountList({ items: [], emptyText: 'Nothing here' })
+    expect(wrapper.find('.t-widget-list__row').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Nothing here')
+  })
+
+  it('bare mode drops the NCard chrome so it nests inside a TWidgetCard', () => {
+    const wrapper = mountList({ bare: true, title: 'Ignored' })
+    expect(wrapper.find('.t-widget-list--bare').exists()).toBe(true)
+    // No card header rendered in bare mode.
+    expect(wrapper.find('.t-widget-list__head').exists()).toBe(false)
+  })
+})
+
+describe('TKpiCard clickable', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  function mountCard(props: Record<string, unknown>) {
+    return mount(TKpiCard, {
+      props: { label: 'Files', value: 12, ...props },
+      global: { plugins: [mockRouter()], provide: themeProvide() },
+    })
+  }
+
+  it('is not interactive by default', () => {
+    const wrapper = mountCard({})
+    expect(wrapper.find('.t-stat-card--clickable').exists()).toBe(false)
+  })
+
+  it('becomes a button and emits click when `to` is set', async () => {
+    const wrapper = mountCard({ to: '/admin/matters' })
+    const card = wrapper.find('.t-stat-card--clickable')
+    expect(card.exists()).toBe(true)
+    expect(card.attributes('role')).toBe('button')
+    await card.trigger('click')
+    expect(wrapper.emitted('click')?.length).toBe(1)
+  })
+
+  it('is interactive via the `interactive` flag without a router target', () => {
+    const wrapper = mountCard({ interactive: true })
+    expect(wrapper.find('.t-stat-card--clickable').exists()).toBe(true)
+  })
+})
+
 describe('preset helpers', () => {
   it('defaultKpiCards returns 4 gradient cards', () => {
     const kpis = defaultKpiCards()
@@ -276,5 +407,28 @@ describe('preset helpers', () => {
   it('every default widget has a unique id', () => {
     const ids = defaultWorkbenchWidgets().map((w) => w.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('module-coupled default widgets carry a module tag', () => {
+    const deck = defaultWorkbenchWidgets()
+    const byId = new Map(deck.map((w) => [w.id, w]))
+    expect(byId.get('chat-stats')?.module).toBe('chat')
+    expect(byId.get('identity-stats')?.module).toBe('identity')
+    expect(byId.get('ai-usage')?.module).toBe('ai')
+    expect(byId.get('storage-usage')?.module).toBe('storage')
+    expect(byId.get('notification-stats')?.module).toBe('notification')
+    expect(byId.get('audit-recent')?.module).toBe('audit')
+    expect(byId.get('activity')?.module).toBe('audit')
+    // Module-agnostic tiles stay untagged.
+    expect(byId.get('quick-actions')?.module).toBeUndefined()
+  })
+
+  it('no longer ships the retired tips widget', () => {
+    expect(defaultWorkbenchWidgets().some((w) => w.id === 'tips')).toBe(false)
+  })
+
+  it('every default quick action carries a module tag', () => {
+    const actions = defaultQuickActions()
+    expect(actions.every((a) => !!a.module)).toBe(true)
   })
 })

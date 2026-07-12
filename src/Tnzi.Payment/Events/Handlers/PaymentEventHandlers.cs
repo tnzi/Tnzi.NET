@@ -8,48 +8,41 @@ public class PaymentCompletedEventHandler : IEventHandler<PaymentCompletedEvent>
 {
     private readonly ILogger<PaymentCompletedEventHandler> _logger;
     private readonly IInvoiceService? _invoiceService;
-    private readonly IOptions<InvoiceOptions>? _invoiceOptions;
+    private readonly IOptionsMonitor<InvoiceOptions>? _invoiceOptions;
 
     public PaymentCompletedEventHandler(
         ILogger<PaymentCompletedEventHandler> logger,
         IInvoiceService? invoiceService = null,
-        IOptions<InvoiceOptions>? invoiceOptions = null)
+        IOptionsMonitor<InvoiceOptions>? invoiceOptions = null)
     {
         _logger = Check.NotNull(logger);
         _invoiceService = invoiceService;
         _invoiceOptions = invoiceOptions;
     }
 
+    // 不再吞异常：发票自动生成失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底。
     public async Task HandleAsync(PaymentCompletedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Payment completed. TradeNo: {TradeNo}, Amount: {Amount} {Currency}",
-                eventData.TradeNo, eventData.Amount, eventData.Currency);
+        _logger.LogInformation(
+            "Payment completed. TradeNo: {TradeNo}, Amount: {Amount} {Currency}",
+            eventData.TradeNo, eventData.Amount, eventData.Currency);
 
-            // 自动生成发票
-            if (_invoiceService != null
-                && _invoiceOptions?.Value is { Enabled: true, AutoSendOnPayment: true })
+        // 自动生成发票
+        if (_invoiceService != null
+            && _invoiceOptions?.CurrentValue is { Enabled: true, AutoSendOnPayment: true })
+        {
+            var invoiceResult = await _invoiceService.CreateFromPaymentAsync(
+                eventData.PaymentId, null, cancellationToken);
+
+            if (invoiceResult.Succeeded && invoiceResult.Data != null)
             {
-                var invoiceResult = await _invoiceService.CreateFromPaymentAsync(
-                    eventData.PaymentId, null, cancellationToken);
+                _logger.LogInformation(
+                    "Invoice auto-created from payment. InvoiceId: {InvoiceId}, TradeNo: {TradeNo}",
+                    invoiceResult.Data.Id, eventData.TradeNo);
 
-                if (invoiceResult.Succeeded && invoiceResult.Data != null)
-                {
-                    _logger.LogInformation(
-                        "Invoice auto-created from payment. InvoiceId: {InvoiceId}, TradeNo: {TradeNo}",
-                        invoiceResult.Data.Id, eventData.TradeNo);
-
-                    // 自动发送发票
-                    await _invoiceService.SendAsync(invoiceResult.Data.Id, null, null, cancellationToken);
-                }
+                // 自动发送发票
+                await _invoiceService.SendAsync(invoiceResult.Data.Id, null, null, cancellationToken);
             }
-        }
-        catch (Exception ex)
-        {
-            // 事件处理器错误不影响主业务流程，静默忽略
-            _logger.LogWarning(ex, "Failed to handle payment completed event. TradeNo: {TradeNo}", eventData.TradeNo);
         }
     }
 }
@@ -69,18 +62,11 @@ public class PaymentFailedEventHandler : IEventHandler<PaymentFailedEvent>
 
     public async Task HandleAsync(PaymentFailedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogWarning(
-                "Payment failed. TradeNo: {TradeNo}, ErrorCode: {ErrorCode}, Reason: {Reason}",
-                eventData.TradeNo, eventData.ErrorCode, eventData.FailReason);
+        _logger.LogWarning(
+            "Payment failed. TradeNo: {TradeNo}, ErrorCode: {ErrorCode}, Reason: {Reason}",
+            eventData.TradeNo, eventData.ErrorCode, eventData.FailReason);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle payment failed event. TradeNo: {TradeNo}", eventData.TradeNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -99,27 +85,20 @@ public class RefundProcessedEventHandler : IEventHandler<RefundProcessedEvent>
 
     public async Task HandleAsync(RefundProcessedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
+        if (eventData.Succeeded)
         {
-            if (eventData.Succeeded)
-            {
-                _logger.LogInformation(
-                    "Refund succeeded. RefundNo: {RefundNo}, Amount: {Amount} {Currency}",
-                    eventData.RefundNo, eventData.Amount, eventData.Currency);
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Refund failed. RefundNo: {RefundNo}, Reason: {Reason}",
-                    eventData.RefundNo, eventData.FailReason);
-            }
+            _logger.LogInformation(
+                "Refund succeeded. RefundNo: {RefundNo}, Amount: {Amount} {Currency}",
+                eventData.RefundNo, eventData.Amount, eventData.Currency);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Refund failed. RefundNo: {RefundNo}, Reason: {Reason}",
+                eventData.RefundNo, eventData.FailReason);
+        }
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle refund processed event. RefundNo: {RefundNo}", eventData.RefundNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -138,18 +117,11 @@ public class PaymentExpiredEventHandler : IEventHandler<PaymentExpiredEvent>
 
     public async Task HandleAsync(PaymentExpiredEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Payment expired. TradeNo: {TradeNo}, BusinessOrderNo: {BusinessOrderNo}, ExpiredTime: {ExpiredTime}",
-                eventData.TradeNo, eventData.BusinessOrderNo, eventData.ExpiredTime);
+        _logger.LogInformation(
+            "Payment expired. TradeNo: {TradeNo}, BusinessOrderNo: {BusinessOrderNo}, ExpiredTime: {ExpiredTime}",
+            eventData.TradeNo, eventData.BusinessOrderNo, eventData.ExpiredTime);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle payment expired event. TradeNo: {TradeNo}", eventData.TradeNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -168,18 +140,11 @@ public class SubscriptionCreatedEventHandler : IEventHandler<SubscriptionCreated
 
     public async Task HandleAsync(SubscriptionCreatedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Subscription created. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, Plan: {PlanName}, IsTrial: {IsTrial}",
-                eventData.SubscriptionNo, eventData.UserId, eventData.PlanName, eventData.IsTrial);
+        _logger.LogInformation(
+            "Subscription created. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, Plan: {PlanName}, IsTrial: {IsTrial}",
+            eventData.SubscriptionNo, eventData.UserId, eventData.PlanName, eventData.IsTrial);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle subscription created event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -198,18 +163,11 @@ public class SubscriptionCancelledEventHandler : IEventHandler<SubscriptionCance
 
     public async Task HandleAsync(SubscriptionCancelledEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Subscription cancelled. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, Immediate: {Immediate}, Reason: {Reason}",
-                eventData.SubscriptionNo, eventData.UserId, eventData.Immediate, eventData.CancelReason);
+        _logger.LogInformation(
+            "Subscription cancelled. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, Immediate: {Immediate}, Reason: {Reason}",
+            eventData.SubscriptionNo, eventData.UserId, eventData.Immediate, eventData.CancelReason);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle subscription cancelled event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -228,18 +186,11 @@ public class SubscriptionExpiredEventHandler : IEventHandler<SubscriptionExpired
 
     public async Task HandleAsync(SubscriptionExpiredEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Subscription expired. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, ExpiredTime: {ExpiredTime}",
-                eventData.SubscriptionNo, eventData.UserId, eventData.ExpiredTime);
+        _logger.LogInformation(
+            "Subscription expired. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, ExpiredTime: {ExpiredTime}",
+            eventData.SubscriptionNo, eventData.UserId, eventData.ExpiredTime);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle subscription expired event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -258,18 +209,11 @@ public class SubscriptionRenewedEventHandler : IEventHandler<SubscriptionRenewed
 
     public async Task HandleAsync(SubscriptionRenewedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Subscription renewed. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, NewEndTime: {NewEndTime}, AutoRenew: {AutoRenew}",
-                eventData.SubscriptionNo, eventData.UserId, eventData.NewEndTime, eventData.AutoRenew);
+        _logger.LogInformation(
+            "Subscription renewed. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, NewEndTime: {NewEndTime}, AutoRenew: {AutoRenew}",
+            eventData.SubscriptionNo, eventData.UserId, eventData.NewEndTime, eventData.AutoRenew);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle subscription renewed event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
@@ -288,25 +232,22 @@ public class SubscriptionPlanChangedEventHandler : IEventHandler<SubscriptionPla
 
     public async Task HandleAsync(SubscriptionPlanChangedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Subscription plan changed. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, FromPlan: {FromPlanId}, ToPlan: {ToPlanId}, ChangeType: {ChangeType}, ProratedAmount: {ProratedAmount}, Immediate: {Immediate}",
-                eventData.SubscriptionNo, eventData.UserId, eventData.FromPlanId, eventData.ToPlanId,
-                eventData.ChangeType, eventData.ProratedAmount, eventData.Immediate);
+        _logger.LogInformation(
+            "Subscription plan changed. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, FromPlan: {FromPlanId}, ToPlan: {ToPlanId}, ChangeType: {ChangeType}, ProratedAmount: {ProratedAmount}, Immediate: {Immediate}",
+            eventData.SubscriptionNo, eventData.UserId, eventData.FromPlanId, eventData.ToPlanId,
+            eventData.ChangeType, eventData.ProratedAmount, eventData.Immediate);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle subscription plan changed event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
-        }
+        await Task.CompletedTask;
     }
 }
 
 /// <summary>
 /// 订阅支付完成处理器：将订阅相关支付的完成回流到订阅状态机（激活/续费/试用转正/升级补差生效）
 /// </summary>
+/// <remarks>
+/// 不再吞异常：状态机推进失败应冒泡给事件总线，由其重试 + DLQ 兜底。
+/// 这直接缓解「扣款成功-推进失败-换新流水重扣」的 exactly-once 残留风险（见模块 Known Issues）。
+/// </remarks>
 public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentCompletedEvent>
 {
     private readonly ILogger<SubscriptionPaymentCompletedHandler> _logger;
@@ -322,36 +263,31 @@ public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentComplete
 
     public async Task HandleAsync(PaymentCompletedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
-                return;
+        if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
+            return;
 
-            var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
-            if (meta == null)
-                return;
+        var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
+        if (meta == null)
+            return;
 
-            await _subscriptionService.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
-            {
-                Purpose = meta.Purpose,
-                SubscriptionId = meta.SubscriptionId,
-                SubscriptionNo = eventData.BusinessOrderNo,
-                ChangeId = meta.ChangeId,
-                PaymentTradeNo = eventData.TradeNo,
-                Amount = eventData.Amount,
-                Currency = eventData.Currency
-            }, cancellationToken);
-        }
-        catch (Exception ex)
+        _logger.LogDebug("Applying subscription payment-completed. TradeNo: {TradeNo}, Purpose: {Purpose}", eventData.TradeNo, meta.Purpose);
+        await _subscriptionService.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
         {
-            _logger.LogWarning(ex, "Failed to apply subscription payment-completed. TradeNo: {TradeNo}", eventData.TradeNo);
-        }
+            Purpose = meta.Purpose,
+            SubscriptionId = meta.SubscriptionId,
+            SubscriptionNo = eventData.BusinessOrderNo,
+            ChangeId = meta.ChangeId,
+            PaymentTradeNo = eventData.TradeNo,
+            Amount = eventData.Amount,
+            Currency = eventData.Currency
+        }, cancellationToken);
     }
 }
 
 /// <summary>
 /// 订阅支付失败处理器：续费/转正失败降级 PastDue，升级补差失败取消变更
 /// </summary>
+/// <remarks>不再吞异常：降级失败应冒泡给事件总线，由其重试 + DLQ 兜底。</remarks>
 public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent>
 {
     private readonly ILogger<SubscriptionPaymentFailedHandler> _logger;
@@ -367,35 +303,30 @@ public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent
 
     public async Task HandleAsync(PaymentFailedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
-                return;
+        if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
+            return;
 
-            var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
-            if (meta == null)
-                return;
+        var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
+        if (meta == null)
+            return;
 
-            await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
-            {
-                Purpose = meta.Purpose,
-                SubscriptionId = meta.SubscriptionId,
-                SubscriptionNo = eventData.BusinessOrderNo,
-                ChangeId = meta.ChangeId,
-                PaymentTradeNo = eventData.TradeNo,
-                FailReason = eventData.FailReason
-            }, cancellationToken);
-        }
-        catch (Exception ex)
+        _logger.LogDebug("Applying subscription payment-failed. TradeNo: {TradeNo}, Purpose: {Purpose}", eventData.TradeNo, meta.Purpose);
+        await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
         {
-            _logger.LogWarning(ex, "Failed to apply subscription payment-failed. TradeNo: {TradeNo}", eventData.TradeNo);
-        }
+            Purpose = meta.Purpose,
+            SubscriptionId = meta.SubscriptionId,
+            SubscriptionNo = eventData.BusinessOrderNo,
+            ChangeId = meta.ChangeId,
+            PaymentTradeNo = eventData.TradeNo,
+            FailReason = eventData.FailReason
+        }, cancellationToken);
     }
 }
 
 /// <summary>
 /// 订阅支付过期处理器：未支付的订阅待支付订单过期视同失败（如升级补差待支付单过期则取消变更）
 /// </summary>
+/// <remarks>不再吞异常：状态推进失败应冒泡给事件总线，由其重试 + DLQ 兜底。</remarks>
 public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEvent>
 {
     private readonly ILogger<SubscriptionPaymentExpiredHandler> _logger;
@@ -411,28 +342,22 @@ public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEve
 
     public async Task HandleAsync(PaymentExpiredEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
-                return;
+        if (eventData.BusinessType != BusinessType.Subscription || _subscriptionService == null)
+            return;
 
-            var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
-            if (meta == null)
-                return;
+        var meta = SubscriptionBillingMetadata.TryParse(eventData.ExtraData);
+        if (meta == null)
+            return;
 
-            await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
-            {
-                Purpose = meta.Purpose,
-                SubscriptionId = meta.SubscriptionId,
-                SubscriptionNo = eventData.BusinessOrderNo,
-                ChangeId = meta.ChangeId,
-                FailReason = "Payment order expired"
-            }, cancellationToken);
-        }
-        catch (Exception ex)
+        _logger.LogDebug("Applying subscription payment-expired. TradeNo: {TradeNo}, Purpose: {Purpose}", eventData.TradeNo, meta.Purpose);
+        await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
         {
-            _logger.LogWarning(ex, "Failed to apply subscription payment-expired. TradeNo: {TradeNo}", eventData.TradeNo);
-        }
+            Purpose = meta.Purpose,
+            SubscriptionId = meta.SubscriptionId,
+            SubscriptionNo = eventData.BusinessOrderNo,
+            ChangeId = meta.ChangeId,
+            FailReason = "Payment order expired"
+        }, cancellationToken);
     }
 }
 
@@ -451,17 +376,10 @@ public class SubscriptionTrialConvertedEventHandler : IEventHandler<Subscription
 
     public async Task HandleAsync(SubscriptionTrialConvertedEvent eventData, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogInformation(
-                "Subscription trial converted. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, ConvertedTime: {ConvertedTime}",
-                eventData.SubscriptionNo, eventData.UserId, eventData.ConvertedTime);
+        _logger.LogInformation(
+            "Subscription trial converted. SubscriptionNo: {SubscriptionNo}, UserId: {UserId}, ConvertedTime: {ConvertedTime}",
+            eventData.SubscriptionNo, eventData.UserId, eventData.ConvertedTime);
 
-            await Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle subscription trial converted event. SubscriptionNo: {SubscriptionNo}", eventData.SubscriptionNo);
-        }
+        await Task.CompletedTask;
     }
 }

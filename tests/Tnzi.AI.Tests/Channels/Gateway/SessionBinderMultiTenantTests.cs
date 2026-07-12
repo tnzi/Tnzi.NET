@@ -52,7 +52,7 @@ public sealed class SessionBinderMultiTenantTests : IDisposable
                 Channel = "telegram", PeerId = "u1", AgentId = AgentB,
                 Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true, TenantId = _tenantB
             });
-        seed.SaveChanges();
+        seed.SaveChangesAsync().GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -114,7 +114,7 @@ public sealed class SessionBinderMultiTenantTests : IDisposable
         {
             new() { Channel = "slack", AgentId = AgentA, Scope = SessionScope.Global, Priority = 5, IsEnabled = true }
         };
-        var options = MsOptions.Create(new GatewayOptions { DefaultAgentId = DefaultAgent });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgent });
         var binder = new DefaultSessionBinder(configRules, options, CreateScopeFactory());
 
         var forTenantB = binder.Resolve(new SessionBindingContext
@@ -132,7 +132,7 @@ public sealed class SessionBinderMultiTenantTests : IDisposable
 
     private DefaultSessionBinder CreateBinder()
     {
-        var options = MsOptions.Create(new GatewayOptions { DefaultAgentId = DefaultAgent });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgent });
         // 空配置规则 → 只测 DB 规则的租户分区行为。
         return new DefaultSessionBinder([], options, CreateScopeFactory());
     }

@@ -19,7 +19,7 @@ public sealed class CompositeContextProvider : IContextProvider
 {
     private readonly List<IContextProvider> _providers = [];
     private readonly ILogger<CompositeContextProvider> _logger;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ITokenEstimator _tokenEstimator;
 
     /// <summary>
@@ -27,7 +27,7 @@ public sealed class CompositeContextProvider : IContextProvider
     /// </summary>
     public CompositeContextProvider(
         ILogger<CompositeContextProvider> logger,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ITokenEstimator? tokenEstimator = null)
     {
         _logger = Check.NotNull(logger);
@@ -41,7 +41,7 @@ public sealed class CompositeContextProvider : IContextProvider
     public CompositeContextProvider(
         IEnumerable<IContextProvider> providers,
         ILogger<CompositeContextProvider> logger,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ITokenEstimator? tokenEstimator = null)
         : this(logger, options, tokenEstimator)
     {
@@ -132,7 +132,7 @@ public sealed class CompositeContextProvider : IContextProvider
         var mergedTools = new List<AITool>();
         var mergedCitations = new List<CitationDto>();
 
-        var maxBudget = _options.Value.ContextProviders.MaxTokenBudget;
+        var maxBudget = _options.CurrentValue.ContextProviders.MaxTokenBudget;
         var usedTokens = 0;
 
         foreach (var provider in _providers)

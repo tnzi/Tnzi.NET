@@ -42,7 +42,7 @@ public class McpServerRegistrationMtIsolationTests : IDisposable
             Transport = "sse",
             TenantId = _tenantA
         });
-        seedContext.SaveChanges();
+        seedContext.SaveChangesAsync().GetAwaiter().GetResult();
     }
 
     public void Dispose()

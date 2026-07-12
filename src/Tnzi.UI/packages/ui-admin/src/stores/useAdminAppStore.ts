@@ -61,39 +61,32 @@ export const useAdminAppStore = defineStore('admin-app', () => {
   const isMobile = bp.smaller('md')
   const isTablet = bp.between('md', 'lg')
   const isDesktop = bp.greaterOrEqual('lg')
+  // "Below desktop" = mobile OR tablet (viewport < lg / 1024px). Drives
+  // the auto-collapse watcher below.
+  const isBelowDesktop = bp.smaller('lg')
 
-  // Auto-collapse the sider when the viewport is narrower than `lg`
-  // (i.e. mobile OR tablet). On tablets the 220px sider eats nearly a
-  // third of the screen, so collapsing to icon-rail keeps the content
-  // area readable. Restoring to the previous state happens on the
-  // first transition back to desktop.
+  // Auto-collapse the sider whenever the viewport is narrower than `lg`
+  // (mobile OR tablet): a 220px sider eats nearly a third of a tablet
+  // screen, and on mobile the sider becomes an overlay drawer. A SINGLE
+  // backup/restore watcher (mirroring soybean-admin's `isMobile` watcher)
+  // snapshots the desktop collapse state on the way into a narrow viewport
+  // and restores it the moment the viewport widens back to desktop — so
+  // temporarily shrinking the window (desktop → tablet → desktop, without
+  // ever crossing into the mobile drawer) no longer leaves the sider stuck
+  // collapsed. The earlier two-watcher split had a collapse branch for the
+  // tablet range but NO restore branch, which is exactly why widening from
+  // tablet back to desktop never reopened the sider.
   watch(
-    isMobile,
-    (mobile) => {
-      if (mobile) {
+    isBelowDesktop,
+    (narrow) => {
+      if (narrow) {
         if (desktopSiderCollapseSnapshot.value === null) {
           desktopSiderCollapseSnapshot.value = siderCollapse.value
         }
         siderCollapse.value = true
-      } else {
-        if (desktopSiderCollapseSnapshot.value !== null) {
-          siderCollapse.value = desktopSiderCollapseSnapshot.value
-          desktopSiderCollapseSnapshot.value = null
-        }
-      }
-    },
-    { immediate: false },
-  )
-  watch(
-    isTablet,
-    (tablet) => {
-      // Only act on the rising edge into tablet from desktop — mobile
-      // already auto-collapses via the watcher above.
-      if (tablet && !isMobile.value) {
-        if (desktopSiderCollapseSnapshot.value === null) {
-          desktopSiderCollapseSnapshot.value = siderCollapse.value
-        }
-        siderCollapse.value = true
+      } else if (desktopSiderCollapseSnapshot.value !== null) {
+        siderCollapse.value = desktopSiderCollapseSnapshot.value
+        desktopSiderCollapseSnapshot.value = null
       }
     },
     { immediate: false },

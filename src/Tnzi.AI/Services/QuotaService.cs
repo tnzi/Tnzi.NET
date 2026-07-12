@@ -6,11 +6,11 @@ namespace Tnzi.AI.Services;
 public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
 {
     private readonly IRepository<UserQuota, Guid> _quotaRepository;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public QuotaService(
         IRepository<UserQuota, Guid> quotaRepository,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -481,7 +481,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
 
         if (quota != null) return quota;
 
-        var quotaOptions = _options.Value.Quota;
+        var quotaOptions = _options.CurrentValue.Quota;
         quota = new UserQuota
         {
             UserId = userId,

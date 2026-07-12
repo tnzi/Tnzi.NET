@@ -32,6 +32,7 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { deleteAction, viewAction, type RowAction } from '../../headless/rowActions'
 import { createSystemBridge, type ScheduledJobDto } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -46,9 +47,11 @@ const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
 const t = makePageTranslator('system.scheduledJobs')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const crud = useCrudPage<ScheduledJobDto>({
   pageId: 'system.scheduledJobs',
+  permission: 'system.scheduledJob',
   columns: scheduledJobColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.scheduledJobs.fetch(query),
@@ -77,6 +80,7 @@ const rowActions: RowAction<ScheduledJobDto>[] = [
   {
     key: 'trigger',
     label: 'actions.trigger',
+    show: () => can('system.scheduledJob.execute'),
     disabled: (row) => row.removed === true,
     onClick: (row) => triggerJob(row),
   },

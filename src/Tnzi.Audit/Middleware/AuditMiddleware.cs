@@ -9,27 +9,31 @@ public class AuditMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<AuditMiddleware> _logger;
     private readonly IAuditSender _auditSender;
-    private readonly AuditOptions _auditOptions;
+    private readonly IOptionsMonitor<AuditOptions> _optionsMonitor;
     private readonly RequestBodyRedactor _redactor;
+
+    // 经 IOptionsMonitor 在使用点热读取，使 admin 配置中心对 AuditOptions 的改动即时生效
+    // （中间件在管线中仅实例化一次，若在构造期固化快照将永久冻结在启动值）。
+    private AuditOptions Options => _optionsMonitor.CurrentValue;
 
     public AuditMiddleware(
         RequestDelegate next,
         ILogger<AuditMiddleware> logger,
         IAuditSender auditSender,
-        IOptions<AuditOptions> auditOptions,
+        IOptionsMonitor<AuditOptions> auditOptions,
         RequestBodyRedactor redactor)
     {
         _next = Check.NotNull(next);
         _logger = Check.NotNull(logger);
         _auditSender = Check.NotNull(auditSender);
-        _auditOptions = Check.NotNull(auditOptions).Value;
+        _optionsMonitor = Check.NotNull(auditOptions);
         _redactor = Check.NotNull(redactor);
     }
 
     public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, IUserAgentParserService? userAgentParser = null)
     {
         // 检查是否启用操作审计
-        if (!_auditOptions.EnableOperationAudit)
+        if (!Options.EnableOperationAudit)
         {
             await _next(context);
             return;
@@ -51,7 +55,7 @@ public class AuditMiddleware
 
         // Enable request body buffering if capture is enabled
         string? requestBody = null;
-        if (_auditOptions.EnableRequestBodyCapture)
+        if (Options.EnableRequestBodyCapture)
         {
             requestBody = await CaptureRequestBodyAsync(context);
         }
@@ -99,7 +103,7 @@ public class AuditMiddleware
 
     private bool IsExcludedPath(PathString path)
     {
-        foreach (var excluded in _auditOptions.ExcludedPaths)
+        foreach (var excluded in Options.ExcludedPaths)
         {
             if (path.StartsWithSegments(excluded))
             {
@@ -130,7 +134,7 @@ public class AuditMiddleware
 
         try
         {
-            var maxSize = _auditOptions.MaxRequestBodySize;
+            var maxSize = Options.MaxRequestBodySize;
             request.EnableBuffering(bufferLimit: maxSize);
 
             var buffer = new byte[Math.Min(request.ContentLength ?? maxSize, maxSize)];
@@ -147,9 +151,9 @@ public class AuditMiddleware
             var body = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
             // Redact sensitive fields
-            if (_auditOptions.SensitiveFields.Count > 0)
+            if (Options.SensitiveFields.Count > 0)
             {
-                body = _redactor.Redact(body, _auditOptions.SensitiveFields);
+                body = _redactor.Redact(body, Options.SensitiveFields);
             }
 
             return body;
@@ -198,7 +202,7 @@ public class AuditMiddleware
 
         // 获取请求参数（受配置控制）
         string? requestParameters = null;
-        if (_auditOptions.EnableRequestParameters)
+        if (Options.EnableRequestParameters)
         {
             try
             {

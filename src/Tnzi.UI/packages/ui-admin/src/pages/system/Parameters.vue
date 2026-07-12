@@ -47,6 +47,7 @@ const bridge = createSystemBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<SettingDto, string>({
   pageId: 'system.parameters',
+  permission: 'system.parameter',
   columns: parameterColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.settings.fetch(query),

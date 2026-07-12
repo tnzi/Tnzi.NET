@@ -22,6 +22,9 @@ const bridge = createStorageBridge({ client: useAdminClient() })
 
 useWidgetData(async () => {
   const stats = await bridge.statistics.get()
+  // A 403/failed envelope can resolve to undefined (permission revoked
+  // mid-session) - keep the em-dash placeholders instead of throwing.
+  if (!stats) return
   totalFiles.value = stats.totalFiles ?? 0
   totalSizeBytes.value = stats.totalSize ?? 0
   loaded.value = true

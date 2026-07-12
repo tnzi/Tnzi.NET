@@ -16,24 +16,33 @@ import { useAdminClient } from '../../plugin/client'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useWidgetData } from '../shell/useWidgetData'
 import { translatePageKey } from '../../pages/_shared/translate'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 
 const totalUsers = ref<number | null>(null)
 const activeSessions = ref<number | null>(null)
 const onlineUsers = ref<number | null>(null)
 
 const bridge = createIdentityBridge({ client: useAdminClient() })
+const authStore = useAdminAuthStore()
 
 useWidgetData(async () => {
+  // The widget itself is gated by user.view (preset `permission`), but
+  // `sessions.statistics()` sits behind session.view (Technical) - probe it
+  // only when the code is held (super-user bypass + fail-open pre-load, same
+  // semantics as the sidebar), so a business admin's dashboard doesn't fire a
+  // doomed request that lands as console 403 noise. Skipped → em-dash rows.
+  const canSeeSessions =
+    authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission('session.view')
+
   // Parallel fetch — neither depends on the other.
   const [stats, users] = await Promise.allSettled([
-    bridge.sessions.statistics(),
+    canSeeSessions ? bridge.sessions.statistics() : Promise.resolve(undefined),
     bridge.users.fetch({ pageIndex: 1, pageSize: 1, searchText: '', filters: {} }),
   ])
-  // `sessions.statistics()` is gated by session.view (Technical) — a business
-  // admin's call fulfils with an undefined/empty body rather than rejecting, so
-  // guard `stats.value` before reading it (else "Cannot read properties of
-  // undefined (reading 'activeSessionCount')" tanks the whole widget). The
-  // session rows then stay em-dash while total users still renders.
+  // Even a permitted call can fulfil with an undefined/empty body (failed
+  // envelope resolves instead of rejecting), so guard `stats.value` before
+  // reading it (else "Cannot read properties of undefined" tanks the whole
+  // widget). The session rows then stay em-dash while total users renders.
   if (stats.status === 'fulfilled' && stats.value) {
     activeSessions.value = stats.value.activeSessionCount ?? 0
     onlineUsers.value = stats.value.onlineUserCount ?? 0

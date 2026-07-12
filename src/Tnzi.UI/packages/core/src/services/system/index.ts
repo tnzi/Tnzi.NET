@@ -7,4 +7,5 @@
 export * from './metadata';
 export * from './types';
 export * from './api';
+export * from './settings-realtime';
 

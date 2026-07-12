@@ -217,7 +217,7 @@ public class ToolRegistryPermissionTests
         permissionChecker.Setup(p => p.IsGrantedAsync("perm.read")).ReturnsAsync(true);
         permissionChecker.Setup(p => p.IsGrantedAsync("perm.write")).ReturnsAsync(false);
 
-        var aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions
+        var aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
             DefaultProvider = "OpenAI",
             Providers = new Dictionary<string, ProviderOptions>

@@ -50,15 +50,23 @@ export interface RowAction<T = Record<string, unknown>> {
   divider?: boolean
 }
 
-/** Build the standard primary "Edit" action wired to `state.openEdit`. */
+/**
+ * Build the standard primary "Edit" action wired to `state.openEdit`.
+ * Hidden per row when `state.canUpdate` is false (no update callback, or the
+ * page's `permission` config denies `.update` for the current user) - the
+ * check runs at render time via `show`, so it stays reactive to permission
+ * loads. A caller-supplied `show` is AND-composed on top.
+ */
 export function editAction<T, TId extends string | number = string | number>(
   state: UseCrudPageReturn<T, TId>,
   opts: Partial<RowAction<T>> = {},
 ): RowAction<T> {
+  const callerShow = opts.show
   return {
     key: 'edit',
     type: 'primary',
     ...opts,
+    show: (row) => state.canUpdate !== false && (callerShow ? callerShow(row) : true),
     onClick: opts.onClick ?? ((row) => state.openEdit(row)),
   }
 }
@@ -75,16 +83,22 @@ export function viewAction<T, TId extends string | number = string | number>(
   }
 }
 
-/** Build the standard destructive "Delete" action (confirm + `state.handleDelete`). */
+/**
+ * Build the standard destructive "Delete" action (confirm + `state.handleDelete`).
+ * Hidden per row when `state.canDelete` is false - same permission-reactive
+ * `show` composition as {@link editAction}.
+ */
 export function deleteAction<T, TId extends string | number = string | number>(
   state: UseCrudPageReturn<T, TId>,
   opts: Partial<RowAction<T>> = {},
 ): RowAction<T> {
+  const callerShow = opts.show
   return {
     key: 'delete',
     type: 'error',
     confirm: true,
     ...opts,
+    show: (row) => state.canDelete !== false && (callerShow ? callerShow(row) : true),
     onClick:
       opts.onClick ??
       (async (row) => {

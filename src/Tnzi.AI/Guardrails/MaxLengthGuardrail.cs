@@ -5,27 +5,28 @@ namespace Tnzi.AI.Guardrails;
 /// </summary>
 public class MaxLengthGuardrail : IInputGuardrail, IGuardrailProvider
 {
-    private readonly GuardrailsOptions _guardrailOptions;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public string Name => nameof(MaxLengthGuardrail);
 
-    public MaxLengthGuardrail(IOptions<AIOptions> options)
+    public MaxLengthGuardrail(IOptionsMonitor<AIOptions> options)
     {
-        _guardrailOptions = Check.NotNull(options).Value.Guardrails;
+        _options = Check.NotNull(options);
     }
 
     public Task<GuardrailResult> ValidateAsync(string input, CancellationToken ct = default)
     {
-        if (!_guardrailOptions.EnableMaxLength)
+        var guardrailOptions = _options.CurrentValue.Guardrails;
+        if (!guardrailOptions.EnableMaxLength)
         {
             return Task.FromResult(GuardrailResult.Allowed());
         }
 
-        if (input.Length > _guardrailOptions.MaxInputLength)
+        if (input.Length > guardrailOptions.MaxInputLength)
         {
             return Task.FromResult(GuardrailResult.Rejected(
                 nameof(MaxLengthGuardrail),
-                $"Input exceeds maximum length of {_guardrailOptions.MaxInputLength} characters (actual: {input.Length})"));
+                $"Input exceeds maximum length of {guardrailOptions.MaxInputLength} characters (actual: {input.Length})"));
         }
 
         return Task.FromResult(GuardrailResult.Allowed());

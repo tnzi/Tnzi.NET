@@ -22,6 +22,17 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
+
+  <!-- PublicApiAnalyzers API 门禁（0.1.0 冻结基线）。未登记的公共 API => RS0016 error；
+       删除死条目 => RS0017 error。RS0026/RS0027（可选参数重载设计建议）保持 warning。
+       基线见同目录 PublicAPI.Shipped.txt；增删改 API 的登记工作流见 docs/coding-standards/public-api-governance.md。 -->
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017;RS0024;RS0025</WarningsAsErrors>
+  </PropertyGroup>
 
 </Project>

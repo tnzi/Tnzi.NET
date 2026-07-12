@@ -9,14 +9,14 @@ namespace Tnzi.AI.Agents.Definitions;
 /// </summary>
 public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
 {
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<YamlAgentDefinitionProvider> _logger;
     private readonly IDeserializer _yamlDeserializer;
     private readonly ConcurrentDictionary<string, (AgentDefinitionDto Definition, string Hash)> _cache = new();
     private FileSystemWatcher? _watcher;
     private bool _disposed;
 
-    public YamlAgentDefinitionProvider(IOptions<AIOptions> options, ILogger<YamlAgentDefinitionProvider> logger)
+    public YamlAgentDefinitionProvider(IOptionsMonitor<AIOptions> options, ILogger<YamlAgentDefinitionProvider> logger)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
@@ -31,7 +31,7 @@ public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
     /// <inheritdoc />
     public async Task<IReadOnlyList<AgentDefinitionDto>> LoadDefinitionsAsync(CancellationToken ct = default)
     {
-        var config = _options.Value.AgentDefinitions;
+        var config = _options.CurrentValue.AgentDefinitions;
         if (!config.Enabled)
             return [];
 
@@ -110,7 +110,7 @@ public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
 
     private void InitializeWatcher()
     {
-        var config = _options.Value.AgentDefinitions;
+        var config = _options.CurrentValue.AgentDefinitions;
         if (!config.Enabled || !config.WatchForChanges)
             return;
 

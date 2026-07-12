@@ -7,14 +7,14 @@ namespace Tnzi.AI.Infrastructure.ContextProviders.Contributors;
 internal sealed class TextSearchContributor : IContextProviderContributor
 {
     private readonly ITextSearchService _textSearchService;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILoggerFactory _loggerFactory;
 
     public int Order => ContextProviderOrders.Rag;
 
     public TextSearchContributor(
         ITextSearchService textSearchService,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILoggerFactory loggerFactory)
     {
         _textSearchService = Check.NotNull(textSearchService);
@@ -24,12 +24,12 @@ internal sealed class TextSearchContributor : IContextProviderContributor
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
     {
-        if (!_options.Value.ContextProviders.TextSearch.Enabled) return null;
+        if (!_options.CurrentValue.ContextProviders.TextSearch.Enabled) return null;
 
         try
         {
             var logger = _loggerFactory.CreateLogger<TextSearchProvider>();
-            return new TextSearchProvider(_textSearchService, _options.Value.ContextProviders.TextSearch, logger, context.KnowledgeBaseIds);
+            return new TextSearchProvider(_textSearchService, _options.CurrentValue.ContextProviders.TextSearch, logger, context.KnowledgeBaseIds);
         }
         catch (Exception ex)
         {

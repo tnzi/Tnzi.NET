@@ -43,7 +43,8 @@ useWidgetData(async () => {
     searchText: '',
     filters: {},
   })
-  rows.value = (result.items ?? []).map((raw) => {
+  // A 403/failed envelope can resolve to undefined - render the empty state.
+  rows.value = (result?.items ?? []).map((raw) => {
     const r = raw as unknown as Record<string, unknown>
     return {
       id: String(r.id ?? ''),

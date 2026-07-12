@@ -30,6 +30,26 @@ describe('TPresencePicker', () => {
     expect(wrapper.find('.t-presence-picker').exists()).toBe(true)
   })
 
+  it('offers all four statuses by default (Invisible included)', () => {
+    const wrapper = mount(TPresencePicker, {
+      props: { status: UserPresenceStatus.Online, name: 'Alice' },
+      global: globalConfig,
+    })
+    const opts = (wrapper.vm as unknown as { visibleOptions: { key: UserPresenceStatus }[] }).visibleOptions
+    expect(opts.map((o) => o.key)).toContain(UserPresenceStatus.Invisible)
+    expect(opts).toHaveLength(4)
+  })
+
+  it('drops the Invisible option when allowInvisible is false', () => {
+    const wrapper = mount(TPresencePicker, {
+      props: { status: UserPresenceStatus.Online, name: 'Alice', allowInvisible: false },
+      global: globalConfig,
+    })
+    const opts = (wrapper.vm as unknown as { visibleOptions: { key: UserPresenceStatus }[] }).visibleOptions
+    expect(opts).toHaveLength(3)
+    expect(opts.map((o) => o.key)).not.toContain(UserPresenceStatus.Invisible)
+  })
+
   it('emits change with the picked status', () => {
     const cases: UserPresenceStatus[] = [
       UserPresenceStatus.Online,

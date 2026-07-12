@@ -9,7 +9,8 @@ public class DistributedSessionService : ApplicationService, ISessionService
 {
     private readonly IDistributedCache _cache;
     private readonly SessionOptions _sessionOptions;
-    private readonly IOptions<IdentityOptions>? _identityOptions;
+    // Scoped 服务：IOptionsSnapshot 每请求重算，AccountSecurity.SessionTimeoutMinutes 随请求热更新。
+    private readonly IOptionsSnapshot<IdentityOptions>? _identityOptions;
     private readonly IRepository<UserSession, Guid>? _repository;
     private readonly IDistributedLock? _distributedLock;
 
@@ -30,7 +31,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         IServiceProvider serviceProvider,
         IRepository<UserSession, Guid>? repository = null,
         IDistributedLock? distributedLock = null,
-        IOptions<IdentityOptions>? identityOptions = null)
+        IOptionsSnapshot<IdentityOptions>? identityOptions = null)
         : base(serviceProvider)
     {
         _cache = Check.NotNull(cache);

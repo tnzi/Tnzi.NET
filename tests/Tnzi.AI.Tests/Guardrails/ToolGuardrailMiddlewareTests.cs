@@ -7,12 +7,12 @@ namespace Tnzi.AI.Tests.Guardrails;
 /// </summary>
 public class ToolGuardrailMiddlewareTests
 {
-    private static IOptions<AIOptions> CreateOptions(bool enabled = true, bool failClosed = true)
+    private static IOptionsMonitor<AIOptions> CreateOptions(bool enabled = true, bool failClosed = true)
     {
         var opts = new AIOptions();
         opts.Guardrails.Enabled = enabled;
         opts.Guardrails.FailClosed = failClosed;
-        return Microsoft.Extensions.Options.Options.Create(opts);
+        return new StaticOptionsMonitor<AIOptions>(opts);
     }
 
     private static ToolExecutionContext CreateToolContext(string toolName = "bash")
@@ -39,7 +39,7 @@ public class ToolGuardrailMiddlewareTests
 
     private static ToolGuardrailMiddleware CreateMiddleware(
         IEnumerable<IGuardrailProvider>? providers = null,
-        IOptions<AIOptions>? options = null,
+        IOptionsMonitor<AIOptions>? options = null,
         IEventBus? eventBus = null,
         IAgentExecutionContextAccessor? accessor = null)
         => new(

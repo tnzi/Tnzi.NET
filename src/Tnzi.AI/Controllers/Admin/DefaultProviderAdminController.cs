@@ -97,6 +97,7 @@ public class DefaultProviderAdminController : ApiAdminControllerBase
     /// 创建 Provider 实体
     /// </summary>
     [HttpPost("entities")]
+    [ApiAuthorize(PermissionName = "ai.provider.create")]
     public virtual async Task<ApiResult<ProviderDto>> Create([FromBody] CreateProviderDto dto)
     {
         var result = await ProviderService.CreateAsync(dto, HttpContext.RequestAborted);
@@ -107,6 +108,7 @@ public class DefaultProviderAdminController : ApiAdminControllerBase
     /// 更新 Provider 实体
     /// </summary>
     [HttpPut("entities/{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.provider.update")]
     public virtual async Task<ApiResult<ProviderDto>> Update(Guid id, [FromBody] UpdateProviderDto dto)
     {
         var result = await ProviderService.UpdateAsync(id, dto, HttpContext.RequestAborted);
@@ -117,6 +119,7 @@ public class DefaultProviderAdminController : ApiAdminControllerBase
     /// 软删除 Provider 实体
     /// </summary>
     [HttpDelete("entities/{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.provider.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await ProviderService.DeleteAsync(id, HttpContext.RequestAborted);
@@ -127,6 +130,7 @@ public class DefaultProviderAdminController : ApiAdminControllerBase
     /// 测试 Provider 连接（轻量探针：校验 IsEnabled + API Key 解密）
     /// </summary>
     [HttpPost("entities/{id:guid}/test")]
+    [ApiAuthorize(PermissionName = "ai.provider.execute")]
     public virtual async Task<ApiResult<ProviderTestResultDto>> TestConnection(Guid id)
     {
         var result = await ProviderService.TestConnectionAsync(id, HttpContext.RequestAborted);

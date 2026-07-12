@@ -184,7 +184,7 @@ public class HistoryMiddlewareTests
 
         var middleware = new HistoryMiddleware(
             mockThreadService.Object,
-            Microsoft.Extensions.Options.Options.Create(aiOptions),
+            new StaticOptionsMonitor<AIOptions>(aiOptions),
             Mock.Of<ILogger<HistoryMiddleware>>());
 
         var context = CreateContext(threadId);
@@ -324,7 +324,7 @@ public class HistoryMiddlewareTests
 
     #region Helpers
 
-    private static IOptions<AIOptions> CreateOptions(int? maxLoadedMessages, bool useDefault = false)
+    private static IOptionsMonitor<AIOptions> CreateOptions(int? maxLoadedMessages, bool useDefault = false)
     {
         var aiOptions = new AIOptions();
         if (useDefault)
@@ -335,7 +335,7 @@ public class HistoryMiddlewareTests
         {
             aiOptions.History.Store.MaxLoadedMessages = maxLoadedMessages;
         }
-        return Microsoft.Extensions.Options.Options.Create(aiOptions);
+        return new StaticOptionsMonitor<AIOptions>(aiOptions);
     }
 
     private static AiMiddlewareContext CreateContext(Guid threadId)

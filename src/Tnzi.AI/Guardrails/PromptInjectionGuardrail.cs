@@ -9,7 +9,7 @@ namespace Tnzi.AI.Guardrails;
 /// </remarks>
 public class PromptInjectionGuardrail : IInputGuardrail, IGuardrailProvider
 {
-    private readonly bool _enabled;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public string Name => nameof(PromptInjectionGuardrail);
 
@@ -32,14 +32,14 @@ public class PromptInjectionGuardrail : IInputGuardrail, IGuardrailProvider
         "jailbreak"
     ];
 
-    public PromptInjectionGuardrail(IOptions<AIOptions> options)
+    public PromptInjectionGuardrail(IOptionsMonitor<AIOptions> options)
     {
-        _enabled = Check.NotNull(options).Value.Guardrails.EnablePromptInjectionDetection;
+        _options = Check.NotNull(options);
     }
 
     public Task<GuardrailResult> ValidateAsync(string input, CancellationToken ct = default)
     {
-        if (!_enabled)
+        if (!_options.CurrentValue.Guardrails.EnablePromptInjectionDetection)
         {
             return Task.FromResult(GuardrailResult.Allowed());
         }

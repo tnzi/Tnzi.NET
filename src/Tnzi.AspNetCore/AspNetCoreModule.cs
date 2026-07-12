@@ -51,6 +51,11 @@ public class AspNetCoreModule : TnziFrameworkModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, AspNetCorePermissions>();
+
         // 自动添加 Controllers 支持
         // 枚举按成员名(PascalCase)序列化是框架 wire 契约;入参仍兼容数字(JsonStringEnumConverter 默认 allowIntegerValues)
         var mvcBuilder = context.Services.AddControllers()
@@ -113,6 +118,19 @@ public class AspNetCoreModule : TnziFrameworkModule
         var aspNetCoreOptions = context.Configuration
             .GetSection("AspNetCore")
             .Get<AspNetCoreOptions>() ?? new AspNetCoreOptions();
+
+        // 抑制 [ApiController] 内置的 ModelStateInvalidFilter（Order -2000，先于自定义
+        // ModelStateValidationFilter 短路），改由框架的 ModelStateValidationFilter 接管：
+        // 内置过滤器返回 RFC7807 ProblemDetails（无 code 字段），前端 normalizeApiResult
+        // 读不到 code 会误判成功；自定义过滤器返回统一 ApiResult 信封 + 真实 400 状态码。
+        // 仅在启用框架全局模型验证时抑制（自定义过滤器此时接管），否则保持 ASP.NET Core 默认行为。
+        if (aspNetCoreOptions.EnableGlobalModelValidation)
+        {
+            context.Services.Configure<ApiBehaviorOptions>(options =>
+            {
+                options.SuppressModelStateInvalidFilter = true;
+            });
+        }
 
         // 注册过滤器（根据配置）
         context.Services.Configure<MvcOptions>(options =>

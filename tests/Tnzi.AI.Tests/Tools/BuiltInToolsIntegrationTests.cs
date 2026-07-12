@@ -105,7 +105,7 @@ public class BuiltInToolsIntegrationTests
     public void MemoryTools_CanBeInstantiated()
     {
         var mockStore = new Mock<IMemoryStore>();
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         var tools = new BuiltInMemoryTools(mockStore.Object, NullLogger<BuiltInMemoryTools>.Instance, options);
         tools.ShouldNotBeNull();
     }

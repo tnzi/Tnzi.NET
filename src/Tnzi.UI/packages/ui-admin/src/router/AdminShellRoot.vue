@@ -14,7 +14,7 @@
  * their own component; the route table replacement logic in
  * {@link createTnziUiAdmin} treats consumer-supplied routes as authoritative.
  */
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, ref, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NConfigProvider, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
@@ -33,7 +33,13 @@ import { useChatStore } from '../stores/useChatStore'
 import type { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { useAdminLoginConfig } from '../plugin/loginConfig'
 import { useAdminChatConfig } from '../plugin/chatConfig'
+import { useAdminSettingsConfig } from '../plugin/settingsConfig'
+import { useAdminThemeConfig } from '../plugin/themeConfig'
 import { useAdminClient } from '../plugin/client'
+import { usePermissionGuard } from '../headless/usePermissionGuard'
+import { useModuleAvailability } from '../headless/useModuleAvailability'
+import { useGlobalTheme } from '../headless/useGlobalTheme'
+import { useSettingsRealtime } from '../headless/useSettingsRealtime'
 import { useStorageApi } from '@tnzi/core/services/storage'
 import { resolveAvatarUrl } from '../utils/resolveAvatarUrl'
 import { en } from '../locales/en'
@@ -47,17 +53,20 @@ const tabStore = useAdminTabStore()
 const routeStore = useAdminRouteStore()
 const authStore = useAdminAuthStore()
 
-// Reactively drop persisted tabs the current user isn't allowed to open. This
-// is the shell-level twin of the loadPermissions-time prune: it also fires on a
-// page RELOAD, where the auth store hydrates from localStorage (userInfo already
-// non-null) so the consumer's "load permissions only when userInfo === null"
-// idempotency guard skips loadPermissions — without this, a prior session's
-// Diagnostics / MCP / Sandbox tabs would still sit in the bar (clicking one is
-// already blocked by the permission guard, but the ghost tab shouldn't linger).
-// `deniedRouteNames` is empty for super users / before permissions load, so this
-// is a no-op except on a real privilege downgrade.
+// Reactively drop persisted tabs the current user can't open — either because
+// they lack permission (`deniedRouteNames`) OR because the tab points into a
+// framework module the backend didn't load (`unavailableRouteNames`, the
+// module-availability twin). This is the shell-level twin of the
+// loadPermissions-time prune: it also fires on a page RELOAD, where the auth
+// store hydrates from localStorage (userInfo already non-null) so the consumer's
+// "load permissions only when userInfo === null" idempotency guard skips
+// loadPermissions — without this, a prior session's Diagnostics / MCP / Sandbox
+// (or an unloaded module's) tabs would still sit in the bar (clicking one is
+// already blocked by the guards, but the ghost tab shouldn't linger). Both sets
+// are empty for super users / before the signals load, so this is a no-op except
+// on a real privilege downgrade or a module the host stopped loading.
 watch(
-  () => routeStore.deniedRouteNames,
+  () => new Set([...routeStore.deniedRouteNames, ...routeStore.unavailableRouteNames]),
   (denied) => tabStore.pruneTabs(denied),
   { immediate: true },
 )
@@ -114,10 +123,22 @@ const naiveTheme = computed(() => (themeCtx?.isDark.value ? darkTheme : null))
 const loginConfig = useAdminLoginConfig()
 const chatConfig = useAdminChatConfig()
 
-// Presence in the header avatar — only when the built-in chat is enabled AND a
+// Built-in chat — enabled by consumer config (default on) AND the backend
+// actually loaded the Chat module. `canActivate` (not `has`) because TChatHost
+// is side-effectful on mount (fetches conversations, opens the SignalR hub):
+// it must not race the availability probe, so it defers while the signal is
+// in flight and only mounts once the signal settles (fail-open on old
+// backends without the endpoint). Reactive: if a later refresh drops Chat,
+// the host unmounts and tears the socket down.
+const moduleAvailability = useModuleAvailability()
+const builtinChatEnabled = computed(
+  () => chatConfig?.enabled !== false && moduleAvailability.canActivate('chat'),
+)
+
+// Presence in the header avatar — only when the built-in chat is live AND a
 // client is present (TChatHost then inits the chat bridge + loads my status).
 const chatStore = useChatStore()
-const presenceEnabled = computed(() => chatConfig?.enabled !== false && !!storageClient)
+const presenceEnabled = computed(() => builtinChatEnabled.value && !!storageClient)
 function onSetPresence(status: UserPresenceStatus): void {
   void chatStore.setMyStatus(status).catch(() => undefined)
 }
@@ -167,6 +188,87 @@ const footerCopyright = computed<string>(() => {
 })
 
 const themeDrawerOpen = ref(false)
+
+// ── Global admin theme ─────────────────────────────────────────────────────
+// The super admin's theme configuration applies to EVERY user: the shell
+// loads the server snapshot after sign-in and applies it over the locally
+// cached theme. Privileged users (system.appearance.update - super admins by
+// default under deny-by-default) get the full drawer and edit the global
+// snapshot; everyone else gets a preset color-scheme picker whose visibility
+// the admin controls via the drawer's General → Global section.
+const themeConfig = useAdminThemeConfig()
+const { can } = usePermissionGuard()
+const canEditGlobalTheme = computed(() => can('system.appearance.update'))
+const globalTheme = useGlobalTheme({
+  client: storageClient,
+  themeContext: themeCtx,
+  enabled: themeConfig?.globalSync !== false,
+  // Personal preset colors only overlay for preset-picker users. Privileged
+  // users edit the global theme directly - overlaying THEIR lingering
+  // personal color would leak it into the next "save for all users".
+  shouldOverlayUserPreset: () => !canEditGlobalTheme.value,
+})
+// Load once signed in AND the System module (which owns the appearance
+// endpoints) is actually loaded — `canActivate` defers while the module
+// signal is in flight, so a host without Tnzi.System never sees a doomed
+// GET /appearance/admin-theme on boot. Fail-open on old backends (no signal).
+watch(
+  () => authStore.isLogin && moduleAvailability.canActivate('system'),
+  (ready) => {
+    if (ready) void globalTheme.load()
+  },
+  { immediate: true },
+)
+const themeDrawerMode = computed<'full' | 'presets'>(() =>
+  canEditGlobalTheme.value ? 'full' : 'presets',
+)
+const themeBtnVisible = computed(
+  () => canEditGlobalTheme.value || themeStore.presetPickerVisible,
+)
+
+// ── Realtime config push ────────────────────────────────────────────────────
+// Subscribe to `/hubs/settings` so a super admin's deployment-config change
+// (Settings Center runtime settings, or the global theme) reaches this already-
+// open session live — no manual page reload. The backend broadcasts only the
+// changed key; we route it to the matching re-fetch:
+//   Appearance:AdminTheme → reload + re-apply the global theme
+//   Chat:*                → re-fetch chat config (the chat window reads
+//                           store.config reactively, so the invisible option /
+//                           presence / attachment gating update in place)
+// Gated on `system` module availability (the hub lives in Tnzi.System) so a host
+// without it never opens a doomed socket. Fail-open on old backends (no signal).
+const settingsConfig = useAdminSettingsConfig()
+const settingsRealtime = useSettingsRealtime({
+  getToken: () => storageClient?.getAccessToken?.() ?? authStore.token ?? '',
+  onChanged: (p) => {
+    if (p.key === 'Appearance:AdminTheme') {
+      void globalTheme.load()
+    } else if (p.key.startsWith('Chat:')) {
+      if (builtinChatEnabled.value) void chatStore.loadConfig()
+    }
+    // Consumer routes (defineAdminApp({ settings: { realtime } })) run after the
+    // built-ins — matched by exact key or prefix, isolated so one bad handler
+    // doesn't break the others.
+    for (const r of settingsConfig?.realtime ?? []) {
+      if (p.key === r.prefix || p.key.startsWith(r.prefix)) {
+        try {
+          r.handler(p)
+        } catch {
+          /* consumer handler errors must not break the realtime pipeline */
+        }
+      }
+    }
+  },
+})
+watch(
+  () => authStore.isLogin && !!storageClient && moduleAvailability.canActivate('system'),
+  (ready) => {
+    if (ready) void settingsRealtime.start()
+    else void settingsRealtime.stop()
+  },
+  { immediate: true },
+)
+onUnmounted(() => { void settingsRealtime.stop() })
 
 function onMenuSelect(menu: AdminMenuItem): void {
   // Leaf entries carry an absolute route path; navigate to it. Branch entries
@@ -223,8 +325,9 @@ function defaultTranslate(key: string, fallback?: string): string {
     <TAdminShell
       :title="loginConfig.brand ?? 'Tnzi Admin'"
       :sider="{ brand: loginConfig.brand, brandSubtitle: loginConfig.brandSubtitle, brandIcon: loginConfig.brandIcon }"
+      :header="{ showThemeBtn: themeBtnVisible }"
       :footer="{ copyright: footerCopyright, links: loginConfig.footer?.links }"
-      :builtin-chat="chatConfig?.enabled !== false"
+      :builtin-chat="builtinChatEnabled"
       @menu-select="onMenuSelect"
       @open-theme-drawer="onOpenThemeDrawer"
       @locale-change="onLocaleChange"
@@ -242,7 +345,7 @@ function defaultTranslate(key: string, fallback?: string): string {
     <!-- Header user avatar (Phase I.7.7+) — wired from `useAdminLoginConfig().user`. -->
     <template #header-user>
       <TAdminUserAvatar
-        :user-name="authStore.userInfo?.displayName || authStore.userInfo?.username || loginConfig.user?.userName"
+        :user-name="authStore.userInfo?.shortName || authStore.userInfo?.displayName || authStore.userInfo?.username || loginConfig.user?.userName"
         :avatar-url="headerAvatarUrl"
         :avatar-icon="loginConfig.user?.avatarIcon"
         :on-user-center="loginConfig.user?.onUserCenter ?? goUserCenter"
@@ -251,6 +354,7 @@ function defaultTranslate(key: string, fallback?: string): string {
         :on-sign-in="loginConfig.user?.onSignIn"
         :presence="presenceEnabled ? chatStore.myStatus : null"
         :on-set-presence="onSetPresence"
+        :allow-invisible="chatStore.config.allowInvisible"
         :translate="loginConfig.translate ?? defaultTranslate"
       />
     </template>
@@ -262,6 +366,12 @@ function defaultTranslate(key: string, fallback?: string): string {
     <!-- <RouterView v-slot> + <Transition> + <component :is> pattern. -->
     <TAdminRouterView :exclude="['login', '403', '404']" />
     </TAdminShell>
-    <TThemeDrawer v-model:show="themeDrawerOpen" :translate="defaultTranslate" />
+    <TThemeDrawer
+      v-model:show="themeDrawerOpen"
+      :mode="themeDrawerMode"
+      :global-theme="globalTheme"
+      :presets="themeConfig?.presets"
+      :translate="defaultTranslate"
+    />
   </NConfigProvider>
 </template>

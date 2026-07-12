@@ -31,7 +31,7 @@ public class VectorTextSearchServiceTests
             _docRepoMock.Object,
             _kbRepoMock.Object,
             postProcessors ?? Enumerable.Empty<ISearchPostProcessor>(),
-            Microsoft.Extensions.Options.Options.Create(ragOptions ?? new AIRagOptions
+            new StaticOptionsMonitor<AIRagOptions>(ragOptions ?? new AIRagOptions
             {
                 DefaultEmbeddingProvider = "openai",
                 DefaultEmbeddingModel = "text-embedding-3-small"

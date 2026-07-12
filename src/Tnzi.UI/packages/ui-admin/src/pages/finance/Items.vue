@@ -47,6 +47,7 @@ function toPayload(d: Record<string, unknown>): UpdateItemDto {
 
 const crud = useCrudPage<ItemRow>({
   pageId: 'finance.items',
+  permission: 'finance.item',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.items.fetch(q),

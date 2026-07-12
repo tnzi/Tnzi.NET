@@ -24,4 +24,6 @@ global using Tnzi.Performance.Options;
 global using Tnzi.Performance.Services;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Security.Claims;
+global using Tnzi.Settings;
 global using Tnzi.Utilities;
+global using Tnzi.Performance.Permissions;

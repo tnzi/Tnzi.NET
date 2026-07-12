@@ -193,7 +193,7 @@ public class SandboxToolBindingIntegrationTests : IDisposable
         var loggerFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.None));
         var openApiGenerator = new OpenApiToolGenerator(
             new Mock<IHttpClientFactory>().Object,
-            Microsoft.Extensions.Options.Options.Create(new AIOptions()),
+            new StaticOptionsMonitor<AIOptions>(new AIOptions()),
             NullLogger<OpenApiToolGenerator>.Instance);
 
         var resolver = new ToolResolver(

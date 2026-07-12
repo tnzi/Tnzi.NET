@@ -15,6 +15,32 @@ public class RedisOptions
     /// 连接选项
     /// </summary>
     public ConnectionOptions Connection { get; set; } = new();
+
+    /// <summary>
+    /// 分布式锁选项
+    /// </summary>
+    public LockOptions Lock { get; set; } = new();
+}
+
+/// <summary>
+/// Redis 分布式锁选项
+/// </summary>
+public class LockOptions
+{
+    /// <summary>
+    /// 锁的默认过期时间（秒，默认: 30）。
+    /// 这是持锁者进程崩溃后锁自动释放的安全上限。
+    /// </summary>
+    public int DefaultExpirySeconds { get; set; } = 30;
+
+    /// <summary>
+    /// 是否启用锁的自动续租（默认: true）。
+    /// 启用后，只要持锁句柄存活，后台看门狗会在锁过期前周期性续租，
+    /// 避免长任务因固定过期时间而中途丢锁；进程崩溃时看门狗随之消失，锁仍会在
+    /// <see cref="DefaultExpirySeconds"/> 内自动释放，因此不会造成死锁。
+    /// 关闭后锁为固定过期语义（达到 <see cref="DefaultExpirySeconds"/> 即释放）。
+    /// </summary>
+    public bool EnableAutoRenewal { get; set; } = true;
 }
 
 /// <summary>

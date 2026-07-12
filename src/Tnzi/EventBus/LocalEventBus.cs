@@ -1,7 +1,7 @@
 
 namespace Tnzi.EventBus;
 
-public class LocalEventBus : IEventBus, IDisposable
+public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<LocalEventBus> _logger;
@@ -10,6 +10,9 @@ public class LocalEventBus : IEventBus, IDisposable
     private readonly ConcurrentDictionary<Type, HashSet<Type>> _runtimeHandlers = new();
     private readonly SemaphoreSlim _concurrencySemaphore;
     private readonly int _maxConcurrency;
+    private readonly ResiliencePipeline? _retryPipeline;
+    // 在飞后台处理器任务跟踪：关闭时排水,避免应用关闭丢失 fire-and-forget 事件处理
+    private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
     private volatile bool _disposed;
 
     public LocalEventBus(
@@ -26,6 +29,17 @@ public class LocalEventBus : IEventBus, IDisposable
         _maxConcurrency = maxConcurrency > 0 ? maxConcurrency : 10;
         _concurrencySemaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
 
+        // 消费 ResilienceModule 注册的 "eventbus" 弹性管线(统一重试策略来源);
+        // 未注册(Resilience 关闭)时回退到内置的手动重试逻辑
+        if (_options.EnableRetry)
+        {
+            var pipelineProvider = serviceProvider.GetService<ResiliencePipelineProvider<string>>();
+            if (pipelineProvider != null && pipelineProvider.TryGetPipeline("eventbus", out var pipeline))
+            {
+                _retryPipeline = pipeline;
+            }
+        }
+
         // 处理器现在直接从DI容器动态获取，支持运行时注册
     }
 
@@ -34,6 +48,28 @@ public class LocalEventBus : IEventBus, IDisposable
         ThrowIfDisposed();
         Check.NotNull(@event);
 
+        // 事务感知发布：处于活跃工作单元事务中时,延迟到提交后执行(回滚则丢弃),
+        // 使直接注入 IEventBus 的发布也默认具备事务安全性(不产生幽灵事件)
+        if (_options.TransactionAwarePublish)
+        {
+            var ambient = AmbientUnitOfWork.Current;
+            if (ambient?.IsTransactionActive == true)
+            {
+                _logger.LogDebug("Event {EventType} (EventId: {EventId}) published inside an active unit-of-work transaction; deferred until after commit",
+                    typeof(TEvent).Name, @event.EventId);
+                ambient.EnqueuePostCommit(ct => PublishCoreAsync(@event, ct));
+                return;
+            }
+        }
+
+        await PublishCoreAsync(@event, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 实际发布逻辑(不做事务感知检测,由 PublishAsync 或提交后队列调用)
+    /// </summary>
+    private async Task PublishCoreAsync<TEvent>(TEvent @event, CancellationToken cancellationToken) where TEvent : class, IEvent
+    {
         var eventType = typeof(TEvent);
 
         // 在整个处理过程中保持scope活动，确保Scoped生命周期的处理器有效
@@ -83,14 +119,18 @@ public class LocalEventBus : IEventBus, IDisposable
             await Task.WhenAll(syncTasks).ConfigureAwait(false);
 
         // Fire-and-forget 后台处理器（各自创建独立 Scope，不阻塞发布者）
+        // 任务被跟踪,应用关闭时 DisposeAsync 会等待在飞任务排水(带超时),避免静默丢失
         foreach (var handlerType in backgroundHandlerTypes)
         {
             var capturedEvent = @event;
             var capturedEventType = eventType;
             // 捕获租户 ID，在新 scope 中恢复上下文
             var capturedTenantId = (@event as EventBase)?.TenantId;
-            _ = Task.Run(async () =>
+            var backgroundTask = Task.Run(async () =>
             {
+                // 后台处理器运行在独立作用域/独立事务中,必须隔离发布者的环境事务上下文,
+                // 防止处理器内的再发布被挂到一个可能已提交/已释放的外部事务队列上
+                AmbientUnitOfWork.Set(null);
                 try
                 {
                     using var bgScope = _serviceProvider.CreateScope();
@@ -137,6 +177,13 @@ public class LocalEventBus : IEventBus, IDisposable
                         handlerType.Name, capturedEventType.Name, capturedEvent.EventId);
                 }
             });
+
+            _backgroundTasks.TryAdd(backgroundTask, 0);
+            _ = backgroundTask.ContinueWith(
+                t => _backgroundTasks.TryRemove(t, out _),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
     }
 
@@ -337,6 +384,16 @@ public class LocalEventBus : IEventBus, IDisposable
             return;
         }
 
+        // 优先消费 ResilienceModule 的 "eventbus" 弹性管线(统一重试策略);
+        // 管线未注册时回退到下方内置的指数退避重试
+        if (_retryPipeline != null)
+        {
+            await _retryPipeline.ExecuteAsync(
+                async ct => await metadata.HandleDelegate!(handler, @event, ct).ConfigureAwait(false),
+                cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         Exception? lastException = null;
         for (int attempt = 0; attempt <= _options.RetryCount; attempt++)
         {
@@ -381,6 +438,12 @@ public class LocalEventBus : IEventBus, IDisposable
         }
     }
 
+    /// <summary>
+    /// 延迟发布事件(内联延迟实现)
+    /// 注意语义：本实现通过 Task.Delay 在当前调用流内等待后发布,await 它会阻塞调用者整个延迟时长;
+    /// 延迟期间应用关闭或调用方取消则事件不会发布(非持久化调度)。
+    /// 适合短延迟的轻量场景;需要可靠的长延迟/持久化调度请使用后台任务系统(如 Hangfire)
+    /// </summary>
     public async Task PublishDelayedAsync<TEvent>(TEvent @event, TimeSpan delay, CancellationToken cancellationToken = default) where TEvent : class, IEvent
     {
         if (delay > TimeSpan.Zero)
@@ -513,12 +576,38 @@ public class LocalEventBus : IEventBus, IDisposable
     }
 
     /// <summary>
-    /// 释放资源
+    /// 释放资源(同步路径,不等待在飞后台处理器;优雅关闭请走 DisposeAsync)
     /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _concurrencySemaphore?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// 异步释放：先等待在飞后台处理器排水(最长 10 秒),再释放资源
+    /// 容器关闭时(ServiceProvider.DisposeAsync)自动走此路径,避免应用关闭丢失后台事件处理
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        var inFlight = _backgroundTasks.Keys.ToArray();
+        if (inFlight.Length > 0)
+        {
+            _logger.LogInformation("Draining {Count} in-flight background event handler task(s) before shutdown", inFlight.Length);
+            var drainTask = Task.WhenAll(inFlight);
+            var completed = await Task.WhenAny(drainTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
+            if (completed != drainTask)
+            {
+                _logger.LogWarning("Timed out waiting for {Count} background event handler task(s) to complete during shutdown",
+                    _backgroundTasks.Count);
+            }
+        }
+
         _concurrencySemaphore?.Dispose();
         GC.SuppressFinalize(this);
     }

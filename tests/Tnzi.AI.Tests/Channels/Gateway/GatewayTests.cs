@@ -31,12 +31,13 @@ public class GatewayTests
 
     private static (DefaultGateway gateway, Mock<IAgentRuntime> runtime, Mock<IChannelThreadStore> threadStore) CreateGateway(
         Guid? defaultAgentId = null,
-        Guid? existingThreadId = null)
+        Guid? existingThreadId = null,
+        int streamingThrottleMs = 0)
     {
         var agentId = defaultAgentId ?? TestAgentId;
 
         // SessionBinder setup
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
             DefaultAgentId = agentId
         });
@@ -65,9 +66,10 @@ public class GatewayTests
         var scopeFactoryMock = new Mock<IServiceScopeFactory>();
         scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
 
-        var gatewayOptions = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        var gatewayOptions = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
-            DefaultAgentId = agentId
+            DefaultAgentId = agentId,
+            StreamingThrottleMs = streamingThrottleMs
         });
         var gateway = new DefaultGateway(binder, scopeFactoryMock.Object, gatewayOptions, NullLogger<DefaultGateway>.Instance);
 
@@ -103,14 +105,14 @@ public class GatewayTests
     public async Task ProcessAsync_NoDefaultAgent_ReturnsError()
     {
         // Arrange — DefaultAgentId = null → binder returns Guid.Empty
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
             DefaultAgentId = null
         });
         var binder = new DefaultSessionBinder([], options);
 
         var scopeFactoryMock = new Mock<IServiceScopeFactory>();
-        var gatewayOptions = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        var gatewayOptions = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
             DefaultAgentId = null
         });
@@ -196,5 +198,68 @@ public class GatewayTests
         // Assert
         var afterPrune = await gateway.GetSessionsAsync();
         afterPrune.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ProcessStreamingAsync_CoalescesRapidChunks_WhenThrottled()
+    {
+        // Arrange — high throttle so every non-final delta after the first coalesces
+        var (gateway, runtime, _) = CreateGateway(streamingThrottleMs: 10_000);
+        runtime
+            .Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(StreamChunks(
+                new AgentStreamChunk { Text = "a" },
+                new AgentStreamChunk { Text = "b" },
+                new AgentStreamChunk { Text = "c" },
+                new AgentStreamChunk { Text = "d", FinishReason = "stop" }));
+
+        // Act
+        var emitted = new List<GatewayStreamChunk>();
+        await foreach (var chunk in gateway.ProcessStreamingAsync(CreateRequest()))
+        {
+            emitted.Add(chunk);
+        }
+
+        // Assert — no text lost, but far fewer emissions than the 4 input chunks
+        string.Concat(emitted.Select(c => c.TextDelta)).ShouldBe("abcd");
+        emitted.Count.ShouldBe(2);              // first "a" immediate + coalesced final "bcd"
+        emitted[0].TextDelta.ShouldBe("a");     // fast first paint
+        emitted[0].IsFinal.ShouldBeFalse();
+        emitted[^1].IsFinal.ShouldBeTrue();
+        emitted[^1].FinishReason.ShouldBe("stop");
+    }
+
+    [Fact]
+    public async Task ProcessStreamingAsync_PassesThroughEveryChunk_WhenThrottleDisabled()
+    {
+        // Arrange — throttle 0 = disabled → original per-chunk passthrough semantics
+        var (gateway, runtime, _) = CreateGateway(streamingThrottleMs: 0);
+        runtime
+            .Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(StreamChunks(
+                new AgentStreamChunk { Text = "a" },
+                new AgentStreamChunk { Text = "b" },
+                new AgentStreamChunk { Text = "c", FinishReason = "stop" }));
+
+        // Act
+        var emitted = new List<GatewayStreamChunk>();
+        await foreach (var chunk in gateway.ProcessStreamingAsync(CreateRequest()))
+        {
+            emitted.Add(chunk);
+        }
+
+        // Assert — one emission per input chunk, text intact, final preserved
+        emitted.Count.ShouldBe(3);
+        emitted.Select(c => c.TextDelta).ShouldBe(["a", "b", "c"]);
+        emitted[^1].IsFinal.ShouldBeTrue();
+    }
+
+    private static async IAsyncEnumerable<AgentStreamChunk> StreamChunks(params AgentStreamChunk[] chunks)
+    {
+        foreach (var chunk in chunks)
+        {
+            await Task.Yield();
+            yield return chunk;
+        }
     }
 }

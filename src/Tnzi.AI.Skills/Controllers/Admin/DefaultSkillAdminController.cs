@@ -49,6 +49,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 创建租户级技能
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.skill.create")]
     public virtual async Task<ApiResult<SkillDetailDto>> Create([FromBody] CreateSkillDto input)
     {
         input.Scope = SkillScope.Tenant;
@@ -60,6 +61,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 更新技能
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.skill.update")]
     public virtual async Task<ApiResult<SkillDetailDto>> Update(Guid id, [FromBody] UpdateSkillDto input)
     {
         var result = await SkillService.UpdateAsync(id, input);
@@ -70,6 +72,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 删除技能
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.skill.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await SkillService.DeleteAsync(id);
@@ -80,6 +83,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 批量删除技能
     /// </summary>
     [HttpPost("batch-delete")]
+    [ApiAuthorize(PermissionName = "ai.skill.delete")]
     public virtual async Task<ApiResult<int>> BatchDelete([FromBody] List<Guid> ids)
     {
         var result = await SkillService.BatchDeleteAsync(ids);
@@ -90,6 +94,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 批量启用技能
     /// </summary>
     [HttpPost("batch-enable")]
+    [ApiAuthorize(PermissionName = "ai.skill.update")]
     public virtual async Task<ApiResult<int>> BatchEnable([FromBody] List<Guid> ids)
     {
         var result = await SkillService.BatchSetEnabledAsync(ids, true);
@@ -100,6 +105,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 批量禁用技能
     /// </summary>
     [HttpPost("batch-disable")]
+    [ApiAuthorize(PermissionName = "ai.skill.update")]
     public virtual async Task<ApiResult<int>> BatchDisable([FromBody] List<Guid> ids)
     {
         var result = await SkillService.BatchSetEnabledAsync(ids, false);
@@ -140,6 +146,7 @@ public class DefaultSkillAdminController : ApiAdminControllerBase
     /// 导入技能
     /// </summary>
     [HttpPost("import")]
+    [ApiAuthorize(PermissionName = "ai.skill.create")]
     public virtual async Task<ApiResult<SkillImportResultDto>> Import([FromBody] SkillImportRequestDto request)
     {
         var result = await SkillService.ImportSkillsAsync(request.Skills, request.TargetScope);

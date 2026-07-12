@@ -41,7 +41,14 @@ export interface ChatMessageDto {
   id: string; conversationId: string; senderId?: string | null; senderName?: string | null;
   senderAvatarFileId?: string | null;
   contentType: MessageContentType; content: string;
-  fileId?: string | null; fileName?: string | null; fileSize?: number | null; sentAt: string;
+  fileId?: string | null; fileName?: string | null; fileSize?: number | null;
+  /** Rich system-notification title (null for plain messages). */
+  title?: string | null;
+  /** Rich system-notification click-through link (null for plain messages). */
+  linkUrl?: string | null;
+  /** Rich system-notification category tag (null for plain messages). */
+  category?: string | null;
+  sentAt: string;
 }
 export interface MessageThreadDto { messages: ChatMessageDto[]; hasMore: boolean; }
 export interface SendMessageDto { contentType: MessageContentType; content?: string; fileId?: string; fileName?: string; fileSize?: number; }
@@ -53,13 +60,60 @@ export interface RenameGroupDto { title: string; }
 export interface BroadcastDto { content: string; roleIds?: string[]; userIds?: string[]; all?: boolean; }
 export interface ChatContactDto { userId: string; name: string; avatarFileId?: string | null; }
 
+/**
+ * Message sound preset (synthesised client-side via WebAudio — no binary assets).
+ * Two families: attention (longer, for closed window / non-active conversation) and
+ * subtle (short/gentle, for in-conversation send+receive). `None` = silent.
+ * Values mirror the backend `ChatSoundEffect` enum member names (wire PascalCase).
+ */
+export enum ChatSoundEffect {
+  None = 'None',
+  // Attention (notification) family — longer, multi-note
+  Chime = 'Chime',
+  DingDong = 'DingDong',
+  TriTone = 'TriTone',
+  Marimba = 'Marimba',
+  Pulse = 'Pulse',
+  Bell = 'Bell',
+  // Subtle (in-conversation) family — short, gentle
+  Pop = 'Pop',
+  Tick = 'Tick',
+  Blip = 'Blip',
+  Soft = 'Soft',
+  Drop = 'Drop',
+}
+
+/**
+ * Visual attention effect on the launcher icon when a message arrives while the
+ * chat window is closed. `None` keeps only the unread badge. Values mirror the
+ * backend `ChatNewMessageEffect` enum member names (wire PascalCase).
+ */
+export enum ChatNewMessageEffect {
+  None = 'None',
+  Shake = 'Shake',
+  Pulse = 'Pulse',
+  Blink = 'Blink',
+  Bounce = 'Bounce',
+}
+
 /** Deployment-level chat feature configuration. Backend: ChatClientConfigDto (GET /chat/config) */
 export interface ChatClientConfigDto {
   enableGroups: boolean;
   maxGroupMembers: number;
   groupAvatarMemberCount: number;
   enablePresence: boolean;
+  /** Whether users may set the "Invisible" status (false hides the option). */
+  allowInvisible: boolean;
+  /** Master toggle — false silences every chat sound. */
   enableMessageSound: boolean;
+  /** Sound for messages arriving while the window is closed or in a non-active conversation. */
+  notificationSound: ChatSoundEffect;
+  /** Sound for send+receive within the conversation currently on screen. */
+  messageSound: ChatSoundEffect;
+  /** Launcher icon animation when a message arrives while the window is closed. */
+  newMessageEffect: ChatNewMessageEffect;
+  /** Flash the browser tab title when a message arrives and the tab is unfocused. */
+  flashTitleOnMessage: boolean;
   enableFileMessages: boolean;
 }
 
@@ -175,5 +229,7 @@ export interface BroadcastLogDto {
   recipientCount: number;
   senderId?: string | null;
   senderName?: string | null;
+  /** Provenance tag: null for admin-UI broadcasts; set for programmatic module sends. */
+  source?: string | null;
   creationTime: string;
 }

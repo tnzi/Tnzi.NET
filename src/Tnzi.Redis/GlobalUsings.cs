@@ -16,6 +16,7 @@ global using System.Threading.Tasks;
 global using Tnzi.Caching;
 global using Tnzi.Exceptions;
 global using Tnzi.Json;
+global using Tnzi.Redis.Exceptions;
 global using Tnzi.Locking;
 global using Tnzi.Modules;
 global using Tnzi.Options;

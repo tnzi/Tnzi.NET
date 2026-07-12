@@ -7,13 +7,13 @@ public class PromotionService : ApplicationService, IPromotionService
 {
     private readonly IRepository<Promotion, Guid> _promotionRepository;
     private readonly IRepository<CouponUsage, Guid> _couponUsageRepository;
-    private readonly IOptions<PromotionOptions> _promotionOptions;
+    private readonly IOptionsSnapshot<PromotionOptions> _promotionOptions;
     private readonly IPaymentProviderFactory? _providerFactory;
 
     public PromotionService(
         IRepository<Promotion, Guid> promotionRepository,
         IRepository<CouponUsage, Guid> couponUsageRepository,
-        IOptions<PromotionOptions> promotionOptions,
+        IOptionsSnapshot<PromotionOptions> promotionOptions,
         IServiceProvider serviceProvider,
         IPaymentProviderFactory? providerFactory = null)
         : base(serviceProvider)

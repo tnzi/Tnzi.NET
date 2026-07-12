@@ -16,6 +16,7 @@ export * from './router'
 export * from './plugin'
 export * from './presets'
 // Phase J (0.2.71+): Workbench widget system. Exposes the WidgetDef
-// protocol, TWorkbenchLayout / TWidgetCard, useWidget(Data), the 14
-// built-in widgets, and the default deck preset.
+// protocol, TWorkbenchLayout / TWidgetCard, useWidget(Data), the bundled
+// built-in widgets (KPI strip, list, charts, timeline, quick actions +
+// business tiles), and the default deck preset.
 export * from './widgets'

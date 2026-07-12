@@ -26,7 +26,7 @@ public class AgentResolverWorkspaceTests
 
     private AgentResolver CreateResolver(AIOptions? options = null)
     {
-        var opts = Microsoft.Extensions.Options.Options.Create(options ?? new AIOptions());
+        var opts = new StaticOptionsMonitor<AIOptions>(options ?? new AIOptions());
         return new AgentResolver(
             _agentFactory.Object,
             opts,

@@ -103,4 +103,30 @@ describe('vPermission directive', () => {
     } as never, null as never, null as never)
     expect(el.style.display).toBe('')
   })
+
+  it('reacts to auth-store changes WITHOUT a component re-render', async () => {
+    // Permissions typically load AFTER mount (loadPermissions is async).
+    // The mounted watchEffect must re-apply on store changes by itself -
+    // no updated() call - or the element stays stuck at its mount verdict.
+    const auth = useAdminAuthStore()
+    auth.userInfo = { id: '1', username: 'u', displayName: 'u', roles: [], permissions: [] }
+    const el = probe('user.delete', undefined)
+    expect(el.style.display).toBe('none')
+
+    auth.setUserInfo({
+      id: '1',
+      username: 'u',
+      displayName: 'u',
+      roles: [],
+      permissions: ['user.delete'],
+    })
+    await Promise.resolve() // flush the watchEffect
+    expect(el.style.display).toBe('')
+
+    // Sign-out drops the grant - fail-open (userInfo null) keeps it visible,
+    // matching the sidebar semantics; a real downgrade hides it again.
+    auth.setUserInfo({ id: '1', username: 'u', displayName: 'u', roles: [], permissions: [] })
+    await Promise.resolve()
+    expect(el.style.display).toBe('none')
+  })
 })

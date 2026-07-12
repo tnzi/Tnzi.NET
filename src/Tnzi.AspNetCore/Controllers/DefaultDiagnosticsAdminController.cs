@@ -50,6 +50,7 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     /// </summary>
     /// <returns>Operation result</returns>
     [HttpDelete("exceptions")]
+    [ApiAuthorize(PermissionName = "system.diagnostics.execute")]
     public virtual ApiResult ClearExceptions()
     {
         var result = ExceptionStatisticsService.Clear();
@@ -121,6 +122,34 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
         }).ToList();
 
         return Ok(modules);
+    }
+
+    /// <summary>
+    /// Get the module health report — dependency integrity and initialization status
+    /// across all loaded modules. Read-only; inherits the class-level diagnostics
+    /// view permission.
+    /// </summary>
+    [HttpGet("modules/health")]
+    public virtual ApiResult<ModuleHealthReportDto> GetModuleHealth(
+        [FromServices] ITnziApplication tnziApp,
+        [FromServices] ModuleHealthChecker healthChecker)
+    {
+        var result = healthChecker.CheckAll(tnziApp.Modules);
+
+        var report = new ModuleHealthReportDto
+        {
+            IsHealthy = result.IsHealthy,
+            IssueCount = result.Issues.Count,
+            Issues = result.Issues.Select(i => new ModuleHealthIssueDto
+            {
+                Module = i.ModuleType.Name,
+                IssueType = i.IssueType.ToString(),
+                Message = i.Message,
+                MissingDependencies = i.MissingDependencies?.Select(t => t.Name).ToList() ?? []
+            }).ToList()
+        };
+
+        return Ok(report);
     }
 
     /// <summary>
@@ -250,4 +279,38 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
             ? assemblyName.Substring(prefix.Length)
             : assemblyName;
     }
+}
+
+/// <summary>
+/// Module health report — dependency integrity and initialization status.
+/// Serialization shape for <c>GET /admin/diagnostics/modules/health</c>.
+/// </summary>
+public class ModuleHealthReportDto
+{
+    /// <summary>Whether all loaded modules are healthy (no issues detected).</summary>
+    public bool IsHealthy { get; set; }
+
+    /// <summary>Total number of detected health issues.</summary>
+    public int IssueCount { get; set; }
+
+    /// <summary>The detected health issues (empty when healthy).</summary>
+    public List<ModuleHealthIssueDto> Issues { get; set; } = [];
+}
+
+/// <summary>
+/// A single module health issue (missing dependency, not initialized, or initialization failed).
+/// </summary>
+public class ModuleHealthIssueDto
+{
+    /// <summary>Simple name of the module the issue belongs to.</summary>
+    public string Module { get; set; } = string.Empty;
+
+    /// <summary>Issue category (MissingDependency / NotInitialized / InitializationFailed).</summary>
+    public string IssueType { get; set; } = string.Empty;
+
+    /// <summary>Human-readable description of the issue.</summary>
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Simple names of the missing dependency modules (empty unless a dependency issue).</summary>
+    public List<string> MissingDependencies { get; set; } = [];
 }

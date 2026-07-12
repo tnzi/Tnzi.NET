@@ -34,6 +34,8 @@ useWidgetData(async () => {
     searchText: '',
     filters: { startTime: thirtyDaysAgo.toISOString(), endTime: now.toISOString() },
   })
+  // A 403/failed envelope can resolve to undefined - keep the placeholders.
+  if (!summary) return
   tokens.value = summary.totalTokens ?? 0
   cost.value = summary.totalCostUsd ?? 0
   requests.value = summary.requestCount ?? 0

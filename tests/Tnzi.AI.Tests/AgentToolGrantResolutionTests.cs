@@ -39,7 +39,7 @@ public class AgentToolGrantResolutionTests
         return (factory, captured, () => captured);
     }
 
-    private static IOptions<AIOptions> CreateOptions() => Microsoft.Extensions.Options.Options.Create(new AIOptions
+    private static IOptionsMonitor<AIOptions> CreateOptions() => new StaticOptionsMonitor<AIOptions>(new AIOptions
     {
         DefaultProvider = "OpenAI",
         Providers = new Dictionary<string, ProviderOptions>

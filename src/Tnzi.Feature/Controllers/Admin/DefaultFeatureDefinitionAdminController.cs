@@ -45,6 +45,7 @@ public class DefaultFeatureDefinitionAdminController : ApiAdminControllerBase
     /// </summary>
     /// <param name="request">Create request</param>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "feature.create")]
     public virtual async Task<ApiResult<FeatureDefinitionDto>> Create([FromBody] CreateFeatureDefinitionRequest request)
     {
         var result = await FeatureService.CreateDefinitionAsync(request);
@@ -57,6 +58,7 @@ public class DefaultFeatureDefinitionAdminController : ApiAdminControllerBase
     /// <param name="id">Feature definition ID</param>
     /// <param name="request">Update request</param>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "feature.update")]
     public virtual async Task<ApiResult<FeatureDefinitionDto>> Update(Guid id, [FromBody] UpdateFeatureDefinitionRequest request)
     {
         var result = await FeatureService.UpdateDefinitionAsync(id, request);
@@ -68,6 +70,7 @@ public class DefaultFeatureDefinitionAdminController : ApiAdminControllerBase
     /// </summary>
     /// <param name="id">Feature definition ID</param>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "feature.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await FeatureService.DeleteDefinitionAsync(id);

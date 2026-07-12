@@ -8,7 +8,7 @@ internal sealed class EntityMemoryContributor : IContextProviderContributor
 {
     private readonly IEntityMemoryStore _entityMemoryStore;
     private readonly LlmEntityExtractor _entityExtractor;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly ICurrentUser? _currentUser;
     private readonly ILoggerFactory _loggerFactory;
@@ -18,7 +18,7 @@ internal sealed class EntityMemoryContributor : IContextProviderContributor
     public EntityMemoryContributor(
         IEntityMemoryStore entityMemoryStore,
         LlmEntityExtractor entityExtractor,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IAgentExecutionContextAccessor executionContextAccessor,
         ILoggerFactory loggerFactory,
         ICurrentUser? currentUser = null)
@@ -33,11 +33,11 @@ internal sealed class EntityMemoryContributor : IContextProviderContributor
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
     {
-        if (!_options.Value.ContextProviders.EntityMemory.Enabled) return null;
+        if (!_options.CurrentValue.ContextProviders.EntityMemory.Enabled) return null;
 
         try
         {
-            var entityMemoryOptions = _options.Value.ContextProviders.EntityMemory;
+            var entityMemoryOptions = _options.CurrentValue.ContextProviders.EntityMemory;
             var logger = _loggerFactory.CreateLogger<EntityMemoryContextProvider>();
             return new EntityMemoryContextProvider(
                 _entityMemoryStore,

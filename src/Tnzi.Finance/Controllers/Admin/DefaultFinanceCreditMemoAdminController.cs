@@ -41,6 +41,7 @@ public class DefaultFinanceCreditMemoAdminController : ApiAdminControllerBase
     /// 创建销售贷项单草稿
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.document.create")]
     public virtual async Task<ApiResult<CreditMemoDto>> Create([FromBody] CreateCreditMemoDto request)
     {
         var result = await _service.CreateDraftAsync(request);
@@ -51,6 +52,7 @@ public class DefaultFinanceCreditMemoAdminController : ApiAdminControllerBase
     /// 更新销售贷项单草稿
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<CreditMemoDto>> Update(Guid id, [FromBody] CreateCreditMemoDto request)
     {
         var result = await _service.UpdateDraftAsync(id, request);
@@ -61,6 +63,7 @@ public class DefaultFinanceCreditMemoAdminController : ApiAdminControllerBase
     /// 删除销售贷项单草稿
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.document.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _service.DeleteDraftAsync(id);
@@ -71,6 +74,7 @@ public class DefaultFinanceCreditMemoAdminController : ApiAdminControllerBase
     /// 过账销售贷项单
     /// </summary>
     [HttpPost("{id:guid}/post")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<CreditMemoDto>> Post(Guid id)
     {
         var result = await _service.PostAsync(id);
@@ -81,6 +85,7 @@ public class DefaultFinanceCreditMemoAdminController : ApiAdminControllerBase
     /// 作废销售贷项单
     /// </summary>
     [HttpPost("{id:guid}/void")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<CreditMemoDto>> Void(Guid id)
     {
         var result = await _service.VoidAsync(id);

@@ -14,11 +14,11 @@ namespace Tnzi.AI.Mcp.Controllers.Admin;
 public class DefaultMcpAdminController : ApiAdminControllerBase
 {
     private readonly IMcpServerHost _mcpServerHost;
-    private readonly IOptions<McpServerOptions> _mcpOptions;
+    private readonly IOptionsMonitor<McpServerOptions> _mcpOptions;
 
     public DefaultMcpAdminController(
         IMcpServerHost mcpServerHost,
-        IOptions<McpServerOptions> mcpOptions)
+        IOptionsMonitor<McpServerOptions> mcpOptions)
     {
         _mcpServerHost = Check.NotNull(mcpServerHost);
         _mcpOptions = Check.NotNull(mcpOptions);
@@ -30,7 +30,7 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
     [HttpGet("status")]
     public virtual async Task<ApiResult<McpServerStatusDto>> GetStatus()
     {
-        var options = _mcpOptions.Value;
+        var options = _mcpOptions.CurrentValue;
         var tools = await _mcpServerHost.ListToolsAsync();
 
         return ApiResult<McpServerStatusDto>.Ok(new McpServerStatusDto
@@ -76,6 +76,7 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
     /// 动态暴露 Agent 为 MCP 工具
     /// </summary>
     [HttpPost("agents/{agentId:guid}/expose")]
+    [ApiAuthorize(PermissionName = "ai.mcp.update")]
     public virtual ApiResult ExposeAgent(Guid agentId, [FromBody] McpToolExposureOptions? options = null)
     {
         _mcpServerHost.ExposeAgent(agentId, options);
@@ -86,6 +87,7 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
     /// 移除已暴露的 Agent
     /// </summary>
     [HttpDelete("agents/{agentId:guid}")]
+    [ApiAuthorize(PermissionName = "ai.mcp.update")]
     public virtual ApiResult RemoveAgent(Guid agentId)
     {
         var removed = _mcpServerHost.RemoveAgent(agentId);

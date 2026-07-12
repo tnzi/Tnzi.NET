@@ -1,7 +1,7 @@
 <template>
   <TCrudPage :state="crud" :all-columns="exchangeRateColumns" :title="title" :row-actions="rowActions" :translate="t">
     <template #toolbarRight>
-      <NButton size="small" :loading="refreshing" @click="refreshFromProvider">
+      <NButton v-if="can('finance.rate.create')" size="small" :loading="refreshing" @click="refreshFromProvider">
         <template #icon>
           <TSvgIcon icon="mdi:cloud-sync-outline" :size="16" />
         </template>
@@ -25,6 +25,7 @@ import { NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge, type UpsertExchangeRateDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -37,6 +38,7 @@ import { tsToIsoDate } from './money'
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.rates')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 /** Form model → upsert payload. The `date` schema field holds a timestamp. */
 function toPayload(d: Record<string, unknown>): UpsertExchangeRateDto {
@@ -52,6 +54,14 @@ function toPayload(d: Record<string, unknown>): UpsertExchangeRateDto {
 
 const crud = useCrudPage<RateRow>({
   pageId: 'finance.rates',
+  // Rates are date-keyed UPSERTS on the backend - the catalogue declares
+  // create + delete only, so the UI "edit" (same upsert endpoint) gates on
+  // the create code (a derived finance.rate.update would exist for no one).
+  permission: {
+    create: 'finance.rate.create',
+    update: 'finance.rate.create',
+    delete: 'finance.rate.delete',
+  },
   columns: exchangeRateColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.rates.fetch(q),

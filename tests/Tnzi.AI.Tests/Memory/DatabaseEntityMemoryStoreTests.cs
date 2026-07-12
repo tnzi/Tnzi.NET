@@ -364,10 +364,10 @@ public class DatabaseEntityMemoryStoreTests
 
     private static DatabaseEntityMemoryStore CreateStore(Mock<IRepository<EntityMemory, Guid>> mockRepo, EntityMemoryOptions? entityOptions = null)
     {
-        IOptions<AIOptions>? aiOptions = null;
+        IOptionsMonitor<AIOptions>? aiOptions = null;
         if (entityOptions != null)
         {
-            aiOptions = Microsoft.Extensions.Options.Options.Create(new AIOptions
+            aiOptions = new StaticOptionsMonitor<AIOptions>(new AIOptions
             {
                 ContextProviders = new ContextProvidersOptions { EntityMemory = entityOptions }
             });

@@ -7,8 +7,8 @@ namespace Tnzi.Authorization.Events.Handlers;
 /// <remarks>
 /// <para>
 /// <b>Why this exists</b>: <see cref="FunctionAuthCache"/> caches a user's
-/// effective permission set (union of <c>ModuleUser</c> / <c>ModuleRole</c>
-/// / <c>RoleFunction</c>) keyed by user-id, default 30-minute TTL. When
+/// effective permission set (union of <c>RoleFunction</c> /
+/// <c>UserFunction</c>) keyed by user-id, default 30-minute TTL. When
 /// an admin revokes a role from a user, the TTL would otherwise let the
 /// user retain the revoked role's permissions for up to a full window —
 /// a real permission-retention security gap. This handler closes that
@@ -16,11 +16,12 @@ namespace Tnzi.Authorization.Events.Handlers;
 /// change commits.
 /// </para>
 /// <para>
-/// <b>Why silent-catch</b>: framework rule for event handlers — auxiliary
-/// flows must not break the main role-change request. If cache invalidation
-/// fails (transient cache outage etc.), the TTL backstop still kicks in and
-/// the worst case is a 30-minute permission lag, which is what we'd have
-/// without this handler anyway.
+/// <b>Why let exceptions propagate</b>: the event bus provides error isolation,
+/// retry, and dead-letter handling, so a transient cache-invalidation failure is
+/// retried instead of being silently swallowed — closing the permission-retention
+/// window faster and more reliably. The bus keeps the failure off the main
+/// role-change request; the 30-minute TTL remains the ultimate backstop if all
+/// retries are exhausted.
 /// </para>
 /// </remarks>
 public class UserRolesChangedEventHandler : IEventHandler<UserRolesChangedEvent>
@@ -46,23 +47,13 @@ public class UserRolesChangedEventHandler : IEventHandler<UserRolesChangedEvent>
             return;
         }
 
-        try
-        {
-            await _functionAuthCache.RemoveUserPermissionNamesAsync(@event.UserId);
-            _logger.LogDebug(
-                "Invalidated permission cache for user {UserId} after role change ({ChangeType}; added={AddedCount}, removed={RemovedCount}).",
-                @event.UserId,
-                @event.ChangeType,
-                @event.AddedRoleIds.Count,
-                @event.RemovedRoleIds.Count);
-        }
-        catch (Exception ex)
-        {
-            // Per framework convention, log + swallow so the role-change
-            // transaction's outer request isn't impacted.
-            _logger.LogWarning(ex,
-                "Failed to invalidate permission cache for user {UserId} after role change.",
-                @event.UserId);
-        }
+        // 不再吞异常：失效失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        await _functionAuthCache.RemoveUserPermissionNamesAsync(@event.UserId);
+        _logger.LogDebug(
+            "Invalidated permission cache for user {UserId} after role change ({ChangeType}; added={AddedCount}, removed={RemovedCount}).",
+            @event.UserId,
+            @event.ChangeType,
+            @event.AddedRoleIds.Count,
+            @event.RemovedRoleIds.Count);
     }
 }

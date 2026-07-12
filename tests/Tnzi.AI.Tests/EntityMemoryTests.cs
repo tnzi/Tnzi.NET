@@ -45,7 +45,7 @@ public class EntityMemoryTests
         mockFactory.Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockChatClient);
 
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         var logger = new Mock<ILogger<LlmEntityExtractor>>().Object;
         var extractor = new LlmEntityExtractor(mockFactory.Object, options, logger);
 
@@ -79,7 +79,7 @@ public class EntityMemoryTests
         mockFactory.Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockChatClient);
 
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         var logger = new Mock<ILogger<LlmEntityExtractor>>().Object;
         var extractor = new LlmEntityExtractor(mockFactory.Object, options, logger);
 
@@ -100,7 +100,7 @@ public class EntityMemoryTests
         mockFactory.Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
             .Throws(new InvalidOperationException("Provider not configured"));
 
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         var logger = new Mock<ILogger<LlmEntityExtractor>>().Object;
         var extractor = new LlmEntityExtractor(mockFactory.Object, options, logger);
 
@@ -116,7 +116,7 @@ public class EntityMemoryTests
     public async Task LlmEntityExtractor_EmptyText_ReturnsEmpty()
     {
         var mockFactory = new Mock<IChatClientFactory>();
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         var logger = new Mock<ILogger<LlmEntityExtractor>>().Object;
         var extractor = new LlmEntityExtractor(mockFactory.Object, options, logger);
 
@@ -344,7 +344,7 @@ public class EntityMemoryTests
         mockFactory.Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockClient);
 
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
         var logger = new Mock<ILogger<LlmEntityExtractor>>().Object;
         return new LlmEntityExtractor(mockFactory.Object, options, logger);
     }

@@ -1,4 +1,4 @@
-﻿global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Http;
 global using Microsoft.AspNetCore.Http.Features;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;
@@ -117,3 +117,4 @@ global using Tnzi.Security.Claims;
 global using Tnzi.Services;
 global using Tnzi.Threading;
 global using Tnzi.Utilities;
+global using Tnzi.AI.Permissions;

@@ -28,6 +28,13 @@ export interface MenuRow {
   isHidden?: boolean
   permission?: string
   type?: string
+  /**
+   * Front-end route name this row OVERRIDES under `menu.source: 'merge'`
+   * (e.g. `identity.users`). Empty = a custom node. This is the field that
+   * makes a Sys_Menu row participate in the merge overlay at all - without
+   * it the row is inert for built-in menus.
+   */
+  menuKey?: string | null
 }
 
 export const menuFormSchema: FormSchemaItem[] = [
@@ -48,11 +55,18 @@ export const menuFormSchema: FormSchemaItem[] = [
   // clearable parent-menu picker built from the runtime menu tree) — see
   // Menus.vue `fieldRenderers`. Falls back to a read-only value if unrendered.
   { key: 'parentId', labelKey: 'form.parentId', label: 'Parent', type: 'menu-parent' },
+  // Route name this row overrides under `menu.source: 'merge'` - the core
+  // merge-overlay field that used to be missing from this form entirely
+  // (operators literally could not create an override row from the UI).
+  { key: 'menuKey', labelKey: 'form.menuKey', label: 'Menu Key (route name)', type: 'text' },
   { key: 'path', labelKey: 'form.path', label: 'Path', type: 'text' },
   { key: 'component', labelKey: 'form.component', label: 'Component', type: 'text' },
   // `icon` renders the shared TIconPicker via the admin form-schema renderer.
   { key: 'icon', labelKey: 'form.icon', label: 'Icon', type: 'icon' },
-  { key: 'permission', labelKey: 'form.permission', label: 'Permission Code', type: 'text' },
+  // `menu-permission` is a page-supplied renderer: a filterable select over
+  // the backend permission catalogue (replaces the old free-text input that
+  // accepted codes the backend never heard of).
+  { key: 'permission', labelKey: 'form.permission', label: 'Permission Code', type: 'menu-permission' },
   { key: 'sortOrder', labelKey: 'form.sortOrder', label: 'Sort', type: 'number', min: 0 },
   { key: 'isHidden', labelKey: 'form.isHidden', label: 'Hidden', type: 'switch' },
 ]

@@ -35,31 +35,23 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
             return;
         }
 
-        try
-        {
-            // 获取应用名称
-            var appName = await GetAppNameAsync();
+        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        var appName = await GetAppNameAsync();
 
-            // 根据类型发送
-            if (@event.Type.Equals("Email", StringComparison.OrdinalIgnoreCase))
-            {
-                await SendEmailCodeAsync(@event, appName, cancellationToken);
-                _logger.LogInformation("Two-factor code email sent to {Address} for user {UserId}", @event.Address, @event.UserId);
-            }
-            else if (@event.Type.Equals("Sms", StringComparison.OrdinalIgnoreCase))
-            {
-                await SendSmsCodeAsync(@event, appName, cancellationToken);
-                _logger.LogInformation("Two-factor code SMS sent to {Address} for user {UserId}", @event.Address, @event.UserId);
-            }
-            else
-            {
-                _logger.LogWarning("Unknown two-factor code type: {Type}", @event.Type);
-            }
-        }
-        catch (Exception ex)
+        // 根据类型发送
+        if (@event.Type.Equals("Email", StringComparison.OrdinalIgnoreCase))
         {
-            // 记录错误但不抛出（事件处理器的错误不应影响主业务流程）
-            _logger.LogError(ex, "Failed to send two-factor code to {Address} for user {UserId}", @event.Address, @event.UserId);
+            await SendEmailCodeAsync(@event, appName, cancellationToken);
+            _logger.LogInformation("Two-factor code email sent to {Address} for user {UserId}", @event.Address, @event.UserId);
+        }
+        else if (@event.Type.Equals("Sms", StringComparison.OrdinalIgnoreCase))
+        {
+            await SendSmsCodeAsync(@event, appName, cancellationToken);
+            _logger.LogInformation("Two-factor code SMS sent to {Address} for user {UserId}", @event.Address, @event.UserId);
+        }
+        else
+        {
+            _logger.LogWarning("Unknown two-factor code type: {Type}", @event.Type);
         }
     }
 

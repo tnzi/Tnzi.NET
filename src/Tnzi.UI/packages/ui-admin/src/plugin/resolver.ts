@@ -13,7 +13,7 @@ const CRUD_COMPONENTS = new Set([
 // Renderers live in the `crud/renderers/` subdirectory (different from-path).
 const CRUD_RENDERER_COMPONENTS = new Set(['TCardRenderer', 'TTableRenderer'])
 const FORM_COMPONENTS = new Set([
-  'TPermissionTree', 'TMenuTree',
+  'TPermissionMatrix', 'TMenuTree',
   'TDictSelector', 'TRoleSelector', 'TUserSelector', 'TTenantSelector',
 ])
 const DATA_COMPONENTS = new Set(['TChunkFileUpload'])

@@ -2,12 +2,22 @@
   <TDetailHost
     :state="detail"
     layout="side"
-    :sections="sections"
+    :sections="navSections"
     :title="t('admin.modules.system.settings.title')"
     icon="mdi:cog-outline"
     :back="false"
     :translate="t"
   >
+    <template #nav-header>
+      <NInput
+        v-model:value="searchQuery"
+        size="small"
+        clearable
+        :placeholder="t('admin.modules.system.settings.search')"
+      >
+        <template #prefix><Icon icon="mdi:magnify" :width="16" /></template>
+      </NInput>
+    </template>
     <template #default="{ section }">
       <NSpin v-if="loading" class="t-settings-page__spin" />
       <template v-else>
@@ -18,13 +28,14 @@
           :save-group="saveGroup"
           :reset-group="resetGroup"
           @updated="onGroupUpdated"
+          @refresh="() => load(true)"
         />
         <component
           :is="resolveCustomComponent(activeCustomSection(section)!)"
           v-else-if="activeCustomSection(section)"
           :key="section ?? ''"
         />
-        <div v-else-if="section === ADVANCED_KEY" class="t-settings-page__advanced">
+        <div v-else-if="section === ADVANCED_KEY && canViewParameters" class="t-settings-page__advanced">
           <Parameters />
         </div>
       </template>
@@ -34,7 +45,8 @@
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, type Component } from 'vue'
-import { NSpin } from 'naive-ui'
+import { NInput, NSpin } from 'naive-ui'
+import { Icon } from '@iconify/vue'
 import type { SettingsCenterGroupDto } from '@tnzi/core/services/system'
 import TDetailHost from '../detail/TDetailHost.vue'
 import TSettingsGroupPanel from './TSettingsGroupPanel.vue'
@@ -42,6 +54,7 @@ import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminSettingsConfig, type AdminSettingsSection } from '../../plugin/settingsConfig'
 import { useDetail, type DetailSection } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { useSafeMessage } from '../../pages/_shared/safeMessage'
 import { resolveBackendLabel, translatePageKey } from '../../pages/_shared/translate'
 
@@ -53,6 +66,12 @@ const ADVANCED_KEY = 'advanced:parameters'
 const bridge = createSystemBridge({ client: useAdminClient() })
 const config = useAdminSettingsConfig()
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
+
+// The Advanced section embeds the raw Parameters/Dictionaries table, gated by
+// system.parameter.view (its own Technical code). Users granted only per-module
+// settings never see Advanced (and the backend blocks those endpoints anyway).
+const canViewParameters = computed(() => can('system.parameter.view'))
 const t = (key: string) => translatePageKey('', key)
 
 const groups = ref<SettingsCenterGroupDto[]>([])
@@ -86,13 +105,47 @@ const sections = computed<DetailSection[]>(() => [
     icon: s.icon,
     group: s.group ?? 'App',
   })),
-  {
-    key: ADVANCED_KEY,
-    label: 'admin.modules.system.settings.advancedParameters',
-    icon: 'mdi:tune',
-    group: 'admin.modules.system.settings.advancedGroup',
-  },
+  ...(canViewParameters.value
+    ? [
+        {
+          key: ADVANCED_KEY,
+          label: 'admin.modules.system.settings.advancedParameters',
+          icon: 'mdi:tune',
+          group: 'admin.modules.system.settings.advancedGroup',
+        },
+      ]
+    : []),
 ])
+
+// Global settings search: filters ONLY the left nav (matched groups show, clear
+// restores). The `useDetail` engine below keeps the full `sections` list so the
+// `?section=` deep link + default resolution stay stable even while filtering.
+const searchQuery = ref('')
+
+// key → lowercase searchable text (group label + module + every field label for
+// schema groups; label + group for custom sections; the label for Advanced).
+const searchIndex = computed<Record<string, string>>(() => {
+  const idx: Record<string, string> = {}
+  for (const g of visibleGroups.value) {
+    const parts = [resolveBackendLabel(g.i18nKey, g.displayName), g.moduleName]
+    for (const f of g.fields) parts.push(resolveBackendLabel(f.i18nKey, f.label))
+    idx[g.key] = parts.join(' ').toLowerCase()
+  }
+  for (const s of customSections.value) {
+    idx[`custom:${s.key}`] = `${s.label} ${s.group ?? ''}`.toLowerCase()
+  }
+  if (canViewParameters.value) {
+    idx[ADVANCED_KEY] = t('admin.modules.system.settings.advancedParameters').toLowerCase()
+  }
+  return idx
+})
+
+const navSections = computed<DetailSection[]>(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return sections.value
+  const idx = searchIndex.value
+  return sections.value.filter((s) => (idx[s.key] ?? '').includes(q))
+})
 
 // The single detail engine, page mode: the active section is two-way bound to
 // the `?section=` query key (deep-linkable + Back/Forward step through panels).
@@ -137,15 +190,19 @@ function onGroupUpdated(updated: SettingsCenterGroupDto): void {
   groups.value = groups.value.map((g) => (g.key === updated.key ? updated : g))
 }
 
-async function load(): Promise<void> {
-  loading.value = true
+// `silent` = realtime-triggered re-fetch (another session changed a group):
+// keep the current panel mounted (no spinner flash); the fresh group DTO
+// flows into the panel via its `props.group` watch and re-hydrates in place.
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     groups.value = await bridge.settingsCenter.getDefinitions()
   } catch (error) {
+    if (silent) return
     groups.value = []
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
     // No manual seed needed: `useSectionRoute` re-resolves the default the moment
     // the (async) `sections` list changes, picking the first schema group.
   }

@@ -135,7 +135,10 @@ public interface IEventSubscriber
 }
 
 /// <summary>
-/// 事件总线接口（进程内事件发布）
+/// 事件总线接口（基础发布契约）
+/// 注意：注入 <see cref="IEventBus"/> 得到的始终是本地(进程内)事件总线；
+/// 需要跨进程投递时注入 <see cref="IDistributedEventBus"/> 或使用
+/// ApplicationService.PublishEventAsync 的集成事件自动路由
 /// </summary>
 [StableApi(Since = "0.1.0")]
 public interface IEventBus : IEventSubscriber
@@ -175,5 +178,33 @@ public interface IEventBus : IEventSubscriber
     /// <typeparam name="TEvent">事件类型</typeparam>
     /// <returns>处理器数量</returns>
     int GetHandlerCount<TEvent>() where TEvent : class, IEvent;
+}
+
+/// <summary>
+/// 本地(进程内)事件总线接口
+/// 语义契约：同步派发给当前进程内注册的处理器,PublishAsync 完成即代表全部同步处理器执行完毕;
+/// 处理器异常由总线隔离(错误隔离 + 可选重试 + 死信队列),不会传播给发布者;
+/// 当 EventBusOptions.TransactionAwarePublish 启用且发布发生在活跃工作单元事务中时,
+/// 发布自动延迟到事务提交后执行(回滚则丢弃)
+/// </summary>
+[StableApi(Since = "0.1.0")]
+public interface ILocalEventBus : IEventBus
+{
+}
+
+/// <summary>
+/// 分布式(跨进程)事件总线接口
+/// 语义契约：将事件序列化后投递到消息中间件(RabbitMQ/Kafka 等),PublishAsync 完成仅代表投递成功,
+/// 不执行任何本进程内的处理器;消费端为 at-least-once,处理器应保证幂等。
+/// 分布式实现注册后不替换 <see cref="IEventBus"/>(本地总线始终可用),
+/// 集成事件建议经 ApplicationService.PublishEventAsync 自动路由(Outbox 优先,其次本接口)
+/// </summary>
+[StableApi(Since = "0.1.0")]
+public interface IDistributedEventBus : IEventBus
+{
+    /// <summary>
+    /// 分布式实现固定为非本地
+    /// </summary>
+    bool IEventBus.IsLocal => false;
 }
 

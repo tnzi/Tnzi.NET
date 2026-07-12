@@ -2,11 +2,19 @@
 namespace Tnzi.Modules;
 
 /// <summary>
-/// 模块重载器实现
-/// 注意：在.NET中实现真正的模块热重载需要使用AssemblyLoadContext，这是一个复杂的功能
-/// 当前实现提供了基础框架，但实际的热重载功能需要根据具体场景进行扩展
+/// 模块重载器实现 —— 语义为「模块重初始化（re-initialization）」，而非程序集热重载。
+/// <para>
+/// 能力边界（重要）：.NET 没有可回收的 <see cref="AssemblyLoadContext"/> 用于框架宿主场景，
+/// 无法真正卸载/重新加载已加载的程序集，也不会重新注册 DI 服务。本重载器做的是对目标模块
+/// 按序执行生命周期钩子：<c>OnApplicationShutdownAsync</c> → <c>OnApplicationInitializationAsync</c>。
+/// 这对「重新加载配置驱动的状态、重建连接、刷新缓存」等有真实价值；模块可实现
+/// <see cref="IModuleHotReload"/> 自定义否决、状态保存/恢复与重载后回调。
+/// </para>
+/// <para>
+/// 默认关闭（<see cref="ModuleHotReloadOptions.Enabled"/> = false）。
+/// </para>
 /// </summary>
-[ExperimentalApi(Reason = "Hot reload is not fully implemented")]
+[ExperimentalApi(Reason = "Module re-initialization only; assembly unload/reload and service re-registration are not supported")]
 public class ModuleReloader : IModuleReloader, IDisposable
 {
     private readonly ILogger<ModuleReloader> _logger;
@@ -60,65 +68,76 @@ public class ModuleReloader : IModuleReloader, IDisposable
     /// <inheritdoc />
     public async Task<bool> ReloadModuleAsync(Type moduleType, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(moduleType);
+
         if (!_options.Enabled)
         {
             _logger.LogWarning("Module hot reload is disabled");
             return false;
         }
 
+        // 查找模块描述符
+        var moduleDescriptor = _application.Modules.FirstOrDefault(m => m.Type == moduleType);
+        if (moduleDescriptor == null)
+        {
+            _logger.LogWarning("Module not found: {ModuleType}", moduleType.Name);
+            return false;
+        }
+
+        // 重初始化需要一个已构建的服务容器
+        var serviceProvider = _application.ServiceProvider;
+        if (serviceProvider == null)
+        {
+            _logger.LogWarning("Cannot re-initialize module before the application is initialized: {ModuleType}", moduleType.Name);
+            return false;
+        }
+
+        // 模块可选实现 IModuleHotReload，以获得否决权与状态保存/恢复钩子
+        var hotReloadModule = moduleDescriptor.Instance as IModuleHotReload;
+
         try
         {
-            _logger.LogInformation("Attempting to reload module: {ModuleType}", moduleType.Name);
+            _logger.LogInformation("Re-initializing module: {ModuleType}", moduleType.Name);
 
-            // 查找模块描述符
-            var moduleDescriptor = _application.Modules.FirstOrDefault(m => m.Type == moduleType);
-            if (moduleDescriptor == null)
+            // 重载前处理：允许模块否决本次重初始化
+            if (hotReloadModule != null)
             {
-                _logger.LogWarning("Module not found: {ModuleType}", moduleType.Name);
-                return false;
+                var canReload = await hotReloadModule.OnBeforeReloadAsync().ConfigureAwait(false);
+                if (!canReload)
+                {
+                    _logger.LogWarning("Module refused to reload: {ModuleType}", moduleType.Name);
+                    return false;
+                }
             }
 
-            // 检查模块是否支持热重载
-            if (moduleDescriptor.Instance is not IModuleHotReload hotReloadModule)
+            // 保存需要跨重初始化保留的状态
+            object? state = hotReloadModule != null
+                ? await hotReloadModule.GetStateAsync().ConfigureAwait(false)
+                : null;
+
+            // 核心语义：对目标模块按序重跑生命周期钩子 —— 先关闭后重新初始化。
+            // 不卸载程序集、不重注册 DI 服务，仅重执行模块自身的关闭/初始化逻辑。
+            var shutdownContext = new ApplicationShutdownContext(serviceProvider);
+            await moduleDescriptor.Instance.OnApplicationShutdownAsync(shutdownContext).ConfigureAwait(false);
+
+            // 重新初始化上下文只携带 ServiceProvider：中间件管道在启动时已构建，
+            // 运行期无法重建，因此不提供 IApplicationBuilder（App 为 null）。
+            var initContext = new ApplicationInitializationContext(serviceProvider);
+            await moduleDescriptor.Instance.OnApplicationInitializationAsync(initContext).ConfigureAwait(false);
+
+            // 恢复状态并触发重载后回调
+            if (hotReloadModule != null)
             {
-                _logger.LogWarning("Module does not implement IModuleHotReload: {ModuleType}", moduleType.Name);
-                return false;
+                await hotReloadModule.RestoreStateAsync(state).ConfigureAwait(false);
+                await hotReloadModule.OnAfterReloadAsync().ConfigureAwait(false);
             }
 
-            // 重载前处理
-            var canReload = await hotReloadModule.OnBeforeReloadAsync().ConfigureAwait(false);
-            if (!canReload)
-            {
-                _logger.LogWarning("Module refused to reload: {ModuleType}", moduleType.Name);
-                return false;
-            }
-
-            // 保存状态
-            var state = await hotReloadModule.GetStateAsync().ConfigureAwait(false);
-
-            // 注意：在.NET中实现真正的模块重载需要使用AssemblyLoadContext
-            // 这涉及到程序集的卸载和重新加载，需要复杂的处理
-            // 当前实现仅提供了框架，实际的热重载功能需要根据具体场景实现
-            _logger.LogWarning("Actual module reload is not fully implemented. " +
-                             "Full implementation requires AssemblyLoadContext and service container recreation.");
-
-            // 这里应该：
-            // 1. 卸载旧程序集（使用AssemblyLoadContext.Unload）
-            // 2. 加载新程序集
-            // 3. 重新创建模块实例
-            // 4. 重新配置服务
-            // 5. 恢复状态
-
-            // 模拟重载后处理
-            await hotReloadModule.RestoreStateAsync(state);
-            await hotReloadModule.OnAfterReloadAsync();
-
-            _logger.LogInformation("Module reload completed: {ModuleType}", moduleType.Name);
+            _logger.LogInformation("Module re-initialization completed: {ModuleType}", moduleType.Name);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reloading module: {ModuleType}", moduleType.Name);
+            _logger.LogError(ex, "Error re-initializing module: {ModuleType}", moduleType.Name);
             return false;
         }
     }
@@ -131,15 +150,14 @@ public class ModuleReloader : IModuleReloader, IDisposable
             {
                 _logger.LogInformation("Module file changed: {FilePath}", e.FullPath);
 
-                // 尝试从文件路径推断模块类型
-                // 这是一个简化实现，实际场景可能需要更复杂的逻辑
+                // 尝试从文件路径推断模块类型（按程序集名匹配）
                 var fileName = Path.GetFileNameWithoutExtension(e.FullPath);
                 var moduleDescriptor = _application.Modules.FirstOrDefault(m =>
                     m.Type.Assembly.GetName().Name?.Equals(fileName, StringComparison.OrdinalIgnoreCase) == true);
 
                 if (moduleDescriptor != null)
                 {
-                    await ReloadModuleAsync(moduleDescriptor.Type);
+                    await ReloadModuleAsync(moduleDescriptor.Type).ConfigureAwait(false);
                 }
                 else
                 {

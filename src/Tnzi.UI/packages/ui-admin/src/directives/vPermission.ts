@@ -12,14 +12,20 @@
  * plus the `isSuperUser` bypass. Super-admins pass every check.
  */
 
-import type { Directive, DirectiveBinding } from 'vue'
+import { watchEffect, type Directive, type DirectiveBinding, type WatchStopHandle } from 'vue'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 
 type PermissionValue = string | string[]
 
+/** Per-element reactive effect handle so unmounted can dispose it. */
+const stopHandles = new WeakMap<HTMLElement, WatchStopHandle>()
+
 function evaluate(value: PermissionValue, anyMode: boolean): boolean {
   const auth = useAdminAuthStore()
-  if (auth.isSuperUser) return true
+  // Fail-open while the user isn't loaded yet - mirrors the sidebar filter,
+  // usePermissionGuard and useCrudPage action gating. Backend [ApiAuthorize]
+  // remains the real enforcement.
+  if (auth.isSuperUser || auth.userInfo === null) return true
   if (typeof value === 'string') return auth.hasPermission(value)
   if (Array.isArray(value)) {
     return anyMode ? auth.hasAnyPermission(value) : auth.hasAllPermissions(value)
@@ -43,9 +49,19 @@ function apply(el: HTMLElement, binding: DirectiveBinding<PermissionValue>): voi
 
 export const vPermission: Directive<HTMLElement, PermissionValue> = {
   mounted(el, binding) {
-    apply(el, binding)
+    // Reactive: re-apply whenever the auth store changes (permissions load
+    // after mount, super flag flips, sign-out), not only on component
+    // re-render - `evaluate` reads reactive store state, so watchEffect
+    // tracks it for free.
+    stopHandles.set(el, watchEffect(() => apply(el, binding)))
   },
   updated(el, binding) {
+    // Binding VALUE changes (dynamic codes) re-run through the update hook;
+    // the store dependency is already tracked by the mounted effect.
     apply(el, binding)
+  },
+  unmounted(el) {
+    stopHandles.get(el)?.()
+    stopHandles.delete(el)
   },
 }

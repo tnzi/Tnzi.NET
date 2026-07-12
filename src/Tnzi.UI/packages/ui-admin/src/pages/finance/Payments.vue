@@ -9,7 +9,7 @@
     :detail-title="detailTitle"
   >
     <template #primary>
-      <NButton type="primary" tertiary size="small" @click="crud.openCreate">
+      <NButton v-if="crud.canCreate" type="primary" tertiary size="small" @click="crud.openCreate">
         <template #icon>
           <TSvgIcon icon="mdi:plus" :size="16" />
         </template>
@@ -36,6 +36,7 @@
           <NDescriptionsItem :label="t('columns.docDate')">{{ formatDateOnly(viewed.docDate, { utc: true }) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.amount')">{{ fmtAmount(viewed.amount) }} {{ viewed.currency }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.applied')">{{ fmtAmount(viewed.appliedTotal) }}</NDescriptionsItem>
+          <NDescriptionsItem :label="t('form.paymentMethod')">{{ methodLabel(viewed.paymentMethod) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.reference')">{{ viewed.reference ?? '—' }}</NDescriptionsItem>
         </NDescriptions>
         <h4 class="fin-pay-detail__subtitle">{{ t('applications.title') }}</h4>
@@ -98,11 +99,13 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import {
   createFinanceBridge,
   FinanceDocumentStatus,
   FinancePartyType,
+  PAYMENT_METHODS,
   PaymentDirection,
   SettlementDocType,
   type OpenDocumentDto,
@@ -119,7 +122,10 @@ import { amountCell, fmtAmount, tsToIsoDate } from './money'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.payments')
+// Shared document namespace (payment-method labels shared with the expense editor).
+const td = makePageTranslator('finance.docs')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'partyName', { amountKey: 'amount', showApplied: true })
@@ -134,6 +140,7 @@ function toPayload(d: Record<string, unknown>) {
     amount: Number(d.amount ?? 0),
     currency: typeof d.currency === 'string' && d.currency.trim() ? d.currency.trim().toUpperCase() : null,
     depositToAccountId: (d.depositToAccountId as string | null) || null,
+    paymentMethod: (d.paymentMethod as string | null) || null,
     reference: (d.reference as string | null) || null,
     memo: (d.memo as string | null) || null,
   }
@@ -141,6 +148,7 @@ function toPayload(d: Record<string, unknown>) {
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.payments',
+  permission: 'finance.document',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.payments.fetch(q),
@@ -166,6 +174,12 @@ function directionLabel(direction?: PaymentDirection): string {
   return direction === PaymentDirection.Outbound ? t('direction.outbound') : t('direction.inbound')
 }
 
+function methodLabel(method?: string | null): string {
+  if (!method) return '—'
+  const known = PAYMENT_METHODS.find((m) => m === method)
+  return known ? td(`method.${known.charAt(0).toLowerCase()}${known.slice(1)}`) : method
+}
+
 // ── Form schema (draft create/edit through the standard modal) ──
 const paymentFormSchema: FormSchemaItem[] = [
   {
@@ -184,6 +198,7 @@ const paymentFormSchema: FormSchemaItem[] = [
   { key: 'amount', labelKey: 'form.amount', label: 'Amount', type: 'number', required: true },
   { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text' },
   { key: 'depositToAccountId', labelKey: 'form.depositTo', label: 'Deposit / Pay From', type: 'finance-account' },
+  { key: 'paymentMethod', labelKey: 'form.paymentMethod', label: 'Payment Method', type: 'payment-method' },
   { key: 'reference', labelKey: 'form.reference', label: 'Reference', type: 'text' },
   { key: 'memo', labelKey: 'form.memo', label: 'Memo', type: 'textarea' },
 ]
@@ -195,7 +210,11 @@ const fieldRenderers = {
     return direction === PaymentDirection.Outbound ? sources.vendorOptions.value : sources.customerOptions.value
   }, { placeholder: t('form.partyPlaceholder'), clearable: false }),
   'finance-account': selectRenderer(() => sources.leafAccountOptions.value, { placeholder: t('form.depositToPlaceholder') }),
+  'payment-method': selectRenderer(() => methodOptions.value, { placeholder: t('form.paymentMethodPlaceholder'), clearable: true }),
 }
+
+const methodOptions = computed(() =>
+  PAYMENT_METHODS.map((m) => ({ label: td(`method.${m.charAt(0).toLowerCase()}${m.slice(1)}`), value: m })))
 
 watch(
   () => crud.formModal.visible.value,
@@ -243,7 +262,7 @@ const applicationColumns: DataTableColumns<PaymentApplicationDto> = [
 // Declarative unapply (confirm) — TResponsiveTable synthesises the action
 // column (TRowActions) instead of a hand-written NPopconfirm cell.
 const applicationActions: RowAction<PaymentApplicationDto>[] = [
-  { key: 'unapply', label: 'applications.unapply', type: 'warning', confirm: 'applications.confirmUnapply', onClick: (r) => void unapply(r.id) },
+  { key: 'unapply', label: 'applications.unapply', type: 'warning', show: () => can('finance.document.update'), confirm: 'applications.confirmUnapply', onClick: (r) => void unapply(r.id) },
 ]
 
 // ── Apply panel ─────────────────────────────────────────────────
@@ -337,11 +356,11 @@ const canApply = (row: FinanceDocRow) =>
 
 const rowActions: RowAction<FinanceDocRow>[] = [
   viewAction(crud),
-  { key: 'edit', type: 'primary', show: isDraft, onClick: (row) => crud.openEdit(row) },
-  { key: 'post', label: 'actions.post', type: 'primary', show: isDraft, confirm: 'confirmPost', onClick: (row) => void run(() => bridge.payments.post(String(row.id ?? '')), 'postSuccess') },
-  { key: 'apply', label: 'actions.apply', type: 'info', show: canApply, onClick: (row) => void applyDetail.open('edit', String(row.id ?? '')) },
-  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => isPosted(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.payments.voidDoc(String(row.id ?? '')), 'voidSuccess') },
-  { key: 'delete', label: 'actions.delete', type: 'error', show: isDraft, confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.payments.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
+  { key: 'edit', type: 'primary', show: (row) => crud.canUpdate && isDraft(row), onClick: (row) => crud.openEdit(row) },
+  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.payments.post(String(row.id ?? '')), 'postSuccess') },
+  { key: 'apply', label: 'actions.apply', type: 'info', show: (row) => can('finance.document.update') && canApply(row), onClick: (row) => void applyDetail.open('edit', String(row.id ?? '')) },
+  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isPosted(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.payments.voidDoc(String(row.id ?? '')), 'voidSuccess') },
+  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => crud.canDelete && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.payments.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]
 </script>
 

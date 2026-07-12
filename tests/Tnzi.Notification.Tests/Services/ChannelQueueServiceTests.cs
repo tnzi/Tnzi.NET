@@ -6,7 +6,7 @@ public class ChannelQueueServiceTests
     private readonly ChannelQueueService _queueService;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<ILogger<ChannelQueueService>> _loggerMock;
-    private readonly Mock<IOptions<NotificationOptions>> _optionsMock;
+    private readonly Mock<IOptionsMonitor<NotificationOptions>> _optionsMock;
     private readonly Mock<IServiceScopeFactory> _scopeFactoryMock;
     private readonly Mock<IServiceScope> _scopeMock;
 
@@ -14,11 +14,11 @@ public class ChannelQueueServiceTests
     {
         _serviceProviderMock = new Mock<IServiceProvider>();
         _loggerMock = new Mock<ILogger<ChannelQueueService>>();
-        _optionsMock = new Mock<IOptions<NotificationOptions>>();
+        _optionsMock = new Mock<IOptionsMonitor<NotificationOptions>>();
         _scopeFactoryMock = new Mock<IServiceScopeFactory>();
         _scopeMock = new Mock<IServiceScope>();
 
-        _optionsMock.Setup(x => x.Value).Returns(new NotificationOptions
+        _optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             Queue = new QueueOptions { QueueCapacity = 10000 }
         });

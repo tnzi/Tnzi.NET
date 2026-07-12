@@ -158,7 +158,7 @@ public class BuiltInSkillsValidationTests
     private static List<SkillDefinition> LoadAllBuiltInSkills()
     {
         var builtInPath = FindBuiltInSkillsPath();
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
             ContextProviders = new ContextProvidersOptions
             {

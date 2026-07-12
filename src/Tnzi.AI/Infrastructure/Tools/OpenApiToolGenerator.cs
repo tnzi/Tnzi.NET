@@ -17,12 +17,12 @@ namespace Tnzi.AI.Infrastructure.Tools;
 public partial class OpenApiToolGenerator
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IOptions<AIOptions> _aiOptions;
+    private readonly IOptionsMonitor<AIOptions> _aiOptions;
     private readonly ILogger<OpenApiToolGenerator> _logger;
 
     public OpenApiToolGenerator(
         IHttpClientFactory httpClientFactory,
-        IOptions<AIOptions> aiOptions,
+        IOptionsMonitor<AIOptions> aiOptions,
         ILogger<OpenApiToolGenerator> logger)
     {
         _httpClientFactory = Check.NotNull(httpClientFactory);
@@ -37,7 +37,7 @@ public partial class OpenApiToolGenerator
     /// <returns>生成的 AITool 列表；禁用时返回空列表</returns>
     public virtual async Task<IReadOnlyList<AITool>> GenerateToolsAsync(CancellationToken ct = default)
     {
-        var options = _aiOptions.Value.OpenApiTools;
+        var options = _aiOptions.CurrentValue.OpenApiTools;
         if (options == null || !options.Enabled || options.Specs.Count == 0)
         {
             return Array.Empty<AITool>();

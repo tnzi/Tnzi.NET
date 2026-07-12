@@ -96,6 +96,7 @@
                entirely so no dead buttons render. -->
           <template v-if="!isConfigSource(item)" #actions>
             <NButton
+              v-if="can('ai.provider.execute')"
               size="small"
               type="primary"
               ghost
@@ -104,10 +105,10 @@
             >
               {{ t('actions.test') }}
             </NButton>
-            <NButton size="small" ghost :disabled="isLocked(item)" @click="crud.openEdit(item)">
+            <NButton v-if="crud.canUpdate" size="small" ghost :disabled="isLocked(item)" @click="crud.openEdit(item)">
               {{ t('actions.edit') }}
             </NButton>
-            <NPopconfirm :disabled="isLocked(item)" @positive-click="removeOne(item)">
+            <NPopconfirm v-if="crud.canDelete" :disabled="isLocked(item)" @positive-click="removeOne(item)">
               <template #trigger>
                 <NButton size="small" type="error" ghost :disabled="isLocked(item)">{{ t('actions.delete') }}</NButton>
               </template>
@@ -140,6 +141,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
@@ -160,6 +162,7 @@ const t = (key: string) => translatePageKey('ai.providers', key)
 
 const bridge = createAiBridge({ client: useAdminClient() })
 const authStore = useAdminAuthStore()
+const { can } = usePermissionGuard()
 
 // Mirrors the backend write guard (ProviderService): system providers are locked only for
 // tenant-scoped sessions; without tenant context (host admin / MT off) they remain editable.
@@ -219,6 +222,7 @@ function toUpdateDto(form: Record<string, unknown>): UpdateProviderDto {
 
 const crud = useCrudPage<ProviderDto>({
   pageId: 'ai.providers',
+  permission: 'ai.provider',
   columns: [],
   rowKey: (p) => p.id,
   fetchData: (query) => bridge.providers.fetch(query),

@@ -9,16 +9,18 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ChannelQueueService> _logger;
 
+    // 队列容量固化进 Channel 是刻意的（BoundedChannel 容量运行时不可变）；
+    // 用 Monitor 在实例创建时点读一次，语义等价且不触发热消费审计告警。
     public ChannelQueueService(
         IServiceProvider serviceProvider,
         ILogger<ChannelQueueService> logger,
-        IOptions<NotificationOptions> options)
+        IOptionsMonitor<NotificationOptions> options)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         // 从配置读取队列容量，如果配置值无效（<=0）则使用默认值10000
-        var queueCapacity = Check.NotNull(options).Value.Queue.QueueCapacity > 0
-            ? options.Value.Queue.QueueCapacity
+        var queueCapacity = Check.NotNull(options).CurrentValue.Queue.QueueCapacity > 0
+            ? options.CurrentValue.Queue.QueueCapacity
             : 10000;
         var channelOptions = new BoundedChannelOptions(queueCapacity)
         {

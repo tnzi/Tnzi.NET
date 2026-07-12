@@ -41,6 +41,7 @@ public class DefaultFinanceVendorAdminController : ApiAdminControllerBase
     /// 创建供应商
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.vendor.create")]
     public virtual async Task<ApiResult<VendorDto>> Create([FromBody] CreateVendorDto request)
     {
         var result = await _vendorService.CreateAsync(request);
@@ -51,6 +52,7 @@ public class DefaultFinanceVendorAdminController : ApiAdminControllerBase
     /// 更新供应商
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.vendor.update")]
     public virtual async Task<ApiResult<VendorDto>> Update(Guid id, [FromBody] UpdateVendorDto request)
     {
         var result = await _vendorService.UpdateAsync(id, request);
@@ -61,6 +63,7 @@ public class DefaultFinanceVendorAdminController : ApiAdminControllerBase
     /// 删除供应商
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.vendor.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _vendorService.DeleteAsync(id);

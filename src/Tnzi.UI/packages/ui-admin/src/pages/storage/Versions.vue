@@ -26,6 +26,7 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createStorageBridge, type FileVersionAuditDto } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -40,6 +41,7 @@ const title = 'title'
 const bridge = createStorageBridge({ client: useAdminClient() })
 const t = makePageTranslator('storage.versions')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 const crud = useCrudPage<FileVersionAuditDto>({
   pageId: 'storage.versions',
@@ -59,6 +61,7 @@ const rowActions: RowAction<FileVersionAuditDto>[] = [
   {
     key: 'restore',
     label: 'actions.restore',
+    show: () => can('storage.file.update'),
     disabled: (row) => row.isCurrent === true,
     onClick: (row) => void handleRestore(row),
   },

@@ -261,6 +261,7 @@ function ensureToolPattern(data: Partial<PersistedPermissionRuleDto>): void {
 
 const crud = useCrudPage<PersistedPermissionRuleDto>({
   pageId: 'ai.permissions',
+  permission: 'ai.permissions',
   columns: persistedColumns,
   rowKey: (r) => r.id,
   fetchData: async () => {

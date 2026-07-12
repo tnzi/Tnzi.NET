@@ -27,10 +27,10 @@
           <div class="ai-persona-card__desc">{{ item.description || t('noDescription') }}</div>
           <div class="ai-persona-card__snippet font-mono">{{ contentPreview(item.content) }}</div>
           <template #actions>
-            <NButton size="small" ghost :disabled="isLocked(item)" @click="crud.openEdit(item)">
+            <NButton v-if="crud.canUpdate" size="small" ghost :disabled="isLocked(item)" @click="crud.openEdit(item)">
               {{ t('actions.edit') }}
             </NButton>
-            <NPopconfirm :disabled="isLocked(item)" @positive-click="removeOne(item)">
+            <NPopconfirm v-if="crud.canDelete" :disabled="isLocked(item)" @positive-click="removeOne(item)">
               <template #trigger>
                 <NButton size="small" type="error" ghost :disabled="isLocked(item)">{{ t('actions.delete') }}</NButton>
               </template>
@@ -93,7 +93,7 @@
       </template>
 
       <template #detailFooter>
-        <NButton v-if="viewed" size="small" type="primary" :disabled="isLocked(viewed)" @click="crud.openEdit(viewed)">
+        <NButton v-if="viewed && crud.canUpdate" size="small" type="primary" :disabled="isLocked(viewed)" @click="crud.openEdit(viewed)">
           {{ t('actions.edit') }}
         </NButton>
       </template>
@@ -149,6 +149,7 @@ const relatedLoading = ref(false)
 
 const crud = useCrudPage<AgentPersonaDto>({
   pageId: 'ai.personas',
+  permission: 'ai.persona',
   columns: [],
   rowKey: (p) => p.id,
   fetchData: (query) => bridge.personas.fetch(query),

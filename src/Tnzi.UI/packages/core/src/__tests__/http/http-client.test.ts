@@ -462,6 +462,36 @@ describe('HttpClient', () => {
       const result = await client.download('/missing');
       expect(result.succeeded).toBe(false);
     });
+
+    it('should surface the ApiResult envelope message on a failed download', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ code: 400, succeeded: false, message: 'Narrow the date range.' }),
+          ),
+      });
+
+      const result = await client.download('/export');
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(400);
+      expect(result.message).toBe('Narrow the date range.');
+    });
+
+    it('should fall back to the plain-text body when the error body is not JSON', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: () => Promise.resolve('boom'),
+      });
+
+      const result = await client.download('/export');
+      expect(result.succeeded).toBe(false);
+      expect(result.message).toBe('boom');
+    });
   });
 
   // ------------------------------------------

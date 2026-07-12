@@ -41,6 +41,7 @@ public class DefaultInvoiceAdminController : ApiAdminControllerBase
     /// 手动创建发票
     /// </summary>
     [HttpPost("manual")]
+    [ApiAuthorize(PermissionName = "payment.invoice.create")]
     public virtual async Task<ApiResult<InvoiceDto>> CreateManual([FromBody] CreateInvoiceDto request)
     {
         var result = await _invoiceService.CreateManualAsync(request);
@@ -51,6 +52,7 @@ public class DefaultInvoiceAdminController : ApiAdminControllerBase
     /// 发送发票
     /// </summary>
     [HttpPost("{id:guid}/send")]
+    [ApiAuthorize(PermissionName = "payment.invoice.update")]
     public virtual async Task<ApiResult> Send(Guid id, [FromBody] SendInvoiceDto? request)
     {
         var result = await _invoiceService.SendAsync(id, request?.RecipientEmail);
@@ -61,6 +63,7 @@ public class DefaultInvoiceAdminController : ApiAdminControllerBase
     /// 标记为已支付
     /// </summary>
     [HttpPost("{id:guid}/mark-paid")]
+    [ApiAuthorize(PermissionName = "payment.invoice.update")]
     public virtual async Task<ApiResult> MarkAsPaid(Guid id, [FromBody] MarkInvoicePaidDto request)
     {
         var result = await _invoiceService.MarkAsPaidAsync(id, request);
@@ -71,6 +74,7 @@ public class DefaultInvoiceAdminController : ApiAdminControllerBase
     /// 取消发票
     /// </summary>
     [HttpPost("{id:guid}/cancel")]
+    [ApiAuthorize(PermissionName = "payment.invoice.update")]
     public virtual async Task<ApiResult> Cancel(Guid id, [FromBody] CancelInvoiceDto request)
     {
         var result = await _invoiceService.CancelAsync(id, request.Reason);

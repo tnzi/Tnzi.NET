@@ -47,13 +47,12 @@ public class ResumeDownloadUploadTests
 
     private FileChunkUploadService CreateChunkUploadService()
     {
-        var optionsWrapper = Microsoft.Extensions.Options.Options.Create(_options);
         return new FileChunkUploadService(
             _mockUploadSessionRepository.Object,
             _mockChunkRepository.Object,
             _mockFileRepository.Object,
             _mockStorage.Object,
-            optionsWrapper,
+            new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object);
     }
 

@@ -41,6 +41,7 @@ public class DefaultFinanceSettlementAdminController : ApiAdminControllerBase
     /// 核销
     /// </summary>
     [HttpPost("apply")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<List<PaymentApplicationDto>>> Apply([FromBody] ApplySettlementDto request)
     {
         var result = await _settlementService.ApplyAsync(request);
@@ -51,9 +52,22 @@ public class DefaultFinanceSettlementAdminController : ApiAdminControllerBase
     /// 撤销核销
     /// </summary>
     [HttpDelete("applications/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult> Unapply(Guid id)
     {
         var result = await _settlementService.UnapplyAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 批量结算（Pay Bills / Receive Payments）：一组未清单据 → 按（往来方 + 币种）
+    /// 生成收付款单并过账 + 自动核销，整体一个事务
+    /// </summary>
+    [HttpPost("pay")]
+    [ApiAuthorize(PermissionName = "finance.document.create")]
+    public virtual async Task<ApiResult<BatchPaymentResultDto>> Pay([FromBody] BatchPaymentDto request)
+    {
+        var result = await _settlementService.PayAsync(request);
         return result.ToApiResult();
     }
 }

@@ -15,16 +15,19 @@ public class DefaultChannelAdminController : ApiAdminControllerBase
     private readonly IEnumerable<IChannelAdapter>? _adapters;
     private readonly IChannelMessageBus? _bus;
     private readonly ChannelsModuleOptions _options;
+    private readonly GatewayOptions _gatewayOptions;
 
     /// <summary>
     /// 初始化 Channel 管理控制器（适配器/消息总线可选，模块未启用时返回 disabled 状态）
     /// </summary>
     public DefaultChannelAdminController(
         IOptions<ChannelsModuleOptions> options,
+        IOptions<GatewayOptions> gatewayOptions,
         IEnumerable<IChannelAdapter>? adapters = null,
         IChannelMessageBus? bus = null)
     {
         _options = Check.NotNull(options).Value;
+        _gatewayOptions = Check.NotNull(gatewayOptions).Value;
         _adapters = adapters;
         _bus = bus;
     }
@@ -39,7 +42,7 @@ public class DefaultChannelAdminController : ApiAdminControllerBase
         {
             Enabled = _options.Enabled,
             MaxConcurrency = _options.MaxConcurrency,
-            StreamingThrottleMs = _options.StreamingThrottleMs,
+            StreamingThrottleMs = _gatewayOptions.StreamingThrottleMs,
             Adapters = (_adapters ?? []).Select(a => new ChannelAdapterDto
             {
                 Name = a.Name,

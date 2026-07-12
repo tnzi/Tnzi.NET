@@ -154,10 +154,9 @@ public class FileCleanupBackgroundServiceTests
 
     private FileCleanupBackgroundService CreateService(StorageOptions options)
     {
-        var optionsWrapper = Microsoft.Extensions.Options.Options.Create(options);
         return new FileCleanupBackgroundService(
             _mockServiceProvider.Object,
-            optionsWrapper,
+            new StaticOptionsMonitor<StorageOptions>(options),
             _mockLogger.Object);
     }
 }

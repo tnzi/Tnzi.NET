@@ -11,9 +11,9 @@ public class SessionBinderTests
     private static readonly Guid RuleAgentId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid HighPriorityAgentId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
-    private static IOptions<GatewayOptions> CreateOptions(Guid? defaultAgentId = null, SessionScope defaultScope = SessionScope.PerPeer)
+    private static IOptionsMonitor<GatewayOptions> CreateOptions(Guid? defaultAgentId = null, SessionScope defaultScope = SessionScope.PerPeer)
     {
-        return Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        return new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
             DefaultAgentId = defaultAgentId ?? DefaultAgentId,
             DefaultScope = defaultScope

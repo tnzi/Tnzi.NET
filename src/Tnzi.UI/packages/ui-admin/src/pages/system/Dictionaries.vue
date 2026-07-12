@@ -45,6 +45,9 @@ const bridge = createSystemBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<SettingDto, string>({
   pageId: 'system.dictionaries',
+  // Route gates on system.parameter.view (shared /admin/settings endpoint), so
+  // the write codes derive from the same base the backend actually enforces.
+  permission: 'system.parameter',
   columns: dictionaryColumns,
   rowKey: (r) => r.id,
   // autoLoad off so the fixed group filter is set before the first fetch.

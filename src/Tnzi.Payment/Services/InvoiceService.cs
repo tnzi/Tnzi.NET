@@ -14,13 +14,13 @@ public class InvoiceService : ApplicationService, IInvoiceService
     private readonly ITemplateRenderService? _templateRenderService;
     private readonly INotificationService? _notificationService;
     private readonly IFileStorageService? _fileStorage;
-    private readonly IOptions<InvoiceOptions> _invoiceOptions;
+    private readonly IOptionsSnapshot<InvoiceOptions> _invoiceOptions;
 
     public InvoiceService(
         IRepository<Invoice, Guid> invoiceRepository,
         IRepository<InvoiceLineItem, Guid> lineItemRepository,
         IRepository<PaymentEntity, Guid> paymentRepository,
-        IOptions<InvoiceOptions> invoiceOptions,
+        IOptionsSnapshot<InvoiceOptions> invoiceOptions,
         IServiceProvider serviceProvider,
         IHtmlToPdfConverter? pdfConverter = null,
         ITemplateRenderService? templateRenderService = null,

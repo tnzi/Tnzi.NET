@@ -74,6 +74,6 @@ public class SubAgentLimitMiddlewareTests
     private static SubAgentLimitMiddleware CreateMiddleware(int maxConcurrent)
     {
         var options = new SubAgentOptions { MaxConcurrentSubAgents = maxConcurrent };
-        return new SubAgentLimitMiddleware(Microsoft.Extensions.Options.Options.Create(options), NullLogger<SubAgentLimitMiddleware>.Instance);
+        return new SubAgentLimitMiddleware(new StaticOptionsMonitor<SubAgentOptions>(options), NullLogger<SubAgentLimitMiddleware>.Instance);
     }
 }

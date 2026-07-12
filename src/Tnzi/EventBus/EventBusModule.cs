@@ -52,7 +52,12 @@ public class EventBusModule : TnziInfrastructureModule
         // 注册事件总线
         // 注意：ICurrentTenant 是 Scoped 服务，不能在 Singleton 工厂中解析并持有引用
         // LocalEventBus 在 PublishAsync 中通过 scope 动态解析 ICurrentTenant
-        services.AddSingleton<IEventBus>(provider =>
+        //
+        // 注册语义(重要)：
+        // - LocalEventBus 同时注册为 ILocalEventBus 与 IEventBus,IEventBus 永远指向本地总线;
+        // - 分布式实现(RabbitMQ/Kafka)只注册 IDistributedEventBus/IIntegrationEventBus,
+        //   不再替换 IEventBus —— 进程内领域事件在任何配置下都由本地总线派发
+        services.AddSingleton<LocalEventBus>(provider =>
         {
             var eventBusLogger = provider.GetRequiredService<ILogger<LocalEventBus>>();
             var eventBusOptions = provider.GetService<IOptions<EventBusOptions>>()?.Value ?? new EventBusOptions();
@@ -63,6 +68,8 @@ public class EventBusModule : TnziInfrastructureModule
 
             return new LocalEventBus(provider, eventBusLogger, eventBusOptions, deadLetterQueue, maxConcurrency);
         });
+        services.AddSingleton<ILocalEventBus>(provider => provider.GetRequiredService<LocalEventBus>());
+        services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<LocalEventBus>());
 
         return Task.CompletedTask;
     }

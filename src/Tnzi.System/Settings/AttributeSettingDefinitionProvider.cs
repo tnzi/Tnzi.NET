@@ -129,6 +129,14 @@ public sealed class AttributeSettingDefinitionProvider : ISettingDefinitionProvi
                 I18nKey = FirstNonEmpty(contributors.Select(c => c.I18nKey)),
                 Icon = FirstNonEmpty(contributors.Select(c => c.Icon)),
                 Description = FirstNonEmpty(contributors.Select(c => c.Description)),
+                PermissionGroup = FirstNonEmpty(contributors.Select(c => c.PermissionGroup)),
+                PermissionSlug = FirstNonEmpty(contributors.Select(c => c.PermissionSlug)),
+                // 合并组携带全部贡献者的 Options 类型 — validator 预检要对每个类型分别
+                // 绑定候选并验证，只留第一个会让其余贡献者的字段静默跳过预检。
+                OptionsTypes = contributors
+                    .SelectMany(c => c.OptionsTypes ?? [])
+                    .Distinct()
+                    .ToList() is { Count: > 0 } types ? types : null,
                 Fields = mergedFields,
             });
         }

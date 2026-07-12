@@ -19,6 +19,7 @@ public class PaymentEntryDto
     public decimal BaseAmount { get; set; }
     public decimal AppliedTotal { get; set; }
     public Guid? DepositToAccountId { get; set; }
+    public string? PaymentMethod { get; set; }
     public string? Reference { get; set; }
     public string? Memo { get; set; }
     public string? SourceType { get; set; }
@@ -49,6 +50,9 @@ public class CreatePaymentEntryDto
     /// <summary>存入/付出科目（Inbound 可空回退待存款项，见 FinanceOptions.PostToUndepositedFunds）</summary>
     public Guid? DepositToAccountId { get; set; }
 
+    /// <summary>结算方式（推荐取值见 PaymentMethods 常量，可自定义）</summary>
+    public string? PaymentMethod { get; set; }
+
     public string? Reference { get; set; }
     public string? Memo { get; set; }
 }
@@ -66,6 +70,9 @@ public class PaymentEntryQueryDto : PagedQueryDto
 
     /// <summary>按方向过滤</summary>
     public PaymentDirection? Direction { get; set; }
+
+    /// <summary>按结算方式过滤</summary>
+    public string? PaymentMethod { get; set; }
 
     /// <summary>按往来方过滤</summary>
     public Guid? PartyId { get; set; }

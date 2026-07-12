@@ -130,6 +130,7 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
     /// Force disconnect all connections for a specific user
     /// </summary>
     [HttpDelete("users/{userId:guid}/connections")]
+    [ApiAuthorize(PermissionName = "system.signalr.execute")]
     public virtual async Task<ApiResult> DisconnectUser(Guid userId)
     {
         await ConnectionManager.RemoveUserConnectionsAsync(userId);

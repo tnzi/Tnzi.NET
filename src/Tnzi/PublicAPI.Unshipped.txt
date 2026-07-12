@@ -1,0 +1,98 @@
+#nullable enable
+Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.All = Tnzi.Security.Authorization.CrudActions.View | Tnzi.Security.Authorization.CrudActions.Write -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.Create = 2 -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.Delete = 8 -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.None = 0 -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.Update = 4 -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.View = 1 -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.CrudActions.Write = Tnzi.Security.Authorization.CrudActions.Create | Tnzi.Security.Authorization.CrudActions.Update | Tnzi.Security.Authorization.CrudActions.Delete -> Tnzi.Security.Authorization.CrudActions
+Tnzi.Security.Authorization.IPermissionDefinitionContext
+Tnzi.Security.Authorization.IPermissionDefinitionContext.AddGroup(string! name, string! displayName, string? description = null, string? parentName = null, Tnzi.Security.Authorization.PermissionCategory? defaultCategory = null) -> Tnzi.Security.Authorization.PermissionGroupDefinition!
+Tnzi.Security.Authorization.IPermissionDefinitionContext.AddPermission(string! name, string! displayName, string? description = null, string? parentName = null, Tnzi.Security.Authorization.PermissionCategory? category = null) -> Tnzi.Security.Authorization.PermissionDefinition!
+Tnzi.Security.Authorization.IPermissionDefinitionProvider
+Tnzi.Security.Authorization.IPermissionDefinitionProvider.Define(Tnzi.Security.Authorization.IPermissionDefinitionContext! context) -> void
+Tnzi.Security.Authorization.PermissionCategory
+Tnzi.Security.Authorization.PermissionCategory.Business = 0 -> Tnzi.Security.Authorization.PermissionCategory
+Tnzi.Security.Authorization.PermissionCategory.Technical = 1 -> Tnzi.Security.Authorization.PermissionCategory
+Tnzi.Security.Authorization.PermissionDefinition
+Tnzi.Security.Authorization.PermissionDefinition.Category.get -> Tnzi.Security.Authorization.PermissionCategory
+Tnzi.Security.Authorization.PermissionDefinition.Category.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.Description.get -> string?
+Tnzi.Security.Authorization.PermissionDefinition.Description.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.DisplayName.get -> string!
+Tnzi.Security.Authorization.PermissionDefinition.DisplayName.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.Group.get -> Tnzi.Security.Authorization.PermissionGroupDefinition?
+Tnzi.Security.Authorization.PermissionDefinition.Group.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.InheritFromParent(bool inherit = true) -> Tnzi.Security.Authorization.PermissionDefinition!
+Tnzi.Security.Authorization.PermissionDefinition.IsEnabled.get -> bool
+Tnzi.Security.Authorization.PermissionDefinition.IsEnabled.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.IsInheritedFromParent.get -> bool
+Tnzi.Security.Authorization.PermissionDefinition.IsInheritedFromParent.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.Name.get -> string!
+Tnzi.Security.Authorization.PermissionDefinition.Name.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.ParentName.get -> string?
+Tnzi.Security.Authorization.PermissionDefinition.ParentName.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.PermissionDefinition() -> void
+Tnzi.Security.Authorization.PermissionDefinition.RequiredPermissions.get -> System.Collections.Generic.List<string!>!
+Tnzi.Security.Authorization.PermissionDefinition.RequiredPermissions.set -> void
+Tnzi.Security.Authorization.PermissionDefinition.RequiresPermission(string! permissionName) -> Tnzi.Security.Authorization.PermissionDefinition!
+Tnzi.Security.Authorization.PermissionDefinitionContext
+Tnzi.Security.Authorization.PermissionDefinitionContext.AddGroup(string! name, string! displayName, string? description = null, string? parentName = null, Tnzi.Security.Authorization.PermissionCategory? defaultCategory = null) -> Tnzi.Security.Authorization.PermissionGroupDefinition!
+Tnzi.Security.Authorization.PermissionDefinitionContext.AddPermission(string! name, string! displayName, string? description = null, string? parentName = null, Tnzi.Security.Authorization.PermissionCategory? category = null) -> Tnzi.Security.Authorization.PermissionDefinition!
+Tnzi.Security.Authorization.PermissionDefinitionContext.Groups.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Tnzi.Security.Authorization.PermissionGroupDefinition!>!
+Tnzi.Security.Authorization.PermissionDefinitionContext.PermissionDefinitionContext() -> void
+Tnzi.Security.Authorization.PermissionDefinitionContext.Permissions.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Tnzi.Security.Authorization.PermissionDefinition!>!
+Tnzi.Security.Authorization.PermissionDefinitionContextExtensions
+Tnzi.Security.Authorization.PermissionGroupDefinition
+Tnzi.Security.Authorization.PermissionGroupDefinition.DefaultCategory.get -> Tnzi.Security.Authorization.PermissionCategory
+Tnzi.Security.Authorization.PermissionGroupDefinition.DefaultCategory.set -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.Description.get -> string?
+Tnzi.Security.Authorization.PermissionGroupDefinition.Description.set -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.DisplayName.get -> string!
+Tnzi.Security.Authorization.PermissionGroupDefinition.DisplayName.set -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.IsEnabled.get -> bool
+Tnzi.Security.Authorization.PermissionGroupDefinition.IsEnabled.set -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.Name.get -> string!
+Tnzi.Security.Authorization.PermissionGroupDefinition.Name.set -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.ParentName.get -> string?
+Tnzi.Security.Authorization.PermissionGroupDefinition.ParentName.set -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.PermissionGroupDefinition() -> void
+Tnzi.Security.Authorization.PermissionGroupDefinition.Permissions.get -> System.Collections.Generic.List<Tnzi.Security.Authorization.PermissionDefinition!>!
+Tnzi.Security.Authorization.PermissionGroupDefinition.Permissions.set -> void
+Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult
+Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult.AuditResult() -> void
+Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult.DirectWarnings.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult.DirectWarnings.init -> void
+Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult.NestedHints.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult.NestedHints.init -> void
+static Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditDetailed(System.Collections.Generic.IEnumerable<Microsoft.Extensions.DependencyInjection.ServiceDescriptor!>! descriptors, System.Collections.Generic.IEnumerable<System.Reflection.Assembly!>! assemblies) -> Tnzi.Modules.Diagnostics.RuntimeSettingConsumerAuditor.AuditResult!
+Tnzi.TnziOptions.EnableRuntimeSettingConsumerAudit.get -> bool
+Tnzi.TnziOptions.EnableRuntimeSettingConsumerAudit.set -> void
+Tnzi.Settings.RuntimeSettingAttribute.Pattern.get -> string?
+Tnzi.Settings.RuntimeSettingAttribute.Pattern.init -> void
+Tnzi.Settings.RuntimeSettingAttribute.Subsection.get -> string?
+Tnzi.Settings.RuntimeSettingAttribute.Subsection.init -> void
+Tnzi.Settings.SettingFieldDefinition.Subsection.get -> string?
+Tnzi.Settings.SettingFieldDefinition.Subsection.init -> void
+Tnzi.Settings.SettingFieldType.Duration = 8 -> Tnzi.Settings.SettingFieldType
+Tnzi.Settings.SettingDefinitionGroup.OptionsTypes.get -> System.Collections.Generic.IReadOnlyList<System.Type!>?
+Tnzi.Settings.SettingDefinitionGroup.OptionsTypes.init -> void
+Tnzi.Settings.SettingFieldDefinition.Pattern.get -> string?
+Tnzi.Settings.SettingFieldDefinition.Pattern.init -> void
+Tnzi.Settings.RuntimeSettingGroupAttribute.PermissionGroup.get -> string?
+Tnzi.Settings.RuntimeSettingGroupAttribute.PermissionGroup.init -> void
+Tnzi.Settings.RuntimeSettingGroupAttribute.PermissionSlug.get -> string?
+Tnzi.Settings.RuntimeSettingGroupAttribute.PermissionSlug.init -> void
+Tnzi.Settings.SettingDefinitionGroup.PermissionGroup.get -> string?
+Tnzi.Settings.SettingDefinitionGroup.PermissionGroup.init -> void
+Tnzi.Settings.SettingDefinitionGroup.PermissionSlug.get -> string?
+Tnzi.Settings.SettingDefinitionGroup.PermissionSlug.init -> void
+Tnzi.Settings.SettingsPermissionNaming
+const Tnzi.Settings.SettingsPermissionNaming.Infix = "settings" -> string!
+static Tnzi.Security.Authorization.PermissionDefinitionContextExtensions.AddCrudPermissions(this Tnzi.Security.Authorization.IPermissionDefinitionContext! context, string! prefix, string! displayName, string? parentName = null, Tnzi.Security.Authorization.PermissionCategory? category = null, Tnzi.Security.Authorization.CrudActions actions = Tnzi.Security.Authorization.CrudActions.All) -> void
+static Tnzi.Settings.SettingsPermissionNaming.GroupName(Tnzi.Settings.SettingDefinitionGroup! group) -> string!
+static Tnzi.Settings.SettingsPermissionNaming.IsSettingsPermissionCode(string? code) -> bool
+static Tnzi.Settings.SettingsPermissionNaming.Slug(Tnzi.Settings.SettingDefinitionGroup! group) -> string!
+static Tnzi.Settings.SettingsPermissionNaming.UpdateCode(Tnzi.Settings.SettingDefinitionGroup! group) -> string!
+static Tnzi.Settings.SettingsPermissionNaming.ViewCode(Tnzi.Settings.SettingDefinitionGroup! group) -> string!

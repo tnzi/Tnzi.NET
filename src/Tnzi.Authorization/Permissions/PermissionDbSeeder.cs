@@ -28,11 +28,13 @@ namespace Tnzi.Authorization.Permissions;
 ///     /<c>ParentId</c> to match the code declaration. Preserves admin's
 ///     <c>IsEnabled</c> toggle (ops can disable a permission point without
 ///     redeploying code; redeploying will not silently re-enable).</item>
-///   <item><b>Remove</b>: never. Removing a provider declaration leaves the
-///     DB row in place — that prevents accidental data loss when a code
-///     change drops a permission. Admin can manually purge the row (the
-///     <c>IsSystemManaged</c> flag will be irrelevant because the
-///     provider no longer claims it; we re-evaluate ownership each run).</item>
+///   <item><b>Remove</b>: only <b>system-managed</b> rows whose code is no
+///     longer declared by any provider are retired (row + its RoleFunction
+///     grants), because system-managed rows are code-owned - a vanished
+///     declaration means the permission was removed from the product, and a
+///     lingering row would keep dead codes grantable in the assignment
+///     matrix (e.g. the retired <c>Admin.Manage</c> outer gate).
+///     Admin-created rows are never touched.</item>
 /// </list>
 /// </remarks>
 public class PermissionDbSeeder
@@ -41,17 +43,20 @@ public class PermissionDbSeeder
     private readonly IRepository<ModuleFunction, Guid> _functionRepository;
     private readonly ILogger<PermissionDbSeeder> _logger;
     private readonly IOptions<Options.AuthorizationOptions>? _options;
+    private readonly IRepository<RoleFunction, Guid>? _roleFunctionRepository;
 
     public PermissionDbSeeder(
         IRepository<FunctionModule, Guid> moduleRepository,
         IRepository<ModuleFunction, Guid> functionRepository,
         ILogger<PermissionDbSeeder> logger,
-        IOptions<Options.AuthorizationOptions>? options = null)
+        IOptions<Options.AuthorizationOptions>? options = null,
+        IRepository<RoleFunction, Guid>? roleFunctionRepository = null)
     {
         _moduleRepository = Check.NotNull(moduleRepository);
         _functionRepository = Check.NotNull(functionRepository);
         _logger = Check.NotNull(logger);
         _options = options;
+        _roleFunctionRepository = roleFunctionRepository;
     }
 
     /// <summary>
@@ -227,8 +232,56 @@ public class PermissionDbSeeder
             }
         }
 
+        // Pass 3: retire system-managed rows the code no longer declares.
+        // System-managed rows are code-owned (this seeder re-asserts their
+        // content every boot), so a vanished declaration means the permission
+        // itself was removed from the product - a lingering row would keep
+        // dead codes grantable in the assignment matrix. Grants referencing a
+        // retired function are deleted with it; admin-created rows are never
+        // touched.
+        var declaredFunctionCodes = new HashSet<string>(
+            context.Permissions.Values.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+        var orphanFunctions = existingFunctions
+            .Where(f => f.IsSystemManaged && !declaredFunctionCodes.Contains(f.Code))
+            .ToList();
+        foreach (var orphan in orphanFunctions)
+        {
+            if (_roleFunctionRepository != null)
+            {
+                await _roleFunctionRepository.DeleteAsync(rf => rf.FunctionId == orphan.Id, cancellationToken: cancellationToken);
+            }
+            await _functionRepository.DeleteAsync(f => f.Id == orphan.Id, cancellationToken: cancellationToken);
+            functionByCode.Remove(orphan.Code);
+            _logger.LogInformation(
+                "PermissionDbSeeder: retired system-managed permission {Code} (no provider declares it anymore).",
+                orphan.Code);
+            touched++;
+        }
+
+        // Retire system-managed modules no provider declares once they hold
+        // no functions and no child modules (admin-created content keeps the
+        // module alive).
+        var declaredGroupCodes = new HashSet<string>(
+            context.Groups.Values.Select(g => g.Name), StringComparer.OrdinalIgnoreCase);
+        var liveModuleIds = functionByCode.Values.Select(f => f.ModuleId).ToHashSet();
+        var orphanModules = moduleByCode.Values
+            .Where(m => m.IsSystemManaged
+                        && !declaredGroupCodes.Contains(m.Code)
+                        && !liveModuleIds.Contains(m.Id)
+                        && moduleByCode.Values.All(child => child.ParentId != m.Id))
+            .ToList();
+        foreach (var orphan in orphanModules)
+        {
+            await _moduleRepository.DeleteAsync(m => m.Id == orphan.Id, cancellationToken: cancellationToken);
+            moduleByCode.Remove(orphan.Code);
+            _logger.LogInformation(
+                "PermissionDbSeeder: retired empty system-managed module {Code} (no provider declares it anymore).",
+                orphan.Code);
+            touched++;
+        }
+
         _logger.LogInformation(
-            "PermissionDbSeeder: {Count} module/function row(s) inserted or updated from {ProviderCount} provider(s).",
+            "PermissionDbSeeder: {Count} module/function row(s) inserted, updated or retired from {ProviderCount} provider(s).",
             touched, providers.Count());
         return touched;
     }

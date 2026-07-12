@@ -23,11 +23,17 @@ public class StorageOptions
     /// <summary>
     /// 获取或设置 是否启用MD5验证
     /// </summary>
+    [RuntimeSetting(Label = "Enable MD5 Validation", I18n = "admin.modules.system.settings.fields.storageEnableMd5",
+        Type = SettingFieldType.Boolean, Subsection = "Files",
+        Description = "Compute MD5 for uploads to enable content-hash de-duplication and integrity checks.")]
     public bool EnableMd5Validation { get; set; } = true;
 
     /// <summary>
     /// 获取或设置 是否启用文件引用
     /// </summary>
+    [RuntimeSetting(Label = "Enable File Reference Tracking", I18n = "admin.modules.system.settings.fields.storageEnableFileReference",
+        Type = SettingFieldType.Boolean, Subsection = "Files",
+        Description = "Track [FileField] references so unreferenced files can be cleaned up. Warning: turning this off while files are in use stops reference tracking, so those files may be treated as orphaned by later cleanup.")]
     public bool EnableFileReference { get; set; } = true;
 
     /// <summary>
@@ -45,6 +51,9 @@ public class StorageOptions
     /// <summary>
     /// 获取或设置 是否自动生成缩略图
     /// </summary>
+    [RuntimeSetting(Label = "Auto-generate Thumbnails", I18n = "admin.modules.system.settings.fields.storageAutoGenerateThumbnail",
+        Type = SettingFieldType.Boolean, Subsection = "Files",
+        Description = "Generate a square thumbnail for image uploads.")]
     public bool AutoGenerateThumbnail { get; set; } = true;
 
     /// <summary>
@@ -62,6 +71,9 @@ public class StorageOptions
     /// <summary>
     /// 获取或设置 文件访问URL前缀
     /// </summary>
+    [RuntimeSetting(Label = "File URL Prefix", I18n = "admin.modules.system.settings.fields.storageUrlPrefix",
+        Type = SettingFieldType.String, Subsection = "Files",
+        Description = "Base URL prefix prepended to generated file access URLs (e.g. a CDN origin). Leave empty to use the storage provider default.")]
     public string? UrlPrefix { get; set; }
 
     /// <summary>
@@ -171,64 +183,102 @@ public class R2StorageOptions
 /// <summary>
 /// 文件清理配置选项
 /// </summary>
+[ConfigSection("Storage:Cleanup")]
+[RuntimeSettingGroup(Key = "storage-cleanup", Module = "Storage", DisplayName = "File Cleanup",
+    I18nKey = "admin.modules.system.settings.groups.storageCleanup",
+    Icon = "mdi:broom", Order = 310)]
 public class CleanupOptions
 {
     /// <summary>
     /// 是否启用自动清理任务
     /// </summary>
+    [RuntimeSetting(Label = "Enable Cleanup Task", I18n = "admin.modules.system.settings.fields.storageCleanupEnabled",
+        Type = SettingFieldType.Boolean, Subsection = "Schedule",
+        Description = "Enable the background file cleanup task. Note: enabling or disabling this takes effect after an application restart.")]
     public bool Enabled { get; set; } = false;
 
     /// <summary>
     /// 清理任务执行间隔（分钟），默认60分钟
     /// </summary>
+    [RuntimeSetting(Label = "Cleanup Interval (minutes)", I18n = "admin.modules.system.settings.fields.storageCleanupIntervalMinutes",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Schedule",
+        Description = "Interval between cleanup runs, in minutes. Ignored when a Cron expression is set.")]
     public int IntervalMinutes { get; set; } = 60;
 
     /// <summary>
     /// 临时文件保留时间（小时），超过此时间的临时文件将被清理，默认24小时
     /// </summary>
+    [RuntimeSetting(Label = "Temporary File Retention (hours)", I18n = "admin.modules.system.settings.fields.storageCleanupTemporaryFileRetentionHours",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Retention",
+        Description = "Temporary files older than this are deleted.")]
     public int TemporaryFileRetentionHours { get; set; } = 24;
 
     /// <summary>
     /// 是否启用僵尸文件清理（ReferenceCount=0 的文件）
     /// </summary>
+    [RuntimeSetting(Label = "Enable Orphan File Cleanup", I18n = "admin.modules.system.settings.fields.storageCleanupEnableOrphanFileCleanup",
+        Type = SettingFieldType.Boolean, Subsection = "Orphans",
+        Description = "Delete files whose reference count has reached zero.")]
     public bool EnableOrphanFileCleanup { get; set; } = true;
 
     /// <summary>
     /// 僵尸文件保留时间（小时），ReferenceCount=0 超过此时间后删除，默认72小时
     /// </summary>
+    [RuntimeSetting(Label = "Orphan File Retention (hours)", I18n = "admin.modules.system.settings.fields.storageCleanupOrphanFileRetentionHours",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Orphans",
+        Description = "Orphaned files (reference count zero) older than this are deleted.")]
     public int OrphanFileRetentionHours { get; set; } = 72;
 
     /// <summary>
     /// 是否启用孤立引用清理（引用的实体已不存在）
     /// 注意：此功能需要查询实体表验证，可能影响性能，默认关闭
     /// </summary>
+    [RuntimeSetting(Label = "Enable Orphan Reference Cleanup", I18n = "admin.modules.system.settings.fields.storageCleanupEnableOrphanReferenceCleanup",
+        Type = SettingFieldType.Boolean, Subsection = "Orphans",
+        Description = "Remove references whose target entity no longer exists. This queries entity tables to verify existence and may affect performance.")]
     public bool EnableOrphanReferenceCleanup { get; set; } = false;
 
     /// <summary>
     /// 单次清理的最大文件数量，防止长时间阻塞，默认100
     /// </summary>
+    [RuntimeSetting(Label = "Max Files Per Run", I18n = "admin.modules.system.settings.fields.storageCleanupMaxFilesPerRun",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Schedule",
+        Description = "Maximum number of files processed in a single cleanup run, to avoid long-running blocking operations.")]
     public int MaxFilesPerRun { get; set; } = 100;
 
     /// <summary>
     /// 清理任务执行时间（Cron 表达式），如果设置则优先于 IntervalMinutes
     /// 例如: "0 3 * * *" 表示每天凌晨3点执行
     /// </summary>
+    [RuntimeSetting(Label = "Cron Expression", I18n = "admin.modules.system.settings.fields.storageCleanupCronExpression",
+        Type = SettingFieldType.String, Subsection = "Schedule",
+        Description = "Optional cron expression for the cleanup schedule (e.g. '0 3 * * *' for daily at 03:00 UTC). When set, it takes precedence over the interval. Changes take effect after an application restart.")]
     public string? CronExpression { get; set; }
 }
 
 /// <summary>
 /// 缩略图尺寸配置
 /// </summary>
+[ConfigSection("Storage:ThumbnailSize")]
+[RuntimeSettingGroup(Key = "storage-upload", Module = "Storage", DisplayName = "Upload Limits",
+    I18nKey = "admin.modules.system.settings.groups.storageUpload",
+    Icon = "mdi:cloud-upload-outline", Order = 300)]
 public class ThumbnailSizeOptions
 {
     /// <summary>
     /// 宽度（像素）
     /// </summary>
+    [RuntimeSetting(Label = "Thumbnail Width (px)", I18n = "admin.modules.system.settings.fields.storageThumbnailWidth",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Thumbnail",
+        Description = "Thumbnail width in pixels.")]
     public int Width { get; set; } = 200;
 
     /// <summary>
     /// 高度（像素）
     /// </summary>
+    [RuntimeSetting(Label = "Thumbnail Height (px)", I18n = "admin.modules.system.settings.fields.storageThumbnailHeight",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Thumbnail",
+        Description = "Thumbnail height in pixels.")]
     public int Height { get; set; } = 200;
 }
 

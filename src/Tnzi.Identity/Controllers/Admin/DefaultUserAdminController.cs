@@ -32,6 +32,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">用户信息</param>
     /// <returns>创建的用户</returns>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "user.create")]
     public virtual async Task<ApiResult<UserDto>> Create([FromBody] CreateUserDto input)
     {
         var result = await UserService.CreateAsync(input);
@@ -45,6 +46,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">用户信息</param>
     /// <returns>更新后的用户</returns>
     [HttpPut("{id}")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult<UserDto>> Update(Guid id, [FromBody] UpdateUserDto input)
     {
         var result = await UserService.UpdateAsync(id, input);
@@ -57,6 +59,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="id">用户ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("{id}")]
+    [ApiAuthorize(PermissionName = "user.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await UserService.DeleteAsync(id);
@@ -93,6 +96,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="id">用户ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/enable")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> Enable(Guid id)
     {
         var result = await UserService.EnableAsync(id);
@@ -106,6 +110,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="reason">禁用原因（可选）</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/disable")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> Disable(Guid id, [FromBody] string? reason = null)
     {
         var result = await UserService.DisableAsync(id, reason);
@@ -119,6 +124,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">锁定信息</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/lock")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> Lock(Guid id, [FromBody] LockUserDto? input = null)
     {
         var result = await UserService.LockAsync(id, input?.LockoutEnd, input?.Reason);
@@ -131,6 +137,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="id">用户ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/unlock")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> Unlock(Guid id)
     {
         var result = await UserService.UnlockAsync(id);
@@ -144,6 +151,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">密码信息</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/change-password")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> ChangePassword(Guid id, [FromBody] ChangePasswordDto input)
     {
         var result = await PasswordService.ChangePasswordAsync(id, input.CurrentPassword, input.NewPassword);
@@ -157,6 +165,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">新密码</param>
     /// <returns>操作结果</returns>
     [HttpPost("{id}/reset-password")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> ResetPassword(Guid id, [FromBody] ResetPasswordByAdminDto input)
     {
         var result = await PasswordService.ResetPasswordByAdminAsync(id, input.NewPassword);
@@ -169,6 +178,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="inputs">用户信息列表</param>
     /// <returns>创建的用户列表</returns>
     [HttpPost("batch/create")]
+    [ApiAuthorize(PermissionName = "user.create")]
     public virtual async Task<ApiResult<IEnumerable<UserListItemDto>>> CreateMany([FromBody] IEnumerable<CreateUserDto> inputs)
     {
         var result = await UserService.CreateManyAsync(inputs);
@@ -181,6 +191,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="inputs">用户更新信息列表</param>
     /// <returns>更新后的用户列表</returns>
     [HttpPut("batch/update")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult<IEnumerable<UserListItemDto>>> UpdateMany([FromBody] IEnumerable<UpdateUserBatchDto> inputs)
     {
         var updateList = inputs.Select(x => (x.Id, x.Dto));
@@ -194,6 +205,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="ids">用户ID列表</param>
     /// <returns>操作结果</returns>
     [HttpDelete("batch/delete")]
+    [ApiAuthorize(PermissionName = "user.delete")]
     public virtual async Task<ApiResult> DeleteMany([FromBody] IEnumerable<Guid> ids)
     {
         var result = await UserService.DeleteManyAsync(ids);
@@ -207,6 +219,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">组织信息</param>
     /// <returns>操作结果</returns>
     [HttpPost("{userId}/assign-organization")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> AssignToOrganization(Guid userId, [FromBody] AssignOrganizationDto input)
     {
         if (OrganizationService == null)
@@ -223,6 +236,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="userId">用户ID</param>
     /// <returns>操作结果</returns>
     [HttpPost("{userId}/remove-organization")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> RemoveFromOrganization(Guid userId)
     {
         if (OrganizationService == null)
@@ -240,6 +254,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">角色ID列表</param>
     /// <returns>操作结果</returns>
     [HttpPost("{userId}/assign-roles")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> AssignRoles(Guid userId, [FromBody] AssignRolesDto input)
     {
         var result = await UserService.AssignRolesAsync(userId, input.RoleIds);
@@ -253,6 +268,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// <param name="input">角色ID列表</param>
     /// <returns>操作结果</returns>
     [HttpPost("{userId}/remove-roles")]
+    [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> RemoveRoles(Guid userId, [FromBody] RemoveRolesDto input)
     {
         var result = await UserService.RemoveRolesAsync(userId, input.RoleIds);
@@ -293,6 +309,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     /// Import users from CSV file
     /// </summary>
     [HttpPost("import/csv")]
+    [ApiAuthorize(PermissionName = "user.create")]
     public virtual async Task<ApiResult<UserImportResult>> ImportCsv(IFormFile file)
     {
         if (file == null || file.Length == 0)

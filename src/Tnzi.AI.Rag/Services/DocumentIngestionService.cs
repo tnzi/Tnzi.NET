@@ -21,7 +21,7 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
         IRepository<DocumentChunk, Guid> chunkRepository,
         IRepository<KnowledgeBase, Guid> kbRepository,
         IGraphExtractor graphExtractor,
-        IOptions<AIRagOptions> options,
+        IOptionsSnapshot<AIRagOptions> options,
         IServiceProvider serviceProvider,
         IAsyncChunkingStrategy? asyncChunkingStrategy = null) : base(serviceProvider)
     {

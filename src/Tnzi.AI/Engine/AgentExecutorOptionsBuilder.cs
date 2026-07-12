@@ -13,7 +13,7 @@ namespace Tnzi.AI.Engine;
 /// </remarks>
 public class AgentExecutorOptionsBuilder
 {
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IEnumerable<IToolExecutionMiddleware> _middlewares;
@@ -21,7 +21,7 @@ public class AgentExecutorOptionsBuilder
     private readonly ILogger<AgentExecutorOptionsBuilder> _logger;
 
     public AgentExecutorOptionsBuilder(
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILoggerFactory loggerFactory,
         IChatClientFactory chatClientFactory,
         IEnumerable<IToolExecutionMiddleware> middlewares,
@@ -81,7 +81,7 @@ public class AgentExecutorOptionsBuilder
             MaxOutputTokens = maxTokens,
             HistoryReducer = historyReducer,
             Middlewares = middlewares,
-            StripTextFromToolCallMessages = _options.Value.StripTextFromToolCallMessages
+            StripTextFromToolCallMessages = _options.CurrentValue.StripTextFromToolCallMessages
         };
     }
 
@@ -90,7 +90,7 @@ public class AgentExecutorOptionsBuilder
     /// </summary>
     private IHistoryReducer? CreateHistoryReducer()
     {
-        var historyConfig = _options.Value.History;
+        var historyConfig = _options.CurrentValue.History;
         var reductionMode = historyConfig.Reduction.Mode;
 
         if (reductionMode == HistoryReductionMode.None)
@@ -118,7 +118,7 @@ public class AgentExecutorOptionsBuilder
     /// </summary>
     private IHistoryReducer CreatePruneChatReducer()
     {
-        var pruneOptions = _options.Value.History.Reduction.Prune;
+        var pruneOptions = _options.CurrentValue.History.Reduction.Prune;
         var logger = _loggerFactory.CreateLogger<PruneChatReducer>();
 
         _logger.LogDebug(
@@ -133,12 +133,12 @@ public class AgentExecutorOptionsBuilder
     /// </summary>
     private IHistoryReducer? CreateSummarizeChatReducer()
     {
-        var summarizeOptions = _options.Value.History.Reduction.Summarize;
+        var summarizeOptions = _options.CurrentValue.History.Reduction.Summarize;
         var logger = _loggerFactory.CreateLogger<SummarizeChatReducer>();
 
         try
         {
-            var provName = summarizeOptions.Provider ?? _options.Value.DefaultProvider;
+            var provName = summarizeOptions.Provider ?? _options.CurrentValue.DefaultProvider;
             var chatClient = _chatClientFactory.GetChatClient(provName, summarizeOptions.SummaryModelId);
 
             _logger.LogDebug(

@@ -366,7 +366,7 @@ public class McpServerSecurityMiddlewareTests
 
     private static McpServerSecurityMiddleware CreateMiddleware(McpServerOptions options)
         => new(
-            MsOptions.Create(options),
+            new StaticOptionsMonitor<McpServerOptions>(options),
             NullLogger<McpServerSecurityMiddleware>.Instance,
             new ServiceCollection().BuildServiceProvider());
 

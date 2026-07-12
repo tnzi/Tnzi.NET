@@ -99,6 +99,7 @@
                       {{ testState[item.id]?.result?.message }}
                     </NTag>
                     <NButton
+                      v-if="can('ai.mcp.execute')"
                       size="small"
                       ghost
                       :loading="testState[item.id]?.busy"
@@ -107,10 +108,10 @@
                       <template #icon><TSvgIcon icon="mdi:connection" :size="14" /></template>
                       {{ t('servers.test') }}
                     </NButton>
-                    <NButton size="small" ghost @click="serverCrud.openEdit(item)">
+                    <NButton v-if="serverCrud.canUpdate" size="small" ghost @click="serverCrud.openEdit(item)">
                       {{ t('actions.edit') }}
                     </NButton>
-                    <NPopconfirm @positive-click="removeServer(item)">
+                    <NPopconfirm v-if="serverCrud.canDelete" @positive-click="removeServer(item)">
                       <template #trigger>
                         <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
                       </template>
@@ -191,7 +192,7 @@
               <!-- Exposed Agents management -->
               <NCard size="small" :title="t('expose.title')" :bordered="false" class="mt-12px t-tab-card">
                 <template #header-extra>
-                  <div class="flex items-center gap-6px">
+                  <div v-if="can('ai.mcp.update')" class="flex items-center gap-6px">
                     <NSelect
                       v-model:value="agentToExpose"
                       size="small"
@@ -225,7 +226,7 @@
                       <span class="t-mcp__exposed-name">{{ row.name }}</span>
                       <code class="font-mono t-mcp__exposed-id">{{ row.agentId }}</code>
                     </span>
-                    <NPopconfirm @positive-click="onRemoveAgent(row.agentId)">
+                    <NPopconfirm v-if="can('ai.mcp.update')" @positive-click="onRemoveAgent(row.agentId)">
                       <template #trigger>
                         <NButton size="small" type="error" tertiary>
                           <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
@@ -268,7 +269,7 @@
             <template v-else>
             <div class="t-mcp__analytics-bar">
               <span class="t-mcp__analytics-hint">{{ t('analytics.hint') }}</span>
-              <NPopconfirm @positive-click="onCleanup">
+              <NPopconfirm v-if="can('ai.mcp.delete')" @positive-click="onCleanup">
                 <template #trigger>
                   <NButton size="small" :loading="cleanupBusy">
                     <template #icon><TSvgIcon icon="mdi:broom" :size="14" /></template>
@@ -371,6 +372,7 @@ import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
@@ -394,6 +396,7 @@ import type {
 const t = makePageTranslator('ai.mcp')
 
 const bridge = createAiBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 // Primary tabs. TTabsPage owns the `?section=` deep-linking + Back/Forward; the
 // `status` pane holds mixed variable-height content so it owns its own scroll.
@@ -407,6 +410,7 @@ const activeTab = ref('servers')
 // ─── Tab 1: External servers CRUD ──────────────────────────────────────
 const serverCrud = useCrudPage<McpServerRegistrationDto>({
   pageId: 'ai.mcp',
+  permission: 'ai.mcp',
   columns: mcpServerColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.mcpServers.fetch(query),

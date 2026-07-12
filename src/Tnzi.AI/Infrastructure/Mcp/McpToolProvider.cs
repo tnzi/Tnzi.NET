@@ -8,7 +8,7 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// </summary>
 public class McpToolProvider : IMcpToolProvider
 {
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IMcpServerCatalog _serverCatalog;
     private readonly IMcpClientFactory _clientFactory;
     private readonly ILoggerFactory _loggerFactory;
@@ -24,7 +24,7 @@ public class McpToolProvider : IMcpToolProvider
     private readonly ConcurrentDictionary<string, List<string>> _serverToolNames = new(StringComparer.OrdinalIgnoreCase);
 
     public McpToolProvider(
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IMcpServerCatalog serverCatalog,
         IMcpClientFactory clientFactory,
         ILoggerFactory loggerFactory,
@@ -59,7 +59,7 @@ public class McpToolProvider : IMcpToolProvider
             return Array.Empty<AITool>();
         }
 
-        var toolCacheSeconds = _options.Value.Mcp?.ToolCacheSeconds ?? 300;
+        var toolCacheSeconds = _options.CurrentValue.Mcp?.ToolCacheSeconds ?? 300;
         var allTools = new List<AITool>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

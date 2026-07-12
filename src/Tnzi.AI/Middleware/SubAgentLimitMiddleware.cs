@@ -9,12 +9,12 @@ public class SubAgentLimitMiddleware : IAiMiddleware
     private const int MaxLimit = 4;
     private const string TaskToolName = "task";
 
-    private readonly IOptions<SubAgentOptions> _options;
+    private readonly IOptionsMonitor<SubAgentOptions> _options;
     private readonly ILogger<SubAgentLimitMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.SubAgentLimit;
 
-    public SubAgentLimitMiddleware(IOptions<SubAgentOptions> options, ILogger<SubAgentLimitMiddleware> logger)
+    public SubAgentLimitMiddleware(IOptionsMonitor<SubAgentOptions> options, ILogger<SubAgentLimitMiddleware> logger)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
@@ -23,7 +23,7 @@ public class SubAgentLimitMiddleware : IAiMiddleware
     public async Task<AgentRunResult> InvokeAsync(
         AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        if (!_options.Value.Enabled)
+        if (!_options.CurrentValue.Enabled)
             return await next(context, cancellationToken);
 
         TruncateTaskCalls(context);
@@ -34,7 +34,7 @@ public class SubAgentLimitMiddleware : IAiMiddleware
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!_options.Value.Enabled)
+        if (!_options.CurrentValue.Enabled)
         {
             await foreach (var chunk in next(context, cancellationToken))
                 yield return chunk;
@@ -48,7 +48,7 @@ public class SubAgentLimitMiddleware : IAiMiddleware
 
     private void TruncateTaskCalls(AiMiddlewareContext context)
     {
-        var maxConcurrent = Math.Clamp(_options.Value.MaxConcurrentSubAgents, MinLimit, MaxLimit);
+        var maxConcurrent = Math.Clamp(_options.CurrentValue.MaxConcurrentSubAgents, MinLimit, MaxLimit);
 
         // Find last assistant message
         for (var i = context.Messages.Count - 1; i >= 0; i--)

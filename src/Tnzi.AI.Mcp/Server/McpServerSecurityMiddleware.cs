@@ -15,7 +15,7 @@ public class McpServerSecurityMiddleware
     /// </summary>
     public const string CallerHashItemKey = "mcp-caller-hash";
 
-    private readonly IOptions<McpServerOptions> _options;
+    private readonly IOptionsMonitor<McpServerOptions> _options;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<McpServerSecurityMiddleware> _logger;
 
@@ -25,7 +25,7 @@ public class McpServerSecurityMiddleware
     private const int CleanupInterval = 100;
 
     public McpServerSecurityMiddleware(
-        IOptions<McpServerOptions> options,
+        IOptionsMonitor<McpServerOptions> options,
         ILogger<McpServerSecurityMiddleware> logger,
         IServiceProvider serviceProvider)
     {
@@ -40,7 +40,7 @@ public class McpServerSecurityMiddleware
     /// <returns>验证通过返回 true</returns>
     public bool ValidateApiKey(string? apiKey)
     {
-        var config = _options.Value;
+        var config = _options.CurrentValue;
         if (!config.RequireAuthentication)
         {
             return true;
@@ -98,7 +98,7 @@ public class McpServerSecurityMiddleware
         // Query-string API key extraction is OFF by default because query strings
         // leak into access logs, proxy caches, browser history, and referrer headers.
         // See McpServerOptions.AllowApiKeyInQuery for opt-in semantics.
-        if (_options.Value.AllowApiKeyInQuery)
+        if (_options.CurrentValue.AllowApiKeyInQuery)
         {
             if (request.Query.TryGetValue("apiKey", out var apiKeyQueryValues))
             {
@@ -167,7 +167,7 @@ public class McpServerSecurityMiddleware
     {
         Check.NotNull(context);
 
-        var tenantSegment = _options.Value.RateLimitPerTenant
+        var tenantSegment = _options.CurrentValue.RateLimitPerTenant
             ? ExtractTenantId(context.Request) ?? "public"
             : "shared";
 
@@ -184,7 +184,7 @@ public class McpServerSecurityMiddleware
     /// <returns>未超限返回 true</returns>
     public bool CheckRateLimit(string clientKey)
     {
-        var config = _options.Value;
+        var config = _options.CurrentValue;
         var limit = config.RateLimitPerMinute;
         if (limit <= 0)
         {
@@ -259,7 +259,7 @@ public class McpServerSecurityMiddleware
         string? callerApiKeyId = null,
         CancellationToken ct = default)
     {
-        var config = _options.Value;
+        var config = _options.CurrentValue;
         var auditEnabled = config.EnableAuditLog;
         var analyticsEnabled = config.EnableToolAnalytics;
 

@@ -19,6 +19,7 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
     /// 创建知识库
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.knowledge.create")]
     public virtual async Task<ApiResult<KnowledgeBaseDto>> Create([FromBody] CreateKnowledgeBaseDto input, CancellationToken ct)
     {
         var result = await KnowledgeBaseService.CreateAsync(input, ct);
@@ -29,6 +30,7 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
     /// 更新知识库
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.knowledge.update")]
     public virtual async Task<ApiResult<KnowledgeBaseDto>> Update(Guid id, [FromBody] UpdateKnowledgeBaseDto input, CancellationToken ct)
     {
         var result = await KnowledgeBaseService.UpdateAsync(id, input, ct);
@@ -39,6 +41,7 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
     /// 删除知识库
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.knowledge.delete")]
     public virtual async Task<ApiResult> Delete(Guid id, CancellationToken ct)
     {
         var result = await KnowledgeBaseService.DeleteAsync(id, ct);
@@ -79,6 +82,7 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
     /// 上传文档到知识库
     /// </summary>
     [HttpPost("{id:guid}/upload")]
+    [ApiAuthorize(PermissionName = "ai.knowledge.create")]
     public virtual async Task<ApiResult<DocumentUploadResultDto>> UploadDocument(Guid id, IFormFile file, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
@@ -96,6 +100,7 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
     /// 删除知识库中的文档
     /// </summary>
     [HttpDelete("{id:guid}/documents/{docId:guid}")]
+    [ApiAuthorize(PermissionName = "ai.knowledge.delete")]
     public virtual async Task<ApiResult> DeleteDocument(Guid id, Guid docId, CancellationToken ct)
     {
         var result = await KnowledgeBaseService.DeleteDocumentAsync(id, docId, ct);
@@ -136,6 +141,7 @@ public class DefaultKnowledgeBaseAdminController : ApiAdminControllerBase
     /// 对知识库执行完整重新索引（重新生成所有块的嵌入向量）
     /// </summary>
     [HttpPost("{id:guid}/reindex")]
+    [ApiAuthorize(PermissionName = "ai.knowledge.update")]
     public virtual async Task<ApiResult<ReindexResultDto>> Reindex(Guid id, CancellationToken ct)
     {
         var result = await KnowledgeBaseService.ReindexAsync(id, ct);

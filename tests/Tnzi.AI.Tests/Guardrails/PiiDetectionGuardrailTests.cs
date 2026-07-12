@@ -9,11 +9,11 @@ namespace Tnzi.AI.Tests.Guardrails;
 /// </remarks>
 public class PiiDetectionGuardrailTests
 {
-    private static IOptions<AIOptions> CreateOptions(Action<GuardrailsOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptions(Action<GuardrailsOptions>? configure = null)
     {
         var options = new AIOptions();
         configure?.Invoke(options.Guardrails);
-        return Microsoft.Extensions.Options.Options.Create(options);
+        return new StaticOptionsMonitor<AIOptions>(options);
     }
 
     [Fact]

@@ -110,4 +110,13 @@ public interface IRoleFunctionService
     /// <param name="importData">Exported permission data</param>
     /// <returns>Import result with counts</returns>
     Task<Result<PermissionImportResultDto>> ImportRolePermissionsAsync(Guid roleId, RolePermissionExportDto importData);
+
+    /// <summary>
+    /// The role names configured as super administrators
+    /// (<c>Authorization:SuperAdminRoles</c>). Members of these roles bypass
+    /// every permission check, so assignment UIs must render them read-only:
+    /// explicit RoleFunction rows have no effect on their members. Default
+    /// interface method so existing implementations keep compiling.
+    /// </summary>
+    IReadOnlyList<string> GetSuperAdminRoleNames() => [];
 }

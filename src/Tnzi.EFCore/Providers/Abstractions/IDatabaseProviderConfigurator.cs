@@ -17,5 +17,6 @@ public interface IDatabaseProviderConfigurator
     /// </summary>
     /// <param name="builder">DbContext 选项构建器</param>
     /// <param name="connectionString">连接字符串</param>
-    void Configure(DbContextOptionsBuilder builder, string connectionString);
+    /// <param name="options">provider 连接级选项（重试策略、命令超时）；为 null 时保持 provider 默认行为</param>
+    void Configure(DbContextOptionsBuilder builder, string connectionString, DbProviderConfigureOptions? options = null);
 }

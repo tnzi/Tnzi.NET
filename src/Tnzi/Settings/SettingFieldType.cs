@@ -20,5 +20,12 @@ public enum SettingFieldType
     Password = 6,
 
     /// <summary>仅用于 [RuntimeSetting]：由属性 CLR 类型推断实际类型，不作为最终 SettingFieldDefinition.Type。</summary>
-    Auto = 7
+    Auto = 7,
+
+    /// <summary>
+    /// 时长（<see cref="System.TimeSpan"/>）。值以 canonical 字符串存取（如 "00:05:00" / "1.12:00:00"），
+    /// 必须 <see cref="System.TimeSpan.TryParse(string, out System.TimeSpan)"/> 可逆，保证热更新写回后
+    /// ConfigurationBinder 原生绑定不失败。前端渲染带格式提示的文本输入。
+    /// </summary>
+    Duration = 8
 }

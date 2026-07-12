@@ -3,11 +3,13 @@
 namespace Tnzi.RabbitMQ;
 
 /// <summary>
-/// RabbitMQ事件总线实现
+/// RabbitMQ事件总线实现(分布式)
+/// 实现 IDistributedEventBus 与 IIntegrationEventBus,PublishAsync 完成仅代表投递成功,
+/// 不执行本进程内处理器;不替换 IEventBus(本地总线始终可用)
 /// 使用独立的发布 Channel 和 per-consumer Channel 架构（RabbitMQ 最佳实践）
 /// RabbitMQ.Client 7.x 的 IChannel 是线程安全的，发布操作无需外部锁
 /// </summary>
-public class RabbitMQEventBus : IEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
+public class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
 {
     private readonly IConnection _connection;
     private readonly ILogger<RabbitMQEventBus> _logger;

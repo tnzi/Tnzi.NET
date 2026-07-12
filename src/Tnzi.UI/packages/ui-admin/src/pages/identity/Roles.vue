@@ -126,6 +126,7 @@ const t = makePageTranslator('identity.roles')
 
 const crud = useCrudPage<RoleDto, string>({
   pageId: 'identity.roles',
+  permission: 'role',
   columns: roleColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.roles.fetch(query),

@@ -7,7 +7,7 @@ namespace Tnzi.AI.Engine;
 public class AgentFactory : IAgentFactory
 {
     private readonly IChatClientFactory _chatClientFactory;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IToolResolver _toolResolver;
     private readonly AgentExecutorOptionsBuilder _optionsBuilder;
     private readonly IToolRegistry _toolRegistry;
@@ -15,7 +15,7 @@ public class AgentFactory : IAgentFactory
 
     public AgentFactory(
         IChatClientFactory chatClientFactory,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IToolResolver toolResolver,
         AgentExecutorOptionsBuilder optionsBuilder,
         IToolRegistry toolRegistry,
@@ -45,9 +45,9 @@ public class AgentFactory : IAgentFactory
         CancellationToken ct = default)
     {
         // 1. 解析 Provider 配置
-        var resolvedProvider = providerName ?? _options.Value.DefaultProvider;
+        var resolvedProvider = providerName ?? _options.CurrentValue.DefaultProvider;
 
-        if (!_options.Value.Providers.TryGetValue(resolvedProvider, out var providerConfig))
+        if (!_options.CurrentValue.Providers.TryGetValue(resolvedProvider, out var providerConfig))
         {
             throw new InvalidOperationException($"AI provider '{resolvedProvider}' is not configured");
         }

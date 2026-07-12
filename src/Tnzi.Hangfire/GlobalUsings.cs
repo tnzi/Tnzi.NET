@@ -23,3 +23,4 @@ global using Tnzi.MultiTenancy;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Utilities;
+global using Tnzi.Hangfire.Permissions;

@@ -33,6 +33,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// 创建布局
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "template.layout.create")]
     public virtual async Task<ApiResult<LayoutDto>> Create([FromBody] CreateLayoutRequest request)
     {
         var result = await LayoutStoreService.CreateLayoutAsync(request);
@@ -43,6 +44,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// 更新布局
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "template.layout.update")]
     public virtual async Task<ApiResult<LayoutDto>> Update(Guid id, [FromBody] UpdateLayoutRequest request)
     {
         var result = await LayoutStoreService.UpdateLayoutAsync(id, request);
@@ -53,6 +55,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// 删除布局
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "template.layout.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await LayoutStoreService.DeleteLayoutAsync(id);
@@ -63,6 +66,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// 批量删除布局
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "template.layout.delete")]
     public virtual async Task<ApiResult> DeleteBatch([FromBody] IEnumerable<Guid> ids)
     {
         var result = await LayoutStoreService.DeleteLayoutsAsync(ids);
@@ -93,6 +97,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// 克隆布局
     /// </summary>
     [HttpPost("{id:guid}/clone")]
+    [ApiAuthorize(PermissionName = "template.layout.create")]
     public virtual async Task<ApiResult<LayoutDto>> Clone(Guid id, [FromQuery] string newName)
     {
         var result = await LayoutStoreService.CloneLayoutAsync(id, newName);
@@ -123,6 +128,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// Import layouts from JSON
     /// </summary>
     [HttpPost("import")]
+    [ApiAuthorize(PermissionName = "template.layout.create")]
     public virtual async Task<ApiResult<LayoutImportResultDto>> Import([FromBody] LayoutImportRequest request)
     {
         var result = await LayoutStoreService.ImportLayoutsAsync(request.Json, request.OverwriteExisting);
@@ -133,6 +139,7 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     /// Batch activate or deactivate layouts
     /// </summary>
     [HttpPost("batch-activate")]
+    [ApiAuthorize(PermissionName = "template.layout.update")]
     public virtual async Task<ApiResult<int>> BatchActivate([FromBody] BatchActivateRequest request)
     {
         var result = await LayoutStoreService.BatchActivateAsync(request.Ids, request.IsActive);

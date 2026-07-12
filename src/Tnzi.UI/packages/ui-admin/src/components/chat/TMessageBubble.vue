@@ -5,7 +5,21 @@
        trivial. A card makes each broadcast read as an actual notification. -->
   <div v-if="message.contentType === MessageContentType.System && isSystem" class="t-bubble-notice">
     <span class="t-bubble-notice__icon"><Icon icon="mdi:bell-outline" :width="15" /></span>
-    <div class="t-bubble-notice__card">{{ message.content }}</div>
+    <div class="t-bubble-notice__card">
+      <div v-if="message.category" class="t-bubble-notice__category">{{ message.category }}</div>
+      <div v-if="message.title" class="t-bubble-notice__title">{{ message.title }}</div>
+      <div class="t-bubble-notice__body">{{ message.content }}</div>
+      <a
+        v-if="message.linkUrl"
+        class="t-bubble-notice__link"
+        :href="message.linkUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <Icon icon="mdi:open-in-new" :width="13" />
+        <span>{{ linkLabel }}</span>
+      </a>
+    </div>
   </div>
 
   <!-- Inline system notice (group created / member joined): centered grey pill -->
@@ -62,6 +76,7 @@ import { NImage } from 'naive-ui'
 import { MessageContentType } from '@tnzi/core/services/chat'
 import type { ChatMessageDto } from '@tnzi/core/services/chat'
 import { resolveChatAvatarUrl } from './avatar'
+import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
 
 const props = defineProps<{
@@ -82,6 +97,9 @@ const props = defineProps<{
 
 // On my own messages prefer the known current-user name; fall back to senderName.
 const avatarName = computed(() => (props.mine ? props.myName || props.message.senderName : props.message.senderName))
+
+// Call-to-action label for a rich notification's link.
+const linkLabel = computed(() => translatePageKey('chat', 'window.viewDetails'))
 
 // File/image URL — reuse the file preview helper (/api/files/{id}/preview).
 const fileUrl = computed(() => resolveChatAvatarUrl(props.message.fileId))
@@ -171,8 +189,46 @@ const fileSizeLabel = computed(() => {
   font-size: 13.5px;
   line-height: 1.6;
   word-break: break-word;
-  white-space: pre-wrap;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.t-bubble-notice__category {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: rgb(var(--tnzi-primary-rgb, 13 148 136) / 0.12);
+  color: var(--chat-send, var(--tnzi-primary-600, #158278));
+}
+
+.t-bubble-notice__title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.t-bubble-notice__body {
+  white-space: pre-wrap;
+}
+
+.t-bubble-notice__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--chat-send, var(--tnzi-primary-600, #158278));
+  text-decoration: none;
+}
+
+.t-bubble-notice__link:hover {
+  text-decoration: underline;
 }
 
 /* ── System notice ─────────────────────────────────────────────────────── */

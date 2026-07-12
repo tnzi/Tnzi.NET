@@ -24,6 +24,11 @@ public class PerformanceModule : TnziInfrastructureModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, PerformancePermissions>();
+
         var config = context.Configuration.GetSection("Performance").Get<PerformanceOptions>()
             ?? new PerformanceOptions();
 

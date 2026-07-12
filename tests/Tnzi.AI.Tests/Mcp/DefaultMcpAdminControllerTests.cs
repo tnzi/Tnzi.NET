@@ -15,7 +15,7 @@ public class DefaultMcpAdminControllerTests
     private readonly Mock<IMcpServerHost> _host = new();
 
     private DefaultMcpAdminController CreateController(McpServerOptions? options = null) =>
-        new(_host.Object, MsOptions.Create(options ?? new McpServerOptions()));
+        new(_host.Object, new StaticOptionsMonitor<McpServerOptions>(options ?? new McpServerOptions()));
 
     // ─── GetStatus ───────────────────────────────────────────────────────────
 

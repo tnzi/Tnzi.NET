@@ -18,13 +18,17 @@ public class FinanceOptionsValidator : OptionsValidatorBase<FinanceOptions>
         if (options.RoundingTolerance < 0)
             errors.Add("RoundingTolerance cannot be negative.");
 
-        if (options.JournalNumberPadding is < 0 or > 12)
-            errors.Add("JournalNumberPadding must be between 0 and 12.");
+        // 报表按凭证号字符串排序依赖补零（无补零时 "JE-10" 会排在 "JE-9" 之前）
+        if (options.JournalNumberPadding is < 1 or > 12)
+            errors.Add("JournalNumberPadding must be between 1 and 12.");
 
         if (options.MaxLinesPerEntry <= 1)
             errors.Add("MaxLinesPerEntry must be greater than 1.");
 
         if (options.DefaultPaymentTermsDays < 0)
             errors.Add("DefaultPaymentTermsDays cannot be negative.");
+
+        if (options.ReportExportMaxRows <= 0)
+            errors.Add("ReportExportMaxRows must be greater than 0.");
     }
 }

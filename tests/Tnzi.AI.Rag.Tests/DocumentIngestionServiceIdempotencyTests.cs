@@ -45,7 +45,7 @@ public class DocumentIngestionServiceIdempotencyTests
             }.BuildMock());
 
         var graph = new Mock<IGraphExtractor>();
-        var options = Microsoft.Extensions.Options.Options.Create(new AIRagOptions());
+        var options = new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions());
 
         var callOrder = new List<string>();
         chunkRepo.Setup(r => r.DeleteAsync(It.IsAny<System.Linq.Expressions.Expression<Func<DocumentChunk, bool>>>(), It.IsAny<CancellationToken>()))

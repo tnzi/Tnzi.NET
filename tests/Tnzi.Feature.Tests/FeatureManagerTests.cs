@@ -17,7 +17,7 @@ public class FeatureManagerTests
     private readonly Mock<IServiceScope> _scopeMock;
     private readonly Mock<IServiceProvider> _scopeServiceProviderMock;
     private readonly Mock<IRepository<FeatureDefinition, Guid>> _repositoryMock;
-    private readonly Mock<IOptions<FeatureOptions>> _optionsMock;
+    private readonly Mock<IOptionsMonitor<FeatureOptions>> _optionsMock;
     private readonly FeatureOptions _options;
     private readonly List<IFeatureDefinitionProvider> _providers;
     private readonly FeatureManager _manager;
@@ -28,9 +28,9 @@ public class FeatureManagerTests
         _scopeMock = new Mock<IServiceScope>();
         _scopeServiceProviderMock = new Mock<IServiceProvider>();
         _repositoryMock = new Mock<IRepository<FeatureDefinition, Guid>>();
-        _optionsMock = new Mock<IOptions<FeatureOptions>>();
+        _optionsMock = new Mock<IOptionsMonitor<FeatureOptions>>();
         _options = new FeatureOptions { CacheRefreshIntervalMinutes = 0 }; // 0 = no auto-refresh
-        _optionsMock.Setup(o => o.Value).Returns(_options);
+        _optionsMock.Setup(o => o.CurrentValue).Returns(_options);
         _providers = [];
 
         _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(_scopeMock.Object);

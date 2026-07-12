@@ -51,6 +51,7 @@ public class DefaultFinanceAccountAdminController : ApiAdminControllerBase
     /// 创建科目
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.account.create")]
     public virtual async Task<ApiResult<AccountDto>> Create([FromBody] CreateAccountDto request)
     {
         var result = await _accountService.CreateAsync(request);
@@ -61,6 +62,7 @@ public class DefaultFinanceAccountAdminController : ApiAdminControllerBase
     /// 更新科目
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.account.update")]
     public virtual async Task<ApiResult<AccountDto>> Update(Guid id, [FromBody] UpdateAccountDto request)
     {
         var result = await _accountService.UpdateAsync(id, request);
@@ -71,6 +73,7 @@ public class DefaultFinanceAccountAdminController : ApiAdminControllerBase
     /// 删除科目
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.account.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _accountService.DeleteAsync(id);
@@ -81,6 +84,7 @@ public class DefaultFinanceAccountAdminController : ApiAdminControllerBase
     /// 播种默认科目表（仅当科目表为空）
     /// </summary>
     [HttpPost("seed-default")]
+    [ApiAuthorize(PermissionName = "finance.account.create")]
     public virtual async Task<ApiResult<int>> SeedDefault()
     {
         var result = await _accountService.SeedDefaultAsync();

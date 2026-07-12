@@ -10,6 +10,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <!-- Optional at runtime (SignalRModule via [OptionalDependsOn]); the reference is
+         compile-time only for the SettingsRealtimeHub push. No-op when SignalR isn't loaded. -->
+    <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" />
   </ItemGroup>
 
   <!-- Microsoft.EntityFrameworkCore is provided by Tnzi.EFCore project reference -->

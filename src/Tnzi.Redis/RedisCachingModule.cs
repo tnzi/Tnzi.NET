@@ -119,10 +119,11 @@ public class RedisCachingModule : TnziInfrastructureModule
 
         // 注册 Redis 缓存服务（替换默认的内存缓存实现）
         // 使用 RemoveAll 确保替换 CachingModule 注册的默认实现
+        // 注意：RedisCacheService 直接使用裸 IDatabase（String 表示），不再依赖 IDistributedCache。
+        // IDistributedCache 仍通过 AddStackExchangeRedisCache 注册，供会话/数据保护等其它消费者使用。
         services.RemoveAll<ICache>();
         services.AddSingleton<ICache>(provider =>
         {
-            var distributedCache = provider.GetRequiredService<IDistributedCache>();
             var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
             var logger = provider.GetRequiredService<ILogger<RedisCacheService>>();
             var cacheSyncService = provider.GetService<ICacheSyncService>();
@@ -131,14 +132,16 @@ public class RedisCachingModule : TnziInfrastructureModule
             var cachingOptions = provider.GetService<IOptions<CachingOptions>>()?.Value;
             var instanceName = cachingOptions?.RedisInstanceName;
 
-            return new RedisCacheService(distributedCache, connectionMultiplexer, logger, instanceName, cacheSyncService);
+            return new RedisCacheService(connectionMultiplexer, logger, instanceName, cacheSyncService);
         });
 
         // 注册分布式锁
         services.AddSingleton<IDistributedLock>(provider =>
         {
             var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
-            return new RedisDistributedLock(connectionMultiplexer);
+            var lockOptions = provider.GetService<IOptions<RedisOptions>>()?.Value?.Lock;
+            var loggerFactory = provider.GetService<ILoggerFactory>();
+            return new RedisDistributedLock(connectionMultiplexer, lockOptions, loggerFactory);
         });
 
         return Task.CompletedTask;

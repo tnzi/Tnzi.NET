@@ -3,6 +3,9 @@ namespace Tnzi.AI.Options;
 /// <summary>
 /// 工具白名单/黑名单 Guardrail 配置
 /// </summary>
+[ConfigSection("AI:Guardrails:Allowlist")]
+[RuntimeSettingGroup(Key = "ai-guardrails", Module = "AI", DisplayName = "Guardrails",
+    I18nKey = "admin.modules.system.settings.groups.aiGuardrails", Icon = "mdi:shield-check-outline", Order = 120)]
 public class AllowlistGuardrailOptions
 {
     /// <summary>
@@ -18,5 +21,8 @@ public class AllowlistGuardrailOptions
     /// <summary>
     /// 是否精确匹配工具名称（默认 false = 前缀匹配）
     /// </summary>
+    [RuntimeSetting(Label = "Match Tool Names Exactly", I18n = "admin.modules.system.settings.fields.guardrailsAllowlistMatchExact",
+        Type = SettingFieldType.Boolean, Subsection = "Allowlist",
+        Description = "Exact tool-name matching for allow/deny lists (default off = prefix matching)")]
     public bool MatchExact { get; set; }
 }

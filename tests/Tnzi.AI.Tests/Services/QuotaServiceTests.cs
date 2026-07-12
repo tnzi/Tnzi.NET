@@ -7,7 +7,7 @@ public class QuotaServiceTests
 {
     private readonly Mock<IRepository<UserQuota, Guid>> _repository = new();
     private readonly IServiceProvider _serviceProvider;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public QuotaServiceTests()
     {
@@ -19,7 +19,7 @@ public class QuotaServiceTests
         services.AddLogging();
         _serviceProvider = services.BuildServiceProvider();
 
-        _options = Microsoft.Extensions.Options.Options.Create(new AIOptions());
+        _options = new StaticOptionsMonitor<AIOptions>(new AIOptions());
     }
 
     private QuotaService CreateService() => new(_repository.Object, _options, _serviceProvider);

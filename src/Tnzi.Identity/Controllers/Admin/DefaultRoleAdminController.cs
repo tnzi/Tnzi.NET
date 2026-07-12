@@ -85,6 +85,7 @@ public class DefaultRoleAdminController : ApiAdminControllerBase
     /// <param name="input">角色信息</param>
     /// <returns>创建的角色</returns>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "role.create")]
     public virtual async Task<ApiResult<RoleDto>> Create([FromBody] CreateRoleDto input)
     {
         var result = await RoleService.CreateAsync(input);
@@ -98,6 +99,7 @@ public class DefaultRoleAdminController : ApiAdminControllerBase
     /// <param name="input">角色信息</param>
     /// <returns>更新后的角色</returns>
     [HttpPut("{id}")]
+    [ApiAuthorize(PermissionName = "role.update")]
     public virtual async Task<ApiResult<RoleDto>> Update(Guid id, [FromBody] UpdateRoleDto input)
     {
         var result = await RoleService.UpdateAsync(id, input);
@@ -110,6 +112,7 @@ public class DefaultRoleAdminController : ApiAdminControllerBase
     /// <param name="id">角色ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("{id}")]
+    [ApiAuthorize(PermissionName = "role.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await RoleService.DeleteAsync(id);
@@ -122,6 +125,7 @@ public class DefaultRoleAdminController : ApiAdminControllerBase
     /// <param name="ids">角色ID列表</param>
     /// <returns>操作结果</returns>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "role.delete")]
     public virtual async Task<ApiResult> DeleteMany([FromBody] IEnumerable<Guid> ids)
     {
         var result = await RoleService.DeleteManyAsync(ids);
@@ -183,6 +187,7 @@ public class DefaultRoleAdminController : ApiAdminControllerBase
     /// <param name="isDefault">是否设为默认</param>
     /// <returns>操作结果</returns>
     [HttpPut("{id}/default")]
+    [ApiAuthorize(PermissionName = "role.update")]
     public virtual async Task<ApiResult> SetDefault(Guid id, [FromQuery] bool isDefault)
     {
         var result = await RoleService.SetDefaultAsync(id, isDefault);

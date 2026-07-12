@@ -17,7 +17,8 @@ vi.mock('naive-ui', () => ({
   NDrawerContent: {
     name: 'NDrawerContent',
     props: ['title', 'closable'],
-    template: '<div class="n-drawer-content-stub" :data-title="title"><slot /></div>',
+    template:
+      '<div class="n-drawer-content-stub" :data-title="title"><slot /><slot name="footer" /></div>',
   },
   NTabs: {
     name: 'NTabs',
@@ -262,5 +263,121 @@ describe('TThemeDrawer', () => {
     })
     const content = wrapper.find('.n-drawer-content-stub')
     expect(content.attributes('data-title')).toBe('#title')
+  })
+})
+
+// ─── Presets mode + global-theme controller (2026-07-07) ────────────────────
+
+import { ref, computed } from 'vue'
+import type { GlobalThemeController } from '../../../src/headless/useGlobalTheme'
+
+function fakeController(overrides: Partial<GlobalThemeController> = {}): GlobalThemeController {
+  return {
+    enabled: true,
+    remote: ref(null),
+    loaded: ref(true),
+    saving: ref(false),
+    isDirty: computed(() => false),
+    load: vi.fn(async () => undefined),
+    applyRemote: vi.fn(),
+    save: vi.fn(async () => true),
+    reset: vi.fn(async () => true),
+    ...overrides,
+  }
+}
+
+describe('TThemeDrawer - presets mode', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('renders only the preset grid (no tabs) with the user-preset title', () => {
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx(), mode: 'presets' },
+    })
+    expect(wrapper.findAll('.tab-pane-stub').length).toBe(0)
+    // Default card + 12 built-in palettes.
+    expect(wrapper.findAll('.t-theme-drawer__preset-card').length).toBe(13)
+    expect(wrapper.find('.n-drawer-content-stub').attributes('data-title')).toBe(
+      'admin.theme.userPreset.title',
+    )
+  })
+
+  it('picking a preset records userPresetColor and applies the primary color', async () => {
+    const ctx = createCtx()
+    const store = useAdminThemeStore()
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: ctx, mode: 'presets' },
+    })
+    const cards = wrapper.findAll('.t-theme-drawer__preset-card')
+    await cards[3].trigger('click') // [0] = default card, [3] = '#7C3AED'
+    expect(store.userPresetColor).toBe('#7C3AED')
+  })
+
+  it('the default card clears the choice and re-applies the global snapshot', async () => {
+    const store = useAdminThemeStore()
+    store.setUserPresetColor('#7C3AED')
+    const controller = fakeController()
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx(), mode: 'presets', globalTheme: controller },
+    })
+    await wrapper.findAll('.t-theme-drawer__preset-card')[0].trigger('click')
+    expect(store.userPresetColor).toBeNull()
+    expect(controller.applyRemote).toHaveBeenCalled()
+  })
+
+  it('renders no footer (reset/save are privileged-only surfaces)', () => {
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx(), mode: 'presets', globalTheme: fakeController() },
+    })
+    expect(wrapper.find('.t-theme-drawer__footer').exists()).toBe(false)
+  })
+})
+
+describe('TThemeDrawer - global theme (full mode)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('renders the "save for all users" footer action and delegates to the controller', async () => {
+    const controller = fakeController()
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx(), globalTheme: controller },
+    })
+    const saveBtn = wrapper
+      .findAll('.t-theme-drawer__footer .btn')
+      .find((b) => b.text().includes('admin.theme.global.save'))
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+    expect(controller.save).toHaveBeenCalled()
+  })
+
+  it('resetAll persists the factory snapshot globally (other clients only see saved snapshots)', async () => {
+    const controller = fakeController()
+    const store = useAdminThemeStore()
+    store.setLayoutMode('horizontal')
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx(), globalTheme: controller },
+    })
+    await (wrapper.vm as unknown as { resetAll: () => Promise<void> }).resetAll()
+    expect(store.layoutMode).toBe('vertical')
+    expect(controller.save).toHaveBeenCalled()
+    expect(controller.reset).not.toHaveBeenCalled()
+  })
+
+  it('general tab exposes the preset-picker visibility switch', async () => {
+    const store = useAdminThemeStore()
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx() },
+    })
+    expect(store.presetPickerVisible).toBe(true)
+    // The switch sits right after the reload-visibility toggle in the
+    // General → Global group; drive the store setter through it.
+    const generalPane = wrapper.find('.tab-pane-stub[data-name="general"]')
+    const rows = generalPane.findAll('.t-theme-drawer__row')
+    const row = rows.find((r) => r.text().includes('admin.theme.general.presetPickerVisible'))
+    expect(row).toBeTruthy()
+    await row!.find('.switch').trigger('click')
+    expect(store.presetPickerVisible).toBe(false)
   })
 })

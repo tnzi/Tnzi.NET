@@ -20,7 +20,11 @@
       <slot />
     </div>
     <template v-if="$slots.footer" #footer>
-      <slot name="footer" />
+      <!-- Chrome-level action layout: right-aligned with a uniform gap, so
+           pages can drop bare buttons into #footer without them touching. -->
+      <div class="t-modal-shell__footer">
+        <slot name="footer" />
+      </div>
     </template>
   </NModal>
 </template>
@@ -94,6 +98,13 @@ const contentMaxHeight = computed(() =>
 .t-modal-shell__scroll {
   overflow-y: auto;
   overflow-x: hidden;
+}
+.t-modal-shell__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 </style>
 

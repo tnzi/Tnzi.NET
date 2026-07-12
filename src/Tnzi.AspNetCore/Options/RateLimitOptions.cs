@@ -6,7 +6,7 @@ namespace Tnzi.AspNetCore.Options;
 [ConfigSection("AspNetCore:RateLimit")]
 [RuntimeSettingGroup(Key = "web-ratelimit", Module = "Web", DisplayName = "Rate Limiting",
     I18nKey = "admin.modules.system.settings.groups.webRatelimit",
-    Icon = "mdi:speedometer", Order = 720)]
+    Icon = "mdi:speedometer", Order = 720, PermissionGroup = "system")]
 public class RateLimitOptions
 {
     /// <summary>

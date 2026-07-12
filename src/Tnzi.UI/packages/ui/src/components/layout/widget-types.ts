@@ -119,6 +119,17 @@ export interface WidgetDef {
   permission?: string
 
   /**
+   * Backend module short name this widget's data belongs to (e.g. `'chat'`,
+   * `'ai'`, `'storage'`). When set, the HOST page drops the widget unless the
+   * backend host actually loaded that module (the admin Dashboard filters
+   * against the `GET /admin/shell/modules` availability signal). Orthogonal
+   * to `permission` — the module gate has NO super-user bypass, because an
+   * unloaded module's endpoints 404 for the super admin too. Opaque to
+   * `@tnzi/ui`; omit for widgets that don't fetch from an optional module.
+   */
+  module?: string
+
+  /**
    * Show a refresh button on the card header that calls the widget's
    * `WidgetContext.refresh()`. Default `true`.
    */

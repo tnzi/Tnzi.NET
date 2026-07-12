@@ -46,6 +46,19 @@ public class FunctionModule : FullAuditedEntity<Guid>
     public bool IsSystemManaged { get; set; }
 
     /// <summary>
+    /// Transient (not persisted) flag stamped on the admin read path: <c>true</c>
+    /// when this module belongs to the FRAMEWORK built-in catalogue (its code
+    /// matches a loaded <c>Tnzi.*</c> module), <c>false</c> for a consumer
+    /// application's own modules. Lets the role-permission matrix list the
+    /// consumer's own permissions first and separate the built-in catalogue.
+    /// Resolved from the running module graph (see
+    /// <see cref="Permissions.FrameworkModuleResolver"/>); default <c>false</c>
+    /// so unstamped read paths simply treat everything as consumer-level.
+    /// </summary>
+    [NotMapped]
+    public bool IsBuiltIn { get; set; }
+
+    /// <summary>
     /// 获取或设置 父模块ID
     /// </summary>
     public Guid? ParentId { get; set; }

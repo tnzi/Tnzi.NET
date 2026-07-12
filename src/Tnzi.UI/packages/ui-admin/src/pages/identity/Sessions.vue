@@ -2,7 +2,7 @@
   <TContentPage :title="t('title')" :translate="t" card scroll="fill">
     <template #actions>
       <NButton size="small" :loading="loading" @click="refreshAll">{{ t('toolbar.refresh') }}</NButton>
-      <NPopconfirm @positive-click="handleCleanExpired">
+      <NPopconfirm v-if="can('session.delete')" @positive-click="handleCleanExpired">
         <template #trigger>
           <NButton size="small" type="warning" ghost>{{ t('toolbar.cleanExpired') }}</NButton>
         </template>
@@ -61,7 +61,7 @@
     >
       <template #header-extra>
         <!-- Revoke-all is a per-user operation — only offered when filtered. -->
-        <NPopconfirm v-if="targetUserId" @positive-click="handleRevokeAll">
+        <NPopconfirm v-if="targetUserId && can('session.delete')" @positive-click="handleRevokeAll">
           <template #trigger>
             <NButton size="small" type="error" ghost :disabled="!sessions.length">
               {{ t('list.revokeAll') }}
@@ -107,6 +107,7 @@ import {
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { type RowAction } from '../../headless/rowActions'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { useSafeMessage } from '../_shared/safeMessage'
@@ -122,6 +123,7 @@ type UserSessionRow = UserSessionDto
 
 const bridge = createIdentityBridge({ client: useAdminClient() })
 const t = makePageTranslator('identity.sessions')
+const { can } = usePermissionGuard()
 
 const message = useSafeMessage()
 
@@ -337,7 +339,7 @@ const rowActions: RowAction<UserSessionRow>[] = [
     label: 'actions.revoke',
     type: 'error',
     confirm: true,
-    show: (row) => !row.isRevoked,
+    show: (row) => can('session.delete') && !row.isRevoked,
     onClick: (row) => void handleRevokeSession(row.id),
   },
 ]

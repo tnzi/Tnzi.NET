@@ -9,7 +9,7 @@
     :detail-title="detailTitle"
   >
     <template #primary>
-      <NButton type="primary" tertiary size="small" @click="openCreate">
+      <NButton v-if="can('finance.document.create')" type="primary" tertiary size="small" @click="openCreate">
         <template #icon>
           <TSvgIcon icon="mdi:plus" :size="16" />
         </template>
@@ -71,6 +71,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge, FinanceDocumentStatus, type InvoiceDto, type CreateInvoiceDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -88,12 +89,14 @@ const t = makePageTranslator('finance.invoices')
 // document page's own namespace).
 const td = makePageTranslator('finance.docs')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'customerName', { showApplied: true, showDueDate: true })
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.invoices',
+  permission: 'finance.document',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.invoices.fetch(q),
@@ -224,12 +227,12 @@ const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.
 
 const rowActions: RowAction<FinanceDocRow>[] = [
   viewAction(crud),
-  { key: 'edit', type: 'primary', show: isDraft, onClick: openEdit },
-  { key: 'post', label: 'actions.post', type: 'primary', show: isDraft, confirm: 'confirmPost', onClick: (row) => void run(() => bridge.invoices.post(String(row.id ?? '')), 'postSuccess') },
+  { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
+  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.invoices.post(String(row.id ?? '')), 'postSuccess') },
   // Void only when nothing is applied — the backend rejects voiding a document
   // with settled payments (unapply them first).
-  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.invoices.voidDoc(String(row.id ?? '')), 'voidSuccess') },
-  { key: 'delete', label: 'actions.delete', type: 'error', show: isDraft, confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.invoices.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
+  { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.invoices.voidDoc(String(row.id ?? '')), 'voidSuccess') },
+  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.document.delete') && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.invoices.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]
 </script>
 

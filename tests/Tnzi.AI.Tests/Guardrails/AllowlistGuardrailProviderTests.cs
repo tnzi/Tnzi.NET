@@ -5,11 +5,11 @@ namespace Tnzi.AI.Tests.Guardrails;
 /// </summary>
 public class AllowlistGuardrailProviderTests
 {
-    private static IOptions<AIOptions> CreateOptions(Action<AllowlistGuardrailOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptions(Action<AllowlistGuardrailOptions>? configure = null)
     {
         var options = new AIOptions();
         configure?.Invoke(options.Guardrails.Allowlist);
-        return Microsoft.Extensions.Options.Options.Create(options);
+        return new StaticOptionsMonitor<AIOptions>(options);
     }
 
     [Fact]

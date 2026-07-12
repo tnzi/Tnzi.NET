@@ -63,7 +63,7 @@ public class MySqlConfigurator : DatabaseProviderConfiguratorBase
     /// MySQL 的调用方式
     /// Pomelo 7.0+ 需要通过 ServerVersion.AutoDetect(connectionString) 获取版本
     /// </summary>
-    protected override void InvokeExtensionMethod(MethodInfo method, DbContextOptionsBuilder builder, string connectionString)
+    protected override void InvokeExtensionMethod(MethodInfo method, DbContextOptionsBuilder builder, string connectionString, DbProviderConfigureOptions? options)
     {
         var parameters = method.GetParameters();
 
@@ -92,8 +92,10 @@ public class MySqlConfigurator : DatabaseProviderConfiguratorBase
             }
             else
             {
-                // 第四个参数是 Action<MySqlDbContextOptionsBuilder>，传 null
-                method.Invoke(null, [builder, connectionString, serverVersion!, null!]);
+                // 第四个参数是 Action<MySqlDbContextOptionsBuilder>：应用重试/超时选项
+                var optionsBuilderType = parameters[3].ParameterType.GetGenericArguments()[0];
+                var action = BuildProviderOptionsAction(optionsBuilderType, options, extraAction: null);
+                method.Invoke(null, [builder, connectionString, serverVersion!, action]);
             }
         }
         else if (parameters.Length == 2)
@@ -103,8 +105,10 @@ public class MySqlConfigurator : DatabaseProviderConfiguratorBase
         }
         else if (parameters.Length == 3)
         {
-            // 旧版: UseMySql(builder, connectionString, action)
-            method.Invoke(null, [builder, connectionString, null!]);
+            // 旧版: UseMySql(builder, connectionString, action)：应用重试/超时选项
+            var optionsBuilderType = parameters[2].ParameterType.GetGenericArguments()[0];
+            var action = BuildProviderOptionsAction(optionsBuilderType, options, extraAction: null);
+            method.Invoke(null, [builder, connectionString, action]);
         }
         else
         {

@@ -11,17 +11,19 @@ namespace Tnzi.AI.Guardrails;
 /// </remarks>
 public class AllowlistGuardrailProvider : IGuardrailProvider
 {
-    private readonly AllowlistGuardrailOptions _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public string Name => nameof(AllowlistGuardrailProvider);
 
-    public AllowlistGuardrailProvider(IOptions<AIOptions> options)
+    public AllowlistGuardrailProvider(IOptionsMonitor<AIOptions> options)
     {
-        _options = Check.NotNull(options).Value.Guardrails.Allowlist;
+        _options = Check.NotNull(options);
     }
 
     public Task<GuardrailDecision> EvaluateAsync(GuardrailRequest request, CancellationToken ct = default)
     {
+        var options = _options.CurrentValue.Guardrails.Allowlist;
+
         // 非工具请求直接放行
         if (string.IsNullOrEmpty(request.ToolName))
         {
@@ -29,7 +31,7 @@ public class AllowlistGuardrailProvider : IGuardrailProvider
         }
 
         // 1. 黑名单检查（优先）
-        if (_options.DeniedTools.Count > 0 && MatchesTool(request.ToolName, _options.DeniedTools))
+        if (options.DeniedTools.Count > 0 && MatchesTool(request.ToolName, options.DeniedTools, options.MatchExact))
         {
             return Task.FromResult(GuardrailDecision.Deny(
                 GuardrailReasonCodes.ToolDenied,
@@ -37,7 +39,7 @@ public class AllowlistGuardrailProvider : IGuardrailProvider
                 "allowlist"));
         }
 
-        if (_options.AllowedTools.Count > 0 && !MatchesTool(request.ToolName, _options.AllowedTools))
+        if (options.AllowedTools.Count > 0 && !MatchesTool(request.ToolName, options.AllowedTools, options.MatchExact))
         {
             return Task.FromResult(GuardrailDecision.Deny(
                 GuardrailReasonCodes.ToolNotAllowed,
@@ -48,11 +50,11 @@ public class AllowlistGuardrailProvider : IGuardrailProvider
         return Task.FromResult(GuardrailDecision.Allow());
     }
 
-    private bool MatchesTool(string toolName, List<string> toolList)
+    private static bool MatchesTool(string toolName, List<string> toolList, bool matchExact)
     {
         foreach (var tool in toolList)
         {
-            if (_options.MatchExact)
+            if (matchExact)
             {
                 if (string.Equals(toolName, tool, StringComparison.OrdinalIgnoreCase))
                     return true;

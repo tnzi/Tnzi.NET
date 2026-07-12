@@ -31,6 +31,7 @@ const bridge = createSystemBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<FeatureDto>({
   pageId: 'system.features',
+  permission: 'feature',
   columns: featureColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.features.fetch(q),

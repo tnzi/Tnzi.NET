@@ -89,6 +89,7 @@ import {
 import { makePageTranslator } from '../_shared/translate'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { type RowAction } from '../../headless/rowActions'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { StatusType } from '@tnzi/ui'
@@ -100,6 +101,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 const bridge = createInvoiceBridge({ client: useAdminClient() })
 const message = useMessage()
 const t = makePageTranslator('payment.invoices')
+const { can } = usePermissionGuard()
 
 const actionLoading = ref(false)
 
@@ -291,7 +293,7 @@ const rowActions: RowAction<InvoiceDto>[] = [
     key: 'send',
     label: 'actions.send',
     icon: 'mdi:send',
-    show: (r) => SENDABLE.has(String(r.status ?? '')),
+    show: (r) => can('payment.invoice.update') && SENDABLE.has(String(r.status ?? '')),
     confirm: (r) => t('sendConfirm', { no: r.invoiceNo }),
     onClick: (r) => sendInvoice(r),
   },
@@ -300,7 +302,7 @@ const rowActions: RowAction<InvoiceDto>[] = [
     label: 'actions.markPaid',
     type: 'primary',
     icon: 'mdi:cash-check',
-    show: (r) => !TERMINAL.has(String(r.status ?? '')),
+    show: (r) => can('payment.invoice.update') && !TERMINAL.has(String(r.status ?? '')),
     onClick: (r) => void markPaidDetail.open('edit', r),
   },
   {
@@ -308,7 +310,7 @@ const rowActions: RowAction<InvoiceDto>[] = [
     label: 'actions.cancel',
     type: 'warning',
     icon: 'mdi:close-circle-outline',
-    show: (r) => !TERMINAL.has(String(r.status ?? '')),
+    show: (r) => can('payment.invoice.update') && !TERMINAL.has(String(r.status ?? '')),
     onClick: (r) => void cancelDetail.open('edit', r),
   },
 ]

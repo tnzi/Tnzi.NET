@@ -37,6 +37,11 @@ public class IdentityModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, IdentityPermissions>();
+
         var configuration = context.Configuration;
 
         // 自动配置 Identity（如果 DbContext 继承自 IdentityDbContext）

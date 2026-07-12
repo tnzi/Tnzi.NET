@@ -20,4 +20,12 @@ public interface ISettlementService
 
     /// <summary>撤销核销（回滚两侧 AppliedTotal 与派生状态；冲销 realized FX 凭证）</summary>
     Task<Result> UnapplyAsync(Guid applicationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量结算（Pay Bills / Receive Payments）：选定一组未清单据（同为 Invoice 或同为 Bill），
+    /// 按（往来方 + 币种）分组各生成一张收付款单，过账后立即核销到对应单据。
+    /// 整体一个事务——任一环节失败（含过账前钩子否决）全部回滚。
+    /// 汇率按付款日期从汇率表解析；与目标捕获汇率不同的外币结算自动产生 realized FX 凭证
+    /// </summary>
+    Task<Result<BatchPaymentResultDto>> PayAsync(BatchPaymentDto input, CancellationToken cancellationToken = default);
 }

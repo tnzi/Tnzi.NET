@@ -98,6 +98,7 @@ const agencySchema: FormSchemaItem[] = [
 
 const agencyCrud = useCrudPage<AgencyRow>({
   pageId: 'finance.taxes.agencies',
+  permission: 'finance.tax',
   columns: agencyColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: listFetch(() => bridge.taxes.agencies()),
@@ -128,6 +129,7 @@ const rateSchema: FormSchemaItem[] = [
 
 const rateCrud = useCrudPage<RateRow>({
   pageId: 'finance.taxes.rates',
+  permission: 'finance.tax',
   columns: rateColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: listFetch(() => bridge.taxes.rates()),
@@ -174,6 +176,7 @@ function toCodePayload(d: Record<string, unknown>): UpsertTaxCodeDto {
 
 const codeCrud = useCrudPage<CodeRow>({
   pageId: 'finance.taxes.codes',
+  permission: 'finance.tax',
   columns: codeColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: listFetch(() => bridge.taxes.codes()),

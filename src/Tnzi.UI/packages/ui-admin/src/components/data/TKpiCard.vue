@@ -11,7 +11,16 @@
     standard status palette. Pages pass already-translated `label` text
     (the page owns t()).
   -->
-  <NCard size="small" :bordered="false" class="t-stat-card">
+  <NCard
+    size="small"
+    :bordered="false"
+    class="t-stat-card"
+    :class="{ 't-stat-card--clickable': clickable }"
+    :role="clickable ? 'button' : undefined"
+    :tabindex="clickable ? 0 : undefined"
+    @click="clickable && handleClick()"
+    @keydown.enter="clickable && handleClick()"
+  >
     <div class="t-stat-card__inner">
       <span v-if="icon" class="t-stat-card__icon" :class="`t-stat-card__icon--${tone}`">
         <TSvgIcon :icon="icon" :size="20" />
@@ -44,6 +53,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NNumberAnimation } from 'naive-ui'
+import { useRouter, type RouteLocationRaw } from 'vue-router'
 import { TSvgIcon } from '@tnzi/ui'
 
 export type TKpiCardTone = 'default' | 'success' | 'warning' | 'error'
@@ -61,6 +71,19 @@ export interface TKpiCardProps {
   tone?: TKpiCardTone
   /** Animate numeric values via NNumberAnimation (default true). */
   animated?: boolean
+  /**
+   * Vue-router target. When set the whole card becomes a click target (cursor +
+   * hover lift + `role="button"`) and navigates on click — so a KPI can act as a
+   * drill-in link ("Active files → /admin/matters") without hand-rolling a
+   * clickable card. Also emits `click` for router-less handling.
+   */
+  to?: RouteLocationRaw
+  /**
+   * Force the interactive affordance (cursor + hover lift + `click` emit) without
+   * a router target — for consumers wiring their own `@click`. Ignored when `to`
+   * is set (that already implies interactive).
+   */
+  interactive?: boolean
 }
 
 const props = withDefaults(defineProps<TKpiCardProps>(), {
@@ -68,7 +91,14 @@ const props = withDefaults(defineProps<TKpiCardProps>(), {
   icon: undefined,
   tone: 'default',
   animated: true,
+  to: undefined,
+  interactive: false,
 })
+
+const emit = defineEmits<{
+  /** Fired on click when the card is interactive (`to` set or `interactive`). */
+  (e: 'click'): void
+}>()
 
 defineSlots<{
   /** Trailing content after the value (e.g. a status NTag), same baseline. */
@@ -76,6 +106,17 @@ defineSlots<{
   /** Full-width band below the value (e.g. a progress bar / trend line). */
   footer?: () => unknown
 }>()
+
+// `useRouter()` is a plain inject — safe even without a router installed
+// (returns undefined); navigation is guarded so router-less mounts (e.g. unit
+// tests, non-interactive KPIs) never throw.
+const router = useRouter()
+const clickable = computed(() => props.to != null || props.interactive)
+
+function handleClick(): void {
+  emit('click')
+  if (props.to != null && router) void router.push(props.to)
+}
 
 /**
  * Preserve the value's decimal places through NNumberAnimation — its default
@@ -94,6 +135,20 @@ const precision = computed<number>(() => {
 .t-stat-card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+.t-stat-card--clickable {
+  cursor: pointer;
+  transition:
+    transform var(--tnzi-admin-motion-duration-fast, 0.15s) ease,
+    box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
+}
+.t-stat-card--clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+}
+.t-stat-card--clickable:focus-visible {
+  outline: 2px solid var(--tnzi-primary);
+  outline-offset: 2px;
 }
 .t-stat-card__inner {
   display: flex;

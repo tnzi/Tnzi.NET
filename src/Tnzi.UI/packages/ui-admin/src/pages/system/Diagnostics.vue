@@ -98,7 +98,7 @@
           <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
           {{ t('actions.refresh') }}
         </NButton>
-        <NPopconfirm @positive-click="clearExceptions">
+        <NPopconfirm v-if="can('system.diagnostics.execute')" @positive-click="clearExceptions">
           <template #trigger>
             <NButton size="small" type="warning" tertiary>
               <template #icon><TSvgIcon icon="mdi:delete-sweep-outline" :size="14" /></template>
@@ -202,10 +202,14 @@ import {
 import { makePageTranslator } from '../_shared/translate'
 import { methodTone } from '../_shared/http-method'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 
 const bridge = createDiagnosticsBridge({ client: useAdminClient() })
 
 const t = makePageTranslator('system.diagnostics')
+
+// 危险触发操作按钮级权限门控(fail-open,后端 [ApiAuthorize] 是真墙)
+const { can } = usePermissionGuard()
 
 // Deep-linkable primary tabs (?section=) - TTabsPage owns the deep-linking +
 // Back/Forward; the page just declares the tabs.

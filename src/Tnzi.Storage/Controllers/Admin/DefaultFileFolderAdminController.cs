@@ -39,6 +39,7 @@ public class DefaultFileFolderAdminController : ApiAdminControllerBase
     /// Create a new folder
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "storage.file.create")]
     public virtual async Task<ApiResult<FileFolderDto>> Create([FromBody] CreateFileFolderDto input)
     {
         var result = await FileFolderService.CreateAsync(input);
@@ -49,6 +50,7 @@ public class DefaultFileFolderAdminController : ApiAdminControllerBase
     /// Update an existing folder
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult<FileFolderDto>> Update(Guid id, [FromBody] UpdateFileFolderDto input)
     {
         var result = await FileFolderService.UpdateAsync(id, input);
@@ -59,6 +61,7 @@ public class DefaultFileFolderAdminController : ApiAdminControllerBase
     /// Delete a folder
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "storage.file.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await FileFolderService.DeleteAsync(id);
@@ -69,6 +72,7 @@ public class DefaultFileFolderAdminController : ApiAdminControllerBase
     /// Move a folder to a new parent
     /// </summary>
     [HttpPost("{id:guid}/move")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult> Move(Guid id, [FromQuery] Guid? newParentId = null)
     {
         var result = await FileFolderService.MoveAsync(id, newParentId);
@@ -79,6 +83,7 @@ public class DefaultFileFolderAdminController : ApiAdminControllerBase
     /// Move files to a folder (batch)
     /// </summary>
     [HttpPost("move-files")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult> MoveFiles([FromBody] MoveFilesToFolderRequest request)
     {
         var result = await FileFolderService.MoveFilesToFolderAsync(request.FileIds, request.FolderId);

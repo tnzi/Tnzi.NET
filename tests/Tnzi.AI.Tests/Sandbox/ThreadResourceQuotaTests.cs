@@ -43,7 +43,7 @@ public class ThreadResourceQuotaTests : IDisposable
         var opts = new SandboxModuleOptions { ThreadQuota = overrides ?? new ThreadQuotaOptions() };
         return new ThreadResourceQuotaService(
             _cache,
-            Microsoft.Extensions.Options.Options.Create(opts),
+            new StaticOptionsMonitor<SandboxModuleOptions>(opts),
             NullLogger<ThreadResourceQuotaService>.Instance);
     }
 

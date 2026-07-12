@@ -81,6 +81,14 @@ export interface SelectRendererOptions {
   filterable?: boolean
   /** Show the clear affordance (default true). */
   clearable?: boolean
+  /**
+   * Allow typing a value that is not in the options (NSelect `tag`).
+   * Use when the options list is a best-effort catalogue that may be
+   * unavailable to the current user (e.g. loaded from an endpoint behind a
+   * different permission) - the field then degrades to free entry instead
+   * of becoming uneditable.
+   */
+  tag?: boolean
 }
 
 /**
@@ -107,7 +115,7 @@ export function selectRenderer(
   getOptions: () => SelectOption[],
   opts: SelectRendererOptions = {},
 ): FieldRenderer {
-  const { placeholder, multiple = false, filterable = true, clearable = true } = opts
+  const { placeholder, multiple = false, filterable = true, clearable = true, tag = false } = opts
   return (ctx) =>
     // Cast to a loose record — naive's `options` prop type (SelectMixedOption)
     // over-constrains our plain `{ label, value }` list; mirrors _selector-factory.
@@ -120,6 +128,7 @@ export function selectRenderer(
       placeholder,
       filterable,
       clearable,
+      tag,
       disabled: ctx.readonly,
       'onUpdate:value': (v: unknown) =>
         ctx.onUpdate(multiple ? (v ?? []) : (v ?? undefined)),

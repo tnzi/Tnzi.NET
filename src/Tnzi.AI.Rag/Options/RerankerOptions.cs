@@ -9,6 +9,9 @@ namespace Tnzi.AI.Rag.Options;
 /// Phase 3: 按得分降序排列
 /// </para>
 /// </summary>
+[ConfigSection("AI:Rag:Reranker")]
+[RuntimeSettingGroup(Key = "ai-rag", Module = "AI", DisplayName = "RAG",
+    I18nKey = "admin.modules.system.settings.groups.aiRag", Icon = "mdi:book-search-outline", Order = 155)]
 public class RerankerOptions
 {
     /// <summary>
@@ -18,11 +21,17 @@ public class RerankerOptions
     /// 值越小，重复匹配的额外加分越少。
     /// </para>
     /// </summary>
+    [RuntimeSetting(Label = "Diminishing Factor", I18n = "admin.modules.system.settings.fields.ragRerankerDiminishingFactor",
+        Type = SettingFieldType.Decimal, Min = 0, Max = 1, Subsection = "Reranker",
+        Description = "Contribution of the i-th duplicate match = score x factor^i (smaller = less bonus)")]
     public double DiminishingFactor { get; set; } = 0.5;
 
     /// <summary>
     /// 合并后得分上限
     /// </summary>
+    [RuntimeSetting(Label = "Max Merged Score", I18n = "admin.modules.system.settings.fields.ragRerankerMaxMergedScore",
+        Type = SettingFieldType.Decimal, Min = 0, Max = 100, Subsection = "Reranker",
+        Description = "Upper bound applied to the merged score after diminishing aggregation")]
     public double MaxMergedScore { get; set; } = 1.0;
 
     /// <summary>

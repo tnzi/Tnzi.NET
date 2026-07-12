@@ -165,4 +165,23 @@ public abstract class TnziDbContext<TDbContext> : DbContext
             TimeProvider,
             _multiTenancyEnabled);
     }
+
+    /// <summary>
+    /// 同步保存已被禁用。框架的审计字段填充、ID 生成、软删除转换管线是异步实现的
+    /// （仅拦截 <see cref="SaveChangesAsync(CancellationToken)"/>）；同步 <see cref="SaveChanges()"/>
+    /// 会绕过全部横切逻辑（软删除实体被物理 DELETE、审计字段与 ID 不被填充），因此显式禁用。
+    /// </summary>
+    /// <exception cref="NotSupportedException">始终抛出，提示改用 <see cref="SaveChangesAsync(CancellationToken)"/>。</exception>
+    public override int SaveChanges()
+        => throw new NotSupportedException(SyncSaveNotSupportedMessage);
+
+    /// <inheritdoc cref="SaveChanges()"/>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        => throw new NotSupportedException(SyncSaveNotSupportedMessage);
+
+    private const string SyncSaveNotSupportedMessage =
+        "Synchronous SaveChanges() is not supported on TnziDbContext. The audit-field population, " +
+        "ID generation, and soft-delete conversion pipeline is async-only (only SaveChangesAsync is intercepted). " +
+        "Calling SaveChanges() would bypass these cross-cutting steps: soft-deletable entities would be physically " +
+        "deleted, and audit fields and IDs would be left unset. Use SaveChangesAsync(CancellationToken) instead.";
 }

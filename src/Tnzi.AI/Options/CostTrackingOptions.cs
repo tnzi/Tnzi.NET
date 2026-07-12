@@ -4,7 +4,7 @@ namespace Tnzi.AI.Options;
 /// 成本追踪配置选项
 /// </summary>
 [ConfigSection("AI:CostTracking")]
-[RuntimeSettingGroup(Key = "ai-budget", Module = "AI", DisplayName = "AI Budget",
+[RuntimeSettingGroup(Key = "ai-budget", Module = "AI", DisplayName = "Budget",
     I18nKey = "admin.modules.system.settings.groups.aiBudget", Icon = "mdi:cash-multiple", Order = 110)]
 public class CostTrackingOptions
 {

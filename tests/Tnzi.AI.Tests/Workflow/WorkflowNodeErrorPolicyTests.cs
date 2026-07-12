@@ -185,7 +185,7 @@ public class WorkflowNodeErrorPolicyTests
 
         var updatedEntities = new List<WorkflowExecution>();
         var repo = BuildMockRepo([staleExecution], updatedEntities);
-        var options = Microsoft.Extensions.Options.Options.Create(new WorkflowWatchdogOptions { Enabled = false });
+        var options = new StaticOptionsMonitor<WorkflowWatchdogOptions>(new WorkflowWatchdogOptions { Enabled = false });
         var watchdog = new WorkflowWatchdogService(repo, Mock.Of<ILogger<WorkflowWatchdogService>>(), options);
 
         var count = await watchdog.ScanAsync();
@@ -252,8 +252,8 @@ public class WorkflowNodeErrorPolicyTests
         return repo.Object;
     }
 
-    private static IOptions<WorkflowWatchdogOptions> CreateOptions() =>
-        Microsoft.Extensions.Options.Options.Create(new WorkflowWatchdogOptions
+    private static StaticOptionsMonitor<WorkflowWatchdogOptions> CreateOptions() =>
+        new(new WorkflowWatchdogOptions
         {
             Enabled = true,
             RunningTimeout = TimeSpan.FromMinutes(30),

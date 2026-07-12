@@ -25,7 +25,7 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
 
     public PgFullTextSearchProvider(
         IConfiguration configuration,
-        IOptions<AIRagOptions> options,
+        IOptionsSnapshot<AIRagOptions> options,
         ILogger<PgFullTextSearchProvider> logger,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null)

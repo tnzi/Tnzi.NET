@@ -47,6 +47,7 @@ export const CASH_FLOW_LABELS: Record<string, string> = {
   [CashFlowActivity.Operating]: 'Operating',
   [CashFlowActivity.Investing]: 'Investing',
   [CashFlowActivity.Financing]: 'Financing',
+  [CashFlowActivity.CashEquivalent]: 'Cash Equivalent',
 }
 
 const ROOT_TYPE_BADGE: Record<string, 'info' | 'success' | 'warning' | 'error' | 'default'> = {

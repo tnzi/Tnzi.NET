@@ -18,15 +18,25 @@
 
     <!-- side: left vertical menu | right panel -->
     <div v-if="layout === 'side'" class="t-detail-layout__split">
-      <NMenu
-        ref="navRef"
-        :value="activeSection ?? undefined"
-        :options="menuOptions"
-        mode="vertical"
-        :indent="14"
-        class="t-detail-layout__nav"
-        @update:value="onSection"
-      />
+      <div class="t-detail-layout__nav-col">
+        <!-- Optional header above the nav (e.g. a filter/search box). Hidden on
+             the collapsed phone rail where the 60px width can't fit it. -->
+        <div v-if="$slots['nav-header']" class="t-detail-layout__nav-header">
+          <slot name="nav-header" />
+        </div>
+        <NMenu
+          ref="navRef"
+          :value="activeSection ?? undefined"
+          :options="menuOptions"
+          mode="vertical"
+          :indent="14"
+          :collapsed="isSm"
+          :collapsed-width="60"
+          :collapsed-icon-size="20"
+          class="t-detail-layout__nav"
+          @update:value="onSection"
+        />
+      </div>
       <div ref="panelRef" class="t-detail-layout__panel">
         <slot :section="activeSection" />
       </div>
@@ -49,6 +59,7 @@ import { NTabs, NTabPane, NMenu } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TPageHeader from '../layout/TPageHeader.vue'
 import { maybeTranslateKey } from '../../pages/_shared/translate'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import type { DetailSection, DetailLayout } from '../../headless/useDetail'
 
 interface Props {
@@ -98,6 +109,8 @@ defineSlots<{
   title?: () => unknown
   actions?: () => unknown
   footer?: () => unknown
+  /** Rendered above the left nav in `side` layout (e.g. a section search box). */
+  'nav-header'?: () => unknown
   default?: (props: { section: string | null }) => unknown
 }>()
 
@@ -108,6 +121,11 @@ function label(s: DetailSection): string {
 function onSection(key: string): void {
   emit('update:activeSection', key)
 }
+
+// Phone (<768px, isSm): the side menu collapses to a narrow icon rail (see
+// NMenu `:collapsed`) instead of stacking on top of the panel, so it reclaims
+// width without eating vertical space.
+const { isSm } = useBreakpoint()
 
 // Template refs backing the scrollToSection public API.
 const navRef = ref<ComponentPublicInstance | null>(null)
@@ -166,8 +184,13 @@ const menuOptions = computed(() => {
 .t-detail-layout__tabs { flex-shrink: 0; }
 .t-detail-layout__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .t-detail-layout__split { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
+.t-detail-layout__nav-col {
+  width: 220px; flex-shrink: 0; min-height: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.t-detail-layout__nav-header { flex-shrink: 0; }
 .t-detail-layout__nav {
-  width: 220px; flex-shrink: 0; overflow-y: auto;
+  width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto;
   background: var(--tnzi-container-bg); border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius, 6px); padding: 8px 0;
 }
@@ -187,9 +210,41 @@ const menuOptions = computed(() => {
   padding-top: 12px; border-top: 1px solid var(--tnzi-border);
 }
 @media (max-width: 767px) {
-  .t-detail-layout__split { flex-direction: column; }
-  /* 移动堆叠：nav 必须限高且可收缩（flex 0 1 auto + max-height），否则在
-     column 方向上 flex-shrink:0 的 nav 吃满容器高度，把 panel 压成 0 高。 */
-  .t-detail-layout__nav { width: 100%; flex: 0 1 auto; max-height: 40%; }
+  /* Phone: keep the LEFT/RIGHT split (do NOT stack) and collapse the menu to
+     a narrow icon rail. Stacking is what used to eat ~40% of the screen height;
+     staying side-by-side removes that entirely. The panel's section header
+     names the active section, so the icon-only rail stays legible. Width tracks
+     the NMenu `:collapsed-width` (60). */
+  .t-detail-layout__nav-col { width: 60px; }
+  /* The 60px rail can't fit a search box — hide the nav header on phones. */
+  .t-detail-layout__nav-header { display: none; }
+  .t-detail-layout__nav { width: 60px; padding: 6px 0; }
+  /* The 60px rail can't fit group titles like "Setup" / "Operations", so they
+     clip to "Setu" / "Oper". Hide the text but keep a small gap so the group
+     boundary still reads as a subtle separation between icon clusters. */
+  .t-detail-layout__nav :deep(.n-menu-item-group-title) {
+    height: 10px;
+    min-height: 10px;
+    padding: 0;
+    font-size: 0;
+    overflow: hidden;
+  }
+  /* Center the glyph in the 60px rail. naive's collapsed grouped item is a CSS
+     grid whose (hidden) label cell still reserves width, pinning the icon to
+     the left ~22px off centre. Force the row to flex, remove the label element
+     entirely, and center the lone icon that remains. */
+  .t-detail-layout__nav :deep(.n-menu-item-content) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  .t-detail-layout__nav :deep(.n-menu-item-content__icon) {
+    margin: 0 !important;
+  }
+  .t-detail-layout__nav :deep(.n-menu-item-content-header) {
+    display: none !important;
+  }
 }
 </style>

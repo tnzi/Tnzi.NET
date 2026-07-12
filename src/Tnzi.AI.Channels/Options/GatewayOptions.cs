@@ -3,6 +3,10 @@ namespace Tnzi.AI.Channels.Options;
 /// <summary>
 /// Gateway 配置选项
 /// </summary>
+[ConfigSection("AI:Channels:Gateway")]
+[RuntimeSettingGroup(Key = "ai-channels", Module = "AI", DisplayName = "Channels",
+    I18nKey = "admin.modules.system.settings.groups.aiChannels",
+    Icon = "mdi:forum-outline", Order = 158)]
 public class GatewayOptions
 {
     /// <summary>是否启用 Gateway</summary>
@@ -18,6 +22,9 @@ public class GatewayOptions
     public SessionScope DefaultScope { get; set; } = SessionScope.PerPeer;
 
     /// <summary>每用户最大连接数（匿名连接共享 UserId==null 桶，同样受此上限约束）</summary>
+    [RuntimeSetting(Label = "Max Connections per User", I18n = "admin.modules.system.settings.fields.gatewayMaxConnectionsPerUser",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Gateway",
+        Description = "Maximum concurrent WebSocket connections per user (anonymous connections share one UserId==null bucket bound by the same cap). Applied when a new connection is accepted.")]
     public int MaxConnectionsPerUser { get; set; } = 5;
 
     /// <summary>
@@ -28,10 +35,22 @@ public class GatewayOptions
     public bool RequireAuthentication { get; set; }
 
     /// <summary>心跳间隔（秒）</summary>
+    [RuntimeSetting(Label = "Heartbeat Interval (seconds)", I18n = "admin.modules.system.settings.fields.gatewayHeartbeatIntervalSeconds",
+        Type = SettingFieldType.Int, Min = 5, Subsection = "Gateway",
+        Description = "Interval between WebSocket heartbeat pings, in seconds. Applied to connections accepted after the change.")]
     public int HeartbeatIntervalSeconds { get; set; } = 30;
 
     /// <summary>会话空闲驱逐时间（小时），超过此时间未活跃的会话将被自动清理</summary>
+    [RuntimeSetting(Label = "Session Eviction (hours)", I18n = "admin.modules.system.settings.fields.gatewaySessionEvictionHours",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Gateway",
+        Description = "Idle sessions inactive longer than this many hours are pruned on the next request.")]
     public int SessionEvictionHours { get; set; } = 24;
+
+    /// <summary>流式更新最小间隔（毫秒），合并快速到达的 token 增量，避免刷爆 IM 平台的编辑/限流阈值</summary>
+    [RuntimeSetting(Label = "Streaming Throttle (ms)", I18n = "admin.modules.system.settings.fields.gatewayStreamingThrottleMs",
+        Type = SettingFieldType.Int, Min = 100, Subsection = "Gateway",
+        Description = "Minimum interval between streamed reply updates pushed to IM platforms, in milliseconds. Rapid token deltas are coalesced to avoid flooding platform edit/rate limits. The first token and the final message are always delivered immediately. Takes effect on the next streamed reply.")]
+    public int StreamingThrottleMs { get; set; } = 350;
 
     /// <summary>JSON 配置中的绑定规则（数据库规则的补充）</summary>
     public List<SessionBindingRuleConfig>? BindingRules { get; set; }

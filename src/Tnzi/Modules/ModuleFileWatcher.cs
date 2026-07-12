@@ -3,9 +3,9 @@ namespace Tnzi.Modules;
 
 /// <summary>
 /// 模块文件监听器
-/// 监听模块程序集文件的变化
+/// 监听模块程序集文件的变化，触发模块重初始化。仅在热重载启用时启动。
 /// </summary>
-[ExperimentalApi(Reason = "Hot reload is not fully implemented")]
+[ExperimentalApi(Reason = "Module re-initialization only; assembly unload/reload is not supported")]
 public class ModuleFileWatcher : IDisposable
 {
     private readonly ILogger<ModuleFileWatcher> _logger;

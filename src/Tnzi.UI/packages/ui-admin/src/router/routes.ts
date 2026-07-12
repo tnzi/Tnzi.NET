@@ -1,23 +1,38 @@
-import { defineComponent, h } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
 import AdminShellRoot from './AdminShellRoot.vue'
 
 /**
  * Default admin routes — Phase 3.38: all 28 module pages registered.
  *
- * Placeholder components are kept for login/forbidden.
+ * A placeholder component is kept for login only. The 403 / 404 / 500 routes
+ * render the soybean-styled {@link ExceptionView} (a router + i18n wrapper
+ * around `TExceptionPage`) instead of the old bare `h('div', '403 Forbidden')`.
  * All admin pages use vue-router's async component syntax (`() => import(...)`)
  * for code splitting — vue-router handles the async loading + internal Suspense
  * boundary itself; wrapping in `defineAsyncComponent` triggers a warning and
  * conflicts with router-level Suspense (see Phase H3 regression).
  * The `/admin` parent renders {@link AdminShellRoot} so every child page
  * inherits the standard TAdminShell layout (sidebar + header + content).
+ *
+ * ── Module-availability gating (`meta.moduleGate`) ──
+ * Every top-level FRAMEWORK module node below carries `meta.moduleGate: true`.
+ * When `defineAdminApp({ moduleGating })` is on (the default), the shell fetches
+ * `GET /admin/shell/modules` (which framework `TnziApplicationModule`s the host
+ * actually loaded) and HIDES + makes UNREACHABLE any gated node whose module the
+ * backend didn't load — so an unloaded module (Finance / Payment / AI …) never
+ * surfaces a dead menu that 404s on click. This is orthogonal to permissions, so
+ * it holds for super-admins too. `moduleGate: true` uses the node's own `name`
+ * as the module key; a consumer module registered via `addModules` can opt in
+ * with `moduleGate: '<its-TnziApplicationModule-short-name>'`. A standalone
+ * page whose backend lives in one module can gate with an explicit name (the
+ * Settings Center carries `moduleGate: 'system'`). Nodes WITHOUT `moduleGate`
+ * (dashboard / user-center, consumer pages) are never gated. When the signal
+ * is unavailable the shell shows everything (fail-open).
  */
 
-const ForbiddenPlaceholder = defineComponent({
-  name: 'ForbiddenPlaceholder',
-  render: () => h('div', '403 Forbidden'),
-})
+// Single wired exception page (403 / 404 / 500) — reads `meta.exceptionType`.
+// Lazy so the exception bundle isn't pulled into the initial chunk.
+const ExceptionView = () => import('../pages/exception/ExceptionView.vue')
 
 export const defaultAdminRoutes: RouteRecordRaw[] = [
   {
@@ -30,11 +45,27 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     component: () => import('../pages/login/index.vue'),
     meta: { requiresAuth: false, title: 'Login' },
   },
+  // Exception pages — top-level (so `applyBasePath` prefixes them uniformly with
+  // every other route) and `requiresAuth: false` so the permission / module
+  // guards can redirect INTO them without the auth guard bouncing back. Each
+  // carries `meta.exceptionType`, which ExceptionView reads to pick the preset.
   {
     path: '/403',
     name: 'forbidden',
-    component: ForbiddenPlaceholder,
-    meta: { requiresAuth: false, title: '403' },
+    component: ExceptionView,
+    meta: { requiresAuth: false, title: '403', exceptionType: '403' },
+  },
+  {
+    path: '/404',
+    name: 'not-found',
+    component: ExceptionView,
+    meta: { requiresAuth: false, title: '404', exceptionType: '404' },
+  },
+  {
+    path: '/500',
+    name: 'server-error',
+    component: ExceptionView,
+    meta: { requiresAuth: false, title: '500', exceptionType: '500' },
   },
   {
     path: '/admin',
@@ -60,7 +91,10 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
         component: () => import('../pages/dashboard/Dashboard.vue'),
         meta: {
           title: 'tnzi.admin.modules.dashboard.title',
-          permission: 'dashboard.view',
+          // Deliberately NO permission: the dashboard is the baseline landing
+          // page every signed-in user must reach (widgets self-filter by
+          // their own codes). Gating it made a zero-grant role's members
+          // bounce to /403 straight from a successful login.
           keepAlive: true,
           fixedIndexInTab: 0,
           order: 0,
@@ -85,7 +119,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'identity',
         name: 'identity',
-        meta: { title: 'tnzi.admin.modules.identity.label', permission: 'identity.view', order: 100 },
+        meta: { title: 'tnzi.admin.modules.identity.label', permission: 'identity.view', order: 100, moduleGate: true },
         children: [
           {
             path: 'users',
@@ -168,7 +202,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'authorization',
         name: 'authorization',
-        meta: { title: 'tnzi.admin.modules.authorization.label', permission: 'authorization.view', order: 110 },
+        meta: { title: 'tnzi.admin.modules.authorization.label', permission: 'authorization.view', order: 110, moduleGate: true },
         children: [
           {
             path: 'function-modules',
@@ -217,7 +251,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'system',
         name: 'system',
-        meta: { title: 'tnzi.admin.modules.system.label', permission: 'system.view', order: 120 },
+        meta: { title: 'tnzi.admin.modules.system.label', permission: 'system.view', order: 120, moduleGate: true },
         children: [
           {
             path: 'menus',
@@ -338,14 +372,24 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
 
       // ── Settings Center ──────────────────────────────────────
       // Reached via the sidebar bottom icon (Task 14); not in the menu tree.
+      // Module-gated on 'system': the page's backbone (settings-center
+      // definitions / save / reset + the Advanced parameters table) lives in
+      // the System module backend — a host without it gets a broken page, so
+      // the route (and the sidebar gear, which checks this route's
+      // availability) hides instead.
       {
         path: 'settings',
         name: 'settings',
         component: () => import('../pages/system/Settings.vue'),
         meta: {
           title: 'tnzi.admin.modules.system.settings.title',
-          permission: 'system.parameter.view',
+          // The config center spans many modules; no single code gates it.
+          // Reachable if the user holds ANY per-group settings view code (or
+          // system.parameter.view for Advanced). Enforced by the guard's
+          // anySettingsPermission handling + per-group backend filtering.
+          anySettingsPermission: true,
           hideInMenu: true,
+          moduleGate: 'system',
         },
       },
 
@@ -353,7 +397,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'storage',
         name: 'storage',
-        meta: { title: 'tnzi.admin.modules.storage.label', permission: 'storage.view', order: 160 },
+        meta: { title: 'tnzi.admin.modules.storage.label', permission: 'storage.view', order: 160, moduleGate: true },
         children: [
           {
             path: 'files',
@@ -432,7 +476,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'audit',
         name: 'audit',
-        meta: { title: 'tnzi.admin.modules.audit.label', permission: 'audit.view', order: 130 },
+        meta: { title: 'tnzi.admin.modules.audit.label', permission: 'audit.view', order: 130, moduleGate: true },
         children: [
           {
             path: 'logs',
@@ -461,7 +505,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'notification',
         name: 'notification',
-        meta: { title: 'tnzi.admin.modules.notification.label', permission: 'notification.view', order: 170 },
+        meta: { title: 'tnzi.admin.modules.notification.label', permission: 'notification.view', order: 170, moduleGate: true },
         children: [
           {
             path: 'templates',
@@ -500,7 +544,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'chat',
         name: 'chat',
-        meta: { title: 'tnzi.admin.modules.chat.label', permission: 'chat.view', order: 140 },
+        meta: { title: 'tnzi.admin.modules.chat.label', permission: 'chat.view', order: 140, moduleGate: true },
         children: [
           {
             path: 'overview',
@@ -527,7 +571,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'payment',
         name: 'payment',
-        meta: { title: 'tnzi.admin.modules.payment.label', permission: 'payment.view', order: 180 },
+        meta: { title: 'tnzi.admin.modules.payment.label', permission: 'payment.view', order: 180, moduleGate: true },
         children: [
           {
             path: 'orders',
@@ -596,7 +640,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'finance',
         name: 'finance',
-        meta: { title: 'tnzi.admin.modules.finance.label', permission: 'finance.view', order: 185 },
+        meta: { title: 'tnzi.admin.modules.finance.label', permission: 'finance.view', order: 185, moduleGate: true },
         children: [
           {
             path: 'accounts',
@@ -729,6 +773,26 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
           {
+            path: 'transfers',
+            name: 'finance.transfers',
+            component: () => import('../pages/finance/Transfers.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.transfers.title',
+              permission: 'finance.document.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'reconciliations',
+            name: 'finance.reconciliations',
+            component: () => import('../pages/finance/Reconciliations.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.reconciliations.title',
+              permission: 'finance.reconciliation.view',
+              keepAlive: true,
+            },
+          },
+          {
             path: 'reports',
             name: 'finance.reports',
             component: () => import('../pages/finance/Reports.vue'),
@@ -755,7 +819,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'ai',
         name: 'ai',
-        meta: { title: 'tnzi.admin.modules.ai.label', permission: 'ai.view', order: 150 },
+        meta: { title: 'tnzi.admin.modules.ai.label', permission: 'ai.view', order: 150, moduleGate: true },
         children: [
           // ── 1. Configuration ──
           {
@@ -967,7 +1031,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       {
         path: 'template',
         name: 'template',
-        meta: { title: 'tnzi.admin.modules.template.label', permission: 'template.view', order: 190 },
+        meta: { title: 'tnzi.admin.modules.template.label', permission: 'template.view', order: 190, moduleGate: true },
         children: [
           {
             path: 'templates',

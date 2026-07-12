@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Options;
 
 [ConfigSection("AI:SubAgent")]
-[RuntimeSettingGroup(Key = "ai-subagent", Module = "AI", DisplayName = "AI Sub-Agents",
+[RuntimeSettingGroup(Key = "ai-subagent", Module = "AI", DisplayName = "Sub-Agents",
     I18nKey = "admin.modules.system.settings.groups.aiSubagent", Icon = "mdi:account-group-outline", Order = 120)]
 public class SubAgentOptions
 {

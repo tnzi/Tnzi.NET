@@ -27,6 +27,10 @@ import {
   provideAdminChatConfig,
   type AdminChatConfig,
 } from './chatConfig'
+import {
+  provideAdminThemeConfig,
+  type AdminThemeConfig,
+} from './themeConfig'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -92,6 +96,12 @@ export interface TnziUiAdminOptions {
    * When omitted the chat launcher is enabled by default.
    */
   chat?: AdminChatConfig
+  /**
+   * Global admin theme configuration. `globalSync` (default true) makes the
+   * shell load + apply the backend global theme snapshot for every user;
+   * `presets` replaces the built-in color-scheme palette.
+   */
+  theme?: AdminThemeConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -132,6 +142,11 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // Always provide (even when undefined) with a stable empty object so
   // useAdminChatConfig() returns a consistent value.
   provideAdminChatConfig(app, options.chat ?? {})
+
+  // Theme config - provide so AdminShellRoot can wire the global admin
+  // theme sync + the preset color schemes. Stable empty object = defaults
+  // (global sync on, built-in palette).
+  provideAdminThemeConfig(app, options.theme ?? {})
 
   // Install global directives (v-permission, etc).
   installDirectives(app)
@@ -184,7 +199,7 @@ export { TnziUiAdminResolver } from './resolver'
 export { registerBrandIcon, type BrandIconData } from './brandIcon'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
 export { defineAdminApp } from './defineAdminApp'
-export { installDirectives, vPermission } from '../directives'
+export { installDirectives, vPermission, vModule } from '../directives'
 export type { DefineAdminAppOptions, DefineAdminAppResult } from './defineAdminApp'
 export {
   ADMIN_LOGIN_CONFIG_KEY,
@@ -219,8 +234,21 @@ export {
   type AdminChatConfig,
 } from './chatConfig'
 export {
+  ADMIN_THEME_CONFIG_KEY,
+  provideAdminThemeConfig,
+  useAdminThemeConfig,
+  type AdminThemeConfig,
+  type ThemeColorPreset,
+} from './themeConfig'
+export {
   fetchAdminManifest,
   type AdminManifest,
   type AdminManifestModule,
   type AdminManifestEntity,
 } from '../services/admin-manifest'
+export {
+  fetchAdminShellModules,
+  normalizeModuleName,
+  type AdminShellModule,
+  type AdminShellModules,
+} from '../services/admin-shell-modules'

@@ -17,6 +17,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
     private readonly IDocumentNumberService _numberService;
     private readonly LedgerPostingEngine _engine;
     private readonly FinanceDocumentHelper _helper;
+    private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
 
     public PaymentEntryService(
@@ -28,7 +29,8 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         IDocumentNumberService numberService,
         LedgerPostingEngine engine,
         FinanceDocumentHelper helper,
-        IOptions<FinanceOptions> options)
+        PostingGuardRunner guards,
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
@@ -38,6 +40,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         _numberService = Check.NotNull(numberService);
         _engine = Check.NotNull(engine);
         _helper = Check.NotNull(helper);
+        _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
     }
 
@@ -138,6 +141,10 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
             return Fail<PaymentEntryDto>("Only draft payments can be posted.", 409);
         if (payment.Amount <= 0)
             return Fail<PaymentEntryDto>("Payment amount must be greater than zero.", 400);
+
+        var guardResult = await _guards.CheckAsync(nameof(PaymentEntry), payment.Id.ToString(), FinancePostingOperation.Post, payment, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<PaymentEntryDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
         var partyResult = await ValidatePartyAsync(payment.PartyType, payment.PartyId, payment.Direction, cancellationToken);
         if (!partyResult.Succeeded)
@@ -272,6 +279,10 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         if (payment.AppliedTotal != 0)
             return Fail<PaymentEntryDto>("The payment has been applied. Unapply it before voiding.", 409);
 
+        var guardResult = await _guards.CheckAsync(nameof(PaymentEntry), payment.Id.ToString(), FinancePostingOperation.Void, payment, cancellationToken);
+        if (!guardResult.Succeeded)
+            return Fail<PaymentEntryDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
+
         var original = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)
             .FirstOrDefaultAsync(e => e.Id == payment.JournalEntryId, cancellationToken);
@@ -360,6 +371,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
             ExchangeRate = input.ExchangeRate,
             Amount = input.Amount,
             DepositToAccountId = input.DepositToAccountId,
+            PaymentMethod = input.PaymentMethod,
             Reference = input.Reference,
             Memo = input.Memo
         }, cancellationToken);
@@ -410,6 +422,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         payment.ExchangeRate = input.ExchangeRate ?? 0m;
         payment.Amount = _helper.Round(input.Amount);
         payment.DepositToAccountId = input.DepositToAccountId;
+        payment.PaymentMethod = input.PaymentMethod;
         payment.Reference = input.Reference;
         payment.Memo = input.Memo;
         return Ok();

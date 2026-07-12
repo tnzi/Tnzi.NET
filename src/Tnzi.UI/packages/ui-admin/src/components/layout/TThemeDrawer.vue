@@ -33,6 +33,8 @@ import {
   snapshotToJson,
   type AdminThemeSnapshot,
 } from '../../theme/admin-config'
+import { applyThemeSnapshot, buildThemeSnapshot } from '../../theme/snapshot'
+import type { GlobalThemeController } from '../../headless/useGlobalTheme'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 
 interface ThemePreset {
@@ -47,12 +49,30 @@ interface Props {
   themeContext?: ThemeContext
   presets?: ThemePreset[]
   translate?: (key: string) => string
+  /**
+   * Drawer variant.
+   * - `'full'` (default) - every theme knob + the global save/reset footer
+   *   when a `globalTheme` controller is supplied. For privileged users
+   *   (system.appearance.update - super admins by default).
+   * - `'presets'` - preset color-scheme picker only. What non-privileged
+   *   users get; their choice persists locally and overlays the global theme.
+   */
+  mode?: 'full' | 'presets'
+  /**
+   * Global-theme controller (from `useGlobalTheme`). When present in full
+   * mode, the footer gains "save for all users" + the reset action also
+   * clears the server snapshot; in presets mode it re-applies the saved
+   * global colors when the user clears their choice.
+   */
+  globalTheme?: GlobalThemeController | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   themeContext: undefined,
   presets: undefined,
   translate: undefined,
+  mode: 'full',
+  globalTheme: null,
 })
 
 const emit = defineEmits<{
@@ -207,57 +227,28 @@ function selectLayoutMode(mode: AdminLayoutMode): void {
   themeStore.setLayoutMode(mode)
 }
 
+// ─── User preset picker (presets mode) ────────────────────────────────────
+
+/** Record the user's own color-scheme choice (persisted locally). */
+function selectUserPreset(color: string): void {
+  themeStore.setUserPresetColor(color)
+}
+
+/**
+ * Clear the personal choice and fall back to the global/default primary.
+ * With a loaded global snapshot the exact colors come back; without one
+ * (standalone / older backend) the current color simply stays until the
+ * next reload.
+ */
+function clearUserPreset(): void {
+  themeStore.setUserPresetColor(null)
+  props.globalTheme?.applyRemote()
+}
+
 // ─── Preset handlers ──────────────────────────────────────────────────────
 
 function buildSnapshot(): AdminThemeSnapshot {
-  return {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    admin: {
-      layoutMode: themeStore.layoutMode,
-      headerVisible: themeStore.headerVisible,
-      tabVisible: themeStore.tabVisible,
-      footerVisible: themeStore.footerVisible,
-      breadcrumbVisible: themeStore.breadcrumbVisible,
-      siderWidth: themeStore.siderWidth,
-      siderCollapsedWidth: themeStore.siderCollapsedWidth,
-      mixSiderWidth: themeStore.mixSiderWidth,
-      headerHeight: themeStore.headerHeight,
-      tabHeight: themeStore.tabHeight,
-      tabStyle: themeStore.tabStyle,
-      pageTransition: themeStore.pageTransition,
-      pageAnimate: themeStore.pageAnimate,
-      invertSider: themeStore.invertSider,
-      fixedHeader: themeStore.fixedHeader,
-      fixedTab: themeStore.fixedTab,
-      fixedFooter: themeStore.fixedFooter,
-      watermark: { ...themeStore.watermark },
-      recommendColor: themeStore.recommendColor,
-      infoFollowPrimary: themeStore.infoFollowPrimary,
-      tabCache: themeStore.tabCache,
-      breadcrumbShowIcon: themeStore.breadcrumbShowIcon,
-      multilingualVisible: themeStore.multilingualVisible,
-      globalSearchVisible: themeStore.globalSearchVisible,
-      grayscale: themeStore.grayscale,
-      colourWeakness: themeStore.colourWeakness,
-      closeTabByMiddleClick: themeStore.closeTabByMiddleClick,
-      tabScrollAnimation: themeStore.tabScrollAnimation,
-      scrollMode: themeStore.scrollMode,
-      mixCollapsedWidth: themeStore.mixCollapsedWidth,
-      mixChildMenuWidth: themeStore.mixChildMenuWidth,
-      autoSelectFirstMenu: themeStore.autoSelectFirstMenu,
-      themeRadius: themeStore.themeRadius,
-      footerHeight: themeStore.footerHeight,
-      siderBg: themeStore.siderBg,
-      headerBg: themeStore.headerBg,
-      contentBg: themeStore.contentBg,
-      containerBg: themeStore.containerBg,
-    },
-    ui: {
-      mode: ctx.settings.value.mode,
-      colors: { ...ctx.settings.value.colors },
-    },
-  }
+  return buildThemeSnapshot(themeStore, ctx)
 }
 
 async function onCopy(): Promise<void> {
@@ -320,98 +311,40 @@ function onChooseFile(): void {
 }
 
 function applySnapshot(snapshot: AdminThemeSnapshot): void {
-  // Apply admin state
-  themeStore.setLayoutMode(snapshot.admin.layoutMode)
-  themeStore.setHeaderVisible(snapshot.admin.headerVisible)
-  themeStore.setTabVisible(snapshot.admin.tabVisible)
-  themeStore.setFooterVisible(snapshot.admin.footerVisible)
-  themeStore.setBreadcrumbVisible(snapshot.admin.breadcrumbVisible)
-  themeStore.setSiderWidth(snapshot.admin.siderWidth)
-  themeStore.setSiderCollapsedWidth(snapshot.admin.siderCollapsedWidth)
-  themeStore.setMixSiderWidth(snapshot.admin.mixSiderWidth)
-  themeStore.setHeaderHeight(snapshot.admin.headerHeight)
-  themeStore.setTabHeight(snapshot.admin.tabHeight)
-  themeStore.setTabStyle(snapshot.admin.tabStyle)
-  themeStore.setPageTransition(snapshot.admin.pageTransition)
-  themeStore.setPageAnimate(snapshot.admin.pageAnimate)
-  if (themeStore.invertSider !== snapshot.admin.invertSider) themeStore.toggleInvertSider()
-  themeStore.setFixedHeader(snapshot.admin.fixedHeader)
-  themeStore.setFixedTab(snapshot.admin.fixedTab)
-  themeStore.setFixedFooter(snapshot.admin.fixedFooter)
-  themeStore.setWatermark(snapshot.admin.watermark)
-  // Phase D — defaults preserved if older snapshot is missing the field.
-  if (typeof snapshot.admin.recommendColor === 'boolean') {
-    themeStore.setRecommendColor(snapshot.admin.recommendColor)
-  }
-  if (typeof snapshot.admin.infoFollowPrimary === 'boolean') {
-    themeStore.setInfoFollowPrimary(snapshot.admin.infoFollowPrimary)
-  }
-  if (typeof snapshot.admin.tabCache === 'boolean') {
-    themeStore.setTabCache(snapshot.admin.tabCache)
-  }
-  if (typeof snapshot.admin.breadcrumbShowIcon === 'boolean') {
-    themeStore.setBreadcrumbShowIcon(snapshot.admin.breadcrumbShowIcon)
-  }
-  if (typeof snapshot.admin.multilingualVisible === 'boolean') {
-    themeStore.setMultilingualVisible(snapshot.admin.multilingualVisible)
-  }
-  if (typeof snapshot.admin.globalSearchVisible === 'boolean') {
-    themeStore.setGlobalSearchVisible(snapshot.admin.globalSearchVisible)
-  }
-  if (typeof snapshot.admin.grayscale === 'boolean') {
-    themeStore.setGrayscale(snapshot.admin.grayscale)
-  }
-  if (typeof snapshot.admin.colourWeakness === 'boolean') {
-    themeStore.setColourWeakness(snapshot.admin.colourWeakness)
-  }
-  if (typeof snapshot.admin.closeTabByMiddleClick === 'boolean') {
-    themeStore.setCloseTabByMiddleClick(snapshot.admin.closeTabByMiddleClick)
-  }
-  if (typeof snapshot.admin.tabScrollAnimation === 'boolean') {
-    themeStore.setTabScrollAnimation(snapshot.admin.tabScrollAnimation)
-  }
-  if (snapshot.admin.scrollMode === 'content' || snapshot.admin.scrollMode === 'wrapper') {
-    themeStore.setScrollMode(snapshot.admin.scrollMode)
-  }
-  if (typeof snapshot.admin.mixCollapsedWidth === 'number') {
-    themeStore.setMixCollapsedWidth(snapshot.admin.mixCollapsedWidth)
-  }
-  if (typeof snapshot.admin.mixChildMenuWidth === 'number') {
-    themeStore.setMixChildMenuWidth(snapshot.admin.mixChildMenuWidth)
-  }
-  if (typeof snapshot.admin.autoSelectFirstMenu === 'boolean') {
-    themeStore.setAutoSelectFirstMenu(snapshot.admin.autoSelectFirstMenu)
-  }
-  if (typeof snapshot.admin.themeRadius === 'number') {
-    themeStore.setThemeRadius(snapshot.admin.themeRadius)
-  }
-  if (typeof snapshot.admin.footerHeight === 'number') {
-    themeStore.setFooterHeight(snapshot.admin.footerHeight)
-  }
-  // Background color overrides — `undefined` means the field was absent in an
-  // older snapshot (skip to preserve current value); `null` clears the override.
-  if ('siderBg' in snapshot.admin) {
-    themeStore.setSiderBg(snapshot.admin.siderBg ?? null)
-  }
-  if ('headerBg' in snapshot.admin) {
-    themeStore.setHeaderBg(snapshot.admin.headerBg ?? null)
-  }
-  if ('contentBg' in snapshot.admin) {
-    themeStore.setContentBg(snapshot.admin.contentBg ?? null)
-  }
-  if ('containerBg' in snapshot.admin) {
-    themeStore.setContainerBg(snapshot.admin.containerBg ?? null)
-  }
-  // Apply ui state
-  ctx.setMode(snapshot.ui.mode)
-  for (const [role, color] of Object.entries(snapshot.ui.colors)) {
-    if (color) ctx.setColor(role as keyof ThemeColors, color)
+  applyThemeSnapshot(snapshot, themeStore, ctx)
+}
+
+// ─── Global theme (save for all users) ────────────────────────────────────
+
+const globalEnabled = computed(() => props.mode !== 'presets' && (props.globalTheme?.enabled ?? false))
+const globalSaving = computed(() => props.globalTheme?.saving.value ?? false)
+const globalDirty = computed(() => props.globalTheme?.isDirty.value ?? false)
+
+async function onSaveGlobal(): Promise<void> {
+  if (!props.globalTheme) return
+  const ok = await props.globalTheme.save()
+  if (ok) {
+    message.success(translate('admin.theme.global.saved'))
+  } else {
+    message.error(translate('admin.theme.global.saveFailed'))
   }
 }
 
-function resetAll(): void {
+async function resetAll(): Promise<void> {
   ctx.reset()
   themeStore.reset()
+  // With global sync active, "reset" persists the FACTORY snapshot as the
+  // new global theme (instead of deleting the server row): other clients
+  // hold the last applied theme in their local cache, and only a saved
+  // snapshot reaches them - a bare delete would leave everyone on the
+  // stale theme forever.
+  if (globalEnabled.value && props.globalTheme) {
+    const ok = await props.globalTheme.save()
+    if (!ok) {
+      message.error(translate('admin.theme.global.resetFailed'))
+      return
+    }
+  }
   message.success(translate('admin.theme.reset'))
 }
 
@@ -435,11 +368,62 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
          browser-default scrollbar for Naive UI's NScrollbar (thin grey,
          hidden until hover). Matches soybean's drawer presentation. -->
     <NDrawerContent
-      :title="translate('admin.theme.title')"
+      :title="mode === 'presets' ? translate('admin.theme.userPreset.title') : translate('admin.theme.title')"
       closable
       :native-scrollbar="false"
     >
-      <NTabs v-model:value="activeTab" type="segment" justify-content="space-evenly">
+      <!-- ── Presets-only variant: what non-privileged users get. Their only
+           theme knob is the color scheme (plus the header's dark-mode cycle
+           button when the admin keeps it visible); everything else follows
+           the global theme managed by the super admin. ── -->
+      <template v-if="mode === 'presets'">
+        <p class="t-theme-drawer__hint">
+          {{ translate('admin.theme.userPreset.hint') }}
+        </p>
+        <div class="t-theme-drawer__preset-grid">
+          <button
+            type="button"
+            class="t-theme-drawer__preset-card"
+            :class="{ 't-theme-drawer__preset-card--active': !themeStore.userPresetColor }"
+            :aria-label="translate('admin.theme.userPreset.default')"
+            @click="clearUserPreset()"
+          >
+            <span class="t-theme-drawer__preset-color t-theme-drawer__preset-color--default">
+              <Icon
+                v-if="!themeStore.userPresetColor"
+                icon="mdi:check"
+                width="22"
+                height="22"
+              />
+            </span>
+            <span class="t-theme-drawer__preset-hex">{{ translate('admin.theme.userPreset.default') }}</span>
+          </button>
+          <button
+            v-for="preset in resolvedPresets"
+            :key="preset.name"
+            type="button"
+            class="t-theme-drawer__preset-card"
+            :class="{ 't-theme-drawer__preset-card--active': themeStore.userPresetColor === preset.primary }"
+            :aria-label="`Apply ${preset.primary}`"
+            @click="selectUserPreset(preset.primary)"
+          >
+            <span
+              class="t-theme-drawer__preset-color"
+              :style="{ backgroundColor: preset.primary }"
+            >
+              <Icon
+                v-if="themeStore.userPresetColor === preset.primary"
+                icon="mdi:check"
+                width="22"
+                height="22"
+              />
+            </span>
+            <span class="t-theme-drawer__preset-hex">{{ preset.primary.toUpperCase() }}</span>
+          </button>
+        </div>
+      </template>
+
+      <NTabs v-else v-model:value="activeTab" type="segment" justify-content="space-evenly">
         <!-- ── Tab 1: Appearance — 3 NDivider groups (Scheme/Color/Radius) ── -->
         <NTabPane
           name="appearance"
@@ -931,6 +915,16 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               @update:value="themeStore.setReloadVisible"
             />
           </section>
+          <!-- Whether non-privileged users get the preset color-scheme
+               picker (palette button in the header). Part of the global
+               snapshot - save to apply for everyone. -->
+          <section class="t-theme-drawer__row">
+            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.presetPickerVisible') }}</span>
+            <NSwitch
+              :value="themeStore.presetPickerVisible"
+              @update:value="themeStore.setPresetPickerVisible"
+            />
+          </section>
 
           <!-- Group 2: Watermark — sub-rows gated on `enabled` rather
                than disabled, so a turned-off watermark hides its
@@ -1081,9 +1075,11 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
         </NTabPane>
       </NTabs>
 
-      <!-- Persistent footer — soybean parity (`config-operation.vue:51-54`):
-           Reset + Copy are reachable regardless of which tab is active. -->
-      <template #footer>
+      <!-- Persistent footer (full mode only) - Reset stays reachable from
+           every tab; with global sync active the primary action becomes
+           "save for all users" (with an unsaved-changes dot), otherwise the
+           legacy Copy button. -->
+      <template v-if="mode !== 'presets'" #footer>
         <div class="t-theme-drawer__footer">
           <NPopconfirm
             :positive-text="translate('admin.theme.reset')"
@@ -1094,9 +1090,19 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 {{ translate('admin.theme.reset') }}
               </NButton>
             </template>
-            {{ translate('admin.theme.resetConfirm') }}
+            {{ globalEnabled ? translate('admin.theme.global.resetConfirm') : translate('admin.theme.resetConfirm') }}
           </NPopconfirm>
-          <NButton type="primary" size="small" @click="onCopy">
+          <NButton
+            v-if="globalEnabled"
+            type="primary"
+            size="small"
+            :loading="globalSaving"
+            @click="onSaveGlobal"
+          >
+            <span v-if="globalDirty" class="t-theme-drawer__dirty-dot" aria-hidden="true" />
+            {{ translate('admin.theme.global.save') }}
+          </NButton>
+          <NButton v-else type="primary" size="small" @click="onCopy">
             {{ translate('admin.theme.preset.copy') }}
           </NButton>
         </div>
@@ -1298,5 +1304,37 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   text-align: center;
   color: var(--tnzi-base-text-muted, #6b7280);
   letter-spacing: 0.02em;
+}
+/* "Default" card in the user preset picker - a neutral hatched swatch that
+   reads as "no personal choice, follow the global theme". */
+.t-theme-drawer__preset-color--default {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--tnzi-layout-bg, #f3f4f6),
+    var(--tnzi-layout-bg, #f3f4f6) 6px,
+    var(--tnzi-border, #e5e7eb) 6px,
+    var(--tnzi-border, #e5e7eb) 12px
+  );
+  color: var(--tnzi-base-text, #374151);
+}
+/* Unsaved-changes dot inside the "save for all users" button. */
+.t-theme-drawer__dirty-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #ffffff;
+  opacity: 0.9;
+  animation: t-theme-drawer-pulse 1.6s ease-in-out infinite;
+}
+@keyframes t-theme-drawer-pulse {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 </style>

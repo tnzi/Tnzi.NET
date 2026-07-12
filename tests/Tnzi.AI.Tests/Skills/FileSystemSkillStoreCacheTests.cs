@@ -211,16 +211,15 @@ public class FileSystemSkillStoreCacheTests : IDisposable
 
     private FileSystemSkillStore CreateStore(TimeSpan? ttl = null)
     {
-        var options = Microsoft.Extensions.Options.Options.Create(BuildAiOptions(ttl));
+        var options = new StaticOptionsMonitor<AIOptions>(BuildAiOptions(ttl));
         var logger = Mock.Of<ILogger<FileSystemSkillStore>>();
         return new FileSystemSkillStore(logger, options);
     }
 
     private FileSystemSkillStore CreateStoreWithMonitor(TestOptionsMonitor monitor)
     {
-        var options = Microsoft.Extensions.Options.Options.Create(monitor.CurrentValue);
         var logger = Mock.Of<ILogger<FileSystemSkillStore>>();
-        return new FileSystemSkillStore(logger, options, optionsMonitor: monitor);
+        return new FileSystemSkillStore(logger, monitor);
     }
 
     // -------------------------------------------------------------------------

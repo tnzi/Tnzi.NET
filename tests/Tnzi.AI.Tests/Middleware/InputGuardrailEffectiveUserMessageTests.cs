@@ -20,7 +20,7 @@ public class InputGuardrailEffectiveUserMessageTests
         return new GuardrailRunner(
             [guardrail],
             Enumerable.Empty<IOutputGuardrail>(),
-            Microsoft.Extensions.Options.Options.Create(options),
+            new StaticOptionsMonitor<AIOptions>(options),
             NullLogger<GuardrailRunner>.Instance);
     }
 

@@ -46,11 +46,27 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <summary>
     /// 获取所有模块
     /// </summary>
+    /// <remarks>
+    /// Stamps each module's transient <see cref="FunctionModule.IsBuiltIn"/> flag
+    /// from the running module graph so the role-permission matrix can list a
+    /// consumer application's own modules first and separate the framework
+    /// built-in catalogue. The flag is not persisted — it is a view concern
+    /// resolved fresh per request from <see cref="ITnziApplication"/>.
+    /// </remarks>
     /// <returns>模块列表</returns>
     [HttpGet]
-    public virtual async Task<ApiResult<IEnumerable<FunctionModule>>> GetModules()
+    public virtual async Task<ApiResult<IEnumerable<FunctionModule>>> GetModules(
+        [FromServices] ITnziApplication tnziApp)
     {
         var result = await ModuleManagementService.GetModulesAsync();
+        if (result.Succeeded && result.Data is not null)
+        {
+            var builtInCodes = FrameworkModuleResolver.GetLoadedFrameworkModuleCodes(tnziApp);
+            foreach (var module in result.Data)
+            {
+                module.IsBuiltIn = builtInCodes.Contains(module.Code);
+            }
+        }
         return result.ToApiResult();
     }
 
@@ -60,6 +76,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <param name="request">模块信息</param>
     /// <returns>创建的模块</returns>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "authorization.functionModule.create")]
     public virtual async Task<ApiResult<FunctionModule>> Create([FromBody] CreateFunctionModuleRequest request)
     {
         var result = await ModuleManagementService.CreateModuleAsync(request);
@@ -73,6 +90,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <param name="request">模块信息</param>
     /// <returns>更新后的模块</returns>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.functionModule.update")]
     public virtual async Task<ApiResult<FunctionModule>> Update(Guid id, [FromBody] UpdateFunctionModuleRequest request)
     {
         var result = await ModuleManagementService.UpdateModuleAsync(id, request);
@@ -85,6 +103,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <param name="id">模块ID</param>
     /// <returns>操作结果</returns>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "authorization.functionModule.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await ModuleManagementService.DeleteModuleAsync(id);
@@ -138,6 +157,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <param name="id">模块ID</param>
     /// <returns>操作结果</returns>
     [HttpPut("{id:guid}/enable")]
+    [ApiAuthorize(PermissionName = "authorization.functionModule.update")]
     public virtual async Task<ApiResult> Enable(Guid id)
     {
         var result = await ModuleManagementService.EnableModuleAsync(id);
@@ -150,6 +170,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// <param name="id">模块ID</param>
     /// <returns>操作结果</returns>
     [HttpPut("{id:guid}/disable")]
+    [ApiAuthorize(PermissionName = "authorization.functionModule.update")]
     public virtual async Task<ApiResult> Disable(Guid id)
     {
         var result = await ModuleManagementService.DisableModuleAsync(id);

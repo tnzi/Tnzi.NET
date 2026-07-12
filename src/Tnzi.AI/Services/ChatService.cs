@@ -6,11 +6,11 @@ namespace Tnzi.AI.Services;
 public class ChatService : ApplicationService, IChatService
 {
     private readonly IAgentRuntime _runtime;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
 
     public ChatService(
         IAgentRuntime runtime,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -61,7 +61,7 @@ public class ChatService : ApplicationService, IChatService
         {
             Logger.LogWarning(ex,
                 "Chat request failed with business exception: Provider={Provider}, Model={Model}, UserId={UserId}, ThreadId={ThreadId}",
-                request.Provider ?? _options.Value.DefaultProvider,
+                request.Provider ?? _options.CurrentValue.DefaultProvider,
                 request.Model ?? "default",
                 request.UserId,
                 request.ThreadId);
@@ -72,7 +72,7 @@ public class ChatService : ApplicationService, IChatService
         {
             Logger.LogError(ex,
                 "Chat request failed: Provider={Provider}, Model={Model}, UserId={UserId}, ThreadId={ThreadId}",
-                request.Provider ?? _options.Value.DefaultProvider,
+                request.Provider ?? _options.CurrentValue.DefaultProvider,
                 request.Model ?? "default",
                 request.UserId,
                 request.ThreadId);

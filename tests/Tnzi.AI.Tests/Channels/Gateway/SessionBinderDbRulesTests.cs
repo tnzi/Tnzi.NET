@@ -48,7 +48,7 @@ public class SessionBinderDbRulesTests
             new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
         };
         var (scopeFactory, _) = CreateScopeFactory(dbRules);
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
 
         var binder = new DefaultSessionBinder([], options, scopeFactory.Object);
 
@@ -67,7 +67,7 @@ public class SessionBinderDbRulesTests
             new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = false }
         };
         var (scopeFactory, _) = CreateScopeFactory(dbRules);
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
 
         var binder = new DefaultSessionBinder([], options, scopeFactory.Object);
 
@@ -89,7 +89,7 @@ public class SessionBinderDbRulesTests
             new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
         };
         var (scopeFactory, _) = CreateScopeFactory(dbRules);
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
 
         var binder = new DefaultSessionBinder(configRules, options, scopeFactory.Object);
 
@@ -107,7 +107,7 @@ public class SessionBinderDbRulesTests
             new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
         };
         var (scopeFactory, repo) = CreateScopeFactory(dbRules);
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
 
         // Long TTL so no refresh happens between resolves.
         var binder = new DefaultSessionBinder([], options, scopeFactory.Object, cacheTtl: TimeSpan.FromHours(1));
@@ -133,7 +133,7 @@ public class SessionBinderDbRulesTests
         {
             new() { Channel = "telegram", AgentId = ConfigAgentId, Scope = SessionScope.PerPeer, Priority = 5, IsEnabled = true }
         };
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
 
         var binder = new DefaultSessionBinder(configRules, options, scopeFactory: null);
 

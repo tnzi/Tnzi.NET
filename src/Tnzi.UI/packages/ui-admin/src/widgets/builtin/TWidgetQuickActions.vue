@@ -9,8 +9,9 @@
 import { computed } from 'vue'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
 import { TSvgIcon } from '@tnzi/ui'
-import { maybeTranslate } from '../../pages/_shared/translate'
+import { maybeTranslate, translatePageKey } from '../../pages/_shared/translate'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
+import { useModuleAvailability } from '../../headless/useModuleAvailability'
 
 export interface QuickAction {
   /** Stable key for the v-for list. */
@@ -36,6 +37,14 @@ export interface QuickAction {
    * system.parameter.view). Omit for always-shown actions.
    */
   permission?: string
+  /**
+   * Backend module the action's destination belongs to (e.g. `'ai'`,
+   * `'audit'`). When set, the tile is hidden when the backend host didn't
+   * load that module (no super-user bypass — the destination route is gated
+   * to /403 for everyone). Fail-open while the availability signal is
+   * unknown. Omit for module-agnostic actions.
+   */
+  module?: string
 }
 
 interface Props {
@@ -53,14 +62,19 @@ const props = withDefaults(defineProps<Props>(), {
 
 const router = useRouter()
 const authStore = useAdminAuthStore()
+const moduleAvailability = useModuleAvailability()
 
-// Hide actions whose destination the user can't reach (super-user bypass +
-// fail-open before permissions load), so a business admin never sees a tile
-// that only bounces to /403.
+// Hide actions whose destination the user can't reach, on two orthogonal
+// dimensions: module availability (`module` — no super-user bypass; an
+// unloaded module's route bounces to /403 for everyone) and permissions
+// (`permission` — super-user bypass + fail-open before permissions load).
 const visibleActions = computed<QuickAction[]>(() => {
+  const moduleVisible = props.actions.filter(
+    (a) => !a.module || moduleAvailability.has(a.module),
+  )
   const bypass = authStore.isSuperUser || authStore.userInfo === null
-  if (bypass) return props.actions
-  return props.actions.filter((a) => !a.permission || authStore.hasPermission(a.permission))
+  if (bypass) return moduleVisible
+  return moduleVisible.filter((a) => !a.permission || authStore.hasPermission(a.permission))
 })
 
 const gridStyle = computed(() => ({
@@ -83,7 +97,11 @@ async function handleClick(action: QuickAction): Promise<void> {
 </script>
 
 <template>
-  <div class="t-widget-quick-actions" :style="gridStyle">
+  <div v-if="visibleActions.length === 0" class="t-widget-quick-actions__empty">
+    <TSvgIcon icon="mdi:lock-outline" :size="24" />
+    <p>{{ translatePageKey('', 'admin.widgets.quickActions.empty') || 'No actions available for your permissions' }}</p>
+  </div>
+  <div v-else class="t-widget-quick-actions" :style="gridStyle">
     <button
       v-for="action in visibleActions"
       :key="action.key"
@@ -159,5 +177,18 @@ async function handleClick(action: QuickAction): Promise<void> {
   font-size: 12px;
   color: var(--tnzi-base-text);
   line-height: 1.3;
+}
+.t-widget-quick-actions__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 72px;
+  color: var(--tnzi-base-text-muted, #888);
+  font-size: 12.5px;
+}
+.t-widget-quick-actions__empty p {
+  margin: 0;
 }
 </style>

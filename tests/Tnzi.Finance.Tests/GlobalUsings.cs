@@ -1,3 +1,4 @@
+global using System.Globalization;
 global using Microsoft.Extensions.DependencyInjection;
 global using Tnzi.Data;
 global using Tnzi.Domain.Repositories;

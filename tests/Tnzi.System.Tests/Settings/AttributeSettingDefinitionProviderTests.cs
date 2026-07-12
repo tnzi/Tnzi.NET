@@ -92,6 +92,26 @@ public class AttributeSettingDefinitionProviderTests
     }
 
     [Fact]
+    public void MergeByGroupKey_carries_all_contributor_options_types()
+    {
+        // 回归：validator 预检要对合并组的每个贡献 Options 类型分别绑定验证 —
+        // 合并时丢 OptionsTypes 会让整组静默跳过预检。
+        var rawGroups = new List<SettingDefinitionGroup>
+        {
+            new() { Key = "shared", ModuleName = "A", DisplayName = "A", Order = 0,
+                    OptionsTypes = [typeof(string)],
+                    Fields = [new SettingFieldDefinition { Key = "A:P", Label = "P" }] },
+            new() { Key = "shared", ModuleName = "B", DisplayName = "B", Order = 5,
+                    OptionsTypes = [typeof(int)],
+                    Fields = [new SettingFieldDefinition { Key = "B:P", Label = "P" }] },
+        };
+
+        var merged = AttributeSettingDefinitionProvider.MergeByGroupKey(rawGroups)[0];
+
+        merged.OptionsTypes.ShouldBe([typeof(string), typeof(int)]);
+    }
+
+    [Fact]
     public void MergeByGroupKey_secondary_fills_null_metadata_from_primary()
     {
         var field1 = new SettingFieldDefinition { Key = "A:X", Label = "X" };

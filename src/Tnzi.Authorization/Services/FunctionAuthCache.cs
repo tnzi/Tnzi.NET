@@ -27,13 +27,6 @@ public class FunctionAuthCache
     private const string SuperAdminCatalogueKey = "Permissions:SuperAdminCatalogue";
 
     /// <summary>
-    /// BusinessAdmin 业务目录缓存键（单例 key，跨所有 business-admin 共享）：
-    /// 所有启用且 Category=Business 的 ModuleFunction.Code。与超管目录同样的
-    /// 生命周期语义（随功能启禁用/分类变化失效）。
-    /// </summary>
-    private const string BusinessAdminCatalogueKey = "Permissions:BusinessAdminCatalogue";
-
-    /// <summary>
     /// 初始化一个<see cref="FunctionAuthCache"/>类型的新实例
     /// </summary>
     /// <param name="cache">缓存服务</param>
@@ -89,13 +82,12 @@ public class FunctionAuthCache
     }
 
     // NOTE: this cache intentionally exposes NO permission-check helpers.
-    // The per-user key stores EXPLICIT grants only — tier-unaware. Any check
-    // built directly on it would return false negatives for business admins
-    // (their implicit Business-catalogue grants live in a separate shared
-    // key). All permission checks must go through the tier-aware
-    // FunctionAuthorizationService. (Former CheckPermissionAsync/
-    // CheckPermissionsAsync helpers were removed for exactly this reason —
-    // zero consumers, misleading semantics.)
+    // The per-user key stores EXPLICIT grants only - super-admin-unaware.
+    // Any check built directly on it would return false negatives for super
+    // admins (their bypass lives in FunctionAuthorizationService). All
+    // permission checks must go through FunctionAuthorizationService.
+    // (Former CheckPermissionAsync/CheckPermissionsAsync helpers were removed
+    // for exactly this reason - zero consumers, misleading semantics.)
 
     /// <summary>
     /// 清除所有功能权限缓存
@@ -105,10 +97,9 @@ public class FunctionAuthCache
     public async Task ClearAllAsync()
     {
         await _cache.RemoveByPrefixAsync(UserFunctionsCachePrefix);
-        // The admin-tier catalogues live outside the UserFunctions prefix so
-        // the bulk-prefix remove can't catch them — clear explicitly.
+        // The super-admin catalogue lives outside the UserFunctions prefix so
+        // the bulk-prefix remove can't catch it - clear explicitly.
         await _cache.RemoveAsync(SuperAdminCatalogueKey);
-        await _cache.RemoveAsync(BusinessAdminCatalogueKey);
     }
 
     /// <summary>
@@ -138,29 +129,5 @@ public class FunctionAuthCache
     public Task InvalidateSuperAdminCatalogueAsync()
         => _cache.RemoveAsync(SuperAdminCatalogueKey);
 
-    /// <summary>
-    /// Get the cached business-admin catalogue (enabled ModuleFunction codes
-    /// whose <c>Category</c> is Business). <c>null</c> on cache miss.
-    /// </summary>
-    public Task<IReadOnlyList<string>?> GetBusinessAdminCatalogueAsync()
-        => _cache.GetAsync<IReadOnlyList<string>>(BusinessAdminCatalogueKey);
-
-    /// <summary>
-    /// Store the business-admin catalogue with the same 1-hour TTL as the
-    /// super-admin catalogue.
-    /// </summary>
-    public Task SetBusinessAdminCatalogueAsync(IReadOnlyList<string> codes)
-        => _cache.SetAsync(BusinessAdminCatalogueKey, codes, SuperAdminCatalogueExpiration);
-
-    /// <summary>
-    /// Invalidate both admin-tier catalogues. Any change that affects the
-    /// super-admin catalogue (function/module enable state) can also affect
-    /// the business subset, plus category edits — so they invalidate together.
-    /// </summary>
-    public async Task InvalidateAdminCataloguesAsync()
-    {
-        await _cache.RemoveAsync(SuperAdminCatalogueKey);
-        await _cache.RemoveAsync(BusinessAdminCatalogueKey);
-    }
 }
 

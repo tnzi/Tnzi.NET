@@ -27,7 +27,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         IVectorStore vectorStore,
         IEmbeddingService embeddingService,
         IReranker reranker,
-        IOptions<AIRagOptions> options,
+        IOptionsSnapshot<AIRagOptions> options,
         IServiceProvider serviceProvider,
         IBackgroundJobManager? backgroundJobManager = null) : base(serviceProvider)
     {

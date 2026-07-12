@@ -123,6 +123,14 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // context's `settings.mode`; see the `AdminThemeSchema` type doc above.
   const themeSchema = ref<AdminThemeSchema | null>(null)
 
+  // The last GLOBAL-DEFAULT mode this client applied (global-theme boot
+  // apply). The context→themeSchema mirror records every mode change,
+  // including programmatic default applies - so `themeSchema` alone cannot
+  // distinguish "the user chose dark" from "the boot apply set dark".
+  // A user counts as DIVERGED only when themeSchema differs from this
+  // bookkeeping value; non-diverged users keep following new defaults.
+  const lastAppliedDefaultMode = ref<AdminThemeSchema | null>(null)
+
   // Visibility toggles
   const headerVisible = ref(true)
   const tabVisible = ref(true)
@@ -211,6 +219,15 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const themeSchemaVisible = ref(true)
   /** Visibility of the page reload button in the header. */
   const reloadVisible = ref(false)
+  /** Global-theme era - whether non-privileged users see the preset
+      color-scheme picker (palette button in the header). Part of the
+      global snapshot: the super admin toggles it in the theme drawer's
+      General → Global section; every client applies it at boot. */
+  const presetPickerVisible = ref(true)
+  /** The user's own preset color choice (primary hex) made through the
+      preset picker. Persisted locally - the only color knob a
+      non-privileged user owns; applied ON TOP of the global theme. */
+  const userPresetColor = ref<string | null>(null)
   /** Phase F — full-page grayscale filter (accessibility / mourning mode). */
   const grayscale = ref(false)
   /** Phase F — full-page color-weakness simulation (invert filter). */
@@ -430,6 +447,21 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   function setReloadVisible(v: boolean): void {
     reloadVisible.value = v
   }
+  function setPresetPickerVisible(v: boolean): void {
+    presetPickerVisible.value = v
+  }
+  function setLastAppliedDefaultMode(mode: AdminThemeSchema | null): void {
+    lastAppliedDefaultMode.value = mode
+  }
+  /** Record + live-apply the user's preset color; `null` clears the choice
+      (the caller re-applies the global/default primary as appropriate). */
+  function setUserPresetColor(color: string | null): void {
+    userPresetColor.value = color
+    if (color && themeCtx) {
+      themeCtx.setColor('primary', color)
+      if (infoFollowPrimary.value) themeCtx.setColor('info', color)
+    }
+  }
 
   // Phase F — accessibility filters. Applies/strips the CSS filter on
   // documentElement so the entire page renders through the chosen lens.
@@ -502,6 +534,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     layoutMode.value = 'vertical'
     // Back to "no explicit user choice" — the app default mode wins again.
     themeSchema.value = null
+    lastAppliedDefaultMode.value = null
     themeRadius.value = 4
     headerVisible.value = true
     tabVisible.value = true
@@ -533,6 +566,8 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     fullscreenVisible.value = true
     themeSchemaVisible.value = true
     reloadVisible.value = false
+    presetPickerVisible.value = true
+    userPresetColor.value = null
     grayscale.value = false
     colourWeakness.value = false
     closeTabByMiddleClick.value = false
@@ -618,12 +653,30 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
         }
       },
     )
+    // Persisted user preset color → context. Fires on persisted-state
+    // hydration (bypasses the setter) so the user's color-scheme choice
+    // survives a full reload; the global-theme boot apply re-overlays it
+    // after the server snapshot lands. Gated on the picker being enabled -
+    // when the admin turned the feature off, the stale choice stays dormant.
+    // Same rules as `overlayUserPreset` (theme/snapshot.ts): primary plus
+    // the info-follows-primary companion.
+    watch(
+      userPresetColor,
+      (color) => {
+        if (color && presetPickerVisible.value) {
+          themeCtx.setColor('primary', color)
+          if (infoFollowPrimary.value) themeCtx.setColor('info', color)
+        }
+      },
+      { immediate: true },
+    )
   }
 
   return {
     // state
     layoutMode,
     themeSchema,
+    lastAppliedDefaultMode,
     headerVisible,
     tabVisible,
     footerVisible,
@@ -655,6 +708,8 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     fullscreenVisible,
     themeSchemaVisible,
     reloadVisible,
+    presetPickerVisible,
+    userPresetColor,
     grayscale,
     colourWeakness,
     closeTabByMiddleClick,
@@ -700,6 +755,9 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setFullscreenVisible,
     setThemeSchemaVisible,
     setReloadVisible,
+    setPresetPickerVisible,
+    setUserPresetColor,
+    setLastAppliedDefaultMode,
     setGrayscale,
     setColourWeakness,
     setCloseTabByMiddleClick,
@@ -721,6 +779,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     pick: [
       'layoutMode',
       'themeSchema',
+      'lastAppliedDefaultMode',
       'headerVisible',
       'tabVisible',
       'footerVisible',
@@ -752,6 +811,8 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'fullscreenVisible',
       'themeSchemaVisible',
       'reloadVisible',
+      'presetPickerVisible',
+      'userPresetColor',
       'grayscale',
       'colourWeakness',
       'closeTabByMiddleClick',

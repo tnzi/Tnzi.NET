@@ -30,6 +30,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 批量删除文件
     /// </summary>
     [HttpDelete("batch")]
+    [ApiAuthorize(PermissionName = "storage.file.delete")]
     public virtual async Task<ApiResult> DeleteMany([FromBody] IEnumerable<Guid> ids)
     {
         var result = await FileStorageService.DeleteManyAsync(ids);
@@ -50,6 +51,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 清理临时文件
     /// </summary>
     [HttpPost("cleanup-temporary")]
+    [ApiAuthorize(PermissionName = "storage.file.delete")]
     public virtual async Task<ApiResult<int>> CleanupTemporaryFiles([FromQuery] int? olderThanHours = null)
     {
         var olderThan = olderThanHours.HasValue
@@ -120,6 +122,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 同步单个文件的引用计数
     /// </summary>
     [HttpPost("{id:guid}/sync-reference-count")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult<int>> SyncReferenceCount(Guid id)
     {
         var result = await FileReferenceService.SyncReferenceCountAsync(id);
@@ -130,6 +133,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 批量同步所有文件的引用计数
     /// </summary>
     [HttpPost("sync-all-reference-counts")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult<int>> SyncAllReferenceCounts()
     {
         var result = await FileReferenceService.SyncAllReferenceCountsAsync();
@@ -150,6 +154,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 批量确认引用
     /// </summary>
     [HttpPost("references/batch-confirm")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult> BatchConfirmReferences([FromBody] IEnumerable<FileReferenceInfo> references)
     {
         var result = await FileReferenceService.BatchConfirmReferencesAsync(references);
@@ -160,6 +165,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 批量更新引用
     /// </summary>
     [HttpPut("references/batch-update")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult> BatchUpdateReferences(
         [FromQuery] string entityType,
         [FromQuery] Guid entityId,
@@ -212,7 +218,9 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Batch verify integrity of files (returns only problematic files in details)
+    /// Batch verify integrity of files (returns only problematic files in
+    /// details). READ-ONLY diagnostic - no method-level action code, matching
+    /// the single-file verify above; the class-level .view gate suffices.
     /// </summary>
     [HttpPost("verify-integrity")]
     public virtual async Task<ApiResult<BatchIntegrityResult>> BatchVerifyIntegrity([FromQuery] int maxFiles = 100)
@@ -247,6 +255,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// Batch revoke multiple shares
     /// </summary>
     [HttpPost("shares/batch-revoke")]
+    [ApiAuthorize(PermissionName = "storage.file.delete")]
     public virtual async Task<ApiResult<int>> BatchRevokeShares([FromBody] IEnumerable<Guid> shareIds)
     {
         var result = await FileShareService.BatchRevokeSharesAsync(shareIds);
@@ -259,6 +268,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// Set tags for a file
     /// </summary>
     [HttpPut("{id:guid}/tags")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult<FileInfoDto>> SetFileTags(Guid id, [FromBody] SetFileTagsRequest request)
     {
         var result = await FileStorageService.SetFileTagsAsync(id, request.Tags);
@@ -281,6 +291,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// Set metadata for a file (replaces existing metadata)
     /// </summary>
     [HttpPut("{id:guid}/metadata")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
     public virtual async Task<ApiResult<FileInfoDto>> SetMetadata(Guid id, [FromBody] SetFileMetadataRequest request)
     {
         var result = await FileStorageService.SetMetadataAsync(id, request.Metadata);

@@ -55,8 +55,8 @@ vi.mock('../../../src/plugin/client', () => ({
   TNZI_ADMIN_CLIENT_KEY: Symbol('tnzi-admin-client'),
 }))
 
-vi.mock('../../../src/headless/useNotificationSound', () => ({
-  useNotificationSound: () => ({ play: vi.fn(), setEnabled: vi.fn(), enabled: { value: true } }),
+vi.mock('../../../src/headless/useChatSound', () => ({
+  useChatSound: () => ({ configure: vi.fn(), playNotification: vi.fn(), playMessage: vi.fn(), preview: vi.fn() }),
 }))
 
 vi.mock('../../../src/headless/useBreakpoint', () => ({

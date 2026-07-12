@@ -14,6 +14,7 @@
   >
     <template v-if="$slots.title" #title><slot name="title" :data="state.data.value" /></template>
     <template v-if="$slots.actions" #actions><slot name="actions" :data="state.data.value" :action="state.action.value" /></template>
+    <template v-if="$slots['nav-header']" #nav-header><slot name="nav-header" /></template>
     <template v-if="$slots.footer" #footer><slot name="footer" :submit="state.submit" :close="state.close" /></template>
     <template #default="{ section }">
       <slot :data="state.data.value" :action="state.action.value" :section="section" />
@@ -131,6 +132,8 @@ defineSlots<{
   default?: (props: { data: T | null; action: string | null; section: string | null }) => unknown
   title?: (props: { data: T | null }) => unknown
   actions?: (props: { data: T | null; action: string | null }) => unknown
+  /** Page-mode only: rendered above the side-layout nav (forwarded to TDetailLayout). */
+  'nav-header'?: () => unknown
   footer?: (props: { submit: () => Promise<void>; close: () => void }) => unknown
 }>()
 

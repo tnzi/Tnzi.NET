@@ -39,6 +39,9 @@ public class FinanceTestDbContext : TnziDbContext<FinanceTestDbContext>
         modelBuilder.ApplyConfiguration(new CreditMemoLineConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentEntryConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentApplicationConfiguration());
+        modelBuilder.ApplyConfiguration(new TransferConfiguration());
+        modelBuilder.ApplyConfiguration(new ReconciliationConfiguration());
+        modelBuilder.ApplyConfiguration(new ReconciliationLineConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

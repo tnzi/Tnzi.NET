@@ -324,8 +324,25 @@ export class HttpClient {
       });
 
       if (!response.ok) {
+        // Failed downloads carry the server's ApiResult envelope (or plain text);
+        // surface its message so actionable guidance (e.g. "narrow the date
+        // range") reaches the caller instead of a bare status line.
+        let message = `Download failed: ${response.status} ${response.statusText}`;
+        try {
+          const text = await response.text();
+          if (text) {
+            try {
+              const body = JSON.parse(text) as { message?: string };
+              if (body?.message) message = body.message;
+            } catch {
+              message = text.slice(0, 500);
+            }
+          }
+        } catch {
+          // keep the generic message when the body is unreadable
+        }
         return createFailedApiResult<Blob>({
-          message: `Download failed: ${response.status} ${response.statusText}`,
+          message,
           code: response.status,
         });
       }

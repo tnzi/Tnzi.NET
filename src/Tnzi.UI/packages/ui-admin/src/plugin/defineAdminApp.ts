@@ -38,16 +38,18 @@
  */
 
 import type { App, Component } from 'vue'
+import { inject } from 'vue'
 import type { Pinia } from 'pinia'
 import type { RouteRecordRaw, Router } from 'vue-router'
 import type { HttpClient } from '@tnzi/core/http'
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import { useAdminFunctionAuthorizationApi } from '@tnzi/core/services/authorization'
 import { useAdminMenuApi } from '@tnzi/core/services/system'
 import { createIdentityBridge } from '../services/bridges/identity-bridge'
 import type { MenuSeedResultDto } from '@tnzi/core/services/system'
 import { exportRouteMenuSeed } from '../headless/menuSeed'
 import { defaultAdminRoutes } from '../router/routes'
-import { createAuthGuard, createPermissionGuard } from '../router/guards'
+import { createAuthGuard, createModuleGuard, createPermissionGuard } from '../router/guards'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useAdminTabStore } from '../stores/useAdminTabStore'
 import {
@@ -59,28 +61,31 @@ import type { AdminLoginConfig } from './loginConfig'
 import type { AdminDashboardConfig } from './dashboardConfig'
 import type { AdminSettingsConfig } from './settingsConfig'
 import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deepLinkConfig'
+import type { AdminThemeConfig } from './themeConfig'
 import {
   useAdminRouteStore,
   type AdminRouteRecord,
 } from '../stores/useAdminRouteStore'
 import { useRouteProgress } from '../headless/useRouteProgress'
+import { waitForClientToken } from '../headless/waitForClientToken'
+import { useGlobalTheme } from '../headless/useGlobalTheme'
+import { fetchAdminShellModules } from '../services/admin-shell-modules'
 
 export interface DefineAdminAppOptions {
   /** Backend HttpClient that admin bridges use to talk to the API. */
   client: HttpClient
 
   /**
-   * Role names whose holders are treated as super-admins by `loadPermissions`:
-   * the shell sets `isSuperUser` (sidebar shows EVERYTHING, route guards bypass)
-   * when the signed-in user holds any of these roles (case-insensitive). Mirror
-   * the backend's `Authorization:SuperAdminRoles` here — the TECHNICAL tier of
-   * the two-tier admin model (convention: a role named `SuperAdmin`).
+   * LEGACY FALLBACK - normally unnecessary. `loadPermissions` resolves the
+   * super-admin flag from the backend's `GET /admin/function-authorization/
+   * access-profile` (authoritative, mirrors `Authorization:SuperAdminRoles`),
+   * so no front-end mirror of role names is needed. This option only kicks in
+   * when that endpoint is unavailable (older backend): the shell then infers
+   * `isSuperUser` from the signed-in user's role names (case-insensitive).
    *
-   * The BUSINESS tier (backend `Authorization:BusinessAdminRoles`, convention:
-   * the `Admin` role) needs NO front-end configuration: the backend returns the
-   * Business-category permission subset for those users, so the sidebar and
-   * guards filter naturally and Technical surfaces (diagnostics, MCP, sandbox,
-   * system parameters, …) stay hidden. See docs/modules/authorization.md.
+   * Everyone who is not a super admin is deny-by-default: the backend returns
+   * only explicitly granted permission codes, and the sidebar / guards filter
+   * naturally. See docs/modules/authorization.md.
    */
   superAdminRoles?: string[]
 
@@ -93,6 +98,35 @@ export interface DefineAdminAppOptions {
    *    Call `loadMenus(userId)` after login to fetch them.
    */
   menu?: { source?: 'route' | 'merge' }
+
+  /**
+   * Backend module-availability gating (default ON). When enabled, the shell
+   * fetches `GET /admin/shell/modules` — which framework `TnziApplicationModule`s
+   * the backend host actually loaded — and HIDES the menu + makes UNREACHABLE
+   * every top-level module the backend didn't load (each framework module route
+   * carries `meta.moduleGate`). So a host that doesn't `DependsOn` Finance /
+   * Payment / AI never surfaces their dead menus that 404 on click, with ZERO
+   * per-consumer configuration — and, because the gate is orthogonal to the
+   * permission system, it holds for super-admins and permission-exempt paths
+   * too (which the permission filter alone can't cover).
+   *
+   * INDEPENDENT of `hideModules` / `showOnlyModules`: those physically strip
+   * routes for product-level trimming (and can hide a module the backend DID
+   * load); module gating auto-hides only modules the backend DIDN'T load. The
+   * two combine freely — e.g. hide a loaded `chat` from the sidebar while
+   * keeping module gating on for the rest.
+   *
+   * Fails OPEN: when the endpoint is unavailable (older backend / network
+   * failure) nothing is gated, so the sidebar is never blanked. Set `false`
+   * (or `{ enabled: false }`) to opt out entirely and fall back to the historic
+   * "show every route, filter by permission only" behaviour.
+   *
+   * A consumer module registered via `addModules` can opt into the same gating
+   * by setting `meta.moduleGate: '<its-TnziApplicationModule-short-name>'` on
+   * its top-level route — it then also appears in `/admin/shell/modules` (being
+   * a `TnziApplicationModule`) and auto-hides when the host omits it.
+   */
+  moduleGating?: boolean | { enabled?: boolean }
 
   /**
    * Root path the admin SPA is deployed under inside vue-router. Rewrites every
@@ -331,6 +365,22 @@ export interface DefineAdminAppOptions {
   }
 
   /**
+   * Global admin theme configuration.
+   *
+   * `globalSync` (default true): the shell loads the backend global theme
+   * snapshot (`GET /appearance/admin-theme`) after sign-in and applies it
+   * to every user. Privileged users (`system.appearance.update` - super
+   * admins by default) get the full theme drawer with a "save for all
+   * users" action; everyone else gets a preset color-scheme picker whose
+   * visibility the admin controls from the drawer (General → Global).
+   * Set `globalSync: false` for the legacy local-only theme behaviour.
+   *
+   * `presets` replaces the built-in 12-color palette offered in the
+   * drawer's Preset tab and the users' picker.
+   */
+  theme?: AdminThemeConfig
+
+  /**
    * App-wide deep-link switch for URL-synced UI state (`?detail=` overlay
    * open-states, `?section=` active sections). `false` disables both channels
    * everywhere — built-in pages included — so no UI state ever enters the URL;
@@ -484,6 +534,17 @@ export interface DefineAdminAppResult {
    * session restore without threading the user through.
    */
   loadPermissions(user?: AdminCurrentUser): Promise<string[]>
+
+  /**
+   * Refresh the backend module-availability signal (`GET /admin/shell/modules`)
+   * and feed it to the route store, so the sidebar + guards reflect which
+   * framework modules the host loaded. Called automatically by `install()`
+   * (once a token is present) and after a wrapped login, so consumers rarely
+   * need it — expose it for a manual refresh (e.g. after a runtime module
+   * enable/disable). Fail-open on failure (keeps the prior signal). Safe to
+   * ignore the promise. No-op when `moduleGating` is disabled.
+   */
+  loadAvailableModules(): Promise<void>
 
   /**
    * Load backend `Sys_Menu` overrides for the 'merge' menu source and feed them
@@ -760,6 +821,11 @@ function toAdminRouteRecords(
       activeMenu: rawMeta?.activeMenu as string | undefined,
       fixedIndexInTab: rawMeta?.fixedIndexInTab as number | undefined,
       multiTab: rawMeta?.multiTab as boolean | undefined,
+      // Module-availability gate marker. Like `permission` above, this MUST be
+      // copied through the vue-router-record → AdminRouteRecord round-trip, or
+      // the store's `moduleGateKey` sees `undefined` and never gates the node
+      // (the sidebar keeps showing menus for modules the backend never loaded).
+      moduleGate: rawMeta?.moduleGate as boolean | string | undefined,
     }
     const record: AdminRouteRecord = {
       name: typeof route.name === 'string' ? route.name : route.path,
@@ -784,6 +850,15 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
 
   const hideRoutesSet = new Set(options.hideRoutes ?? [])
   const basePath = normalizeBasePath(options.basePath)
+
+  // Module-availability gating is ON by default; `false` or `{ enabled: false }`
+  // opts out (fall back to permission-only filtering, the historic behaviour).
+  const moduleGatingEnabled =
+    options.moduleGating === false
+      ? false
+      : typeof options.moduleGating === 'object'
+        ? options.moduleGating.enabled !== false
+        : true
 
   // Internal transforms below match on the original `/admin` path. Apply
   // them first against the preset, then rewrite top-level paths via
@@ -818,12 +893,23 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   function wrapLoginCallbacks(login?: AdminLoginConfig): AdminLoginConfig | undefined {
     if (!login) return login
 
-    // Fix #2: clear the admin auth store on deliberate sign-out. The consumer's
+    // Clear the admin auth store on deliberate sign-out. The consumer's
     // `user.onLogout` typically clears only the core AuthStateManager (a separate
-    // store); without this, `isSuperUser` / `userInfo` persisted by useAdminAuthStore
-    // survive into the next sign-in, letting a Business admin inherit a prior
-    // super-admin's "see everything" bypass. Only wrapped when the consumer actually
-    // supplies `onLogout`, so whether a logout affordance exists is unchanged.
+    // store) and redirects to the login page; without this, `isSuperUser` /
+    // `userInfo` persisted by useAdminAuthStore survive into the next sign-in,
+    // letting a role inherit a prior super-admin's "see everything" bypass. Only
+    // wrapped when the consumer actually supplies `onLogout`, so whether a logout
+    // affordance exists is unchanged.
+    //
+    // ORDER MATTERS: run the consumer's logout FIRST (it does the backend
+    // sign-out — a slow remote round-trip — then redirects to the login route),
+    // and clear the admin store in `finally` AFTER. Clearing it FIRST used to
+    // null `userInfo` while the shell was still mounted, so the sidebar
+    // re-rendered every menu (fail-open) for the 1-2s the backend logout took
+    // before the redirect. Deferring the clear keeps the user's real, correctly
+    // filtered menu on screen until the redirect unmounts the shell, then wipes
+    // the store — no flash, and the next sign-in still starts clean. `finally`
+    // guarantees the clear even if the consumer's logout throws.
     let wrapped: AdminLoginConfig = login
     const userCfg = login.user
     const consumerOnLogout = userCfg?.onLogout
@@ -833,8 +919,11 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
         user: {
           ...userCfg,
           onLogout: async () => {
-            useAdminAuthStore().logout()
-            await consumerOnLogout()
+            try {
+              await consumerOnLogout()
+            } finally {
+              useAdminAuthStore().logout()
+            }
           },
         },
       }
@@ -844,6 +933,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     if (!cbs) return wrapped
     const after = async () => {
       await loadPermissions().catch(() => undefined)
+      await loadAvailableModules().catch(() => undefined)
     }
     const pwd = cbs.pwdLogin
     const code = cbs.codeLogin
@@ -874,7 +964,31 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       dashboard: options.dashboard,
       settings: options.settings,
       chat: options.chat,
+      theme: options.theme,
     })
+
+    // Apply the GLOBAL admin theme snapshot app-wide, at bootstrap — BEFORE
+    // and independent of login. `GET /appearance/admin-theme` is anonymous
+    // (deployment-level public appearance), so the login page and the top-level
+    // exception pages (403/404/500) — which render OUTSIDE the authenticated
+    // shell — pick up the super-admin-configured theme too, instead of snapping
+    // back to the built-in palette on every refresh. AdminShellRoot keeps its
+    // own controller for the privileged edit / save / dirty flow; this early
+    // apply is read-only and idempotent (a no-op when nothing differs). The
+    // theme context was just installed by createTnziUiAdmin above (either the
+    // consumer's own or the fallback), so it always resolves. Fire-and-forget:
+    // never blocks app start; degrades silently on old backends / hosts without
+    // Tnzi.System.
+    const bootThemeCtx = app.runWithContext(() =>
+      inject<ThemeContext | null>(THEME_CONTEXT_KEY, null),
+    )
+    if (bootThemeCtx) {
+      void useGlobalTheme({
+        client: options.client,
+        themeContext: bootThemeCtx,
+        enabled: options.theme?.globalSync !== false,
+      }).load()
+    }
 
     // App-wide deep-link switch — read by useDetail (and thus useCrudPage)
     // via tryInjectDeepLinkConfig(). Provided unconditionally so per-page
@@ -915,6 +1029,14 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     if (router) {
       if (options.auth?.enabled) {
         router.beforeEach(createAuthGuard({ loginPath: explicitLoginPath }))
+      }
+      // Module-availability guard BEFORE the permission guard: a route into an
+      // unloaded framework module should bounce to /403 (graceful) without the
+      // permission guard first recording it as a tab. Orthogonal to auth, holds
+      // for super users; a no-op (empty denied set) until the signal loads, and
+      // skipped entirely when module gating is disabled.
+      if (moduleGatingEnabled) {
+        router.beforeEach(createModuleGuard({ forbiddenPath: explicitForbiddenPath }))
       }
       if (options.auth?.permissionGuard !== false) {
         router.beforeEach(createPermissionGuard({ forbiddenPath: explicitForbiddenPath }))
@@ -972,6 +1094,58 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       )
     }
 
+    // Session-restore self-refresh: when the auth store rehydrated a signed-in
+    // session from persistence, consumers historically had to re-call
+    // `loadPermissions` themselves - and forgetting it left the persisted
+    // permission list AND `isSuperUser` frozen at their last-login values (a
+    // stale super flag shows menus the backend will 403; a stale permission
+    // list hides freshly granted ones). Refreshing in the background on every
+    // install keeps the store aligned with the backend with zero consumer
+    // wiring. Fire-and-forget: never blocks app start, never throws.
+    //
+    // ★The probe must WAIT for the HttpClient to carry an access token:
+    // consumers typically restore the core session asynchronously (e.g. in a
+    // router guard), which lands AFTER install() - firing immediately sent an
+    // unauthenticated GET /users/profile on every reload of a signed-in
+    // session (guaranteed 401 console noise; the write-side was already
+    // discarded by loadPermissions' failed-resolution guard). Poll the cheap
+    // in-memory token accessor and give up quietly when no session ever
+    // materialises (the auth guard then redirects to login anyway).
+    const authStore = useAdminAuthStore()
+    if (authStore.isLogin && authStore.userInfo !== null) {
+      const refreshWhenClientReady = async (): Promise<void> => {
+        if (!(await waitForClientToken(options.client))) return
+        await loadPermissions()
+      }
+      void refreshWhenClientReady().catch(() => undefined)
+    }
+
+    // Module-availability signal — fetch once a token is present, regardless of
+    // fresh login vs session restore. Independent of the session-restore probe
+    // above (that one only runs for an already-signed-in reload and only
+    // refreshes permissions). Fail-open on timeout / failure. Skipped when
+    // module gating is disabled.
+    //
+    // While the probe is in flight `moduleSignalPending` is raised so
+    // SIDE-EFFECTFUL module surfaces (built-in chat host, dashboard data
+    // widgets — anything whose mount fires requests / opens sockets) defer
+    // mounting instead of racing a signal that may be about to rule their
+    // module out. Settles on success, failure, AND the no-token timeout, so
+    // deferred surfaces are never wedged (fail-open once settled).
+    if (moduleGatingEnabled) {
+      routeStore.setModuleSignalPending(true)
+      const loadModulesWhenReady = async (): Promise<void> => {
+        try {
+          if (await waitForClientToken(options.client)) {
+            await loadAvailableModules()
+          }
+        } finally {
+          routeStore.setModuleSignalPending(false)
+        }
+      }
+      void loadModulesWhenReady().catch(() => undefined)
+    }
+
     return instance
   }
 
@@ -987,7 +1161,15 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // a failure falls back to whatever the caller supplied.
     let profile: Awaited<ReturnType<ReturnType<typeof createIdentityBridge>['me']['getProfile']>> | null = null
     try {
-      profile = await createIdentityBridge({ client: options.client }).me.getProfile()
+      const fetched = await createIdentityBridge({ client: options.client }).me.getProfile()
+      // Failure envelopes RESOLVE here instead of throwing, in two shapes:
+      // `data: undefined` unwraps to undefined, and an envelope WITHOUT a
+      // data field unwraps to the envelope object itself (truthy!). Only a
+      // payload carrying a real user id counts as a resolved profile -
+      // anything else must read as "identity NOT resolved" so the
+      // failed-resolution guard below can hold.
+      const fetchedId = (fetched as { id?: unknown } | null | undefined)?.id
+      profile = typeof fetchedId === 'string' && fetchedId !== '' ? fetched : null
     } catch {
       profile = null
     }
@@ -999,11 +1181,24 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // nickname → real name (FirstName/LastName) → username.
     const displayName =
       user.displayName || profile?.nickname || (fullName || undefined) || username || undefined
+    // Short, first-name-only label for personal greetings / the header status
+    // bar / the chat "me" name — the surname is intentionally dropped so these
+    // read "Hi, John" not "Hi, John Doe". Keeps nickname first (that IS how the
+    // user wants to be addressed), then the given name, then the username.
+    const shortName = profile?.nickname || profile?.firstName || username || undefined
     const avatarId: string | null = user.avatarId ?? profile?.avatarId ?? null
     const avatar: string | undefined = user.avatar ?? profile?.avatar ?? undefined
     const roles = user.roles ?? profile?.roles ?? []
 
-    if (user.token) authStore.setToken(user.token, user.refreshToken)
+    // NB: the admin store token (→ `isLogin`) is set LATER, atomically with
+    // `setUserInfo` below — NOT here. Setting it early opened a window where
+    // `isLogin === true` but `userInfo === null` during the access-profile
+    // fetch, which the sidebar's `isLogin`-gated fail-open reads as "logged in,
+    // permissions loading" → it flashes EVERY menu. It also matters nothing for
+    // request auth: the permission/profile fetches below go through
+    // `options.client` (core HttpClient), which already carries the token from
+    // the consumer's login. Deferring keeps the login state atomic: either both
+    // token + userInfo land, or (on the failed-resolution guard) neither.
 
     // Resolve permissions (BEST-EFFORT). The identity `setUserInfo` below MUST run
     // even when this fails: a regular (non-admin) user gets 403 from the admin
@@ -1017,20 +1212,53 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     //  ran, so `userInfo` stayed null → header fell back to the static 'Admin' and
     //  `myId` was undefined → own messages never matched as mine.)
     let permissions = user.permissions ?? []
-    if (user.permissions === undefined && userId) {
+    // Backend-authoritative super-admin flag. `null` = unresolved (endpoint
+    // unavailable / caller pre-supplied permissions) → fall back to the legacy
+    // client-side inference from `superAdminRoles` below.
+    let backendIsSuper: boolean | null = null
+    if (user.permissions === undefined) {
       try {
         const api = useAdminFunctionAuthorizationApi(options.client)
-        const res = await api.getUserPermissionNames(userId)
-        if (res.success) permissions = res.data ?? []
+        // Preferred: single self-service call, no userId needed, and the
+        // super-admin flag comes from the backend instead of a front-end
+        // mirror of `Authorization:SuperAdminRoles` (which could drift).
+        const profileRes = await api.getAccessProfile()
+        if (profileRes.success && profileRes.data) {
+          permissions = profileRes.data.permissions ?? []
+          backendIsSuper = profileRes.data.isSuperAdmin === true
+        } else if (userId) {
+          // Older backend without the access-profile endpoint.
+          const legacy = await api.getUserPermissionNames(userId)
+          if (legacy.success) permissions = legacy.data ?? []
+        }
       } catch {
         // best-effort — keep the identity, leave permissions empty
       }
     }
 
+    // FAILED-RESOLUTION GUARD: when the caller supplied nothing and both the
+    // profile and the permission fetches came back empty-handed (expired
+    // token during the install-time background refresh, transient network
+    // failure), this call learned NOTHING about the session. Writing
+    // `{ id: '', permissions: [] }` would POISON the store: `userInfo` flips
+    // non-null with zero permissions, so the permission guard stops failing
+    // open and the very next navigation bounces to /403 - even while a real
+    // login is completing in parallel. It would also clobber a previously
+    // valid persisted identity on a flaky refresh. Leave the store untouched.
+    if (!userId && !username && profile === null && user.permissions === undefined && backendIsSuper === null) {
+      return []
+    }
+
+    // Flip the token (→ `isLogin`) and the identity together so the sidebar
+    // never sees `isLogin === true` with a still-null / still-previous
+    // `userInfo` (see the note above where the early setToken used to live).
+    if (user.token) authStore.setToken(user.token, user.refreshToken)
+
     authStore.setUserInfo({
       id: userId,
       username,
       displayName,
+      shortName,
       email: user.email ?? profile?.email ?? undefined,
       avatar,
       avatarId,
@@ -1040,7 +1268,8 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     })
     const superRoleSet = new Set((options.superAdminRoles ?? []).map((r) => r.toLowerCase()))
     const isSuper =
-      user.superUser === true || roles.some((r) => superRoleSet.has(r.toLowerCase()))
+      backendIsSuper ??
+      (user.superUser === true || roles.some((r) => superRoleSet.has(r.toLowerCase())))
     // Write UNCONDITIONALLY (true OR false). A one-way `if (isSuper) setSuperUser(true)`
     // let a previous super-admin session's `true` — persisted by the auth store — leak
     // into the NEXT sign-in of a non-super user (e.g. a Business admin): `isSuperUser`
@@ -1065,6 +1294,16 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     return permissions
   }
 
+  async function loadAvailableModules(): Promise<void> {
+    if (!moduleGatingEnabled) return
+    const names = await fetchAdminShellModules(options.client)
+    // null = endpoint unavailable / failed → fail-open: keep the prior signal
+    // (null on the first run = gating off = show everything). A real Set (even
+    // empty) turns gating on.
+    if (names === null) return
+    useAdminRouteStore().setAvailableModules(names)
+  }
+
   async function loadMenus(userId: string): Promise<void> {
     if (options.menu?.source !== 'merge') return
     const routeStore = useAdminRouteStore()
@@ -1082,5 +1321,5 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     return res.success ? (res.data ?? null) : null
   }
 
-  return { routes, install, loadPermissions, loadMenus, seedMenus }
+  return { routes, install, loadPermissions, loadAvailableModules, loadMenus, seedMenus }
 }

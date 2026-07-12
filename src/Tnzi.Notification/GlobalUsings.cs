@@ -62,3 +62,4 @@ global using Tnzi.Services;
 global using Tnzi.Template;
 global using Tnzi.Template.Services;
 global using Tnzi.Utilities;
+global using Tnzi.Notification.Permissions;

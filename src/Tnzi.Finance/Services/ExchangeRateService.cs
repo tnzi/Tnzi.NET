@@ -12,7 +12,7 @@ public class ExchangeRateService : ApplicationService, IExchangeRateService
     public ExchangeRateService(
         IServiceProvider serviceProvider,
         IRepository<ExchangeRate, Guid> rateRepository,
-        IOptions<FinanceOptions> options,
+        IOptionsSnapshot<FinanceOptions> options,
         IExchangeRateProvider? provider = null)
         : base(serviceProvider)
     {

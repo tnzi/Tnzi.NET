@@ -35,10 +35,27 @@ export interface AdminSettingsSection {
   component: Component | (() => Promise<unknown>)
 }
 
+/**
+ * Realtime route for `Settings.Changed` broadcasts: when a Global setting whose
+ * key matches `prefix` changes (exact match or prefix match, e.g. 'Blog:'),
+ * `handler` runs in every open admin session — the consumer's twin of the
+ * built-in routes (Appearance:AdminTheme → theme reload, Chat:* → chat config).
+ */
+export interface AdminSettingsRealtimeRoute {
+  /** Key prefix to match (exact key or `startsWith` prefix, e.g. 'Blog:'). */
+  prefix: string
+  handler: (payload: { key: string; isRemoval?: boolean }) => void
+}
+
 export interface AdminSettingsConfig {
   sections?: AdminSettingsSection[]
   /** Hide built-in schema-driven groups by group key (e.g. 'ai-tools'). */
   hideGroups?: string[]
+  /**
+   * Consumer realtime routes for the app's own `[RuntimeSetting]` configs —
+   * re-fetch/apply live when a super admin changes them (no page reload).
+   */
+  realtime?: AdminSettingsRealtimeRoute[]
 }
 
 export const ADMIN_SETTINGS_CONFIG_KEY: InjectionKey<AdminSettingsConfig> = Symbol(

@@ -29,7 +29,7 @@ public interface IApiResult
 /// - 继承 Result&lt;T&gt;，自动获得服务层的所有功能
 /// </remarks>
 [StableApi(Since = "0.1.0")]
-public class ApiResult<T> : Result<T>, IApiResult
+public class ApiResult<T> : Result<T>, IApiResult, IConvertToActionResult
 {
     /// <summary>
     /// HTTP 状态码（非空，覆盖父类的可空 Code）
@@ -52,6 +52,16 @@ public class ApiResult<T> : Result<T>, IApiResult
     {
         Code = code;  // 确保 Code 非空
     }
+
+    /// <summary>
+    /// 将信封转换为携带真实 HTTP 状态码的 <see cref="ObjectResult"/>。
+    /// 机制：ASP.NET Core 的 ActionResultTypeMapper 会对实现 <see cref="IConvertToActionResult"/>
+    /// 的 action 返回值调用 Convert()（与 ActionResult&lt;T&gt; 同一机制），使控制器返回失败信封
+    /// （Code=404/500 等）时 HTTP 状态码与 body.code 一致，不再是以往恒 200 的双语义。
+    /// 返回的是 ObjectResult（Value 为本信封），后续内容协商与序列化行为不变。
+    /// </summary>
+    IActionResult IConvertToActionResult.Convert()
+        => new ObjectResult(this) { StatusCode = Code };
 
     /// <summary>
     /// 创建成功响应

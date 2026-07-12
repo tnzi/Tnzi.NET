@@ -41,6 +41,7 @@ public class DefaultFinanceExpenseAdminController : ApiAdminControllerBase
     /// 创建费用支出草稿
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.document.create")]
     public virtual async Task<ApiResult<ExpenseDto>> Create([FromBody] CreateExpenseDto request)
     {
         var result = await _service.CreateDraftAsync(request);
@@ -51,6 +52,7 @@ public class DefaultFinanceExpenseAdminController : ApiAdminControllerBase
     /// 更新费用支出草稿
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<ExpenseDto>> Update(Guid id, [FromBody] CreateExpenseDto request)
     {
         var result = await _service.UpdateDraftAsync(id, request);
@@ -61,6 +63,7 @@ public class DefaultFinanceExpenseAdminController : ApiAdminControllerBase
     /// 删除费用支出草稿
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.document.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await _service.DeleteDraftAsync(id);
@@ -71,6 +74,7 @@ public class DefaultFinanceExpenseAdminController : ApiAdminControllerBase
     /// 过账费用支出
     /// </summary>
     [HttpPost("{id:guid}/post")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<ExpenseDto>> Post(Guid id)
     {
         var result = await _service.PostAsync(id);
@@ -81,6 +85,7 @@ public class DefaultFinanceExpenseAdminController : ApiAdminControllerBase
     /// 作废费用支出
     /// </summary>
     [HttpPost("{id:guid}/void")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<ExpenseDto>> Void(Guid id)
     {
         var result = await _service.VoidAsync(id);

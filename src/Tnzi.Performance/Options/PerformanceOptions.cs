@@ -3,6 +3,10 @@ namespace Tnzi.Performance.Options;
 /// <summary>
 /// 性能分析配置选项
 /// </summary>
+[ConfigSection("Performance")]
+[RuntimeSettingGroup(Key = "web-performance", Module = "Web", DisplayName = "Performance Monitoring",
+    I18nKey = "admin.modules.system.settings.groups.webPerformance",
+    Icon = "mdi:speedometer", Order = 730, PermissionGroup = "system")]
 public class PerformanceOptions
 {
     /// <summary>
@@ -17,6 +21,9 @@ public class PerformanceOptions
     /// <summary>
     /// 获取或设置 慢请求阈值（毫秒）
     /// </summary>
+    [RuntimeSetting(Label = "Slow Request Threshold (ms)", I18n = "admin.modules.system.settings.fields.performanceSlowThreshold",
+        Type = SettingFieldType.Int, Min = 1,
+        Description = "Requests slower than this threshold (in milliseconds) are logged as slow-request warnings.")]
     public double? SlowRequestThresholdMs { get; set; } = 1000;
 
     /// <summary>
@@ -27,11 +34,17 @@ public class PerformanceOptions
     /// <summary>
     /// 获取或设置 是否记录请求大小
     /// </summary>
+    [RuntimeSetting(Label = "Record Request Size", I18n = "admin.modules.system.settings.fields.performanceRecordRequestSize",
+        Type = SettingFieldType.Boolean,
+        Description = "Record the request content length for each tracked request.")]
     public bool RecordRequestSize { get; set; } = true;
 
     /// <summary>
     /// 获取或设置 是否记录响应大小
     /// </summary>
+    [RuntimeSetting(Label = "Record Response Size", I18n = "admin.modules.system.settings.fields.performanceRecordResponseSize",
+        Type = SettingFieldType.Boolean,
+        Description = "Record the response byte count for each tracked request (wraps the response stream in a counting stream).")]
     public bool RecordResponseSize { get; set; } = true;
 
     /// <summary>

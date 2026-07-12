@@ -257,4 +257,21 @@ public class ChatAdminServiceTests : Integration.IntegrationTestBase
         logs.Data!.TotalCount.ShouldBe(0);
         logs.Data.Items.Count.ShouldBe(0);
     }
+
+    [Fact]
+    public async Task GetBroadcasts_Should_Project_Source_For_Programmatic_Notify()
+    {
+        var broadcast = ServiceProvider.GetRequiredService<IBroadcastService>();
+        await broadcast.NotifyUsersAsync(new[] { Guid.NewGuid() }, new ChatNotification
+        {
+            Content = "Programmatic notice",
+            Source = "BillingModule"
+        });
+
+        var logs = await Admin.GetBroadcastsAsync(new PagedQueryDto());
+        logs.Succeeded.ShouldBeTrue();
+        logs.Data!.TotalCount.ShouldBe(1);
+        logs.Data.Items[0].Source.ShouldBe("BillingModule");
+        logs.Data.Items[0].TargetType.ShouldBe(BroadcastTargetType.Users);
+    }
 }

@@ -80,7 +80,7 @@ public class RagPipelineIntegrationTests : IDisposable
 
         // 构建服务
         var serviceProvider = CreateMockServiceProvider();
-        var options = Microsoft.Extensions.Options.Options.Create(_ragOptions);
+        var options = new StaticOptionsMonitor<AIRagOptions>(_ragOptions);
 
         var plainTextExtractor = new PlainTextFileExtractor();
 

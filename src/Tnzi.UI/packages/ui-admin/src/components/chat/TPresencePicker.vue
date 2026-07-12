@@ -18,7 +18,7 @@
     <div class="t-presence-menu">
       <div class="t-presence-menu__head">{{ t('presence.myStatus') }}</div>
       <button
-        v-for="opt in STATUS_OPTIONS"
+        v-for="opt in visibleOptions"
         :key="opt.key"
         type="button"
         class="t-presence-menu__opt"
@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { NPopover } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
@@ -42,11 +42,16 @@ import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
 import TPresenceDot from './TPresenceDot.vue'
 
-defineProps<{
-  status: UserPresenceStatus
-  name?: string
-  avatarFileId?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    status: UserPresenceStatus
+    name?: string
+    avatarFileId?: string
+    /** Deployment toggle — false drops "Invisible" from the status menu. */
+    allowInvisible?: boolean
+  }>(),
+  { allowInvisible: true },
+)
 
 const emit = defineEmits<{ change: [status: UserPresenceStatus] }>()
 
@@ -62,6 +67,12 @@ const STATUS_OPTIONS: { key: UserPresenceStatus; labelKey: string }[] = [
   { key: UserPresenceStatus.Busy, labelKey: 'presence.busy' },
   { key: UserPresenceStatus.Invisible, labelKey: 'presence.invisible' },
 ]
+
+const visibleOptions = computed(() =>
+  props.allowInvisible
+    ? STATUS_OPTIONS
+    : STATUS_OPTIONS.filter((o) => o.key !== UserPresenceStatus.Invisible),
+)
 
 function select(key: UserPresenceStatus) {
   open.value = false

@@ -33,7 +33,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
         IRepository<KnowledgeDocument, Guid> docRepository,
         IRepository<KnowledgeBase, Guid> kbRepository,
         IEnumerable<ISearchPostProcessor> postProcessors,
-        IOptions<AIRagOptions> ragOptions,
+        IOptionsSnapshot<AIRagOptions> ragOptions,
         IQueryRewriter? queryRewriter = null,
         IRelevanceGrader? relevanceGrader = null,
         IGraphSearchService? graphSearchService = null,

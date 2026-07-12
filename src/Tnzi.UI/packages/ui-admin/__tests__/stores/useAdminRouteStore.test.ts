@@ -53,14 +53,30 @@ describe('useAdminRouteStore', () => {
     expect(store.authRoutes.map((r) => r.name)).toContain('secret')
   })
 
-  it('menus: fail-open when no user is loaded (permission source uninitialised)', () => {
+  it('menus: fail-open while logged IN but permissions still loading (token set, userInfo null)', () => {
     const store = useAdminRouteStore()
     store.setAuthRoutes(authRoutes)
-    // not logged in → show everything so the sidebar is never blank before the
-    // permission list is fetched (and apps that never wire permissions still work)
+    // A session exists (token set on login / restore) but the permission list
+    // hasn't arrived yet (userInfo still null) → show everything so the sidebar
+    // is never blank during the async load, and apps that wire auth but never
+    // call loadPermissions still work.
+    useAdminAuthStore().setToken('t')
     const names = store.menus.map((m) => m.key)
     expect(names).toContain('users')
     expect(names).toContain('secret')
+  })
+
+  it('menus: logged OUT (no token, no userInfo) does NOT fail-open — collapses to public entries', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(authRoutes)
+    // No session at all (post-logout / never authenticated). Fail-open here is
+    // what flashed EVERY menu for the 1-2s between clearing the store and the
+    // login redirect, and let a freshly-switched role transiently see the full
+    // menu. So the menu must collapse to only the public (no-permission) routes.
+    const names = store.menus.map((m) => m.key)
+    expect(names).not.toContain('users') // requires user.view
+    expect(names).not.toContain('secret') // requires admin.super
+    expect(names).toContain('public') // no requirement → still shown
   })
 
   it('menus: filters by singular meta.permission once a user is loaded', () => {
@@ -121,7 +137,11 @@ describe('useAdminRouteStore', () => {
     expect(store.menus.map((m) => m.key)).not.toContain('group')
   })
 
-  it('deniedRouteNames: empty before a user is loaded (fail-open, matches menus)', () => {
+  it('deniedRouteNames: empty before a user is loaded (deny nothing until permissions load)', () => {
+    // deniedRouteNames only drives tab pruning for a logged-in privilege
+    // downgrade; it intentionally denies nothing before the permission list
+    // loads (unlike `menus`, which now collapses when logged out). On logout we
+    // redirect away, so there is nothing to prune.
     const store = useAdminRouteStore()
     store.setAuthRoutes(authRoutes)
     expect(store.deniedRouteNames.size).toBe(0)
@@ -295,5 +315,127 @@ describe('useAdminRouteStore', () => {
     expect(store.menus.find((m) => m.key === 'users')?.label).toBe('Users')
     store.setBackendMenus([node({ menuKey: 'users', name: 'Live Renamed' })])
     expect(store.menus.find((m) => m.key === 'users')?.label).toBe('Live Renamed')
+  })
+
+  // ── module-availability gating (meta.moduleGate + setAvailableModules) ──────
+  const gatedRoutes: AdminRouteRecord[] = [
+    { name: 'dashboard', path: '/dashboard', meta: { title: 'Dashboard', order: 0 } }, // no moduleGate → never gated
+    {
+      name: 'finance',
+      path: '/finance',
+      meta: { title: 'Finance', order: 1, moduleGate: true },
+      children: [
+        { name: 'finance.accounts', path: 'accounts', meta: { title: 'Accounts', permission: 'finance.account.view' } },
+      ],
+    },
+    {
+      name: 'identity',
+      path: '/identity',
+      meta: { title: 'Identity', order: 2, moduleGate: true },
+      children: [
+        { name: 'identity.users', path: 'users', meta: { title: 'Users', permission: 'user.view' } },
+      ],
+    },
+  ]
+
+  it('module gate: null signal is fail-open (gated modules stay visible)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    // availableModules never set → null → no gating
+    const names = store.menus.map((m) => m.key)
+    expect(names).toContain('finance')
+    expect(names).toContain('identity')
+  })
+
+  it('module gate: hides a gated module the backend did NOT load', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    store.setAvailableModules(new Set(['identity'])) // finance not loaded
+    const names = store.menus.map((m) => m.key)
+    expect(names).not.toContain('finance')
+    expect(names).toContain('identity')
+    expect(names).toContain('dashboard') // no moduleGate → never gated
+  })
+
+  it('module gate: holds for SUPER USERS too (orthogonal to permissions)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true) // super user — bypasses permission filter, NOT the module gate
+    store.setAvailableModules(new Set(['identity']))
+    expect(store.menus.map((m) => m.key)).not.toContain('finance')
+  })
+
+  it('module gate: never gates a node without meta.moduleGate', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    store.setAvailableModules(new Set([])) // nothing loaded
+    const names = store.menus.map((m) => m.key)
+    expect(names).toContain('dashboard') // survives even an empty signal
+    expect(names).not.toContain('finance')
+    expect(names).not.toContain('identity')
+  })
+
+  it('module gate: reacts to setAvailableModules', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    expect(store.menus.map((m) => m.key)).toContain('finance')
+    store.setAvailableModules(new Set(['identity']))
+    expect(store.menus.map((m) => m.key)).not.toContain('finance')
+    store.setAvailableModules(null) // back to fail-open
+    expect(store.menus.map((m) => m.key)).toContain('finance')
+  })
+
+  it('module gate: string moduleGate matches an explicit short name (normalized)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes([
+      { name: 'blog', path: '/blog', meta: { title: 'Blog', order: 1, moduleGate: 'Acme.Blog' } },
+    ])
+    login([], true)
+    store.setAvailableModules(new Set(['identity'])) // no acme-blog
+    expect(store.menus.map((m) => m.key)).not.toContain('blog')
+    store.setAvailableModules(new Set(['acme-blog'])) // 'Acme.Blog' normalizes to 'acme-blog'
+    expect(store.menus.map((m) => m.key)).toContain('blog')
+  })
+
+  it('unavailableRouteNames: empty when the signal is unavailable (fail-open)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    expect(store.unavailableRouteNames.size).toBe(0)
+  })
+
+  it('unavailableRouteNames: collects a gated module + all descendants', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    store.setAvailableModules(new Set(['identity']))
+    const denied = store.unavailableRouteNames
+    expect(denied.has('finance')).toBe(true)
+    expect(denied.has('finance.accounts')).toBe(true)
+    expect(denied.has('identity')).toBe(false)
+    expect(denied.has('identity.users')).toBe(false)
+    expect(denied.has('dashboard')).toBe(false)
+  })
+
+  it('unavailableRouteNames: holds for super users (orthogonal to permissions)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    login([], true)
+    store.setAvailableModules(new Set([]))
+    expect(store.unavailableRouteNames.has('finance')).toBe(true)
+    expect(store.unavailableRouteNames.has('identity')).toBe(true)
+  })
+
+  it('clearRoutes resets the module signal to fail-open (null)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(gatedRoutes)
+    store.setAvailableModules(new Set(['identity']))
+    expect(store.availableModules).not.toBeNull()
+    store.clearRoutes()
+    expect(store.availableModules).toBeNull()
   })
 })

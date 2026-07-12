@@ -1,7 +1,7 @@
 <template>
   <TCrudPage :state="crud" :all-columns="accountColumns" :title="title" :row-actions="rowActions" :translate="t">
     <template #toolbarRight>
-      <NPopconfirm @positive-click="seedDefault">
+      <NPopconfirm v-if="can('finance.account.create')" @positive-click="seedDefault">
         <template #trigger>
           <NButton size="small">{{ t('actions.seedDefault') }}</NButton>
         </template>
@@ -25,6 +25,7 @@ import { h, onMounted, ref } from 'vue'
 import { NButton, NPopconfirm, NSelect, NSwitch } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge, AccountRootType, AccountSystemRole, CashFlowActivity, type AccountTreeDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -36,6 +37,7 @@ import { accountColumns, accountFormSchema, type AccountRow } from './account-co
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.accounts')
 const message = useSafeMessage()
+const { can } = usePermissionGuard()
 
 /** Form model → backend payload (empty-string sentinel selects → null, blanks → null). */
 function toPayload(d: Record<string, unknown>) {
@@ -57,6 +59,7 @@ function toPayload(d: Record<string, unknown>) {
 
 const crud = useCrudPage<AccountRow>({
   pageId: 'finance.accounts',
+  permission: 'finance.account',
   columns: accountColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.accounts.fetch(q),

@@ -29,7 +29,7 @@ public class MiddlewarePipelineIntegrationTests
         {
             // 注册 InputGuardrailMiddleware 需要的依赖
             services.AddSingleton<IInputGuardrail>(sp =>
-                new MaxLengthGuardrail(MsOptions.Create(sp.GetRequiredService<IOptions<AIOptions>>().Value)));
+                new MaxLengthGuardrail(sp.GetRequiredService<IOptionsMonitor<AIOptions>>()));
             services.AddSingleton<IEnumerable<IOutputGuardrail>>(Array.Empty<IOutputGuardrail>());
             services.AddSingleton<GuardrailRunner>();
             services.AddSingleton<IAiMiddleware>(sp =>
@@ -269,7 +269,7 @@ public class MiddlewarePipelineIntegrationTests
             services.AddSingleton<IAiMiddleware>(sp =>
                 new HistoryMiddleware(
                     sp.GetRequiredService<IAgentThreadInternalService>(),
-                    sp.GetRequiredService<IOptions<AIOptions>>(),
+                    sp.GetRequiredService<IOptionsMonitor<AIOptions>>(),
                     NullLogger<HistoryMiddleware>.Instance));
         }
 
@@ -525,7 +525,7 @@ public class MiddlewarePipelineIntegrationTests
         {
             // InputGuardrail
             services.AddSingleton<IInputGuardrail>(sp =>
-                new MaxLengthGuardrail(MsOptions.Create(sp.GetRequiredService<IOptions<AIOptions>>().Value)));
+                new MaxLengthGuardrail(sp.GetRequiredService<IOptionsMonitor<AIOptions>>()));
             services.AddSingleton<IEnumerable<IOutputGuardrail>>(Array.Empty<IOutputGuardrail>());
             services.AddSingleton<GuardrailRunner>();
             services.AddSingleton<IAiMiddleware>(sp =>

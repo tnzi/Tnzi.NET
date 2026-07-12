@@ -12,7 +12,7 @@ public class DefaultTaxCalculator : ITaxCalculator
     private readonly IReadOnlyRepository<TaxCode, Guid> _codeRepository;
     private readonly FinanceOptions _options;
 
-    public DefaultTaxCalculator(IReadOnlyRepository<TaxCode, Guid> codeRepository, IOptions<FinanceOptions> options)
+    public DefaultTaxCalculator(IReadOnlyRepository<TaxCode, Guid> codeRepository, IOptionsSnapshot<FinanceOptions> options)
     {
         _codeRepository = Check.NotNull(codeRepository);
         _options = Check.NotNull(options).Value;

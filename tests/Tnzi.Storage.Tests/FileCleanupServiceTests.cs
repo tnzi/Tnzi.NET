@@ -37,7 +37,6 @@ public class FileCleanupServiceTests
 
     private FileCleanupService CreateService()
     {
-        var optionsWrapper = Microsoft.Extensions.Options.Options.Create(_options);
         return new FileCleanupService(
             _mockFileRepository.Object,
             _mockReferenceRepository.Object,
@@ -45,7 +44,7 @@ public class FileCleanupServiceTests
             _mockChunkRepository.Object,
             _mockStorage.Object,
             _mockCurrentTenant.Object,
-            optionsWrapper,
+            new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object,
             multiTenancyOptions: null);
     }

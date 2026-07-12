@@ -38,7 +38,7 @@ public class SkillRegistryTests : IDisposable
 
     private FileSystemSkillStore CreateFileStore()
     {
-        var options = Microsoft.Extensions.Options.Options.Create(new AIOptions
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
             ContextProviders = new ContextProvidersOptions
             {

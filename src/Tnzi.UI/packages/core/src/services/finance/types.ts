@@ -14,6 +14,7 @@ import {
   FinancePartyType,
   SettlementDocType,
   ItemType,
+  ReconciliationStatus,
 } from './metadata';
 
 export { AccountRootType, AccountSystemRole, CashFlowActivity, JournalEntryStatus };
@@ -97,6 +98,8 @@ export interface JournalLineDto {
   partyType?: string | null;
   partyId?: string | null;
   dimensions?: string | null;
+  /** Structured tax dimension (tax lines only; drives the tax summary report) */
+  taxRateId?: string | null;
 }
 
 export interface JournalEntryDto {
@@ -280,6 +283,12 @@ export interface GeneralLedgerLineDto {
   credit: number;
   partyType?: string | null;
   partyId?: string | null;
+  /** Source document type from the entry header (register back-link) */
+  sourceType?: string | null;
+  /** Source document id from the entry header */
+  sourceId?: string | null;
+  /** Signed running balance (debit positive); continuous across pages */
+  runningBalance: number;
 }
 
 export interface GeneralLedgerReportDto {
@@ -297,6 +306,57 @@ export interface GeneralLedgerReportDto {
     pageIndex: number;
     pageSize: number;
   };
+}
+
+/** Indirect-method cash flow statement (net profit + balance-sheet movements by CashFlowActivity) */
+export interface CashFlowReportDto {
+  from: string;
+  to: string;
+  baseCurrency: string;
+  /** Starting point of the indirect method */
+  netProfit: number;
+  operating: ReportAccountRowDto[];
+  investing: ReportAccountRowDto[];
+  financing: ReportAccountRowDto[];
+  /** Accounts with no CashFlowActivity classification (fix them on the chart of accounts) */
+  unclassified: ReportAccountRowDto[];
+  /** = netProfit + operating adjustment rows */
+  totalOperating: number;
+  totalInvesting: number;
+  totalFinancing: number;
+  totalUnclassified: number;
+  netCashFlow: number;
+  openingCash: number;
+  closingCash: number;
+  /** GL movement of CashEquivalent accounts (closingCash - openingCash) */
+  cashMovement: number;
+  /** Identity check row: netCashFlow - cashMovement, expected 0 */
+  checkDifference: number;
+}
+
+/** Per-rate tax filing row (output = TaxPayable credits, input = TaxReceivable debits) */
+export interface TaxSummaryRowDto {
+  taxRateId: string;
+  /** Null when the rate has been deleted */
+  rateName?: string | null;
+  rate?: number | null;
+  agencyId?: string | null;
+  agencyName?: string | null;
+  outputTax: number;
+  inputTax: number;
+  /** outputTax - inputTax; positive = payable */
+  netTax: number;
+}
+
+/** Tax filing summary (pure GL aggregation over lines carrying taxRateId) */
+export interface TaxSummaryReportDto {
+  from: string;
+  to: string;
+  baseCurrency: string;
+  rows: TaxSummaryRowDto[];
+  totalOutputTax: number;
+  totalInputTax: number;
+  totalNetTax: number;
 }
 
 // ── P2: parties, catalog, tax model ─────────────────────────────
@@ -599,12 +659,15 @@ export interface ExpenseDto extends FinanceDocumentBaseDto {
   paidFromAccountId: string;
   /** Resolved paid-from account name (detail only; null in list projection). */
   paidFromAccountName?: string | null;
+  /** Settlement instrument (free-form; suggested values in PAYMENT_METHODS). */
+  paymentMethod?: string | null;
   lines: ExpenseLineDto[];
 }
 
 export interface CreateExpenseDto {
   vendorId?: string | null;
   paidFromAccountId: string;
+  paymentMethod?: string | null;
   docDate: string;
   currency?: string | null;
   exchangeRate?: number | null;
@@ -612,7 +675,9 @@ export interface CreateExpenseDto {
   lines: CreateExpenseLineDto[];
 }
 
-export type ExpenseQueryDto = BillQueryDto;
+export interface ExpenseQueryDto extends BillQueryDto {
+  paymentMethod?: string;
+}
 
 export interface PaymentEntryDto {
   id: string;
@@ -629,6 +694,8 @@ export interface PaymentEntryDto {
   baseAmount: number;
   appliedTotal: number;
   depositToAccountId?: string | null;
+  /** Settlement instrument (free-form; suggested values in PAYMENT_METHODS). */
+  paymentMethod?: string | null;
   reference?: string | null;
   memo?: string | null;
   sourceType?: string | null;
@@ -647,6 +714,7 @@ export interface CreatePaymentEntryDto {
   exchangeRate?: number | null;
   amount: number;
   depositToAccountId?: string | null;
+  paymentMethod?: string | null;
   reference?: string | null;
   memo?: string | null;
 }
@@ -655,6 +723,7 @@ export interface PaymentEntryQueryDto extends PagedQueryDto {
   keyword?: string;
   status?: FinanceDocumentStatus;
   direction?: PaymentDirection;
+  paymentMethod?: string;
   partyId?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -669,6 +738,7 @@ export interface ExternalPaymentIngestDto {
   currency?: string | null;
   exchangeRate?: number | null;
   depositToAccountId?: string | null;
+  paymentMethod?: string | null;
   reference?: string | null;
   memo?: string | null;
   autoPost?: boolean;
@@ -713,6 +783,28 @@ export interface OpenDocumentDto {
   outstanding: number;
 }
 
+/** Batch settlement (Pay Bills / Receive Payments): one payment per (party, currency) group, posted and applied atomically. */
+export interface BatchPaymentTargetDto {
+  docType: SettlementDocType;
+  docId: string;
+  amount: number;
+}
+
+export interface BatchPaymentDto {
+  docDate: string;
+  /** Paid-from account for bills (required); deposit-to account for invoices (falls back to undeposited funds). */
+  fundsAccountId?: string | null;
+  paymentMethod?: string | null;
+  reference?: string | null;
+  memo?: string | null;
+  targets: BatchPaymentTargetDto[];
+}
+
+export interface BatchPaymentResultDto {
+  payments: PaymentEntryDto[];
+  applications: PaymentApplicationDto[];
+}
+
 export interface AgingBucketsDto {
   current: number;
   days1To30: number;
@@ -732,4 +824,103 @@ export interface AgingReportDto {
   baseCurrency: string;
   rows: AgingRowDto[];
   totals: AgingBucketsDto;
+}
+
+// ── P3a: banking domain (transfers + reconciliation) ────────────
+
+/** Funds transfer document (bank/cash account to account) */
+export interface TransferDto {
+  id: string;
+  number?: string | null;
+  status: FinanceDocumentStatus;
+  fromAccountId: string;
+  /** Filled by the service ("code name") */
+  fromAccountName?: string | null;
+  toAccountId: string;
+  toAccountName?: string | null;
+  transferDate: string;
+  currency: string;
+  exchangeRate: number;
+  amount: number;
+  baseAmount: number;
+  reference?: string | null;
+  memo?: string | null;
+  journalEntryId?: string | null;
+  voidJournalEntryId?: string | null;
+  concurrencyStamp: string;
+  creationTime: string;
+}
+
+export interface CreateTransferDto {
+  fromAccountId: string;
+  toAccountId: string;
+  transferDate: string;
+  /** Null = base currency */
+  currency?: string | null;
+  exchangeRate?: number | null;
+  amount: number;
+  reference?: string | null;
+  memo?: string | null;
+}
+
+export interface TransferQueryDto extends PagedQueryDto {
+  status?: FinanceDocumentStatus;
+  accountId?: string;
+  from?: string;
+  to?: string;
+}
+
+/** Bank reconciliation header */
+export interface ReconciliationDto {
+  id: string;
+  accountId: string;
+  accountName?: string | null;
+  statementDate: string;
+  statementEndingBalance: number;
+  status: ReconciliationStatus;
+  completedTime?: string | null;
+  note?: string | null;
+  lineCount: number;
+  /** Cumulative cleared net amount for the account (all reconciliations) */
+  clearedBalance: number;
+  /** statementEndingBalance - clearedBalance; must be 0 to complete */
+  difference: number;
+  concurrencyStamp: string;
+  creationTime: string;
+}
+
+export interface CreateReconciliationDto {
+  accountId: string;
+  statementDate: string;
+  statementEndingBalance: number;
+  note?: string | null;
+}
+
+export interface ReconciliationQueryDto extends PagedQueryDto {
+  accountId?: string;
+  status?: ReconciliationStatus;
+}
+
+/** Candidate/selected ledger line on the reconciliation worksheet */
+export interface ReconciliationCandidateLineDto {
+  journalLineId: string;
+  journalEntryId: string;
+  entryNumber?: string | null;
+  postingDate: string;
+  memo?: string | null;
+  debit: number;
+  credit: number;
+  isSelected: boolean;
+}
+
+export interface ReconciliationWorksheetDto {
+  reconciliationId: string;
+  statementEndingBalance: number;
+  clearedBalance: number;
+  difference: number;
+  lines: ReconciliationCandidateLineDto[];
+}
+
+export interface SetReconciliationLinesDto {
+  journalLineIds: string[];
 }

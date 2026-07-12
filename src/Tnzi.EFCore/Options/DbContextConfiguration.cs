@@ -47,6 +47,35 @@ public class DbContextConfiguration
     public ConnectionPoolOptions? ConnectionPool { get; set; }
 
     /// <summary>
+    /// 是否为该 DbContext 启用瞬时错误重试（retrying execution strategy）。默认 false。
+    /// ⚠️ 启用后与框架 UnitOfWork 的手动事务互斥：UoW 的手动 BeginTransaction 会在运行时抛异常。
+    /// 若该 DbContext 需要重试策略，应关闭其全局 UoW 事务，或改用 IExecutionStrategy.ExecuteAsync 显式包裹写操作。
+    /// 详见 docs/modules/efcore.md「重试与 Execution Strategy」。SQLite 无重试策略，此项对 SQLite 无效。
+    /// </summary>
+    public bool EnableRetryOnFailure { get; set; }
+
+    /// <summary>
+    /// 最大重试次数。为 null 时使用 provider 默认值（EF Core 默认 6）。
+    /// 仅当 <see cref="EnableRetryOnFailure"/> 为 true 时生效。
+    /// </summary>
+    public int? MaxRetryCount { get; set; }
+
+    /// <summary>
+    /// 数据库命令超时（秒）。为 null 时使用 provider 默认值。
+    /// </summary>
+    public int? CommandTimeout { get; set; }
+
+    /// <summary>
+    /// 构建传递给数据库提供者配置器的连接级选项（重试策略、命令超时）。
+    /// </summary>
+    public DbProviderConfigureOptions BuildProviderConfigureOptions() => new()
+    {
+        EnableRetryOnFailure = EnableRetryOnFailure,
+        MaxRetryCount = MaxRetryCount,
+        CommandTimeout = CommandTimeout
+    };
+
+    /// <summary>
     /// 获取最终的连接字符串（包含连接池配置和环境变量展开）
     /// </summary>
     /// <param name="configuration">配置对象（可选，用于环境变量和占位符展开）</param>

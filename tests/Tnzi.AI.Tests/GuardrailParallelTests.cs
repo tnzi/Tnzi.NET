@@ -7,12 +7,12 @@ namespace Tnzi.AI.Tests;
 /// </summary>
 public class GuardrailParallelTests
 {
-    private static IOptions<AIOptions> CreateOptions(Action<GuardrailsOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptions(Action<GuardrailsOptions>? configure = null)
     {
         var options = new AIOptions();
         options.Guardrails.Enabled = true;
         configure?.Invoke(options.Guardrails);
-        return Microsoft.Extensions.Options.Options.Create(options);
+        return new StaticOptionsMonitor<AIOptions>(options);
     }
 
     #region Sequential Mode (向后兼容验证)

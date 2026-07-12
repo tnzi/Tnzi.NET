@@ -41,6 +41,7 @@ public class DefaultFinanceJournalEntryAdminController : ApiAdminControllerBase
     /// 创建凭证草稿
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "finance.journal.create")]
     public virtual async Task<ApiResult<JournalEntryDto>> CreateDraft([FromBody] CreateJournalEntryDto request)
     {
         var result = await _journalEntryService.CreateDraftAsync(request);
@@ -51,6 +52,7 @@ public class DefaultFinanceJournalEntryAdminController : ApiAdminControllerBase
     /// 更新凭证草稿
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.journal.update")]
     public virtual async Task<ApiResult<JournalEntryDto>> UpdateDraft(Guid id, [FromBody] CreateJournalEntryDto request)
     {
         var result = await _journalEntryService.UpdateDraftAsync(id, request);
@@ -61,6 +63,7 @@ public class DefaultFinanceJournalEntryAdminController : ApiAdminControllerBase
     /// 删除凭证草稿
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.journal.delete")]
     public virtual async Task<ApiResult> DeleteDraft(Guid id)
     {
         var result = await _journalEntryService.DeleteDraftAsync(id);
@@ -71,6 +74,7 @@ public class DefaultFinanceJournalEntryAdminController : ApiAdminControllerBase
     /// 过账
     /// </summary>
     [HttpPost("{id:guid}/post")]
+    [ApiAuthorize(PermissionName = "finance.journal.update")]
     public virtual async Task<ApiResult<JournalEntryDto>> Post(Guid id)
     {
         var result = await _journalEntryService.PostAsync(id);
@@ -81,6 +85,7 @@ public class DefaultFinanceJournalEntryAdminController : ApiAdminControllerBase
     /// 冲销
     /// </summary>
     [HttpPost("{id:guid}/reverse")]
+    [ApiAuthorize(PermissionName = "finance.journal.update")]
     public virtual async Task<ApiResult<JournalEntryDto>> Reverse(Guid id, [FromBody] ReverseJournalEntryDto? request)
     {
         var result = await _journalEntryService.ReverseAsync(id, request ?? new ReverseJournalEntryDto());

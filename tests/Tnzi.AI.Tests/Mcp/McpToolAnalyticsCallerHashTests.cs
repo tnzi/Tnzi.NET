@@ -22,7 +22,7 @@ public class McpToolAnalyticsCallerHashTests
             EnableAuditLog = true
         };
         return new McpServerSecurityMiddleware(
-            MsOptions.Create(opts),
+            new StaticOptionsMonitor<McpServerOptions>(opts),
             NullLogger<McpServerSecurityMiddleware>.Instance,
             sp);
     }
@@ -234,7 +234,7 @@ public class McpToolAnalyticsCallerHashTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            MsOptions.Create(options),
+            new StaticOptionsMonitor<McpServerOptions>(options),
             security);
 
         var context = new DefaultHttpContext();

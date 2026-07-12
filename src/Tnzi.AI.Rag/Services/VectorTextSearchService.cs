@@ -34,7 +34,7 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
         IRepository<KnowledgeDocument, Guid> docRepository,
         IRepository<KnowledgeBase, Guid> kbRepository,
         IEnumerable<ISearchPostProcessor> postProcessors,
-        IOptions<AIRagOptions> ragOptions,
+        IOptionsSnapshot<AIRagOptions> ragOptions,
         IQueryRewriter? queryRewriter = null,
         IRelevanceGrader? relevanceGrader = null) : base(serviceProvider)
     {

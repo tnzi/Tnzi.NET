@@ -7,7 +7,7 @@ namespace Tnzi.AspNetCore.Options;
 [ConfigSection("AspNetCore:ExceptionHandling")]
 [RuntimeSettingGroup(Key = "web-observability", Module = "Web", DisplayName = "Request Observability",
     I18nKey = "admin.modules.system.settings.groups.webObservability",
-    Icon = "mdi:chart-timeline-variant", Order = 700)]
+    Icon = "mdi:chart-timeline-variant", Order = 700, PermissionGroup = "system")]
 public class ExceptionHandlingOptions
 {
     /// <summary>
@@ -18,8 +18,11 @@ public class ExceptionHandlingOptions
     public bool ShowDetailsInDevelopment { get; set; } = true;
 
     /// <summary>
-    /// 是否记录请求体（可能包含敏感数据）
+    /// 是否在未处理异常发生时记录请求体（可能包含敏感数据）
     /// </summary>
+    [RuntimeSetting(Label = "Log Request Body On Exception", I18n = "admin.modules.system.settings.fields.exceptionLogRequestBody",
+        Type = SettingFieldType.Boolean,
+        Description = "When enabled, the request body is captured and written to the server log alongside any unhandled exception. Useful for diagnosing failures, but the body may contain sensitive data (passwords, tokens) - keep disabled in production unless needed. Bodies are capped at 8 KB and only buffered when this is on.")]
     public bool LogRequestBody { get; set; } = false;
 
     /// <summary>
@@ -47,6 +50,9 @@ public class ExceptionHandlingOptions
     /// <summary>
     /// 是否在响应中包含上下文数据
     /// </summary>
+    [RuntimeSetting(Label = "Include Context Data In Response", I18n = "admin.modules.system.settings.fields.exceptionIncludeContextData",
+        Type = SettingFieldType.Boolean,
+        Description = "When enabled, BusinessException/InfrastructureException ContextData is included in error responses. This can expose internal identifiers or state - review carefully and prefer disabling in production.")]
     public bool IncludeContextData { get; set; } = true;
 
     /// <summary>

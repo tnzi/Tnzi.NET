@@ -6,14 +6,14 @@ namespace Tnzi.AI.Middleware;
 public class HistoryMiddleware : IAiMiddleware
 {
     private readonly IAgentThreadInternalService _threadService;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<HistoryMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.History;
 
     public HistoryMiddleware(
         IAgentThreadInternalService threadService,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILogger<HistoryMiddleware> logger)
     {
         _threadService = Check.NotNull(threadService);
@@ -33,7 +33,7 @@ public class HistoryMiddleware : IAiMiddleware
         {
             try
             {
-                var maxLoaded = _options.Value.History.Store.MaxLoadedMessages;
+                var maxLoaded = _options.CurrentValue.History.Store.MaxLoadedMessages;
                 var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
                 if (history.Count > 0)
                 {
@@ -139,7 +139,7 @@ public class HistoryMiddleware : IAiMiddleware
         {
             try
             {
-                var maxLoaded = _options.Value.History.Store.MaxLoadedMessages;
+                var maxLoaded = _options.CurrentValue.History.Store.MaxLoadedMessages;
                 var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
                 if (history.Count > 0)
                 {
@@ -394,7 +394,7 @@ public class HistoryMiddleware : IAiMiddleware
 
     private void ApplyToolResultBudget(List<ChatMessage> messages, Guid? threadId)
     {
-        var budgetOptions = _options.Value.ToolResultBudget;
+        var budgetOptions = _options.CurrentValue.ToolResultBudget;
         if (!budgetOptions.Enabled)
         {
             return;

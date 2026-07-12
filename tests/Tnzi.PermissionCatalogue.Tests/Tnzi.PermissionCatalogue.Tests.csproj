@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+  <!-- Every framework module that declares permission codes in-module - this
+       dedicated project exists so the ecosystem-wide assembly closure never
+       leaks into any module's own integration tests (entity auto-discovery
+       scans loaded assemblies). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Hangfire\Tnzi.Hangfire.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Localization\Tnzi.Localization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Performance\Tnzi.Performance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.SignalR\Tnzi.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.HealthChecks\Tnzi.HealthChecks.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Feature\Tnzi.Feature.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Storage\Tnzi.Storage.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Audit\Tnzi.Audit.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Chat\Tnzi.Chat.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment\Tnzi.Payment.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" />
+  </ItemGroup>
+
+</Project>

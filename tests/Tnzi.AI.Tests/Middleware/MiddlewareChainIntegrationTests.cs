@@ -14,7 +14,7 @@ public class MiddlewareChainIntegrationTests
     public void RetryMiddleware_Order_IsCorrect()
     {
         var mw = new RetryMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new AIOptions()),
+            new StaticOptionsMonitor<AIOptions>(new AIOptions()),
             NullLogger<RetryMiddleware>.Instance);
         mw.Order.ShouldBe(AiMiddlewareOrders.Retry);
     }
@@ -40,7 +40,7 @@ public class MiddlewareChainIntegrationTests
     public void SubAgentLimitMiddleware_Order_IsCorrect()
     {
         var mw = new SubAgentLimitMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SubAgentOptions()),
+            new StaticOptionsMonitor<SubAgentOptions>(new SubAgentOptions()),
             NullLogger<SubAgentLimitMiddleware>.Instance);
         mw.Order.ShouldBe(AiMiddlewareOrders.SubAgentLimit);
     }

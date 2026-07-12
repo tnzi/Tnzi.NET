@@ -20,10 +20,9 @@ public class AuthorizationOptionsValidator : OptionsValidatorBase<AuthorizationO
     /// <inheritdoc />
     protected override void ValidateOptions(AuthorizationOptions options, List<string> errors)
     {
-        // 管理员角色列表形态校验。空 List 是合法（= 不启用该档位），但若
-        // 用户*提供*了 List 又写了垃圾值则提前 fail。两档共用同一套规则。
+        // 超管角色列表形态校验。空 List 是合法（= 不启用超管短路），但若
+        // 用户*提供*了 List 又写了垃圾值则提前 fail。
         ValidateRoleList(options.SuperAdminRoles, "Authorization.SuperAdminRoles", errors);
-        ValidateRoleList(options.BusinessAdminRoles, "Authorization.BusinessAdminRoles", errors);
 
         // PermissionCategoryOverrides 键形态校验（值是枚举，绑定阶段已保证合法）。
         if (options.PermissionCategoryOverrides is { Count: > 0 })

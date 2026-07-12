@@ -6,7 +6,7 @@ namespace Tnzi.AspNetCore.Options;
 [ConfigSection("AspNetCore:SecurityHeaders")]
 [RuntimeSettingGroup(Key = "web-security-headers", Module = "Web", DisplayName = "Security Headers",
     I18nKey = "admin.modules.system.settings.groups.webSecurityHeaders",
-    Icon = "mdi:shield-lock-outline", Order = 710)]
+    Icon = "mdi:shield-lock-outline", Order = 710, PermissionGroup = "system")]
 public class SecurityHeadersOptions
 {
     /// <summary>
@@ -71,15 +71,24 @@ public class SecurityHeadersOptions
     /// <summary>
     /// HSTS IncludeSubDomains
     /// </summary>
+    [RuntimeSetting(Label = "HSTS Include Subdomains", I18n = "admin.modules.system.settings.fields.securityHstsIncludeSubDomains",
+        Type = SettingFieldType.Boolean,
+        Description = "Apply the Strict-Transport-Security policy to all subdomains as well as the base domain.")]
     public bool HstsIncludeSubDomains { get; set; } = false;
 
     /// <summary>
     /// HSTS Preload
     /// </summary>
+    [RuntimeSetting(Label = "HSTS Preload", I18n = "admin.modules.system.settings.fields.securityHstsPreload",
+        Type = SettingFieldType.Boolean,
+        Description = "WARNING: enabling 'preload' signals intent to submit this domain to the browser HSTS preload list (hstspreload.org). Once preloaded, browsers hard-force HTTPS for this domain and every subdomain; removal is extremely slow and effectively irreversible (months of propagation, can hard-break access). Never enable in production unless you fully understand and accept this commitment.")]
     public bool HstsPreload { get; set; } = false;
 
     /// <summary>
     /// Permissions-Policy
     /// </summary>
+    [RuntimeSetting(Label = "Permissions-Policy", I18n = "admin.modules.system.settings.fields.securityPermissionsPolicy",
+        Type = SettingFieldType.Text,
+        Description = "Permissions-Policy response header value controlling access to browser features (e.g. 'geolocation=(), camera=()'). Leave empty to omit the header.")]
     public string? PermissionsPolicy { get; set; }
 }

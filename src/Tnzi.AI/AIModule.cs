@@ -69,6 +69,11 @@ public partial class AIModule : TnziApplicationModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // Code-declared permissions for this module's admin surfaces - the
+        // Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        context.Services.AddTransient<IPermissionDefinitionProvider, AIPermissions>();
+
         var services = context.Services;
 
         // 引擎服务注册 — 拆分到 AIModule.Registration.cs（partial）。

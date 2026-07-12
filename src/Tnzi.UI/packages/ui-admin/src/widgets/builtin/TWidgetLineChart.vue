@@ -24,12 +24,15 @@ interface Props {
   area?: boolean
   /** Smooth (spline) lines. Default `true`. */
   smooth?: boolean
+  /** Line colours — cycles through per series. Defaults to the echarts theme palette. */
+  palette?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   height: 240,
   area: true,
   smooth: true,
+  palette: undefined,
 })
 
 const heightStyle = computed(() => ({ height: `${props.height}px` }))
@@ -43,6 +46,7 @@ function buildOption(mode: 'light' | 'dark'): EChartsOption {
   const gridLine = mode === 'dark' ? '#3a3a3a' : '#eee'
   return {
     backgroundColor: 'transparent',
+    color: props.palette,
     grid: { left: 36, right: 16, top: 28, bottom: 28 },
     tooltip: { trigger: 'axis' },
     legend: { right: 0, top: 0, textStyle: { color: textColor } },
@@ -73,7 +77,7 @@ function buildOption(mode: 'light' | 'dark'): EChartsOption {
 // theme mode only, so explicit setOption() keeps the chart in sync with
 // reactive data without relying on a deep-watch on series arrays.
 watch(
-  () => [props.categories, props.series, props.area, props.smooth],
+  () => [props.categories, props.series, props.area, props.smooth, props.palette],
   () => setOption(true),
   { deep: true },
 )

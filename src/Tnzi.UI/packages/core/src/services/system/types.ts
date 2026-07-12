@@ -479,13 +479,21 @@ export interface SettingsCenterFieldDto {
   label: string;
   i18nKey?: string | null;
   description?: string | null;
-  type: 'String' | 'Text' | 'Int' | 'Decimal' | 'Boolean' | 'Select' | 'Password';
+  type: 'String' | 'Text' | 'Int' | 'Decimal' | 'Boolean' | 'Select' | 'Password' | 'Duration';
   isEncrypted: boolean;
   isReadOnly: boolean;
   isRequired: boolean;
   min?: number | null;
   max?: number | null;
+  /** Regex constraint for String/Text values (.NET syntax, whole-value match; validated on save). */
+  pattern?: string | null;
   options?: string[] | null;
+  /**
+   * Optional in-group subsection label (display-only). Fields sharing a
+   * subsection collapse into one section in the panel; fields without one
+   * render in the default area above the sections.
+   */
+  subsection?: string | null;
   value?: string | null;
   defaultValue?: string | null;
   isOverridden: boolean;
@@ -501,6 +509,13 @@ export interface SettingsCenterGroupDto {
   description?: string | null;
   icon?: string | null;
   order: number;
+  /**
+   * Whether the current user may modify this group (holds
+   * `{group}.settings.{slug}.update` or is super-admin). `false` = the user has
+   * view but not update permission; the panel renders read-only. Defaults true
+   * (fail-open when the backend predates this field).
+   */
+  canEdit?: boolean;
   fields: SettingsCenterFieldDto[];
 }
 
@@ -535,4 +550,26 @@ export interface ClearCacheDto {
   prefix?: string;
   keys?: string[];
   clearAll?: boolean;
+}
+
+// ============================================
+// Appearance (Global Admin Theme) Types
+// ============================================
+
+/**
+ * Mirror of Tnzi.System.Dtos.AdminThemeDto.
+ * `theme` is an opaque snapshot document owned by the admin front-end
+ * (layout mode, tab-bar visibility, colors, ...); null when no global
+ * theme has been saved yet (clients fall back to local defaults).
+ */
+export interface AdminGlobalThemeDto {
+  theme: Record<string, unknown> | null;
+  /** Last save time (UTC ISO string); null when unset */
+  updatedAt?: string | null;
+}
+
+/** Mirror of Tnzi.System.Dtos.SaveAdminThemeDto */
+export interface SaveAdminGlobalThemeDto {
+  /** Theme snapshot document; must be a JSON object */
+  theme: Record<string, unknown>;
 }

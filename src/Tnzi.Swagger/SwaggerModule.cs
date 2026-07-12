@@ -127,6 +127,93 @@ public class SwaggerModule : TnziFrameworkModule
             .OrderBy(groupName => groupName, StringComparer.OrdinalIgnoreCase)
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// 扫描已加载的应用程序集，收集"同一简单名出现在多个命名空间"的类型名集合。
+    /// 确定性（与文档生成顺序无关），一次扫描后冻结
+    /// </summary>
+    public static FrozenSet<string> BuildAmbiguousTypeNameSet()
+    {
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        var ambiguous = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var assemblyName = assembly.GetName().Name;
+            if (assemblyName == null ||
+                assemblyName.StartsWith("System", StringComparison.Ordinal) ||
+                assemblyName.StartsWith("Microsoft", StringComparison.Ordinal) ||
+                assemblyName is "mscorlib" or "netstandard")
+            {
+                continue;
+            }
+
+            Type[] types;
+            try
+            {
+                types = assembly.GetExportedTypes();
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                types = ex.Types.OfType<Type>().ToArray();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var type in types)
+            {
+                if (seen.TryGetValue(type.Name, out var existingNamespace))
+                {
+                    if (!string.Equals(existingNamespace, type.Namespace, StringComparison.Ordinal))
+                    {
+                        ambiguous.Add(type.Name);
+                    }
+                }
+                else
+                {
+                    seen[type.Name] = type.Namespace ?? string.Empty;
+                }
+            }
+        }
+
+        return ambiguous.ToFrozenSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// 生成 schemaId：泛型按"参数在前 + 去元数名"拼接（与既有默认形态一致），
+    /// 歧义简单名追加命名空间限定前缀（去 Tnzi/Dtos/Models 噪音段）
+    /// </summary>
+    public static string BuildSchemaId(Type type, IReadOnlySet<string> ambiguousNames)
+    {
+        if (type.IsGenericType)
+        {
+            var prefix = string.Concat(type.GetGenericArguments().Select(a => BuildSchemaId(a, ambiguousNames)));
+            return prefix + Qualify(type, StripArity(type.Name), ambiguousNames);
+        }
+
+        return Qualify(type, StripArity(type.Name), ambiguousNames);
+    }
+
+    private static string StripArity(string name)
+    {
+        var index = name.IndexOf('`');
+        return index > 0 ? name[..index] : name;
+    }
+
+    private static string Qualify(Type type, string simpleName, IReadOnlySet<string> ambiguousNames)
+    {
+        if (!ambiguousNames.Contains(type.Name))
+        {
+            return simpleName;
+        }
+
+        // Finance.Dtos.InvoiceDto → FinanceInvoiceDto；Acme.Blog.Dtos.PostDto → AcmeBlogPostDto
+        var tokens = (type.Namespace ?? string.Empty).Split('.')
+            .Where(t => t.Length > 0 && t is not ("Tnzi" or "Dtos" or "Models" or "Contracts" or "Options"));
+        return string.Concat(tokens) + simpleName;
+    }
 }
 
 internal sealed class ConfigureSwaggerGenOptions : IConfigureOptions<SwaggerGenOptions>
@@ -172,6 +259,13 @@ internal sealed class ConfigureSwaggerGenOptions : IConfigureOptions<SwaggerGenO
                 options.IncludeXmlComments(xmlFile, includeControllerXmlComments: true);
             }
         }
+
+        // 跨模块同名 DTO（如 Tnzi.Payment.Dtos.InvoiceDto 与 Tnzi.Finance.Dtos.InvoiceDto）在
+        // Swashbuckle 默认短名 schemaId 下冲突——任一分组文档同时引用两者即整组 500。
+        // 仅对真正歧义的简单名启用命名空间限定 ID（FinanceInvoiceDto / PaymentInvoiceDto），
+        // 其余类型保持默认短名，避免 OpenAPI codegen 客户端全量改名。
+        var ambiguousNames = SwaggerModule.BuildAmbiguousTypeNameSet();
+        options.CustomSchemaIds(type => SwaggerModule.BuildSchemaId(type, ambiguousNames));
 
         options.DocInclusionPredicate((docName, apiDesc) =>
         {

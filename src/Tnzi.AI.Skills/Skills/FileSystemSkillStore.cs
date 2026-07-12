@@ -12,7 +12,7 @@ namespace Tnzi.AI.Skills;
 public class FileSystemSkillStore : ISkillStore, IDisposable
 {
     private readonly ILogger<FileSystemSkillStore> _logger;
-    private readonly SkillsOptions _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly string? _contentRootPath;
     private readonly ITnziApplication? _application;
 
@@ -27,18 +27,19 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     // OptionsMonitor 订阅 — SkillsOptions 变化时立即失效缓存
     private readonly IDisposable? _optionsChangeListener;
 
+    private SkillsOptions SkillOptions => _options.CurrentValue.ContextProviders.Skills;
+
     public FileSystemSkillStore(
         ILogger<FileSystemSkillStore> logger,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IHostEnvironment? hostEnvironment = null,
-        ITnziApplication? application = null,
-        IOptionsMonitor<AIOptions>? optionsMonitor = null)
+        ITnziApplication? application = null)
     {
         _logger = Check.NotNull(logger);
-        _options = Check.NotNull(options).Value.ContextProviders.Skills;
+        _options = Check.NotNull(options);
         _contentRootPath = hostEnvironment?.ContentRootPath;
         _application = application;
-        _optionsChangeListener = optionsMonitor?.OnChange(_ => InvalidateCache());
+        _optionsChangeListener = options.OnChange(_ => InvalidateCache());
     }
 
     public void Dispose()
@@ -63,7 +64,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
 
             var skills = await LoadAllSkillsAsync(ct);
             _cache = skills;
-            _cacheExpiresAt = DateTime.UtcNow + _options.CacheTtl;
+            _cacheExpiresAt = DateTime.UtcNow + SkillOptions.CacheTtl;
             return skills;
         }
         finally
@@ -99,7 +100,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         var scannedSkillFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 0. Load built-in skills from EmbeddedResource (lowest priority, overridden by file system)
-        var builtInCount = _options.LoadBuiltIn ? LoadBuiltInSkills(skills) : 0;
+        var builtInCount = SkillOptions.LoadBuiltIn ? LoadBuiltInSkills(skills) : 0;
 
         // 1. DataPath — tenant/user installed skills ({DataPath}/skills/{tenantId}/{userId}/)
         var dataPathCount = await LoadFromDataPathAsync(skills, scannedPaths, ct);
@@ -122,7 +123,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         }
 
         // 3. Configured paths (absolute, relative, @Assembly syntax)
-        foreach (var path in _options.Paths)
+        foreach (var path in SkillOptions.Paths)
         {
             var resolved = ResolvePath(path);
             var normalized = NormalizeDirectoryPath(resolved);
@@ -140,11 +141,11 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
 
         // 4. Plugin paths — third-party plugin skills (SkillSource.Plugin)
         var pluginCount = await LoadSourcedPathsAsync(
-            _options.PluginPaths, SkillSource.Plugin, skills, scannedPaths, scannedSkillFiles, ct);
+            SkillOptions.PluginPaths, SkillSource.Plugin, skills, scannedPaths, scannedSkillFiles, ct);
 
         // 5. Managed paths — platform-managed skills (SkillSource.Managed)
         var managedCount = await LoadSourcedPathsAsync(
-            _options.ManagedPaths, SkillSource.Managed, skills, scannedPaths, scannedSkillFiles, ct);
+            SkillOptions.ManagedPaths, SkillSource.Managed, skills, scannedPaths, scannedSkillFiles, ct);
 
         skills = FilterSkills(skills);
 
@@ -289,7 +290,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     private async Task<int> LoadFromDataPathAsync(
         List<SkillDefinition> skills, HashSet<string> scannedPaths, CancellationToken ct)
     {
-        var dataPath = _options.DataPath;
+        var dataPath = SkillOptions.DataPath;
         if (string.IsNullOrWhiteSpace(dataPath)) return 0;
 
         // 支持相对路径（相对于 ContentRoot）
@@ -603,19 +604,20 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
 
     private List<SkillDefinition> FilterSkills(List<SkillDefinition> skills)
     {
-        if (_options.AllowList.Count > 0)
+        var skillOptions = SkillOptions;
+        if (skillOptions.AllowList.Count > 0)
         {
             skills = skills.Where(s =>
-                _options.AllowList.Contains(s.Name, StringComparer.OrdinalIgnoreCase) ||
-                _options.AllowList.Contains(s.Slug, StringComparer.OrdinalIgnoreCase))
+                skillOptions.AllowList.Contains(s.Name, StringComparer.OrdinalIgnoreCase) ||
+                skillOptions.AllowList.Contains(s.Slug, StringComparer.OrdinalIgnoreCase))
                 .ToList();
         }
 
-        if (_options.DenyList.Count > 0)
+        if (skillOptions.DenyList.Count > 0)
         {
             skills = skills.Where(s =>
-                !_options.DenyList.Contains(s.Name, StringComparer.OrdinalIgnoreCase) &&
-                !_options.DenyList.Contains(s.Slug, StringComparer.OrdinalIgnoreCase))
+                !skillOptions.DenyList.Contains(s.Name, StringComparer.OrdinalIgnoreCase) &&
+                !skillOptions.DenyList.Contains(s.Slug, StringComparer.OrdinalIgnoreCase))
                 .ToList();
         }
 

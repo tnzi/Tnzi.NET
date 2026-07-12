@@ -31,7 +31,7 @@ public class StreamingIntegrationTests
         {
             // InputGuardrail
             services.AddSingleton<IInputGuardrail>(sp =>
-                new MaxLengthGuardrail(MsOptions.Create(sp.GetRequiredService<IOptions<AIOptions>>().Value)));
+                new MaxLengthGuardrail(sp.GetRequiredService<IOptionsMonitor<AIOptions>>()));
             services.AddSingleton<IEnumerable<IOutputGuardrail>>(Array.Empty<IOutputGuardrail>());
             services.AddSingleton<GuardrailRunner>();
             services.AddSingleton<IAiMiddleware>(sp =>

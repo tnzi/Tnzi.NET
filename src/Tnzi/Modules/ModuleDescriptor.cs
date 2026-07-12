@@ -87,10 +87,26 @@ public class ModuleDescriptor : IModuleDescriptor
     /// </summary>
     public DateTime? InitializationEndTime { get; internal set; }
 
+    private Lazy<ModuleManifest>? _lazyManifest;
+
     /// <summary>
-    /// Module architecture manifest — auto-generated during initialization
+    /// Module architecture manifest — lazily built on first access from the module's
+    /// registered service descriptors. Returns <see cref="ModuleManifest.Empty"/> until a
+    /// manifest source is provided via <see cref="SetManifestSource"/>. Thread-safe.
     /// </summary>
-    public ModuleManifest Manifest { get; internal set; } = ModuleManifest.Empty;
+    public ModuleManifest Manifest => _lazyManifest?.Value ?? ModuleManifest.Empty;
+
+    /// <summary>
+    /// 提供用于惰性构建 <see cref="Manifest"/> 的服务描述符。
+    /// Manifest 会扫描模块程序集（反射），因此仅在首次访问时构建（通常只有诊断端点会访问），
+    /// 而不是在每次启动时对全部模块预先构建。
+    /// </summary>
+    internal void SetManifestSource(List<ServiceDescriptor> serviceDescriptors)
+    {
+        _lazyManifest = new Lazy<ModuleManifest>(
+            () => ModuleManifestBuilder.Build(this, serviceDescriptors),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+    }
 
     public ModuleDescriptor(Type type, ITnziModule instance)
     {

@@ -33,10 +33,13 @@ public class StorageSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void Group_HasTwoFields()
+    public void Group_HasSixFields()
     {
-        // EnableMd5Validation（无消费者）与 UrlPrefix（单例 provider 构造期冻结）已移除
-        Assert.Equal(2, _group.Fields.Count);
+        // MaxFileSize + ImageCompressionQuality（原始）+ EnableMd5Validation / EnableFileReference /
+        // AutoGenerateThumbnail / UrlPrefix（新暴露，均已接热消费者：FileStorageService/FileChunkUploadService
+        // 经 IOptionsMonitor.CurrentValue 热读，UrlPrefix 经 storage provider 可选 IOptionsMonitor 热读）。
+        // 缩略图宽高在嵌套 ThumbnailSizeOptions（独立 ConfigSection），不属于本组直接字段。
+        Assert.Equal(6, _group.Fields.Count);
     }
 
     [Fact]
@@ -45,6 +48,10 @@ public class StorageSettingDefinitionProviderTests
         var fields = _group.Fields;
         Assert.Contains(fields, f => f.Key == "Storage:MaxFileSize");
         Assert.Contains(fields, f => f.Key == "Storage:ImageCompressionQuality");
+        Assert.Contains(fields, f => f.Key == "Storage:EnableMd5Validation");
+        Assert.Contains(fields, f => f.Key == "Storage:EnableFileReference");
+        Assert.Contains(fields, f => f.Key == "Storage:AutoGenerateThumbnail");
+        Assert.Contains(fields, f => f.Key == "Storage:UrlPrefix");
     }
 
     [Fact]

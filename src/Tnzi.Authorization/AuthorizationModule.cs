@@ -42,6 +42,7 @@ public class AuthorizationModule : TnziApplicationModule
         services.AddScoped<IModuleManagementService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());
         services.AddScoped<IRoleFunctionService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());
         services.AddScoped<Tnzi.Security.Authorization.IFunctionAuthorizationService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());
+        services.AddScoped<IUserFunctionService, UserFunctionService>();
         services.AddScoped<IDataAuthService, DataAuthService>();
         services.AddSingleton<FunctionAuthCache>();
 
@@ -57,12 +58,12 @@ public class AuthorizationModule : TnziApplicationModule
         // only and can't FK to RoleFunction.
         services.AddScoped<PermissionDbSeeder>();
 
-        // Framework built-in permission catalogue: declares the ~68 codes the
-        // admin shell's routes reference (identity.*, system.*, ai.*, …) so a
-        // super-admin's GetUserPermissionNamesAsync returns them and admins can
-        // assign them to roles. Centralised here because framework modules don't
-        // depend on Authorization — see FrameworkPermissions for the rationale.
-        services.AddTransient<IPermissionDefinitionProvider, FrameworkPermissions>();
+        // This module's own permission codes (authorization.*). Every other
+        // module declares its codes in-module the same way — the declaration
+        // contract lives in core Tnzi.Security.Authorization, so no module
+        // needs to reference this assembly to declare permissions
+        // (docs/coding-standards/permissions.md).
+        services.AddTransient<IPermissionDefinitionProvider, AuthorizationPermissions>();
 
         // IUserRoleService 由 Identity 模块注册
         // 通过 [DependsOn] 确保 Identity 模块先加载
@@ -120,19 +121,18 @@ public class AuthorizationModule : TnziApplicationModule
                     var seeder = seedScope.ServiceProvider.GetRequiredService<PermissionDbSeeder>();
                     var touched = await seeder.SeedAsync(providers);
 
-                    // Seed writes can flip Category (declaration change or
-                    // PermissionCategoryOverrides). With a SHARED cache (e.g.
-                    // Redis) and rolling deploys, instances still running keep
-                    // a hot admin-tier catalogue for up to its TTL — a
-                    // permission just reclassified to Technical would stay
-                    // reachable by business admins. Invalidate explicitly;
-                    // no-op for a cold per-process cache.
+                    // Seed writes can add/enable codes. With a SHARED cache
+                    // (e.g. Redis) and rolling deploys, instances still
+                    // running keep a hot super-admin catalogue for up to its
+                    // TTL - a freshly seeded code would stay invisible to
+                    // super admins. Invalidate explicitly; no-op for a cold
+                    // per-process cache.
                     if (touched > 0)
                     {
                         var functionAuthCache = seedScope.ServiceProvider.GetService<FunctionAuthCache>();
                         if (functionAuthCache != null)
                         {
-                            await functionAuthCache.InvalidateAdminCataloguesAsync();
+                            await functionAuthCache.InvalidateSuperAdminCatalogueAsync();
                         }
                     }
                 }
@@ -157,8 +157,8 @@ public class AuthorizationModule : TnziApplicationModule
         var logger = context.ServiceProvider.GetRequiredService<ILogger<AuthorizationModule>>();
 
         // Opt-in built-in role seeding: create an IsSystem role for every
-        // configured admin-tier role name that doesn't exist yet, so the
-        // two-tier convention (SuperAdmin / Admin) works without an
+        // configured super-admin role name that doesn't exist yet, so the
+        // convention (role named SuperAdmin) works without an
         // application-side seeder. Runs BEFORE the existence diagnostics
         // below so freshly seeded roles don't trigger the missing-role
         // warning. Never modifies existing roles; user-role assignment
@@ -180,7 +180,7 @@ public class AuthorizationModule : TnziApplicationModule
         {
             logger.LogInformation(
                 "Authorization SuperAdmin bypass is DISABLED (SuperAdminRoles is empty). " +
-                "Every permission check will consult ModuleUser/ModuleRole/RoleFunction tables.");
+                "Every permission check will consult RoleFunction/UserFunction tables.");
         }
         else
         {
@@ -189,39 +189,11 @@ public class AuthorizationModule : TnziApplicationModule
                 string.Join(", ", optionsSnapshot.SuperAdminRoles));
         }
 
-        if (optionsSnapshot.BusinessAdminRoles.Count == 0)
-        {
-            logger.LogInformation(
-                "Authorization BusinessAdmin tier is DISABLED (BusinessAdminRoles is empty). " +
-                "No role is implicitly granted the Business permission catalogue.");
-        }
-        else
-        {
-            logger.LogInformation(
-                "Authorization BusinessAdmin tier enabled for roles: {Roles} " +
-                "(implicitly granted every enabled Business-category permission).",
-                string.Join(", ", optionsSnapshot.BusinessAdminRoles));
-        }
-
-        // A role listed in both tiers resolves as super admin — the business
-        // entry is redundant and probably a config mistake worth surfacing.
-        var overlap = optionsSnapshot.SuperAdminRoles
-            .Intersect(optionsSnapshot.BusinessAdminRoles, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (overlap.Count > 0)
-        {
-            logger.LogWarning(
-                "Roles listed in BOTH Authorization.SuperAdminRoles and Authorization.BusinessAdminRoles resolve as super admin; " +
-                "the BusinessAdminRoles entries are redundant: {Overlap}.",
-                string.Join(", ", overlap));
-        }
-
-        // Verify every configured admin-tier role actually exists in
+        // Verify every configured super-admin role actually exists in
         // Identity_Role. A missing role means the configured name will
         // never match — same outcome as misconfiguring the JSON key.
         var configuredRoles = optionsSnapshot.SuperAdminRoles
             .Select(name => (name, list: "SuperAdminRoles"))
-            .Concat(optionsSnapshot.BusinessAdminRoles.Select(name => (name, list: "BusinessAdminRoles")))
             .ToList();
         if (configuredRoles.Count > 0)
         {
@@ -260,7 +232,6 @@ public class AuthorizationModule : TnziApplicationModule
         ILogger logger)
     {
         var roleNames = options.SuperAdminRoles
-            .Concat(options.BusinessAdminRoles)
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -268,7 +239,7 @@ public class AuthorizationModule : TnziApplicationModule
         if (roleNames.Count == 0)
         {
             logger.LogWarning(
-                "Authorization.SeedBuiltInAdminRoles is enabled but both SuperAdminRoles and BusinessAdminRoles are empty; nothing to seed.");
+                "Authorization.SeedBuiltInAdminRoles is enabled but SuperAdminRoles is empty; nothing to seed.");
             return;
         }
 

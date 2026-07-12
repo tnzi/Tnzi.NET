@@ -59,6 +59,10 @@ public enum AccountSystemRole
 /// <summary>
 /// 现金流量表活动分类（挂在科目上，供现金流量报表归类）
 /// </summary>
+/// <remarks>
+/// 未分类（null）的资产负债类科目在现金流量表中落入显式的 Unclassified 桶；
+/// 收入/费用类科目的分类被报表忽略（其净额整体经净利润进入经营活动）。
+/// </remarks>
 public enum CashFlowActivity
 {
     /// <summary>经营活动</summary>
@@ -68,7 +72,13 @@ public enum CashFlowActivity
     Investing = 2,
 
     /// <summary>筹资活动</summary>
-    Financing = 3
+    Financing = 3,
+
+    /// <summary>
+    /// 现金及现金等价物——现金流量表的解释对象本身，不参与活动分桶；
+    /// 报表的期初/期末现金与现金净变动按携带此分类的科目聚合
+    /// </summary>
+    CashEquivalent = 4
 }
 
 /// <summary>
@@ -144,6 +154,33 @@ public enum SettlementDocType
 
     /// <summary>销售贷项单（核销源，抵减发票）</summary>
     CreditMemo = 4
+}
+
+/// <summary>
+/// 过账前钩子拦截的操作类型（见 IFinancePostingGuard）
+/// </summary>
+public enum FinancePostingOperation
+{
+    /// <summary>过账（业务单据或凭证 Draft → Posted）</summary>
+    Post = 1,
+
+    /// <summary>作废（业务单据 Posted → Voided，冲销过账凭证）</summary>
+    Void = 2,
+
+    /// <summary>冲销（凭证 Posted → Reversed）</summary>
+    Reverse = 3
+}
+
+/// <summary>
+/// 银行对账状态
+/// </summary>
+public enum ReconciliationStatus
+{
+    /// <summary>草稿（可勾选/撤销行、可编辑、可删除）</summary>
+    Draft = 0,
+
+    /// <summary>已完成（锁定：勾选与头字段均不可再改）</summary>
+    Completed = 1
 }
 
 /// <summary>

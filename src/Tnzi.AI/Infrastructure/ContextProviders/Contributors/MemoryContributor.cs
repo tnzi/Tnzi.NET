@@ -8,7 +8,7 @@ internal sealed class MemoryContributor : IContextProviderContributor
 {
     private readonly IMemoryStore _memoryStore;
     private readonly IChatClientFactory _chatClientFactory;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly IMemoryConsolidator? _memoryConsolidator;
     private readonly ILoggerFactory _loggerFactory;
@@ -18,7 +18,7 @@ internal sealed class MemoryContributor : IContextProviderContributor
     public MemoryContributor(
         IMemoryStore memoryStore,
         IChatClientFactory chatClientFactory,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         IAgentExecutionContextAccessor executionContextAccessor,
         ILoggerFactory loggerFactory,
         IMemoryConsolidator? memoryConsolidator = null)
@@ -33,11 +33,11 @@ internal sealed class MemoryContributor : IContextProviderContributor
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
     {
-        if (!_options.Value.ContextProviders.Memory.Enabled) return null;
+        if (!_options.CurrentValue.ContextProviders.Memory.Enabled) return null;
 
         try
         {
-            var memoryOptions = _options.Value.ContextProviders.Memory;
+            var memoryOptions = _options.CurrentValue.ContextProviders.Memory;
             var scope = MemoryScopeResolver.BuildLocalScope(
                 memoryOptions.DefaultScope,
                 memoryOptions.EnableUserIsolation,

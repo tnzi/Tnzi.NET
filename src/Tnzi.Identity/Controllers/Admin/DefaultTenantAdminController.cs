@@ -37,6 +37,7 @@ public class DefaultTenantAdminController : ApiAdminControllerBase
     }
 
     [HttpPost]
+    [ApiAuthorize(PermissionName = "tenant.create")]
     public virtual async Task<ApiResult<TenantDto>> Create([FromBody] CreateTenantDto input)
     {
         var result = await TenantService.CreateAsync(input);
@@ -44,6 +45,7 @@ public class DefaultTenantAdminController : ApiAdminControllerBase
     }
 
     [HttpPut("{id}")]
+    [ApiAuthorize(PermissionName = "tenant.update")]
     public virtual async Task<ApiResult<TenantDto>> Update(Guid id, [FromBody] UpdateTenantDto input)
     {
         var result = await TenantService.UpdateAsync(id, input);
@@ -51,6 +53,7 @@ public class DefaultTenantAdminController : ApiAdminControllerBase
     }
 
     [HttpPut("{id}/enabled")]
+    [ApiAuthorize(PermissionName = "tenant.update")]
     public virtual async Task<ApiResult> SetEnabled(Guid id, [FromQuery] bool enabled)
     {
         var result = await TenantService.SetEnabledAsync(id, enabled);
@@ -58,6 +61,7 @@ public class DefaultTenantAdminController : ApiAdminControllerBase
     }
 
     [HttpDelete("{id}")]
+    [ApiAuthorize(PermissionName = "tenant.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await TenantService.DeleteAsync(id);

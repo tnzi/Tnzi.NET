@@ -21,7 +21,7 @@ public class DocumentIngestionServiceTests
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
             .Returns(NullLoggerFactory.Instance);
 
-        var options = Microsoft.Extensions.Options.Options.Create(new AIRagOptions
+        var options = new StaticOptionsMonitor<AIRagOptions>(new AIRagOptions
         {
             DefaultChunkSize = 512,
             DefaultChunkOverlap = 64,

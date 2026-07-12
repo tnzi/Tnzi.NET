@@ -118,6 +118,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     /// 创建持久化权限规则
     /// </summary>
     [HttpPost("persisted-rules")]
+    [ApiAuthorize(PermissionName = "ai.permissions.create")]
     public virtual async Task<ApiResult<PersistedPermissionRuleDto>> CreatePersistedRule(
         [FromBody] CreatePersistedPermissionRuleDto input)
     {
@@ -135,6 +136,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     /// 更新持久化权限规则
     /// </summary>
     [HttpPut("persisted-rules/{id}")]
+    [ApiAuthorize(PermissionName = "ai.permissions.update")]
     public virtual async Task<ApiResult<PersistedPermissionRuleDto>> UpdatePersistedRule(
         Guid id,
         [FromBody] CreatePersistedPermissionRuleDto input)
@@ -173,6 +175,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     /// 删除持久化权限规则
     /// </summary>
     [HttpDelete("persisted-rules/{id}")]
+    [ApiAuthorize(PermissionName = "ai.permissions.delete")]
     public virtual async Task<ApiResult> DeletePersistedRule(Guid id)
     {
         var entity = await PermissionRuleRepository.GetAsync(id);

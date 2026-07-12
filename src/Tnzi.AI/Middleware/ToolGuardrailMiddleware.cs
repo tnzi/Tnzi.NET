@@ -13,7 +13,7 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
     public const string ReasonPropertyName = "ToolGuardrailReason";
 
     private readonly IEnumerable<IGuardrailProvider> _providers;
-    private readonly IOptions<AIOptions> _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IEventBus? _eventBus;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<ToolGuardrailMiddleware> _logger;
@@ -22,7 +22,7 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
 
     public ToolGuardrailMiddleware(
         IEnumerable<IGuardrailProvider> providers,
-        IOptions<AIOptions> options,
+        IOptionsMonitor<AIOptions> options,
         ILogger<ToolGuardrailMiddleware> logger,
         IEventBus? eventBus = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null)
@@ -49,7 +49,7 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
 
     public async Task<object?> InvokeAsync(ToolExecutionContext context, Func<Task<object?>> next)
     {
-        if (!_options.Value.Guardrails.Enabled)
+        if (!_options.CurrentValue.Guardrails.Enabled)
         {
             return await next();
         }
@@ -86,7 +86,7 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
     private async Task<(string Reason, string ProviderName)?> EvaluateToolAsync(ToolExecutionContext context, CancellationToken cancellationToken)
     {
         var request = BuildGuardrailRequest(context);
-        var failClosed = _options.Value.Guardrails.FailClosed;
+        var failClosed = _options.CurrentValue.Guardrails.FailClosed;
 
         foreach (var provider in _providers)
         {
@@ -136,7 +136,7 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
         // content-based IGuardrailProvider implementations (PII, MaxLength, LLM-Judge) can
         // inspect the actual argument values.  Default-off avoids breaking large payloads.
         string? contentForInspection = null;
-        if (_options.Value.Guardrails.InspectToolArguments && toolInput?.Count > 0)
+        if (_options.CurrentValue.Guardrails.InspectToolArguments && toolInput?.Count > 0)
         {
             contentForInspection = System.Text.Json.JsonSerializer.Serialize(toolInput);
         }

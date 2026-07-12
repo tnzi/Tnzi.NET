@@ -13,6 +13,7 @@ public abstract class ApplicationService : IApplicationService
     private readonly Lazy<IPermissionChecker?> _permissionChecker;
     private readonly Lazy<IUnitOfWorkManager?> _unitOfWorkManager;
     private readonly Lazy<IEventBus?> _eventBus;
+    private readonly Lazy<IDistributedEventBus?> _distributedEventBus;
     private readonly Lazy<IEventStore?> _eventStore;
     private readonly Lazy<IScopedContext?> _scopedContext;
     private readonly Lazy<IPostCommitActionQueue?> _postCommitActionQueue;
@@ -38,6 +39,7 @@ public abstract class ApplicationService : IApplicationService
         _permissionChecker = new Lazy<IPermissionChecker?>(() => ServiceProvider?.GetService<IPermissionChecker>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _unitOfWorkManager = new Lazy<IUnitOfWorkManager?>(() => ServiceProvider?.GetService<IUnitOfWorkManager>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _eventBus = new Lazy<IEventBus?>(() => ServiceProvider?.GetService<IEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _distributedEventBus = new Lazy<IDistributedEventBus?>(() => ServiceProvider?.GetService<IDistributedEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _eventStore = new Lazy<IEventStore?>(() => ServiceProvider?.GetService<IEventStore>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _scopedContext = new Lazy<IScopedContext?>(() => ServiceProvider?.GetService<IScopedContext>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _postCommitActionQueue = new Lazy<IPostCommitActionQueue?>(() => ServiceProvider?.GetService<IPostCommitActionQueue>(), LazyThreadSafetyMode.ExecutionAndPublication);
@@ -114,18 +116,42 @@ public abstract class ApplicationService : IApplicationService
     protected IEventStore? EventStore => _eventStore.Value;
 
     /// <summary>
+    /// 分布式事件总线（延迟加载，线程安全）
+    /// 当 RabbitMQ/Kafka 等分布式事件总线模块加载时可用,用于跨进程投递集成事件;
+    /// 未加载时为 null,集成事件回退为本地发布
+    /// </summary>
+    protected IDistributedEventBus? DistributedEventBus => _distributedEventBus.Value;
+
+    /// <summary>
     /// 发布事件（事务感知，支持 Outbox 模式）
     /// 对于 IIntegrationEvent：优先通过 IEventStore 写入 Outbox，由后台服务可靠投递
     /// 对于其他事件：在事务中时延迟到提交后发布，不在事务中时立即发布
     /// </summary>
     protected async Task PublishEventAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default) where TEvent : class, IEvent
     {
-        // 对 IIntegrationEvent 优先写入 Outbox，确保事务一致性
-        if (@event is IIntegrationEvent && EventStore != null)
+        // 集成事件路由(优先级):Outbox(事务一致投递) > 分布式总线(事务中延迟到提交后) > 本地总线兜底
+        if (@event is IIntegrationEvent)
         {
-            var eventType = @event.GetType().AssemblyQualifiedName ?? @event.GetType().FullName ?? @event.GetType().Name;
-            await EventStore.SaveEventAsync(@event, eventType, cancellationToken);
-            return;
+            if (EventStore != null)
+            {
+                var eventType = @event.GetType().AssemblyQualifiedName ?? @event.GetType().FullName ?? @event.GetType().Name;
+                await EventStore.SaveEventAsync(@event, eventType, cancellationToken);
+                return;
+            }
+
+            var distributedEventBus = DistributedEventBus;
+            if (distributedEventBus != null)
+            {
+                // 分布式投递无法随本地事务回滚,事务中必须延迟到提交后发出
+                if (UnitOfWorkManager?.IsEnabledTransaction == true && PostCommitActionQueue != null)
+                {
+                    PostCommitActionQueue.Enqueue(ct => distributedEventBus.PublishAsync(@event, ct));
+                    return;
+                }
+
+                await distributedEventBus.PublishAsync(@event, cancellationToken);
+                return;
+            }
         }
 
         var eventBus = EventBus;

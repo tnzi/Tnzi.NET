@@ -426,7 +426,8 @@ public class SettingGroupTests
             _applicationOptionsMock.Object,
             encryptionOptions,
             _cacheMock.Object,
-            Enumerable.Empty<ISettingProvider>());
+            Enumerable.Empty<ISettingProvider>(),
+            Enumerable.Empty<ISettingDefinitionProvider>());
     }
 
     #region GetSettingGroupsAsync — DTO 契约测试

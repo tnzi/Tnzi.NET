@@ -34,7 +34,7 @@
           <div class="ai-knowledge-card__desc">{{ item.description || t('noDescription') }}</div>
 
           <template #actions>
-            <NPopconfirm @positive-click="onReindex(item)">
+            <NPopconfirm v-if="can('ai.knowledge.update')" @positive-click="onReindex(item)">
               <template #trigger>
                 <NButton size="small" ghost :loading="reindexBusyId === item.id">
                   {{ t('actions.reindex') }}
@@ -42,10 +42,10 @@
               </template>
               {{ t('reindex.confirm') }}
             </NPopconfirm>
-            <NButton size="small" ghost @click="crud.openEdit(item)">
+            <NButton v-if="crud.canUpdate" size="small" ghost @click="crud.openEdit(item)">
               {{ t('actions.edit') }}
             </NButton>
-            <NPopconfirm @positive-click="removeOne(item)">
+            <NPopconfirm v-if="crud.canDelete" @positive-click="removeOne(item)">
               <template #trigger>
                 <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
               </template>
@@ -85,6 +85,7 @@
                 @change="onFilePicked"
               />
               <NButton
+                v-if="can('ai.knowledge.create')"
                 size="small"
                 type="primary"
                 :loading="uploadBusy"
@@ -185,6 +186,7 @@ import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import type { RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -215,9 +217,11 @@ const message = (() => {
 })()
 
 const bridge = createAiBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
 
 const crud = useCrudPage<KnowledgeBaseDto>({
   pageId: 'ai.knowledge',
+  permission: 'ai.knowledge',
   columns: [],
   rowKey: (row) => row.id,
   fetchData: (query) => bridge.knowledge.fetch(query),
@@ -371,6 +375,7 @@ const documentRowActions: RowAction<KnowledgeDocumentDto>[] = [
     label: 'actions.delete',
     type: 'error',
     confirm: 'manage.deleteDocConfirm',
+    show: () => can('ai.knowledge.delete'),
     onClick: (row) => deleteDoc(row),
   },
 ]

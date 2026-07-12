@@ -33,6 +33,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 创建税务机构
     /// </summary>
     [HttpPost("agencies")]
+    [ApiAuthorize(PermissionName = "finance.tax.create")]
     public virtual async Task<ApiResult<TaxAgencyDto>> CreateAgency([FromBody] UpsertTaxAgencyDto request)
     {
         var result = await _taxService.CreateAgencyAsync(request);
@@ -43,6 +44,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 更新税务机构
     /// </summary>
     [HttpPut("agencies/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.tax.update")]
     public virtual async Task<ApiResult<TaxAgencyDto>> UpdateAgency(Guid id, [FromBody] UpsertTaxAgencyDto request)
     {
         var result = await _taxService.UpdateAgencyAsync(id, request);
@@ -53,6 +55,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 删除税务机构
     /// </summary>
     [HttpDelete("agencies/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.tax.delete")]
     public virtual async Task<ApiResult> DeleteAgency(Guid id)
     {
         var result = await _taxService.DeleteAgencyAsync(id);
@@ -75,6 +78,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 创建税率
     /// </summary>
     [HttpPost("rates")]
+    [ApiAuthorize(PermissionName = "finance.tax.create")]
     public virtual async Task<ApiResult<TaxRateDto>> CreateRate([FromBody] UpsertTaxRateDto request)
     {
         var result = await _taxService.CreateRateAsync(request);
@@ -85,6 +89,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 更新税率
     /// </summary>
     [HttpPut("rates/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.tax.update")]
     public virtual async Task<ApiResult<TaxRateDto>> UpdateRate(Guid id, [FromBody] UpsertTaxRateDto request)
     {
         var result = await _taxService.UpdateRateAsync(id, request);
@@ -95,6 +100,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 删除税率
     /// </summary>
     [HttpDelete("rates/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.tax.delete")]
     public virtual async Task<ApiResult> DeleteRate(Guid id)
     {
         var result = await _taxService.DeleteRateAsync(id);
@@ -117,6 +123,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 创建税码
     /// </summary>
     [HttpPost("codes")]
+    [ApiAuthorize(PermissionName = "finance.tax.create")]
     public virtual async Task<ApiResult<TaxCodeDto>> CreateCode([FromBody] UpsertTaxCodeDto request)
     {
         var result = await _taxService.CreateCodeAsync(request);
@@ -127,6 +134,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 更新税码（组件全量替换）
     /// </summary>
     [HttpPut("codes/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.tax.update")]
     public virtual async Task<ApiResult<TaxCodeDto>> UpdateCode(Guid id, [FromBody] UpsertTaxCodeDto request)
     {
         var result = await _taxService.UpdateCodeAsync(id, request);
@@ -137,6 +145,7 @@ public class DefaultFinanceTaxAdminController : ApiAdminControllerBase
     /// 删除税码
     /// </summary>
     [HttpDelete("codes/{id:guid}")]
+    [ApiAuthorize(PermissionName = "finance.tax.delete")]
     public virtual async Task<ApiResult> DeleteCode(Guid id)
     {
         var result = await _taxService.DeleteCodeAsync(id);

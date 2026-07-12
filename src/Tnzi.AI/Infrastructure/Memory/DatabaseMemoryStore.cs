@@ -14,7 +14,9 @@ public partial class DatabaseMemoryStore : IMemoryStore
     private readonly IUnitOfWorkManager? _unitOfWorkManager;
     private readonly IEmbeddingService? _embeddingService;
     private readonly ILogger<DatabaseMemoryStore> _logger;
-    private readonly MemoryOptions? _memoryOptions;
+    private readonly IOptionsMonitor<AIOptions>? _aiOptions;
+
+    private MemoryOptions? CurrentMemoryOptions => _aiOptions?.CurrentValue.ContextProviders.Memory;
 
     private const double VectorWeight = 0.7;
     private const double KeywordWeight = 0.3;
@@ -24,16 +26,16 @@ public partial class DatabaseMemoryStore : IMemoryStore
         ILogger<DatabaseMemoryStore> logger,
         IUnitOfWorkManager? unitOfWorkManager = null,
         IEmbeddingService? embeddingService = null,
-        IOptions<AIOptions>? aiOptions = null)
+        IOptionsMonitor<AIOptions>? aiOptions = null)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);
         _unitOfWorkManager = unitOfWorkManager;
         _embeddingService = embeddingService;
-        _memoryOptions = aiOptions?.Value.ContextProviders.Memory;
+        _aiOptions = aiOptions;
 
         // 权重求和验证
-        var scoring = _memoryOptions?.Scoring;
+        var scoring = CurrentMemoryOptions?.Scoring;
         if (scoring != null)
         {
             var weightSum = scoring.SemanticWeight + scoring.RecencyWeight + scoring.ImportanceBoostWeight;
@@ -66,9 +68,9 @@ public partial class DatabaseMemoryStore : IMemoryStore
     private async Task<string?> ReadCoreAsync(IQueryable<MemoryEntry> query, CancellationToken ct)
     {
         // 过期过滤
-        if (_memoryOptions?.EntryExpiration.HasValue == true)
+        if (CurrentMemoryOptions?.EntryExpiration.HasValue == true)
         {
-            var cutoff = DateTime.UtcNow - _memoryOptions.EntryExpiration.Value;
+            var cutoff = DateTime.UtcNow - CurrentMemoryOptions.EntryExpiration.Value;
             query = query.Where(e => e.CreationTime >= cutoff);
         }
 
@@ -256,12 +258,12 @@ public partial class DatabaseMemoryStore : IMemoryStore
         if (_embeddingService != null)
         {
             EmbeddingOptions? embOptions = null;
-            if (_memoryOptions is { EmbeddingProvider: not null } or { EmbeddingModel: not null })
+            if (CurrentMemoryOptions is { EmbeddingProvider: not null } or { EmbeddingModel: not null })
             {
                 embOptions = new EmbeddingOptions
                 {
-                    Provider = _memoryOptions.EmbeddingProvider,
-                    Model = _memoryOptions.EmbeddingModel
+                    Provider = CurrentMemoryOptions.EmbeddingProvider,
+                    Model = CurrentMemoryOptions.EmbeddingModel
                 };
             }
 
@@ -279,9 +281,9 @@ public partial class DatabaseMemoryStore : IMemoryStore
         // 关键词匹配 + 向量融合评分
         // 缓存循环中的常量值，避免每次迭代重复访问
         var now = DateTime.UtcNow;
-        var scoring = _memoryOptions?.Scoring;
-        var importanceWeight = _memoryOptions?.ImportanceWeight ?? 1.0;
-        var recencyDecayRate = _memoryOptions?.RecencyDecayRate ?? 0;
+        var scoring = CurrentMemoryOptions?.Scoring;
+        var importanceWeight = CurrentMemoryOptions?.ImportanceWeight ?? 1.0;
+        var recencyDecayRate = CurrentMemoryOptions?.RecencyDecayRate ?? 0;
 
         var results = new List<MemorySearchResult>();
         foreach (var entry in entries)
@@ -645,14 +647,14 @@ public partial class DatabaseMemoryStore : IMemoryStore
     /// </summary>
     private async Task TrimExcessEntriesAsync(string scopeKey, CancellationToken ct)
     {
-        if (_memoryOptions?.MaxEntriesPerScope is not > 0)
+        if (CurrentMemoryOptions?.MaxEntriesPerScope is not > 0)
         {
             return;
         }
 
         try
         {
-            var max = _memoryOptions.MaxEntriesPerScope.Value;
+            var max = CurrentMemoryOptions.MaxEntriesPerScope.Value;
             var totalCount = await _repository.AsQueryable()
                 .Where(e => e.Scope == scopeKey)
                 .CountAsync(ct);
@@ -695,12 +697,12 @@ public partial class DatabaseMemoryStore : IMemoryStore
         {
             // 使用 Memory 配置的 Embedding Provider/Model（避免回退到不支持 Embedding 的默认 Provider）
             EmbeddingOptions? options = null;
-            if (_memoryOptions is { EmbeddingProvider: not null } or { EmbeddingModel: not null })
+            if (CurrentMemoryOptions is { EmbeddingProvider: not null } or { EmbeddingModel: not null })
             {
                 options = new EmbeddingOptions
                 {
-                    Provider = _memoryOptions.EmbeddingProvider,
-                    Model = _memoryOptions.EmbeddingModel
+                    Provider = CurrentMemoryOptions.EmbeddingProvider,
+                    Model = CurrentMemoryOptions.EmbeddingModel
                 };
             }
 

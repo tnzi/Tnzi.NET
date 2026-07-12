@@ -6,6 +6,7 @@
         :status="myStatus"
         :name="myName"
         :avatar-file-id="myAvatarFileId"
+        :allow-invisible="allowInvisible !== false"
         @change="(s) => emit('set-status', s)"
       />
       <!-- Presence disabled: keep the self avatar (no dot, no status menu). -->
@@ -91,6 +92,8 @@ const props = defineProps<{
   myAvatarFileId?: string
   /** Deployment presence toggle — false hides status dots and the status picker. */
   presence?: boolean
+  /** Deployment invisible toggle — false drops "Invisible" from the status picker. */
+  allowInvisible?: boolean
 }>()
 
 const emit = defineEmits<{

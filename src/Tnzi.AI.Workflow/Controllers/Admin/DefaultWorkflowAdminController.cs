@@ -23,6 +23,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 创建工作流
     /// </summary>
     [HttpPost]
+    [ApiAuthorize(PermissionName = "ai.workflow.create")]
     public virtual async Task<ApiResult<WorkflowDefinitionDto>> Create([FromBody] CreateWorkflowDefinitionDto input)
     {
         var result = await WorkflowService.CreateAsync(input);
@@ -33,6 +34,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 更新工作流
     /// </summary>
     [HttpPut("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.workflow.update")]
     public virtual async Task<ApiResult<WorkflowDefinitionDto>> Update(Guid id, [FromBody] UpdateWorkflowDefinitionDto input)
     {
         var result = await WorkflowService.UpdateAsync(id, input);
@@ -43,6 +45,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 删除工作流
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [ApiAuthorize(PermissionName = "ai.workflow.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
         var result = await WorkflowService.DeleteAsync(id);
@@ -73,6 +76,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 运行工作流
     /// </summary>
     [HttpPost("{id:guid}/run")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> Run(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
         // 管理员可代理但默认用自身 ID
@@ -86,6 +90,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 输出工作流专用结构化流式事件，保留步骤状态和 StepResults 语义
     /// </summary>
     [HttpPost("{id:guid}/run/stream")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task RunStreaming(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
         var userId = CurrentUser?.Id ?? request.UserId;
@@ -112,6 +117,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 克隆工作流（深拷贝定义，生成新 ID）
     /// </summary>
     [HttpPost("{id:guid}/clone")]
+    [ApiAuthorize(PermissionName = "ai.workflow.create")]
     public virtual async Task<ApiResult<WorkflowDefinitionDto>> Clone(Guid id, [FromBody] CloneWorkflowRequestDto? request = null)
     {
         var result = await WorkflowService.CloneAsync(id, request?.NewName);
@@ -142,6 +148,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 恢复暂停的工作流执行
     /// </summary>
     [HttpPost("executions/{executionId}/resume")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> ResumeExecution(string executionId, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.ResumeAsync(executionId, cancellationToken);
@@ -152,6 +159,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 取消工作流执行
     /// </summary>
     [HttpPost("executions/{executionId}/cancel")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult> CancelExecution(string executionId, [FromBody] WorkflowStepApprovalDto? input = null, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.CancelAsync(executionId, input?.Feedback, cancellationToken);
@@ -162,6 +170,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 使用外部输入恢复中断的工作流（通用 HITL 恢复）
     /// </summary>
     [HttpPost("executions/{executionId}/resume-with-input")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> ResumeWithInput(string executionId, [FromBody] ResumeWorkflowInputDto input, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.ResumeWithInputAsync(executionId, input.StepId, input.Input, cancellationToken);
@@ -182,6 +191,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 审批工作流步骤
     /// </summary>
     [HttpPost("executions/{executionId}/steps/{stepId}/approve")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult> ApproveStep(string executionId, string stepId, [FromBody] WorkflowStepApprovalDto? input = null, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.ApproveStepAsync(executionId, stepId, input?.Feedback, cancellationToken);
@@ -192,6 +202,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 拒绝工作流步骤
     /// </summary>
     [HttpPost("executions/{executionId}/steps/{stepId}/reject")]
+    [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult> RejectStep(string executionId, string stepId, [FromBody] WorkflowStepApprovalDto input, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.RejectStepAsync(executionId, stepId, input.Feedback ?? "Rejected", cancellationToken);
@@ -202,6 +213,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 批量删除工作流
     /// </summary>
     [HttpPost("batch-delete")]
+    [ApiAuthorize(PermissionName = "ai.workflow.delete")]
     public virtual async Task<ApiResult<int>> BatchDelete([FromBody] List<Guid> ids)
     {
         var result = await WorkflowService.BatchDeleteAsync(ids);
@@ -212,6 +224,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 批量启用工作流
     /// </summary>
     [HttpPost("batch-enable")]
+    [ApiAuthorize(PermissionName = "ai.workflow.update")]
     public virtual async Task<ApiResult<int>> BatchEnable([FromBody] List<Guid> ids)
     {
         var result = await WorkflowService.BatchSetEnabledAsync(ids, true);
@@ -222,6 +235,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 批量禁用工作流
     /// </summary>
     [HttpPost("batch-disable")]
+    [ApiAuthorize(PermissionName = "ai.workflow.update")]
     public virtual async Task<ApiResult<int>> BatchDisable([FromBody] List<Guid> ids)
     {
         var result = await WorkflowService.BatchSetEnabledAsync(ids, false);
@@ -292,6 +306,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// 恢复到指定版本
     /// </summary>
     [HttpPost("{id:guid}/versions/{versionNumber:int}/restore")]
+    [ApiAuthorize(PermissionName = "ai.workflow.update")]
     public virtual async Task<ApiResult> RestoreVersion(Guid id, int versionNumber, [FromBody] RestoreWorkflowVersionRequestDto? request = null)
     {
         var result = await WorkflowService.RestoreVersionAsync(id, versionNumber, request?.ChangeDescription);

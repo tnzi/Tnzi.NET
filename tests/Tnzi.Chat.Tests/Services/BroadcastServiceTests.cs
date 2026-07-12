@@ -35,4 +35,49 @@ public class BroadcastServiceTests : Integration.IntegrationTestBase
         var member = await DbContext.Set<ConversationMember>().FirstAsync(m => m.UserId == u1);
         member.UnreadCount.ShouldBe(2);
     }
+
+    [Fact]
+    public async Task NotifyUsers_Should_Persist_Rich_Fields_And_Record_Source()
+    {
+        var uid = Guid.NewGuid();
+        var r = await Broadcast.NotifyUsersAsync(new[] { uid }, new ChatNotification
+        {
+            Content = "Your order #1001 has shipped.",
+            Title = "Order shipped",
+            LinkUrl = "/orders/1001",
+            Category = "order",
+            Source = "OrderModule"
+        });
+
+        r.Succeeded.ShouldBeTrue(r.Message);
+        r.Data.ShouldBe(1);
+
+        var key = $"system:{uid:N}";
+        var conv = await DbContext.Set<Conversation>().FirstAsync(c => c.DirectKey == key);
+        var msg = await DbContext.Set<ChatMessage>().FirstAsync(m => m.ConversationId == conv.Id);
+        msg.ContentType.ShouldBe(MessageContentType.System);
+        msg.Title.ShouldBe("Order shipped");
+        msg.LinkUrl.ShouldBe("/orders/1001");
+        msg.Category.ShouldBe("order");
+
+        // Programmatic sends are now audited (gap closed) with the caller-supplied source.
+        var log = await DbContext.Set<BroadcastLog>().FirstAsync();
+        log.Source.ShouldBe("OrderModule");
+        log.Content.ShouldBe("Your order #1001 has shipped.");
+        log.TargetType.ShouldBe(BroadcastTargetType.Users);
+        log.RecipientCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task BroadcastToUsers_Should_Now_Record_Audit_Log()
+    {
+        var uid = Guid.NewGuid();
+        await Broadcast.BroadcastToUsersAsync(new[] { uid }, "plain programmatic notice");
+
+        var log = await DbContext.Set<BroadcastLog>().FirstAsync();
+        log.Content.ShouldBe("plain programmatic notice");
+        log.Source.ShouldBeNull();               // plain overload carries no source
+        log.TargetType.ShouldBe(BroadcastTargetType.Users);
+        log.RecipientCount.ShouldBe(1);
+    }
 }
